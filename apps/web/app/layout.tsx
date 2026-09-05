@@ -17,14 +17,14 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase,
     title: "Hookemon: The cycle never stops.",
     description:
-      "A Pikachu-guided open-source Uniswap v4 prototype that turns swap activity into digital card packs and automatic USDC holder rewards.",
+      "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
     icons: {
       icon: [{ url: "/hookemon-mark.png", type: "image/png" }],
       apple: "/hookemon-mark.png",
     },
     openGraph: {
       title: "Hookemon: The cycle never stops.",
-      description: "Follow the 3% swap loop from Ethereum to packs and automatic USDC rewards.",
+      description: "We open Collector Crypt gacha packs, sell the cards and share the proceeds with HKMN holders.",
       type: "website",
       siteName: "Hookemon",
       images: [
@@ -32,14 +32,14 @@ export async function generateMetadata(): Promise<Metadata> {
           url: "/hookemon-banner.jpeg",
           width: 1500,
           height: 500,
-          alt: "Hookemon. Swaps rip packs, hits pay holders.",
+          alt: "Hookemon logo in yellow, blue and pink",
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
       title: "Hookemon: The cycle never stops.",
-      description: "Follow the 3% swap loop from Ethereum to packs and automatic USDC rewards.",
+      description: "We open Collector Crypt gacha packs, sell the cards and share the proceeds with HKMN holders.",
       images: ["/hookemon-banner.jpeg"],
     },
   };

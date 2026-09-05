@@ -211,7 +211,7 @@ test("server-renders the complete illustrated Hookemon page", async () => {
 
 test("keeps public claims tied to variable proceeds and verified data", async () => {
   const html = await (await render()).text();
-  assert.match(html, /Distributions depend on actual card sale proceeds, costs, reserves and holder eligibility/);
+  assert.match(html, /Distributions depend on finalized returned proceeds and holder eligibility/);
   assert.match(html, /a cycle may have no distributable proceeds/);
   assert.match(html, /when a verified schedule is available/);
   assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);

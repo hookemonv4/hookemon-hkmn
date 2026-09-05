@@ -4,7 +4,7 @@ const STORY = [
   ["Fees fund the adventure.", "Trading fees fund the card packs. The dashboard shows the recorded pot and the current cycle status."],
   ["One pack. New possibilities.", "Hookemon uses the pack allocation to buy gacha card packs, then opens them. Each pack's contents can differ."],
   ["Meet the cards.", "The cards shown here are examples. Completed openings and their cards appear in the dashboard when recorded."],
-  ["Cards become proceeds.", "Hookemon sells the opened cards. The proceeds depend on the cards and their sale prices."],
+  ["Cards become proceeds.", "Hookemon sells cards through Collector Crypt buybacks. Low offers or missing data can put a sale on hold."],
   ["Back to HKMN holders.", "The recorded proceeds are paid to eligible HKMN holders. Distribution follows the cycle's rules and recorded results."],
 ];
 

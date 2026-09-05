@@ -154,6 +154,7 @@
               >
             </div>
           </div>
+          <p class="dashboard-data-note">This dashboard uses the earlier USDC feed. Current USDG cycle reporting is not connected yet.</p>
           <div class="metrics-grid">
             <article class="metric metric-pot">
               <span class="metric-label"
@@ -446,7 +447,7 @@
               ><button type="button" data-scene-stage="2" aria-pressed="false">
                 <span>03</span> Cards</button
               ><button type="button" data-scene-stage="3" aria-pressed="false">
-                <span>04</span> Buyback</button
+                <span>04</span> Sale</button
               ><button type="button" data-scene-stage="4" aria-pressed="false">
                 <span>05</span> Holders
               </button>
@@ -487,8 +488,8 @@
             cycle. Actual proceeds depend on the cards and available sale terms.
           </li>
           <li>
-            <strong>Proceeds reach eligible holders.</strong> After costs and
-            reserves, available proceeds can be distributed to eligible HKMN
+            <strong>Proceeds reach eligible holders.</strong> Finalized returned
+            proceeds can be distributed to eligible HKMN
             holders. Amounts and timing vary.
           </li>
         </ol>
@@ -766,13 +767,16 @@
               How much do holders receive?<span aria-hidden="true">+</span>
             </summary>
             <p>
-              Distributions depend on actual card sale proceeds, costs, reserves
-              and holder eligibility. Amounts can vary, and a cycle may have no
+              Distributions depend on finalized returned proceeds and holder eligibility. Amounts can vary, and a cycle may have no
               distributable proceeds. The dashboard shows the latest cycle's
               payout and average per actual recipient only when its distribution
               is complete. Earlier payouts are included in the total when the
               verified history is complete.
             </p>
+          </details>
+          <details>
+            <summary>Is every card sold immediately?<span aria-hidden="true">+</span></summary>
+            <p>No. The current policy holds a card if its verified buyback offer is below 40% of its verified insured value. Missing or conflicting data also pauses the sale. A held card needs an owner decision before the cycle can continue, and new cycles stay paused in the meantime.</p>
           </details>
           <details>
             <summary>
@@ -793,9 +797,7 @@
             <p>
               The trading fee is 3,00 % auf Brutto‑Volumen: 0,10 % for
               Programmable, 0,40 % for Treasury and 2,50 % for card packs.
-              Available trading fees determine the pack budget. Card sale
-              proceeds, operating costs and reserves determine what can be
-              distributed to eligible holders.
+              Available trading fees determine the pack budget. Only finalized proceeds returned from a cycle can fund its holder payments.
             </p>
           </details>
         </div>

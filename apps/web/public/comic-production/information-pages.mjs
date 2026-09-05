@@ -18,7 +18,7 @@ export function cycleRecord(status, community, now = Date.now()) {
     breakdown: [
       ['Pack spend', formatMicroUsdc(round?.packSpendMicroUsdc)],
       ['Card sale / buyback proceeds', formatMicroUsdc(round?.buybackMicroUsdc)],
-      ['Protected operating costs', formatMicroUsdc(round?.protectedCostsMicroUsdc)],
+      ['Reported operating costs', formatMicroUsdc(round?.protectedCostsMicroUsdc)],
       ['Reserve after the cycle', formatMicroUsdc(round?.feeReserveAfterMicroUsdc)],
       ['Completed holder payout', formatMicroUsdc(payout?.paid)],
     ],
