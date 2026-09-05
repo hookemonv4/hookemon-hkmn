@@ -293,28 +293,26 @@
     },
     "platformFeeConfigurationField": "absent"
   },
-  "preflightProbeOpenFacts": [
+  "preflightProbeResolutions": [
     {
       "id": "PREFLIGHT-SOURCE-BUNDLE-DIGEST",
-      "status": "OPEN_FACT",
-      "missing": "The provider's digest binding between sourceBundleManifest and sourceDescriptor is not derivable from the accepted field shapes. The exact server message is: sourceBundleManifest digest does not match sourceDescriptor.",
-      "attemptedProbeIds": [
+      "status": "SETTLED",
+      "statementPath": "release/phase3/admission/provider-statement-2026-09-05.json",
+      "previousProbeIds": [
         "008",
         "009",
         "010"
       ],
-      "resolve": "Obtain the provider's V4 source-bundle digest preimage or a provider-generated source descriptor, then reproduce it against the same manifest in a new read-only preflight probe.",
-      "verifiedAlternative": "Retain the accepted source descriptor and manifest field shapes with null materialized values; do not construct a launch source commitment or send another candidate request."
+      "resolution": "The provider supplied the V4 source-bundle digest recipe: Keccak256 of the UTF-8 domain string, one zero byte, and UTF-8 RFC 8785 JCS bytes of the 2.0.0 manifest."
     },
     {
       "id": "PREFLIGHT-NONCE-DERIVATION",
-      "status": "OPEN_FACT",
-      "missing": "Whether the V4 nonce is derived from an EVM account transaction count is not established. Probe 001 confirmed only the exact field shape: nonce must be a nonzero lowercase bytes32 value.",
-      "attemptedProbeIds": [
+      "status": "SETTLED",
+      "statementPath": "release/phase3/admission/provider-statement-2026-09-05.json",
+      "previousProbeIds": [
         "001"
       ],
-      "resolve": "Obtain the provider's V4 nonce derivation rule or a provider-generated nonce, then verify it in a new read-only preflight probe.",
-      "verifiedAlternative": "Require an independently established nonzero lowercase bytes32 provider nonce; never pad an EVM JSON-RPC account nonce into this field."
+      "resolution": "The provider requires one cryptographically random, nonzero 32-byte lowercase-hex nonce per launch attempt and byte-identical reuse on retries."
     }
   ],
   "admissionAuthority": {

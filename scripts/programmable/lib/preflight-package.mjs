@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
 
 import { canonicalJson, cloneJson } from './canonical-json.mjs';
 import {
@@ -12,8 +11,10 @@ import {
 const CHAIN_ID = '4663';
 const CAIP2 = 'eip155:4663';
 const REQUEST_PATH = 'release/phase3/package/create-request.json';
+const PACKAGE_MANIFEST_PATH = 'release/phase3/package/package-manifest.json';
 const PROVIDER_DOCUMENTS_PATH = 'release/phase3/admission/provider-documents.json';
 const OWNER_INPUTS_PATH = 'decisions/owner-inputs/launch-inputs-owner.json';
+const GIT_OBJECT_ID = /^[0-9a-f]{40}$/u;
 
 function git(root, args) {
   return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
@@ -39,7 +40,7 @@ function sameJson(left, right) {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-function assertCapabilitiesMatch(capabilities, pinnedCapabilities) {
+export function assertV4CapabilitiesMatch(capabilities, pinnedCapabilities) {
   if (String(capabilities?.chain?.id) !== CHAIN_ID) throw new Error('capabilities.chain.id must be 4663');
   if (capabilities?.chain?.caip2 !== CAIP2) throw new Error('capabilities.chain.caip2 must be eip155:4663');
   for (const field of ['chainDeployment', 'chainDeploymentDescriptorDigest', 'profile']) {
@@ -83,8 +84,9 @@ export function assembleV4PreflightRequest({
   launchWallet,
   nonce,
   now = new Date(),
+  allowUnresolved = false,
 } = {}) {
-  assertCapabilitiesMatch(capabilities, pinnedCapabilities);
+  assertV4CapabilitiesMatch(capabilities, pinnedCapabilities);
   validateV4RequestContract(template, contract, { allowPlaceholders: true });
   const request = cloneJson(template);
   request.schemaVersion = 'programmable.custom-launch-create-request.v4';
@@ -97,10 +99,10 @@ export function assembleV4PreflightRequest({
   request.nonce = normalizeV4PreflightNonce(requiredString(nonce, 'nonce'));
   const validAfter = unixSeconds(now);
   request.permitWindow = { validAfter: String(validAfter), deadline: String(validAfter + 900) };
-  return validateV4RequestContract(request, contract);
+  return validateV4RequestContract(request, contract, { allowPlaceholders: allowUnresolved });
 }
 
-function assertPublicSource(root, source) {
+export function normalizeV4PublicSource(root, source) {
   if (source === undefined) return;
   const repositoryUrl = requiredString(source.repositoryUrl, '--repository-url');
   const sourceCommit = requiredString(source.sourceCommit, '--source-commit');
@@ -111,15 +113,13 @@ function assertPublicSource(root, source) {
   }
   const commit = git(root, ['rev-parse', 'HEAD']);
   const tree = git(root, ['rev-parse', 'HEAD^{tree}']);
-  if (git(root, ['rev-parse', sourceCommit]) !== commit) throw new Error('--source-commit must resolve to HEAD');
-  const sourceTreePath = resolve(sourceTree);
-  if (sourceTree !== tree && sourceTreePath !== resolve(root)) {
-    throw new Error('--source-tree must be HEAD^{tree} or the repository root');
-  }
+  if (!GIT_OBJECT_ID.test(sourceCommit) || sourceCommit !== commit) throw new Error('--source-commit must be the exact lowercase HEAD object ID');
+  if (!GIT_OBJECT_ID.test(sourceTree) || sourceTree !== tree) throw new Error('--source-tree must be the exact lowercase HEAD tree object ID');
+  return { repositoryUrl, sourceCommit: commit, sourceTree: tree };
 }
 
 export function loadCommittedPreflightPackage(root, { source } = {}) {
-  assertPublicSource(root, source);
+  const normalizedSource = normalizeV4PublicSource(root, source);
   const commit = git(root, ['rev-parse', 'HEAD']);
   const tree = git(root, ['rev-parse', `${commit}^{tree}`]);
   const providerDocuments = JSON.parse(readCommittedFile(root, commit, PROVIDER_DOCUMENTS_PATH));
@@ -135,19 +135,21 @@ export function loadCommittedPreflightPackage(root, { source } = {}) {
     throw new Error('graphBundle.targets[0].applicantSalt cannot be derived from committed evidence; release/phase3/package/create-request.json is required');
   }
   const template = JSON.parse(templateSource);
+  const packageManifest = JSON.parse(readCommittedFile(root, commit, PACKAGE_MANIFEST_PATH));
   validateV4RequestContract(template, providerDocuments.v4RequestContract, { allowPlaceholders: true });
   const launchWallet = requiredString(ownerInputs?.launchWallet?.address, 'launchWallet');
   return {
     commit,
     tree,
+    source: normalizedSource,
     providerDocuments,
     pinnedCapabilities,
     contract: providerDocuments.v4RequestContract,
     template,
+    sourceBundleCoverage: packageManifest.sourceBundleCoverage,
     launchWallet,
     packageDigest: sha256(templateSource),
   };
 }
 
-export const PROGRAMMABLE_API_BASE_URL = process.env.PROGRAMMABLE_API_BASE_URL || 'https://api.programmable.market';
-export const ROBINHOOD_RPC_URL = process.env.ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com';
+export const PROGRAMMABLE_API_BASE_URL = 'https://api.programmable.market';

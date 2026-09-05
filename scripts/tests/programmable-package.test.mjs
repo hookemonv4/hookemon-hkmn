@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -8,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,7 @@ import {
   materializePhaseThreeCreateRequest,
   validateRecordedV4RequestTemplate,
 } from '../programmable/lib/create-request-materializer.mjs';
+import { jcsCanonicalize } from '../programmable/lib/jcs.mjs';
 import {
   PackageValidationError,
   buildLaunchPackage,
@@ -39,6 +41,18 @@ import {
   normalizePhaseThreeSubmissionDraft,
   verifyLaunchPackage,
 } from '../programmable/lib/package.mjs';
+import {
+  assertSourceBundleMatchesCommit,
+  buildSourceBundleManifest,
+  buildSourceBundleDescriptor,
+  sourcePublicOriginCommitment,
+  sourceBundleContentSha256,
+  sourceBundleDigest,
+} from '../programmable/lib/source-bundle.mjs';
+import {
+  buildPhaseThreeSourceBundle,
+  derivePhaseThreeSourceBundleCoverage,
+} from '../programmable/lib/source-bundle-coverage.mjs';
 import * as seedIntentCodec from '../programmable/lib/seed-intent.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -255,6 +269,267 @@ test('builds the source record shapes that reached manifest-digest validation', 
     publicOriginCommitment: '0x0000000000000000000000000000000000000000000000000000000000000001',
   }).kind, 'deterministic-source-bundle');
   assert.throws(() => buildV4SourceBundleManifest([]), /nonempty source bundle entries/);
+});
+
+test('canonicalizes RFC 8785 Appendix B number vectors and sorts object names by UTF-16 code units', () => {
+  const input = {
+    numbers: [5e-324, -5e-324, 333333333.33333329, 1e30, 4.50, 2e-3, 0.000000000000000000000000001],
+    string: '€$\u000f\nA\'B"\\\\"/',
+    literals: [null, true, false],
+  };
+  assert.equal(
+    jcsCanonicalize(input),
+    '{"literals":[null,true,false],"numbers":[5e-324,-5e-324,333333333.3333333,1e+30,4.5,0.002,1e-27],"string":"€$\\u000f\\nA\'B\\"\\\\\\\\\\"/"}',
+  );
+
+  const ordering = jcsCanonicalize({ '\uE000': 'private-use', '\u{10000}': 'supplementary' });
+  assert.equal(ordering, '{"𐀀":"supplementary","":"private-use"}');
+  assert.throws(() => jcsCanonicalize({ malformed: '\uD800' }), /lone surrogate/i);
+});
+
+test('builds a source-bundle manifest from every declared package input', (t) => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'programmable-source-bundle-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  for (const path of ['source/nested', 'inputs', 'artifacts', 'attestations', 'metadata']) {
+    mkdirSync(resolve(directory, path), { recursive: true });
+  }
+  writeFileSync(resolve(directory, 'source', 'nested', 'b.sol'), 'nested');
+  writeFileSync(resolve(directory, 'source', 'a.sol'), 'root');
+  writeFileSync(resolve(directory, 'source', '\uE000.sol'), 'private');
+  writeFileSync(resolve(directory, 'source', '\u{10000}.sol'), 'supplementary');
+  writeFileSync(resolve(directory, 'inputs', 'launch.json'), '{"language":"Solidity"}');
+  writeFileSync(resolve(directory, 'artifacts', 'hook.json'), '{"contractName":"Hook"}');
+  writeFileSync(resolve(directory, 'attestations', 'review.json'), '{"checked":true}');
+  writeFileSync(resolve(directory, 'metadata', 'mark.png'), 'image-bytes');
+
+  const manifest = buildSourceBundleManifest({
+    root: directory,
+    sourcePaths: ['source', 'source/nested'],
+    standardJsonInputPaths: ['inputs/launch.json'],
+    compilerArtifactPaths: ['artifacts/hook.json'],
+    attestationEvidencePaths: ['attestations/review.json'],
+    metadataImagePath: 'metadata/mark.png',
+  });
+  const paths = manifest.entries.map(({ path }) => path);
+  assert.deepEqual(paths, [
+    'artifacts/hook.json',
+    'attestations/review.json',
+    'inputs/launch.json',
+    'metadata/mark.png',
+    'source/a.sol',
+    'source/nested/b.sol',
+    'source/.sol',
+    'source/𐀀.sol',
+  ]);
+  assert.equal(new Set(paths).size, paths.length);
+  assert.ok(manifest.entries.every((entry) => entry.kind === 'file' && entry.mode === '100644' && entry.symlinkTarget === null));
+  assert.equal(manifest.entries.find((entry) => entry.path === 'source/a.sol').contentSha256, sha256(Buffer.from('root')));
+  assert.deepEqual(
+    paths,
+    [...paths].sort((left, right) => Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))),
+  );
+  assert.equal(sourceBundleContentSha256(manifest), sha256(Buffer.from(jcsCanonicalize(manifest), 'utf8')));
+  assert.throws(
+    () => buildSourceBundleManifest({
+      root: directory,
+      sourcePaths: ['missing-source'],
+      standardJsonInputPaths: [],
+      compilerArtifactPaths: [],
+      attestationEvidencePaths: [],
+      metadataImagePath: 'metadata/mark.png',
+    }),
+    /listed source bundle path is missing/i,
+  );
+
+  symlinkSync('a.sol', resolve(directory, 'source', 'linked.sol'));
+  assert.throws(
+    () => buildSourceBundleManifest({
+      root: directory,
+      sourcePaths: ['source'],
+      standardJsonInputPaths: [],
+      compilerArtifactPaths: [],
+      attestationEvidencePaths: [],
+      metadataImagePath: 'metadata/mark.png',
+    }),
+    /symlink/i,
+  );
+
+  mkdirSync(resolve(directory, 'declared'), { recursive: true });
+  mkdirSync(resolve(directory, 'outside'), { recursive: true });
+  writeFileSync(resolve(directory, 'outside', 'out.sol'), 'outside');
+  symlinkSync('../outside', resolve(directory, 'declared', 'linked-directory'));
+  assert.throws(
+    () => buildSourceBundleManifest({
+      root: directory,
+      sourcePaths: ['declared/linked-directory/out.sol'],
+      standardJsonInputPaths: [],
+      compilerArtifactPaths: [],
+      attestationEvidencePaths: [],
+      metadataImagePath: 'metadata/mark.png',
+    }),
+    /symlink/i,
+  );
+
+  assert.throws(
+    () => sourceBundleDigest({
+      ...manifest,
+      entries: [{ ...manifest.entries[0], path: 'source/../outside.sol' }],
+    }),
+    /repository-relative POSIX/i,
+  );
+});
+
+test('requires source-bundle bytes to match the claimed source commit', () => {
+  const path = 'packages/contracts/src/HookemonHook.sol';
+  const contents = readFileSync(resolve(root, path));
+  const commit = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  const manifest = {
+    schemaVersion: '2.0.0',
+    entries: [{
+      path,
+      kind: 'file',
+      mode: '100644',
+      byteLength: String(contents.length),
+      contentSha256: sha256(contents),
+      symlinkTarget: null,
+    }],
+  };
+
+  assert.doesNotThrow(() => assertSourceBundleMatchesCommit({ root, sourceCommit: commit, manifest }));
+  assert.throws(
+    () => assertSourceBundleMatchesCommit({
+      root,
+      sourceCommit: commit,
+      manifest: { ...manifest, entries: [{ ...manifest.entries[0], contentSha256: zeroHash }] },
+    }),
+    /does not match the claimed source commit/i,
+  );
+});
+
+test('builds directory coverage from the claimed Git tree instead of dirty worktree bytes', () => {
+  const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const metadataPath = 'release/phase3/preflight/README.md';
+  const manifest = buildSourceBundleManifest({
+    root,
+    sourceCommit: commit,
+    sourcePaths: ['packages/contracts/src/access'],
+    standardJsonInputPaths: ['release/phase3/build-info/launch.json'],
+    compilerArtifactPaths: ['release/phase3/artifacts/hook.json'],
+    attestationEvidencePaths: ['release/phase3/admission/provider-documents.json'],
+    metadataImagePath: metadataPath,
+  });
+  const metadata = manifest.entries.find(({ path }) => path === metadataPath);
+  const committedBytes = execFileSync('git', ['-C', root, 'show', `${commit}:${metadataPath}`], { encoding: 'buffer' });
+  const worktreeBytes = readFileSync(resolve(root, metadataPath));
+
+  assert.ok(manifest.entries.some(({ path }) => path === 'packages/contracts/src/access/MoneyRoles.sol'));
+  assert.equal(metadata.contentSha256, sha256(committedBytes));
+  assert.notEqual(metadata.contentSha256, sha256(worktreeBytes));
+});
+
+test('treats committed source coverage paths as literal paths rather than Git pathspecs', () => {
+  const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  assert.throws(
+    () => buildSourceBundleManifest({
+      root,
+      sourceCommit: commit,
+      sourcePaths: [':(top)'],
+      standardJsonInputPaths: [],
+      compilerArtifactPaths: [],
+      attestationEvidencePaths: [],
+      metadataImagePath: 'release/phase3/preflight/README.md',
+    }),
+    /listed source bundle path is missing/i,
+  );
+});
+
+test('derives the exact Phase 3 source coverage and refuses unresolved package inputs', () => {
+  const coverage = derivePhaseThreeSourceBundleCoverage({ root });
+
+  assert.deepEqual(coverage.sourcePaths, [
+    'packages/contracts/script/release/PhaseThreeReleasePlan.sol',
+    'packages/contracts/src/HookemonHook.sol',
+    'packages/contracts/src/access/MoneyRoles.sol',
+    'packages/contracts/src/accounting/FeeAccounting.sol',
+    'packages/contracts/src/bindings/RobinhoodBindings.sol',
+    'packages/contracts/src/launch/HookemonIssuance.sol',
+    'packages/contracts/src/market/CanonicalMarket.sol',
+  ]);
+  assert.deepEqual(coverage.standardJsonInputPaths, ['release/phase3/build-info/launch.json']);
+  assert.deepEqual(coverage.compilerArtifactPaths, [
+    'release/phase3/artifacts/custody.json',
+    'release/phase3/artifacts/hook.json',
+    'release/phase3/artifacts/token.json',
+  ]);
+  assert.equal(coverage.attestationEvidencePaths, null);
+  assert.equal(coverage.metadataImagePath, null);
+  assert.throws(() => buildPhaseThreeSourceBundle({ root, coverage }), /attestation evidence|metadata image/i);
+});
+
+test('records the provider statement that settles the V4 digest and nonce rules', () => {
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const statement = readJson(resolve(root, 'release/phase3/admission/provider-statement-2026-09-05.json'));
+
+  assert.equal(statement.date, '2026-09-05');
+  assert.equal(statement.channel, 'Programmable answer relayed by the owner in chat');
+  assert.match(statement.germanStatement, /programmable\.source-bundle\.v2/);
+  assert.match(statement.germanStatement, /32-Byte-Wert/);
+  assert.deepEqual(
+    providerDocuments.preflightProbeResolutions.map(({ id, status }) => ({ id, status })),
+    [
+      { id: 'PREFLIGHT-SOURCE-BUNDLE-DIGEST', status: 'SETTLED' },
+      { id: 'PREFLIGHT-NONCE-DERIVATION', status: 'SETTLED' },
+    ],
+  );
+});
+
+test('derives the provider source-bundle digest from the RFC 8785 bytes and one NUL byte', () => {
+  const manifest = {
+    schemaVersion: '2.0.0',
+    entries: [{
+      path: 'source/é.sol',
+      kind: 'file',
+      mode: '100644',
+      byteLength: '3',
+      contentSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      symlinkTarget: null,
+    }],
+  };
+  const jcsBytes = Buffer.from(jcsCanonicalize(manifest), 'utf8');
+  const independentDigest = `0x${Buffer.from(oracleKeccak256(Buffer.concat([
+    Buffer.from('programmable.source-bundle.v2', 'utf8'),
+    Buffer.of(0),
+    jcsBytes,
+  ]))).toString('hex')}`;
+
+  assert.equal(independentDigest, '0x3da229b662d2bbad06132b04738e036e53d864c1bec0755806f43c5a116a9062');
+  assert.equal(sourceBundleDigest(manifest), independentDigest);
+  const source = {
+    repositoryUrl: 'https://github.com/hookemonv4/hookemon-hkmn',
+    sourceCommit: 'a'.repeat(40),
+    sourceTree: 'b'.repeat(40),
+  };
+  const descriptor = buildSourceBundleDescriptor({
+    manifest,
+    controllerWallet: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    source,
+  });
+  const independentOrigin = `0x${Buffer.from(oracleKeccak256(Buffer.from(jcsCanonicalize(source), 'utf8'))).toString('hex')}`;
+  assert.equal(sourcePublicOriginCommitment(source), independentOrigin);
+  assert.deepEqual(descriptor, {
+    schemaVersion: '2.0.0',
+    kind: 'deterministic-source-bundle',
+    controllerWallet: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    sourceLineageNonce: '1',
+    sourceBundleDigest: independentDigest,
+    bundleContentSha256: sourceBundleContentSha256(manifest),
+    publicOriginCommitment: independentOrigin,
+  });
+  assert.throws(
+    () => sourceBundleDigest({ ...manifest, entries: [{ ...manifest.entries[0], byteLength: 1.5 }] }),
+    /integer strings/i,
+  );
 });
 
 function materializedPriceSelectionFixture(launchInputs, selectedOrdering = 'hkmnCurrency0') {
@@ -1463,7 +1738,9 @@ test('phase three draft package retains the recorded provider request template',
     const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
     assert.doesNotThrow(() => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract));
     assert.equal(result.createRequestSha256, sha256(Buffer.from(JSON.stringify(request, null, 2) + '\n')));
-    assert.equal(readJson(resolve(packageDirectory, 'package-manifest.json')).createRequestTemplateSha256, result.createRequestSha256);
+    const packageManifest = readJson(resolve(packageDirectory, 'package-manifest.json'));
+    assert.equal(packageManifest.createRequestTemplateSha256, result.createRequestSha256);
+    assert.deepEqual(packageManifest.sourceBundleCoverage, derivePhaseThreeSourceBundleCoverage({ root }));
 
     const verification = verifyLaunchPackage({
       artifactDirectory: resolve(root, 'release/phase3/artifacts'),
@@ -1475,6 +1752,35 @@ test('phase three draft package retains the recorded provider request template',
       allowUnverified: true,
     });
     assert.equal(verification.createRequestSha256, result.createRequestSha256);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('build CLI writes the V4 request template only with an explicit materialization root', () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-request-cli-test-'));
+  try {
+    const fixture = writePhaseThreeDraftFixture(directory);
+    const packageDirectory = resolve(directory, 'package');
+    const result = spawnSync(process.execPath, [
+      buildCli,
+      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--standard-json-inputs', fixture.standardInputDirectory,
+      '--launch-inputs', fixture.launchInputsPath,
+      '--address-manifest', fixture.addressManifestPath,
+      '--output', packageDirectory,
+      '--request-materialization-root', root,
+    ], { cwd: root, encoding: 'utf8' });
+
+    assert.equal(result.status, 0, result.stderr);
+    const response = JSON.parse(result.stdout);
+    assert.equal(response.fileCount, 4);
+    assert.match(response.createRequestSha256, /^sha256:[0-9a-f]{64}$/);
+    assert.ok(existsSync(resolve(packageDirectory, 'create-request.json')));
+    assert.deepEqual(
+      readJson(resolve(packageDirectory, 'package-manifest.json')).sourceBundleCoverage,
+      derivePhaseThreeSourceBundleCoverage({ root }),
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

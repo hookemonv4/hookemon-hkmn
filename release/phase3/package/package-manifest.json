@@ -6,6 +6,42 @@
     "launchInputsSha256": "sha256:00ca18c5b15821cea85f8f9635d1192e95cc005fde2289856c1b62e78882929b"
   },
   "schemaVersion": "hookemon.phase3.local-package-manifest.v1",
+  "sourceBundleCoverage": {
+    "attestationEvidencePaths": null,
+    "compilerArtifactPaths": [
+      "release/phase3/artifacts/custody.json",
+      "release/phase3/artifacts/hook.json",
+      "release/phase3/artifacts/token.json"
+    ],
+    "metadataImagePath": null,
+    "schemaVersion": "hookemon.phase3.source-bundle-coverage.v1",
+    "sourcePaths": [
+      "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
+      "packages/contracts/src/HookemonHook.sol",
+      "packages/contracts/src/access/MoneyRoles.sol",
+      "packages/contracts/src/accounting/FeeAccounting.sol",
+      "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "packages/contracts/src/launch/HookemonIssuance.sol",
+      "packages/contracts/src/market/CanonicalMarket.sol"
+    ],
+    "standardJsonInputPaths": [
+      "release/phase3/build-info/launch.json"
+    ],
+    "unresolved": [
+      {
+        "category": "attestationEvidencePaths",
+        "missing": "No committed attestation evidence file is available for the V4 launch request.",
+        "resolve": "Generate and commit the attestation evidence file, then record its repository-relative path.",
+        "verifiedAlternative": "Keep the attestation coverage unresolved and refuse source-bundle materialization."
+      },
+      {
+        "category": "metadataImagePath",
+        "missing": "No committed project metadata image is available for the V4 launch request.",
+        "resolve": "Commit the selected metadata image and record its repository-relative path.",
+        "verifiedAlternative": "Keep the metadata coverage unresolved and refuse source-bundle materialization."
+      }
+    ]
+  },
   "status": "ADDRESS_DERIVATION_PENDING",
   "unverified": [
     {

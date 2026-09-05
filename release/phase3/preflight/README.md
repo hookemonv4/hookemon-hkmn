@@ -1,35 +1,59 @@
-# Programmable preflight evidence
+# Programmable V4 preflight
 
-`node scripts/programmable/preflight.mjs` loads the committed V4 request template and sends a body to the advertised read-only preflight route only after every required field is resolved. It writes one timestamped JSON record here for accepted responses and provider rejections. The record contains the V4 body, live capabilities, provider response, and numbered mismatches with secret-looking fields removed.
+The V4 source-bundle digest and launch-attempt nonce rules are settled by the [provider statement of 2026-09-05](../admission/provider-statement-2026-09-05.json). The request remains read-only: it does not sign, broadcast, deploy, or create a launch.
 
-The command reads `PROGRAMMABLE_API_KEY` only from its process environment. It does not open credential files, print the credential, or store it. Evidence removes secret-looking response fields and records only that the environment key was redacted.
+## Source bundle
 
-Every dry-run or preflight requires the public source provenance flags:
+`sourceDescriptor.sourceBundleDigest` is:
+
+```text
+keccak256(utf8("programmable.source-bundle.v2") || 0x00 || utf8(JCS(sourceBundleManifest)))
+```
+
+`0x00` is exactly one byte. `JCS` is [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785), including UTF-16 property-name ordering, RFC string escaping, ECMAScript integer serialization, and UTF-8 output. The manifest builder rejects floating-point values, duplicate paths, a listed missing file, and a symlink in any listed path component. It records only regular files with mode `100644` and `symlinkTarget: null`; entries are sorted by the UTF-8 bytes of `path` and must match the claimed Git commit byte-for-byte.
+
+The generated package declaration at [`../package/package-manifest.json`](../package/package-manifest.json) explicitly covers:
+
+- The seven `implementation.sourcePaths` from `release/phase3/submission.json`, recursively.
+- `release/phase3/build-info/launch.json` as the Standard JSON input.
+- `release/phase3/artifacts/custody.json`, `hook.json`, and `token.json` as compiler artifacts.
+
+The descriptor uses `schemaVersion: "2.0.0"`, kind `deterministic-source-bundle`, and the launch wallet as `controllerWallet`. `sourceLineageNonce` is currently the initial lineage string `"1"`. Until the provider documents those two derivations, `bundleContentSha256` is the SHA-256 digest of the JCS manifest bytes and `publicOriginCommitment` is `keccak256(JCS({repositoryUrl, sourceCommit, sourceTree}))`. These are explicit local assumptions for the next preflight response to confirm or reject; they are not launch authorization.
+
+OPEN FACT — source-bundle coverage is incomplete.
+
+Missing: a committed attestation evidence file and the selected project metadata image with repository-relative paths. Resolve: commit those two inputs, replace the two unresolved coverage fields in the package declaration, regenerate the package, and run preflight again. Verified alternative: keep the coverage declaration explicit and refuse manifest materialization before any provider POST.
+
+## Launch attempt and retries
+
+For a new attempt, the tool generates one cryptographically random 32-byte nonce, rejects all-zero output, and formats it as `0x` plus 64 lowercase hex characters. It persists that nonce, the request's RFC 8785 bytes and SHA-256 digest, and the V4 idempotency-header state in a mode-`600` record. The default record is outside the repository at `~/.hookemon/programmable/launch-attempt.json`; its evidence directory is a sibling outside the repository. Use `--launch-attempt <path>` to choose another outside-repository location.
+
+The retained V4 contract does not define an idempotency header, so the record explicitly stores that no header or key is available. A retry reuses the stored nonce and request bytes byte-for-byte. `--new-launch-attempt` is required to create a record at an unused path; an existing record is never replaced. The tool atomically reserves each request and allows at most five preflight requests per attempt; it removes secret-looking fields and the configured API key from evidence.
+
+## Commands
+
+Use the same attempt record for dry-run and preflight. Create the record explicitly with `--new-launch-attempt`; the dry-run then prints a secret-stripped request and the subsequent command sends exactly the stored bytes.
 
 ```sh
 node scripts/programmable/preflight.mjs \
   --repository-url https://github.com/hookemonv4/hookemon-hkmn \
   --source-commit "$(git rev-parse HEAD)" \
   --source-tree "$(git rev-parse HEAD^{tree})" \
+  --launch-attempt /private/tmp/hookemon-launch-attempt.json \
+  --new-launch-attempt \
   --dry-run
+
+node scripts/programmable/preflight.mjs \
+  --repository-url https://github.com/hookemonv4/hookemon-hkmn \
+  --source-commit "$(git rev-parse HEAD)" \
+  --source-tree "$(git rev-parse HEAD^{tree})" \
+  --launch-attempt /private/tmp/hookemon-launch-attempt.json
 ```
 
-The command accepts only a public HTTPS repository URL, a source commit that resolves to `HEAD`, and either the matching Git tree or the repository root. Those flags prove repository provenance but cannot derive the provider's source descriptor or source bundle manifest without the retained nested provider contract. An EVM account transaction count does not establish the required provider nonce; the command rejects it rather than padding it into the V4 field. It prints a request only when the template is fully resolved. Run `node scripts/programmable/preflight.mjs --status <requestId>` only after a provider request ID exists.
+The source flags must be the exact lowercase 40-hex object IDs for the current `HEAD` and its tree. `--status <requestId>` remains read-only and does not create or alter an attempt record.
 
-## How the V4 format was learned
+The command deliberately reads package evidence from `HEAD`, not uncommitted files. Commit a regenerated package before preflight; otherwise it exits locally without a provider request.
 
-The ten ordered request-response records from the advertised preflight route are retained outside the repository (the provider responses echo retired chain names that the clean-room policy forbids); the coordinator holds them as evidence. Each record redacts `Authorization`; before a request, the helper atomically reserves its ID and rate slot, enforces at least ten seconds between requests, and caps the log at sixty requests. It fails closed if another reservation lock exists, rather than reclaiming a possibly live lock. A transport failure becomes a redacted record rather than an untracked retry. The investigation stopped after ten requests when three digest-recipe differentials reached the same unresolved provider boundary. It never called a create route, signed a payload, or broadcast a transaction.
+If the provider rejects public-origin or provenance because the public repository default branch is still the initial squash `37c0f95`, the command preserves the rejection in the external evidence path it prints. The owner must run `~/.hookemon/push-live.sh --reseed` before retrying that same immutable request; do not change the stored nonce or request bytes.
 
-| Field | Provider result | Probes |
-| --- | --- | --- |
-| `nonce` | Nonzero lowercase bytes32 | `001` |
-| `sourceDescriptor` | Object with `schemaVersion`, `kind`, `controllerWallet`, `sourceLineageNonce`, `sourceBundleDigest`, `bundleContentSha256`, and `publicOriginCommitment` | `002`, `004` |
-| `sourceBundleManifest` | Nonempty `2.0.0` object with file entries containing `path`, `kind`, `mode`, `byteLength`, `contentSha256`, and `symlinkTarget` | `005`, `006`, `008`, `010` |
-
-The source probe used the public repository `https://github.com/hookemonv4/hookemon-hkmn`, commit `37c0f955f76410e9c9863e77cdc33fd48ffd1306`, and tree `d3b513143bc9d0bd57acac02235c74788fdb259d`. Those facts establish the probe input provenance only. They do not establish the provider's source-bundle digest preimage.
-
-OPEN FACT: `sourceDescriptor` and `sourceBundleManifest` still require the provider's digest binding recipe. The exact response from each of probes `008`, `009`, and `010` was `sourceBundleManifest digest does not match sourceDescriptor`. Resolve it with the provider's V4 digest preimage or a provider-generated source descriptor, then repeat a read-only probe against the same manifest. The verified alternative is to retain the accepted field shapes and explicit nulls in `create-request.json`; do not construct a launch source commitment.
-
-OPEN FACT: probe `001` establishes only the V4 nonce's nonzero lowercase-bytes32 shape, not a derivation from an EVM account transaction count. Obtain the provider's nonce rule or a provider-generated nonce and validate it in a new read-only probe. The verified alternative is to retain a null materialized nonce and reject any padded account count. No non-error preflight response or wallet handoff was reached.
-
-OPEN FACT: the committed Phase 3 package remains `ADDRESS_DERIVATION_PENDING`. Its request template contains reproducible bytecode and Standard JSON evidence, but lacks materialized provider deployment data, graph targets and salts, route fields, the source digest binding, runtime materialization, and launch intent. Resolve: retain the canonical capability copy, the provider source-digest preimage, and the graph preimage, then regenerate and commit the request. Verified alternative: retain the explicit-null template and the numbered probe log.
+If an interrupted preflight leaves a `.reservation.lock`, verify that no preflight process is active before removing only that confirmed stale lock. A numbered `.pending.json` permanently consumes a slot in the five-request cap because the provider may already have received it. Do not delete or retry it without an explicit owner accepted-risk decision.

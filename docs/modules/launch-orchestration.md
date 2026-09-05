@@ -13,7 +13,7 @@ Launch Orchestration creates the Phase 3 canonical market and places its first L
 - `HookemonHook.seedCanonicalLiquidity(SeedParams)` is the later, owner-signed Permit2 path. Its constructor commits `seedIntentDigest` over the fixed payer, ticks, liquidity, maxima, and `maxDeadlineSeconds = 900`; each call separately requires `deadline <= block.timestamp + 900`. The call accepts only matching parameters, mints the full-range position to custody, clears temporary approvals, and returns an unused USDG balance to the payer.
 - `PhaseThreeReleasePlan` accepts only two exact full-consumption tuples: USDG-currency0 uses `sqrtPriceX96 = 161723809515207654588927258648643645224` and liquidity `489897948556635619`; HKMN-currency0 uses `sqrtPriceX96 = 38813714284914462669` and liquidity `489897948572597439`.
 - `scripts/launch/derive-addresses.mjs`, `scripts/launch/build-address-manifest.mjs`, and `scripts/mine-hook-address.mjs` derive and verify the three-target graph, address ordering, pool identifiers, initializer bytes, and `0x20CC` hook address from frozen inputs and compiled artifacts.
-- `scripts/programmable/build-launch-package.mjs` renders the checked-in graph draft or a disposable materialized package. `scripts/programmable/verify-launch-package.mjs` rederives the materialized address manifest, decodes the seed transaction, and checks its intent digest and committed bytes.
+- `scripts/programmable/build-launch-package.mjs` renders the checked-in graph draft or a disposable materialized package. Its package manifest declares the exact source-bundle coverage. `scripts/programmable/verify-launch-package.mjs` rederives the materialized address manifest, decodes the seed transaction, and checks its intent digest and committed bytes.
 
 ## Invariants
 
@@ -28,6 +28,7 @@ Launch Orchestration creates the Phase 3 canonical market and places its first L
 - `LaunchLeg.t.sol`, `PhaseThreeReleasePlan.t.sol`, and `RobinhoodV4ArchiveFork.t.sol` cover the bound-field mutations at the hook, executable pre-sign plan, and pinned archive-fork layers.
 - The provider graph has no native or ERC-20 funding leg. The later seed is the only USDG pull and does not change graph allocation, custody configuration, pool initialization, or launch stamp.
 - Derivation and package tools do not read credentials, contact a provider, sign, or broadcast.
+- A preflight source manifest cannot be materialized until its declared attestation evidence and metadata image are committed. Package coverage never substitutes unrelated evidence or a guessed asset path.
 
 ## State transitions
 
@@ -53,5 +54,6 @@ FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/con
 - Rebuild the release package after any token, hook, custody, price, compiler, or source commitment changes; do not hand-edit generated artifacts.
 - If decoded seed calldata no longer matches `seedIntentDigest` or sets `deadline` later than 900 seconds after the execution block timestamp, reject it and rebuild the materialized package from the frozen inputs before requesting a wallet action.
 - OPEN FACT: the provider-supplied launch-intent preimage is absent. The missing values are route namespace, route nonce, topology hash, target-id hashes, and serialized graph call data for the accepted three-call graph. Obtain them from provider preflight; until then retain the non-signing draft without encoded call data or target addresses.
+- OPEN FACT: the source-bundle coverage declaration lacks an attestation evidence file and selected metadata image. Add both paths and regenerate the package; the verified alternative keeps source preflight unavailable.
 - Keep `PROVIDER_API_KEY_PENDING`, `OWNER_WALLET_FUNDING_PENDING`, and `BUILDER_IDENTITY_PENDING` as their separate preflight or operational inputs. None changes the allocation or creates signing authority.
 - If a materialized address ordering does not select one approved price tuple, rebuild from the frozen inputs and reject the candidate rather than forcing an ordering.

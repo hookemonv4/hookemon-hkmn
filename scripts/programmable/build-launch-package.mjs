@@ -84,6 +84,7 @@ function parseArguments(argv) {
     ['--launch-inputs', 'launchInputsPath'],
     ['--address-manifest', 'addressManifestPath'],
     ['--output', 'outputDirectory'],
+    ['--request-materialization-root', 'requestMaterializationRoot'],
     ['--materialized-manifest', 'materializedManifestPath'],
     ['--submission', 'submissionPath'],
     ['--materialized-seed', 'materializedSeedPath'],
@@ -117,6 +118,9 @@ export function run(argv) {
     launchInputsPath: options.launchInputsPath,
     addressManifestPath: options.addressManifestPath,
     outputDirectory: options.outputDirectory,
+    ...(options.requestMaterializationRoot === undefined
+      ? {}
+      : { requestMaterializationRoot: options.requestMaterializationRoot }),
     ...(options.materializedManifestPath === undefined
       ? {}
       : { materializedManifestInputDirectory: dirname(resolve(options.materializedManifestPath)) }),

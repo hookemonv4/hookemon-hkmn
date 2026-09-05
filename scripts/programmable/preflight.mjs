@@ -5,22 +5,17 @@ import { resolve } from 'node:path';
 import {
   formatWalletHandoff,
   getPreflightStatus,
-  readLaunchWalletNonce,
+  prepareV4PreflightAttempt,
   runPreflight,
   stripSecrets,
 } from './lib/preflight-runner.mjs';
-import {
-  assembleV4PreflightRequest,
-  loadCommittedPreflightPackage,
-  PROGRAMMABLE_API_BASE_URL,
-  ROBINHOOD_RPC_URL,
-} from './lib/preflight-package.mjs';
+import { PROGRAMMABLE_API_BASE_URL } from './lib/preflight-package.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const args = process.argv.slice(2);
 
 function usage() {
-  return 'Usage: node scripts/programmable/preflight.mjs [--repository-url <https-url> --source-commit <commit> --source-tree <tree-or-path>] [--dry-run | --status <requestId>]';
+  return 'Usage: node scripts/programmable/preflight.mjs --repository-url <https-url> --source-commit <commit> --source-tree <tree> [--launch-attempt <path>] [--new-launch-attempt] [--dry-run | --status <requestId>]';
 }
 
 function parseArgs(argv) {
@@ -38,7 +33,17 @@ function parseArgs(argv) {
       options.requestId = argv[++index];
       continue;
     }
-    const name = { '--repository-url': 'repositoryUrl', '--source-commit': 'sourceCommit', '--source-tree': 'sourceTree' }[arg];
+    if (arg === '--new-launch-attempt') {
+      if (options.newLaunchAttempt === true) throw new Error(usage());
+      options.newLaunchAttempt = true;
+      continue;
+    }
+    const name = {
+      '--repository-url': 'repositoryUrl',
+      '--source-commit': 'sourceCommit',
+      '--source-tree': 'sourceTree',
+      '--launch-attempt': 'launchAttemptPath',
+    }[arg];
     if (!name || index + 1 >= argv.length || options[name] !== undefined) throw new Error(usage());
     options[name] = argv[++index];
   }
@@ -46,6 +51,8 @@ function parseArgs(argv) {
     for (const name of ['repositoryUrl', 'sourceCommit', 'sourceTree']) {
       if (typeof options[name] !== 'string' || options[name].length === 0) throw new Error(`--${name.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`)} is required`);
     }
+  } else if (options.launchAttemptPath !== undefined || options.newLaunchAttempt === true) {
+    throw new Error(usage());
   }
   return options;
 }
@@ -67,29 +74,27 @@ async function main() {
     return 0;
   }
   if (options.mode === 'dry-run') {
-    const packageData = loadCommittedPreflightPackage(root, { source: sourceFrom(options) });
-    const capabilities = await fetch(new URL('/v4/chains/4663/capabilities', baseUrl)).then(async (response) => {
-      if (!response.ok) throw new Error(`capabilities returned HTTP ${response.status}`);
-      return response.json();
+    const prepared = await prepareV4PreflightAttempt({
+      root,
+      baseUrl,
+      source: sourceFrom(options),
+      launchAttemptPath: options.launchAttemptPath,
+      newLaunchAttempt: options.newLaunchAttempt === true,
     });
-    const nonce = await readLaunchWalletNonce({ rpcUrl: ROBINHOOD_RPC_URL, launchWallet: packageData.launchWallet });
-    const request = assembleV4PreflightRequest({
-      template: packageData.template,
-      contract: packageData.contract,
-      capabilities,
-      pinnedCapabilities: packageData.pinnedCapabilities,
-      launchWallet: packageData.launchWallet,
-      nonce,
-    });
-    process.stdout.write(`${JSON.stringify(stripSecrets({ baseUrl, request }), null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(stripSecrets({
+      baseUrl,
+      launchAttemptPath: prepared.attemptPath,
+      request: prepared.request,
+    }), null, 2)}\n`);
     return 0;
   }
   const result = await runPreflight({
     root,
     baseUrl,
-    rpcUrl: ROBINHOOD_RPC_URL,
     apiKey: process.env.PROGRAMMABLE_API_KEY,
     source: sourceFrom(options),
+    launchAttemptPath: options.launchAttemptPath,
+    newLaunchAttempt: options.newLaunchAttempt === true,
   });
   process.stdout.write(`${formatWalletHandoff(result)}\n`);
   if (result.mismatches.length > 0) {
@@ -100,6 +105,7 @@ async function main() {
 }
 
 main().then((exitCode) => { process.exitCode = exitCode; }).catch((error) => {
-  process.stderr.write(`${error.message}\n`);
+  process.stderr.write(`${stripSecrets(String(error?.message ?? error), { secrets: [process.env.PROGRAMMABLE_API_KEY] })}\n`);
+  if (typeof error?.evidencePath === 'string') process.stderr.write(`evidence: ${error.evidencePath}\n`);
   process.exitCode = 1;
 });

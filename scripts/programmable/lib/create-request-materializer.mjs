@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { cloneJson, sha256Bytes } from './canonical-json.mjs';
+import { derivePhaseThreeSourceBundleCoverage } from './source-bundle-coverage.mjs';
 
 const CHAIN_ID = '4663';
 const CAIP2 = 'eip155:4663';
@@ -469,5 +470,6 @@ export function materializePhaseThreeCreateRequest({ root, graphDraft: suppliedG
   return {
     request,
     unresolvedPaths: unresolvedV4RequestPaths(request),
+    sourceBundleCoverage: derivePhaseThreeSourceBundleCoverage({ root: releaseRoot }),
   };
 }
