@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "selected": [
+    {
+      "id": "base",
+      "version": "0.1.0",
+      "sha256": "fec3e938aa995e1bfc20d26bc2a42e7191176df419eb4bf64820b36337a6f7de"
+    }
+  ],
+  "additionalPacks": [],
+  "reason": "The installed v4-framework distribution exposes only the mandatory base pack. No domain-specific pack is available or required for init."
+}

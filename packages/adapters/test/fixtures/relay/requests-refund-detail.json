@@ -1,0 +1,90 @@
+{
+  "requests": [
+    {
+      "id": "0x178835851754f44d727408cf833287537f1d43372d4a41026ae355e46f15975d",
+      "status": "refund",
+      "user": "0x000000000000000000000000000000000000dEaD",
+      "recipient": "8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto",
+      "sender": "0x000000000000000000000000000000000000dEaD",
+      "refundTo": null,
+      "data": {
+        "failReason": "TOO_LITTLE_RECEIVED",
+        "refundFailReason": null,
+        "refundCurrencyData": {
+          "currency": {
+            "chainId": 4663,
+            "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+            "symbol": "USDG",
+            "name": "Global Dollar",
+            "decimals": 6
+          },
+          "amount": "24500000",
+          "amountFormatted": "24.5",
+          "amountUsd": "24.50351",
+          "minimumAmount": "24500000"
+        },
+        "route": {
+          "quoted": {
+            "origin": {
+              "inputCurrency": {
+                "currency": { "chainId": 4663, "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168", "symbol": "USDG", "decimals": 6 },
+                "amount": "25000000",
+                "minimumAmount": "25000000"
+              },
+              "outputCurrency": {
+                "currency": { "chainId": 4663, "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168", "symbol": "USDG", "decimals": 6 },
+                "amount": "25000000",
+                "minimumAmount": "25000000"
+              },
+              "router": "relay"
+            },
+            "destination": {
+              "inputCurrency": {
+                "currency": { "chainId": 792703809, "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "symbol": "CIRCLE_USD", "decimals": 6 },
+                "amount": "24694978",
+                "minimumAmount": "24201079"
+              },
+              "outputCurrency": {
+                "currency": { "chainId": 792703809, "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "symbol": "CIRCLE_USD", "decimals": 6 },
+                "amount": "24694978",
+                "minimumAmount": "24201079"
+              },
+              "router": "relay"
+            }
+          },
+          "actual": null
+        },
+        "inTxs": [
+          {
+            "txHash": "0xa3f21c9e4b6d1a8f7c2e5b9d0a1f6c3e8b7d4a2f9c6e1b8d5a3f0c7e4b1d8a6f",
+            "block": 9123456,
+            "type": "deposit",
+            "chainId": 4663,
+            "timestamp": 1788358900,
+            "status": "success"
+          }
+        ],
+        "outTxs": [
+          {
+            "txHash": "0xb4e12d8f5c7a2b9e6d1f4a8c3e0b7d5a9f2c6e1b8d4a7f0c3e6b9d2a5f8c1e4b",
+            "block": 9123480,
+            "type": "refund",
+            "chainId": 4663,
+            "timestamp": 1788358980,
+            "status": "success"
+          }
+        ]
+      },
+      "protocol": {
+        "v2": {
+          "orderId": "0x149be8820be11a37f10a77de44a0b12db267f8e9b73c429b3dbcb8ddc53c96f4"
+        }
+      },
+      "requestType": "Crosschain Swap",
+      "features": [],
+      "createdAt": 1788358518,
+      "updatedAt": 1788400000
+    }
+  ],
+  "continuation": null
+}

@@ -1,0 +1,11 @@
+{
+  "id": "r-00012",
+  "at": "2026-08-30T00:27:47.353Z",
+  "type": "measurable-success-criteria-verified",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/PRD.md": "ec44aa6a44facc037f5e3ff8faf471d5201f19666031c29e3a800f0c59bf2831"
+  }
+}

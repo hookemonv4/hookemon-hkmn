@@ -1,0 +1,31 @@
+{
+  "id": "r-00361",
+  "at": "2026-09-01T15:27:18.706Z",
+  "type": "gate",
+  "phase": "tasks",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 2,
+    "problems": [
+      "prerequisite init gate is FAILED via r-00356",
+      "prerequisite spec gate is FAILED via r-00357",
+      "prerequisite architecture gate is FAILED via r-00358",
+      "prerequisite feasibility gate is FAILED via r-00359",
+      "prerequisite redteam gate is FAILED via r-00360",
+      "T1: evidence r-00317 is STALE",
+      "T2: evidence r-00318 is STALE",
+      "T3: evidence r-00319 is STALE",
+      "T4: evidence r-00285 is STALE",
+      "T5: evidence r-00320 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/tasks.json": "53eba48fcab9ca3c2d95e9225dbd8137720d756f017448ca15b2974a4eba7275",
+    "gates/runs/tasks.json": "b01c27947013364ce53e8e153688a94a758966201ad45b486cef3e9eac0e6031",
+    "receipts/r-00317.json": "fe49818790711d689a9fd2803e7244667096b613ca1e7228fb19257dd505df0a",
+    "receipts/r-00318.json": "2f8ceb9e0fda6da0629a93433dc9c49877e413243e8c5cc45169883480d0b027",
+    "receipts/r-00319.json": "c816f03efc9a5d53b7269da8ec7433383700e1d61c6edf457603c0f0d3678a09",
+    "receipts/r-00285.json": "fa92dd43d38486d01cc1d7f420542bf8bc669711f17d1a35507f9ea714632ee4",
+    "receipts/r-00320.json": "16e5c41f76a1ed42ca55c85c62c799649616a3a14145be69a15ddce0ef9e74d6"
+  }
+}

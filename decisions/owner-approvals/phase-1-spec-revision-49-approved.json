@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Owner approved Phase 1 Spec revision 49 with operations-wallet cycle authority and admin-only entitlement replacement.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "10766d4dda7f6067e0b6f35e2de2ecaeb4c67d25802e801aa2058d04bde310a3",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "75b1228eee91c36915f8142635d246817493c6774f3909e131563e0e2881732a"
+  }
+}

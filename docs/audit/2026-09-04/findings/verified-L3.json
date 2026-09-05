@@ -1,0 +1,191 @@
+[
+  {
+    "lane": "L3",
+    "verified": [
+      {
+        "id": "L3-M18",
+        "severity": "LOW",
+        "tag": "MISSING",
+        "verdict": "UNVERIFIED_LOW",
+        "title": "Fee-beneficiary claims (Programmable 0.1%, treasury 0.4%) have no operational runner path",
+        "where": "packages/contracts/src/HookemonHook.sol:170-184 (claimProgrammable, claimTreasury); packages/adapters/bin/hookemon-runner.mjs:60-76; packages/adapters/src/app/compose.mjs:232-241"
+      },
+      {
+        "id": "L3-M19",
+        "severity": "LOW",
+        "tag": "MISSING",
+        "verdict": "UNVERIFIED_LOW",
+        "title": "distribution.mjs never carries forward per-cycle rounding dust (adapters-side half of H1)",
+        "where": "packages/adapters/src/app/stages/distribution.mjs:404; packages/runner/src/distribution/pro-rata.mjs:110-123"
+      },
+      {
+        "id": "L3-M21",
+        "severity": "LOW",
+        "tag": "MISSING",
+        "verdict": "UNVERIFIED_LOW",
+        "title": "production-env-checklist.md omits HOOKEMON_PACK_CODE, which funding.mjs hard-requires to start live mode",
+        "where": "docs/operations/production-env-checklist.md; packages/adapters/src/app/stages/funding.mjs:90-105,117"
+      },
+      {
+        "id": "L3-M22",
+        "severity": "LOW",
+        "tag": "CONFLICT",
+        "verdict": "UNVERIFIED_LOW",
+        "title": "HOOKEMON_PROGRAMMABLE_API_KEY vs PROGRAMMABLE_API_KEY naming mismatch across internal docs for the future launch step",
+        "where": "release/phase2/launch-plan.md:94-101; docs/superpowers/plans/owner-closeout.md:261; docs/superpowers/plans/2026-09-04-money-path-audit-handover.md:160-164; packages/adapters/src/app/environment.mjs:41-140,168-171 (neither name is in the allow-list)"
+      },
+      {
+        "id": "L3-M2",
+        "severity": "CRITICAL",
+        "tag": "MISSING",
+        "verdict": "CONFIRMED",
+        "title": "commitPayoutChunk/payEntitlement are never called, and no calldata builder for them even exists",
+        "where": "packages/adapters/bin/hookemon-runner.mjs:60-76; packages/adapters/src/app/stages/payout.mjs:117-234; packages/adapters/src/hook-contract-client.mjs (full file — no PayoutCommitment/HolderSettlement ABI entries); packages/runner/src/distribution/settlement-worker.mjs:1-12; packages/contracts/src/payout/PayoutCommitment.sol:93-170; packages/contracts/src/settlement/HolderSettlement.sol:33-56,90-98; packages/adapters/src/app/stages/distribution.mjs:408-414"
+      },
+      {
+        "id": "L3-M1",
+        "severity": "CRITICAL",
+        "tag": "MISSING",
+        "verdict": "CONFIRMED",
+        "title": "openPegCycle is never called anywhere in the driven production path",
+        "where": "packages/runner/src/automation/automated-cycle-service.mjs:12-21; packages/adapters/src/app/compose.mjs:371-388; packages/adapters/src/hook-contract-client.mjs:178-180; packages/adapters/src/app/stages/funding.mjs:180-197; packages/contracts/src/process/ProcessBudget.sol:56-70; packages/contracts/src/process/PegCycleVault.sol:311-320"
+      },
+      {
+        "id": "L3-M3",
+        "severity": "CRITICAL",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "The real CLI's payout authorization omits the USDG contract address entirely",
+        "where": "packages/adapters/src/app/environment.mjs:405-436; packages/adapters/bin/hookemon-runner.mjs:147-166; packages/adapters/src/app/compose.mjs:322-350; packages/adapters/src/app/stages/payout.mjs:84-102,187-195; packages/adapters/src/app/stages/action-builder.mjs:47-53"
+      },
+      {
+        "id": "L3-M4",
+        "severity": "CRITICAL",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Relay's raw calldata is passed straight through instead of the route executor's expected RouteParams ABI",
+        "where": "packages/adapters/src/app/stages/action-builder.mjs:203-219 (extractRouteData); packages/adapters/src/app/stages/funding.mjs:140-145; packages/adapters/src/app/stages/outbound.mjs:60-82; packages/contracts/src/process/PegCycleRouteExecutor.sol:16-24,26-44,91-120"
+      },
+      {
+        "id": "L3-M8",
+        "severity": "MEDIUM",
+        "tag": "MISSING",
+        "verdict": "CONFIRMED",
+        "title": "Four of five contract recovery functions remain calldata-builder-only with no CLI caller; only accept-degraded-return is genuinely wired",
+        "where": "packages/adapters/src/hook-contract-client.mjs:104-118,152-171 (buildAuthorizeFundingAfterFailureCall, buildCancelExpiredFundingAuthorizationCall, buildRenewFundingAuthorizationDeadlineCall, buildRenewPayoutAuthorizationDeadlineCall, buildRecordTerminalFailureCall); packages/adapters/bin/hookemon-runner.mjs:60-76,226-269; packages/adapters/src/app/stages/return.mjs:124-185"
+      },
+      {
+        "id": "L3-M5",
+        "severity": "HIGH",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Safety minima and gas caps silently default to the literal atomic-unit value '1' at two independent layers",
+        "where": "packages/adapters/src/app/environment.mjs:373-381; packages/adapters/src/app/compose.mjs:322-336; packages/adapters/src/app/stages/funding.mjs:171-175; packages/adapters/src/app/stages/leg-actions.mjs:42-61,110-129"
+      },
+      {
+        "id": "L3-M6",
+        "severity": "CRITICAL",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "open and purchase are the only two of eight live stages that skip the pre-mutation crash-safety guard, and stage-driver.mjs's own header now misdescribes this",
+        "where": "packages/adapters/src/app/stages/open.mjs:78-89 (mutateOpen); packages/adapters/src/app/stages/purchase.mjs:14-28 (mutatePurchase); packages/adapters/src/app/stage-driver.mjs:36-39,225-239; packages/adapters/src/app/stages/rehearsal.mjs:106-169; packages/adapters/src/app/stages/buyback.mjs:55-58"
+      },
+      {
+        "id": "L3-M7",
+        "severity": "HIGH",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Cross-chain return proceeds are not cycle-attributed and the escrow credit used for distribution is never finality-checked",
+        "where": "packages/adapters/src/app/stages/return.mjs:62-121,157-184; packages/adapters/src/relay-client.mjs:515-518,636-668; packages/adapters/src/app/stages/distribution.mjs:298-321 (vs. the same file's own finality-checked totalSupply anchor at :238-246); packages/adapters/src/robinhood-rpc.mjs:118-149"
+      },
+      {
+        "id": "L3-M11",
+        "severity": "HIGH",
+        "tag": "CONFLICT",
+        "verdict": "CONFIRMED",
+        "title": "The production CycleRunner / standing-authority journal (Track B) is never constructed; the live money path runs on a separate, simpler bookkeeping layer (Track A)",
+        "where": "packages/adapters/src/app/compose.mjs:378-388,439-446 (runnerFactory: cycleId => ({ cycleId })); packages/adapters/src/app/cycle-repository.mjs:20-49; packages/runner/src/cycle/evidence-profile.mjs:68-76; packages/runner/src/cycle/authorization-provider.mjs:17-23; packages/runner/src/cycle/schemas.mjs:14-31; packages/adapters/src/app/stages/return.mjs:76-89"
+      },
+      {
+        "id": "L3-M9",
+        "severity": "HIGH",
+        "tag": "MISSING",
+        "verdict": "CONFIRMED",
+        "title": "Lease/process fencing is incomplete: stale O_EXCL locks, un-journaled outbound/return failures, and a durable-store cache race can produce independent cycles or double-signing",
+        "where": "packages/adapters/src/app/lease-store.mjs:94-145; packages/runner/src/cycle/durable-store.mjs:462-473,556-577; packages/adapters/src/app/cycle-repository.mjs:130-155; packages/adapters/bin/hookemon-runner.mjs:60-76,235-268; packages/adapters/src/app/stages/outbound.mjs:88-105; packages/adapters/src/app/stages/return.mjs:103-121; packages/runner/src/automation/exclusive-lease.mjs:55-100; packages/adapters/src/app/stages/funding.mjs:180-183; packages/runner/src/automation/automated-cycle-service.mjs:177-199"
+      },
+      {
+        "id": "L3-M10",
+        "severity": "HIGH",
+        "tag": "CONFLICT",
+        "verdict": "CONFIRMED",
+        "title": "Rehearsal and production can share an armed live state, while dashboard caps/pack controls do not actually gate spending",
+        "where": "packages/adapters/src/app/environment.mjs:217-246; packages/adapters/src/app/stage-driver.mjs:166-180; packages/runner/src/scheduler/scheduler.mjs:137-195; packages/runner/src/config/state-schema.mjs:8-19,126-157; packages/adapters/src/app/compose.mjs:201-229,396-405; packages/adapters/src/app/stages/purchase.mjs:19-24"
+      },
+      {
+        "id": "L3-M16",
+        "severity": "MEDIUM",
+        "tag": "TEST",
+        "verdict": "CONFIRMED",
+        "title": "PR #5's non-Solana changes add rehearsal capability but not production proof, and required CI does not exercise the changed test suites",
+        "where": "pr5.diff (full file list); packages/adapters/bin/hookemon-runner.mjs:121-131,133-171; packages/adapters/src/app/{environment,compose,stage-driver}.mjs; packages/adapters/src/app/accounting-projection.mjs:74-79,111-145; packages/dashboard/src/{contracts/operator-contracts,projections/operator-projection,public/index,routes/operator,server}.mjs; packages/runner/src/{config/state-schema,operator/pack-selection}.mjs; packages/adapters/test/app/compose.test.mjs:614-621,681-789; .github/workflows/v4-gates.yml:150-160"
+      },
+      {
+        "id": "L3-M13",
+        "severity": "HIGH",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Standing-authority intent expiry is checked against the signed intent's own issuedAt timestamp, not wall-clock time at use",
+        "where": "packages/runner/src/cycle/authorization-provider.mjs:120-136,151-172; packages/runner/src/cycle/cycle-runner.mjs:236-259; packages/adapters/src/app/stages/return.mjs:157-184"
+      },
+      {
+        "id": "L3-M14",
+        "severity": "MEDIUM",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Evidence/accounting records the authorizer's address in the operations-trigger field, and labels funded-but-unpaid liabilities as settled",
+        "where": "packages/adapters/src/app/stages/distribution.mjs:323-345,424-449 (line 330: operationsTrigger: config.accounts.evm); packages/adapters/src/app/accounting-projection.mjs:56-79,102-145; packages/adapters/src/app/stages/payout.mjs:128-151"
+      },
+      {
+        "id": "L3-M12",
+        "severity": "HIGH",
+        "tag": "CONFLICT",
+        "verdict": "REFUTED",
+        "title": "Signer-bundle contracts disagree between the generic external-module signer and the runner's expected role bundle; broadcast-time chain-id/nonce/fee correctness is unverified",
+        "where": "packages/adapters/src/signing/external-module-signer.mjs:28-57; packages/adapters/src/app/environment.mjs:299-311,468-486; packages/adapters/src/robinhood-rpc.mjs:85-88,328-337; packages/adapters/README.md:72-78; packages/adapters/src/app/stages/funding.mjs:180-183; packages/adapters/src/app/stages/outbound.mjs:79-82"
+      },
+      {
+        "id": "L3-M15",
+        "severity": "MEDIUM",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Relay address-equality check can accept a wrong-case Solana address, and there is no route-expiry recovery between funding and outbound",
+        "where": "packages/adapters/src/relay-client.mjs:47-67,153-160,301-321,524-605; packages/adapters/src/app/stages/funding.mjs:137,140-145; packages/adapters/src/app/stages/outbound.mjs:8-18,64-82"
+      },
+      {
+        "id": "L3-M17",
+        "severity": "HIGH",
+        "tag": "CONFLICT",
+        "verdict": "CONTESTED",
+        "title": "PR #5's rehearsal signer imports raw Solana private key material into the Node process, contradicting the general external-signer isolation model",
+        "where": "packages/adapters/rehearsal/macos-keychain-solana-signer.mjs:33-71,74-119; packages/adapters/src/signing/keychain-signer.mjs:12-18,69-104; docs/modules/signing.md:90-105"
+      },
+      {
+        "id": "L3-M23",
+        "severity": "HIGH",
+        "tag": "DEFECT",
+        "verdict": "CONFIRMED",
+        "title": "Live configuration gaps (Collector Crypt, Solana signer, pack code, production distribution identity) surface only after irreversible on-chain work, not before",
+        "where": "packages/adapters/src/app/stages/funding.mjs:90-104; packages/adapters/src/app/compose.mjs:185-198; packages/adapters/src/app/stages/purchase.mjs:14-24; packages/adapters/src/app/environment.mjs:371-395; packages/adapters/src/app/stages/distribution.mjs:208-217; packages/adapters/src/app/stages/payout.mjs:168-173"
+      },
+      {
+        "id": "L3-M20",
+        "severity": "HIGH",
+        "tag": "CONFLICT",
+        "verdict": "CONFIRMED",
+        "title": "PR #5 introduces a character-code obfuscation that evades the clean-room governance scanner rather than complying with it",
+        "where": "packages/adapters/src/app/accounting-projection.mjs:25,74-79; scripts/check-cleanroom.mjs:129-155; docs/modules/clean-room-guard.md"
+      }
+    ]
+  }
+]

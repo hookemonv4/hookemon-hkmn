@@ -1,0 +1,290 @@
+{
+  "chain": {
+    "caip2": "eip155:4663",
+    "chainId": "4663",
+    "entrypoint": "launchAndStampV1",
+    "graphFactory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "router": "0x34965F2A2ee9254522232C32F02056E92BE0C98a"
+  },
+  "graph": {
+    "compiler": {
+      "buildInfo": {
+        "localBuildInfoCount": 1,
+        "reason": "Missing: address-bound constructor values and provider route fields. Resolve: materialize the provider graph after preflight and retain a fresh launch build. Verified alternative: this single pinned-profile build binds template bytecode and source content while all signable graph fields remain unset.",
+        "sourceContentSha256": "sha256:608049e03747463d9f02d1bfed2051cea5bbba1dc3742f31d6a918b0634ecabc",
+        "sourceCount": 31,
+        "status": "OPEN_FACT"
+      },
+      "solc": "0.8.26+commit.8a97fa7a",
+      "solcLongVersion": "0.8.26+commit.8a97fa7a",
+      "standardJson": {
+        "evmVersion": "cancun",
+        "metadata": {
+          "appendCBOR": false,
+          "bytecodeHash": "none",
+          "useLiteralContent": false
+        },
+        "optimizer": {
+          "enabled": true,
+          "runs": 1000
+        },
+        "viaIR": false
+      }
+    },
+    "pool": {
+      "currency0": null,
+      "currency1": null,
+      "fee": 0,
+      "poolId": null,
+      "poolKey": null,
+      "tickSpacing": 60
+    },
+    "postDeployAssertions": [
+      "No graph transaction is signable until the provider supplies the encoded token-allocate, custody-bind-hook and hook-initialize-graph-launch calls in that order.",
+      "The three predicted addresses must have the exact materialized runtime hashes before the seed transaction is signed.",
+      "The hook address must satisfy permission mask 0x20cc.",
+      "The resolved PoolKey must use fee 0, spacing 60, the resolved currency ordering and the resolved hook.",
+      "The token balance and custody position must match the reconciled token allocation before the launch is considered complete.",
+      "The Permit2 allowance must be exact, live at signing time and cleared by the seed path."
+    ],
+    "requiredGraphCalls": [
+      {
+        "argumentBindings": [
+          "resolved HookemonHook address"
+        ],
+        "callId": "token-allocate",
+        "calldata": null,
+        "caller": "graph factory",
+        "function": "allocate(address)",
+        "reason": "The graph factory allocates the fixed supply after all target addresses are resolved.",
+        "selector": "0xffd7d983",
+        "targetId": "token"
+      },
+      {
+        "argumentBindings": [
+          "resolved HookemonHook address"
+        ],
+        "callId": "custody-bind-hook",
+        "calldata": null,
+        "caller": "graph factory",
+        "function": "configureBindingHook(address)",
+        "reason": "The custody binds the resolved hook before the launch graph is initialized.",
+        "selector": "0xc81cbd43",
+        "targetId": "custody"
+      },
+      {
+        "argumentBindings": [
+          "resolved PermanentPositionCustody address",
+          "selected address-order sqrtPriceX96 candidate"
+        ],
+        "callId": "hook-initialize-graph-launch",
+        "calldata": null,
+        "caller": "graph factory as graph initializer",
+        "function": "initializeGraphLaunch(address,uint160)",
+        "reason": "The graph initializer binds custody and initializes the canonical pool in one source-authorized call.",
+        "selector": "0x726bb4ae",
+        "targetId": "hook"
+      }
+    ],
+    "targetCount": 3,
+    "targets": [
+      {
+        "address": null,
+        "applicantSalt": null,
+        "artifactSha256": "sha256:8a134aa16b09ca267055c976d05c5760ccc865c35ab608ceed20248a0e54ac68",
+        "componentKind": "token",
+        "contractName": "HKMNToken",
+        "creationBytecodeHash": "0xbe3146f7eb5c0a9a287bb927f197c518611fed9e371f5262552856d6b3e52e58",
+        "effectiveSalt": null,
+        "libraries": [],
+        "runtimeCodeHash": null,
+        "runtimeTemplateCodeHash": "0xc79e26bd2c8c26952c04f1d3749db091f009febd7507b67232b3838bb148f429",
+        "sourcePath": "packages/contracts/src/launch/HKMNToken.sol",
+        "targetId": "token",
+        "targetIndex": 0
+      },
+      {
+        "address": null,
+        "applicantSalt": null,
+        "artifactSha256": "sha256:08043ea6d688242703d972040bb476b4d5da3ef4a5e9c04db1e0636a1ff86ae5",
+        "componentKind": "other",
+        "contractName": "PermanentPositionCustody",
+        "creationBytecodeHash": "0x778625cf6f5b602c891c7d605941d5e3cfc4662624a9407d67e2873cd4d99dd5",
+        "effectiveSalt": null,
+        "libraries": [],
+        "runtimeCodeHash": null,
+        "runtimeTemplateCodeHash": "0x06f47cecc7026b4d9c5d393c39f8883c7e87c3fdacd30cf6f496ee41c9d4ca0c",
+        "sourcePath": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+        "targetId": "custody",
+        "targetIndex": 1
+      },
+      {
+        "address": null,
+        "applicantSalt": null,
+        "artifactSha256": "sha256:389f63c267cbb76cd703101fd22d00f1221656cd7ea3adcb082d2719dd41aa66",
+        "componentKind": "hook",
+        "contractName": "HookemonHook",
+        "creationBytecodeHash": "0x39c3aeecae31c42f7ad707dae7b18ea976687d33f715befbe9941b853e0af8c2",
+        "effectiveSalt": null,
+        "libraries": [],
+        "runtimeCodeHash": null,
+        "runtimeTemplateCodeHash": "0x95302da944386ccd8b7fb1b898d128098cce7aef178b318998a7a14c1897a36c",
+        "sourcePath": "packages/contracts/src/HookemonHook.sol",
+        "targetId": "hook",
+        "targetIndex": 2
+      }
+    ]
+  },
+  "inputDigests": {
+    "addressManifestSha256": "sha256:60b548091b663ee11266a89f53cdbc1613e10e4f2366bbb64ba214043778005b",
+    "launchInputsSha256": "sha256:b4677fa0a58edb717fb491634fd04f057da49a60d6fdfb47fd92adc3a4b5e809"
+  },
+  "metadata": {
+    "banner": {
+      "expectedFile": "hookemon-banner.jpeg",
+      "status": "OPEN_FACT"
+    },
+    "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
+    "icon": {
+      "expectedFile": "hookemon-mark.png",
+      "status": "OPEN_FACT"
+    },
+    "name": "Hookemon",
+    "symbol": "HKMN",
+    "website": "https://hookemon.com",
+    "x": "https://x.com/hookemon4"
+  },
+  "openFacts": [
+    "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
+    "Missing: the CREATE2 HKMN and hook addresses. Resolve: derive them after the provider route and salts are fixed, then select the lower-address currency order and price candidate. Verified alternative: retain both computed orderings and leave PoolKey, PoolId and selection unset.",
+    "Missing: owner-selected seed deadline, Permit2 expiration, wallet nonce and gas parameters. Resolve: collect them from Rabby after final preflight and record the signed values. Verified alternative: retain the 900-second deadline ceiling and exact-allowance rule without a transaction payload.",
+    "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only.",
+    "Missing: provider route fields, applicant salts and effective salts. Resolve: bind the provider route record and run deterministic address derivation. Verified alternative: keep addresses and graph digest unset while retaining only template hash evidence.",
+    "Missing: address-bound constructor arguments and encoded graph calls. Resolve: derive final target addresses, bind authority values and encode the required graph-call sequence. Verified alternative: retain null initializer calldata and prohibit signing.",
+    "Missing: the minted position token ID. Resolve: read the PositionManager mint result after the owner seed transaction and bind it through PermanentPositionCustody.bindMintedPosition. Verified alternative: deploy custody with constructor tokenId 0 and do not claim a bound position before seed.",
+    "Missing: final token and hook addresses. Resolve: run CREATE2 derivation after route fields are frozen and calculate the canonical PoolKey and PoolId. Verified alternative: retain the two address-order price candidates and leave pool identifiers unset."
+  ],
+  "schemaVersion": "hookemon.phase3.graph-draft.v1",
+  "seed": {
+    "deadlinePolicy": {
+      "actualDeadline": null,
+      "kind": "relative",
+      "maximumSecondsAfterWalletConfirmation": 900,
+      "reason": "The contract only requires a future deadline; the signed value must be created after the final preflight response."
+    },
+    "permit2Allowance": {
+      "amountRule": "Exact selected USDG amount0Max or amount1Max; the hook sets and clears its downstream approval during the seed call.",
+      "expiration": null,
+      "owner": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "spender": "resolved HookemonHook address",
+      "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+    },
+    "priceCandidates": {
+      "hkmnCurrency0": {
+        "amount0Max": "1000000000000000000000000000",
+        "amount1Max": "240000000",
+        "consumedAmount0": "1000000000000000000000000000",
+        "consumedAmount1": "240000000",
+        "consumedHkmn": "1000000000000000000000000000",
+        "liquidity": "489897948572597439",
+        "sqrtLowerX96": "4306310044",
+        "sqrtPriceX96": "38813714284914462669",
+        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
+        "swapFeeQuadrants": {
+          "oneForZeroExactInput": {
+            "basis": "gross-input",
+            "collectionPath": "before-swap-return-delta",
+            "currency": "currency1"
+          },
+          "oneForZeroExactOutput": {
+            "basis": "gross-input",
+            "collectionPath": "after-swap-return-delta",
+            "currency": "currency1"
+          },
+          "zeroForOneExactInput": {
+            "basis": "gross-output",
+            "collectionPath": "after-swap-return-delta",
+            "currency": "currency1"
+          },
+          "zeroForOneExactOutput": {
+            "basis": "gross-output",
+            "collectionPath": "before-swap-return-delta",
+            "currency": "currency1"
+          }
+        }
+      },
+      "selection": {
+        "poolId": null,
+        "poolKey": null,
+        "rule": "Compare the resolved HKMN CREATE2 address with the fixed USDG address. The lower address is currency0.",
+        "selectedOrdering": null,
+        "selectedSqrtPriceX96": null,
+        "status": "OPEN_FACT"
+      },
+      "usdgCurrency0": {
+        "amount0Max": "240000000",
+        "amount1Max": "1000000000000000000000000000",
+        "consumedAmount0": "240000000",
+        "consumedAmount1": "1000000000000000000000000000",
+        "consumedHkmn": "1000000000000000000000000000",
+        "liquidity": "489897948556635619",
+        "sqrtLowerX96": "4306310044",
+        "sqrtPriceX96": "161723809515207654588927258648643645224",
+        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
+        "swapFeeQuadrants": {
+          "oneForZeroExactInput": {
+            "basis": "gross-output",
+            "collectionPath": "after-swap-return-delta",
+            "currency": "currency0"
+          },
+          "oneForZeroExactOutput": {
+            "basis": "gross-output",
+            "collectionPath": "before-swap-return-delta",
+            "currency": "currency0"
+          },
+          "zeroForOneExactInput": {
+            "basis": "gross-input",
+            "collectionPath": "before-swap-return-delta",
+            "currency": "currency0"
+          },
+          "zeroForOneExactOutput": {
+            "basis": "gross-input",
+            "collectionPath": "after-swap-return-delta",
+            "currency": "currency0"
+          }
+        }
+      }
+    },
+    "refundAndDust": {
+      "intendedDestination": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "sourceBehavior": "Unused USDG is returned to the payer. A graph-mode seed requires zero HKMN residual after the position mint; any residual reverts the complete seed, including funding, mint, approvals, and custody binding."
+    }
+  },
+  "status": "ADDRESS_DERIVATION_PENDING",
+  "unverified": [
+    {
+      "blocking": true,
+      "code": "UNVERIFIED_LAUNCH_INTENT_PREIMAGE",
+      "path": "/launchIntentHash",
+      "reason": "Missing provider-supplied route namespace, route nonce, topology hash, target-id hashes, and serialized graph call data needed to derive the launchIntentHash preimage."
+    },
+    {
+      "blocking": false,
+      "code": "PROVIDER_API_KEY_PENDING",
+      "path": "/provider/apiKey",
+      "reason": "Provider preflight requires an authorized API key in the execution environment; the key is never persisted in this package."
+    },
+    {
+      "blocking": false,
+      "code": "OWNER_WALLET_FUNDING_PENDING",
+      "path": "/funding",
+      "reason": "The owner must fund the launch wallet and bind the final nonce, gas parameters and deadline after provider preflight."
+    },
+    {
+      "blocking": true,
+      "code": "BUILDER_IDENTITY_PENDING",
+      "path": "/builder",
+      "reason": "Missing: the builder public repository and contact. Resolve: bind the owner-provided public repository identity before preflight. Verified alternative: retain anonymous builder fields and block a provider-ready package."
+    }
+  ]
+}

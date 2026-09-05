@@ -1,0 +1,28 @@
+{
+  "id": "r-00432",
+  "at": "2026-09-03T08:27:02.317Z",
+  "type": "gate",
+  "phase": "init",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 4,
+    "problems": [
+      "I1: evidence r-00362 is STALE",
+      "I2: evidence r-00430 owner approval invalid: owner approval subject hash for gates/init.json does not match current content",
+      "I3: evidence r-00363 is STALE",
+      "I4: evidence r-00364 is STALE",
+      "I5: evidence r-00365 is STALE",
+      "I6: evidence r-00366: init/I6 evidence requires input docs/modules/adapters.md"
+    ]
+  },
+  "inputHashes": {
+    "gates/init.json": "ab227534842f4c462c8024661597d5d01c4e2024bf2f46a309f797dede806373",
+    "gates/runs/init.json": "853c4df919423630499da42585234aa4856fec4a2e0c1a35b8b9a06996d19080",
+    "receipts/r-00362.json": "fbf52dcdc36262fb161a3e45f5190f5b26446d977c456abd7d36a2ee7de1b304",
+    "receipts/r-00430.json": "8360089a87aa85417e6daa2d040e1e2f65a77a6a9c3c31262719205797190cc7",
+    "receipts/r-00363.json": "d2e9ea8aff53eeb8470fcf0fb319e3b6c73803f948bdae369e766d54711f3edb",
+    "receipts/r-00364.json": "25aa51f386cb0917f02be5ca536e5390328a508118a8d4076db6f658e18ec469",
+    "receipts/r-00365.json": "18cbbbbd9ad6eb95b9b2184e5a0e67b2e819bc97de5c250f8bda0b58e413f983",
+    "receipts/r-00366.json": "f67a1b818a7e3363bdf5e58ec9d36cf782b21fd11859271d8c39195892806970"
+  }
+}

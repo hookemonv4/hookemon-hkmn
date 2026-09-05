@@ -1,0 +1,23 @@
+{
+  "id": "r-00400",
+  "at": "2026-09-01T16:46:52.041Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": null,
+  "data": {
+    "taskId": "P1-001",
+    "commitSha": "324a8d84da99fee05afb47a8d3ade0dfca9ef389",
+    "taskFingerprint": "3a17d55d8e4c96702f4e69d82e4fe75833058c45dea895b5414ad4f93582048f",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "architecture/interfaces.json": "ec2532bb4a1399fb6dbe22e11b471c6124607ed2008a77eb7410fdbb707eb4ab",
+    "feasibility/interface-freeze.json": "2c58c83f18d3aa8c1a39e0f03c6f9a7d9e20e8a84793b259306c96158370c820",
+    "bindings/robinhood-chain.json": "0e06904b104ca89b4ec18b03b8a07bf1d9e1ef4077d98ccbe36fa85de01d297f",
+    "release/phase1/local-candidate.json": "50988e9a272cbbe6ea0a0608f8404d63cddb55e1d168b1b3bb54041b1c1c0687",
+    "release/phase1/local-reproducibility.json": "5b4548a3e8b548cb2c8b15782cfca1b793b9c56ead0be9c7bda6fb8e9912a897",
+    "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol": "591260198032f53e46b23514040fbc8f4514114340981ff91e047b079fd2cbb9",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

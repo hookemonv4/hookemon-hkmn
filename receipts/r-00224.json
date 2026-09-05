@@ -1,0 +1,28 @@
+{
+  "id": "r-00224",
+  "at": "2026-08-31T17:01:20.465Z",
+  "type": "gate",
+  "phase": "architecture",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 3,
+    "problems": [
+      "A1: evidence r-00153 is STALE",
+      "A2: evidence r-00154 is STALE",
+      "A3: evidence r-00133 is STALE",
+      "A4: evidence r-00134 is STALE",
+      "A5: evidence r-00135 is STALE",
+      "A6: evidence r-00155 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/architecture.json": "f208f92bab9c252dc847e282e0fb12d4c7b7e2149aa3082db0b57381e2e3241e",
+    "gates/runs/architecture.json": "0a113c31ef56b96c86b323d0b9aeda0862492c8a211c7129be260c88883ed1ba",
+    "receipts/r-00153.json": "69fe1df000ea391461fe404d7e8b439ca55389375af44ebc54cda7ec8ccc018f",
+    "receipts/r-00154.json": "7be868cdfd745a60a88298dcd13bde5276e9e2f50bee903ba94ad2bf06ae8a82",
+    "receipts/r-00133.json": "06aa55b34947f880ff6425eb3cce79a3c28b497742aecf8a1d623bbc2ab8ee83",
+    "receipts/r-00134.json": "613ab1cb061ac95219ee511b69b971f93f1023686189cb78fa595c458b1961ed",
+    "receipts/r-00135.json": "bea7b52868a5c64618cd4f8acb38b83d22391f477e79fba235068e1f746a8159",
+    "receipts/r-00155.json": "49f5714cd4fec406c146e870f6bd1f8b14a5c0506471694c89bd35a9c9e08490"
+  }
+}

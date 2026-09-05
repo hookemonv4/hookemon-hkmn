@@ -1,0 +1,24 @@
+{
+  "items": {
+    "R1": {
+      "status": "RUN",
+      "receipt": "r-00452"
+    },
+    "R2": {
+      "status": "RUN",
+      "receipt": "r-00453"
+    },
+    "R5": {
+      "status": "RUN",
+      "receipt": "r-00456"
+    },
+    "R3": {
+      "status": "RUN",
+      "receipt": "r-00454"
+    },
+    "R4": {
+      "status": "RUN",
+      "receipt": "r-00455"
+    }
+  }
+}

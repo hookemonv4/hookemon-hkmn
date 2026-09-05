@@ -1,0 +1,57 @@
+{
+  "id": "WP-21",
+  "title": "Requirements revision 58 + ADR-0021 + owner-approval drafts + delivery-boundary open",
+  "goal": "Author the formal spec/process artifacts that authorize everything else in this plan: new REQ ids, ADR-0021, unsigned owner-approval drafts, and the delivery-boundary/CI changes to open Phase 2.",
+  "deps": [
+    "WP-02",
+    "WP-03",
+    "WP-04"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "specs/requirements.json",
+    "decisions/ADR-0021-autonomous-cycle-authority.md",
+    "decisions/owner-approvals/revision-58-baseline.json",
+    "decisions/owner-approvals/revision-58-standing-authority.json",
+    "decisions/owner-approvals/revision-58-hookdata-relaxation.json",
+    "decisions/owner-approvals/revision-58-distribution-signer-custody.json",
+    "product/delivery-boundary.json",
+    "scripts/lib/ledger.mjs",
+    "architecture/capability-map.json",
+    "architecture/capability-map.md",
+    "architecture/interfaces.json",
+    "docs/modules/index.json",
+    "product/REQUIREMENTS_REVISION_58_PROPOSAL.md",
+    "product/PRD.md",
+    "product/OWNER_DECISIONS.md",
+    "decisions/task-deferrals/P1-011.json",
+    "tasks/P2-013.md",
+    "tasks/context-packs.json",
+    "gates/init.json"
+  ],
+  "readSet": [
+    "DESIGN.md sections 3 and 8",
+    "AGENTS.md",
+    "ADR-0018",
+    "ADR-0019"
+  ],
+  "steps": [
+    "Write REQ-fee-accounting-6/7/8, REQ-canonical-market-6, REQ-process-budget-6, REQ-payout-commitment-7/8, REQ-cycle-control-2, REQ-distribution-1/2, REQ-dashboard-2 into specs/requirements.json with exact acceptance text matching the shipped contract behavior from WP-02..05",
+    "Write ADR-0021 stating the five-identity custody model, the two-layer kill switch, the explicit non-adoption of a new on-chain pause role (citing TB-07 by name), and that autonomy changes who signs, not what is checked",
+    "Draft (unsigned) the four owner-approval JSON files per schema v4-owner-approval-v2",
+    "Flip product/delivery-boundary.json's phases.2 from CLOSED to OPEN, or mint fresh Phase-2-scoped task ids that do not need scripts/lib/ledger.mjs's hardcoded P1-011 deferral relaxed",
+    "Reserve P2-001..012 as codex/phase2-revision-57's canonical numbering; new task cards start at P2-013"
+  ],
+  "tests": [
+    "node --test scripts/tests/reqs.test.mjs",
+    "node --test scripts/tests/delivery-boundary.test.mjs"
+  ],
+  "acceptance": [
+    "Revision 58 traces cleanly against every contract change actually shipped in WP-02..05",
+    "Delivery-boundary phase 2 opens without breaking phase 1's closed invariants",
+    "ADR-0021 explicitly cites TB-07 when declining the guardian-role alternative"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "Needs the final REQ text from WP-02/03/04 settled first; do not draft owner-approval spend-cap numbers without decision D4's answer. COORDINATOR NOTE after WP-01: the merged tree carries specs/requirements.json revision 57, which breaks the sha256 binding of decisions/task-deferrals/P1-011.json and its owner approval (node scripts/check-delivery-boundary.mjs exits 1: 'deferred task P1-011 authority invalid' and 'unregistered normative file tasks/P1-011.md'). Resolve it here as part of revision 58: draft the re-bound deferral descriptor and an UNSIGNED owner-approval draft (clearly marked DRAFT_UNSIGNED in rationale, never with the approvalToken 'OWNER APPROVED'), register tasks/P1-011.md, and make scripts/tests/delivery-boundary.test.mjs and check-delivery-boundary.mjs pass while documenting exactly which artifacts still need the owner's signature. Do not fabricate an owner approval token. COORDINATOR NOTE (A6 coupling): gate A6 (scripts/lib/gates.mjs validateModuleIndex) requires docs/modules/index.json, architecture/capability-map.json (modules array and topologicalOrder, identical order) and specs/requirements.json to carry the same productPhase/architectureRevision/requirementsRevision and the same module set; bumping requirements to revision 58 therefore requires bumping index.json and capability-map.json (and capability-map.md projection, interfaces.json if tests bind it) in the same package. Register every module card that exists in docs/modules/ at your start (including cards added by group-2 packages such as durable-store, snapshot-indexer, adapters, phase2-readiness) with a real capability entry (capability text, deploymentPlacement, dependsOn, requirementIds bound to revision-58 REQ ids) and a correct topological position; leave gates.test.mjs and final-review.test.mjs green. Write product/REQUIREMENTS_REVISION_58_PROPOSAL.md (diff plus rationale per R2) and record the pending owner approvals in product/OWNER_DECISIONS.md as PROPOSED, never as approved. COORDINATOR NOTE (I6 coupling): gates/init.json item I6 lists every docs/modules/*.md card in its requiredInputs/allowedInputs (the evidence policy walks the directory), so every new card must also be added there in sorted position; register all currently unregistered cards (adapters.md, holder-snapshot-indexer.md is already listed, plus any card added by group-3 packages) and keep scripts/tests/final-review.test.mjs and gates.test.mjs green. RESUME NOTE: a previous agent started this package and was stopped after a few minutes (full disk); a few uncommitted edits may exist in the worktree (git status). Inspect them, keep what is correct, and complete the package; commit exactly once. Disk space is scarce: no npm installs, delete build artifacts, keep temp files small, stop and report on ENOSPC."
+}

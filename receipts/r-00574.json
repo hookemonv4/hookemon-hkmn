@@ -1,0 +1,38 @@
+{
+  "id": "r-00574",
+  "at": "2026-09-04T03:05:25.207Z",
+  "type": "gate",
+  "phase": "feasibility",
+  "result": "OVERRIDDEN",
+  "data": {
+    "gateVersion": 4,
+    "overriddenResult": "FAILED",
+    "problems": [
+      "F3: evidence r-00180: feasibility/F3 cannot pass: integration spikes explicitly block F3"
+    ],
+    "approvalInput": "decisions/owner-approvals/closeout-revision-58-feasibility-override-approved.json",
+    "rationale": "Owner overrides the feasibility gate for local revision-58 closure while F3 remains blocked: Programmable reports readiness.status unavailable for Robinhood Chain 4663 (checked 2026-09-03), so no external-service spike against a launchable chain is possible yet; F1, F2, F4 and F5 are recorded on the current tree. This override does not claim F3 passed and authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication.",
+    "rationalizationId": null,
+    "note": "A rationalization ID explains a block; it never authorizes. Only the owner does."
+  },
+  "inputHashes": {
+    "architecture/interfaces.json": "fa065aa91fa24c5736fc34ac515b1d5e572196f2a376d4c7fcf0cb6ff9a90405",
+    "decisions/owner-approvals/closeout-revision-58-feasibility-f2-approved.json": "56993e131aa72f69246a00b9a6506f5e3f29624c34fd975449074d738719d7f0",
+    "feasibility/cycle-control-model-results.json": "f47c21aba30424626703439e7fb11967a603b628e603174cf88f5d15163e97e9",
+    "feasibility/cycle-control-model.mjs": "e2420ac880003299b13595e1eaabda05a81fbc797083ddf7813c565df05df607",
+    "feasibility/cycle-control-survivability-bounds.json": "59bcd54c0873bb941ccd9e941419c0632a55fb28bf21320464e23cb87cc3562f",
+    "feasibility/integration-spikes.json": "14464a1d26bf88d0a7c74682f9fe51744b9a882c055655686d5597de971757b6",
+    "feasibility/interface-freeze.json": "931440c30868a964e6fe1fb31b778c90cd52633ce57774471be7f3f84fcfe867",
+    "feasibility/risk-lanes.json": "209d753e14f4a4de1532216e0011ef9bb608c9f2302b2f7a4f4628a70235a072",
+    "gates/feasibility.json": "b5e15577156d7ab88131bc1f948f7bce5fbad67cc77897b3508dd24ff5813d75",
+    "gates/runs/feasibility.json": "690a943b014c48654e31f67af9359e2d3bf11d57552fe8304520133a45dc9ee3",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "receipts/r-00180.json": "dfe555ad3dca56dfb00024430fb8b2e951eaaaf99676643d65d1b259d62b0a8f",
+    "receipts/r-00449.json": "c163e1db604f7b08a399574fcd866366cefc49e33c0bffe86bed714acf9bec0a",
+    "receipts/r-00450.json": "e1117e6f82f626eb380ac52839eb6cbe6a681cf6b5b0351458dea28f90824a6b",
+    "receipts/r-00451.json": "f8a188b31af4c0fe514bad9a042aee9001a33fd5d8c320276bf49475c6b53f0e",
+    "receipts/r-00551.json": "4af4b973b0b3019b15a625877d9b71c46b508c0b21c9adedb3fd3e7ed2fc6439",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380",
+    "decisions/owner-approvals/closeout-revision-58-feasibility-override-approved.json": "592cbb9ae761e42ad4b6129edf44409ed1ed2a91fe9872af3772b535c255cbc8"
+  }
+}

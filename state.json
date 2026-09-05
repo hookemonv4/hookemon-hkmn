@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-09-04T04:10:01.961Z",
+  "currentPhase": "init",
+  "phases": [
+    {
+      "phase": "init",
+      "result": "STALE",
+      "receipt": "r-00624"
+    },
+    {
+      "phase": "spec",
+      "result": "STALE",
+      "receipt": "r-00625"
+    },
+    {
+      "phase": "architecture",
+      "result": "STALE",
+      "receipt": "r-00626"
+    },
+    {
+      "phase": "feasibility",
+      "result": "STALE",
+      "receipt": "r-00637"
+    },
+    {
+      "phase": "redteam",
+      "result": "STALE",
+      "receipt": "r-00638"
+    },
+    {
+      "phase": "tasks",
+      "result": "STALE",
+      "receipt": "r-00639"
+    },
+    {
+      "phase": "build",
+      "result": "STALE",
+      "receipt": "r-00640"
+    },
+    {
+      "phase": "ship",
+      "result": "STALE",
+      "receipt": "r-00642"
+    }
+  ],
+  "overrides": []
+}

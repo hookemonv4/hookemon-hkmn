@@ -1,0 +1,409 @@
+{
+  "schema": "hookemon.phase1-local-candidate.v2",
+  "authority": "LOCAL_ONLY_NOT_RELEASE_APPROVAL",
+  "phase": 1,
+  "phaseTwo": "CLOSED_REQUIRES_FRESH_SPEC_AND_OWNER_APPROVAL",
+  "requirementsRevision": 56,
+  "architectureRevision": 4,
+  "custodyRoles": {
+    "operationsTrigger": "OPERATIONS_TRIGGER_ONLY_NO_USDG_CUSTODY",
+    "cycleVaultAccount": "LOCAL_CREATE2_VAULT_2f575011ffff9291f528a35e5ce30a4a58795063",
+    "policyAccount": "SOLANA_POLICY_ACCOUNT_INTEGRATION_PENDING",
+    "returnAccount": "LOCAL_CREATE2_VAULT_2f575011ffff9291f528a35e5ce30a4a58795063"
+  },
+  "deterministicLocalVault": {
+    "authority": "EPHEMERAL_FOUNDRY_TEST_PLAN_ONLY",
+    "deployer": "0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496",
+    "salt": "0x6ad3d2257c58305f7554f08e88851b3a69b033893428d4607f2ae4ae2dc7f9cc",
+    "initcodeKeccak256": "0x98c145ec43a400e7042794ba01b72fca4fe7f6a2fae4b4d5508999385670a304",
+    "expectedVault": "0x2F575011FffF9291F528A35e5cE30a4A58795063",
+    "concreteRuntimeCodeKeccak256": "0x18c714f808df53a33124db4c6d7a94939ccb6baaa946764b87dd8ae47892f55f",
+    "usdg": "0xF62849F9A0B5Bf2913b396098F7c7019b51A820a",
+    "authorizer": "0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9",
+    "routeExecutor": "0xc7183455a4C133Ae270771860664b6B7ec320bB1",
+    "bindingManifestDigest": "0xf4a11bee9a43d871846e259bde938697a6ba24520f84d55ca1d7ff5c833aaa1b",
+    "deploymentAuthority": "0x7FA9385bE102ac3EAc297483Dd6233D62b3e1496"
+  },
+  "externalStatus": {
+    "programmablePreviousChainDocs": "UNVERIFIED_FOR_ROBINHOOD_API_SHAPE_ONLY",
+    "programmableRobinhoodLaunch": "INTEGRATION_PENDING",
+    "robinhoodPegCycleRoute": "INTEGRATION_PENDING",
+    "solanaPolicyCustody": "INTEGRATION_PENDING",
+    "mainnetCanary": "SEPARATE_EXACT_ACTION_AUTHORIZATION_REQUIRED",
+    "productionReady": false
+  },
+  "files": [
+    {
+      "path": "architecture/execution-topology.md",
+      "sha256": "7b7a17db7f6ea183f496ef70444bbab4a3a344f67e3451ce36b7f8f8e3e1f248"
+    },
+    {
+      "path": "architecture/interfaces.json",
+      "sha256": "3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10"
+    },
+    {
+      "path": "architecture/provisional-interfaces.json",
+      "sha256": "e6323d8c6c256e33c7e9c4c32cc81524b63c0384be8651d72bdd5faedcbe02ca"
+    },
+    {
+      "path": "architecture/risk-classes.json",
+      "sha256": "c9da8275c27aae2bbeb1dbf6511a6f40032722b8e5c535eeb9d5cc3f03c6c494"
+    },
+    {
+      "path": "decisions/ADR-0019-immutable-peg-cycle-custody.md",
+      "sha256": "18fc4d09f1923eb18810a50832dcd08ec09d6f9c58673a906ba8ff337f83b593"
+    },
+    {
+      "path": "docs/modules/cycle-runner.md",
+      "sha256": "8cc42696004559ad324e7cb4e4b520e9a185fade0c20d881e2a2616b165b6e01"
+    },
+    {
+      "path": "docs/modules/index.json",
+      "sha256": "9943a6bdcce3104d2ca2bcbb96481afcc3ece32466ed68b255aef4aca4aec7ff"
+    },
+    {
+      "path": "docs/modules/payout-commitment.md",
+      "sha256": "34eaafa7f9cec8967d1dc26a6cb6b3f1b341b537a526174e426ceee55f35826e"
+    },
+    {
+      "path": "docs/modules/peg-cycle-vault.md",
+      "sha256": "6f633d69ae69922b0bffc75502edd45458db08e0363362ec3c0a347ccd888927"
+    },
+    {
+      "path": "docs/modules/process-budget.md",
+      "sha256": "ca7ef4697de630a0080548a102f5aa6e13f529192bc6bf7457b1a0cc1c4b3fda"
+    },
+    {
+      "path": "docs/modules/release-evidence.md",
+      "sha256": "f089d2a4b040c772c6bccc2bb8cee997c150b6575a03157b2942f73efabee11b"
+    },
+    {
+      "path": "feasibility/integration-spikes.json",
+      "sha256": "14464a1d26bf88d0a7c74682f9fe51744b9a882c055655686d5597de971757b6"
+    },
+    {
+      "path": "feasibility/interface-freeze.json",
+      "sha256": "170a7a22e7540ca35dc9397f4ed0bafd5b74c0af7b325ca330ba294c79023c81"
+    },
+    {
+      "path": "feasibility/model-results.json",
+      "sha256": "a6105c4795ecd7cefe986482da2888ab62b765f2cf45740b84284633ece93325"
+    },
+    {
+      "path": "feasibility/model.mjs",
+      "sha256": "28301f8312488a0c9cec157962f35e517417048d71fb01d1bf81d9a4b09d0a3e"
+    },
+    {
+      "path": "feasibility/programmable-ethereum-api-shape.json",
+      "sha256": "a888007a9ff5555b309c2cec782ee33a6ec9f0831d9a69a93a000f38850cf9c3"
+    },
+    {
+      "path": "feasibility/refresh-interface-freeze.mjs",
+      "sha256": "a934856cec36b67d2a3d98bb961639f5cdb6d1d3fe1f45cc834c27d6edc5761c"
+    },
+    {
+      "path": "feasibility/risk-lanes.json",
+      "sha256": "209d753e14f4a4de1532216e0011ef9bb608c9f2302b2f7a4f4628a70235a072"
+    },
+    {
+      "path": "feasibility/survivability-bounds.json",
+      "sha256": "d81da8da9a23b7a69e0d8a4ab1767b80660230b48c4d041b9f9609ede50cf9bb"
+    },
+    {
+      "path": "feasibility/verify-robinhood-binding.mjs",
+      "sha256": "578a7d5f3379e4ada7f8c0b80b0613bfbd1f673388ad328fe8d02d7f300c4fe9"
+    },
+    {
+      "path": "packages/contracts/foundry.toml",
+      "sha256": "2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258"
+    },
+    {
+      "path": "packages/contracts/script/release/PhaseOneReleasePlan.sol",
+      "sha256": "0d00199ba32a20d815a9907668077e40d435661a755b9855188e85199b401138"
+    },
+    {
+      "path": "packages/contracts/src/HookemonHook.sol",
+      "sha256": "7bb49163908f732e81834594ffd456a5f4dda30471f325eb2a7d2be31e0dd463"
+    },
+    {
+      "path": "packages/contracts/src/access/MoneyRoles.sol",
+      "sha256": "041efbfa3b26a7db221065dd8ab12373cc83b110601a9729c5762d18dc0bfdf0"
+    },
+    {
+      "path": "packages/contracts/src/accounting/FeeAccounting.sol",
+      "sha256": "dc1fbfa2151ec74887a6e7695c636d970bef034d5598f9f263d69549a6d6a86d"
+    },
+    {
+      "path": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "sha256": "e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18"
+    },
+    {
+      "path": "packages/contracts/src/launch/CustomLaunchStrategy.sol",
+      "sha256": "d9bed52b3a0a1b0be009a7a386ddd7f333a16861abb3b995d00db52d2db766ea"
+    },
+    {
+      "path": "packages/contracts/src/launch/HKMNToken.sol",
+      "sha256": "4266a5dab2984c027b5642f7720735f197e00f271d1e2553351a7e794c2455d7"
+    },
+    {
+      "path": "packages/contracts/src/launch/HookemonIssuance.sol",
+      "sha256": "25232ae1f730dd447547f11876603d3913e3a65df84a3793754653d0823ab2fb"
+    },
+    {
+      "path": "packages/contracts/src/market/CanonicalMarket.sol",
+      "sha256": "4be2cddc821c2b9acfc09e510b4faab8ac562fbe4d918275b1435921d079f4bf"
+    },
+    {
+      "path": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+      "sha256": "d4946c1410c119eb50c48d812a4e84874340eb13aaa097178dc29f282ddf980c"
+    },
+    {
+      "path": "packages/contracts/src/payout/PayoutCommitment.sol",
+      "sha256": "3081c43b69cc505743a27c15ada2a99938c6e5a02c053c654f6a0ccc19968f76"
+    },
+    {
+      "path": "packages/contracts/src/process/FundingAuthorizationValidation.sol",
+      "sha256": "e3ebb92a7cb8d342c99c8906e4c24dc74b4460a30c929b665a984d1af11d7e79"
+    },
+    {
+      "path": "packages/contracts/src/process/IPegCycleRouteExecutor.sol",
+      "sha256": "69126fa3c474a6603676977e3aed85c5a0e3c66186b61ac40fc1e25a38524991"
+    },
+    {
+      "path": "packages/contracts/src/process/IPegCycleVault.sol",
+      "sha256": "75492882b2183b7d9189a6f57a3d23b18106e0caed8d49274795a6d48f22d59f"
+    },
+    {
+      "path": "packages/contracts/src/process/PayoutDistributionSignatures.sol",
+      "sha256": "09a871f00e36b0004461cb3f0317ea45c8745e088fab9afa21cab7f4ef8de195"
+    },
+    {
+      "path": "packages/contracts/src/process/PegCycleEscrowFactory.sol",
+      "sha256": "4784a1fe4f7c91afc69e15dc6d1fe1b6019d57703226b6d52235bfa71781ecf3"
+    },
+    {
+      "path": "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+      "sha256": "39532552a02d6ee301110eab229920614557f08cafcd45ae11e54e61dad14d9e"
+    },
+    {
+      "path": "packages/contracts/src/process/PegCycleRouteExecutor.sol",
+      "sha256": "27bcc54ab10d532a200a7cf26145ec107cbb9c36ca01693e9ef00f7f6f8e88f9"
+    },
+    {
+      "path": "packages/contracts/src/process/PegCycleVault.sol",
+      "sha256": "b28ef834b3aac0133c2f76060d410981b714acaa7339bbf71ff30588d9a2af69"
+    },
+    {
+      "path": "packages/contracts/src/process/ProcessBudget.sol",
+      "sha256": "31fa271c59869d3c749773faaf3a9aa56c36fdc082b06550a6dfcfbf1e94ba11"
+    },
+    {
+      "path": "packages/contracts/src/settlement/HolderSettlement.sol",
+      "sha256": "7b037539d4f7cf65b895cd1f0db30f57e009538caf3fb65bdd18041785925899"
+    },
+    {
+      "path": "packages/contracts/test-js/payout/canonical-merkle-sum.test.mjs",
+      "sha256": "d78cd45cce0a2be46439e043c6fdb37ca86763254138194cc7cad1646e0f160d"
+    },
+    {
+      "path": "packages/contracts/test-vectors/payout/canonical-merkle-sum-v1.json",
+      "sha256": "0d95d43ac7012aa0b514c12dd48eadc44c06ca3e5f5018033eeee56e0873f675"
+    },
+    {
+      "path": "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol",
+      "sha256": "7ec2085c6bf0c06805d17b2f4bcf73b3e60c0cff673f83b4d638f9c4b6e3d07b"
+    },
+    {
+      "path": "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol",
+      "sha256": "4ec3bbb63560184d3b138706142c70f645d63abeabc7f3cb9d501e67c0753af0"
+    },
+    {
+      "path": "packages/contracts/test/payout/CanonicalMerkleSum.t.sol",
+      "sha256": "3f8a56110e7ae9d9d38eac8160b2fca0e6a1127186df53e4cfc6e4ce914affb5"
+    },
+    {
+      "path": "packages/contracts/test/payout/PayoutCommitment.t.sol",
+      "sha256": "db5e02d44a50b32b5625ddc9b47e328f6934371553abafd4e0c1f4f2367ece89"
+    },
+    {
+      "path": "packages/contracts/test/process/PegCycleVault.t.sol",
+      "sha256": "f29bb1b83c12f5ecb575e53aa36b7efccdc6df785583be48cc9570e44771ac14"
+    },
+    {
+      "path": "packages/contracts/test/process/ProcessBudget.t.sol",
+      "sha256": "4633f47c270f67ef980ca2b7d6519f4d25d7a741a9cdeff303598df61322fb45"
+    },
+    {
+      "path": "packages/contracts/test/settlement/HolderSettlement.t.sol",
+      "sha256": "1c6dd02bb396d3e08adb3e591708ac745cf0c0fe7f726da44eb3b769d631905e"
+    },
+    {
+      "path": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs",
+      "sha256": "13753130a5237aea4f09b8bb8c75ce433d2d34b59305051a3cdc1f6ae7782001"
+    },
+    {
+      "path": "packages/runner/src/cycle/authorization.mjs",
+      "sha256": "fb5f8157dc882d836572821f28af166ebf87c248d527636ae3c349deac905fe3"
+    },
+    {
+      "path": "packages/runner/src/cycle/bindings.mjs",
+      "sha256": "84c68b4afc09acaa935548a39584098af4b34af061b01c0cdc34ead5facf1315"
+    },
+    {
+      "path": "packages/runner/src/cycle/blockhash-validity.mjs",
+      "sha256": "0f572979e5589f7a86dbc3fe5f82e159d65ba4881c30853953470fa6e84bb2d4"
+    },
+    {
+      "path": "packages/runner/src/cycle/collector.mjs",
+      "sha256": "83c63b095b95eb5219a1b442cf78136de8f9a1e3f473bcc70e51b9cd9ebe3f8b"
+    },
+    {
+      "path": "packages/runner/src/cycle/cycle-runner.mjs",
+      "sha256": "1fef704ec8ea5cff3cd003049eb5dd24a2ae927c0e752772be2f1f599b02c9f0"
+    },
+    {
+      "path": "packages/runner/src/cycle/cycle-store.mjs",
+      "sha256": "c9053644594565c9f089455cf9bfee6439ba7c150f6dc5f9cea706666de28030"
+    },
+    {
+      "path": "packages/runner/src/cycle/decoder.mjs",
+      "sha256": "fe1a2f87f5a1ec64023467db4c1bea34848d38695e12e8e4dcda9e2d2632902a"
+    },
+    {
+      "path": "packages/runner/src/cycle/execution-accounting.mjs",
+      "sha256": "465000448b996350e9f3519cfa92149edd25018403f64c2757a853f90a1a37e6"
+    },
+    {
+      "path": "packages/runner/src/cycle/journal.mjs",
+      "sha256": "dc804e7779ddc02cc8f143562a171a41f57145635df970204aaea3f91f1d7d45"
+    },
+    {
+      "path": "packages/runner/src/cycle/preflight.mjs",
+      "sha256": "d22c5f2134f3f4b7fd68dcaf79963606c2c8d7c6b8f2d6a91eabca76b628661f"
+    },
+    {
+      "path": "packages/runner/src/cycle/receipt-registry.mjs",
+      "sha256": "0e507bd27b576a768f8f2bec90d64182664ae98952773da79d3340c1ed506d94"
+    },
+    {
+      "path": "packages/runner/src/cycle/reducer.mjs",
+      "sha256": "436bfd141d97d29497399e60db620ebd294b94111a6ca03f749bfe11591a5c92"
+    },
+    {
+      "path": "packages/runner/src/cycle/schemas.mjs",
+      "sha256": "7c0c4b5e4fc68d8d01b950ec3defac9cda6d2a7732304320e76a2b25b7c588ff"
+    },
+    {
+      "path": "packages/runner/src/cycle/verify-fixtures.mjs",
+      "sha256": "6c7a2b0277b5b12bc27412cae004af8c831e8b50c0af4527bbf5840c0cd0d7a2"
+    },
+    {
+      "path": "packages/runner/src/distribution/manifest.mjs",
+      "sha256": "23d671473cd0a3be54b98cc766a8b84a933a76a3862bb3fe4b017c0ef6fb3e60"
+    },
+    {
+      "path": "packages/runner/src/distribution/merkle-sum.mjs",
+      "sha256": "7ce4aa8cecb0af2008088d3a7ce70f746be5cf994044d1c082e6ea53ce958ac1"
+    },
+    {
+      "path": "packages/runner/src/distribution/reconcile.mjs",
+      "sha256": "e0e0af4e088fcb893e5d8367590c913034038e05f7652af27c2b037fdd36ded5"
+    },
+    {
+      "path": "packages/runner/test/cycle/fixture-crypto.mjs",
+      "sha256": "449c240758712b13de0dccb985adbd9e0abf5844c8298b7363770862c3b54abf"
+    },
+    {
+      "path": "packages/runner/test/cycle/fixture-cycle.mjs",
+      "sha256": "440ad12449ef77e6c3385d8308caac5b09aa842aa206d2ce8274017697906cb4"
+    },
+    {
+      "path": "packages/runner/test/cycle/security.test.mjs",
+      "sha256": "4c260ee7eb6ceea487b7035f3e152ed30175aefd9537c7f5a43cc88b8cb300a2"
+    },
+    {
+      "path": "packages/runner/test/distribution/holder-candidate.test.mjs",
+      "sha256": "7498d342621acdcce1fa1b4e0d81c889d8adcc3dc2bc3ad0ccb6f04df686e7e2"
+    },
+    {
+      "path": "packages/runner/test/distribution/manifest.test.mjs",
+      "sha256": "894006dbfd11f198ef7b98ce8a9ca085ff71099aaf739679666dd2935b2575bd"
+    },
+    {
+      "path": "packages/runner/test/distribution/reconcile.test.mjs",
+      "sha256": "4e728a6984ebe31049d416920c05e3bba6ae606c0f80f98310b4383145da2c25"
+    },
+    {
+      "path": "packages/runner/test/integration/phase-one-local-loop-adapter.mjs",
+      "sha256": "52129e76ee9420cd413df75cc0337f0bf70f06328207c88be8c54e33a5c05d5d"
+    },
+    {
+      "path": "product/OWNER_DECISIONS.md",
+      "sha256": "f5415c1cc849e62c92c39c53dd5764e07b6bf337f2633d2123dde0a5003ffeca"
+    },
+    {
+      "path": "product/PRD.md",
+      "sha256": "501b3f067241db00d475d1441be76abe2e77a356426720fedb47ebaed228f997"
+    },
+    {
+      "path": "product/REQUIREMENTS_REVISION_56_PROPOSAL.md",
+      "sha256": "9b195d92d057328b4f93292371f29da704a856989472971d3062d5705ff15496"
+    },
+    {
+      "path": "product/SOURCE_BOUNDARY.md",
+      "sha256": "38dd84c306d54d6f63318422661bd2cdab19b95829d49ca51b9c93c2b3352d7f"
+    },
+    {
+      "path": "product/dependency-pins.json",
+      "sha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7"
+    },
+    {
+      "path": "qa/reviews/phase1-local-risk-review.md",
+      "sha256": "0eb252c7447feefd9ac3781e4282c5c0df6265606abc7cf171b65e8b8170ce8f"
+    },
+    {
+      "path": "release/phase1/external-action-stop.json",
+      "sha256": "846bd51ee2364d2de9b9ab8d0def820260011f7f68ed7f3aa329460a0910412f"
+    },
+    {
+      "path": "release/phase1/local-evidence.json",
+      "sha256": "80e697ab5a83d45786f40cba2624a04535102fc188006a146edc49ccb3d63b08"
+    },
+    {
+      "path": "release/phase1/local-toolchain.json",
+      "sha256": "4281412219042eb0949a0ef142afb361776428b70c5f2782c243b17355e92086"
+    },
+    {
+      "path": "scripts/tests/phase-boundary.test.mjs",
+      "sha256": "f5b9c9b078d4fac16b03c2df3c3964e1f6388eaf4d49f3c0d6a60c9fe1b885ee"
+    },
+    {
+      "path": "scripts/tests/phase1-release.test.mjs",
+      "sha256": "5cf061638772313c0b301d0dac5769e9559fb8eb62283c6b19e2f691e74d4a66"
+    },
+    {
+      "path": "scripts/tests/phase1-reproducibility.test.mjs",
+      "sha256": "013c6c28beaa8b8dede2a46ed8bd5c1eaa84e61f480db4980230c627150c652a"
+    },
+    {
+      "path": "scripts/tests/reqs.test.mjs",
+      "sha256": "eb75576c28040672519e685bf06aeb79df02cbba49400fce0d6f49e670f22f52"
+    },
+    {
+      "path": "scripts/verify-phase1-release.mjs",
+      "sha256": "099175875165fa2405672cd14736caa31e2fd523535375322b4df70e96127624"
+    },
+    {
+      "path": "scripts/verify-phase1-reproducibility.mjs",
+      "sha256": "87d13ce71cbc86935acf9c8bca118f401896fc42f63f2363ae4695186ead6385"
+    },
+    {
+      "path": "specs/requirements.json",
+      "sha256": "927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
+    },
+    {
+      "path": "tasks/context-packs.json",
+      "sha256": "8742531d888af60a79903726ee4455bf1ddfa09e9d1484e8467900e339a19f4f"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "r-00348",
+  "at": "2026-09-01T05:44:23.314Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-003",
+    "commitSha": "9b9a70437432a9358234437476e11be28dedb90b",
+    "taskFingerprint": "a55b47009e9d0a0e6ab73d6fa40fea28e76ce56ca71ba45a3c5f2330c3ce12e7",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "packages/contracts/src/launch/HookemonIssuance.sol": "0abac972bce5ea3373519acab8cdf08f3b2f5d88d6cf706bf600867e2de1f627",
+    "packages/contracts/test/launch/HookemonIssuance.t.sol": "cdf1cb04aeb77b6b282d3a2b7d7b82dddea1665a73f8aedfbe01a8e83b4f555f",
+    "release/phase1/local-candidate.json": "12d2afd5c4760e1c7ac2bf2b2ca8b1cbbc747a14a220232a216c0be7a8b6e8cb",
+    "release/phase1/local-reproducibility.json": "0e38488fa52ef52d63eabd8cd74815e4add7d5a909e33086e0f19dbb595e9364",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

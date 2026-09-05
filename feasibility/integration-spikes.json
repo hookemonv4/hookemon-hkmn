@@ -1,0 +1,944 @@
+{
+  "schemaVersion": "hookemon.integration-spikes.v2",
+  "productPhase": 1,
+  "requirementsRevision": 56,
+  "architectureRevision": 4,
+  "observedAt": "2026-08-30T18:30:00Z",
+  "executionPolicy": "Only public read-only calls ran. No credential was read, no API mutation was requested, nothing was signed or broadcast, no asset or gas was spent, and nothing was published.",
+  "overallStatus": "BLOCKED_PRODUCTION_WITH_P1_001_LOCAL_AND_READ_ONLY_PROOF",
+  "gateDisposition": "Revision-56 locally projects immutable PegCycleVault custody with zero Operations process-principal and returned-proceeds exposure. The historical revision-54 P1-001 manifest still proves only the build binding, zero-LP-fee eight-quadrant callback and settlement path against the pinned v4-core PoolManager, and permanent non-project-controlled launch-position custody construction. DEPLOYED_ROBINHOOD_POOLMANAGER_CALLBACK_AND_SETTLEMENT_FORK, PROGRAMMABLE_OWNER_AND_CLAIM_DESTINATION_POLICY_RESOLUTION, EXACT_OUTPUT_USDG_Q_GROSS_NET_AND_FEE_CUSTODY_SEMANTICS, and the production provider, authorizer, typed route executor, bridge, Solana policy account, finality, and return-attribution bindings remain fail closed. F3 must not pass and F4 must not claim a production freeze. No waiver is recommended.",
+  "revision54Delta": {
+    "scope": "ADR-0017 permanent zero-LP-fee canonical market and the P1-001 provider-binding delta from requirements revision 53 / architecture revision 2",
+    "bindingManifest": "bindings/robinhood-chain.json",
+    "manifestDigest": "sha256:97280c263a0e238c447e73ae12d176ff4bcfb6653cb2ca84df26f575f47b7861",
+    "sourceProbeDigest": "sha256:c60c7171b3b46f01438b1299ecf36ed144419cae969c02f1d22aad287d91a8bb",
+    "runtimeProbeDigest": "sha256:d4edf5532b401fe43644a5aefff84d36bad8128fa93523144982f9aa6a763cd1",
+    "localProofStatus": "PASSED",
+    "productionStatus": "INTEGRATION_PENDING"
+  },
+  "askFirstClasses": [
+    "credential or secret access",
+    "external API mutation",
+    "key access or signature",
+    "broadcast or deployment",
+    "asset or native-gas spending",
+    "external artifact publication"
+  ],
+  "askFirstActionMatrix": [
+    {
+      "actionId": "AF-RELAY-QUOTE",
+      "operation": "POST https://api.relay.link/quote/v2 for either conversion direction, including an indicative quote",
+      "boundaries": [
+        "external API mutation",
+        "credential or secret access when x-api-key is used"
+      ],
+      "requiredOwnerAuthorization": "Bind the cycle, direction, endpoint, canonical request digest, exact attempt, origin user, destination recipient, refund and recovery addresses, assets, amount, trade type, slippage values, time to live, fee policy, and credential identifier before the request. A provider-issued quote is not authorization for any later step.",
+      "doesNotAuthorize": [
+        "transaction or order signature",
+        "permit submission",
+        "broadcast",
+        "principal or native-gas spending"
+      ]
+    },
+    {
+      "actionId": "AF-COLLECTOR-GENERATE",
+      "operation": "POST Collector /api/generatePack for the fixed quantity-one non-turbo pack",
+      "boundaries": [
+        "credential or secret access",
+        "external API mutation"
+      ],
+      "requiredOwnerAuthorization": "Bind the cycle, exact endpoint, request digest, player, pack code, quantity one, turbo=false, absent alternate card and funds recipients, credential identifier, and attempt. Independently decode the returned partially signed transaction before any key access.",
+      "doesNotAuthorize": [
+        "key access or signature",
+        "POST /api/submitTransaction",
+        "Circle USD Coin principal or SOL gas"
+      ]
+    },
+    {
+      "actionId": "AF-COLLECTOR-OPEN",
+      "operation": "POST Collector /api/openPack",
+      "boundaries": [
+        "credential or secret access",
+        "external API mutation"
+      ],
+      "requiredOwnerAuthorization": "Bind the cycle, endpoint, purchase memo, reconciled finalized purchase, approved NFT recipient, non-turbo mode, credential identifier, and attempt. Provider success does not replace independent finalized NFT-custody evidence.",
+      "doesNotAuthorize": [
+        "buyback construction",
+        "buyback signature or broadcast",
+        "alternate NFT or funds recipient"
+      ]
+    },
+    {
+      "actionId": "AF-COLLECTOR-BUYBACK",
+      "operation": "POST Collector /api/buyback",
+      "boundaries": [
+        "credential or secret access",
+        "external API mutation"
+      ],
+      "requiredOwnerAuthorization": "Use a separate post-open authorization binding the exact NFT, current owner, original Collector prize-wallet destination, player, altRecipient absence, refund amount, owner minimum receive, credential identifier, canonical request digest, and attempt. Independently decode the returned serialized transaction.",
+      "doesNotAuthorize": [
+        "key access or signature",
+        "POST /api/submitTransaction",
+        "SOL gas"
+      ]
+    },
+    {
+      "actionId": "AF-COLLECTOR-SUBMIT",
+      "operation": "POST Collector /api/submitTransaction with a fully signed Solana transaction",
+      "boundaries": [
+        "credential or secret access",
+        "external API mutation",
+        "broadcast",
+        "asset or native-gas spending already encoded in the signed bytes"
+      ],
+      "requiredOwnerAuthorization": "Require prior action-specific key-access and signature authorization, exact signed-bytes digest, endpoint, credential identifier, broadcast attempt, principal cap, SOL cap, recent blockhash, and last-valid block height. Submitted or confirmed provider status is insufficient; independent finalized RPC evidence must match the decoded message.",
+      "doesNotAuthorize": [
+        "replacement transaction",
+        "new blockhash or altered signed bytes",
+        "retry while the prior intent is unresolved"
+      ]
+    },
+    {
+      "actionId": "AF-LAUNCH-AND-ADMISSION",
+      "operation": "Any Programmable or Launchpad configuration write, token issuance, hook deployment, market admission, pool initialization, source verification, or deployment publication",
+      "boundaries": [
+        "credential or secret access when required",
+        "external API mutation",
+        "key access or signature",
+        "broadcast or deployment",
+        "asset or native-gas spending",
+        "external artifact publication when verification or release records are published"
+      ],
+      "requiredOwnerAuthorization": "Bind one exact action bundle to the approved release revision, chain 4663, contract and provider addresses, initcode and runtime hashes, constructor and PoolKey fields, destinations, value, per-asset gas caps, signed-bytes digest, broadcast attempt, and publication destinations. Official chain support and all local proofs must pass first.",
+      "doesNotAuthorize": [
+        "canary swap",
+        "process-budget release",
+        "payout funding",
+        "another deployment attempt"
+      ]
+    },
+    {
+      "actionId": "AF-CANARY-CYCLE",
+      "operation": "Canary HKMN purchase and every subsequent live cycle action",
+      "boundaries": [
+        "key access or signature",
+        "broadcast",
+        "asset or native-gas spending",
+        "external API mutation for conversion or Collector steps",
+        "external artifact publication for the distribution copies"
+      ],
+      "requiredOwnerAuthorization": "Authorize each canary swap, liability claim, process release, quote request, conversion signature, conversion broadcast, Collector mutation, Collector signature, Collector broadcast, buyback, return conversion, publication, payout funding, and holder-payment action separately with exact bytes, destinations, amounts, caps, and attempts.",
+      "doesNotAuthorize": [
+        "an unattended sequence",
+        "a second cycle",
+        "a retry with changed bytes, amount, destination, cap, or attempt"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "robinhood-connecting",
+      "authority": "Robinhood official documentation",
+      "url": "https://docs.robinhood.com/chain/connecting/",
+      "sha256": "10b70b528d296b876f87f258d7b612ddc8b94177203da938c32a214905cd89bc",
+      "supports": [
+        "Robinhood mainnet chain ID 4663",
+        "ETH native gas asset",
+        "rate-limited public RPC https://rpc.mainnet.chain.robinhood.com"
+      ]
+    },
+    {
+      "id": "robinhood-token-contracts",
+      "authority": "Robinhood official documentation",
+      "url": "https://docs.robinhood.com/chain/contracts/",
+      "sha256": "aed3b208ea188c0fccdc3e562529a77a039d8beac83d89557ad3744c5c643a80",
+      "supports": [
+        "USDG 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+      ]
+    },
+    {
+      "id": "robinhood-bridging",
+      "authority": "Robinhood official documentation",
+      "url": "https://docs.robinhood.com/chain/bridging/",
+      "sha256": "14631945ffd5f55dc23cc798d3633a077b315cce763f3ec8242c4002e6158b97",
+      "supports": [
+        "Relay, LayerZero or Stargate, and other cross-chain routes are listed for Robinhood Chain",
+        "A listed provider is not proof of the exact Hookemon asset pair or executable route"
+      ]
+    },
+    {
+      "id": "circle-mainnet-addresses",
+      "authority": "Circle official documentation",
+      "url": "https://developers.circle.com/stablecoins/usd%63-contract-addresses",
+      "sha256": "c1c924907c65da8fc412f9d2a55773bc01f8d120a788f4127f07eb15a054a519",
+      "supports": [
+        "Solana mainnet Circle USD Coin mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+      ]
+    },
+    {
+      "id": "collector-gacha-api",
+      "authority": "Collector Crypt official documentation",
+      "url": "https://docs.collectorcrypt.com/gacha/api",
+      "sha256": "151e1125c21c04147b0905d952d20ddbd5e5ef262a4bcaa14cd0dba758b08016",
+      "supports": [
+        "generatePack, openPack, buyback, buyback availability, pack status, machines, and submitTransaction field shapes",
+        "six-decimal Circle USD Coin amounts",
+        "standard buyback within 72 hours to the original prize wallet",
+        "the documentation states that every request requires x-api-key"
+      ]
+    },
+    {
+      "id": "programmable-discovery",
+      "authority": "Programmable official live discovery",
+      "url": "https://developers.programmable.family/.well-known/programmable.json",
+      "sha256": "b0a2f0ab5cdb68974fe665b5fa69f4811476b2254f8202bec41aeb944166f5a4",
+      "supports": [
+        "The current advertised live chain list contains chain ID 1 only",
+        "V3 profile 3.3.0 is the active fresh-write profile",
+        "Wallet review, signature, and broadcast remain separate from the service"
+      ]
+    },
+    {
+      "id": "programmable-status",
+      "authority": "Programmable official live status",
+      "url": "https://developers.programmable.family/api/v2/status",
+      "sha256": "4631fe205417f233e3511bfee555c9c0b845c225ddae09bf78f8dcba1bc4ddfb",
+      "supports": [
+        "The current complete coverage reports chain ID 1 only",
+        "Custom discovery is live on that advertised chain"
+      ]
+    },
+    {
+      "id": "programmable-v3-capabilities",
+      "authority": "Programmable official live capabilities",
+      "url": "https://api.programmable.market/v3/capabilities",
+      "sha256": "dae41eccb4b5fd2a50746d474ab173759a529f866b281030fd1fd45243b8e3b6",
+      "supports": [
+        "The live V3 profile reports chain ID 1 as its only production chain",
+        "V3 profile 3.3.0 is production-authorized on that chain",
+        "Platform admission does not certify fee behavior, safety, audit, routing, or universal compatibility"
+      ]
+    },
+    {
+      "id": "uniswap-chain-4663-deployment",
+      "authority": "Uniswap official contracts repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/contracts/4cfc406c8e34da3ce04e60657a7825075b64fd22/deployments/json/4663.json",
+      "sourceCommit": "4cfc406c8e34da3ce04e60657a7825075b64fd22",
+      "sha256": "21964cefbfc24b0ee89e7427acf74d223ce5a50aeb4216a9bac361a6148dea15",
+      "supports": [
+        "PoolManager and peripheral deployment addresses for chain 4663"
+      ]
+    },
+    {
+      "id": "relay-supported-routes",
+      "authority": "Relay official documentation",
+      "url": "https://docs.relay.link/references/api/api_resources/supported-routes",
+      "sha256": "ab583dd97738ec15fafbad297bcedc29ab405ae6dfe2326667aa35fffd8c8727",
+      "supports": [
+        "The Chains API is the current authority for supported chains and assets",
+        "A quote is still required to prove one exact pair and executable request"
+      ]
+    },
+    {
+      "id": "relay-quote-v2",
+      "authority": "Relay official API documentation",
+      "url": "https://docs.relay.link/references/api/get-quote-v2",
+      "sha256": "5a2d3116626396f4f02a0dc12e787a8658f1311ded555d2d21e999e03bb3b169",
+      "supports": [
+        "Exact-input quote fields, recipient, refund destination, executable steps, minimum amount, and request identifier"
+      ]
+    },
+    {
+      "id": "relay-live-chains",
+      "authority": "Relay official live Chains API",
+      "url": "https://api.relay.link/chains",
+      "sha256": "73515554ef5c93934c19ef4c7b4db9c6bdada6e551bcd17d4d08fd56803763ce",
+      "supports": [
+        "Robinhood chain 4663 is enabled with six-decimal USDG as a bridge and solver currency",
+        "Solana Relay chain 792703809 is enabled with the exact six-decimal Circle USD Coin mint as a bridge and solver currency"
+      ]
+    }
+  ],
+  "relayQuoteBindingDraft": {
+    "status": "BLOCKED_PENDING_ASK_FIRST_QUOTES_AND_EXACT_PAYLOADS",
+    "authority": "relay-quote-v2",
+    "endpoint": "https://api.relay.link/quote/v2",
+    "method": "POST",
+    "autonomyClassification": "external API mutation even when indicativeQuote=true; no request may run under the read-only spike grant",
+    "commonRequestFields": {
+      "requiredExactFields": [
+        "user",
+        "originChainId",
+        "destinationChainId",
+        "originCurrency",
+        "destinationCurrency",
+        "amount",
+        "tradeType",
+        "recipient",
+        "refundTo",
+        "slippageTolerance",
+        "latePaymentSlippageTolerance",
+        "ttl"
+      ],
+      "fixedPhaseOneValues": {
+        "tradeType": "EXACT_INPUT",
+        "txs": [],
+        "appFees": [],
+        "topupGas": false,
+        "enableTrueExactOutput": false,
+        "useFallbacks": false,
+        "usePermit": false,
+        "subsidizeFees": false,
+        "indicativeQuote": false
+      },
+      "mustBeAbsentUnlessAReplacementBindingIsOwnerApproved": [
+        "authorizationList",
+        "additionalData",
+        "referrer",
+        "referrerAddress",
+        "recoveryAddress",
+        "txsGasLimit",
+        "gasLimitForDepositSpecifiedTxs",
+        "sponsoredFeeComponents",
+        "maxSubsidizationAmount",
+        "fixedRate"
+      ],
+      "mustBeExplicitAndNeverProviderDefaulted": [
+        "recipient",
+        "refundTo",
+        "slippageTolerance",
+        "latePaymentSlippageTolerance",
+        "ttl",
+        "explicitDeposit",
+        "useExternalLiquidity",
+        "useDepositAddress",
+        "forceSolverExecution",
+        "disableOriginSwaps"
+      ],
+      "depositAddressRule": "The candidate binding uses useDepositAddress=false. If an executable exact pair requires a deposit address, stop and bind recoveryAddress, deposit ownership, recovery procedure, expiry, and refund semantics in a newly owner-approved provider binding before another quote request.",
+      "unknownFieldRule": "Reject any request field, response field, signature item, transaction item, destination call, fee component, contract, program, address, asset, or instruction that is not present in the frozen allowlist and independently decoded."
+    },
+    "directions": {
+      "outbound": {
+        "user": "PENDING_IMMUTABLE_TYPED_ROUTE_EXECUTOR_ADDRESS",
+        "originChainId": 4663,
+        "destinationChainId": 792703809,
+        "originCurrency": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "destinationCurrency": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "recipient": "PENDING_OWNER_APPROVED_SOLANA_POLICY_ACCOUNT",
+        "refundTo": "PENDING_IMMUTABLE_PEG_CYCLE_VAULT_ADDRESS",
+        "amount": "PENDING_OWNER_APPROVED_ATOMIC_USDG_AMOUNT",
+        "originFeePayer": "PENDING_IMMUTABLE_TYPED_ROUTE_EXECUTOR_ADDRESS"
+      },
+      "return": {
+        "user": "PENDING_OWNER_APPROVED_SOLANA_POLICY_ACCOUNT",
+        "originChainId": 792703809,
+        "destinationChainId": 4663,
+        "originCurrency": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "destinationCurrency": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "recipient": "PENDING_IMMUTABLE_PEG_CYCLE_VAULT_ADDRESS",
+        "refundTo": "PENDING_OWNER_APPROVED_SOLANA_POLICY_ACCOUNT",
+        "amount": "PENDING_OWNER_APPROVED_ATOMIC_CIRCLE_COIN_AMOUNT",
+        "depositFeePayer": "PENDING_OWNER_APPROVED_SOLANA_POLICY_ACCOUNT"
+      }
+    },
+    "requiredResponseBindings": [
+      "canonical request bytes and digest plus requestId",
+      "every steps[].id, kind, requestId, item status, item data, and status-check endpoint",
+      "every EVM from, to, calldata, value, chainId, gas limit, max fee, and priority fee",
+      "every Solana versioned message, signer, fee payer, recent blockhash, last-valid height, address-lookup table, account, program, instruction, compute limit, priority fee, mint, token account, amount, and memo",
+      "details.sender, details.recipient, details.currencyIn, details.currencyOut, details.refundCurrency, exact amount, minimumAmount, rate, slippage, time estimate, and complete origin and destination route",
+      "every fees component with currency, amount, minimumAmount, sponsorship, and an exact zero app fee",
+      "protocol version, order identifier, order data, order signature, payment chain, depository, currency, amount, deadline, expiry, and refund behavior when present",
+      "provider contract and program runtime identities, executable simulation, exact signed-bytes digest, unique receipt key, finality rule, and independent balance-delta expectations"
+    ],
+    "freezeCondition": "Both directions need separately authorized exact requests, complete raw responses, independent decoders, executable simulations, provider runtime bindings, and a separately authorized finalized minimum-value roundtrip. Capability metadata alone cannot satisfy F3 or freeze F4."
+  },
+  "reproduction": {
+    "rawSnapshotStatus": "COMMANDS_RECORDED_RAW_RESPONSES_NOT_YET_REPOSITORY_BOUND",
+    "rawSnapshotDirectory": "/tmp/hookemon-r53-feasibility.XXXXXX",
+    "setupCommand": "export HOOKEMON_R53_SNAPSHOT_DIR=\"$(mktemp -d /tmp/hookemon-r53-feasibility.XXXXXX)\"",
+    "publicDocumentFetchCommands": [
+      "curl --fail --silent --show-error --location https://docs.robinhood.com/chain/connecting/ --output \"$HOOKEMON_R53_SNAPSHOT_DIR/robinhood-connecting.raw\"",
+      "curl --fail --silent --show-error --location https://docs.robinhood.com/chain/contracts/ --output \"$HOOKEMON_R53_SNAPSHOT_DIR/robinhood-token-contracts.raw\"",
+      "curl --fail --silent --show-error --location https://docs.robinhood.com/chain/bridging/ --output \"$HOOKEMON_R53_SNAPSHOT_DIR/robinhood-bridging.raw\"",
+      "curl --fail --silent --show-error --location https://developers.circle.com/stablecoins/usd%63-contract-addresses --output \"$HOOKEMON_R53_SNAPSHOT_DIR/circle-mainnet-addresses.raw\"",
+      "curl --fail --silent --show-error --location https://docs.collectorcrypt.com/gacha/api --output \"$HOOKEMON_R53_SNAPSHOT_DIR/collector-gacha-api.raw\"",
+      "curl --fail --silent --show-error --location https://developers.programmable.family/.well-known/programmable.json --output \"$HOOKEMON_R53_SNAPSHOT_DIR/programmable-discovery.raw\"",
+      "curl --fail --silent --show-error --location https://developers.programmable.family/api/v2/status --output \"$HOOKEMON_R53_SNAPSHOT_DIR/programmable-status.raw\"",
+      "curl --fail --silent --show-error --location https://api.programmable.market/v3/capabilities --output \"$HOOKEMON_R53_SNAPSHOT_DIR/programmable-v3-capabilities.raw\"",
+      "curl --fail --silent --show-error --location https://raw.githubusercontent.com/Uniswap/contracts/4cfc406c8e34da3ce04e60657a7825075b64fd22/deployments/json/4663.json --output \"$HOOKEMON_R53_SNAPSHOT_DIR/uniswap-chain-4663-deployment.raw\"",
+      "curl --fail --silent --show-error --location https://docs.relay.link/references/api/api_resources/supported-routes --output \"$HOOKEMON_R53_SNAPSHOT_DIR/relay-supported-routes.raw\"",
+      "curl --fail --silent --show-error --location https://docs.relay.link/references/api/get-quote-v2 --output \"$HOOKEMON_R53_SNAPSHOT_DIR/relay-quote-v2.raw\"",
+      "curl --fail --silent --show-error --location https://api.relay.link/chains --output \"$HOOKEMON_R53_SNAPSHOT_DIR/relay-live-chains.raw\"",
+      "curl --fail --silent --show-error --location https://gacha.collectorcrypt.com/api/status --output \"$HOOKEMON_R53_SNAPSHOT_DIR/collector-status.raw\"",
+      "curl --fail --silent --show-error --location https://gacha.collectorcrypt.com/api/machines --output \"$HOOKEMON_R53_SNAPSHOT_DIR/collector-machines.raw\""
+    ],
+    "publicRpcSnapshotCommands": [
+      "curl --fail --silent --show-error --request POST https://rpc.mainnet.chain.robinhood.com --header 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_chainId\",\"params\":[]}' --output \"$HOOKEMON_R53_SNAPSHOT_DIR/robinhood-chain-id.raw\"",
+      "curl --fail --silent --show-error --request POST https://rpc.mainnet.chain.robinhood.com --header 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x0\",false]}' --output \"$HOOKEMON_R53_SNAPSHOT_DIR/robinhood-genesis.raw\"",
+      "curl --fail --silent --show-error --request POST https://rpc.mainnet.chain.robinhood.com --header 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"0x2fb2df7\",false]}' --output \"$HOOKEMON_R53_SNAPSHOT_DIR/robinhood-block-50015735.raw\"",
+      "curl --fail --silent --show-error --request POST https://api.mainnet-beta.solana.com --header 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getGenesisHash\"}' --output \"$HOOKEMON_R53_SNAPSHOT_DIR/solana-genesis.raw\"",
+      "curl --fail --silent --show-error --request POST https://api.mainnet-beta.solana.com --header 'content-type: application/json' --data '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getAccountInfo\",\"params\":[\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",{\"commitment\":\"finalized\",\"encoding\":\"jsonParsed\"}]}' --output \"$HOOKEMON_R53_SNAPSHOT_DIR/solana-circle-mint.raw\""
+    ],
+    "verificationCommands": [
+      "shasum -a 256 \"$HOOKEMON_R53_SNAPSHOT_DIR\"/*.raw",
+      "jq empty feasibility/integration-spikes.json feasibility/risk-lanes.json",
+      "node scripts/check-cleanroom.mjs .",
+      "git diff --check -- feasibility/integration-spikes.json feasibility/risk-lanes.json"
+    ],
+    "evidenceRule": "Record raw bytes, HTTP status, retrieval time, command version, and SHA-256 in a repository-bound evidence set before F3 verification. A later network response that differs is new evidence and must not silently replace this observation. None of these read-only commands authorizes a quote POST, credential access, mutation, signature, broadcast, spend, deployment, or publication."
+  },
+  "pinnedReadOnlyObservations": {
+    "robinhood": {
+      "rpc": "https://rpc.mainnet.chain.robinhood.com",
+      "chainId": 4663,
+      "genesisBlockHash": "0xaad15f3d702aaea00caf3e9bb56395efe9127bc3b31b24921abf1eee3409305c",
+      "blockNumber": 50015735,
+      "blockNumberHex": "0x2fb2df7",
+      "blockHash": "0x5becdae59ebaf2830f588756f3db3047fb77d90c65f0ac8bb87fcf6dee968150",
+      "blockTimestamp": "2026-08-30T12:38:55.000Z",
+      "observedBlockGasLimitHex": "0x4000000000000",
+      "gasLimitCaveat": "The observed Arbitrum-style block field is not accepted as a production transaction-gas, block-capacity, runtime-size, initcode-size, or deployment-gas bound. Official limits and measured headroom remain required."
+    },
+    "solana": {
+      "rpc": "https://api.mainnet-beta.solana.com",
+      "genesisHash": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      "finalizedSlot": 442881558,
+      "mintObservationSlot": 442881265,
+      "circleCoinMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "mintOwnerProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "mintProgram": "spl-token",
+      "mintAccountSpace": 82,
+      "decimals": 6,
+      "initialized": true
+    }
+  },
+  "confusions": [
+    {
+      "id": "CONFUSION-COLLECTOR-AUTH-001",
+      "status": "UNRESOLVED_FAIL_CLOSED",
+      "factA": "The official Collector documentation says every API request requires a valid x-api-key header.",
+      "factB": "Unauthenticated production GET /api/status and GET /api/machines both returned HTTP 200 on 2026-08-30.",
+      "options": {
+        "A": "Treat every read and mutation as credential-bound exactly as documented.",
+        "B": "Treat only the observed GET endpoints as public while all mutation and wallet-specific endpoints remain credential-bound."
+      },
+      "requiredResolution": "Obtain an official provider clarification or a release-specific authenticated contract. Until then, no mutation schema, credential assumption, or pack binding freezes."
+    }
+  ],
+  "architectureRevision4ProofCoverage": [
+    {
+      "moduleId": "phase-boundary",
+      "status": "BLOCKED_PENDING_SCOPE_AND_HANDOFF_PROOFS",
+      "proofSurfaces": [
+        "Static scope allowlist and forbidden-interface scan over the final ABI, runner commands, schemas, and fixed routes",
+        "Phase 1 handoff proving the full thin loop and a separately owner-approved Phase 2 opening"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+        "SPIKE-R53-RELEASE-REPRODUCIBILITY"
+      ]
+    },
+    {
+      "moduleId": "provider-binding",
+      "status": "P1_001_BUILD_BINDING_PROVED_PRODUCTION_BINDING_BLOCKED",
+      "proofSurfaces": [
+        "Official chain, provider, asset, ABI, source, runtime, limits, finality, quote, transaction, and decoder bindings",
+        "Raw-snapshot reproduction, content hashes, unknown-field rejection, and fail-closed readiness",
+        "Revision-54 content-addressed source, ABI-source, runtime, proxy, USDG metadata, custody, and local proof manifest"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-RH-CHAIN-IDENTITY",
+        "SPIKE-R53-RH-USDG",
+        "SPIKE-R53-UNISWAP-ROOT",
+        "SPIKE-R53-PROGRAMMABLE-CHAIN-4663",
+        "SPIKE-R53-SOLANA-CIRCLE-MINT",
+        "SPIKE-R53-COLLECTOR-PUBLIC-READS",
+        "SPIKE-R53-RELAY-CAPABILITY",
+        "SPIKE-R54-P1-001-BINDING-CUSTODY"
+      ]
+    },
+    {
+      "moduleId": "role-control",
+      "status": "PASSED_LOCAL_PRODUCTION_DEPLOYMENT_BLOCKED",
+      "proofSurfaces": [
+        "Two-step treasury and Operations transitions, cycle-bound Operations identity, unauthorized-caller rejection, and zero hidden authority",
+        "Final ABI types, events, storage transitions, and negative authority scan"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2"
+      ]
+    },
+    {
+      "moduleId": "token-core",
+      "status": "BLOCKED_BY_PROGRAMMABLE_CHAIN_SUPPORT_AND_LAUNCH_PROOF",
+      "proofSurfaces": [
+        "Official issuance parameters, allocation, decimals, treasury representation, deployed token identity, standard transfers, and immutable authority surface",
+        "Exact Launchpad wallet handoff, transaction decoding, deployment root, source verification, and indexed result"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-PROGRAMMABLE-CHAIN-4663",
+        "SPIKE-R53-LAUNCH-AND-CANARY"
+      ]
+    },
+    {
+      "moduleId": "canonical-market",
+      "status": "LOCAL_EIGHT_QUADRANT_AND_CUSTODY_PROOF_PASSED_PRODUCTION_FORK_BLOCKED",
+      "proofSurfaces": [
+        "Complete PoolKey, router, callback stage, permissions, currency ordering, exact-input, exact-output, partial-fill, and executed-USDG normalization",
+        "Only the authentic final canonical swap can reach fee accounting and the buyer receives positive HKMN",
+        "Zero static LP fee, 90 percent immutable custody, no project authority, and supported post-custody buy and sell in the local contract proof"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-UNISWAP-ROOT",
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+        "SPIKE-R53-LAUNCH-AND-CANARY",
+        "SPIKE-R54-P1-001-BINDING-CUSTODY"
+      ]
+    },
+    {
+      "moduleId": "fee-accounting",
+      "status": "LOCAL_ROUNDING_AND_QUADRANT_CONTRACT_PASSED_USDG_FORK_BLOCKED",
+      "proofSurfaces": [
+        "Exact 3.00 percent collection and liability split across minimum-unit rounding, both directions, exact-input, exact-output, and partial fills",
+        "Exact USDG source and contract balance deltas, solvency, reentrancy, unauthorized claim rejection, and zero dust"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-RH-USDG",
+        "SPIKE-R53-UNISWAP-ROOT",
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+        "SPIKE-R53-LAUNCH-AND-CANARY",
+        "SPIKE-R54-P1-001-BINDING-CUSTODY"
+      ]
+    },
+    {
+      "moduleId": "process-budget",
+      "status": "PASSED_LOCAL_WITH_FIXTURE_PREFLIGHT_LIVE_EXECUTION_BLOCKED",
+      "proofSurfaces": [
+        "Exact-authorized Operations-triggered process-liability debit to the immutable mutually bound PegCycleVault with one release event, conservation, and zero Operations balance delta",
+        "Offchain cycle preflight binds funded amount, principal, per-chain gas caps, provider manifest, cycle, Operations trigger, vault, policy account, vault return account, action digests, and exact owner authorization"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+        "SPIKE-R53-JOURNAL-AND-REPLAY",
+        "SPIKE-R53-LAUNCH-AND-CANARY"
+      ]
+    },
+    {
+      "moduleId": "peg-cycle-vault",
+      "status": "REVISION_56_COMMIT_BOUND_LOCAL_CUSTODY_EVIDENCE_PENDING_PRODUCTION_BINDINGS_BLOCKED",
+      "proofSurfaces": [
+        "Expected commit-bound revision-56 proof: immutable hook, USDG, authorizer, typed route executor, binding digest, and one-time mutual hook-vault binding",
+        "Expected commit-bound revision-56 proof: exact single-use funding, outbound, return, payout, and terminal-failure lifecycle with zero generic call, approval, rescue, sweep, proxy, upgrade, delegatecall, administrator, or successor authority",
+        "Expected commit-bound revision-56 proof: zero Operations process-principal and returned-proceeds custody; production provider, authorizer, route-executor, bridge, policy-wallet, finality, and return-attribution bindings remain unresolved and nonzero"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+        "SPIKE-R53-CONVERSION-ROUNDTRIP",
+        "SPIKE-R53-RETURNED-USDG-ATTRIBUTION",
+        "SPIKE-R53-RELEASE-REPRODUCIBILITY"
+      ]
+    },
+    {
+      "moduleId": "payout-commitment",
+      "status": "LOCAL_BUILDERS_FUNDING_AND_CONSERVATION_PASSED_PUBLICATION_AND_OFFICIAL_LIMITS_BLOCKED",
+      "proofSurfaces": [
+        "Independent canonical-manifest and depth-10 Merkle-sum builders, 1,024-position vectors, checked sums, padding, tags, domains, and owner-approved bytes",
+        "PegCycleVault funds the exact root sum only after closed-ledger vault attribution, exact immutable-authorizer approval, and two independently fetched digest-matching publications; Operations remains historical trigger metadata"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-RETURNED-USDG-ATTRIBUTION",
+        "SPIKE-R53-PAYOUT-GAS-SIZE",
+        "SPIKE-R53-DUAL-PUBLICATION",
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2"
+      ]
+    },
+    {
+      "moduleId": "holder-settlement",
+      "status": "PASSED_LOCAL_OFFICIAL_GAS_HEADROOM_BLOCKED",
+      "proofSurfaces": [
+        "Any caller can pay one valid unpaid depth-10 leaf only to its committed recipient, once, without expiry",
+        "Malformed, replayed, redirected, failed-transfer, short-transfer, excess-transfer, and reentrant calls revert the complete transition while other leaves remain independent",
+        "Worst valid and invalid single-payment paths retain positive numeric gas headroom"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-PAYOUT-GAS-SIZE",
+        "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+        "SPIKE-R53-LAUNCH-AND-CANARY"
+      ]
+    },
+    {
+      "moduleId": "cycle-runner",
+      "status": "PASSED_LOCAL_FIXTURE_JOURNAL_REPLAY_AND_ATTRIBUTION_LIVE_PROVIDER_BINDING_BLOCKED",
+      "proofSurfaces": [
+        "Separate intent, authorization, decode, signature, signed-bytes, broadcast, finality, receipt, custody, proceeds, publication, payout, and payment boundaries",
+        "Hash-chained compare-and-swap journal, crash reconciliation, no blind retry, and single consumption for authorization, receipt, and proceeds keys",
+        "Exact Collector custody and buyback plus activity-isolated returned-USDG attribution"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-COLLECTOR-MUTATIONS-AND-CUSTODY",
+        "SPIKE-R53-CONVERSION-ROUNDTRIP",
+        "SPIKE-R53-RETURNED-USDG-ATTRIBUTION",
+        "SPIKE-R53-JOURNAL-AND-REPLAY",
+        "SPIKE-R53-DUAL-PUBLICATION"
+      ]
+    },
+    {
+      "moduleId": "release-evidence",
+      "status": "REVISION_56_COMMIT_BOUND_REPRODUCIBILITY_AND_LOOP_EVIDENCE_PENDING_PRODUCTION_BLOCKED",
+      "proofSurfaces": [
+        "Expected revision-56 evidence: two isolated builds reproduce ABI, method identifiers, events, initcode, runtime, distribution tooling, and runner artifacts from the exact corrective source commit",
+        "Expected revision-56 evidence: pinned local limits, clean-room scan, dependency and source pins, complete local loop, and zero open severe findings; no commit-bound receipt exists yet",
+        "A later separate exact bounded live bundle and canary receipt chain remains required; technical evidence grants no live authority"
+      ],
+      "spikeIds": [
+        "SPIKE-R53-PAYOUT-GAS-SIZE",
+        "SPIKE-R53-RELEASE-REPRODUCIBILITY",
+        "SPIKE-R53-LAUNCH-AND-CANARY",
+        "SPIKE-R54-P1-001-BINDING-CUSTODY"
+      ]
+    }
+  ],
+  "spikes": [
+    {
+      "id": "SPIKE-R53-RH-CHAIN-IDENTITY",
+      "integration": "Robinhood public JSON-RPC",
+      "status": "PASSED_READ_ONLY",
+      "smallestRealCall": "chain ID, genesis block, and current pinned block",
+      "result": {
+        "chainIdMatches": true,
+        "genesisBound": true,
+        "pinnedBlockReadable": true
+      }
+    },
+    {
+      "id": "SPIKE-R53-RH-USDG",
+      "integration": "Canonical USDG on Robinhood mainnet",
+      "status": "PASSED_READ_ONLY_WITH_LOCAL_BEHAVIOR_SPIKE_PENDING",
+      "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "result": {
+        "name": "Global Dollar",
+        "symbol": "USDG",
+        "decimals": 6,
+        "proxyRuntimeCodeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+        "oftWrapper": "0x0d54755f5106BfdB43f7a35f5D49a23F940628d1",
+        "oftWrapperRuntimeCodeHash": "0x5e4dcb0bb1910f6429e5fe91678990088a51c6d1cfe1b31d05fb9d948cc7867c"
+      },
+      "remaining": [
+        "Release-block proxy implementation and roles",
+        "Pinned-fork transfer and transferFrom return, revert, proxy, and exact balance-delta behavior",
+        "Adversarial token harness"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-UNISWAP-ROOT",
+      "integration": "Uniswap V4 deployment on Robinhood mainnet",
+      "status": "PASSED_READ_ONLY_WITH_PROVIDER_SEMANTICS_PENDING",
+      "result": {
+        "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "poolManagerRuntimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+        "manifestPoolManagerMatchesOnchain": true
+      },
+      "remaining": [
+        "Exact core, periphery, and router source and ABI pins",
+        "Final PoolKey, callback stage, permission bits, delta conventions, fee custody, exact-input, exact-output, partial-fill, and both currency-order semantics",
+        "Pinned-fork pool admission and eight swap quadrants"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-PROGRAMMABLE-CHAIN-4663",
+      "integration": "Official Programmable production support for Robinhood Chain",
+      "status": "FAILED_UNSUPPORTED_BY_CURRENT_LIVE_DISCOVERY",
+      "smallestRealCalls": [
+        "GET official well-known discovery",
+        "GET official v2 status",
+        "GET official V3 capabilities",
+        "GET legacy /v4/chains/4663/capabilities"
+      ],
+      "result": {
+        "advertisedChainIds": [1],
+        "v3CapabilityChainId": 1,
+        "v3CapabilityChainName": "chain ID 1 mainnet",
+        "legacyChain4663CapabilityHttpStatus": 404,
+        "robinhoodProductionLaunchSupport": false
+      },
+      "blockingEffect": "The officially required Launchpad, admission, callback, fee, wallet-handoff, deployment-root, source-verification, and indexing evidence cannot be bound for chain 4663. The immutable onchain release cannot proceed."
+    },
+    {
+      "id": "SPIKE-R53-LAUNCH-AND-CANARY",
+      "integration": "Exact Programmable launch, immutable hook deployment, market admission, and one canary purchase",
+      "status": "BLOCKED_BY_CHAIN_SUPPORT_LOCAL_PROOFS_AND_ASK_FIRST_LIVE_ACTIONS",
+      "prerequisites": [
+        "Official Programmable production support and release-specific capability evidence for chain 4663",
+        "Frozen Launchpad, Registrar, PoolManager, router, PoolKey, callback, fee, wallet-handoff, ABI, source, runtime, indexing, gas, and size bindings",
+        "Reproducible production build, complete pinned-fork loop, positive limit headroom, independent review closure, and exact release manifest"
+      ],
+      "requiredProof": [
+        "Separately authorize every configuration API mutation, source-verification publication, key access, signature, deployment, admission, initialization, broadcast, asset value, and native-gas cap",
+        "Independently decode and simulate each exact transaction and bind its unsigned and signed byte digests before broadcast",
+        "Verify finalized deployment addresses, runtime hashes, provider graph and indexing, allocation, treasury representation, role state, canonical PoolKey, and liability solvency from public chain state",
+        "Authorize the canary swap separately with exact input, minimum HKMN output, destination, calldata, deadline, gas cap, and attempt; verify finalized exact balance and liability deltas",
+        "Treat the canary as evidence for only that exact action; it grants no authority for process release, conversion, Collector, payout funding, holder payment, retry, or second cycle"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-SOLANA-CIRCLE-MINT",
+      "integration": "Solana mainnet and canonical Circle USD Coin",
+      "status": "PASSED_READ_ONLY_WITH_EXECUTION_WALLET_PENDING",
+      "smallestRealCall": "finalized getAccountInfo for the Circle-listed mint plus getGenesisHash and getSlot",
+      "result": {
+        "genesisMatchesMainnet": true,
+        "mintMatchesCircle": true,
+        "tokenProgramMatches": true,
+        "decimalsMatch": true
+      },
+      "remaining": [
+        "Owner-approved execution wallet and token account",
+        "Exact account-creation, signer, fee-payer, address-lookup-table, blockhash, finality, and transaction-history rules"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-COLLECTOR-PUBLIC-READS",
+      "integration": "Collector production status and machine snapshot",
+      "status": "PASSED_READ_ONLY_WITH_AUTH_CONFUSION_AND_BINDING_PENDING",
+      "result": {
+        "statusHttp": 200,
+        "statusResponseSha256": "efb9a190cab43e817b64c7c72d66099954d18f31c64d325d2d143c06664d38eb",
+        "machineHttp": 200,
+        "machineResponseSha256": "81d550268b4eff63e6f29c2796e26bdfae3b9376c39e1ded7853172fcdbd6e10",
+        "machineStatus": "running",
+        "publicMachineCount": 25,
+        "lowestObservedPublicCandidate": {
+          "code": "pokemon_25",
+          "name": "Starter Pokémon Gacha Pack",
+          "priceAtomicCircleCoin": "25000000",
+          "instantBuybackPercent": 85,
+          "reportedTurboModeCapability": true,
+          "bindingStatus": "CANDIDATE_ONLY"
+        }
+      },
+      "remaining": [
+        "Resolve the official-document versus public-runtime authentication conflict",
+        "Bind one exact public pack and prove quantity one with turbo=false",
+        "Generate and independently decode one exact purchase payload",
+        "Prove memo, purchase finality, idempotent open, awarded NFT custody, buyback eligibility, original prize-wallet destination, exact refund, status reconciliation, and final token credit"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-RELAY-CAPABILITY",
+      "integration": "Candidate fixed Robinhood-USDG to Solana-Circle-USD-Coin route",
+      "status": "PASSED_READ_ONLY_AS_CAPABILITY_CANDIDATE_ONLY",
+      "smallestRealCall": "GET Relay Chains API and inspect chain, asset, decimals, bridging, solver, and contract fields",
+      "result": {
+        "robinhoodChainEnabled": true,
+        "robinhoodChainId": 4663,
+        "robinhoodUsdgAddress": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "robinhoodUsdgBridgeAndSolverSupport": true,
+        "solanaChainEnabled": true,
+        "solanaRelayChainId": 792703809,
+        "solanaCircleCoinMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "solanaCircleCoinBridgeAndSolverSupport": true,
+        "exactPairQuoteProven": false,
+        "roundtripProven": false
+      },
+      "remaining": [
+        "Obtain separate owner authorization for each POST /quote/v2 request and bind every field in relayQuoteBindingDraft, including explicit user, recipient, refund, amount, slippage, time-to-live, feature switches, and zero app fee",
+        "Capture both raw request and response byte sets, decode every EVM and Solana item, bind provider contracts and programs, and reject every unknown field, alternate recipient, destination call, permit, subsidy, top-up, referrer, or app fee",
+        "Complete the smallest separately authorized real roundtrip and independently verify both finalized receipts and exact balance deltas"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-COLLECTOR-MUTATIONS-AND-CUSTODY",
+      "integration": "Collector generate, purchase, open, and standard buyback",
+      "status": "BLOCKED_ASK_FIRST_AND_PROVIDER_BINDING",
+      "requiredProof": [
+        "Exact authentication contract and non-secret credential identifier",
+        "Separate mutation-specific owner authorization before POST /api/generatePack and POST /api/openPack; generate binds player, fixed pack, quantity one, turbo=false, and absent alternate recipients, while open binds the finalized purchase memo and approved NFT recipient",
+        "Independent complete decoding of the partially signed purchase transaction before separate key-access and signature authorization",
+        "Separate authorization for Circle USD Coin principal, SOL gas, exact signed bytes, and POST /api/submitTransaction broadcast; submitted or confirmed provider status remains unresolved until independent finalized RPC reconciliation",
+        "Separate post-open authorization before POST /api/buyback binding the exact NFT, current owner, original prize wallet, player, absent altRecipient, exact refund, minimum receive, request digest, and attempt",
+        "Independent complete decoding of the serialized buyback transaction before new key-access, signature, SOL-gas, and POST /api/submitTransaction broadcast authorizations",
+        "No changed blockhash, replacement bytes, re-generation, resubmission, or retry while a prior generate, open, buyback, or submit intent is unresolved",
+        "Independent finalized RPC and exact custody and balance-delta evidence"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-CONVERSION-ROUNDTRIP",
+      "integration": "Actual fixed outbound and return conversions",
+      "status": "BLOCKED_PENDING_EXACT_QUOTE_DECODE_AND_ASK_FIRST_LIVE_ACTION",
+      "reason": "Relay is a viable read-only capability candidate, but no exact quote, transaction decode, provider binding, owner-bound wallet set, or live roundtrip exists.",
+      "requiredProof": [
+        "Separate external-API-mutation authorization for each outbound and return POST /quote/v2 request; requesting a quote is distinct from signing, broadcasting, principal spending, and gas spending",
+        "Exact outbound and return request fields, response fields, raw bytes, canonical digests, quote identifiers, executable steps, payload schemas, and expiry behavior as defined by relayQuoteBindingDraft",
+        "Contracts or programs, assets, destinations, refund destinations, fees, minimum receives, deadlines, finality, and receipt keys",
+        "Independent decoding and simulation",
+        "Separate authorization for every signature, broadcast, principal amount, and native-gas cap",
+        "Finalized roundtrip receipts and exact Robinhood USDG and Solana Circle USD Coin balance deltas"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-RETURNED-USDG-ATTRIBUTION",
+      "integration": "Activity-isolated finalized USDG return credit and single-use payout attribution",
+      "status": "PASSED_LOCAL_FIXTURE_REAL_RETURN_ROUTE_AND_RECEIPT_BLOCKED",
+      "attributionWindow": {
+        "account": "PENDING_IMMUTABLE_PEG_CYCLE_VAULT_ADDRESS",
+        "asset": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "start": "A finalized block number and hash immediately before the authorized return action, with the USDG balance read at that exact block",
+        "end": "A later finalized block number and hash after the exact return receipt reaches terminal success, with the USDG balance read at that exact block",
+        "isolationRule": "PegCycleVault has no unrelated USDG credit or debit inside the window, and Operations is not used as a balance basis. Any unrelated, ambiguous, pending, proxy-mismatched, or unfinalized movement invalidates the window and produces no payout intent.",
+        "amountRule": "actualReturnedUsdgAtomic equals endBalanceAtomic minus startBalanceAtomic, is positive, equals the sum of independently decoded finalized USDG credits attributable to the exact return receipt, and excludes the quote, minimum receive, gross output, buyback amount, API status, unrelated transfer, and native-gas value."
+      },
+      "requiredProof": [
+        "Exact cycle identifier, Operations trigger, PegCycleVault, policy account, vault return account, return provider-binding digest, canonical request digest, provider request identifier, signed-bytes digest, finalized transaction hash, receipt-consumption key, and journal heads before and after reconciliation",
+        "Independent Robinhood RPC receipt, block, USDG Transfer-log, proxy-implementation, code-hash, pre-balance, post-balance, and exact balance-delta evidence at pinned finalized blocks",
+        "Independent reconciliation of the Solana Circle USD Coin debit and every provider fee against the same return action without treating the Solana amount as Robinhood USDG",
+        "Closed-cycle ledger proving all purchase, NFT custody, buyback, conversion, fee, gas, refund, failed-attempt, and unresolved-intent entries before distribution compilation",
+        "A domain-separated proceeds-attribution key over chain, cycle, PegCycleVault, policy account, Operations trigger metadata, USDG, provider binding, request, finalized return transaction, pinned pre and post blocks, exact returned amount, and closed journal head",
+        "Compare-and-swap consumption proving one proceeds-attribution key creates at most one payout-funding intent; replay, concurrent preparation, changed journal head, changed manifest, or changed amount creates zero additional intent"
+      ],
+      "doesNotCountAsProof": [
+        "Relay quote or details.currencyOut amount",
+        "minimum receive or expected output",
+        "Collector refund or buyback response",
+        "provider status without finalized chain evidence",
+        "a raw wallet balance increase without an activity-isolated receipt attribution"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-JOURNAL-AND-REPLAY",
+      "integration": "Provider-bound durable cycle journal",
+      "status": "PASSED_LOCAL_FIXTURE_EXACT_LIVE_PROVIDER_PAYLOADS_BLOCKED",
+      "requiredProof": [
+        "Hash-chain and monotone compare-and-swap state transitions",
+        "Crash and restart at every intent, authorization, payload, signed-bytes, broadcast, finality, receipt, custody, proceeds, publication, and payout boundary",
+        "No blind retry and one consumption for every authorization, receipt, and proceeds key",
+        "Provider-specific expiry, idempotency, status, and reconciliation fields"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-ONCHAIN-KERNEL-ARCH2",
+      "integration": "Architecture revision 4 immutable onchain module composition",
+      "status": "PASSED_LOCAL_PROVIDER_BINDINGS_PINNED_FORK_AND_PRODUCTION_BLOCKED",
+      "requiredProof": [
+        "Final ABI and storage map for role-control, token-core, canonical-market, fee-accounting, process-budget, peg-cycle-vault, payout-commitment, and holder-settlement",
+        "Static forbidden-selector, privilege, proxy, upgrade, pause, scheduler, routing, quote, batch, delay, recipient-replacement, surplus-withdrawal, and generic-administrator scans",
+        "Two-step role transitions, exact-authorized Operations-triggered vault funding, typed outbound execution, exact return to vault, canonical swap authentication, exact fee collection and liabilities, exact vault-funded root-sum payout, permissionless single-leaf payment, reentrancy, transfer failure, replay, and conservation tests",
+        "Pinned-fork USDG behavior, all eight swap quadrants, minimum-unit rounding, partial fills, adversarial token and recipient behavior, and exact event reconstruction",
+        "No module interface freeze before all external bindings, bytecode and gas headroom, independent proof tooling, and severe-finding closure pass"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-PAYOUT-GAS-SIZE",
+      "integration": "Depth-10 proof, immutable hook size, and single-payment gas",
+      "status": "PASSED_LOCAL_OFFICIAL_LIMITS_AND_PRODUCTION_HEADROOM_BLOCKED",
+      "requiredProof": [
+        "Independent Solidity and non-Solidity Merkle-sum builders",
+        "All 1,024 positions, padding, overflow, malformed proof, replay, transfer-failure, and reentrancy vectors",
+        "Exact compiler runtime and initcode bytes",
+        "Official transaction, block, runtime, initcode, and deployment-gas limits",
+        "Positive numeric headroom for worst valid and invalid single-payment paths"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-DUAL-PUBLICATION",
+      "integration": "Two independent canonical-manifest publication locations",
+      "status": "BLOCKED_PENDING_LOCATION_SELECTION_AND_ASK_FIRST_PUBLICATION",
+      "requiredProof": [
+        "Two independently administered locations",
+        "Exact byte publication and independent re-fetch",
+        "Digest match, unavailable-location, stale, reordered, altered-byte, and conflicting-copy tests",
+        "No payout-funding preparation before both fetched copies match"
+      ]
+    },
+    {
+      "id": "SPIKE-R53-RELEASE-REPRODUCIBILITY",
+      "integration": "Architecture revision 4 reproducible release and proof bundle",
+      "status": "REVISION_56_COMMIT_BOUND_EVIDENCE_PENDING",
+      "evidenceLineage": {
+        "historicalRevision54": "PASSED_LOCAL_AND_READ_ONLY_SOURCE_BOUND",
+        "revision56Candidate": "PENDING_COMMIT_BOUND_EVIDENCE_GENERATION"
+      },
+      "requiredProof": [
+        "Expected after the corrective source commit: two isolated clean builds from the same pinned source and dependencies reproduce ABI, method identifiers, events, initcode, runtime, manifest compiler, both proof builders, and runner artifacts byte for byte",
+        "Expected after evidence generation: the release manifest binds requirements revision 56, architecture revision 4, frozen interfaces, the historical revision-54 provider manifest without relabeling it, compiler and dependency versions, source revisions, runtime identities, immutable vault custody roles, gas and size limits, and every evidence digest",
+        "Expected after evidence generation: the clean-room, secret, dependency, source-boundary, static-analysis, unit, fuzz, invariant, pinned-fork, decoder, crash-replay, publication, and complete local-loop checks pass with zero unresolved critical or high findings",
+        "The local proof bundle and the separately authorized live-action bundle have different identities; neither one grants authority to the other",
+        "F3 stays blocked until the real external spikes pass or receive explicit owner waivers, and F4 stays blocked until the post-spike final interfaces and freeze evidence exist"
+      ]
+    },
+    {
+      "id": "SPIKE-R54-P1-001-BINDING-CUSTODY",
+      "integration": "Revision-54 Robinhood build binding and ADR-0017 permanent launch-position custody",
+      "status": "PASSED_LOCAL_AND_READ_ONLY_PRODUCTION_BLOCKED",
+      "smallestRealCalls": [
+        "Two independent fetches of every official source body",
+        "Two independent eth_chainId, genesis, eth_getCode, eth_getProof, ERC-1967 implementation-slot, and USDG metadata probe sets",
+        "Two isolated clean Foundry builds and nine contract tests covering the binding, all eight pinned PoolManager swap quadrants, all eight partial-fill rejection quadrants, and a pinned v4-periphery PositionManager mint into permanent custody with post-custody trading"
+      ],
+      "result": {
+        "requirementsRevision": 54,
+        "architectureRevision": 3,
+        "manifest": "bindings/robinhood-chain.json",
+        "manifestDigest": "sha256:97280c263a0e238c447e73ae12d176ff4bcfb6653cb2ca84df26f575f47b7861",
+        "sourceProbeDigest": "sha256:c60c7171b3b46f01438b1299ecf36ed144419cae969c02f1d22aad287d91a8bb",
+        "runtimeProbeDigest": "sha256:d4edf5532b401fe43644a5aefff84d36bad8128fa93523144982f9aa6a763cd1",
+        "chainId": 4663,
+        "genesisHash": "0xaad15f3d702aaea00caf3e9bb56395efe9127bc3b31b24921abf1eee3409305c",
+        "poolManagerRuntimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+        "positionManagerRuntimeCodeHash": "0xc873e135dc9aaec88489cfbad146b4cb49d6a32e0d80326377784b7ba17670b2",
+        "staticLpFee": 0,
+        "hookPermissionMask": "0x00cc",
+        "hookFeeBasisPoints": {
+          "total": 300,
+          "programmable": 10,
+          "treasury": 40,
+          "process": "total minus independently rounded Programmable and treasury amounts"
+        },
+        "launchAllocationBasisPoints": 9000,
+        "swapQuadrantsPassed": 8,
+        "executedUsdgNormalization": {
+          "specifiedUsdg": "ABS_FINAL_CALLER_SPECIFIED_DELTA_AFTER_FULL_FILL",
+          "unspecifiedUsdg": "ABS_RAW_POOL_UNSPECIFIED_DELTA_BEFORE_AFTERSWAP_HOOK_DELTA"
+        },
+        "custodyAbiFunctions": [
+          "finalizePosition",
+          "onERC721Received",
+          "positionManager",
+          "positionReceived",
+          "positionTokenId"
+        ],
+        "forbiddenCustodyAuthorityPaths": 0,
+        "delegatecallPresent": false,
+        "selfdestructPresent": false,
+        "postCustodyBuyPassed": true,
+        "postCustodySellPassed": true
+      },
+      "productionBlockers": [
+        "DEPLOYED_ROBINHOOD_POOLMANAGER_CALLBACK_AND_SETTLEMENT_FORK: the pinned source passes locally, but the deployed Robinhood runtime and final canonical PoolKey fork path are unproven.",
+        "PROGRAMMABLE_OWNER_AND_CLAIM_DESTINATION_POLICY_RESOLUTION: the owner and claim-destination policy is unresolved.",
+        "EXACT_OUTPUT_USDG_Q_GROSS_NET_AND_FEE_CUSTODY_SEMANTICS: official Robinhood and Programmable evidence must bind exact-input and exact-output USDG Q, the gross/net convention, hook-fee custody, and every delta stage before production.",
+        "The HKMN and CREATE2 hook addresses, final ordered PoolKey, tick spacing, and PoolId do not exist before an owner-authorized deployment.",
+        "Programmable still does not advertise Robinhood chain 4663 production admission.",
+        "The local custody runtime has not been deployed and does not yet own the production PositionManager token.",
+        "A pinned-fork canonical pool with real supported post-custody swaps and route-wide zero surcharge remains unproved.",
+        "The exact 90 percent launch allocation has not been funded to custody on chain."
+      ],
+      "authorityBoundary": "The result proves a build-only contract and read-only binding. It does not authorize deployment, custody mutation, signing, broadcast, asset movement, gas spend, or publication."
+    }
+  ],
+  "waivers": [],
+  "blockingFacts": [
+    "DEPLOYED_ROBINHOOD_POOLMANAGER_CALLBACK_AND_SETTLEMENT_FORK remains unproven: the pinned source passes locally, but the deployed runtime and final canonical PoolKey have not been exercised on a fork.",
+    "PROGRAMMABLE_OWNER_AND_CLAIM_DESTINATION_POLICY_RESOLUTION remains unresolved: no owner or claim-destination policy is bound for production.",
+    "EXACT_OUTPUT_USDG_Q_GROSS_NET_AND_FEE_CUSTODY_SEMANTICS remains unresolved: the local Q normalization is not authoritative for production gross/net, exact-output, fee-custody, or delta-stage semantics.",
+    "Revision-54 local proofs now bind a zero static LP fee, exclusive inclusive 3.00 percent hook-fee contract, all eight USDG swap quadrants, and an immutable single-position receiver with no project-controlled position path; these are not deployed production facts.",
+    "Official live Programmable discovery and V3 capabilities advertise chain ID 1 only; chain 4663 is not a supported production launch target.",
+    "No exact Relay pair quote, decoded transaction set, or real Robinhood-USDG to Solana-Circle-USD-Coin to Robinhood-USDG roundtrip exists.",
+    "Collector mutation, transaction, custody, open, and buyback behavior is unproven, and its documented authentication rule conflicts with observed public GET behavior.",
+    "The local fixture journal, independent Merkle-sum tooling, and local gas and size evidence exist; exact live provider payloads, official production headroom, and the two-location publication proof remain unresolved.",
+    "The local immutable-vault path removes Operations custody, but production provider, authorizer, route-executor, bridge, and policy-wallet compromise exposure remains separate, nonzero, and unquantified until exact live bindings exist.",
+    "Every remaining live proof crosses one or more ask-first boundaries and therefore cannot be inferred from the Phase 1 design approval."
+  ],
+  "nextSmallestProof": "After the onchain kernel produces HKMN and hook initcode, resolve the owner and claim-destination policy and bind official exact-input and exact-output USDG Q, gross/net, fee-custody, and delta-stage semantics. Then run one pinned Robinhood fork that derives the final ordered PoolKey, exercises the actual PoolManager callback and settlement path, deploys the custody receiver, mints the exact 90 percent position to it, and executes supported post-transfer buys and sells with zero route surcharge. Production deployment, signing, broadcast, asset movement, gas spend, and publication remain separately ask-first."
+}

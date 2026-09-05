@@ -1,0 +1,20 @@
+{
+  "id": "r-00351",
+  "at": "2026-09-01T05:45:01.081Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-008",
+    "commitSha": "27d6cc3a20ec23833be5b86b08b153e9327d5b7f",
+    "taskFingerprint": "0e062146091f63cb5138eba742b58d9e3345214999ca6bbc8e46d655a8f27350",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "qa/reviews/p1-012-local-verification.json": "99b626bcf3f01b3418a254fc1118a50dd0608beb41e724eece424fc26a14ca1c",
+    "release/phase1/local-evidence.json": "0e329a0e73f0ee6957319ea860dfdaf0d8f347add1ddaf69de82dc9a0fe228ae",
+    "release/phase1/local-candidate.json": "12d2afd5c4760e1c7ac2bf2b2ca8b1cbbc747a14a220232a216c0be7a8b6e8cb",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

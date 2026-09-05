@@ -1,0 +1,20 @@
+{
+  "id": "r-00056",
+  "at": "2026-08-30T08:01:46.218Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "AUTO-SCOPE PHASE-1-SPEC APPROVED"
+  },
+  "inputHashes": {
+    "gates/spec.json": "327e14a644919e7e7fc821dec8ef5bd8a1e7f9098662bcfdd94cf52f1666e61e",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "6eb2478f43e0e87a98da01ed868d737a19fe2038958b3e85fce2e5c411f14660",
+    "decisions/owner-approvals/phase-1-spec-approved.json": "bc42d77df747bf7bd1e4a276656118a0eac041cf01a74439eff453bb0115bf85"
+  }
+}

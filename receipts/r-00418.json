@@ -1,0 +1,41 @@
+{
+  "id": "r-00418",
+  "at": "2026-09-01T16:47:06.007Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-010",
+    "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+    "taskFingerprint": "e48a4680fa9d75891baab3239f549bebdb8dfad3522e410b8d0c65c98e79147a",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "qa/reviews/p1-012-local-verification.json": "99b626bcf3f01b3418a254fc1118a50dd0608beb41e724eece424fc26a14ca1c",
+    "release/phase1/local-candidate.json": "50988e9a272cbbe6ea0a0608f8404d63cddb55e1d168b1b3bb54041b1c1c0687",
+    "release/phase1/local-evidence.json": "0e329a0e73f0ee6957319ea860dfdaf0d8f347add1ddaf69de82dc9a0fe228ae",
+    "release/phase1/local-reproducibility.json": "5b4548a3e8b548cb2c8b15782cfca1b793b9c56ead0be9c7bda6fb8e9912a897",
+    "release/phase1/local-toolchain.json": "4281412219042eb0949a0ef142afb361776428b70c5f2782c243b17355e92086",
+    "packages/runner/src/cycle/authorization.mjs": "fb5f8157dc882d836572821f28af166ebf87c248d527636ae3c349deac905fe3",
+    "packages/runner/src/cycle/bindings.mjs": "7a0834cba71a5a3115eed5f8d469fd13ee6776de83f2ad618039536fa66aa9aa",
+    "packages/runner/src/cycle/blockhash-validity.mjs": "04ea6415ba55163248bbec69283f91d053c955fbedca99b5f7dd5ae636672888",
+    "packages/runner/src/cycle/collector.mjs": "da6f06270e0343fb32538a05c689981bb0465e14c4cde372f3958b30c0fe1d83",
+    "packages/runner/src/cycle/cycle-runner.mjs": "83c188de729310bf7a4a6afbf196fc32488fc25d39bb96c39318c6b8c939386a",
+    "packages/runner/src/cycle/cycle-store.mjs": "96c0393ea937e26bc59d169cffc387495f4efc1c7abe021127df8c3f755bbe49",
+    "packages/runner/src/cycle/decoder.mjs": "e3b3126596972c6c1d040485a78868387142e061fa56f7b2418aa1e21eb6aca5",
+    "packages/runner/src/cycle/execution-accounting.mjs": "532afd347a58ed69a4e255be066b18cb465b042952fe43cabb1665a454153ebf",
+    "packages/runner/src/cycle/journal.mjs": "5f390e6e2b0bd51b28873d08bd5dcd12a080ec7b6b8c2079ae2ca1f384a73c0e",
+    "packages/runner/src/cycle/preflight.mjs": "cd05516968186f508dd11ebf005ee157a47b62a1d83192069fd1cc1f54ae0db6",
+    "packages/runner/src/cycle/receipt-registry.mjs": "0e507bd27b576a768f8f2bec90d64182664ae98952773da79d3340c1ed506d94",
+    "packages/runner/src/cycle/reducer.mjs": "ff929041f4c15a2e043531e4036930cc37e3ae8d8f23c2485ebf786b4f201f44",
+    "packages/runner/src/cycle/schemas.mjs": "118fcdc65df73bb5b9d0bb3e4cdcd2110ee23a7a4a26991942b1d3377cb1b495",
+    "packages/runner/src/cycle/vault-payout-authorization.mjs": "1b10d2e830b1e518f7ea6bc82a7e0c9869f436e1f794c09b52dc667b56eb857b",
+    "packages/runner/src/cycle/verify-fixtures.mjs": "6c7a2b0277b5b12bc27412cae004af8c831e8b50c0af4527bbf5840c0cd0d7a2",
+    "packages/runner/test/cycle/fixture-crypto.mjs": "f4337500e420e04d2e2f45fe6acae6cc36368c6750ba30879d752539c0cad276",
+    "packages/runner/test/cycle/fixture-cycle.mjs": "d1876789e76ba209854e211993e42619358bde2db73abaed28bad805965b9304",
+    "packages/runner/test/cycle/security.test.mjs": "7714914a201034600f083435a04d39fbc8436d880fc6e0f7dc33b77cfa6b30e0",
+    "packages/runner/test/integration/phase-one-local-loop-adapter.mjs": "dae06eb770a890ef13e15ffde73baf828f719b57ee2a1a94dc0ed4ebd61c89a8",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

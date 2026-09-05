@@ -1,0 +1,11 @@
+{
+  "id": "r-00004",
+  "at": "2026-08-29T23:35:46.875Z",
+  "type": "prd-defined",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/PRD.md": "639ffeb25a4298cbd7033ce928fb2168b51ff144588c972c12c7ac09bc586d31"
+  }
+}

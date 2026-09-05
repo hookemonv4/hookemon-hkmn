@@ -1,0 +1,17 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes adoption of requirements revision 63 and architecture revision 9 for the Phase 3 Operations-wallet money path. It freezes persisted Relay settlement, first-use standing-authority reservations, typed minima and mandatory gas caps, split provider-graph and owner-seed launch atomicity, and durable payout recovery. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/capability-map.json": "825bb23833caa6bcb4970ef32b9c3f5b4a52f901311f41d1a5b425d361b15ae6",
+    "architecture/interfaces.json": "7335deedd7c8fc3d31fa357265ce1643cdb46792e0eef4e0aa3e01ab20c3d6a6",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "290f4b75146970e28b10ab8dc430620f24c372482a4a7afa600ced3eb6a6aec9",
+    "product/delivery-boundary.json": "5b36a35a59a407c9bf86a2586b3eb5889207f61563ba3385dab7718e46534acc",
+    "specs/requirements.json": "696ac5c670e900089cc723674b3910fec4798c284708926eb05bfed49b817c15"
+  }
+}

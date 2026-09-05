@@ -1,0 +1,18 @@
+{
+  "id": "r-00311",
+  "at": "2026-08-31T20:27:10.314Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-006",
+    "commitSha": "5fe64e77e49132341185e4894e8b5c7ab5c0f8a4",
+    "taskFingerprint": "ec6fa631eff5535549c47880e5d65e26c62ab0ea2e6c8df663b9a690e7cb1f10",
+    "requirementsRevision": 55,
+    "requirementsHash": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  },
+  "inputHashes": {
+    "packages/contracts/test/process/ProcessBudget.t.sol": "05c97253828829ac0b05e1fd8b09fadd5a00af63455765dd03887bf744545b6e",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

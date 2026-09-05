@@ -1,0 +1,18 @@
+{
+  "id": "redteam", "version": 2,
+  "items": [
+    { "id": "R1", "text": "Doubt loop ran: reviewer received ONLY artifact + contract (never the author's reasoning), with an issues-only prompt", "receiptType": "doubt-loop-review-run", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["qa/redteam/doubt-loop.json"], "requiredPrefixes": [], "allowedInputs": ["qa/redteam/doubt-loop.json"], "allowedPrefixes": [] } },
+    { "id": "R2", "text": "Every finding classified: contract-misread, valid-actionable, valid-tradeoff, or noise; classifications recorded in decisions/", "receiptType": "review-findings-classified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["decisions/redteam/findings.json"], "requiredPrefixes": [], "allowedInputs": ["decisions/redteam/findings.json"], "allowedPrefixes": [] } },
+    { "id": "R3", "text": "All valid-actionable criticals resolved, or explicitly overridden by the owner", "receiptType": "critical-findings-resolved", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["qa/redteam/resolutions.json"], "requiredPrefixes": [], "allowedInputs": ["qa/redteam/resolutions.json"], "allowedPrefixes": [] } },
+    { "id": "R4", "text": "Loop terminated in at most 3 cycles; if substantive findings remained, the result is EXHAUSTED_WITH_OPEN_FINDINGS and continuing required an owner override receipt", "receiptType": "doubt-loop-termination-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["qa/redteam/termination.json"], "requiredPrefixes": [], "allowedInputs": ["qa/redteam/termination.json"], "allowedPrefixes": [] } },
+    { "id": "R5", "text": "New trust boundaries got a threat pass (spoofing, tampering, repudiation, disclosure, denial, elevation)", "receiptType": "threat-pass-completed", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["qa/redteam/threat-model.json"], "requiredPrefixes": [], "allowedInputs": ["qa/redteam/threat-model.json"], "allowedPrefixes": [] } }
+  ],
+  "redFlags": [
+    "Reviewer output contains 'looks good' (issues-only prompts do not produce praise)",
+    "Two or more cycles with substantive findings but zero classified actionable — that is validation theater, not doubt",
+    "The author's rationale was passed to the reviewer"
+  ],
+  "rationalizations": [
+    { "id": "RZ-R1", "excuse": "We already reviewed it ourselves carefully", "reality": "Self-review inherits the author's blind spots. The loop exists because agreement is cheap and refutation is information." }
+  ]
+}

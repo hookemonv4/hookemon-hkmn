@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "feasibility",
+  "itemId": "F2",
+  "rationale": "Owner approves the survivability bounds recorded in feasibility/survivability-bounds.json for requirements revision 58 as local closure bounds only; this authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "feasibility/cycle-control-survivability-bounds.json": "59bcd54c0873bb941ccd9e941419c0632a55fb28bf21320464e23cb87cc3562f",
+    "gates/feasibility.json": "b5e15577156d7ab88131bc1f948f7bce5fbad67cc77897b3508dd24ff5813d75",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8"
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "phase": "redteam",
+  "requirementsRevision": 58,
+  "architectureRevision": 5,
+  "method": "STRIDE",
+  "review": {
+    "reviewer": "redteam-r58-phase2-automation-and-payout-authority",
+    "context": "fresh",
+    "artifactOnly": false,
+    "issuesOnly": true,
+    "authorOfReviewedChanges": false,
+    "scope": [
+      "automation (packages/adapters/src/app/**, packages/runner/src/scheduler, automated-cycle-service)",
+      "escrow (PegCycleReturnEscrow.sol, PegCycleRouteExecutor.sol)",
+      "chunked payout (PayoutCommitment.sol, CanonicalMerkleSum.sol, HolderSettlement.sol)",
+      "open router / optional hookData (CanonicalMarket.sol)",
+      "cumulative fee remainder + 1000-unit minimum (FeeAccounting.sol)",
+      "DEGRADED quarantine + dust fast path (PegCycleVault.sol)",
+      "distribution-signer / verifier split (packages/runner/src/distribution/**, packages/adapters/src/signing/**)",
+      "production evidence profile + StandingAuthorityProvider (packages/runner/src/cycle/evidence-profile.mjs, authorization-provider.mjs)",
+      "stage driver live paths + liveMode gating (packages/adapters/src/app/stages/**, stage-driver.mjs)",
+      "dashboard operator routes (packages/dashboard/src/**)"
+    ],
+    "criticalFindingCount": 2,
+    "highFindingCount": 0,
+    "mediumFindingCount": 2,
+    "inProgressFindingCount": 1,
+    "rescopedFromR55Count": 3,
+    "closedByTestCount": 2
+  },
+  "categories": [
+    {
+      "category": "Spoofing",
+      "threats": [
+        {
+          "id": "STRIDE-R58-S-01",
+          "severity": "critical",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "A holder of the single vault-authorizer EVM key calls PegCycleVault.authorizePayout and PayoutCommitment.commitPayoutChunk directly, presenting a self-chosen rootHash/rootSum/manifestDigest as though it were the product of the design's two-key distribution-signer + verifier process. Neither on-chain function accepts, references, or checks any distribution-signer or verifier signature; both trust msg.sender == pegCycleVault.authorizer() alone. The caller is thereby able to spoof 'the dual-builder/dual-publication process approved this manifest' with no such approval ever having existed.",
+          "affectedFindings": ["RT-R58-01"],
+          "requiredControl": "Bind PegCycleVault.authorizePayout (or PayoutCommitment.commitPayoutChunk) to an on-chain check of both the distribution-signer's and the independent verifier's signatures over the exact rootHash/rootSum, e.g. ecrecover/Ed25519-precompile verification against two owner-configured, non-worker-held public keys, before either records a claimable manifest."
+        },
+        {
+          "id": "STRIDE-R58-S-02",
+          "severity": "critical",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "Anyone who has cloned this public repository already holds the Ed25519 private keys that packages/runner/src/distribution/manifest.mjs hardcodes as the sole verification keys for a distribution-signer approval (OWNER_PUBLIC_KEY) and a verifier receipt (DISTRIBUTION_VERIFIER_PUBLIC_KEY) -- the matching private keys are committed in cleartext as 'fixture' test keys and reused unchanged by the live distribution.mjs stage. An attacker who is not the worker, not the owner, and not the verifier can independently construct a fully valid-looking distribution-signer approval + verifier receipt pair for any manifest of their choosing.",
+          "affectedFindings": ["RT-R58-02"],
+          "requiredControl": "Load the production owner and verifier public keys from operator configuration (never a module-level constant) in manifest.mjs, distinct from and never overlapping with the fixture keypairs used by the test suite; reject verification when no production key is configured rather than silently falling back to the fixture key."
+        }
+      ]
+    },
+    {
+      "category": "Tampering",
+      "threats": [
+        {
+          "id": "STRIDE-R58-T-01",
+          "severity": "critical",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "Same root cause as STRIDE-R58-S-01: the vault-authorizer key can tamper with which Merkle-sum tree is authoritative for a cycle's entire returned proceeds by committing its own single-leaf tree via commitPayoutChunk, then calling HolderSettlement.payEntitlement against that tree to pay itself the full rootSum. PayoutCommitment.sol's own doc comment (lines 18-27) already names this exact risk for a 'lower-trust' caller such as operationsTrigger, but does not recognize that the *current* privileged caller (the vault authorizer) is itself the always-on worker's own key per design.md section 2.3 and is wired to packages/adapters' single signerClient.evm.",
+          "affectedFindings": ["RT-R58-01"],
+          "control": "See STRIDE-R58-S-01's requiredControl; same fix closes both."
+        },
+        {
+          "id": "STRIDE-R58-T-02",
+          "severity": "medium",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "PegCycleVault.recordDegradedReturn accepts any acceptDegraded=true boolean from msg.sender==authorizer as proof that the required off-chain, separately-logged human confirmation already happened (PegCycleVault.sol lines 410-417 comment). Nothing on-chain distinguishes a genuine human-confirmed call from an automated policy that always passes true, or from a compromised authorizer key deciding unilaterally. A cycle that would otherwise have paid out cleanly (balance >= rootSum) can instead be tampered into DEGRADED quarantine at the authorizer's sole discretion.",
+          "affectedFindings": ["RT-R58-04"],
+          "requiredControl": "Either bind acceptDegraded to a second, independently-held confirmation signature (mirroring the distribution-signer/verifier split), or accept this as a documented, owner-approved trust boundary on the authorizer key specifically for the DEGRADED path and say so explicitly in the ADR-0021 text (design.md section 2.5 already flags the requirement but the contract does not enforce it)."
+        }
+      ]
+    },
+    {
+      "category": "Repudiation",
+      "threats": []
+    },
+    {
+      "category": "Information Disclosure",
+      "threats": [
+        {
+          "id": "STRIDE-R58-I-01",
+          "severity": "critical",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "The private key material for the two identities the whole distribution-signer/verifier security property depends on (the 'owner' and 'verifier' Ed25519 keys manifest.mjs checks against) is disclosed in the repository itself, in plaintext, as committed test fixtures (packages/runner/test/cycle/fixture-crypto.mjs, packages/runner/test/distribution/manifest.test.mjs, packages/runner/test/distribution/distribution-signer.test.mjs). This is the same finding as STRIDE-R58-S-02 viewed from the disclosure angle: the keys are not merely weak or test-only in intent, they are a matter of public record.",
+          "affectedFindings": ["RT-R58-02"],
+          "requiredControl": "Same as STRIDE-R58-S-02. Additionally: once a production key is introduced, confirm no code path can ever select the fixture key when a production evidence profile is active (an explicit profile-to-key binding, not an implicit module-level default)."
+        }
+      ]
+    },
+    {
+      "category": "Denial of Service",
+      "threats": [
+        {
+          "id": "STRIDE-R58-D-01",
+          "severity": "medium",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "The composed production runner (packages/adapters/src/app/compose.mjs) exposes exactly one EVM signer role, signerClient.evm, used identically by funding.mjs (authorizeFunding, requires msg.sender == PegCycleVault.authorizer), outbound.mjs (executeOutbound, requires msg.sender == activeAuthorization.operationsTrigger), and payout.mjs (authorizePayout, requires msg.sender == authorizer). PegCycleVault._validateFundingAuthorization (PegCycleVault.sol line ~491) explicitly rejects a FundingAuthorization whose operationsTrigger equals the vault's own authorizer. Because funding.mjs always sets operationsTrigger to config.accounts.evm (HOOKEMON_EVM_ACCOUNT) while signerClient.evm actually signs from whichever single account HOOKEMON_KEYCHAIN_EVM_ACCOUNT (or the external signer module) names, there is no configuration of this composition under which both authorizeFunding/authorizePayout (which need msg.sender==authorizer) and executeOutbound (which needs msg.sender==operationsTrigger) can succeed for the same deployment: the one available signer identity would have to satisfy both authorizer and operationsTrigger simultaneously, which the contract forbids by design. As shipped, the live path cannot complete a full cycle under any single-signer configuration.",
+          "affectedFindings": ["RT-R58-03"],
+          "requiredControl": "Add a second, distinct EVM signer role to the signerClient seam (e.g. signerClient.vaultAuthorizer, separate from signerClient.evm used for operationsTrigger-role calls) and wire funding.mjs/payout.mjs to sign with it while outbound.mjs keeps signerClient.evm; document which HOOKEMON_* environment variable backs which role so an operator cannot accidentally collapse them to the same address."
+        }
+      ]
+    },
+    {
+      "category": "Elevation of Privilege",
+      "threats": [
+        {
+          "id": "STRIDE-R58-E-01",
+          "severity": "critical",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "design.md section 2.3 states the always-on worker holds only identities 1 (Operations trigger), 2 (vault authorizer) and the Solana leg of identity 3, specifically so that 'a compromised worker host can therefore never redirect a cycle's payout on its own' -- that guarantee depends entirely on identity 4 (distribution-signer + verifier) being both non-worker-held AND actually checked before a payout is authorized. Findings RT-R58-01/02 show neither on-chain nor off-chain enforcement of that check exists in the code as merged: identity 2 alone (worker-held) is sufficient to author and commit an arbitrary payout manifest and settle it to itself, which is exactly the elevation the design's own custody model (section 2.3, decision D7) was built to prevent.",
+          "affectedFindings": ["RT-R58-01", "RT-R58-02"],
+          "requiredControl": "Same as STRIDE-R58-S-01/S-02. This entry exists to name the elevation-of-privilege framing explicitly, distinct from the spoofing/tampering framing of the same root cause, per STRIDE's convention of one entry per violated security property."
+        }
+      ]
+    }
+  ],
+  "verifiedClosed": [
+    {
+      "id": "RT-R58-CLOSED-01",
+      "test": "Can the open-router / optional-hookData relaxation (WP-05, REQ-canonical-market-6) be abused to bypass fee accrual?",
+      "verdict": "NO",
+      "evidence": "CanonicalMarket.sol: _beforeSwap/_afterSwap compute the charged fee (_fee/_previewTotalFee -> FeeAccounting._splitLiability) from the pool's own authenticated BalanceDelta (_validateFinalizedSwap), never from hookData. CanonicalSwapHookData.tryDecode (lines 58-102) affects only the auxiliary buyerHkmnCredit bookkeeping when hookData is absent or malformed; fee collection (_collectFee) and liability accrual (_accrueAuthenticatedSwap) run unconditionally before hookData is even inspected. swapRouter (line 153/186) is now dead state -- grepped across packages/contracts/src, it is never read outside the constructor -- confirming no caller/router is special-cased for fee purposes either way."
+    },
+    {
+      "id": "RT-R58-CLOSED-02",
+      "test": "Can a DEGRADED or quarantined balance be swept by any code path?",
+      "verdict": "NO",
+      "evidence": "PegCycleReturnEscrow.sol exposes exactly two mutating functions, both callable only by the coordinator (the vault): sendOutbound (only reachable from PegCycleVault.executeOutbound, which requires lifecycle==FUNDED) and sendPayout (only reachable from PegCycleVault.consumePayoutAuthorization, which requires lifecycle==RETURNED). recordDegradedReturn moves the vault's global lifecycle to the terminal DEGRADED state (PegCycleVault.sol lines 408-428, _recordTerminalReceipt lines 518-530) without touching cycleEscrows[cycleId]'s balance. Because lifecycle is a single global machine and a DEGRADED (or FAILED) cycle's own escrow address is never re-associated with a later cycle (authorizeFundingAfterFailure creates a fresh CREATE2 escrow for the successor cycleId, cycleEscrows[successorId] != cycleEscrows[failedId]), no later call can ever reach lifecycle==FUNDED or ==RETURNED for the old cycleId/escrow pair again. No rescue, sweep, or owner-drain function exists on PegCycleReturnEscrow, PegCycleVault, or PegCycleRouteExecutor."
+    }
+  ],
+  "rescopedFromRevision55": [
+    {
+      "id": "RT-R55-02",
+      "revision58Id": "RT-R58-05",
+      "disposition": "STILL_OPEN_UNCHANGED",
+      "note": "The new standing-authority document (packages/runner/src/cycle/authorization-provider.mjs, createStandingAuthorityProvider) enforces perCycleSpendCap and maxCyclesPerDay, but only as an off-chain signature/policy check on step authorizations before a journal entry is accepted -- FeeAccounting.sol/ProcessBudget.sol still have no on-chain cap on the process liability a compromised authorizer/operations identity could debit and route outbound (FeeAccounting._debitProcessLiability only checks amount <= processLiabilityAmount, no ceiling). The original finding (a compromised current Operations identity can release the complete accrued process liability; no onchain cap) is unchanged by this revision and remains open pending the same owner reapproval RT-R55-02 already called for."
+    },
+    {
+      "id": "RT-R55-05",
+      "revision58Id": "RT-R58-06",
+      "disposition": "STILL_OPEN_UNCHANGED",
+      "note": "WP-27's disk-backed DurableCycleStore (packages/runner/src/cycle/durable-store.mjs) fixes the runner's own ~16-cycle in-memory operational ceiling but does not address RT-R55-05's actual subject: durable, non-expiring, independently-recoverable *public* proof retention for a holder's unpaid entitlement (republication/archival of a manifest across independent failure domains so a holder can always reconstruct their claim). No new artifact in this revision implements content-addressed release-archive retention or republish/recovery semantics for payout manifests. Remains open pending owner-approved retention design."
+    },
+    {
+      "id": "RT-R55-06",
+      "revision58Id": "RT-R58-07",
+      "disposition": "PARTIALLY_MITIGATED_STILL_OPEN",
+      "note": "WP-05's open-router / optional-hookData change (REQ-canonical-market-6, verified in RT-R58-CLOSED-01) removes the pool's dependency on any *specific* router address for correct fee/liability behavior, which was the practical risk this finding named. WP-24 adds packages/contracts/test/integration/RobinhoodV4Fork.t.sol (pinned-block, reviewable) and RobinhoodV4ForkSmoke.t.sol (current-head drift check) against a real forked PoolManager, closing the 'proven only through a test-local router' gap for the callback/settlement path itself. What remains open, per design.md section 12 and the coordinator's 2026-09-02 verified RPC facts: an actual live (not forked) confirmation of zero additional surcharge and correct settlement against the production Robinhood-chain PoolManager once Programmable's chain-4663 profile is launch-ready -- this is blocked on external readiness (Programmable status: unavailable), not a code defect, and feasibility/official-robinhood-binding-recheck.json predates this revision's WP-05/WP-24 evidence and should be refreshed once a live probe is possible."
+    }
+  ],
+  "inProgress": [
+    {
+      "id": "RT-R58-08",
+      "status": "IN_PROGRESS",
+      "reference": "WP-37 (branch codex/p2-wp-37, not yet merged onto this branch)",
+      "scenario": "packages/adapters/src/app/stages/distribution.mjs's buildFinalizedHolderSnapshot (lines 109-145) excludes only the vault, the hook, and the current cycle's own return escrow from the HKMN holder snapshot -- not the canonical pool, the treasury/Programmable beneficiaries, or any *prior* cycle's return escrow (each of which is a real, computable CREATE2 address the runner already knows how to derive). Until WP-37 lands, a live distribution computed by this code today would treat pool/treasury/prior-escrow HKMN balances, if any, as ordinary holder balances and pay them a pro-rata share.",
+      "note": "Per the coordinator's base-state note, WP-37 already scopes and is building this exact fix (buildHolderExclusionSet). Recorded here as a tracked gap against the merged base this review covers, not re-derived as a fresh remediation design; do not close until WP-37's own tests land and pass on this branch."
+    }
+  ],
+  "resolvedFindingIds": ["RT-R55-01", "RT-R55-03", "RT-R55-04", "RT-R58-CLOSED-01", "RT-R58-CLOSED-02"],
+  "openFindingIds": [
+    "RT-R58-01", "RT-R58-02", "RT-R58-03", "RT-R58-04",
+    "RT-R58-05", "RT-R58-06", "RT-R58-07"
+  ],
+  "inProgressFindingIds": ["RT-R58-08"],
+  "unresolvedCriticalCount": 3,
+  "unresolvedHighCount": 0,
+  "unresolvedMediumCount": 2,
+  "productionAuthorizationGranted": false,
+  "externalActionAuthorizationGranted": false
+}

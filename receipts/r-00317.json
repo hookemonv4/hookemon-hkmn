@@ -1,0 +1,17 @@
+{
+  "id": "r-00317",
+  "at": "2026-08-31T20:32:44.251Z",
+  "type": "task-requirements-bound",
+  "phase": "tasks",
+  "result": "PASSED",
+  "data": {
+    "itemId": "T1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/tasks.json": "53eba48fcab9ca3c2d95e9225dbd8137720d756f017448ca15b2974a4eba7275",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4",
+    "tasks.json": "721edfa64c594c143f2bfcb735e7c91a7b9175329e4b988a723b340adf6f20ea"
+  }
+}

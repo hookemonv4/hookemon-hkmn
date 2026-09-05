@@ -1,0 +1,31 @@
+{
+  "id": "base",
+  "version": "0.1.0",
+  "coreCompat": ">=0.1.0",
+  "namespaces": ["base"],
+  "pathOwnership": [],
+  "dependsOn": [],
+  "contributions": {
+    "feasibilityModels": [
+      {
+        "id": "base.scenario",
+        "description": "Generic best/expected/worst scenario harness: the project defines numeric inputs and survivability bounds in feasibility/model.mjs; the gate requires the model to run and the worst case to stay within owner-approved bounds."
+      }
+    ],
+    "gateItems": [],
+    "certifiedModules": [],
+    "releaseStates": ["built", "verified", "released", "operating"],
+    "sourceHierarchy": [
+      "Official documentation of the exact pinned dependency versions",
+      "Source code of the pinned dependencies",
+      "Project decisions/ and specs/",
+      "Banned as primary sources: blog posts, forums, AI training-data recall"
+    ],
+    "opsTemplates": [
+      { "id": "base.alerts", "description": "Two severities only: page (act now) and ticket (act this week). Every alert must be actionable and link a runbook of at least three lines: what it means, first check, escalation." }
+    ],
+    "advisories": [],
+    "discoveryQuestions": [],
+    "phaseAdapters": []
+  }
+}

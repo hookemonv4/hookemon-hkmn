@@ -1,0 +1,14 @@
+{
+  "id": "r-00010",
+  "at": "2026-08-30T00:27:46.626Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/PRD.md": "ec44aa6a44facc037f5e3ff8faf471d5201f19666031c29e3a800f0c59bf2831",
+    "product/PHASE_EXECUTION.md": "9e447dce38e47f7de52507e7044fb652e3a9af2bab2a23a1128306d9103e3c32",
+    "product/SOURCE_BOUNDARY.md": "9f7d34a32860122f82a007d3550b2f651a49f1e6030d66b7743342ae3c75da5e",
+    "decisions/ADR-0001-clean-room-programmable-robinhood.md": "c08dd6e50670fd0577623c2ced94b301f936141d26c502c68f66c39714d9791d"
+  }
+}

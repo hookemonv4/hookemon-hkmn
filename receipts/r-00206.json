@@ -1,0 +1,20 @@
+{
+  "id": "r-00206",
+  "at": "2026-08-30T21:02:28.322Z",
+  "type": "gate",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "gateVersion": 3,
+    "problems": []
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "gates/runs/feasibility.json": "eb069481ccbc549d7ef31207d1256823e7933ec0c1d0764e2bbd91cdbf48af28",
+    "receipts/r-00179.json": "6b9533a534e90fbdad43a876975c8f08da10408d163ea243919179fa942dfbc0",
+    "receipts/r-00199.json": "de135edd570976daebb01982fba7fd478790fabc86e5840c87078a508cf44537",
+    "receipts/r-00180.json": "dfe555ad3dca56dfb00024430fb8b2e951eaaaf99676643d65d1b259d62b0a8f",
+    "receipts/r-00205.json": "8c958650d3b7c8bd134e3a8c351c8f9d1525e615c829c34061de6fce1d989a74",
+    "receipts/r-00182.json": "20a1553ad801f6431404b2f0ac09d5ab0fb608a5308e4605c9c323b887d4c92d"
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "schema": "hookemon.failure-matrix.v1",
+  "cells": [
+    {
+      "system": "Provider mutation",
+      "failureClass": "pre-call-failure",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "NOT_SENT",
+      "expectedNextStage": "retry",
+      "owningWp": "WP07-0",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — persists NOT_SENT before an injected capability and retries the same request after reopen"
+    },
+    {
+      "system": "Collector API",
+      "failureClass": "committed-then-503",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "SENT_UNKNOWN",
+      "expectedNextStage": "reconcile",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — keeps a Collector committed-then-503 attempt SENT_UNKNOWN after reopen until reconciliation"
+    },
+    {
+      "system": "Relay",
+      "failureClass": "lost-response",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "SENT_UNKNOWN",
+      "expectedNextStage": "reconcile",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — keeps a Relay lost-response attempt SENT_UNKNOWN after reopen until reconciliation"
+    },
+    {
+      "system": "Relay leg",
+      "failureClass": "partial-finalized-delta",
+      "expectedTerminalState": "HELD_RELAY_PARTIAL",
+      "expectedAttemptState": "FINALIZED",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a wrong-amount return receipt as HELD_RELAY_PARTIAL after reopen"
+    },
+    {
+      "system": "Relay leg",
+      "failureClass": "refund-finalized-delta",
+      "expectedTerminalState": "HELD_RELAY_REFUND",
+      "expectedAttemptState": "FINALIZED",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a process-RPC origin refund credit after reopen without a second settlement"
+    },
+    {
+      "system": "Relay leg",
+      "failureClass": "late-finalized-delta",
+      "expectedTerminalState": "HELD_RELAY_LATE",
+      "expectedAttemptState": "FINALIZED",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a late return receipt as HELD_RELAY_LATE after reopen"
+    },
+    {
+      "system": "Relay leg",
+      "failureClass": "wrong-asset-finalized-delta",
+      "expectedTerminalState": "HELD_RELAY_WRONG_ASSET",
+      "expectedAttemptState": "FINALIZED",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a wrong-token or wrong-recipient return receipt as HELD_RELAY_WRONG_ASSET after reopen"
+    },
+    {
+      "system": "Transaction policy",
+      "failureClass": "wrong-asset",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": "NOT_SENT",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a wrong-asset transaction policy refusal before signing"
+    },
+    {
+      "system": "Transaction policy",
+      "failureClass": "wrong-recipient",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": "NOT_SENT",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a wrong-recipient transaction policy refusal before signing"
+    },
+    {
+      "system": "Relay quote",
+      "failureClass": "expired-quote",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired Relay quote before any request or broadcast"
+    },
+    {
+      "system": "Chain transaction",
+      "failureClass": "expired-blockhash",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": "BROADCAST",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired return blockhash while retaining a broadcast attempt after reopen"
+    },
+    {
+      "system": "EVM transaction",
+      "failureClass": "dropped",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "BROADCAST",
+      "expectedNextStage": "reconcile-or-rebroadcast",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stages-payout.test.mjs — rebroadcasts dropped bytes from a reopened payout repository without signing or holding"
+    },
+    {
+      "system": "EVM transaction",
+      "failureClass": "replaced",
+      "expectedTerminalState": "HELD_OWNER_DECISION",
+      "expectedAttemptState": "NONCE_INTERFERENCE",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stages-payout.test.mjs — continues a later recipient after isolated nonce interference and holds reopened payout custody"
+    },
+    {
+      "system": "Wallet lease",
+      "failureClass": "lost-lease",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": "NOT_SENT",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease before a provider effect and retains a NOT_SENT retry record"
+    },
+    {
+      "system": "Repository recovery",
+      "failureClass": "state-directory-loss",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP10a",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — a copied state-directory marker persists an owner-decision recovery hold instead of accepting a replacement tree"
+    },
+    {
+      "system": "Open result",
+      "failureClass": "missing-mint-response-recorded",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": "RESPONSE_RECORDED",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — open response missing its memo-bound mint holds durably without a retry"
+    },
+    {
+      "system": "Open result",
+      "failureClass": "missing-mint-sent-unknown-retry",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": "SENT_UNKNOWN",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — open SENT_UNKNOWN retry missing mint holds durably after reopen"
+    },
+    {
+      "system": "Epic gate",
+      "failureClass": "threshold-equality",
+      "expectedTerminalState": null,
+      "expectedAttemptState": null,
+      "expectedNextStage": "buyback",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — keeps a forty-percent epic equality sellable after a real repository reopen"
+    },
+    {
+      "system": "Buyback API",
+      "failureClass": "unavailable",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — holds unavailable buyback durably after reopen before its sole owner decision"
+    },
+    {
+      "system": "Snapshot",
+      "failureClass": "incomplete-logs",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP09a",
+      "test": "packages/adapters/test/app/eligibility-snapshot.test.mjs — holds incomplete snapshot logs durably after reopen before the sole claim transition"
+    },
+    {
+      "system": "Snapshot",
+      "failureClass": "reorg",
+      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP09a",
+      "test": "packages/adapters/test/app/eligibility-snapshot.test.mjs — holds a snapshot reorg durably after reopen before the sole claim transition"
+    },
+    {
+      "system": "Payout",
+      "failureClass": "frozen-recipient",
+      "expectedTerminalState": "HELD_OWNER_DECISION",
+      "expectedAttemptState": "REFUSED",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP09b",
+      "test": "packages/adapters/test/app/stages-payout.test.mjs — quarantines a frozen recipient, finalizes a later recipient, then holds reopened custody"
+    },
+    {
+      "system": "EVM nonce",
+      "failureClass": "interference",
+      "expectedTerminalState": "HELD_OWNER_DECISION",
+      "expectedAttemptState": "NONCE_INTERFERENCE",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stages-payout.test.mjs — continues a later recipient after isolated nonce interference and holds reopened payout custody"
+    },
+    {
+      "system": "Payout feasibility",
+      "failureClass": "holder-count-above-envelope",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP09b",
+      "test": "packages/adapters/test/app/eligibility-snapshot.test.mjs — holds a holder envelope breach durably after reopen before the sole claim transition"
+    },
+    {
+      "system": "USDG canary",
+      "failureClass": "paused",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP14",
+      "test": "packages/adapters/test/app/compose.test.mjs — holds an active cycle on a paused USDG status canary before any signing boundary"
+    },
+    {
+      "system": "USDG canary",
+      "failureClass": "frozen",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": null,
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP14",
+      "test": "packages/adapters/test/app/compose.test.mjs — holds an active cycle on a frozen USDG status canary before any signing boundary"
+    },
+    {
+      "system": "External signer",
+      "failureClass": "keychain-interaction",
+      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedAttemptState": "NOT_SENT",
+      "expectedNextStage": "owner-decision",
+      "owningWp": "WP08a",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a keychain interaction denial with redacted OS text before any broadcast"
+    },
+    {
+      "system": "Standing authority",
+      "failureClass": "replay-after-expiry",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "RESPONSE_RECORDED",
+      "expectedNextStage": "reconcile",
+      "owningWp": "WP07",
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — production signing replays a stored authority after expiry with one signer and a reopened reconciliation attempt"
+    }
+  ]
+}

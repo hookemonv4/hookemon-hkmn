@@ -1,0 +1,1887 @@
+{
+  "$schema": "urn:programmable:v4-hook-submission:1.5.0",
+  "schemaVersion": 1,
+  "standardVersion": "1.5.0",
+  "stage": "proposal",
+  "model": {
+    "id": "hookemon-autonomous-peg-cycle",
+    "name": "Hookemon Autonomous Peg Cycle",
+    "summary": "An autonomous USDG/HKMN v4 pool on Robinhood Chain whose canonical fee hook funds a scheduled off-chain cycle that buys and resells a Collector Crypt pack, bridges proceeds back as USDG through Relay, and pays HKMN holders pro rata through a chunked Merkle-sum payout.",
+    "userOutcome": "HKMN holders receive recurring pro-rata USDG distributions funded entirely by the canonical pool's own inclusive swap fee, without operating any infrastructure themselves.",
+    "category": "custom-hook-project",
+    "whyV4": "v4's singleton PoolManager and hook callbacks let the inclusive fee be authenticated, collected, and accounted for atomically inside the swap itself, and one immutable hook composes canonical-market callback authentication, fee accounting, holder settlement, and pinned issuance without a separate fee-collector contract or an approval-based skim."
+  },
+  "builder": {
+    "github": null,
+    "contact": null,
+    "beneficiary": null,
+    "licenseDeclaration": "MIT (SPDX-License-Identifier: MIT on every packages/contracts/src file)"
+  },
+  "builderTemplate": {
+    "schemaVersion": "1.0.0",
+    "source": "manual",
+    "templateSelection": null
+  },
+  "publicMetadata": {
+    "project": {
+      "name": "Hookemon",
+      "description": "Autonomous USDG/HKMN peg-cycle protocol on Robinhood Chain: a canonical v4 pool whose inclusive swap fee funds a scheduled off-chain cycle that buys and resells one Collector Crypt pack per interval and distributes the returned USDG to HKMN holders pro rata.",
+      "projectUri": null,
+      "logoUri": null,
+      "logoContentHash": null,
+      "metadataMutable": false,
+      "metadataOwner": null
+    },
+    "token": {
+      "name": "Hookemon",
+      "symbol": "HKMN",
+      "metadataUri": null,
+      "metadataContentHash": null,
+      "logoUri": null,
+      "logoContentHash": null,
+      "metadataMutable": false,
+      "metadataOwner": null
+    },
+    "localDiscoveryTags": [],
+    "claimedAffiliations": [],
+    "providerPresentations": []
+  },
+  "target": {
+    "chainId": 4663,
+    "network": "robinhood-chain",
+    "solidityVersion": "0.8.26",
+    "evmVersion": "cancun",
+    "dependencyBaseline": "model-specific-pinned",
+    "officialLaunchProfileId": null
+  },
+  "assets": [
+    {
+      "id": "usdg",
+      "role": "quote",
+      "origin": "existing-erc20",
+      "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "decimals": 6,
+      "decimalsSource": "token-contract-observation",
+      "supplyPolicy": "externally-managed",
+      "initialSupply": null,
+      "behaviors": [
+        "standard"
+      ],
+      "controls": [
+        "issuer-upgradeable-implementation"
+      ]
+    },
+    {
+      "id": "hkmn",
+      "role": "launched",
+      "origin": "new-fixed-supply",
+      "address": null,
+      "decimals": 18,
+      "decimalsSource": "implementation-constant",
+      "supplyPolicy": "fixed-at-creation",
+      "initialSupply": "420690000000000000000000000000",
+      "behaviors": [
+        "standard"
+      ],
+      "controls": []
+    }
+  ],
+  "launchLifecycle": {
+    "tokenCreation": {
+      "applicable": true,
+      "actor": "CustomLaunchStrategy through Uniswap LiquidityLauncher/UERC20Factory, called by the issuance authority (WP-20, not yet deployed)",
+      "valueFlow": "Mints the fixed WHOLE_HKMN_SUPPLY (420,690,000,000 whole HKMN, 18 decimals) directly to the launch allocation split enforced by HookemonIssuance._validatePlan: 90% market / 10% otherAllocation.",
+      "custody": "The minted market-allocation leg moves directly into the canonical PoolKey's permanent launch position; HookemonIssuance.verifyIssuance requires an exact two-leg TransferRecord trace before accepting the observation.",
+      "failure": "verifyIssuance rejects any observation whose balances or trace do not match the frozen plan; a rejected observation leaves token status pending and blocks canonical-market activation.",
+      "event": "HookemonIssuance's plan-committed/issuance-verified events (exact name INTEGRATION_PENDING pending WP-20).",
+      "notApplicableReason": null
+    },
+    "poolInitialization": {
+      "applicable": true,
+      "actor": "The launch strategy calls PoolManager.initialize with the static LP fee locked at zero (RobinhoodBindings.STATIC_LP_FEE).",
+      "valueFlow": "No value moves at pool initialization; it only fixes the pool's initial state (currencies, zero LP fee, tick spacing, hook).",
+      "custody": "No custody transition occurs at pool initialization.",
+      "failure": "CanonicalMarket callbacks reject any pool whose static LP fee is nonzero or whose currencies/tickSpacing/hook do not match the bound PoolKey.",
+      "event": "PoolManager Initialize event for the canonical PoolId.",
+      "notApplicableReason": null
+    },
+    "liquidityFormation": {
+      "applicable": true,
+      "actor": "The launch strategy, atomically with token creation, through LiquidityLauncher's LBP-curve strategy (placeholder curve parameters, PLACEHOLDER_OWNER_DECISION per decision D10).",
+      "valueFlow": "90% of WHOLE_HKMN_SUPPLY forms the canonical pool's launch position; the remaining 10% (otherAllocation) is currently zero-valued pending D10's final remainder-representation contract (a documented timelocked treasury-custody stub).",
+      "custody": "PermanentPositionCustody binds exactly one PositionManager token id with no transfer, approval, decrease, withdrawal, rescue, upgrade, delegatecall or successor-control path.",
+      "failure": "A launch call whose observed balances or trace do not match the frozen plan is rejected before any custody transition.",
+      "event": "PositionManager Transfer/ModifyLiquidity events for the minted launch position.",
+      "notApplicableReason": null
+    },
+    "initialTransaction": {
+      "applicable": true,
+      "actor": "Any external caller/router (open-router design, decision D2).",
+      "valueFlow": "The first swap against the canonical pool follows the same inclusive-fee accounting as every later swap; there is no special-cased initial-trade value flow.",
+      "custody": "No custody transition beyond ordinary PoolManager swap settlement; see the trading phase.",
+      "failure": "A positive executed volume below 1,000 smallest USDG units reverts the whole swap atomically.",
+      "event": "PoolManager Swap event plus HookemonHook's SwapLiabilitiesAccrued.",
+      "notApplicableReason": null
+    },
+    "trading": {
+      "applicable": true,
+      "actor": "Any caller/router; hookData is optional (REQ-canonical-market-6).",
+      "valueFlow": "Executed USDG volume funds the inclusive ~3.00% fee (accrued into Programmable/treasury/process liabilities); the remainder settles the swap through the pool as usual.",
+      "custody": "Fee liabilities accrue inside HookemonHook (FeeAccounting); principal never leaves the pool except through ordinary PoolManager settlement.",
+      "failure": "A foreign PoolManager, currency, fee, tick spacing, hook, malformed delta, unsupported partial fill, or reentrant callback creates no output credit or liability.",
+      "event": "SwapLiabilitiesAccrued(executedUsdg, totalFee, programmableBeneficiary, programmableFee, treasuryBeneficiary, treasuryFee, processFee, programmableRemainderAfter, projectRemainderAfter).",
+      "notApplicableReason": null
+    },
+    "feesAndClaims": {
+      "applicable": true,
+      "actor": "The Programmable and treasury beneficiaries call claimProgrammable/claimTreasury directly; process liability funds the peg-cycle vault through ProcessBudget.openPegCycle, triggered by the off-chain automated-cycle-service and confirmed on-chain.",
+      "valueFlow": "Programmable claims its own accrued 0.10% share to itself at any time; treasury claims its accrued 0.40% share; process's accrued remainder (nominally 2.50%) releases only to the immutable per-cycle escrow after PegCycleVault authorizes a cycle.",
+      "custody": "Beneficiary ownership freezes at accrual time; a later handover does not rewrite already-accrued liability.",
+      "failure": "isSolvent()/global conservation checks fail closed; a claim or release that would leave the hook under-collateralized reverts.",
+      "event": "ProgrammableClaimed(beneficiary, amount) / TreasuryClaimed(beneficiary, amount) / ProcessBudgetReleased(cycleId, operations, amount).",
+      "notApplicableReason": null
+    },
+    "dependencyFailure": {
+      "applicable": true,
+      "actor": "PegCycleVault coordinator and the off-chain automated-cycle-service.",
+      "valueFlow": "A failed or stuck cycle keeps process funds inside that exact cycle's PegCycleReturnEscrow; there is no automatic sweep or reassignment.",
+      "custody": "FAILED is terminal for its exact cycle and escrow; a successor cycle requires a fresh identifier, nonce, and the stored predecessor failure receipt (authorizeFundingAfterFailure).",
+      "failure": "Every off-chain adapter (Collector Crypt, Relay bridge, Robinhood/Solana RPC) is dry-run-first and fails closed into INTEGRATION_PENDING rather than fabricating a passing probe.",
+      "event": "PegCycleVault's recordTerminalFailure and the DEGRADED-recovery state transition.",
+      "notApplicableReason": null
+    },
+    "retirement": {
+      "applicable": false,
+      "actor": null,
+      "valueFlow": null,
+      "custody": null,
+      "failure": null,
+      "event": null,
+      "notApplicableReason": "No token or pool retirement path is designed; the canonical pool and hook are immutable for the deployment's lifetime. End-of-life handling remains an open owner decision."
+    }
+  },
+  "pool": {
+    "currency0": "usdg",
+    "currency1": "hkmn",
+    "orderingRule": "Currency ordering is determined by final on-chain address comparison (the lower address is currency0); this cannot be fixed until the CREATE2-mined HKMN address is known (WP-20, INTEGRATION_PENDING).",
+    "tickSpacing": null,
+    "lpFee": {
+      "classification": "lp-fee",
+      "mode": "static",
+      "hundredthsOfBip": 0,
+      "initialHundredthsOfBip": null,
+      "initializationPath": null,
+      "applicationMode": null,
+      "overrideFlagPolicy": null,
+      "persistentUpdateActor": null,
+      "persistentUpdateCallSites": [],
+      "rateLimit": null,
+      "updatePath": null,
+      "minimum": null,
+      "maximum": null,
+      "inputMetric": null,
+      "referenceAsset": null,
+      "measurementUnit": null,
+      "observationMode": null,
+      "observationWindow": null,
+      "curve": null,
+      "updateCadence": null,
+      "liquidityDecreaseBehavior": null,
+      "manipulationResistance": null,
+      "failureRule": null,
+      "recipient": "pool-liquidity-providers"
+    },
+    "canonical": true,
+    "alternativePools": "Alternative USDG/HKMN pools may exist because routing is open (no factory-level admission gate); only the canonical PoolKey (zero static LP fee, this pinned hook) is authenticated by CanonicalMarket callbacks and accrues Programmable/treasury/process liability."
+  },
+  "programmableFee": {
+    "policyId": "programmable-volume-fee-v1",
+    "policyVersion": "1.1.0",
+    "poolScope": "canonical-launch-pool-key",
+    "rates": {
+      "unit": "hundredths-of-bip",
+      "selectedHundredthsOfBip": 30000,
+      "minimumEffectiveHundredthsOfBip": 1000,
+      "effectiveHundredthsOfBip": 30000,
+      "platformHundredthsOfBip": 1000,
+      "projectHundredthsOfBip": 29000,
+      "formula": "effective=max(selected,1000);platform=1000;project=effective-1000",
+      "lpFeeExcluded": true
+    },
+    "basis": {
+      "volume": "gross-quote-side-swap-volume",
+      "quoteAsset": "canonical-pool-quote-asset"
+    },
+    "ownership": {
+      "owner": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+      "immutable": true,
+      "claimAuthority": "owner-only",
+      "claimAvailability": "anytime",
+      "claimDestinationPolicy": "owner-or-owner-selected-per-claim",
+      "storedMutableRecipient": false,
+      "builderCanMutate": false,
+      "projectCanMutate": false,
+      "administratorCanMutate": false
+    },
+    "collection": {
+      "status": "implemented",
+      "integration": "canonical-pool-hook",
+      "enforcement": "non-bypassable",
+      "hookFeeMechanismBinding": "hook.feeMechanism",
+      "supportedSwapModes": [
+        "zeroForOne-exactInput",
+        "zeroForOne-exactOutput",
+        "oneForZero-exactInput",
+        "oneForZero-exactOutput"
+      ],
+      "swapModePaths": {
+        "zeroForOneExactInput": "after-swap-return-delta",
+        "zeroForOneExactOutput": "after-swap-return-delta",
+        "oneForZeroExactInput": "after-swap-return-delta",
+        "oneForZeroExactOutput": "after-swap-return-delta"
+      },
+      "selfCallPolicy": "same-pool-swap-forbidden"
+    },
+    "accounting": {
+      "accrualMode": "claimable-liability",
+      "liabilityKeyDimensions": [
+        "poolId",
+        "currency",
+        "owner"
+      ],
+      "crossPoolNetting": false,
+      "roundingPolicy": "cumulative-independent-platform-project-remainders",
+      "remainderScope": "canonical-pool-lifetime",
+      "claimResetsRemainders": false,
+      "minimumGrossQuoteUnits": 1000,
+      "fragmentationResistant": true,
+      "valueFlowId": "swap-fee-accrual",
+      "collectionEvent": "SwapLiabilitiesAccrued(executedUsdg, totalFee, programmableBeneficiary, programmableFee, treasuryBeneficiary, treasuryFee, processFee, programmableRemainderAfter, projectRemainderAfter)",
+      "claimEvent": "ProgrammableClaimed(beneficiary, amount) / TreasuryClaimed(beneficiary, amount)"
+    },
+    "evidence": {
+      "sourcePaths": [
+        "packages/contracts/src/accounting/FeeAccounting.sol",
+        "packages/contracts/src/HookemonHook.sol",
+        "packages/contracts/src/market/CanonicalMarket.sol",
+        "packages/contracts/src/bindings/RobinhoodBindings.sol"
+      ],
+      "testPaths": [
+        "packages/contracts/test/accounting/FeeAccounting.t.sol",
+        "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+        "packages/contracts/test/market/CanonicalMarket.t.sol",
+        "packages/contracts/test/integration/HookemonHook.t.sol"
+      ]
+    }
+  },
+  "hook": {
+    "used": true,
+    "base": "Custom composed hook (HolderSettlement, CanonicalMarketCallback, HookemonIssuance); no template base",
+    "upgradeable": false,
+    "sharedAcrossPools": false,
+    "poolNamespace": "Single canonical PoolKey per immutable hook instance; no additional namespace exists.",
+    "poolAdmission": {
+      "enforcement": "Any caller/router may swap against the canonical PoolKey; there is no factory-level admission gate. Only swaps against the exact bound PoolManager, complete PoolKey (currencies, zero static LP fee, tickSpacing, this hook) authenticate into fee accounting.",
+      "factoryOrRegistry": "None; no factory or registry gates admission. Any caller may swap against the canonical PoolKey (open-router design, decision D2).",
+      "alternativePoolBehavior": "A pool with the same currencies but a different fee tier, tick spacing, or hook can exist and trade normally; it accrues no Programmable/treasury/process liability and is not the canonical pool.",
+      "rejectionRule": "CanonicalMarket callbacks revert on a foreign manager, currency pair, fee, tick spacing, hook, pool identifier, malformed delta, unsupported partial fill, or reentrant entry."
+    },
+    "permissions": {
+      "beforeInitialize": false,
+      "afterInitialize": false,
+      "beforeAddLiquidity": false,
+      "afterAddLiquidity": false,
+      "beforeRemoveLiquidity": false,
+      "afterRemoveLiquidity": false,
+      "beforeSwap": true,
+      "afterSwap": true,
+      "beforeDonate": false,
+      "afterDonate": false,
+      "beforeSwapReturnDelta": true,
+      "afterSwapReturnDelta": true,
+      "afterAddLiquidityReturnDelta": false,
+      "afterRemoveLiquidityReturnDelta": false
+    },
+    "callbackPolicies": [
+      {
+        "callback": "beforeSwap",
+        "necessity": "Stages the swap context (PoolKey, params, hookData) so afterSwap can authenticate the complete, unmodified context before finalizing the fee and any recipient credit.",
+        "allowedReverts": "Reverts on a foreign PoolManager, currency, fee, tick spacing, hook, pool identifier, or an already-pending callback (reentrancy fencing).",
+        "userExitImpact": "A revert here blocks only the current swap transaction; it never traps prior balances or accrued liability.",
+        "noSelfCallImpact": "No self-call is made from beforeSwap; nestedActions.used is false for this hook."
+      },
+      {
+        "callback": "afterSwap",
+        "necessity": "The only point at which a full fill is authenticated and the inclusive fee is collected through PoolManager.take and accrued into liability; hookData is validated here for recipient crediting.",
+        "allowedReverts": "Reverts on a partial fill, mismatched callback context versus beforeSwap, malformed final delta, nonzero protocol/live LP fee, or a positive executed volume below 1,000 smallest USDG units.",
+        "userExitImpact": "A revert here blocks only the current swap transaction and leaves all liability and balances unchanged; it never blocks a later valid swap.",
+        "noSelfCallImpact": "No self-call is made from afterSwap; the moneyPath reentrancy lock rejects any nested entry into afterSwap during collection."
+      }
+    ],
+    "hookData": {
+      "used": true,
+      "schema": "abi.encode(bytes32 domain, bytes32 operationId, address sender, address recipient); domain = keccak256(\"HOOKEMON_CANONICAL_SWAP_R54_A3_V1\") (CanonicalSwapHookData.sol).",
+      "identitySource": null,
+      "trustedRouterDeploymentRecordId": null,
+      "callbackSenderRule": "pool-manager-callback-only",
+      "validation": "hookData is optional and never gates fee collection or liability accrual (REQ-canonical-market-6, open-router decision D2). When present it must decode as exactly the four-field ABI encoding above with domain matching DOMAIN, both operationId and recipient nonzero, and sender equal to the swap's authenticated callback sender; otherwise it is treated as absent (not rejected), and the swap still finalizes without a recipient credit. tryDecode never reverts."
+    },
+    "feeMechanism": {
+      "used": true,
+      "classification": "hook-owned-fee",
+      "chargedCurrency": "USDG (the canonical pool's quote currency); the fee is always denominated in and collected from executed USDG volume regardless of swap direction.",
+      "swapQuadrants": {
+        "zeroForOneExactInput": null,
+        "zeroForOneExactOutput": null,
+        "oneForZeroExactInput": null,
+        "oneForZeroExactOutput": null
+      },
+      "maximumHundredthsOfBip": 30000,
+      "collectionPath": "after-swap-return-delta",
+      "collectionValueFlowId": "swap-fee-accrual",
+      "liabilityKeyDimensions": [
+        "poolId",
+        "currency",
+        "beneficiary"
+      ],
+      "collectionEvent": "SwapLiabilitiesAccrued(executedUsdg, totalFee, programmableBeneficiary, programmableFee, treasuryBeneficiary, treasuryFee, processFee, programmableRemainderAfter, projectRemainderAfter)",
+      "recipients": [
+        {
+          "role": "programmable",
+          "sharePpm": 33333,
+          "addressSource": "fixed-address",
+          "address": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+          "binding": "exact-address",
+          "derivationRule": null,
+          "mutable": false,
+          "mutationController": "none",
+          "newAddressValidation": "none",
+          "mutationEvent": null
+        },
+        {
+          "role": "treasury",
+          "sharePpm": 133333,
+          "addressSource": "beneficiary-supplied",
+          "address": null,
+          "binding": "beneficiary-at-launch",
+          "derivationRule": null,
+          "mutable": true,
+          "mutationController": "current-beneficiary-only",
+          "newAddressValidation": "none",
+          "mutationEvent": "MoneyRoles.RoleAccepted(role, previousBeneficiary, newBeneficiary) on completion of the two-step proposeTreasury/acceptTreasury handover."
+        },
+        {
+          "role": "process",
+          "sharePpm": 833334,
+          "addressSource": "derived-contract",
+          "address": null,
+          "binding": "immutable-derived-contract",
+          "derivationRule": "The project stream's remainder after the treasury floor (nominally 2.50% of executed USDG volume, absorbing the project stream's carried cumulative dust); released only to the immutable PegCycleVault-computed per-cycle escrow.",
+          "mutable": false,
+          "mutationController": "none",
+          "newAddressValidation": "none",
+          "mutationEvent": null
+        }
+      ],
+      "ownership": "Programmable and treasury beneficiary ownership freezes at accrual time; process liability has no beneficiary address and is released only to the coordinator-computed escrow for an authorized cycle.",
+      "claimPolicy": "Programmable and treasury beneficiaries may claim their own accrued liability to themselves at any time (claimProgrammable/claimTreasury); process liability is released, not claimed, only through ProcessBudget.openPegCycle after PegCycleVault authorizes a cycle."
+    },
+    "customAccounting": {
+      "used": true,
+      "backingSource": "Executed USDG volume authenticated by CanonicalMarket's afterSwap callback (finalized raw pool delta after full-fill normalization).",
+      "conservationEquation": "hookUsdgBalance >= programmableLiability + treasuryLiability + processLiability + sum(payoutLiability) at every state transition (isSolvent).",
+      "settlement": "PoolManager.take() at the exact rounded fee amount; direct ERC20 balanceOf/transfer adapters for claims and releases, accepted only on an exact observed balance delta.",
+      "partialFillBehavior": "A partial fill reverts the whole swap atomically; no partial fee is ever collected or accounted.",
+      "liabilityNamespace": "One hook instance; liabilities are namespaced by beneficiary role (programmable/treasury/process) and, for payouts, by payoutId.",
+      "liabilityKeyDimensions": [
+        "poolId",
+        "currency",
+        "beneficiary"
+      ],
+      "crossPoolNetting": false,
+      "duplicateCurrencyPolicy": "Not applicable; the hook is bound to exactly one currency pair (USDG/HKMN) for its lifetime.",
+      "failureIsolation": "A rejected or failed money transition leaves all liabilities and balances unchanged; one beneficiary's claim never affects another beneficiary's liability.",
+      "withdrawalOrdering": "No withdrawal ordering constraint; each beneficiary claims independently and process release is a separate, cycle-gated path."
+    },
+    "returnDeltaAccounting": {
+      "used": null,
+      "quadrants": {
+        "zeroForOneExactInput": {
+          "supported": null,
+          "specifiedCurrency": null,
+          "unspecifiedCurrency": null,
+          "amountSign": null,
+          "specifiedComponent": null,
+          "unspecifiedComponent": null,
+          "residualAmmEquation": null,
+          "finalCallerDeltaEquation": null,
+          "specifiedDeltaCanConsumeEntireAmount": null,
+          "rounding": null,
+          "zeroAmmLeg": null,
+          "partialFillRule": null,
+          "slippageInvariant": null,
+          "failureRule": null
+        },
+        "zeroForOneExactOutput": {
+          "supported": null,
+          "specifiedCurrency": null,
+          "unspecifiedCurrency": null,
+          "amountSign": null,
+          "specifiedComponent": null,
+          "unspecifiedComponent": null,
+          "residualAmmEquation": null,
+          "finalCallerDeltaEquation": null,
+          "specifiedDeltaCanConsumeEntireAmount": null,
+          "rounding": null,
+          "zeroAmmLeg": null,
+          "partialFillRule": null,
+          "slippageInvariant": null,
+          "failureRule": null
+        },
+        "oneForZeroExactInput": {
+          "supported": null,
+          "specifiedCurrency": null,
+          "unspecifiedCurrency": null,
+          "amountSign": null,
+          "specifiedComponent": null,
+          "unspecifiedComponent": null,
+          "residualAmmEquation": null,
+          "finalCallerDeltaEquation": null,
+          "specifiedDeltaCanConsumeEntireAmount": null,
+          "rounding": null,
+          "zeroAmmLeg": null,
+          "partialFillRule": null,
+          "slippageInvariant": null,
+          "failureRule": null
+        },
+        "oneForZeroExactOutput": {
+          "supported": null,
+          "specifiedCurrency": null,
+          "unspecifiedCurrency": null,
+          "amountSign": null,
+          "specifiedComponent": null,
+          "unspecifiedComponent": null,
+          "residualAmmEquation": null,
+          "finalCallerDeltaEquation": null,
+          "specifiedDeltaCanConsumeEntireAmount": null,
+          "rounding": null,
+          "zeroAmmLeg": null,
+          "partialFillRule": null,
+          "slippageInvariant": null,
+          "failureRule": null
+        }
+      },
+      "executionEvent": null
+    },
+    "postReturnDeltaAccounting": {
+      "afterSwap": {
+        "used": null,
+        "returnedDeltaShape": null,
+        "positiveMeaning": null,
+        "negativeMeaning": null,
+        "backingSource": null,
+        "callerDeltaEquation": null,
+        "componentPolicies": {
+          "unspecified": null,
+          "currency0": null,
+          "currency1": null
+        },
+        "bounds": null,
+        "rounding": null,
+        "slippageOrMinimums": null,
+        "failureRule": null,
+        "executionEvent": null
+      },
+      "afterAddLiquidity": {
+        "used": false,
+        "returnedDeltaShape": null,
+        "positiveMeaning": null,
+        "negativeMeaning": null,
+        "backingSource": null,
+        "callerDeltaEquation": null,
+        "componentPolicies": {
+          "unspecified": null,
+          "currency0": null,
+          "currency1": null
+        },
+        "bounds": null,
+        "rounding": null,
+        "slippageOrMinimums": null,
+        "failureRule": null,
+        "executionEvent": null
+      },
+      "afterRemoveLiquidity": {
+        "used": false,
+        "returnedDeltaShape": null,
+        "positiveMeaning": null,
+        "negativeMeaning": null,
+        "backingSource": null,
+        "callerDeltaEquation": null,
+        "componentPolicies": {
+          "unspecified": null,
+          "currency0": null,
+          "currency1": null
+        },
+        "bounds": null,
+        "rounding": null,
+        "slippageOrMinimums": null,
+        "failureRule": null,
+        "executionEvent": null
+      }
+    },
+    "erc6909Claims": {
+      "used": false,
+      "currencyIdDerivation": null,
+      "claimBalanceScope": null,
+      "poolIdIncludedInClaimId": null,
+      "owner": null,
+      "operatorPolicy": null,
+      "mintFlow": null,
+      "burnFlow": null,
+      "takeSettleFlow": null,
+      "liabilityKeys": null,
+      "liabilityKeyDimensions": [],
+      "crossPoolNetting": null,
+      "transferPolicy": null,
+      "redemption": null,
+      "roundingDust": null,
+      "aggregateSolvencyEquation": null
+    },
+    "nestedActions": {
+      "used": false,
+      "directPoolManagerCalls": false,
+      "routerCalls": false,
+      "allowedActions": [],
+      "samePoolPolicy": "Reentrant afterSwap calls during collection revert via the moneyPath lock (fee-accounting.md).",
+      "crossPoolPolicy": null,
+      "callbackSuppression": null,
+      "directCallbackBehavior": null,
+      "routerCallbackBehavior": null,
+      "maximumDepth": null,
+      "stateCommitOrder": null,
+      "transientDeltaOwner": null,
+      "syncInterleaving": null,
+      "slippageAggregation": null,
+      "failureAtomicity": null
+    }
+  },
+  "noHookArchitecture": null,
+  "tokenMechanics": null,
+  "valueFlows": [
+    {
+      "id": "swap-fee-accrual",
+      "action": "swap",
+      "asset": "usdg",
+      "from": "swap caller/router",
+      "to": "HookemonHook liability ledger (programmable + treasury + process)",
+      "amountRule": "Cumulative-remainder split of executed USDG volume Q: floor(cumProgrammableNumerator/10000) to Programmable, floor(cumProjectNumerator/10000) to the project stream, split further into a plain per-swap treasury floor plus process absorbing the project stream's carried dust.",
+      "settlement": "Collected via PoolManager.take at afterSwap, authoritative only on the exact observed hook USDG balance increase.",
+      "failure": "Revert the complete swap atomically; no partial collection or liability mutation."
+    },
+    {
+      "id": "programmable-claim",
+      "action": "claim",
+      "asset": "usdg",
+      "from": "HookemonHook liability ledger (programmable)",
+      "to": "Programmable beneficiary or its selected destination",
+      "amountRule": "Exactly the Programmable beneficiary's current accrued liability at claim time.",
+      "settlement": "Direct ERC20 transfer, accepted only on an exact canonical true return and exact source/destination balance delta.",
+      "failure": "A false, reverted, malformed, short, or reentrant transfer commits no partial liability debit or transfer state."
+    },
+    {
+      "id": "treasury-claim",
+      "action": "claim",
+      "asset": "usdg",
+      "from": "HookemonHook liability ledger (treasury)",
+      "to": "current or historical treasury beneficiary",
+      "amountRule": "Exactly that beneficiary's current or historically frozen accrued liability.",
+      "settlement": "Direct ERC20 transfer, accepted only on an exact canonical true return and exact source/destination balance delta.",
+      "failure": "A false, reverted, malformed, short, or reentrant transfer commits no partial liability debit or transfer state."
+    },
+    {
+      "id": "process-release",
+      "action": "release",
+      "asset": "usdg",
+      "from": "HookemonHook liability ledger (process)",
+      "to": "the active cycle's deterministic PegCycleReturnEscrow",
+      "amountRule": "Exactly the amount authorized by PegCycleVault's single-use funding authorization for that cycle, never more than accrued process liability.",
+      "settlement": "ProcessBudget.openPegCycle: atomic liability debit, escrow transfer, and confirmFunding.",
+      "failure": "A zero, excessive, duplicate, stale-trigger, non-vault-destination, short-delta, false-return, reverted, or reentrant attempt leaves liability, balances, and cycle state unchanged."
+    },
+    {
+      "id": "cycle-outbound-route",
+      "action": "route-outbound",
+      "asset": "usdg",
+      "from": "the active cycle's PegCycleReturnEscrow",
+      "to": "the pinned typed route executor (production implementation INTEGRATION_PENDING, WP-28)",
+      "amountRule": "Exactly the frozen Operations-authorized amount for the exact cycle id; escrow.sendOutbound only accepts calls from the coordinator.",
+      "settlement": "PegCycleVault.executeOutbound calls IPegCycleRouteExecutor with the exact escrow, cycle id, and amount.",
+      "failure": "A destination, amount, or caller mismatch reverts; delayed funds remain in the originating escrow (never swept elsewhere)."
+    },
+    {
+      "id": "cycle-return",
+      "action": "return-proceeds",
+      "asset": "usdg",
+      "from": "Collector Crypt buyback proceeds, bridged Solana Circle USD to Robinhood USDG via Relay",
+      "to": "the same originating cycle's PegCycleReturnEscrow",
+      "amountRule": "Exact attributable returned USDG for that cycle, as observed and reconciled by the off-chain worker before payout compilation.",
+      "settlement": "A standard ERC20 transfer into the exact predecessor escrow; the escrow verifies the exact balance delta.",
+      "failure": "An unreconciled, short, or unattributed return blocks payout compilation for that cycle until reconciled; it is never guessed or approximated."
+    },
+    {
+      "id": "holder-payout",
+      "action": "pay-entitlement",
+      "asset": "usdg",
+      "from": "a funded, closed payout chunk (chunked Canonical Merkle-Sum manifest)",
+      "to": "the committed recipient for that entitlement",
+      "amountRule": "Exactly the leaf amount proven by the entitlement's Merkle-sum proof against the funded, closed chunk root.",
+      "settlement": "HolderSettlement.payEntitlement, marking that exact (payoutId, chunkIndex, index) tuple paid exactly once.",
+      "failure": "An already-paid, unfunded, unclosed-manifest, or invalid-proof entitlement reverts without mutating paid state."
+    }
+  ],
+  "authorities": [
+    {
+      "role": "programmable-beneficiary",
+      "controller": "RobinhoodBindings.PROGRAMMABLE_BENEFICIARY (0x4957f49620AFf3Adbbe8195a4f633E49cc93376c), pinned at deployment and immutable thereafter",
+      "capabilities": [
+        "claim its own accrued Programmable fee liability to itself at any time"
+      ],
+      "mutable": false,
+      "delay": null,
+      "userExitImpact": "None; this authority never touches trading, HKMN transfers, or holder payouts."
+    },
+    {
+      "role": "treasury-beneficiary",
+      "controller": "MoneyRoles two-step propose/accept handover (proposeTreasury/acceptTreasury)",
+      "capabilities": [
+        "claim its own accrued treasury fee liability to itself at any time",
+        "propose a successor treasury beneficiary (two-step handover)"
+      ],
+      "mutable": true,
+      "delay": "Two-step (propose then accept); no timelock beyond the second transaction.",
+      "userExitImpact": "None; a handover only redirects future accrual, and never rewrites already-accrued liability owed to a prior beneficiary."
+    },
+    {
+      "role": "operations-trigger",
+      "controller": "MoneyRoles two-step propose/accept handover (proposeOperations/acceptOperations)",
+      "capabilities": [
+        "trigger openPegCycle for an authorized cycle",
+        "trigger executeOutbound for the active cycle"
+      ],
+      "mutable": true,
+      "delay": "Two-step (propose then accept); no timelock beyond the second transaction.",
+      "userExitImpact": "None; Operations is a trigger only and is never a custodian of process principal (process-budget.md)."
+    },
+    {
+      "role": "peg-cycle-coordinator",
+      "controller": "The immutable PegCycleVault contract itself (not an EOA); computes and commands each cycle's escrow.",
+      "capabilities": [
+        "authorize/confirm cycle funding",
+        "command escrow sendOutbound/sendPayout for its own computed escrows only"
+      ],
+      "mutable": false,
+      "delay": null,
+      "userExitImpact": "None; this authority is scoped entirely to internal cycle custody routing."
+    },
+    {
+      "role": "distribution-signer",
+      "controller": "The off-chain automated-cycle-service's own key (D7, MODIFIED: fully automated, no human signature per cycle)",
+      "capabilities": [
+        "sign a recomputed snapshot/manifest for one cycle's payout"
+      ],
+      "mutable": true,
+      "delay": null,
+      "userExitImpact": "None directly; a payout only becomes claimable on-chain after the separately-keyed verifier also signs the exact same recomputation."
+    },
+    {
+      "role": "distribution-verifier",
+      "controller": "A separate automated verifier process with its own key (designed to run on a different host from the signer)",
+      "capabilities": [
+        "independently recompute the snapshot and manifest from chain data and sign only on an exact match"
+      ],
+      "mutable": true,
+      "delay": null,
+      "userExitImpact": "None; refusing to sign on a mismatch blocks only that cycle's payout commitment, never prior funded/paid entitlements."
+    }
+  ],
+  "dependencies": {
+    "onchain": [
+      {
+        "id": "robinhood-pool-manager",
+        "name": "Robinhood Chain v4 PoolManager",
+        "kind": "uniswap-v4-core",
+        "repository": "https://github.com/Uniswap/v4-core",
+        "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+        "packageVersion": null,
+        "license": "Not independently re-verified; see upstream LICENSE",
+        "sourceProvenance": "pinned-source",
+        "deploymentRecordId": null,
+        "chainAddress": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "runtimeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+        "deploymentEvidencePath": "bindings/robinhood-chain.json",
+        "trust": "Read-only callback authentication and eight-quadrant local proof (canonical-market.md); production deployed-runtime fork proof is INTEGRATION_PENDING.",
+        "failure": "A foreign PoolManager address is rejected by every hook callback.",
+        "fallback": "No substitute dependency; a wrong or unreachable pin blocks the affected on-chain action rather than silently falling back."
+      },
+      {
+        "id": "robinhood-usdg",
+        "name": "Robinhood Chain USDG (Global Dollar)",
+        "kind": "external-erc20",
+        "repository": null,
+        "revision": null,
+        "packageVersion": null,
+        "license": "Not independently re-verified; see upstream LICENSE",
+        "sourceProvenance": "verified-explorer-source",
+        "deploymentRecordId": null,
+        "chainAddress": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "runtimeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+        "deploymentEvidencePath": "bindings/robinhood-chain.json",
+        "trust": "ERC1967 UUPS proxy; issuer-controlled implementation upgrade authority is external and unaudited by this project.",
+        "failure": "Direct hook and vault transfers accept only an exactly 32-byte canonical true return and exact balance deltas; any other behavior fails closed with no liability mutation.",
+        "fallback": "No substitute dependency; a wrong or unreachable pin blocks the affected on-chain action rather than silently falling back."
+      },
+      {
+        "id": "uniswap-liquidity-launcher",
+        "name": "Uniswap LiquidityLauncher",
+        "kind": "uniswap-liquidity-launcher",
+        "repository": "https://github.com/Uniswap/liquidity-launcher",
+        "revision": "1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a",
+        "packageVersion": null,
+        "license": "Not independently re-verified; see upstream LICENSE",
+        "sourceProvenance": "pinned-source",
+        "deploymentRecordId": null,
+        "chainAddress": "0x0000FffFBE8efE702c8703aE3477FF5dE3d319C0",
+        "runtimeHash": "0x4a586d925c9d59ece13ce2239ebd7dea9ee725f9d33c6667e0fd16ae8d977d80",
+        "deploymentEvidencePath": "bindings/robinhood-chain.json",
+        "trust": "Used only for atomic token creation + launch position formation through a custom strategy (WP-20, INTEGRATION_PENDING).",
+        "failure": "verifyIssuance rejects any observation not produced by an actual launcher call.",
+        "fallback": "No substitute dependency; a wrong or unreachable pin blocks the affected on-chain action rather than silently falling back."
+      },
+      {
+        "id": "uniswap-uerc20-factory",
+        "name": "Uniswap UERC20 factory",
+        "kind": "uniswap-uerc20-factory",
+        "repository": "https://github.com/Uniswap/uerc20-factory",
+        "revision": "a747318fcce114f56a3a21b8bcec83663a61208b",
+        "packageVersion": null,
+        "license": "Not independently re-verified; see upstream LICENSE",
+        "sourceProvenance": "pinned-source",
+        "deploymentRecordId": null,
+        "chainAddress": "0x000000e200088D55C39a11F609E5F667729ad49b",
+        "runtimeHash": "0x9f042af1533641f048ced56b55898d9e87b2ccb0ec6854292e2cd8ea733e6aeb",
+        "deploymentEvidencePath": "bindings/robinhood-chain.json",
+        "trust": "Mints HKMN as a fixed-supply UERC20 through LiquidityLauncher; no independent trust beyond the launcher.",
+        "failure": "verifyIssuance rejects a decimals or supply mismatch against the frozen plan.",
+        "fallback": "No substitute dependency; a wrong or unreachable pin blocks the affected on-chain action rather than silently falling back."
+      },
+      {
+        "id": "uniswap-universal-router",
+        "name": "Uniswap UniversalRouter",
+        "kind": "uniswap-universal-router",
+        "repository": "https://github.com/Uniswap/universal-router",
+        "revision": null,
+        "packageVersion": null,
+        "license": "Not independently re-verified; see upstream LICENSE",
+        "sourceProvenance": "pinned-source",
+        "deploymentRecordId": null,
+        "chainAddress": "0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99",
+        "runtimeHash": "0xbe8e8191bb42d843c2e948a5a55772eaab864ce01e54dcd47c9d089170b302d5",
+        "deploymentEvidencePath": "bindings/robinhood-chain.json",
+        "trust": "Not load-bearing for swap correctness (routing is open, decision D2), but load-bearing for CREATE2 hook mining. Disagrees with Uniswap's public deployments page (0x8876789976decbfcbbbe364623c63652db8c0904); WP-25 resolves which is live via a fresh runtime-codehash probe before mining.",
+        "failure": "Not applicable to trading correctness; only affects documentation/mining accuracy until WP-25 resolves it.",
+        "fallback": "No substitute dependency; a wrong or unreachable pin blocks the affected on-chain action rather than silently falling back."
+      }
+    ],
+    "offchain": [
+      {
+        "id": "collector-crypt-api",
+        "name": "Collector Crypt pack marketplace API",
+        "kind": "external-http-api",
+        "repository": null,
+        "revision": null,
+        "packageVersion": null,
+        "license": "Provider-operated service; no redistributed source",
+        "sourceProvenance": null,
+        "deploymentRecordId": null,
+        "chainAddress": null,
+        "runtimeHash": null,
+        "deploymentEvidencePath": null,
+        "trust": "Off-chain HTTP API for pack purchase, opening, and standard buyback; accessed only through the adapter's dry-run-first client.",
+        "failure": "An unreachable, malformed, or unexpected response is reported INTEGRATION_PENDING and stops that cycle's automation step, never fabricated as a pass.",
+        "fallback": "Dry-run-first adapter reports INTEGRATION_PENDING and stops that cycle's automation step; no silent fallback provider is substituted."
+      },
+      {
+        "id": "relay-bridge-api",
+        "name": "Relay cross-chain bridge API",
+        "kind": "external-http-api",
+        "repository": null,
+        "revision": null,
+        "packageVersion": null,
+        "license": "Provider-operated service; no redistributed source",
+        "sourceProvenance": null,
+        "deploymentRecordId": null,
+        "chainAddress": null,
+        "runtimeHash": null,
+        "deploymentEvidencePath": null,
+        "trust": "Bridges Circle USD proceeds from Solana back to Robinhood Chain as USDG; accessed only through the adapter's dry-run-first client.",
+        "failure": "An unreachable, malformed, or unexpected response is reported INTEGRATION_PENDING and stops that cycle's automation step, never fabricated as a pass.",
+        "fallback": "Dry-run-first adapter reports INTEGRATION_PENDING and stops that cycle's automation step; no silent fallback provider is substituted."
+      },
+      {
+        "id": "robinhood-solana-rpc",
+        "name": "Robinhood Chain and Solana RPC endpoints",
+        "kind": "external-rpc",
+        "repository": null,
+        "revision": null,
+        "packageVersion": null,
+        "license": "Provider-operated service; no redistributed source",
+        "sourceProvenance": null,
+        "deploymentRecordId": null,
+        "chainAddress": null,
+        "runtimeHash": null,
+        "deploymentEvidencePath": "bindings/robinhood-chain.json",
+        "trust": "Robinhood public RPC (https://rpc.mainnet.chain.robinhood.com) serves eth_getCode/eth_getProof/eth_call at 'latest' only; 'finalized'/'safe'/an explicit older block fail. Reads are re-confirmed once finalized or use a configurable archive RPC, per design.",
+        "failure": "A probe failure or unreachable endpoint is reported INTEGRATION_PENDING; never treated as a passing precondition.",
+        "fallback": "Dry-run-first adapter reports INTEGRATION_PENDING and stops that cycle's automation step; no silent fallback provider is substituted."
+      }
+    ]
+  },
+  "operations": {
+    "keeper": {
+      "required": true,
+      "actor": "The off-chain automated-cycle-service (packages/runner), triggered on a dashboard-adjustable interval (intervalMinutes, integer in [5, 1440]; design default 20 minutes).",
+      "action": "Open one peg cycle, buy and resell one Collector Crypt pack within the dashboard-configured caps, bridge proceeds back as USDG, and hand the reconciled return to payout compilation.",
+      "cadence": "Dashboard-adjustable interval, integer minutes in [5, 1440] (design default 20); daily cycle count is capped by the owner-signed standing authority (decision D4).",
+      "authentication": "Every mutation still passes through the same on-chain schema-bound policy-wallet authorization (destination/function/asset/amount allowlists, single-use nonces) before a signer is ever invoked; the keeper itself holds no on-chain override authority.",
+      "funding": "Process liability accrued from the canonical pool's own swap fee, released to the cycle escrow only through ProcessBudget.openPegCycle.",
+      "failure": "A stuck or failed cycle leaves funds in its own escrow (FAILED is terminal for that cycle); the keeper does not retry blindly and requires exact reconciliation before a successor cycle.",
+      "fallback": "Manual owner intervention through the dashboard (pause/resume) and the existing on-chain DEGRADED-recovery path; no new on-chain pause role was added (decision D8)."
+    },
+    "oracle": {
+      "required": false,
+      "actor": null,
+      "action": null,
+      "cadence": null,
+      "authentication": null,
+      "funding": null,
+      "failure": null,
+      "fallback": null
+    },
+    "monitoring": "A public community-facing status surface plus dashboard visibility into cycle state, budget caps, and stuck-cycle recovery (packages/dashboard, node:http + node:sqlite only).",
+    "incidentResponse": "Two-layer kill switch: a dashboard pause stops the off-chain keeper from opening new cycles, and the existing on-chain FAILED/DEGRADED terminal states stop a specific cycle without a new on-chain pause role (ADR-0021, decision D8; explicitly declines a guardian-role alternative)."
+  },
+  "integration": {
+    "routerGeneration": null,
+    "routerDependencyId": null,
+    "permit2DependencyId": null,
+    "stateViewDependencyId": null,
+    "quoterDependencyId": null,
+    "sdkDependencies": [],
+    "routerActionProfile": {
+      "routerVersionExplicit": null,
+      "universalRouterCommand": null,
+      "v4Actions": [],
+      "settlementMode": null,
+      "permit2Mode": null,
+      "finalSwapDeltaValidated": null
+    },
+    "sdkSafetyProfile": {
+      "packageRootImportsOnly": null,
+      "hookedQuoteSource": null,
+      "localHookedPoolMathDisabled": null,
+      "hookDataParity": null,
+      "multiHopHookDataMode": null,
+      "perHopPriceBounds": null,
+      "slippageSemantics": null,
+      "deprecatedLiquidityActionsDisabled": null
+    },
+    "appSourcePaths": [],
+    "integrationTestPaths": [],
+    "quoteExecutionParity": null,
+    "swapModes": [
+      "zeroForOne-exactInput",
+      "zeroForOne-exactOutput",
+      "oneForZero-exactInput",
+      "oneForZero-exactOutput"
+    ],
+    "partialFills": "Not supported; a partial fill reverts the whole swap atomically.",
+    "slippage": "Ordinary v4/router-level slippage protection applies to the caller; the hook adds no additional surcharge beyond the disclosed inclusive fee.",
+    "deadline": "Not fixed by the hook; deadline enforcement is the calling router's own responsibility since routing is open (decision D2).",
+    "permit2": "Not required by the hook; token approval/transfer mechanism is the calling router's own responsibility since routing is open (decision D2).",
+    "stateReads": "Live pool protocol/LP fee is read on every callback from the pinned PoolManager and must be zero.",
+    "events": [
+      "Swap",
+      "SwapLiabilitiesAccrued",
+      "ProgrammableClaimed",
+      "TreasuryClaimed",
+      "ProcessBudgetReleased"
+    ],
+    "routingAndDiscoverability": {
+      "routingMode": "uniswap-interface-api",
+      "allowlistTriggers": {
+        "usesDeltaFlag": true,
+        "addressStartsWith91": false,
+        "targetsMajorPair": false,
+        "permissionedPool": false
+      },
+      "uniswapRoutingStatus": "required-not-submitted",
+      "hookRegistryStatus": "not-submitted",
+      "customHookDataRequired": false,
+      "standardRouterCompatible": true,
+      "permissionedRouting": {
+        "required": false,
+        "minimumRouterGeneration": null,
+        "adapterCurrencyUsed": null,
+        "allowedWrapperBindings": null,
+        "positionManagerBinding": null,
+        "routingAllowlistRequiredPerChain": null
+      },
+      "sourcePaths": [],
+      "testPaths": []
+    },
+    "dataReconstruction": {
+      "mode": null,
+      "eventCoverage": null,
+      "cursor": null,
+      "startBlockPolicy": null,
+      "finalityDepth": null,
+      "reorgPolicy": null,
+      "backfillPolicy": null,
+      "checkpointPolicy": null,
+      "freshnessTargetSeconds": null,
+      "staleAfterSeconds": null,
+      "freshnessMeasurement": null,
+      "reconciliation": null,
+      "reserveReconstruction": {
+        "used": null,
+        "balanceSources": [],
+        "liabilitySources": [],
+        "attributionKeys": [],
+        "solvencyEquation": null,
+        "poolLiquidityTreatment": null,
+        "donationAndDustPolicy": null,
+        "reconciliation": null
+      },
+      "sourcePaths": [],
+      "testPaths": []
+    },
+    "platformHandoff": {
+      "intended": true,
+      "websiteRegistryPath": null,
+      "uiSourcePaths": [],
+      "apiSourcePaths": [],
+      "indexerSourcePaths": [],
+      "testPaths": [],
+      "reviewStatus": "not-requested",
+      "maintainerReviewRequired": true,
+      "selfApproval": false,
+      "availabilityClaimed": false,
+      "handoffNotes": "This submission is proposal-stage evidence prepared ahead of Programmable's Robinhood Chain profile becoming available; it makes no public-availability claim and requires independent Programmable maintainer review before any handoff."
+    }
+  },
+  "projectSurfaces": [
+    {
+      "id": "canonical-pool-hook",
+      "kind": "onchain-contract",
+      "name": "HookemonHook canonical market and fee accounting",
+      "summary": "The immutable v4 hook (HookemonHook composing CanonicalMarket, FeeAccounting, HolderSettlement and HookemonIssuance) that authenticates the canonical PoolKey's PoolManager callbacks, collects the inclusive hook fee, and holds Programmable/treasury/process liability until claimed or released.",
+      "executionBoundary": "onchain",
+      "capabilityIds": [
+        "canonical-pool-fee-accounting"
+      ],
+      "authorityRefs": [
+        "programmable-beneficiary",
+        "treasury-beneficiary",
+        "operations-trigger"
+      ],
+      "valueFlowRefs": [
+        "swap-fee-accrual",
+        "programmable-claim",
+        "treasury-claim",
+        "process-release"
+      ],
+      "assetRefs": [
+        "usdg",
+        "hkmn"
+      ],
+      "sourcePaths": [
+        "packages/contracts/src/HookemonHook.sol",
+        "packages/contracts/src/market/CanonicalMarket.sol",
+        "packages/contracts/src/accounting/FeeAccounting.sol",
+        "packages/contracts/src/access/MoneyRoles.sol"
+      ],
+      "testPaths": [
+        "packages/contracts/test/market/CanonicalMarket.t.sol",
+        "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+        "packages/contracts/test/accounting/FeeAccounting.t.sol",
+        "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+        "packages/contracts/test/integration/HookemonHook.t.sol"
+      ],
+      "schemaPaths": [],
+      "evidencePaths": [
+        "bindings/robinhood-chain.json",
+        "docs/modules/canonical-market.md",
+        "docs/modules/fee-accounting.md"
+      ],
+      "exposure": {
+        "movesValue": true,
+        "usesSignatures": false,
+        "makesExternalCalls": false,
+        "holdsCustody": true,
+        "handlesPii": false,
+        "usesGeolocation": false,
+        "usesSecrets": false
+      },
+      "profiles": {
+        "authority": {
+          "status": "applicable",
+          "summary": "PoolManager callback authentication, the pinned RobinhoodBindings.PROGRAMMABLE_BENEFICIARY constant, and MoneyRoles' two-step treasury/operations handover govern every mutation of hook state.",
+          "controls": [
+            "Authenticate every hook callback through the exact bound PoolManager and complete PoolKey.",
+            "Reject any deployment whose programmableBeneficiary does not equal RobinhoodBindings.PROGRAMMABLE_BENEFICIARY."
+          ],
+          "evidenceRefs": []
+        },
+        "valueFlow": {
+          "status": "applicable",
+          "summary": "Executed USDG swap volume funds the cumulative-remainder inclusive fee split (0.10% Programmable, 0.40% treasury, remainder process); claims and releases move only accrued liability.",
+          "controls": [
+            "Revert atomically when a positive executed volume is below 1,000 smallest USDG units.",
+            "Debit only a beneficiary's own accrued liability on claim; never reduce a different beneficiary's balance."
+          ],
+          "evidenceRefs": []
+        },
+        "sourceOfTruth": {
+          "status": "applicable",
+          "summary": "Confirmed PoolManager state and the hook's own liability ledger for the exact chain, PoolId and beneficiary are authoritative; no off-chain cache is trusted for settlement.",
+          "controls": [
+            "Read live pool protocol/LP fee on every callback and reject any nonzero value before staging or finalizing."
+          ],
+          "evidenceRefs": []
+        },
+        "signaturesReplay": {
+          "status": "not-applicable",
+          "summary": "The hook consumes no signed off-chain payload; every mutation is a direct authenticated on-chain call.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "externalCalls": {
+          "status": "not-applicable",
+          "summary": "The hook calls only the bound PoolManager and the two pinned ERC20 tokens (USDG, HKMN); it makes no arbitrary or discovered external call.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "custody": {
+          "status": "applicable",
+          "summary": "The hook holds accrued Programmable, treasury and process USDG liability between accrual and claim/release; it never custodies HKMN principal beyond issuance-time minting.",
+          "controls": [
+            "Keep actual hook USDG balance at least equal to total unpaid liabilities at every state transition (isSolvent)."
+          ],
+          "evidenceRefs": []
+        },
+        "piiGeolocation": {
+          "status": "not-applicable",
+          "summary": "The hook records no personal data or location; only addresses and USDG amounts.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "secretBoundary": {
+          "status": "not-applicable",
+          "summary": "The hook holds no secret; all authentication is on-chain address/callback based.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "sourceTestSchema": {
+          "status": "applicable",
+          "summary": "The implementation manifest binds the exact reviewed source and test set for this boundary; imported executable bytes are included through the pinned v4-core dependency.",
+          "controls": [
+            "Bind implementation.sourcePaths/testPaths to the exact files reviewed for this submission."
+          ],
+          "evidenceRefs": []
+        },
+        "failureRecovery": {
+          "status": "applicable",
+          "summary": "An invalid callback, malformed delta, partial fill, or reentrant entry reverts atomically and creates no output credit or liability; it never blocks a later valid swap.",
+          "controls": [
+            "Test dependency failure, callback revert and recovery without partial settlement (canonical-market.md invariants)."
+          ],
+          "evidenceRefs": []
+        }
+      },
+      "signedDataSource": {
+        "used": false,
+        "signerAuthorityRefs": [],
+        "signatureScheme": null,
+        "payloadSchemaPath": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "onchainVerifierSurfaceId": null
+      },
+      "onchainOracleVerifier": {
+        "used": false,
+        "verifiedSourceSurfaceIds": [],
+        "verificationRule": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "failureRule": null
+      }
+    },
+    {
+      "id": "peg-cycle-vault-and-escrow",
+      "kind": "onchain-contract",
+      "name": "PegCycleVault, PegCycleReturnEscrow and holder settlement",
+      "summary": "The immutable per-cycle custody chain: PegCycleVault authorizes and confirms funding, ProcessBudget moves process liability into the active cycle's deterministic PegCycleReturnEscrow, the escrow forwards principal to the outbound route and receives returned USDG, and HolderSettlement pays funded holder entitlements from a closed chunked Merkle-sum manifest.",
+      "executionBoundary": "onchain",
+      "capabilityIds": [
+        "peg-cycle-custody-and-release"
+      ],
+      "authorityRefs": [
+        "operations-trigger",
+        "peg-cycle-coordinator"
+      ],
+      "valueFlowRefs": [
+        "process-release",
+        "cycle-outbound-route",
+        "cycle-return",
+        "holder-payout"
+      ],
+      "assetRefs": [
+        "usdg"
+      ],
+      "sourcePaths": [
+        "packages/contracts/src/process/PegCycleVault.sol",
+        "packages/contracts/src/process/IPegCycleVault.sol",
+        "packages/contracts/src/process/ProcessBudget.sol",
+        "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+        "packages/contracts/src/process/IPegCycleRouteExecutor.sol",
+        "packages/contracts/src/payout/PayoutCommitment.sol",
+        "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+        "packages/contracts/src/settlement/HolderSettlement.sol"
+      ],
+      "testPaths": [
+        "packages/contracts/test/process/PegCycleVault.t.sol",
+        "packages/contracts/test/process/PegCycleVaultRecovery.t.sol",
+        "packages/contracts/test/process/PegCycleReturnDegraded.t.sol",
+        "packages/contracts/test/process/ProcessBudget.t.sol",
+        "packages/contracts/test/payout/PayoutCommitment.t.sol",
+        "packages/contracts/test/payout/CanonicalMerkleSum.t.sol",
+        "packages/contracts/test/settlement/HolderSettlement.t.sol"
+      ],
+      "schemaPaths": [],
+      "evidencePaths": [
+        "docs/modules/process-budget.md",
+        "docs/modules/payout-commitment.md",
+        "docs/modules/holder-settlement.md",
+        "docs/modules/peg-cycle-vault.md"
+      ],
+      "exposure": {
+        "movesValue": true,
+        "usesSignatures": false,
+        "makesExternalCalls": true,
+        "holdsCustody": true,
+        "handlesPii": false,
+        "usesGeolocation": false,
+        "usesSecrets": false
+      },
+      "profiles": {
+        "authority": {
+          "status": "applicable",
+          "summary": "Only the frozen Operations trigger may open a cycle or request an outbound route call; the coordinator (PegCycleVault) alone may command an escrow's sendOutbound/sendPayout.",
+          "controls": [
+            "Authenticate openPegCycle/executeOutbound callers against the exact frozen Operations identity for that cycle.",
+            "Restrict PegCycleReturnEscrow.sendOutbound/sendPayout to msg.sender == coordinator only."
+          ],
+          "evidenceRefs": []
+        },
+        "valueFlow": {
+          "status": "applicable",
+          "summary": "Process liability moves once into the cycle's escrow, then out to the typed route executor and back as returned USDG, then out again to funded holder entitlements through the chunked Merkle-sum manifest.",
+          "controls": [
+            "Verify exact source/destination balance deltas on every escrow transfer; reject a false, short or malformed ERC20 return."
+          ],
+          "evidenceRefs": []
+        },
+        "sourceOfTruth": {
+          "status": "applicable",
+          "summary": "PegCycleVault's own lifecycle state (funded cycle record, terminal-failure receipt, committed payout binding) is authoritative; no off-chain journal can substitute for it.",
+          "controls": [
+            "Read PegCycleVault's own lifecycle state (funding record, terminal-failure receipt, committed payout binding) directly; never trust an off-chain cache as authoritative."
+          ],
+          "evidenceRefs": []
+        },
+        "signaturesReplay": {
+          "status": "not-applicable",
+          "summary": "This surface accepts no off-chain signature; every state transition is a direct authenticated on-chain call gated by single-use nonces and cycle identifiers.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "externalCalls": {
+          "status": "applicable",
+          "summary": "executeOutbound calls the pinned, typed IPegCycleRouteExecutor with the exact cycle's escrow as caller; the concrete production route-executor implementation remains INTEGRATION_PENDING (WP-28).",
+          "controls": [
+            "Bind the route executor call to the exact escrow, cycle id and authorized amount; reject any other destination."
+          ],
+          "evidenceRefs": []
+        },
+        "custody": {
+          "status": "applicable",
+          "summary": "Each cycle's PegCycleReturnEscrow is a fresh, immutable, single-purpose custody contract; a FAILED cycle leaves delayed funds in its own escrow rather than sweeping them elsewhere.",
+          "controls": [
+            "Keep terminal and surplus funds in their originating cycle escrow; require a fresh cycle identifier for any successor (process-budget.md)."
+          ],
+          "evidenceRefs": []
+        },
+        "piiGeolocation": {
+          "status": "not-applicable",
+          "summary": "This surface records no personal data; holder entitlements are keyed by address and USDG amount only.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "secretBoundary": {
+          "status": "not-applicable",
+          "summary": "This surface holds no secret on-chain; off-chain signer/authorization key material is out of this on-chain boundary's scope.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "sourceTestSchema": {
+          "status": "applicable",
+          "summary": "The implementation manifest binds the exact reviewed source and test set for this boundary.",
+          "controls": [
+            "Bind implementation.sourcePaths/testPaths to the exact process/payout/settlement files reviewed for this submission."
+          ],
+          "evidenceRefs": []
+        },
+        "failureRecovery": {
+          "status": "applicable",
+          "summary": "FAILED is terminal for its exact cycle and escrow; a later cycle requires a fresh identifier and nonce and, after failure, the exact predecessor identifier and stored failure receipt.",
+          "controls": [
+            "Test DEGRADED recovery and the dust fast path (packages/contracts/test/process/PegCycleReturnDegraded.t.sol)."
+          ],
+          "evidenceRefs": []
+        }
+      },
+      "signedDataSource": {
+        "used": false,
+        "signerAuthorityRefs": [],
+        "signatureScheme": null,
+        "payloadSchemaPath": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "onchainVerifierSurfaceId": null
+      },
+      "onchainOracleVerifier": {
+        "used": false,
+        "verifiedSourceSurfaceIds": [],
+        "verificationRule": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "failureRule": null
+      }
+    },
+    {
+      "id": "off-chain-cycle-automation",
+      "kind": "off-chain-worker",
+      "name": "Automated peg-cycle service and distribution signer/verifier",
+      "summary": "The off-chain automated-cycle-service (packages/runner) that triggers each interval's cycle, calls the Collector Crypt and Relay bridge adapters through an injected signer client, indexes holder balances, compiles the pro-rata manifest, and pairs an automated distribution-signer with a separately-keyed automated verifier before any payout commitment is authorized on-chain.",
+      "executionBoundary": "worker",
+      "capabilityIds": [
+        "off-chain-cycle-orchestration"
+      ],
+      "authorityRefs": [
+        "operations-trigger",
+        "distribution-signer",
+        "distribution-verifier"
+      ],
+      "valueFlowRefs": [
+        "cycle-outbound-route",
+        "cycle-return"
+      ],
+      "assetRefs": [
+        "usdg"
+      ],
+      "sourcePaths": [
+        "packages/runner/src/cycle/cycle-runner.mjs",
+        "packages/runner/src/automation/policy-wallets.mjs",
+        "packages/runner/src/distribution/snapshot-indexer.mjs",
+        "packages/runner/src/distribution/manifest.mjs",
+        "packages/runner/src/distribution/merkle-sum.mjs",
+        "packages/runner/src/config/state-schema.mjs"
+      ],
+      "testPaths": [],
+      "schemaPaths": [
+        "packages/runner/src/distribution/manifest.mjs"
+      ],
+      "evidencePaths": [
+        "docs/modules/adapters.md",
+        "docs/modules/cycle-runner.md"
+      ],
+      "exposure": {
+        "movesValue": false,
+        "usesSignatures": true,
+        "makesExternalCalls": true,
+        "holdsCustody": false,
+        "handlesPii": false,
+        "usesGeolocation": false,
+        "usesSecrets": true
+      },
+      "profiles": {
+        "authority": {
+          "status": "applicable",
+          "summary": "Every mutation this worker triggers still passes through the same on-chain schema-bound policy-wallet authorization (destination/function/asset/amount allowlists, single-use nonces) before a signer is ever invoked; the worker itself holds no override authority.",
+          "controls": [
+            "Reject any operator-configuration document with an unknown or secret-material field before any range check runs (packages/runner/src/config/state-schema.mjs)."
+          ],
+          "evidenceRefs": []
+        },
+        "valueFlow": {
+          "status": "not-applicable",
+          "summary": "This off-chain surface only triggers and observes on-chain value flows already declared under the peg-cycle-vault-and-escrow and canonical-pool-hook surfaces; it holds no value flow of its own.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "sourceOfTruth": {
+          "status": "applicable",
+          "summary": "The worker treats confirmed on-chain state as authoritative and derives its own durable journal from it; the journal is never a substitute source of truth for a payout commitment.",
+          "controls": [
+            "Reconcile the worker's journal against confirmed on-chain state before compiling any payout manifest."
+          ],
+          "evidenceRefs": []
+        },
+        "signaturesReplay": {
+          "status": "applicable",
+          "summary": "The distribution-signer (the worker's own key) and the separately-keyed automated verifier each sign only after independently recomputing the snapshot and manifest from chain data and finding an exact match; no human signature is required per cycle.",
+          "controls": [
+            "Run the verifier as an independent automated process (designed for a separate host) with its own key, never the signer's key.",
+            "Sign only on an exact recomputed match; refuse to sign on any mismatch or missing data."
+          ],
+          "evidenceRefs": []
+        },
+        "externalCalls": {
+          "status": "applicable",
+          "summary": "Adapters call Collector Crypt's pack API, the Relay bridge API, and Robinhood/Solana RPC; every adapter supports a --dry-run mode that performs real reads but refuses any signing/broadcast call, and INTEGRATION_PENDING is reported rather than a fabricated pass.",
+          "controls": [
+            "Fail closed to INTEGRATION_PENDING on an unreachable, malformed, or unexpected external response; never fabricate a passing probe."
+          ],
+          "evidenceRefs": []
+        },
+        "custody": {
+          "status": "not-applicable",
+          "summary": "This off-chain worker never itself custodies USDG, HKMN, or bridge proceeds; all custody is on-chain in the hook, vault, and escrow surfaces.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "piiGeolocation": {
+          "status": "not-applicable",
+          "summary": "The worker processes only chain addresses, USDG amounts, and adapter API responses; it collects no personal identity or geolocation data.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "secretBoundary": {
+          "status": "applicable",
+          "summary": "The worker holds adapter API credentials and, through the injected signerClient seam, triggers signing without itself constructing a signer or reading raw key material (packages/adapters holds no key material either).",
+          "controls": [
+            "Reject any configuration object carrying a secret-material field (privateKey, secretKey, mnemonic, seed, keypair)."
+          ],
+          "evidenceRefs": []
+        },
+        "sourceTestSchema": {
+          "status": "applicable",
+          "summary": "packages/runner ships its own zero-npm-dependency test suite; packages/adapters is the sole npm-dependent package, isolated behind the injected signerClient seam.",
+          "controls": [
+            "Run packages/runner's own zero-npm-dependency test suite before trusting any off-chain automation change."
+          ],
+          "evidenceRefs": []
+        },
+        "failureRecovery": {
+          "status": "applicable",
+          "summary": "A stuck or failed cycle is recoverable from durable state without fabricating a passing external probe; the two-layer kill switch (dashboard pause plus the existing on-chain FAILED/DEGRADED terminal states) stops further automation without a new on-chain pause role (ADR-0021, decision D8).",
+          "controls": [
+            "Recover a stuck or failed cycle from durable, reconciled state; never retry blindly against an unresolved discrepancy."
+          ],
+          "evidenceRefs": []
+        }
+      },
+      "signedDataSource": {
+        "used": true,
+        "signerAuthorityRefs": [
+          "distribution-signer",
+          "distribution-verifier"
+        ],
+        "signatureScheme": "Two independent automated signatures over the same recomputed snapshot/manifest digest: the worker's own distribution-signer key and a separately-keyed, separately-hosted automated verifier that signs only on an exact match (D7, MODIFIED).",
+        "payloadSchemaPath": "packages/runner/src/distribution/manifest.mjs",
+        "freshnessRule": "The verifier recomputes the snapshot and manifest from live chain data at verification time rather than trusting a cached signer-supplied copy.",
+        "replayProtection": "Single-use cycle/payout identifiers and nonces at the on-chain PayoutCommitment/PegCycleVault layer (see peg-cycle-vault-and-escrow).",
+        "onchainVerifierSurfaceId": null
+      },
+      "onchainOracleVerifier": {
+        "used": false,
+        "verifiedSourceSurfaceIds": [],
+        "verificationRule": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "failureRule": null
+      }
+    }
+  ],
+  "projectCapabilities": [
+    {
+      "id": "canonical-pool-fee-accounting",
+      "kind": "fee-accounting",
+      "summary": "Collect the inclusive, cumulative-remainder Programmable/treasury/process fee from every authenticated canonical-market swap and hold it as claimable/releasable liability without any additional trading surcharge.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": false,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "value-flow",
+        "source-of-truth",
+        "custody",
+        "source-test-schema",
+        "failure-recovery"
+      ]
+    },
+    {
+      "id": "peg-cycle-custody-and-release",
+      "kind": "custody-and-release",
+      "summary": "Move process-liability USDG into and out of one immutable per-cycle escrow, route it out through a typed executor, receive it back, and pay funded holder entitlements from a closed chunked Merkle-sum manifest.",
+      "surfaceIds": [
+        "peg-cycle-vault-and-escrow"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "value-flow",
+        "source-of-truth",
+        "external-calls",
+        "custody",
+        "source-test-schema",
+        "failure-recovery"
+      ]
+    },
+    {
+      "id": "off-chain-cycle-orchestration",
+      "kind": "keeper-orchestration",
+      "summary": "Trigger each interval's cycle, call the Collector Crypt and Relay bridge adapters through an injected signer client, index holder balances, and produce a dual-signed (signer + independent verifier) payout manifest.",
+      "surfaceIds": [
+        "off-chain-cycle-automation"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": false,
+        "sourceOfTruth": true,
+        "signaturesReplay": true,
+        "externalCalls": true,
+        "custody": false,
+        "piiGeolocation": false,
+        "secretBoundary": true,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "external-calls",
+        "failure-recovery",
+        "secret-boundary",
+        "signatures-replay",
+        "source-of-truth",
+        "source-test-schema"
+      ]
+    }
+  ],
+  "capabilities": {
+    "externalCalls": {
+      "used": true,
+      "targets": [
+        "Robinhood Chain PoolManager (fee take)",
+        "Robinhood/Solana RPC endpoints",
+        "Collector Crypt pack API",
+        "Relay bridge API"
+      ],
+      "callSites": [
+        "HookemonHook.afterSwap (PoolManager.take)",
+        "PegCycleVault.executeOutbound (route executor)",
+        "off-chain automated-cycle-service adapters"
+      ],
+      "reentrancyPolicy": "On-chain: the moneyPath lock rejects any reentrant afterSwap during collection. Off-chain: every adapter call is dry-run-first and idempotent per cycle id.",
+      "stateDriftPolicy": "An adapter response is never trusted as authoritative over on-chain state; the worker reconciles returned proceeds against the exact predecessor escrow before payout compilation.",
+      "returnValuePolicy": "Direct ERC20 calls accept only an exactly 32-byte canonical true return; PoolManager.take is authoritative only via the exact observed hook balance increase.",
+      "failureAtomicity": "A failed or malformed external call blocks only that step; it never partially commits liability, custody, or payout state."
+    },
+    "permissionedAsset": {
+      "used": false,
+      "officialUniswapPermissionedPool": null,
+      "issuer": null,
+      "jurisdiction": null,
+      "legalDocuments": [],
+      "underlyingClaim": null,
+      "custodian": null,
+      "adapter": null,
+      "hooks": null,
+      "positionManager": null,
+      "swapEligibility": null,
+      "liquidityEligibility": null,
+      "positionTransferability": null,
+      "pauseFreezeUnwind": null,
+      "redemption": null,
+      "routingLimitations": null
+    },
+    "oracle": {
+      "used": false,
+      "source": null,
+      "value": null,
+      "deployment": null,
+      "runtimeHash": null,
+      "decimals": null,
+      "heartbeatSeconds": null,
+      "maxAgeSeconds": null,
+      "observationType": null,
+      "windowSeconds": null,
+      "minimumAnswer": null,
+      "maximumAnswer": null,
+      "maximumDeviation": null,
+      "roundChecks": null,
+      "manipulationResistance": null,
+      "governance": null,
+      "fallback": null,
+      "maxFallbackAgeSeconds": null,
+      "failureRule": null
+    },
+    "keeper": {
+      "used": false,
+      "executionMode": null,
+      "minIntervalSeconds": null,
+      "maxDelaySeconds": null,
+      "permissionlessFallbackAfterSeconds": null,
+      "idempotencyKey": null,
+      "duplicateBehavior": null,
+      "lastProcessedState": null,
+      "boundedWork": null,
+      "maxItems": null,
+      "retryPolicy": null,
+      "zeroWorkBehavior": null,
+      "fundingSource": null,
+      "minimumGasRunway": null,
+      "alertThreshold": null,
+      "maximumGas": null,
+      "failureImpact": null,
+      "userExitIndependent": null,
+      "poolBinding": null,
+      "slippage": null,
+      "deadline": null,
+      "mevPolicy": null
+    },
+    "proof": {
+      "used": false,
+      "proofSystem": null,
+      "circuitRevision": null,
+      "verifyingKeyHash": null,
+      "verifierAddress": null,
+      "runtimeHash": null,
+      "setupType": null,
+      "setupProvenance": null,
+      "publicInputs": [],
+      "domainBindings": {
+        "chainId": null,
+        "verifyingContract": null,
+        "modelVersion": null,
+        "pool": null,
+        "action": null,
+        "actorOrRecipient": null,
+        "amountBounds": null,
+        "epochOrDeadline": null
+      },
+      "replayMode": null,
+      "nullifierScope": null,
+      "nullifierDerivation": null,
+      "nullifierStorage": null,
+      "atomicSpentCheck": null,
+      "resetPolicy": null,
+      "maximumProofBytes": null,
+      "maximumVerificationGas": null,
+      "verifierAuthority": null,
+      "failureRule": null,
+      "privacyClaim": null,
+      "metadataLeakage": null
+    },
+    "crossChain": {
+      "used": false,
+      "bridgeDependencyId": null,
+      "source": {
+        "network": {
+          "namespace": null,
+          "reference": null
+        },
+        "domain": null,
+        "authenticatedSender": {
+          "encoding": null,
+          "value": null,
+          "canonicalizationRule": null
+        }
+      },
+      "destination": {
+        "chainId": null,
+        "domain": null,
+        "receiver": null,
+        "receiverDependencyId": null,
+        "authenticatedBridgeCaller": null
+      },
+      "message": {
+        "identifierDerivation": null,
+        "nonceDerivation": null,
+        "nonceScope": null,
+        "customNonceRule": null,
+        "payloadHashRule": null,
+        "idempotencyKeyRule": null,
+        "idempotencyStorage": null,
+        "atomicConsumption": null,
+        "duplicateBehavior": null,
+        "domainBindings": {
+          "bridgeDependencyId": null,
+          "sourceNetwork": null,
+          "sourceDomain": null,
+          "sourceSender": null,
+          "destinationChainId": null,
+          "destinationDomain": null,
+          "receiver": null,
+          "receiverDependencyId": null,
+          "modelId": null,
+          "poolId": null,
+          "action": null,
+          "payloadHash": null,
+          "timestampOrExpiry": null,
+          "messageId": null,
+          "nonce": null
+        }
+      },
+      "finality": {
+        "mode": null,
+        "minimumSourceConfirmations": null,
+        "challengePeriodSeconds": null,
+        "attestationRule": null,
+        "reorgBehavior": null,
+        "customFinalityRule": null
+      },
+      "ordering": {
+        "mode": null,
+        "sequenceKey": null,
+        "outOfOrderBehavior": null,
+        "maximumPendingMessages": null,
+        "queueOverflowBehavior": null,
+        "pendingMessageExpirySeconds": null,
+        "cleanupRule": null,
+        "releaseRule": null
+      },
+      "staleness": {
+        "timestampSource": null,
+        "customTimestampRule": null,
+        "maximumMessageAgeSeconds": null,
+        "maximumFutureSkewSeconds": null,
+        "staleMessageBehavior": null
+      },
+      "failureBehavior": null,
+      "failureRule": null,
+      "fallback": {
+        "mode": null,
+        "authority": null,
+        "rule": null
+      },
+      "quarantine": {
+        "used": null,
+        "storageRule": null,
+        "maximumEntries": null,
+        "entryExpirySeconds": null,
+        "overflowBehavior": null,
+        "cleanupRule": null,
+        "releaseMode": null,
+        "releaseRule": null,
+        "releaseAuthority": null,
+        "atomicRelease": null
+      }
+    },
+    "externalLiquidity": {
+      "used": false,
+      "custody": null,
+      "ownership": null,
+      "shareAccounting": null,
+      "solvencyEquation": null,
+      "lossAllocation": null,
+      "donationPolicy": null,
+      "exitPath": null,
+      "dependencyFailure": null
+    },
+    "asyncSwap": {
+      "used": false,
+      "supportedExactness": null,
+      "custody": null,
+      "fillRule": null,
+      "partialFillRule": null,
+      "cancellation": null,
+      "expiry": null,
+      "refund": null,
+      "queueBound": null,
+      "liveness": null,
+      "failureRule": null
+    },
+    "customCurve": {
+      "used": false,
+      "invariant": null,
+      "domain": null,
+      "rounding": null,
+      "monotonicity": null,
+      "discontinuities": null,
+      "inverse": null,
+      "differentialReference": null,
+      "failureRule": null
+    }
+  },
+  "capabilityExtensions": [],
+  "tokenBehaviorExtensions": [],
+  "security": {
+    "usesTxOrigin": false,
+    "userControlledDelegatecall": false,
+    "arbitraryExecution": false,
+    "unboundedCriticalLoop": false,
+    "ignoredCallResults": false,
+    "hiddenControls": false,
+    "assumesOnchainSecrecy": false,
+    "bypassesHookAddressValidation": false,
+    "signatureScheme": {
+      "used": false,
+      "standard": null,
+      "nonce": null,
+      "deadline": null,
+      "chain": null,
+      "verifyingContract": null,
+      "action": null,
+      "parameters": null,
+      "erc1271": null
+    }
+  },
+  "implementation": {
+    "sourcePaths": [
+      "packages/contracts/src/HookemonHook.sol",
+      "packages/contracts/src/access/MoneyRoles.sol",
+      "packages/contracts/src/accounting/FeeAccounting.sol",
+      "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "packages/contracts/src/launch/HookemonIssuance.sol",
+      "packages/contracts/src/market/CanonicalMarket.sol",
+      "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+      "packages/contracts/src/payout/PayoutCommitment.sol",
+      "packages/contracts/src/process/IPegCycleRouteExecutor.sol",
+      "packages/contracts/src/process/IPegCycleVault.sol",
+      "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+      "packages/contracts/src/process/PegCycleVault.sol",
+      "packages/contracts/src/process/ProcessBudget.sol",
+      "packages/contracts/src/settlement/HolderSettlement.sol"
+    ],
+    "testPaths": [
+      "packages/contracts/test/accounting/FeeAccounting.t.sol",
+      "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+      "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+      "packages/contracts/test/bindings/RobinhoodV4PoolManager.t.sol",
+      "packages/contracts/test/integration/HookemonHook.t.sol",
+      "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol",
+      "packages/contracts/test/launch/HookemonIssuance.t.sol",
+      "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "packages/contracts/test/payout/CanonicalMerkleSum.t.sol",
+      "packages/contracts/test/payout/PayoutCommitment.t.sol",
+      "packages/contracts/test/process/PegCycleReturnDegraded.t.sol",
+      "packages/contracts/test/process/PegCycleVault.t.sol",
+      "packages/contracts/test/process/PegCycleVaultRecovery.t.sol",
+      "packages/contracts/test/process/ProcessBudget.t.sol",
+      "packages/contracts/test/settlement/HolderSettlement.t.sol"
+    ],
+    "compilerBuildInfoPaths": null,
+    "specificationPath": "specs/requirements.json",
+    "testEvidencePath": "release/phase1/local-evidence.json",
+    "dependencyLockPath": "product/dependency-pins.json",
+    "gateStatusPath": "gates/init.json",
+    "reviewTargetPath": "bindings/robinhood-chain.json",
+    "runtimeAssetManifestPath": null
+  },
+  "risk": {
+    "dimensions": {
+      "complexity": 4,
+      "customMath": 3,
+      "externalDependencies": 3,
+      "externalLiquidity": 1,
+      "valueAtRisk": 4,
+      "teamMaturity": 1,
+      "upgradeability": 0,
+      "autonomy": 3,
+      "priceImpact": 1
+    },
+    "rationales": {
+      "complexity": "One hook composes canonical-market callback authentication, cumulative-remainder fee accounting, issuance verification, and holder settlement; off-chain automation adds a scheduled cycle, two external adapters, a bridge hop, and a dual-signed payout manifest.",
+      "customMath": "Cumulative-remainder fee accounting carries two independent fractional numerators across the pool's lifetime, plus a chunked Merkle-sum payout tree; both are covered by dedicated unit and invariant tests, not yet by an independent audit.",
+      "externalDependencies": "Depends on the pinned v4-core PoolManager/PositionManager, LiquidityLauncher/UERC20Factory, an ambiguous UniversalRouter pin under active resolution (WP-25), Collector Crypt's API, and Relay's bridge API.",
+      "externalLiquidity": "The hook holds no external liquidity position beyond its own permanently-custodied canonical launch position; it does not depend on a third-party liquidity pool for its own accounting.",
+      "valueAtRisk": "Value at risk includes accrued but unclaimed fee liability, in-flight process principal inside per-cycle escrows, and bridged proceeds in transit; every value-moving step is bounded by owner-signed caps (design decision D4) and dry-run-first adapters.",
+      "teamMaturity": "Local Foundry and Node test suites are extensive and pass; no external audit has occurred yet, and production Robinhood deployment/binding remains INTEGRATION_PENDING throughout bindings/robinhood-chain.json.",
+      "upgradeability": "The hook, vault, escrow, and payout contracts are immutable with no proxy, delegatecall, or upgrade authority (permanent-custody and no-successor-control invariants).",
+      "autonomy": "The off-chain cycle service runs on a schedule without a human signature per cycle; a two-layer kill switch (dashboard pause plus existing on-chain FAILED/DEGRADED states) is the only intervention, per decision D8's explicit non-adoption of a new on-chain pause role.",
+      "priceImpact": "Each cycle trades a small, dashboard-capped budget (design decision D4: roughly one pack purchase plus bridge fees per cycle) relative to the canonical pool; the swap fee itself adds no price-impact beyond the disclosed inclusive rate."
+    },
+    "declaredTotal": 20,
+    "declaredTier": "high",
+    "featureTriggers": [
+      "autonomous",
+      "custom-accounting",
+      "custom-math",
+      "external-calls",
+      "hook-held-liquidity",
+      "price-impact",
+      "project-custody",
+      "project-external-calls",
+      "project-secret-boundary",
+      "project-signatures",
+      "project-value-flow",
+      "return-delta"
+    ]
+  },
+  "disclosures": [
+    "Programmable's Robinhood Chain profile is not yet available: the discovery document lists chain 4663 with status 'planned', and the v4 capabilities endpoint returns readiness.status 'unavailable' with reasonCodes ['ROBINHOOD_CHAIN_PROFILE_UNAVAILABLE'] (verified 2026-09-02). Only chain id 1 has productionLaunchAuthorized true today; Robinhood Chain does not yet.",
+    "Chain 4663 is not among the builder skill's known EVM chain-id-to-network mappings (only 1, 130, 8453, 11155111); this submission's network slug 'robinhood-chain' will enter architecture review rather than automatic acceleration.",
+    "The repo-pinned UniversalRouter address (0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99) disagrees with Uniswap's public deployments page value for chain 4663 (0x8876789976decbfcbbbe364623c63652db8c0904, a possible 2026-08-05 redeploy). This does not block pool function (routing is open, decision D2) but must be resolved via WP-25's runtime-codehash probe before CREATE2 hook-address mining trusts either value.",
+    "HKMN's on-chain address, the CREATE2-mined hook address, the final canonical PoolKey (and therefore currency0/currency1 ordering), and every deployed runtime hash remain INTEGRATION_PENDING pending WP-20 (custom launch strategy + CREATE2 mining) and WP-25 (router resolution).",
+    "The 10% non-market HKMN allocation ('otherAllocation') is currently zero-valued with its final remainder-representation contract and LBP curve parameters documented as PLACEHOLDER_OWNER_DECISION pending decision D10.",
+    "Chunked payouts (multi-chunk Merkle-sum manifests) are implemented and tested but shipped inactive at chunk count 1 pending real distribution volume (design decision D5).",
+    "The distribution-signer and verifier roles are both automated processes as of decision D7 (MODIFIED): no human signs per cycle; a manual-signature mode may exist as a non-default option."
+  ],
+  "unresolved": [
+    "Await Programmable's Robinhood Chain profile reaching readiness:available before any real launch-admission submission can be executed (external, outside this repository's control; see scripts/verify-phase2-readiness.mjs).",
+    "Resolve the UniversalRouter address discrepancy for chain 4663 via a fresh on-chain runtime-codehash probe (WP-25) before CREATE2 hook-address mining or any router-specific integration field is finalized.",
+    "Mine and record the CREATE2 hook address, deploy HKMN through the custom LiquidityLauncher strategy, and fix the final canonical PoolKey (currency0/currency1 ordering, tickSpacing) once both addresses exist (WP-20).",
+    "hook.hookData.identitySource has no schema category that cleanly describes this design's mechanism (sender authenticated against the callback's actual caller, recipient self-declared, no trusted-router relationship required by the open-router decision D2); left null rather than selecting a misleading enum value pending Programmable review guidance.",
+    "Finalize decision D10 (remainder-representation contract and LBP curve parameters) to replace the current PLACEHOLDER_OWNER_DECISION.",
+    "Draft and obtain the owner's signature on the standing spend-authority caps referenced in operations.keeper (design decision D4: per-cycle and daily USDG spend caps) before autonomous cycles run in live mode (WP-21 owner-approval drafts).",
+    "Complete WP-28 (PegCycleRouteExecutor, the concrete Relay outbound route contract) so integration.dependencies.onchain's route-executor dependency is no longer only an interface.",
+    "Complete WP-07/WP-14 (automated-cycle-service scheduler wiring) so operations.keeper's actor is a merged, tested module rather than a design-level description.",
+    "capabilities.crossChain/keeper/permissionedAsset/externalLiquidity.used are deliberately false even though each has a real off-chain or partial counterpart: this submission does not have a diligenced dossier confident enough to fill each capability's full required sub-schema, and the genuine facts are recorded instead under operations.keeper, dependencies, disclosures and assets[0].controls.",
+    "hook.returnDeltaAccounting and hook.postReturnDeltaAccounting.afterSwap are left at their scaffold default (used: null) even though both permissions are real (CanonicalMarket._beforeSwap returns a nonzero delta; afterSwap collects via take()): this submission has not independently re-derived the exact signed-range/cancellation/currency-mapping semantics with enough confidence to assert them."
+  ]
+}

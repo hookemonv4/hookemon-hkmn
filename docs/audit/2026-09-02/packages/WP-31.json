@@ -1,0 +1,63 @@
+{
+  "id": "WP-31",
+  "title": "CycleRunner production path: durable store acceptance, production evidence profile, standing authority, binding digests, proceeds basis",
+  "goal": "Make packages/runner/src/cycle/cycle-runner.mjs usable outside test fixtures so the composition root (WP-30, packages/adapters/src/app) can drive a real cycle through it. Today CycleRunner requires FixtureCycleStore, validates every Track-A evidence item against fixture-only schemas (provider fixture-provider with one hardcoded public key, fixture owner key, constant timestamp), verifyProductionProviderReceipt throws INTEGRATION_PENDING, StandingAuthorityProvider is not threaded through the reducer consumption bookkeeping, and the binding-manifest and action digests the vault calls need are only produced for fixtures. Introduce an explicit evidence profile chosen at construction: profile fixture keeps every current behavior unchanged (all existing tests keep passing without edits); profile production accepts the WP-27 DurableCycleStore (interface check, not instanceof), verifies provider evidence by chain observation instead of a fixture signature (Collector Crypt purchase, open and buyback are Solana transactions: the evidence carries the API response plus the transaction signature, and the reducer accepts it only after the injected Solana observer confirms the transaction finalized with the expected program, payer, amounts and, for open, the minted card mint address read from the post token balances), verifies owner authorizations through StandingAuthorityProvider, derives bindingManifestDigest from bindings/robinhood-chain.json and architecture/interfaces.json through the existing preflight code, computes outboundActionDigest and returnActionDigest from the real frozen cycle control, and produces the closedProceedsBasis handoff for Track B from real return evidence.",
+  "deps": ["WP-27", "WP-29", "WP-30", "WP-10", "WP-08", "WP-09"],
+  "parallelGroup": 7,
+  "writeSet": [
+    "packages/runner/src/cycle/cycle-runner.mjs",
+    "packages/runner/src/cycle/reducer.mjs",
+    "packages/runner/src/cycle/schemas.mjs",
+    "packages/runner/src/cycle/authorization.mjs",
+    "packages/runner/src/cycle/authorization-provider.mjs",
+    "packages/runner/src/cycle/cycle-store.mjs",
+    "packages/runner/src/cycle/durable-store.mjs",
+    "packages/runner/src/cycle/preflight.mjs",
+    "packages/runner/src/cycle/bindings.mjs",
+    "packages/runner/src/cycle/collector.mjs",
+    "packages/runner/src/cycle/decoder.mjs",
+    "packages/runner/src/cycle/blockhash-validity.mjs",
+    "packages/runner/src/cycle/execution-accounting.mjs",
+    "packages/runner/src/cycle/evidence-profile.mjs",
+    "packages/runner/test/cycle/**",
+    "packages/runner/test/integration/production-cycle.test.mjs",
+    "docs/modules/cycle-runner.md",
+    "docs/modules/index.json (only the sha256 entry of docs/modules/cycle-runner.md)"
+  ],
+  "readSet": [
+    "packages/adapters/src/app/stage-driver.mjs and cycle-repository.mjs and docs/modules/composition-root.md section Confirmed upstream blockers (the exact five gaps to close)",
+    "packages/adapters/src/collector-crypt.mjs, solana-rpc.mjs, relay-client.mjs, hook-contract-client.mjs (the evidence shapes the adapters can actually produce; do not edit)",
+    "packages/runner/src/automation/automated-cycle-service.mjs (stage contract)",
+    "packages/runner/src/distribution/distribution-signer.mjs and settlement-worker.mjs (what Track B needs from the proceeds basis)",
+    "docs/audit/2026-09-02/FINDINGS_REPORT.md findings HK-006, HK-007, HK-023, HK-028, HK-030",
+    "docs/audit/2026-09-02/design/DESIGN.md sections on the cycle reducer and evidence",
+    "bindings/robinhood-chain.json, architecture/interfaces.json, feasibility/interface-freeze.json"
+  ],
+  "steps": [
+    "Write evidence-profile.mjs: two named profiles (fixture, production) with the verifier functions the reducer and CycleRunner call (action assertion, provider receipt verification, owner authorization verification, cycle store acceptance); the fixture profile delegates to the existing functions unchanged",
+    "Change CycleRunner to take an evidenceProfile option (default fixture so every existing caller is unaffected) and accept any cycle store that satisfies the documented interface when the profile is production; add a DurableCycleStore conformance test",
+    "Define the production provider evidence schema: provider collector-crypt, the recorded API request and response, the Solana transaction signature, and the observer confirmation (finalized slot, block time, program ids, pre and post token balances); the reducer accepts purchase, open and buyback evidence only when the injected observer confirmation matches; the open evidence yields the card mint address from post token balances so the buyback stage can use it",
+    "Thread StandingAuthorityProvider through the reducer consumption bookkeeping for the production profile (single use, expiry, scope) so no fixture owner key is required; keep the fixture provider for the fixture profile",
+    "Compute bindingManifestDigest, outboundActionDigest and returnActionDigest for the production profile from the real bindings and the frozen cycle control (reuse computeManifestDigest and the existing digest helpers; never hardcode digests); make preflight read them without the FIXTURE_ prefix path",
+    "Produce the closedProceedsBasis handoff from production return evidence (the Relay return leg observed on Robinhood via the injected EVM observer: USDG transfer into the cycle escrow) so distribution and payout become reachable",
+    "Replace verifyProductionProviderReceipt with the real implementation and delete the INTEGRATION_PENDING throw",
+    "Add packages/runner/test/integration/production-cycle.test.mjs: a full eight-stage cycle with DurableCycleStore in a temp directory, production-profile evidence produced by fake observers (no network), driven to a closed proceeds basis and a payout-ready state; plus negative tests: unconfirmed transaction rejected, mismatched amounts rejected, reused authorization rejected, fixture evidence rejected under the production profile",
+    "Update docs/modules/cycle-runner.md (six sections) and only its digest in docs/modules/index.json; run the whole runner suite, the adapters suite, scripts/tests and the clean-room scanner before the single commit"
+  ],
+  "tests": [
+    "node --test packages/runner/test/**/*.test.mjs",
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "All previously passing runner tests still pass without modification of their expectations (the fixture profile is unchanged)",
+    "production-cycle.test.mjs drives a full cycle through CycleRunner with DurableCycleStore and production-profile evidence to a payout-ready state, with no fixture keys involved",
+    "Under the production profile, evidence without a matching observer confirmation is rejected, and every vault call input (bindingManifestDigest, outboundActionDigest, returnActionDigest) is derived from repository bindings, never hardcoded",
+    "verifyProductionProviderReceipt no longer throws INTEGRATION_PENDING",
+    "packages/runner keeps zero npm dependencies; the adapters suite still passes"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "This package closes the gap that keeps the product from running live; it is the most safety-critical runner change of Phase 2, so a fresh-context R4 reviewer is mandatory before merge and must check: the fixture profile is unchanged in behavior, the production profile never accepts evidence without an observer confirmation, authorizations are single use, and no code path reads key material (only injected observer, signer and authority clients). Coordinate with the WP-30 stage driver (packages/adapters/src/app/stage-driver.mjs) by reading it, not editing it: the follow-up package WP-32 rewires the six refusing stages in packages/adapters to drive CycleRunner through the production profile; document in docs/modules/cycle-runner.md exactly which CycleRunner calls each stage must make and which evidence shape each expects, so WP-32 can be mechanical. If a Collector Crypt fact is missing (for example which program id the open transaction uses), do not guess: model it as a configuration value validated at construction and say so in the report. COORDINATOR NOTE (base state, 2026-09-02 night): the integration head is clean: cleanroom passes, runner 354/354, adapters 171/171, scripts/tests 407/409 (only phase1-release and phase1-reproducibility red, owned by WP-22; leave them). Do not edit docs/modules/index.json beyond the cycle-runner.md digest, architecture/capability-map.json or gates/init.json."
+}

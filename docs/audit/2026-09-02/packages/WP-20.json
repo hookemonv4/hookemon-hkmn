@@ -1,0 +1,42 @@
+{
+  "id": "WP-20",
+  "title": "Custom LiquidityLauncher strategy + HookemonIssuance wiring + CREATE2 hook mining",
+  "goal": "Write and test a custom launch strategy (the stock InstantLaunchStrategy is unusable), wire it to the existing fail-closed HookemonIssuance guard so HKMN is actually created through the launchpad, and mine the hook's CREATE2 address against the finalized permission mask.",
+  "deps": [
+    "WP-05",
+    "WP-25"
+  ],
+  "parallelGroup": 4,
+  "writeSet": [
+    "packages/contracts/src/launch/CustomLaunchStrategy.sol",
+    "packages/contracts/test/launch/CustomLaunchStrategy.t.sol",
+    "packages/contracts/test/launch/HookemonIssuanceIntegration.t.sol",
+    "scripts/mine-hook-address.mjs"
+  ],
+  "readSet": [
+    "Uniswap liquidity-launcher SDK docs",
+    "scratchpad/w2/DESIGN.md sections 3.8 and 7",
+    "packages/contracts/src/launch/HookemonIssuance.sol"
+  ],
+  "steps": [
+    "Write a custom LiquidityLauncher strategy contract (not native-ETH, not fixed-1e9-supply) and its tests, against a fork of the vendored liquidity-launcher submodule",
+    "Wire CustomLaunchStrategy as the concrete provider adapter HookemonIssuance.sol's own doc comment calls for: call prepareOfficialIssuance with a plan matching the fixed 90%/10% split (WHOLE_HKMN_SUPPLY=420_690_000_000, otherAllocation=0) already enforced in HookemonIssuance._validatePlan, using decision D10's answer (or, if D10 is still open, a clearly-labeled placeholder per design.md section 3.8) for remainderRepresentation and the LBP curve parameters",
+    "Perform the real mint/allocation through LiquidityLauncher/UERC20Factory, then call verifyIssuance with the real observed balances and a 2-element TransferRecord trace proving the market and remainder legs landed exactly as planned",
+    "Add HookemonIssuanceIntegration.t.sol: a regression test proving readTokenState().status reaches OBSERVATION_VERIFIED_PROVIDER_BINDING_PENDING only after a real (forked) launch call through CustomLaunchStrategy, never from a hand-constructed observation not actually produced by the launcher",
+    "Do not begin CREATE2 mining until WP-05's hookData relaxation is finalized and WP-25's Universal Router probe has resolved which router address is live",
+    "Mine the hook address against the finalized permission mask using the RPC-verified-live router address"
+  ],
+  "tests": [
+    "forge test --match-path 'test/launch/*.t.sol'"
+  ],
+  "acceptance": [
+    "Strategy compiles and passes unit tests against a forked launcher",
+    "A forked launch call through CustomLaunchStrategy actually mints/allocates HKMN and HookemonIssuance.verifyIssuance accepts the resulting observation",
+    "A hand-constructed (not launcher-produced) observation is rejected by verifyIssuance's existing trace/allocation checks",
+    "Mined hook address matches the finalized permission mask",
+    "Mining used the router address confirmed live by WP-25's probe, not an unverified pin"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Hard-blocked on WP-25 completing first, not merely sequenced after \u2014 mining before the router address resolves risks a wasted or wrong mine. Also gated on owner decision D10 (remainderRepresentation custody + LBP curve parameters) for the final, non-placeholder version \u2014 see design.md section 3.8/11 D10 for what may proceed against a documented placeholder in the meantime."
+}

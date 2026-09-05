@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "transactionSignature": "3Dq2kH65vqEzpBKczyDLzNYS8sXmtS5GS9MYTwjVaPM4tqVxjtPGnQG4mKpSPa5iTzqomhFgo9nYs3grRNPp68Fh",
+  "nft_address": "H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA",
+  "nftWon": {
+    "content": {
+      "metadata": {
+        "name": "Card Name",
+        "description": "Card Description",
+        "attributes": []
+      }
+    }
+  },
+  "points": 0,
+  "roll": 12345678,
+  "rarity": "Epic"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "r-00072",
+  "at": "2026-08-30T08:41:03.058Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-revision-49-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approved Phase 1 Spec revision 49 with operations-wallet cycle authority and admin-only entitlement replacement."
+  },
+  "inputHashes": {
+    "gates/spec.json": "10766d4dda7f6067e0b6f35e2de2ecaeb4c67d25802e801aa2058d04bde310a3",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "75b1228eee91c36915f8142635d246817493c6774f3909e131563e0e2881732a",
+    "decisions/owner-approvals/phase-1-spec-revision-49-approved.json": "4b0b958b4e8fd5f630458caff890c59d7115cf8b22d8e4888894fe57fc9772a0"
+  }
+}

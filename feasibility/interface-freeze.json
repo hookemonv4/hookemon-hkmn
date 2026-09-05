@@ -1,0 +1,186 @@
+{
+  "schemaVersion": "hookemon.interface-freeze.v1",
+  "productPhase": 3,
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
+  "bindingManifestDigest": null,
+  "inputHashes": {
+    ".gitmodules": "sha256:74e33daf215915a1cc7be5bcf9c1524c9e71387c4c2bba023dd54eea7d5ab335",
+    "architecture/interfaces.json": "sha256:3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10",
+    "architecture/provisional-interfaces.json": "sha256:e6323d8c6c256e33c7e9c4c32cc81524b63c0384be8651d72bdd5faedcbe02ca",
+    "bindings/robinhood-chain.json": "sha256:10f7b2c02ec8d108e2bb90371adbe3a2eedc8f0f10dca8c6becfe2f3573d9f69",
+    "feasibility/cycle-control-model-results.json": "sha256:f47c21aba30424626703439e7fb11967a603b628e603174cf88f5d15163e97e9",
+    "feasibility/cycle-control-survivability-bounds.json": "sha256:59bcd54c0873bb941ccd9e941419c0632a55fb28bf21320464e23cb87cc3562f",
+    "feasibility/model-results.json": "sha256:a6105c4795ecd7cefe986482da2888ab62b765f2cf45740b84284633ece93325",
+    "packages/contracts/foundry.toml": "sha256:2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258",
+    "packages/contracts/remappings.txt": "sha256:1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
+    "product/dependency-pins.json": "sha256:8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
+    "specs/requirements.json": "sha256:927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
+  },
+  "compatibilityVerdict": {
+    "status": "PASSED",
+    "exactModuleSet": true,
+    "exactOperationSets": true,
+    "exactRecordSets": true,
+    "exactEventSets": true,
+    "unresolvedProviderFactPromoted": false,
+    "deferredSelectorOrStoragePresent": false,
+    "genericAdministratorPresent": false,
+    "outOfScopePhase2SurfacePresent": false
+  },
+  "proofCoverage": {
+    "providerBinding": {
+      "status": "PASSED_HISTORICAL_REVISION_54_SOURCE_BOUND",
+      "requirementsRevision": 54,
+      "architectureRevision": 3,
+      "contentAddressed": true,
+      "officialSourcesAndAbiFetchedTwice": true,
+      "readOnlyRuntimeProbesExecutedTwice": true,
+      "sourceProbeDigest": "sha256:c60c7171b3b46f01438b1299ecf36ed144419cae969c02f1d22aad287d91a8bb",
+      "runtimeProbeDigest": "sha256:d4edf5532b401fe43644a5aefff84d36bad8128fa93523144982f9aa6a763cd1",
+      "repeatedExactly": true,
+      "atomicConstructionNegativeVectors": true,
+      "productionBindingComplete": false
+    },
+    "canonicalMarket": {
+      "swapQuadrants": 8,
+      "roundingTransitionVectors": 17,
+      "deterministicFuzzedExecutedUsdgValues": 100000,
+      "staticLpFeeBasisPoints": 0,
+      "additionalTradingFeeBasisPoints": 0,
+      "inclusiveHookFeeBasisPoints": 300,
+      "launchAllocationBasisPoints": 10000,
+      "partialFillRejectionQuadrants": 8,
+      "pinnedV4CorePoolManagerCallbackAndSettlement": "PASSED_LOCAL",
+      "deployedRobinhoodPoolManagerFork": "UNPROVEN"
+    },
+    "permanentCustody": {
+      "adr": "decisions/ADR-0017-permanent-zero-lp-fee-market.md",
+      "localContractProof": "PASSED",
+      "pinnedV4PeripheryPositionManagerMintAndFinalization": "PASSED_LOCAL",
+      "projectControlledAuthorityPaths": 0,
+      "postCustodyBuy": true,
+      "postCustodySell": true,
+      "postCustodyUserTransfer": true,
+      "productionRuntimeProof": "INTEGRATION_PENDING",
+      "deployedCustodyPostTransferTrading": "UNPROVEN",
+      "onchainLaunchFunding10000BasisPoints": "UNPROVEN"
+    },
+    "reproducibleBuild": {
+      "historicalRevision54": {
+        "status": "PASSED_LOCAL_HISTORICAL_SOURCE_BOUND",
+        "requirementsRevision": 54,
+        "architectureRevision": 3,
+        "isolatedCleanBuilds": 2,
+        "declaredGitlinkPinsChecked": 7,
+        "bytecode": {
+          "ImmutableLaunchBinding": {
+            "creationSha256": "sha256:ed54b2ad7e611fdb298606700bf46dd59249c4f71aff9934d50484bb3ed9322d",
+            "runtimeSha256": "sha256:99061a1d239d861c2fcb465c2420fcda6ea88d9382c451c2bc2ce78342a6ab19"
+          },
+          "PermanentPositionCustody": {
+            "creationSha256": "sha256:354b1edc654e3ef04394ceeb3ea5f46ea5322110aa105a0e09f46f51e2a353b6",
+            "runtimeSha256": "sha256:e0a1cadff0b8e2a6700675cf600abc596dd8af5659429c15e9f24fca33b3dfbc"
+          },
+          "RobinhoodBindings": {
+            "creationSha256": "sha256:d7ac96d464f78c6fda8aa1de9f7b9d92884b081f3bfcd79bb8a1c198e9752418",
+            "runtimeSha256": "sha256:00b3b642139567b85e19cd344e804d27960107637f04ae5f72a6e2289fc00e80"
+          }
+        },
+        "repeatedExactly": true
+      },
+      "revision56Candidate": {
+        "status": "PENDING_COMMIT_BOUND_EVIDENCE_GENERATION",
+        "expectedIsolatedCleanBuilds": 2,
+        "observedCommitBoundIsolatedCleanBuilds": 0,
+        "expectedArtifactCount": 20,
+        "localLoopEvidence": "PENDING_COMMIT_BOUND_EVIDENCE",
+        "pegCycleVaultConcreteRuntimeEvidence": "PENDING_COMMIT_BOUND_EVIDENCE",
+        "repeatedExactly": false
+      },
+      "pinnedToolchain": {
+        "foundry": {
+          "version": "1.7.1",
+          "commit": "4072e48705af9d93e3c0f6e29e93b5e9a40caed8"
+        },
+        "solidity": {
+          "solcVersion": "0.8.26",
+          "evmVersion": "cancun",
+          "optimizer": true,
+          "optimizerRuns": 20000
+        }
+      },
+      "compilerTemplates": {
+        "PegCycleVault": {
+          "creationTemplateSha256": "sha256:10c3699cfbd6e4722e48cebd4f2ee0324286717c896c84c01412a738f4114565",
+          "runtimeTemplateSha256": "sha256:138f608c4153e0c6afe332fe842e8bb5d081e94aac213d34f6b587caf2f90576",
+          "runtimeHasImmutableReferences": true,
+          "concreteRuntimeEvidence": "PENDING_COMMIT_BOUND_EVIDENCE"
+        }
+      }
+    },
+    "sourceClosure": {
+      "historicalCodeIsAuthority": false,
+      "unsupportedProviderFactIsAuthority": false,
+      "productPhase2IsPresent": false
+    },
+    "historicalPhase1Model": {
+      "status": "PRESERVED_HISTORICAL_REVISION_56_ARCHITECTURE_4",
+      "requirementsRevision": 56,
+      "architectureRevision": 4,
+      "schemaVersion": "hookemon.feasibility-model-results.v5"
+    },
+    "cycleControl": {
+      "status": "PASSED_LOCAL_REVISION_57_ARCHITECTURE_5",
+      "requirementsRevision": 57,
+      "architectureRevision": 5,
+      "maximumCrossCycleContaminationAtomicUSDG": "0",
+      "maximumBlindRetryMoneyMutationAtomicUSDG": "0",
+      "maximumActiveCycles": 1,
+      "minimumDistinctEscrowsObserved": 2,
+      "maximumAuthorizedLossPerCycleAtomicUSDG": "100000000",
+      "cumulativeSystemLossCap": "NOT_CLAIMED"
+    },
+    "phase3Interface": {
+      "status": "PROVISIONAL_PENDING_FEASIBILITY",
+      "requirementsRevision": 65,
+      "architectureRevision": 9,
+      "bindingManifest": "release/phase3/deployment-manifest.json",
+      "bindingManifestDigest": null,
+      "providerBindingStatus": "INTEGRATION_PENDING",
+      "codeReadinessDoesNotAuthorizeLive": true
+    }
+  },
+  "verification": [
+    "forge fmt --check --root packages/contracts",
+    "forge test --root packages/contracts --match-path 'test/bindings/*.t.sol' -vvv",
+    "node --test scripts/tests/reqs.test.mjs",
+    "node feasibility/verify-robinhood-binding.mjs bindings/robinhood-chain.json",
+    "node feasibility/verify-robinhood-binding.mjs bindings/robinhood-chain.json --reproducible-build /absolute/clean-checkout-a /absolute/clean-checkout-b",
+    "node feasibility/cycle-control-model.mjs --verify feasibility/cycle-control-model-results.json --verify-bounds feasibility/cycle-control-survivability-bounds.json"
+  ],
+  "productionReadiness": {
+    "ready": false,
+    "unprovenFacts": [
+      "provider-bound-FEE-01-confirmation",
+      "provider-graph-admission",
+      "pinned-archive-fork-evidence",
+      "launch-inputs",
+      "finalized-snapshot-log-source",
+      "payout-feasibility-envelope",
+      "owner-gated-live-prerequisites"
+    ],
+    "blockers": [
+      "provider-bound-FEE-01-confirmation",
+      "provider-graph-admission",
+      "pinned-archive-fork-evidence",
+      "launch-inputs",
+      "finalized-snapshot-log-source",
+      "payout-feasibility-envelope",
+      "owner-gated-live-prerequisites"
+    ],
+    "ownerAndClaimDestinationPolicy": "OPERATIONS_CALLER_SELF_DESTINATION_WITH_SEPARATE_OWNER_ACTIONS",
+    "rule": "The Phase 3 interface is provisional and cannot authorize signing, broadcast, deployment, asset movement, gas spend, or publication."
+  }
+}

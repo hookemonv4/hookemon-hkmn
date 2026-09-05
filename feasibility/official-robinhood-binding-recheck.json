@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-08-30",
+  "requirementsRevision": 54,
+  "scope": "READ_ONLY_BUILD_PLANNING",
+  "status": "BUILD_COMPONENTS_DISCOVERED_PRODUCTION_BINDING_PENDING",
+  "supersedes": {
+    "artifact": "feasibility/integration-spikes.json",
+    "finding": "SPIKE-R53-PROGRAMMABLE-CHAIN-4663",
+    "onlyFor": "Whether an official Robinhood-compatible token launcher and Uniswap v4 build surface exist",
+    "doesNotSupersede": [
+      "The requirement for release-block runtime and implementation hash verification",
+      "The requirement to prove the custom USDG/HKMN market and hook behavior",
+      "The requirement to prove a zero PoolKey LP fee and the absence of protocol, router, provider, integrator, token-transfer, or other trading surcharges in addition to the inclusive 3.00 percent Hookemon hook fee",
+      "The requirement to prove permanent non-project-controlled custody of the 90 percent HKMN launch position and successful supported trading after custody",
+      "The prohibition on production deployment without exact owner authorization"
+    ]
+  },
+  "officialSources": [
+    {
+      "authority": "Robinhood Chain",
+      "url": "https://docs.robinhood.com/chain/deploy-smart-contracts/",
+      "facts": [
+        "Robinhood Chain is EVM compatible",
+        "Foundry is supported",
+        "Mainnet chain ID is 4663",
+        "Testnet chain ID is 46630"
+      ]
+    },
+    {
+      "authority": "Robinhood Chain",
+      "url": "https://docs.robinhood.com/chain/contracts/",
+      "facts": [
+        "Canonical USDG is 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+      ]
+    },
+    {
+      "authority": "Uniswap",
+      "url": "https://github.com/Uniswap/contracts/blob/main/deployments/4663.md",
+      "facts": [
+        "PoolManager is 0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "PositionManager is 0x58daec3116aae6D93017bAAea7749052E8a04fA7"
+      ]
+    },
+    {
+      "authority": "Uniswap",
+      "url": "https://github.com/Uniswap/sdks/blob/main/sdks/liquidity-launcher-sdk/src/addresses.ts",
+      "sourceHead": "48dea05c1800598a31005c333c08344e53e2b9c6",
+      "facts": [
+        "Robinhood LiquidityLauncher is 0x0000FffFBE8efE702c8703aE3477FF5dE3d319C0",
+        "Robinhood UERC20Factory is 0x000000e200088D55C39a11F609E5F667729ad49b",
+        "Robinhood LBPStrategy is 0x05d552391067389EE44fec3924157ed33F976000"
+      ]
+    },
+    {
+      "authority": "Uniswap",
+      "url": "https://github.com/Uniswap/liquidity-launcher/blob/main/docs/DeploymentGuide.md",
+      "sourceHead": "1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a",
+      "facts": [
+        "Token creation and distribution can be atomic in LiquidityLauncher.multicall",
+        "Custom distribution strategies are supported",
+        "A custom hook used by an LBP migration must implement the required initializer interface and permission bits"
+      ]
+    },
+    {
+      "authority": "Uniswap",
+      "url": "https://github.com/Uniswap/uerc20-factory",
+      "sourceHead": "a747318fcce114f56a3a21b8bcec83663a61208b",
+      "facts": [
+        "The UERC20 factory supports deterministic fixed-supply ERC-20 creation",
+        "The documented Robinhood deployment is 0x000000e200088D55C39a11F609E5F667729ad49b"
+      ]
+    }
+  ],
+  "negativeCompatibilityFacts": [
+    "The official InstantLaunchStrategy is hookless, native-ETH paired, fixed to 1,000,000,000 tokens, and therefore is not the Hookemon USDG/HKMN launch path.",
+    "A custom strategy or compatible LBP migration is required for the approved 420,690,000,000 HKMN supply, USDG quote asset, custom hook, and allocation policy.",
+    "Discovery of deployed official components does not freeze Hookemon callback semantics, initial price, liquidity range, position custody, exclusive fee behavior, runtime hashes, or deployment parameters.",
+    "No reviewed official stock strategy yet proves all Hookemon requirements for zero LP fee, no additional trading surcharge, permanent non-project-controlled position custody, and normal post-custody buys and sells."
+  ],
+  "buildFence": {
+    "allowed": [
+      "Create a clean Foundry workspace pinned to official source revisions",
+      "Implement and test provider-independent immutable accounting components",
+      "Implement a custom launcher strategy behind explicit compatibility tests",
+      "Run local and pinned-fork read-only verification"
+    ],
+    "blocked": [
+      "Freeze production interfaces before runtime probes pass",
+      "Accept a market path before zero LP fee, exclusive hook-fee behavior, permanent position custody, and post-custody trading tests pass",
+      "Sign, broadcast, deploy, initialize, seed liquidity, spend, or publish",
+      "Treat the stock InstantLaunchStrategy as compatible with Hookemon"
+    ]
+  }
+}

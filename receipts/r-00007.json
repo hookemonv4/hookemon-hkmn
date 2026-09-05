@@ -1,0 +1,14 @@
+{
+  "id": "r-00007",
+  "at": "2026-08-29T23:35:47.595Z",
+  "type": "dependency-pin",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/dependency-pins.json": "faafad254fade007b6cbcc4effc04e7c6f36fafab9502f6cafc75431851c9933",
+    "pnpm-lock.yaml": "5c6e002c4edb460126c42140b5ab926de8bf360934ce5fb92f1503e37554284c",
+    "foundry.toml": "c76af93143dc47e36db719a4cea16d3b9c24494fc9e26471beb1ad8462b2fb0c",
+    "packages/contracts/package.json": "889833bf789c7f866d15191053a245b952975bd453ea42ca319c980548137d3f"
+  }
+}

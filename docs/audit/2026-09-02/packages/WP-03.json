@@ -1,0 +1,41 @@
+{
+  "id": "WP-03",
+  "title": "Vault dead-end fixes: dust fast path + DEGRADED recovery",
+  "goal": "Close the two remaining PegCycleVault dead ends: a trivial-excess return locking authorizePayout forever, and a short/ambiguous return with no valid state transition.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "packages/contracts/src/process/PegCycleVault.sol",
+    "packages/contracts/src/process/IPegCycleVault.sol",
+    "packages/contracts/test/process/PegCycleVault.t.sol",
+    "packages/contracts/test/process/PegLegacyVaultDegraded.t.sol"
+  ],
+  "readSet": [
+    "ADR-0019",
+    "architecture/trust-boundaries.md"
+  ],
+  "steps": [
+    "Relax authorizePayout to accept balance >= rootSum, transferring exactly rootSum and leaving any excess in the escrow (no new state; this closes the pure stray-donation griefing case)",
+    "Add recordDegradedReturn(cycleId, receiptDigest, acceptDegraded) \u2014 authorizer-only, callable from OUTBOUND when balance is nonzero but satisfies neither the dust-fast-path nor the exact/minimum condition",
+    "Require acceptDegraded == true be set only via a distinct authorization schema field that the authorizer signs after an explicit, separately-logged confirmation step (document the off-chain confirmation protocol in a code comment and in docs/modules/peg-cycle-vault.md)",
+    "Add a new terminal DEGRADED state; quarantine the balance identically to FAILED (CREATE2-isolated, cannot contaminate a successor cycle)",
+    "Allow authorizeFundingAfterFailure-equivalent successor-cycle creation from DEGRADED",
+    "Add tests: a return below minimumReturnUsdg without acceptDegraded=true still reverts (no silent laxity); with the flag, DEGRADED is reached and a fresh cycle can start; balance in DEGRADED is never auto-swept; a trivial 1-unit-excess return via the dust fast path pays exactly rootSum and leaves the excess in place",
+    "Add a regression test for the FUNDED-with-expired-payout-authorization case: an authorization signed and then expired before authorizePayout consumes it must renew via the same cancelExpiredFundingAuthorization-family path, not lock principal (design.md section 2.5)"
+  ],
+  "tests": [
+    "forge test --match-path 'test/process/*.t.sol'"
+  ],
+  "acceptance": [
+    "A return >= rootSum by any amount pays out exactly rootSum, no more, no less",
+    "A nonzero return that is neither >= rootSum nor exactly 0 has a valid transition (DEGRADED) instead of being permanently stuck",
+    "recordDegradedReturn reverts unless acceptDegraded is explicitly true in the signed authorization",
+    "DEGRADED balance is never automatically moved anywhere by any contract function",
+    "An expired payout authorization on a FUNDED cycle renews cleanly instead of locking principal"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "This is the single highest-value correctness fix in the whole design \u2014 closes a previously-flagged critical dead end. Do not add any path that auto-sweeps a DEGRADED balance. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer (someone who has not written this diff) before merge \u2014 do not self-approve."
+}

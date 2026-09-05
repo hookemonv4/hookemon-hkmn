@@ -1,0 +1,44 @@
+{
+  "id": "WP-05",
+  "title": "Pin Programmable owner + open router / optional hookData",
+  "goal": "Compile-time pin the Programmable fee beneficiary to the policy-mandated address, emit claim events, and relax the single-router/mandatory-hookData binding so standard wallets, aggregators, and the Uniswap Trading API can swap against the pool.",
+  "deps": [
+    "WP-01",
+    "WP-02"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/contracts/src/bindings/RobinhoodBindings.sol",
+    "packages/contracts/src/accounting/FeeAccounting.sol",
+    "packages/contracts/src/HookemonHook.sol",
+    "packages/contracts/src/market/CanonicalMarket.sol",
+    "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+    "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol"
+  ],
+  "readSet": [
+    "programmable-fee-policy.md",
+    "compatibility-standard.md",
+    "bindings/robinhood-chain.json"
+  ],
+  "steps": [
+    "Add a compile-time constant / constructor-time require pinning programmableBeneficiary == 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "Add ProgrammableClaimed/TreasuryClaimed events to _claimLiability",
+    "Make hookData optional in CanonicalMarket: when absent or malformed, skip buyerHkmnCredit bookkeeping but still collect the fee and accrue liabilities normally for any caller/router",
+    "Keep full-fill-only enforcement (InvalidFinalizedSwap on partial fill) unchanged",
+    "Add new test cases: swap from an arbitrary router with no hookData succeeds and pays the exact fee with no buyerHkmnCredit; the existing strict-hookData path is unchanged for the automation's own swaps; RobinhoodBindings.validate() rejects a binding whose programmableBeneficiary is not the pinned address"
+  ],
+  "tests": [
+    "forge test --match-path 'test/bindings/*.t.sol'",
+    "forge test --match-path 'test/accounting/*.t.sol'",
+    "forge test --match-path 'test/market/*.t.sol'"
+  ],
+  "acceptance": [
+    "Deployment reverts if programmable != 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "ProgrammableClaimed/TreasuryClaimed events emitted with exact amounts on every claim",
+    "A swap from an arbitrary router with no hookData succeeds, pays the exact 3% fee, and credits no buyerHkmnCredit",
+    "The existing hookData-present path is byte-for-byte unchanged in behavior"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "Revisits an audited, tested invariant (single-router binding) \u2014 gated on owner decision D2 and a dedicated red-team pass (WP-26) before this is treated as final. Do not begin CREATE2 hook mining (WP-20) until this lands AND the router-address probe (WP-25) resolves. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer before merge \u2014 do not self-approve. COORDINATOR NOTE after WP-01: packages/contracts/src/HookemonHook.sol has pre-existing forge fmt drift; run forge fmt on it as part of this package so forge fmt --check passes. RESUME NOTE: a previous agent started this package and was stopped after a few minutes (full disk); a few uncommitted edits may exist in the worktree (git status). Inspect them, keep what is correct, and complete the package; commit exactly once. Disk space is scarce: no npm installs, delete build artifacts, keep temp files small, stop and report on ENOSPC."
+}

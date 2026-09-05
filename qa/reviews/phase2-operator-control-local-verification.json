@@ -1,0 +1,82 @@
+{
+  "schema": "hookemon.phase2-local-verification.v1",
+  "authority": "LOCAL_FIXTURE_AND_OFFLINE_TESTS_ONLY",
+  "requirementsRevision": 57,
+  "architectureRevision": 5,
+  "implementationCommits": [
+    "0de53c8df4afb857e6d2c3d8d68823589f44086a",
+    "e4c29f95d3ce486976a3ac4088784cdada3dfabd",
+    "9b7b69751888e792c15d8cda03099cf369d42739",
+    "b11754857ef561e5b92abe99bf1f1bafee913729",
+    "b9e891cef32f72ccde313a1e4a56a4e1549ada2c",
+    "fc4906a2c9c9b9a70e7bdb02724fbf317a3a3adb",
+    "e6a8ca750d401294569c9a8fb926e4afca7f18b1",
+    "d590b060992834158c09df9f3af9e867b5d02ff9"
+  ],
+  "verifiedBehavior": [
+    "An interrupted nonterminal cycle resumes from the same frozen plan, control binding, and durable journal.",
+    "Unresolved external intent permits reconciliation only and blocks blind retry.",
+    "A verified terminal failure permits only a fresh successor identifier, nonce, and deterministic escrow.",
+    "Cycle-local returns and unsolicited surplus cannot fund or enlarge another cycle.",
+    "Only an expired inactive never-started plan can be retired; started cycles cannot be abandoned."
+  ],
+  "review": {
+    "initialOutcome": "CHANGES_REQUESTED",
+    "findings": [
+      "Unsolicited USDG could make an otherwise authorized payout permanently unconsumable.",
+      "The frozen local cycle identifier was not bound to the observed onchain cycle identifier.",
+      "An expired frozen plan that never started had no bounded retirement path.",
+      "The signed execution preflight did not bind the frozen funding nonce, expiry, or Robinhood minimum receive.",
+      "Terminal evidence did not retain the observed onchain cycle and could replace an active unresolved request."
+    ],
+    "remediation": {
+      "commits": [
+        "b9e891cef32f72ccde313a1e4a56a4e1549ada2c",
+        "fc4906a2c9c9b9a70e7bdb02724fbf317a3a3adb",
+        "e6a8ca750d401294569c9a8fb926e4afca7f18b1",
+        "d590b060992834158c09df9f3af9e867b5d02ff9"
+      ],
+      "disposition": "REMEDIATED_LOCALLY_WITH_FOCUSED_REGRESSION",
+      "summary": "The payout moves only the evidenced amount from its cycle escrow, frozen control and terminal evidence retain the observed onchain identity, the signed preflight binds every funding projection field, unresolved intent remains reconcile-only, and retirement is limited to expired inactive plans with no journal."
+    }
+  },
+  "verification": {
+    "runner": {
+      "command": "node --test packages/runner/test/cycle/*.test.mjs packages/runner/test/distribution/*.test.mjs packages/runner/test/operator/*.test.mjs",
+      "tests": 135,
+      "passed": 135,
+      "failed": 0
+    },
+    "contractProcess": {
+      "command": "forge test --root packages/contracts --match-path 'test/process/*.t.sol' -vvv",
+      "tests": 51,
+      "passed": 51,
+      "failed": 0
+    },
+    "contractSurface": {
+      "command": "node --test packages/contracts/test/process/PegCycleVault.surface.test.mjs",
+      "tests": 2,
+      "passed": 2,
+      "failed": 0
+    }
+  },
+  "excludedCapabilities": [
+    "dashboard",
+    "server",
+    "database",
+    "scheduler",
+    "automatic-pack-selection",
+    "concurrent-cycles",
+    "production-signing",
+    "broadcast",
+    "deployment"
+  ],
+  "releaseApproved": false,
+  "productionReady": false,
+  "externalActionsPerformed": false,
+  "limits": [
+    "The signed escrow observation uses pinned local fixture data and proves no live Robinhood Chain state.",
+    "Provider routes, credentials, production authorization, transaction submission, deployment, and publication remain outside this evidence.",
+    "This artifact records local implementation verification and cannot override a failed or stale framework gate."
+  ]
+}

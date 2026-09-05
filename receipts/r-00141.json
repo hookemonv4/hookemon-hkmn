@@ -1,0 +1,16 @@
+{
+  "id": "r-00141",
+  "at": "2026-08-30T14:15:42.709Z",
+  "type": "measurable-success-criteria-verified",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "itemId": "I3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "product/PRD.md": "53ab38b0978884ab1b6753db084e8020f22212efffde4c4e36e95cea84962c8c"
+  }
+}

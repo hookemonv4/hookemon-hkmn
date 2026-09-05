@@ -1,0 +1,16 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes the 10/40/250 basis-point gross-volume fee design, independent lifetime remainders, exact-output gross-up, the 1,000-atomic-USDG threshold, and whole-swap reversion. FEE-01 stays open pending provider-bound confirmation; Option A is a plan default only. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/capability-map.md": "429d78b2c91f16a5de19b45469e6049e3cf01b9f6a35e8df45a064117a832bbc",
+    "architecture/interfaces.json": "fece0278bb8b975828836517ab86fc97c7cdba69a7c6e65a5660719251beff2e",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "fc19b6ad3fa4f9c911a9e2c62c465b05b7c4dffd2342e19ec4c022ce9d7e823a",
+    "specs/requirements.json": "79855056e16c6c006825cde67ac610182007de4bfd6798f2b66574b2d361506b"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "Owner approved the manual one-cycle Phase 1 rescope and instructed continuous local completion while GitHub remains unavailable.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "product/PRD.md": "ff3a9c2d4688ee93563555338a8442c9663975a56f3600593f377d535e340cb5"
+  }
+}

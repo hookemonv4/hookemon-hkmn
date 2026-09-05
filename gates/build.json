@@ -1,0 +1,19 @@
+{
+  "id": "build", "version": 2,
+  "items": [
+    { "id": "B1", "text": "Every active ledger task is done; every excluded task is explicitly owner-deferred; no live leases; merge queue empty (no queued or retest rows)", "receiptType": "task-ledger-complete", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json"], "allowedPrefixes": [] } },
+    { "id": "B2", "text": "v4 trace check passes: every requirement covered, every done task has an evidence receipt", "receiptType": "build-trace-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json", "specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json", "specs/requirements.json"], "allowedPrefixes": [] } },
+    { "id": "B3", "text": "R1 held: module contract cards updated for every touched module", "receiptType": "module-contracts-updated", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["docs/modules/index.json"], "requiredPrefixes": [], "allowedInputs": ["docs/modules/index.json"], "allowedPrefixes": [] } },
+    { "id": "B4", "text": "R2 held: every behavior change has an owner-approved spec revision", "receiptType": "owner-spec-revision-approved", "evidencePolicy": { "authority": "OWNER", "requiredInputs": ["specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["specs/requirements.json"], "allowedPrefixes": [] } },
+    { "id": "B5", "text": "High-risk tasks show blind-test + independent-review receipts; ordinary tasks show integration review at checkpoints", "receiptType": "review-evidence-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["qa/reviews/index.json"], "requiredPrefixes": [], "allowedInputs": ["qa/reviews/index.json"], "allowedPrefixes": [] } },
+    { "id": "B6", "text": "One commit per task; no commit mixes tasks; clean baseline before every worktree", "receiptType": "task-commit-integrity-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json"], "allowedPrefixes": [] } }
+  ],
+  "redFlags": [
+    "'All tests pass' without a test-run receipt",
+    "Tests that passed on their first run (they may not test what you think)",
+    "A worktree that edited files outside its task's declared scope"
+  ],
+  "rationalizations": [
+    { "id": "RZ-B1", "excuse": "The docs can catch up after the merge", "reality": "R1 exists so a fresh session reads docs instead of the whole codebase. Stale cards poison every later session." }
+  ]
+}

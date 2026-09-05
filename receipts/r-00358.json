@@ -1,0 +1,30 @@
+{
+  "id": "r-00358",
+  "at": "2026-09-01T15:27:18.517Z",
+  "type": "gate",
+  "phase": "architecture",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 6,
+    "problems": [
+      "prerequisite init gate is FAILED via r-00356",
+      "prerequisite spec gate is FAILED via r-00357",
+      "A1: evidence r-00268 is STALE",
+      "A2: evidence r-00293 is STALE",
+      "A3: evidence r-00270 is STALE",
+      "A4: evidence r-00271 is STALE",
+      "A5: evidence r-00272 is STALE",
+      "A6: evidence r-00335: architecture/A6 evidence must bind the module index and every indexed card"
+    ]
+  },
+  "inputHashes": {
+    "gates/architecture.json": "000eb1273c2bf4d237c60d4c8b9ad926ca4e7a2d62fdf32d575dac30cac03dae",
+    "gates/runs/architecture.json": "fb714d04649d5a85194455294a5decd10e5b0e32a668f5049e285673968f5246",
+    "receipts/r-00268.json": "dde00b58cbe4fcfa0eb96d095f8077619c4e4abe74e1f300c70def5c4a1c147d",
+    "receipts/r-00293.json": "614dcf1a4bfc0f6b5661d89fdc6a900c58b560cd567409920ae57958e8b8f148",
+    "receipts/r-00270.json": "44f577528092648b04850e07585ea1101217236c52f7e4086a37c0daf54bfd84",
+    "receipts/r-00271.json": "96c549edec6295195c844896d23d78a10b3841d663dc16855b07c9d8ac8d3301",
+    "receipts/r-00272.json": "95e323951f65b6e17721f04f6290308c8a1b8629d0ce8eef8c03d625b29cf200",
+    "receipts/r-00335.json": "e15118a1b4f6967401a542459f6015c49e88e0afdf04dd161fb095c77d46e4b0"
+  }
+}

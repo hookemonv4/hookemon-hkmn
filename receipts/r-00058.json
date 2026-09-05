@@ -1,0 +1,25 @@
+{
+  "id": "r-00058",
+  "at": "2026-08-30T08:05:07.780Z",
+  "type": "architecture-decisions-recorded",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "itemId": "S3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/spec.json": "327e14a644919e7e7fc821dec8ef5bd8a1e7f9098662bcfdd94cf52f1666e61e",
+    "decisions/ADR-0001-clean-room-programmable-robinhood.md": "de60c3e0716d4f115e60ea827b871175084ef41f88383ee564eb6695258a29f4",
+    "decisions/ADR-0002-launchpad-token-issuance.md": "4cc79b69d493302b87044e768688b591fbc8418b538b884f3bc73de22480d1a2",
+    "decisions/ADR-0003-segregated-usdg-liabilities.md": "87ce796ff507192cf9be73f30c11ac1825e5dc83bf5ed05a8efd7b5a923e499b",
+    "decisions/ADR-0004-attested-process-budget-release.md": "6d42c3eca4d11f9096bae29c5b3cd9cf6cb64103c1b4ee628077f8d06a9be4b1",
+    "decisions/ADR-0005-funded-payout-state-machine.md": "7799693a44386d47daab3320c1bdc1fd75db6f75d2affa6f88786c156e7abc48",
+    "decisions/ADR-0006-bounded-role-and-pause-matrix.md": "2efa480d8ca0182b5145a5f8a46aa0be2630fee294c7e09bd42b4ae76a3f8bb3",
+    "decisions/ADR-0007-phase-1-interface-boundary.md": "d799ce36c11b3fe2ed9c13f7a659bde0e52dac60eacfe003fab775278fd50962",
+    "decisions/ADR-0008-immutable-successor-lifecycle.md": "25e7a78801660f410b409e35e83a04029cccd6173d369a8eac0b092bbc190e86",
+    "decisions/ADR-0009-official-provider-binding.md": "25f91967e8a8c074a3a77b7e1d0e68a6e5c4e423085992292c516c229e22eeeb",
+    "decisions/ADR-0010-treasury-only-surplus-recovery.md": "78a1ecc0c996fa1726b05358a58cacb3ef8e3ab8783201b1546d62a3d22c3bde"
+  }
+}

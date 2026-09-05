@@ -1,0 +1,16 @@
+{
+  "id": "r-00362",
+  "at": "2026-09-01T16:39:59.550Z",
+  "type": "prd-written",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "itemId": "I1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/init.json": "cdcf3eeb87f0870ac886ab5af69af15cc29063237eaecb6f9d4d832263347012",
+    "product/PRD.md": "d4fe76c6b8a8846b92c7248594bb0e329b996b0882270c96e0e8ee478abbc952"
+  }
+}

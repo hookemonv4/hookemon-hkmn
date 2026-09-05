@@ -1,0 +1,35 @@
+{
+  "schema": "v4-task-deferral-v1",
+  "action": "TASK_DEFER",
+  "taskId": "P1-011",
+  "phase": "build",
+  "targetStatus": "deferred",
+  "rationale": "Phase 1 task P1-011 remains deferred under the owner-approved manual one-cycle boundary. DRAFT_UNSIGNED re-binding to requirements revision 62 after specs/requirements.json advanced from revision 58 to 62; this draft is not wired into tasks.json and does not replace the live decisions/task-deferrals/P1-011.json binding. The current task CLI cannot rebind an already deferred entry, and the approval draft binds the draft descriptor path instead of the canonical descriptor path, so an owner signature is necessary but not sufficient. An owner-authorized rebind operation must validate the existing deferral, produce canonical descriptor and approval bytes, and append the renewal receipt before this draft can replace the live binding. It authorizes no deployment, credential use, signing, broadcast, asset movement, spending, or publication.",
+  "prestate": {
+    "id": "P1-011",
+    "title": "Render loop dashboard",
+    "phase": "build",
+    "risk": "ordinary",
+    "deps": [
+      "P1-001"
+    ],
+    "reqs": [],
+    "status": "done",
+    "leaseToken": 1,
+    "completionCommit": "27e675ba61538b1d39e1a5ebf5e01a49e1e2c112"
+  },
+  "prestateFingerprint": "b05e44062790639cf601a6a69776054b814b981924c0aa5f60d44c34b83f8031",
+  "requirements": {
+    "path": "specs/requirements.json",
+    "revision": 62,
+    "sha256": "677a9909c8097dbd4ebffb78517239e5674efd29ef3ba72f451d835040864b83"
+  },
+  "decision": {
+    "path": "decisions/ADR-0018-manual-one-cycle-phase-boundary.md",
+    "sha256": "65ee8b6b48ad409bed26ec9d44c8aa952d16f292374f0abbd1df165a9363f5f3"
+  },
+  "design": {
+    "path": "docs/superpowers/specs/2026-08-31-manual-one-cycle-design.md",
+    "sha256": "7cf6f733e9925d5552999d8d0c076a0eb72f4a45be5768ed4991baf0bf8bfe82"
+  }
+}

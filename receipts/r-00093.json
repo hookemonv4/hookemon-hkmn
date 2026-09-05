@@ -1,0 +1,17 @@
+{
+  "id": "r-00093",
+  "at": "2026-08-30T11:45:14.461Z",
+  "type": "domain-pack-validated",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "itemId": "I4",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/init.json": "f54b2ac9902b8004c87eacbdbcff8a175e0617e2c90decf948b9c29d4409715e",
+    "packs/base/pack.json": "fec3e938aa995e1bfc20d26bc2a42e7191176df419eb4bf64820b36337a6f7de",
+    "product/domain-packs.json": "8c65bffa55576c3dd7e4919d04f2b885b7052626db55f48471f395d63432093b"
+  }
+}

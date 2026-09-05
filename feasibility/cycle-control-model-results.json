@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "hookemon.cycle-control-model-results.v1",
+  "productPhase": 2,
+  "requirementsRevision": 57,
+  "architectureRevision": 5,
+  "inputs": {
+    "maximumAuthorizedLossPerCycleAtomicUSDG": "100000000",
+    "requestedMaximumActiveCycles": 1,
+    "requiredDistinctEscrowsAcrossTwoCycles": 2
+  },
+  "scenarios": [
+    {
+      "id": "two-sequential-successful-cycles",
+      "inputs": {
+        "requestedCycles": 2
+      },
+      "cycles": [
+        {
+          "cycleId": "0x1884a8f1d43a1e42bb7156c36b0a3fc740a99581cd81055be8ac3516027b724f",
+          "nonce": "0xc50300049745e0d46cfbd0a86cee5846f03559253a6cda8562577537ae5dce08",
+          "escrow": "0xf565f7e3e4f551fe690532236e9746dfe1b007a8",
+          "principalAtomicUSDG": "50000000",
+          "terminalStatus": "PAYOUT_COMMITTED",
+          "predecessorCycleId": null
+        },
+        {
+          "cycleId": "0xec6e19ee0577041c381ac4469cec32ac40f5abd6d57cb7724d03b3d886fa5537",
+          "nonce": "0x0e9aaa0b0bc90a5476ed1856d0d6c2e7a435507afd33026ea99825b15284c9b9",
+          "escrow": "0xffe0466ba29d08dc1a8e09f6cc33d7067a24d32c",
+          "principalAtomicUSDG": "75000000",
+          "terminalStatus": "PAYOUT_COMMITTED",
+          "predecessorCycleId": null
+        }
+      ],
+      "outcomes": {
+        "maximumActiveCycles": 1,
+        "distinctEscrows": 2,
+        "bothCyclesTerminal": true
+      }
+    },
+    {
+      "id": "same-cycle-restart-requires-reconciliation",
+      "inputs": {
+        "interruptedCycleId": "0x5d5f35e6b6b7b47848293d9a8bea5dfea07b3f2a712e1fdef3789ed036023684",
+        "unresolvedIntent": true
+      },
+      "outcomes": {
+        "blindRetryAccepted": false,
+        "blindRetryMoneyMutationAtomicUSDG": "0",
+        "reconciliationRequired": true,
+        "reconciledBeforeResume": true,
+        "resumedCycleId": "0x5d5f35e6b6b7b47848293d9a8bea5dfea07b3f2a712e1fdef3789ed036023684"
+      }
+    },
+    {
+      "id": "failed-cycle-successor-isolates-late-return",
+      "inputs": {
+        "failedCycleId": "0xfd0d841ca4b09cfbd7be9c3a61f880d6402e0caf5af3043394e833f272d2a87d",
+        "failureReceiptDigest": "0x33dc4764f6efcb7a11a6831790c9d320423a22f6a96f43b1cad3987a0093daeb",
+        "lateReturnToFailedEscrowAtomicUSDG": "125000000"
+      },
+      "cycles": [
+        {
+          "cycleId": "0xfd0d841ca4b09cfbd7be9c3a61f880d6402e0caf5af3043394e833f272d2a87d",
+          "nonce": "0x9c48174f5bb7afdbe79e2263d152b4a687634e302d741efbc233064a281c0984",
+          "escrow": "0x204362dba1861c9fb30578ca61a49bf100b9c290",
+          "principalAtomicUSDG": "100000000",
+          "terminalStatus": "FAILED",
+          "predecessorCycleId": null
+        },
+        {
+          "cycleId": "0x7eb2867195ff33c686989a4c31389ceeb12e41d7d8ba186ef517b787681653bd",
+          "nonce": "0xf092dfd12208a0b0bb7b461f402c7e1e7a9846d47f6d9e015e7b99c0653f33d5",
+          "escrow": "0x8b265b846c4895bf8785a8f056ab6e2b2631c2d5",
+          "principalAtomicUSDG": "100000000",
+          "terminalStatus": null,
+          "predecessorCycleId": "0xfd0d841ca4b09cfbd7be9c3a61f880d6402e0caf5af3043394e833f272d2a87d"
+        }
+      ],
+      "outcomes": {
+        "successorUsesFreshCycleId": true,
+        "successorUsesFreshNonce": true,
+        "successorUsesDistinctEscrow": true,
+        "successorBoundToFailedCycle": true,
+        "failedEscrowBalanceAfterLateReturnAtomicUSDG": "225000000",
+        "successorBalanceBeforeLateReturnAtomicUSDG": "100000000",
+        "successorBalanceAfterLateReturnAtomicUSDG": "100000000",
+        "lateReturnContributionToSuccessorAtomicUSDG": "0"
+      }
+    }
+  ],
+  "aggregate": {
+    "maximumCrossCycleContaminationAtomicUSDG": "0",
+    "maximumBlindRetryMoneyMutationAtomicUSDG": "0",
+    "maximumActiveCycles": 1,
+    "minimumDistinctEscrowsObserved": 2,
+    "maximumAuthorizedLossPerCycleAtomicUSDG": "100000000",
+    "cumulativeSystemLossCap": {
+      "status": "NOT_CLAIMED",
+      "atomicUSDG": null
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "r-00133",
+  "at": "2026-08-30T14:14:14.623Z",
+  "type": "failure-modes-operationalized",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "f208f92bab9c252dc847e282e0fb12d4c7b7e2149aa3082db0b57381e2e3241e",
+    "architecture/failure-modes.md": "92b1e029fa2428b5a8ffc74514682d212fe3e8db47dd53ef27dc4e562f900c2d"
+  }
+}

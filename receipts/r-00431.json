@@ -1,0 +1,19 @@
+{
+  "id": "r-00431",
+  "at": "2026-09-02T03:21:22.519Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-013",
+    "commitSha": "741aaaea2c5cc69895a1d17b1ce72932b490c692",
+    "taskFingerprint": "ecb6c3fc3c556109481827d8029da88ae66292b8794c01b2153fd25d9b1dadf0",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "packages/contracts/test/integration/HookemonHook.t.sol": "c15fd29a75fd0fa50165c40f8664b69133c4c0ac9bfb1bdaccda2ff969d6598f",
+    "packages/contracts/test/process/PegCycleVault.t.sol": "2d006d873a20f5e743e2aa15a6079c1d4df74429dbb9dec7f93ce04a4aa3984c",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

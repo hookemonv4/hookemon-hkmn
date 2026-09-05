@@ -1,0 +1,12 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes approval of REQ-canonical-market-6 specifically — relaxing CanonicalMarket.sol's single-router, mandatory-hookData binding so the standard Uniswap Trading API, any wallet's default swap flow, and any DEX aggregator can swap against the canonical pool. This revises an already-tested, previously owner-reviewed invariant (the single-router binding), so it is called out as its own separate approval rather than folded into the revision-58 baseline draft, per WP-05's scoping and the design synthesis's decision D2. Fee accrual and liability accounting are unaffected: hookData only gates buyerHkmnCredit bookkeeping, never fee collection. Full-fill-only enforcement is unchanged. This draft grants no deployment authority; the code change itself (WP-05) is a separate, parallel package with its own red-team pass gate.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

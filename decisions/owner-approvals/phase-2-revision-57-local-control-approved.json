@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Owner approved the lean local Phase 2 scope: manual pack and money-parameter control before freeze, exact same-cycle resume after interruption, and a fresh isolated cycle after terminal failure. No external action is authorized.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "specs/requirements.json": "be63dcdf98ae4714c5ffcdfc5617f4fd8f8d7805577c689ec34ac10e3e461fe8"
+  }
+}

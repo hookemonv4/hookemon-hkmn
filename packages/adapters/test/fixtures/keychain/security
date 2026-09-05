@@ -1,0 +1,201 @@
+#!/usr/bin/env node
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+class SecurityFixtureError extends Error {
+  constructor(message, code = 1) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function requiredEnvironment(name) {
+  const value = process.env[name];
+  if (typeof value !== 'string' || value.length === 0) throw new SecurityFixtureError(`missing ${name}`);
+  return value;
+}
+
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    let input = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => { input += chunk; });
+    process.stdin.once('error', reject);
+    process.stdin.once('end', () => resolve(input));
+  });
+}
+
+function recordCall(recordPath, argv, stdin) {
+  mkdirSync(dirname(recordPath), { recursive: true });
+  appendFileSync(recordPath, `${JSON.stringify({ argv, stdin })}\n`, 'utf8');
+}
+
+function readStore(storePath) {
+  if (!existsSync(storePath)) return { values: {} };
+  const parsed = JSON.parse(readFileSync(storePath, 'utf8'));
+  if (!parsed || typeof parsed !== 'object' || !parsed.values || typeof parsed.values !== 'object') {
+    throw new SecurityFixtureError('fake Keychain store is malformed');
+  }
+  return parsed;
+}
+
+function writeStore(storePath, store) {
+  mkdirSync(dirname(storePath), { recursive: true });
+  writeFileSync(storePath, `${JSON.stringify(store)}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+function itemKey(service, account) {
+  return `${service}\u0000${account}`;
+}
+
+function readPasswordFromStdin(stdin) {
+  return stdin.endsWith('\r\n') ? stdin.slice(0, -2) : stdin.endsWith('\n') ? stdin.slice(0, -1) : stdin;
+}
+
+function splitCommandLine(line) {
+  const tokens = [];
+  let token = '';
+  let quote = null;
+  let escaped = false;
+  let started = false;
+
+  for (const character of line) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      started = true;
+    } else if (character === '\\') {
+      escaped = true;
+      started = true;
+    } else if (quote !== null) {
+      if (character === quote) quote = null;
+      else token += character;
+      started = true;
+    } else if (character === '\"' || character === "'") {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        tokens.push(token);
+        token = '';
+        started = false;
+      }
+    } else {
+      token += character;
+      started = true;
+    }
+  }
+
+  if (escaped || quote !== null) throw new SecurityFixtureError('malformed security -i command line');
+  if (started) tokens.push(token);
+  return tokens;
+}
+
+function parseItemArguments(args, { interactive, stdin, operation }) {
+  let service;
+  let account;
+  let keychain;
+  let replace = false;
+  let writePassword = false;
+  let password;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '-a' || argument === '-s') {
+      const value = args[++index];
+      if (typeof value !== 'string' || value.length === 0) throw new SecurityFixtureError(`${operation} requires a value after ${argument}`);
+      if (argument === '-a') account = value;
+      else service = value;
+    } else if (argument === '-U' && operation === 'add-generic-password') {
+      replace = true;
+    } else if (argument === '-w') {
+      writePassword = true;
+      if (operation === 'add-generic-password') {
+        if (interactive) {
+          if (index === args.length - 1) throw new SecurityFixtureError('interactive add-generic-password requires a password after -w');
+          password = args[++index];
+        } else {
+          if (index !== args.length - 1) throw new SecurityFixtureError('add-generic-password requires -w as its final argument');
+          password = readPasswordFromStdin(stdin);
+        }
+      }
+    } else if (!argument.startsWith('-') && index === args.length - 1) {
+      keychain = argument;
+    } else {
+      throw new SecurityFixtureError(`unsupported ${operation} argument ${argument}`);
+    }
+  }
+
+  if (!service || !account) throw new SecurityFixtureError(`${operation} requires -a <account> and -s <service>`);
+  if (!writePassword) throw new SecurityFixtureError(`${operation} requires -w`);
+  return { service, account, keychain, replace, password };
+}
+
+function execute(command, args, { interactive, stdin, storePath, keychainPath }) {
+  if (command === 'default-keychain' || command === 'login-keychain') return `${JSON.stringify(keychainPath)}\n`;
+
+  if (command === 'add-generic-password') {
+    const { service, account, keychain, replace, password } = parseItemArguments(args, { interactive, stdin, operation: command });
+    if (keychain !== undefined && keychain !== keychainPath) throw new SecurityFixtureError('unexpected fake Keychain path');
+    const store = readStore(storePath);
+    const key = itemKey(service, account);
+    if (Object.hasOwn(store.values, key) && !replace) {
+      throw new SecurityFixtureError('SecKeychainItemAdd: The specified item already exists in the keychain.', 45);
+    }
+    store.values[key] = password;
+    writeStore(storePath, store);
+    return '';
+  }
+
+  if (command === 'find-generic-password') {
+    const { service, account, keychain } = parseItemArguments(args, { interactive, stdin, operation: command });
+    if (keychain !== undefined && keychain !== keychainPath) throw new SecurityFixtureError('unexpected fake Keychain path');
+    const store = readStore(storePath);
+    const key = itemKey(service, account);
+    if (!Object.hasOwn(store.values, key)) {
+      throw new SecurityFixtureError('SecKeychainSearchCopyNext: The specified item could not be found in the keychain.', 44);
+    }
+    return store.values[key];
+  }
+
+  throw new SecurityFixtureError(`unsupported command ${command}`);
+}
+
+function hang(pidPath) {
+  if (pidPath) writeFileSync(pidPath, `${process.pid}\n`, 'utf8');
+  setInterval(() => {}, 1_000);
+}
+
+const argv = process.argv.slice(2);
+const stdin = await readStdin();
+const recordPath = requiredEnvironment('HOOKEMON_TEST_KEYCHAIN_RECORD_PATH');
+const storePath = requiredEnvironment('HOOKEMON_TEST_KEYCHAIN_STORE_PATH');
+const keychainPath = requiredEnvironment('HOOKEMON_TEST_KEYCHAIN_PATH');
+const mode = process.env.HOOKEMON_TEST_KEYCHAIN_MODE ?? 'success';
+recordCall(recordPath, argv, stdin);
+
+try {
+  const directCommand = argv[0];
+  if (directCommand === 'default-keychain' || directCommand === 'login-keychain') {
+    process.stdout.write(`${JSON.stringify(keychainPath)}\n`);
+  } else if (mode === 'deny') {
+    throw new SecurityFixtureError('SecKeychainItemCopyContent: User interaction is not allowed.', 36);
+  } else if (mode === 'hang') {
+    hang(process.env.HOOKEMON_TEST_KEYCHAIN_PID_PATH);
+    await new Promise(() => {});
+  } else if (mode === 'error') {
+    throw new SecurityFixtureError(process.env.HOOKEMON_TEST_KEYCHAIN_ERROR_TEXT ?? 'fake Keychain error');
+  } else if (directCommand === '-i') {
+    const lines = stdin.split(/\r?\n/).filter(line => line.length > 0);
+    if (lines.length !== 1) throw new SecurityFixtureError('security -i expects exactly one command line before EOF');
+    const [command, ...args] = splitCommandLine(lines[0]);
+    process.stdout.write(execute(command, args, { interactive: true, stdin: '', storePath, keychainPath }));
+  } else {
+    process.stdout.write(execute(directCommand, argv.slice(1), { interactive: false, stdin, storePath, keychainPath }));
+  }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = error instanceof SecurityFixtureError ? error.code : 1;
+  process.stderr.write(`security: ${message}\n`);
+  process.exitCode = code;
+}

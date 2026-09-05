@@ -1,0 +1,74 @@
+{
+  "requirementsRevision": 59,
+  "architectureRevision": 6,
+  "highRiskControls": ["blind-test-writer", "fresh-context-independent-reviewer", "doubt-loop"],
+  "classes": [
+    {
+      "id": "R4",
+      "name": "irreversible-custody-and-external-state",
+      "level": "high",
+      "definition": "Tasks that initialize or mint an immutable launch, change hook claim or fee behavior, move or account for USDG, create a signable transaction, change an Operations signer, decode provider transactions, mutate a provider, bridge assets, purchase or sell a card, freeze eligibility, broadcast a payout, or alter journal and custody recovery.",
+      "controls": ["blind-test-writer", "fresh-context-independent-reviewer", "doubt-loop"]
+    },
+    {
+      "id": "R3",
+      "name": "authority-binding-and-release-truth",
+      "level": "high",
+      "definition": "Tasks that define deployment-manifest membership, provider admission, fee-policy interpretation, policy limits, interface truth, chain evidence, runtime hashes, launchEligible, release gates, or any boundary that can permit or prevent an R4 action.",
+      "controls": ["blind-test-writer", "fresh-context-independent-reviewer", "doubt-loop"]
+    },
+    {
+      "id": "R2",
+      "name": "deterministic-read-only-support",
+      "level": "medium",
+      "definition": "Tasks proven unable to move assets, create a signable action, mutate a journal, grant authority, or determine release readiness, such as isolated formatters and non-authoritative projections.",
+      "controls": ["focused-verification", "module-owner-review"]
+    },
+    {
+      "id": "R1",
+      "name": "documentary-presentation-only",
+      "level": "low",
+      "definition": "Timeless explanatory documentation that cannot change executable behavior, authority, deployment membership, interface truth, or release state.",
+      "controls": ["source-trace-review"]
+    }
+  ],
+  "moduleDefaults": [
+    {"module": "phase-boundary", "class": "R3", "reason": "The boundary decides whether a future money path is in scope."},
+    {"module": "provider-binding", "class": "R3", "reason": "Provider facts and fee policy decide whether launch can proceed."},
+    {"module": "deployment-manifest", "class": "R3", "reason": "The manifest determines the production runtime set and excludes the legacy custody family."},
+    {"module": "role-control", "class": "R4", "reason": "Roles control claims, pauses, limit changes, and Operations rotation."},
+    {"module": "token-core", "class": "R4", "reason": "Issuance and token behavior are irreversible."},
+    {"module": "canonical-market", "class": "R4", "reason": "Callback authentication and initialization govern immutable market and fee mutation."},
+    {"module": "fee-accounting", "class": "R4", "reason": "Gross fee accounting changes shared-custody liabilities."},
+    {"module": "operations-wallet", "class": "R4", "reason": "Process claims and rotation control money movement."},
+    {"module": "launch-orchestration", "class": "R4", "reason": "Atomic pool initialization, Permit2 funding, and custody binding are irreversible."},
+    {"module": "legacy-custody-family", "class": "R4", "reason": "The frozen code remains high-risk even though deployment is forbidden."},
+    {"module": "cycle-repository", "class": "R4", "reason": "The repository controls durable money-mutation state and restart safety."},
+    {"module": "transaction-policy", "class": "R4", "reason": "Transaction decoding and signer policy gate all external asset actions."},
+    {"module": "policy-engine", "class": "R4", "reason": "Caps, holds, canaries, and kill switches control whether money action is possible."},
+    {"module": "cycle-runner", "class": "R4", "reason": "The runner performs the irreversible stages and custody attribution."},
+    {"module": "eligibility-snapshot", "class": "R4", "reason": "A pre-claim snapshot fixes the direct-payout recipient set."},
+    {"module": "direct-payout", "class": "R4", "reason": "Per-recipient transfers and finality determine irreversible holder payments."},
+    {"module": "signing", "class": "R4", "reason": "The signer boundary controls external transaction authority."},
+    {"module": "release-evidence", "class": "R3", "reason": "Readiness and evidence can permit or deny a future live action."}
+  ],
+  "highRiskTaskKinds": [
+    "onchain source, storage, ABI, event, initialization, claim control, or deployment",
+    "fee formula, gross-up, remainder, liability conservation, token transfer, or reentrancy",
+    "Operations claim window, Treasury limit change, pause, rotation, custody binding, or direct payout",
+    "provider binding, transaction allowlist, semantic decoder, signer boundary, or finality rule",
+    "bridge, Collector mutation, card hold, buyback, return attribution, or external broadcast",
+    "journal, fencing, recovery, typed amount, custody ledger, snapshot, or payout manifest",
+    "deployment manifest, release evidence, readiness gate, external authorization, or live evidence"
+  ],
+  "classificationRules": [
+    "Every task starts at its module default class.",
+    "Anything the owner marks high is R4 regardless of diff size or apparent reversibility.",
+    "A task spanning modules uses the highest class touched.",
+    "Any asset movement, liability mutation, immutable deployment, transaction construction, signing, broadcast, spend, or payout-data compilation is R4.",
+    "Any binding, policy, proof, finality, or readiness condition that can permit or block an R4 action is at least R3.",
+    "R2 or R1 applies only after the task is proven isolated from custody, authority, deployment membership, release truth, and signable action preparation.",
+    "An unresolved provider, custody, or authorization fact fails closed and never lowers the risk class."
+  ],
+  "doubtLoopExit": "No plausible unresolved critical or high loss, overcharge, unfunded liability, duplicate action, wrong-custody, double-payment, signer escalation, false readiness, or forbidden legacy-runtime deployment remains without executable falsification evidence."
+}

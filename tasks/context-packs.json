@@ -1,0 +1,434 @@
+{
+  "schemaVersion": 1,
+  "productPhase": 2,
+  "requirementsRevision": 58,
+  "architectureRevision": 5,
+  "taskCount": 26,
+  "coordination": {
+    "canonicalLedgerCheckout": "repository-root",
+    "ledgerRule": "Run every claim, heartbeat, completion, and merge-ledger command from the canonical checkout. Never copy or independently initialize .v4/ledger.db in a task worktree.",
+    "historicalPhase1": {
+      "sharedContractTask": "P1-001",
+      "onchainProductionLane": [
+        "P1-002",
+        "P1-003",
+        "P1-005",
+        "P1-004",
+        "P1-006",
+        "P1-007",
+        "P1-008"
+      ],
+      "parallelAfterSharedContract": [
+        "P1-009",
+        "P1-010"
+      ],
+      "releaseTask": "P1-012",
+      "integrationTask": "P1-013"
+    },
+    "sharedContractTask": "P2-001",
+    "parallelAfterScope": [
+      "P2-002",
+      "P2-006",
+      "P2-007",
+      "P2-011"
+    ],
+    "packFreezeTask": "P2-003",
+    "parallelAfterPackFreeze": [
+      "P2-004",
+      "P2-008"
+    ],
+    "hardeningTasks": [
+      "P2-009",
+      "P2-010",
+      "P2-012"
+    ],
+    "documentationTask": "P2-011",
+    "releaseTask": "P2-005"
+  },
+  "cards": [
+    {
+      "id": "P1-001",
+      "title": "Freeze immutable launch contract",
+      "path": "tasks/P1-001.md",
+      "sha256": "abb336de078512c24f9294995e53e4fb0cd85315562299e254584a0ee79bce59",
+      "risk": "high",
+      "dependencies": [],
+      "requirements": [
+        "REQ-provider-binding-1",
+        "REQ-provider-binding-2",
+        "REQ-provider-binding-3",
+        "REQ-canonical-market-5",
+        "REQ-fee-accounting-1",
+        "REQ-phase-boundary-1",
+        "REQ-phase-boundary-3"
+      ]
+    },
+    {
+      "id": "P1-002",
+      "title": "Execute canonical market swap",
+      "path": "tasks/P1-002.md",
+      "sha256": "f2057b735c8694a0f86059060fd8d72b2eca105fc2de0d60c48fc3d0db83d708",
+      "risk": "high",
+      "dependencies": [
+        "P1-001"
+      ],
+      "requirements": [
+        "REQ-canonical-market-1",
+        "REQ-canonical-market-2",
+        "REQ-canonical-market-3",
+        "REQ-canonical-market-4"
+      ]
+    },
+    {
+      "id": "P1-003",
+      "title": "Issue fixed HKMN supply",
+      "path": "tasks/P1-003.md",
+      "sha256": "620af4a0eab6038005c72563427505d4e60283400498032ef0fdf884abded96f",
+      "risk": "high",
+      "dependencies": [
+        "P1-002"
+      ],
+      "requirements": [
+        "REQ-token-core-1",
+        "REQ-token-core-2",
+        "REQ-token-core-3",
+        "REQ-token-core-4"
+      ]
+    },
+    {
+      "id": "P1-004",
+      "title": "Accrue isolated USDG liabilities",
+      "path": "tasks/P1-004.md",
+      "sha256": "61a47459ca5f5ea7d249345242123a9eb32b84bbecf818353b983fd9e5949348",
+      "risk": "high",
+      "dependencies": [
+        "P1-005"
+      ],
+      "requirements": [
+        "REQ-fee-accounting-2",
+        "REQ-fee-accounting-3",
+        "REQ-fee-accounting-4",
+        "REQ-fee-accounting-5"
+      ]
+    },
+    {
+      "id": "P1-005",
+      "title": "Enforce minimal money roles",
+      "path": "tasks/P1-005.md",
+      "sha256": "9c8e80bfac5f72a9e9b7373225212fcf2e07450e60cda58ea69245bcf743e9d3",
+      "risk": "high",
+      "dependencies": [
+        "P1-003"
+      ],
+      "requirements": [
+        "REQ-role-control-1",
+        "REQ-role-control-2",
+        "REQ-role-control-3",
+        "REQ-role-control-4"
+      ]
+    },
+    {
+      "id": "P1-006",
+      "title": "Release one process cycle",
+      "path": "tasks/P1-006.md",
+      "sha256": "0536d46543687191629a42b9e794133cafdc7de7e16b310429b31f3dc2d067fb",
+      "risk": "high",
+      "dependencies": [
+        "P1-004"
+      ],
+      "requirements": [
+        "REQ-process-budget-1",
+        "REQ-process-budget-2",
+        "REQ-process-budget-3",
+        "REQ-process-budget-5"
+      ]
+    },
+    {
+      "id": "P1-007",
+      "title": "Fund one payout commitment",
+      "path": "tasks/P1-007.md",
+      "sha256": "0b15f6d5390baa5eb6a33fdfc6891197a6c0809fdac603ed65e6d8de5baee787",
+      "risk": "high",
+      "dependencies": [
+        "P1-006"
+      ],
+      "requirements": [
+        "REQ-payout-commitment-1",
+        "REQ-payout-commitment-2",
+        "REQ-payout-commitment-3",
+        "REQ-payout-commitment-4",
+        "REQ-payout-commitment-5",
+        "REQ-payout-commitment-6"
+      ]
+    },
+    {
+      "id": "P1-008",
+      "title": "Pay one holder entitlement",
+      "path": "tasks/P1-008.md",
+      "sha256": "80b9b1aa204cb06cc2265ea7732baabb5229a76c123d7a99b229254c0a93b6d6",
+      "risk": "high",
+      "dependencies": [
+        "P1-007"
+      ],
+      "requirements": [
+        "REQ-holder-settlement-1",
+        "REQ-holder-settlement-2",
+        "REQ-holder-settlement-3",
+        "REQ-holder-settlement-4",
+        "REQ-holder-settlement-6",
+        "REQ-holder-settlement-7"
+      ]
+    },
+    {
+      "id": "P1-009",
+      "title": "Compile realized holder distribution",
+      "path": "tasks/P1-009.md",
+      "sha256": "ee717e4f33b7826dd0d0e221ba48fb95350b4e8283546c950ca2b26e51a6ef2f",
+      "risk": "high",
+      "dependencies": [
+        "P1-001"
+      ],
+      "requirements": [
+        "REQ-cycle-runner-2",
+        "REQ-holder-settlement-5"
+      ]
+    },
+    {
+      "id": "P1-010",
+      "title": "Journal one pack cycle",
+      "path": "tasks/P1-010.md",
+      "sha256": "df7662baf36927ba93b085769b59995b4ea09ffb3046ecebd615ec77c0a23170",
+      "risk": "high",
+      "dependencies": [
+        "P1-001"
+      ],
+      "requirements": [
+        "REQ-process-budget-4",
+        "REQ-cycle-runner-1"
+      ]
+    },
+    {
+      "id": "P1-011",
+      "title": "Render loop dashboard (deferred)",
+      "path": "tasks/P1-011.md",
+      "sha256": "c7726ec112540c617be7581911ce97311db19a996b76587ca9d99862f4030043",
+      "risk": "ordinary",
+      "dependencies": [
+        "P1-001"
+      ],
+      "requirements": []
+    },
+    {
+      "id": "P1-012",
+      "title": "Close thin-V1 release evidence",
+      "path": "tasks/P1-012.md",
+      "sha256": "be2bf8405f874adbe70b0e44c23edb15adac3bc2cb1e6eb8f42ceed27d530701",
+      "risk": "high",
+      "dependencies": [
+        "P1-008",
+        "P1-009",
+        "P1-010"
+      ],
+      "requirements": [
+        "REQ-release-evidence-1",
+        "REQ-release-evidence-2",
+        "REQ-release-evidence-3",
+        "REQ-release-evidence-4",
+        "REQ-release-evidence-5",
+        "REQ-release-evidence-6",
+        "REQ-phase-boundary-2"
+      ]
+    },
+    {
+      "id": "P1-013",
+      "title": "Integrate canonical v4 hook accounting",
+      "path": "tasks/P1-013.md",
+      "sha256": "d5bef1c99fb6af822db6bcbdfdd3e8933ae6b74b1fdc700c04d7eed2319d6543",
+      "risk": "high",
+      "dependencies": [
+        "P1-004"
+      ],
+      "requirements": [
+        "REQ-canonical-market-5",
+        "REQ-fee-accounting-1"
+      ]
+    },
+    {
+      "id": "P2-001",
+      "title": "Bind lean manual cycle control",
+      "path": "tasks/P2-001.md",
+      "sha256": "67eaf007c4aece24632904985843e9f63486980ab66e47c504212711d8fe41c5",
+      "risk": "high",
+      "dependencies": [],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-002",
+      "title": "Isolate peg cycle custody",
+      "path": "tasks/P2-002.md",
+      "sha256": "5110be561776c8c5f617f997be2d6c6ce76fc08fcaadd005a2ba70227162207c",
+      "risk": "high",
+      "dependencies": [
+        "P2-001"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-003",
+      "title": "Freeze manual pack selection",
+      "path": "tasks/P2-003.md",
+      "sha256": "53f17eee356b2c7c9f6093433ca33779f4fc2a751a48ed7451609b76aebb91ec",
+      "risk": "high",
+      "dependencies": [
+        "P2-006"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-004",
+      "title": "Persist local operator control",
+      "path": "tasks/P2-004.md",
+      "sha256": "ec8fe8f08b29426ed677b2641126128288bf2dc369676e50c10d2d112283a75e",
+      "risk": "high",
+      "dependencies": [
+        "P2-003"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-005",
+      "title": "Verify lean Phase 2 boundary",
+      "path": "tasks/P2-005.md",
+      "sha256": "7d1c7e6c6d0c5f96af07cb62c3b4535c9ad25e53791bf8673b503f9cb9b813ea",
+      "risk": "high",
+      "dependencies": [
+        "P2-002",
+        "P2-003",
+        "P2-004",
+        "P2-008",
+        "P2-009",
+        "P2-010",
+        "P2-011"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-006",
+      "title": "Freeze manual cycle architecture",
+      "path": "tasks/P2-006.md",
+      "sha256": "27a0a9aabc381e4018ed73d2951c5f8cf8a40b6f706a1b3f0b1b1a65a380443e",
+      "risk": "high",
+      "dependencies": [
+        "P2-001"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-007",
+      "title": "Model cycle control feasibility",
+      "path": "tasks/P2-007.md",
+      "sha256": "31cd8390474d5148772793286d815e993800a860229f1b35506dd3b197ff854d",
+      "risk": "high",
+      "dependencies": [
+        "P2-001"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-008",
+      "title": "Bind distribution to cycle escrow",
+      "path": "tasks/P2-008.md",
+      "sha256": "d8f99d3b4c741f3e6911afa2d924f1ead72b6e23bf748c44f49c398055cb9de6",
+      "risk": "high",
+      "dependencies": [
+        "P2-003"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-009",
+      "title": "Preserve cycle progress with quarantined surplus",
+      "path": "tasks/P2-009.md",
+      "sha256": "f903a382b099178c1532c4f43011f71c5a10b72e146385e9b0c2a3f736e6d6ea",
+      "risk": "high",
+      "dependencies": [
+        "P2-002"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-010",
+      "title": "Anchor frozen cycle execution",
+      "path": "tasks/P2-010.md",
+      "sha256": "97603d6901fcbb1107210116e9a96f13b7ea8fa36bfb384ece5e35e4e310fc1e",
+      "risk": "high",
+      "dependencies": [
+        "P2-003",
+        "P2-004"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-011",
+      "title": "Document Phase 2 task ledger",
+      "path": "tasks/P2-011.md",
+      "sha256": "41688f0fe5a6cea65f483ed708fc1ea3a51ea55441e669697107e0994717da0b",
+      "risk": "high",
+      "dependencies": [
+        "P2-001"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-012",
+      "title": "Recover stale operator state locks",
+      "path": "tasks/P2-012.md",
+      "sha256": "c265e18d398250ed8d965bed414b5cb2a6fe89515d390f278ddda653c750ff79",
+      "risk": "high",
+      "dependencies": [
+        "P2-010"
+      ],
+      "requirements": [
+        "REQ-cycle-control-1"
+      ]
+    },
+    {
+      "id": "P2-013",
+      "title": "Author requirements revision 58 and autonomous cycle authority",
+      "path": "tasks/P2-013.md",
+      "sha256": "66017bb9157cea637967425c9509e5025b0f9322452ba8869618b6654d50eaab",
+      "risk": "high",
+      "dependencies": [
+        "P2-001"
+      ],
+      "requirements": [
+        "REQ-cycle-control-2",
+        "REQ-distribution-1",
+        "REQ-distribution-2",
+        "REQ-dashboard-2"
+      ]
+    }
+  ]
+}

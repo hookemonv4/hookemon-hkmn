@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "hookemon.cycle-control-survivability-bounds.v1",
+  "productPhase": 2,
+  "requirementsRevision": 57,
+  "architectureRevision": 5,
+  "approvalState": "OWNER_BOUND_RECEIPT_REQUIRED",
+  "scope": "Manual sequential cycles with one active cycle, one immutable return escrow per cycle, reconciliation before retry, and failure-bound fresh-cycle recovery",
+  "bounds": {
+    "maximumCrossCycleContaminationAtomicUSDG": {
+      "value": "0",
+      "absorber": "The failed cycle's immutable return escrow quarantines every delayed return from successor custody."
+    },
+    "maximumBlindRetryMoneyMutationAtomicUSDG": {
+      "value": "0",
+      "absorber": "The durable journal blocks a repeated money mutation until the unresolved intent is reconciled."
+    },
+    "maximumActiveCycles": {
+      "value": 1,
+      "absorber": "The coordinator admits no successor until the current cycle reaches a terminal state."
+    },
+    "minimumDistinctEscrowsAcrossTwoCycles": {
+      "value": 2,
+      "absorber": "A fresh cycle identifier and nonce derive a distinct immutable return escrow."
+    },
+    "maximumAuthorizedLossPerCycleAtomicUSDG": {
+      "value": "100000000",
+      "absorber": "The owner-authorized cycle principal is capped at 100 USDG for each cycle-specific escrow.",
+      "scope": "PER_CYCLE_ONLY"
+    }
+  },
+  "cumulativeSystemLossCap": {
+    "status": "NOT_CLAIMED",
+    "atomicUSDG": null,
+    "reason": "Sequential cycles create repeated separately authorized exposure; this feasibility delta does not claim a lifetime or system-wide cap."
+  },
+  "notAnActionAuthorization": true
+}

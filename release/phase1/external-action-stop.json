@@ -1,0 +1,19 @@
+{
+  "schema": "hookemon.phase1-external-action-stop.v1",
+  "authority": "POLICY_ONLY_DENY_UNLESS_SEPARATELY_OWNER_AUTHORIZED",
+  "enforcement": "POLICY_ONLY_NO_RUNTIME_EXTERNAL_ACTION_INTERPOSITION",
+  "actions": {
+    "accessSecrets": false,
+    "deploy": false,
+    "sign": false,
+    "broadcast": false,
+    "spend": false,
+    "publish": false,
+    "mutateProvider": false,
+    "initialize": false,
+    "seedLiquidity": false,
+    "runLiveCanary": false,
+    "claimProductionReadiness": false
+  },
+  "reason": "This policy denies release authority for external actions; it does not technically prevent an independently launched process from taking one. The candidate contains local fixture and offline evidence only. Provider runtime, production addresses, custody, gas headroom, publication, and live-cycle evidence remain unresolved."
+}

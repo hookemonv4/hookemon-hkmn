@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Owner approves requirements revision 56 as the authoritative Phase 1 specification for local implementation and verification only.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "ae874d461d1051d941331eb4961cf1adc2f1731b520c91cfcea6686fa7ce4b9f",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

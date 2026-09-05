@@ -1,0 +1,129 @@
+{
+  "schemaVersion": "hookemon.phase3.deployment-manifest.v1",
+  "addressManifestSchema": "release/phase3/address-manifest.schema.json",
+  "deployed": [
+    {
+      "name": "HKMNToken",
+      "sourcePath": "packages/contracts/src/launch/HKMNToken.sol",
+      "role": "graph target 0: fixed-supply HKMN token",
+      "constructorArgsSchema": {
+        "type": "array",
+        "items": [
+          {
+            "name": "issuanceAuthority",
+            "type": "address"
+          },
+          {
+            "name": "expectedUsdg",
+            "type": "address"
+          },
+          {
+            "name": "decimals",
+            "type": "uint8"
+          },
+          {
+            "name": "launchSqrtPriceX96",
+            "type": "uint160"
+          }
+        ],
+        "initializerSchema": {
+          "callCount": 1,
+          "targetIndex": 0,
+          "method": "allocate(address)",
+          "selector": "0xffd7d983",
+          "arguments": [
+            "hook:address"
+          ]
+        }
+      },
+      "createdBy": "programmable graphFactory CREATE2 via launchAndStampV1",
+      "saltDerivation": "release/phase3/address-manifest.schema.json#/$defs/applicantSalt",
+      "runtimeCodeHash": null,
+      "initCodeHash": null
+    },
+    {
+      "name": "PermanentPositionCustody",
+      "sourcePath": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "role": "graph target 1: permanent position NFT custody",
+      "constructorArgsSchema": {
+        "type": "array",
+        "items": [
+          {
+            "name": "manager",
+            "type": "address"
+          },
+          {
+            "name": "tokenId",
+            "type": "uint256"
+          }
+        ],
+        "initializerSchema": {
+          "callCount": 1,
+          "targetIndex": 1,
+          "method": "configureBindingHook(address)",
+          "selector": "0xc81cbd43",
+          "arguments": [
+            "hook:address"
+          ]
+        }
+      },
+      "createdBy": "programmable graphFactory CREATE2 via launchAndStampV1",
+      "saltDerivation": "release/phase3/address-manifest.schema.json#/$defs/applicantSalt",
+      "runtimeCodeHash": null,
+      "initCodeHash": null
+    },
+    {
+      "name": "HookemonHook",
+      "sourcePath": "packages/contracts/src/HookemonHook.sol",
+      "role": "graph target 2: canonical market hook",
+      "constructorArgsSchema": {
+        "type": "tuple",
+        "name": "ConstructorConfig",
+        "components": [
+          "manager:address",
+          "positionManager:address",
+          "permit2:address",
+          "usdg:address",
+          "hkmn:address",
+          "tickSpacing:int24",
+          "programmable:address",
+          "treasury:address",
+          "operations:address",
+          "launchAuthority:address",
+          "issuanceAuthority:address",
+          "expectedDecimals:uint8",
+          "bindingDigest:bytes32",
+          "runtimeDigest:bytes32",
+          "processClaimLimit6h:uint256",
+          "processClaimLimitMax:uint256",
+          "processClaimMaxCount:uint256",
+          "operationsRotationDelay:uint256"
+        ],
+        "initializerSchema": {
+          "callCount": 1,
+          "targetIndex": 2,
+          "method": "initializeGraphLaunch(address,uint160)",
+          "selector": "0x726bb4ae",
+          "arguments": [
+            "custody:address",
+            "sqrtPriceX96:uint160"
+          ]
+        }
+      },
+      "createdBy": "programmable graphFactory CREATE2 via launchAndStampV1",
+      "saltDerivation": "release/phase3/address-manifest.schema.json#/$defs/applicantSalt",
+      "runtimeCodeHash": null,
+      "initCodeHash": null
+    }
+  ],
+  "excluded": [
+    "PegCycleVault",
+    "PegCycleEscrowFactory",
+    "PegCycleReturnEscrow",
+    "PegCycleRouteExecutor",
+    "PayoutCommitment",
+    "CanonicalMerkleSum",
+    "HolderSettlement"
+  ],
+  "deploymentManifestDigest": "sha256:8154743b6e7b678e1e941ea580dd012e1f75d6767f1ecfff79df860138cea7cc"
+}

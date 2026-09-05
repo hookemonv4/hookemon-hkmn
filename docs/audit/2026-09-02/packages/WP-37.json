@@ -1,0 +1,46 @@
+{
+  "id": "WP-37",
+  "title": "Holder-snapshot exclusions and card consistency after the live wiring",
+  "goal": "Close the correctness gap the WP-36 reviewer flagged: the pro-rata holder snapshot in packages/adapters/src/app/stages/distribution.mjs excludes only the vault, the hook and the current cycle's return escrow, so once the pool is live the pool's HKMN balance, the treasury and prior cycles' return escrows would be paid out as if they were ordinary holders. Make the exclusion set complete and configurable: always exclude the vault, the hook, the pool manager and the canonical pool (addresses from bindings/robinhood-chain.json when present), the treasury beneficiary and the Programmable beneficiary read from the hook bindings, every return escrow of every cycle recorded in the cycle repository (derived deterministically, not stored), the zero address, and an operator-supplied list (validated addresses) from the environment; record the applied exclusion set with the snapshot evidence so a verifier can recompute it. Also fix the two documentation inconsistencies the reviewer named: the stale invariant line in docs/modules/composition-root.md that still mentions refusing stages, and the dangling header reference in distribution.mjs.",
+  "deps": ["WP-36"],
+  "parallelGroup": 12,
+  "writeSet": [
+    "packages/adapters/src/app/stages/distribution.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/src/app/cycle-repository.mjs",
+    "packages/adapters/bin/hookemon-runner.mjs",
+    "packages/adapters/test/app/**",
+    "packages/adapters/README.md",
+    "docs/modules/composition-root.md",
+    "docs/modules/index.json (only the sha256 entry of docs/modules/composition-root.md if it already exists there)"
+  ],
+  "readSet": [
+    "packages/runner/src/distribution/snapshot-indexer.mjs and pro-rata.mjs (exclusion input shape)",
+    "bindings/robinhood-chain.json (pool manager, market.poolKey status, vault, hook fields)",
+    "packages/contracts/src/process/PegCycleVault.sol computeCycleEscrow (escrow derivation) and packages/adapters/src/hook-contract-client.mjs",
+    "packages/adapters/src/app/stages/*.mjs as merged by WP-36"
+  ],
+  "steps": [
+    "Add buildHolderExclusionSet({bindings, cycleRepository, environment}) in distribution.mjs (or a small helper module under stages) returning a sorted, de-duplicated, lower-cased address list with a reason per entry; derive prior escrows from every cycle id the repository knows through the same CREATE2 rule the vault uses",
+    "environment.mjs: optional HOOKEMON_EXCLUDED_HOLDER_ADDRESSES (comma-separated, validated, de-duplicated) and the pool and treasury addresses when bindings do not carry them yet; refuse malformed entries at construction",
+    "Record the exclusion set (addresses and reasons) in the distribution evidence next to the snapshot block so the verifier can recompute; extend bin/hookemon-verifier.mjs only if the receipt format needs the field (then keep it backward compatible)",
+    "Tests: pool and treasury balances are never paid; a prior cycle's escrow is excluded while a new holder is included; malformed operator entries are refused; the recorded exclusion set is byte-identical across a crash-resume",
+    "Fix the composition-root.md invariant line and the distribution.mjs header reference; run adapters, runner, dashboard, scripts/tests and the clean-room scanner before the single commit"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test packages/dashboard/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "The exclusion set always contains vault, hook, pool manager, canonical pool (when known), treasury and Programmable beneficiaries, every prior return escrow, the zero address and the operator list, and is recorded with the snapshot evidence",
+    "Tests prove pool, treasury and prior-escrow balances are never distributed and that a malformed operator entry is refused",
+    "The two documentation inconsistencies are fixed; all suites green; clean-room scanner green"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Fresh-context reviewer before merge (R3, money-moving distribution input). Do not edit gates/init.json; do not add new cards. The head is clean: cleanroom passes, runner 383, adapters 333, dashboard 108 green, scripts/tests 407/409 (phase1-release and phase1-reproducibility red, owned by WP-22; leave them). Identify assets by contract address and use USDG, Circle USD and EVM L1 wording only."
+}

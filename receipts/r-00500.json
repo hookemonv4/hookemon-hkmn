@@ -1,0 +1,21 @@
+{
+  "id": "r-00500",
+  "at": "2026-09-03T08:46:20.476Z",
+  "type": "gate",
+  "phase": "ship",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 2,
+    "problems": [
+      "H1: no status recorded",
+      "H2: no status recorded"
+    ]
+  },
+  "inputHashes": {
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "gates/runs/ship.json": "03c51fe99c707e66d4e5cd3d32475ab3bb50ddd6df4cd5f62f22ffc68f75611f",
+    "receipts/r-00468.json": "f0d1c1d6ba7411c3e920b33c17f6530aba8a0acc9b37f3f9a94973c4fd8f6a08",
+    "receipts/r-00469.json": "6be737530168613e358619464ff6bec79fea59644d2459073affb15eaf982707",
+    "receipts/r-00470.json": "d341d5e35372790f29cbaa6fabb4f7a08fd74246dc22f1421aa794ed18d3cc87"
+  }
+}

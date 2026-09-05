@@ -1,0 +1,11 @@
+{
+  "id": "r-00201",
+  "at": "2026-08-30T20:45:11.622Z",
+  "type": "autonomy-grant",
+  "phase": "build",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/PHASE_1_CONTINUOUS_WORK_AUTONOMY_GRANT.md": "5abb0691127a093cc4062d43d6f3330619aa945a0a30789c7ae5aecb5256aa9e"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "status": "refund",
+  "details": "Solver could not deliver the destination minimum amount within the deadline; the deposit was refunded on the origin chain.",
+  "inTxHashes": [
+    "0xa3f21c9e4b6d1a8f7c2e5b9d0a1f6c3e8b7d4a2f9c6e1b8d5a3f0c7e4b1d8a6f"
+  ],
+  "txHashes": [
+    "0xb4e12d8f5c7a2b9e6d1f4a8c3e0b7d5a9f2c6e1b8d4a7f0c3e6b9d2a5f8c1e4b"
+  ],
+  "updatedAt": 1788400000000,
+  "originChainId": 4663,
+  "destinationChainId": 792703809,
+  "quoteCreatedAt": 1788358518299,
+  "failReason": "TOO_LITTLE_RECEIVED",
+  "refundFailReason": null
+}

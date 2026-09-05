@@ -1,0 +1,30 @@
+{
+  "id": "r-00352",
+  "at": "2026-09-01T05:55:48.334Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-006",
+    "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+    "taskFingerprint": "a362bc82f6ab212803b40fa5b89064300b317aa5e8cc38261a3555a621948d24",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "qa/reviews/p1-012-local-verification.json": "99b626bcf3f01b3418a254fc1118a50dd0608beb41e724eece424fc26a14ca1c",
+    "release/phase1/local-candidate.json": "12d2afd5c4760e1c7ac2bf2b2ca8b1cbbc747a14a220232a216c0be7a8b6e8cb",
+    "release/phase1/local-evidence.json": "0e329a0e73f0ee6957319ea860dfdaf0d8f347add1ddaf69de82dc9a0fe228ae",
+    "release/phase1/local-reproducibility.json": "0e38488fa52ef52d63eabd8cd74815e4add7d5a909e33086e0f19dbb595e9364",
+    "release/phase1/local-toolchain.json": "4281412219042eb0949a0ef142afb361776428b70c5f2782c243b17355e92086",
+    "packages/contracts/src/process/IPegCycleRouteExecutor.sol": "69126fa3c474a6603676977e3aed85c5a0e3c66186b61ac40fc1e25a38524991",
+    "packages/contracts/src/process/IPegCycleVault.sol": "26f0a6a0602e810e4b5e5c35f94af850ea54dd0683d0eeffd857524ecef0052f",
+    "packages/contracts/src/process/PegCycleVault.sol": "fa9fa37df85d7c51f426e2b8d72da4d045e1a0eca5ea73258cfc761e1bc25217",
+    "packages/contracts/src/process/ProcessBudget.sol": "c11cc6cea207cf9d1e79567bfb726e0803ddacdc439373e6e2417ee5995ad361",
+    "packages/contracts/test/process/PegCycleVault.t.sol": "8f6d29af3e0fc67f40bc140f7aa539b197b59bd308b34cf1926ac5fe5b61297b",
+    "packages/contracts/test/process/ProcessBudget.t.sol": "9dfd9f53a198d609db8980351dcee6f79caf9739228304b00dfa0ad915d990dd",
+    "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol": "947fcdc9684386e7398e2340b71538e5be6108f8db563e9e26a876441080bab0",
+    "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol": "c88f704acbbba5809ff9919bb4e90b6d168f7c5a7d6f16581566e8faa0c442e8",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "r-00123",
+  "at": "2026-08-30T13:35:51.893Z",
+  "type": "review-findings-classified",
+  "phase": "redteam",
+  "result": "PASSED",
+  "data": {
+    "itemId": "R2",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "decisions/redteam/findings.json": "8df350588ea591bea667b976adc9816aa23020ca67b6dc7588555d658b246009"
+  }
+}

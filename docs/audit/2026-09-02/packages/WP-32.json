@@ -1,0 +1,60 @@
+{
+  "id": "WP-32",
+  "title": "Single-process composition and per-cycle accounting (re-scoped 2026-09-03; live stage paths moved to WP-33, WP-34 and WP-35)",
+  "goal": "RE-SCOPED BY THE COORDINATOR ON 2026-09-03 after the independent review confirmed that the six live stage paths need a signer and authority subsystem (WP-33), a production escrow observation and frozen cycle control (WP-34) and then the stage wiring itself (WP-35). This package delivers: the dashboard control service and the scheduler composed in one process through compose.mjs and bin/hookemon-runner.mjs (run-cycle-now triggers a real tick, restart requests reach the recovery entry points, a --no-dashboard flag), a per-cycle accounting projection from the durable journal into the status projection and the dashboard projections, and the proof that liveMode false never reaches sign or broadcast. The six stages that still refuse in liveMode true keep their named LiveModeIntegrationPendingError and docs/modules/composition-root.md maps each refusal to its follow-up package.",
+  "deps": [
+    "WP-30",
+    "WP-31",
+    "WP-17",
+    "WP-16"
+  ],
+  "parallelGroup": 8,
+  "writeSet": [
+    "packages/adapters/src/app/stage-driver.mjs",
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/src/app/cycle-repository.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/src/app/accounting-projection.mjs",
+    "packages/adapters/bin/hookemon-runner.mjs",
+    "packages/adapters/README.md",
+    "packages/adapters/test/app/**",
+    "packages/runner/src/observability/status-projection.mjs",
+    "packages/runner/test/observability/status-projection.test.mjs",
+    "packages/dashboard/src/projections/*.mjs",
+    "packages/dashboard/test/projections/*.test.mjs",
+    "docs/modules/composition-root.md",
+    "docs/modules/index.json (only the sha256 entries of composition-root.md, observability.md and dashboard.md)"
+  ],
+  "readSet": [
+    "docs/modules/cycle-runner.md as updated by WP-31 (the per-stage CycleRunner call and evidence table)",
+    "packages/runner/src/cycle/cycle-runner.mjs, evidence-profile.mjs, reducer.mjs (production profile)",
+    "packages/runner/src/automation/automated-cycle-service.mjs (reconcile returns null until the mutation is durably done; execute performs it)",
+    "packages/runner/src/scheduler/scheduler.mjs (triggerTick, abortInFlight)",
+    "packages/dashboard/src/server.mjs and routes/operator.mjs (ctx.triggerTick, ctx.requestRecovery seams; resultCodes RECORDED_NO_LIVE_SCHEDULER and RECORDED_NO_LIVE_SERVICE must disappear when composed)",
+    "packages/adapters/src/*.mjs (adapter surfaces; add the smallest missing function with a test if one is needed)",
+    "packages/runner/src/distribution/{snapshot-indexer,pro-rata,distribution-signer,settlement-worker}.mjs"
+  ],
+  "steps": [
+    "Compose the dashboard server in compose.mjs next to the scheduler (same process, same operator state file, same durable store) and pass triggerTick and requestRecovery into the dashboard context; bin/hookemon-runner.mjs run starts both; add a --no-dashboard flag",
+    "Write accounting-projection.mjs: per-cycle spend, proceeds, fees and reward totals from the journal evidence; feed it into status-projection.mjs and the dashboard projections so public-cycle-status and community-snapshot carry real values",
+    "Tests: a full liveMode true cycle through the real composed service with fake transports and a throwing signer stub proving every sign and broadcast goes through the injected clients only; a liveMode false cycle proving no sign or broadcast is reached; crash-and-resume between every pair of stages; run-cycle-now through the composed dashboard triggering a real tick; accounting values asserted against the journal",
+    "Update docs/modules/composition-root.md and only the digests of the touched cards in docs/modules/index.json; run adapters, runner, dashboard, scripts/tests and the clean-room scanner before the single commit"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test packages/dashboard/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "Every stage that still refuses in liveMode true keeps its named LiveModeIntegrationPendingError and docs/modules/composition-root.md maps each refusal to WP-33, WP-34 or WP-35 (the live paths themselves are delivered by WP-35)",
+    "With liveMode false no code path reaches sign or broadcast (asserted with throwing stubs)",
+    "hookemon-runner run serves the dashboard and the scheduler in one process; run-cycle-now triggers a real tick and restart-stuck-cycle reaches the recovery entry points",
+    "Public cycle-status and community-snapshot responses carry real per-cycle accounting derived from the journal",
+    "All suites pass; packages/runner and packages/dashboard keep zero npm dependencies"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context independent reviewer mandatory before merge; the reviewer must reproduce the liveMode false no-mutation proof and the crash-and-resume proof, and must check that no key material is read anywhere (signer, observer and authority clients are injected). Keep the owner product simple: default one pack per cycle every 20 minutes, dry run until liveMode is set through the dashboard. If a Collector Crypt or Relay fact is missing (endpoint, program id, deposit address), model it as a validated configuration value and report it; never guess. COORDINATOR NOTE (after WP-31): the production evidence profile lives in packages/runner/src/cycle/evidence-profile.mjs (createProductionEvidenceProfile(deps) with injected observers.solana, observers.evm and signerRegistry, all synchronous and caller-resolved); the stage driver must resolve the chain data through the adapters first (solana-rpc getTransaction, robinhood-rpc receipts and logs) and hand the resolved confirmations to the profile. The production signed-transaction envelope in the runner is a canonical-JSON envelope, not the raw Solana or EVM wire format: the adapters layer must translate real broadcasts into that envelope (signature, payer, program ids, pre and post token balances, finalized slot or block) and never the other way round. docs/modules/cycle-runner.md contains the per-stage call and evidence table; follow it literally."
+}

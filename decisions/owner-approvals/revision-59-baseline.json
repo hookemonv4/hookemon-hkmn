@@ -1,0 +1,17 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes adoption of requirements revision 59 and architecture revision 6 as the Operations-wallet Phase 3 baseline. It opens the Phase 3 delivery boundary, replaces the deployed custody topology with a manifest-excluded frozen family and an Operations identity pair, and preserves the distinction between code readiness and separately governed live action. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/capability-map.json": "64e22edbf542609bb757603d2be80203543b21786795f9fcd6b5a7126865ad08",
+    "architecture/interfaces.json": "fece0278bb8b975828836517ab86fc97c7cdba69a7c6e65a5660719251beff2e",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "fc19b6ad3fa4f9c911a9e2c62c465b05b7c4dffd2342e19ec4c022ce9d7e823a",
+    "product/delivery-boundary.json": "bce8a9c241fd3356a26698976fa7fc244f31cb0906e6cbb98a14b6decbfe9c98",
+    "specs/requirements.json": "79855056e16c6c006825cde67ac610182007de4bfd6798f2b66574b2d361506b"
+  }
+}

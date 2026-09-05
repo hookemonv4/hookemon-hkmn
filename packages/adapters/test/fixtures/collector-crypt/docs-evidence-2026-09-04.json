@@ -1,0 +1,68 @@
+{
+  "schema": "hookemon.collector-crypt-docs-evidence.v1",
+  "capturedAt": "2026-09-04",
+  "sources": [
+    {
+      "url": "https://docs.collectorcrypt.com/gacha/api",
+      "scope": "Solana Gacha API",
+      "quotes": [
+        {
+          "field": "machines.contains",
+          "text": "\"contains\": \"description of contents\"",
+          "use": "Documentation example only; purchase planning accepts only an integer or numeric string from the selected machine record."
+        },
+        {
+          "field": "prize_tier",
+          "text": "1 = Epic, 2 = Rare, 3 = Uncommon, 4 = Common",
+          "use": "The epic gate compares the numeric tier with the string rarity."
+        },
+        {
+          "field": "buyback.available.amount",
+          "text": "{\"available\":true,\"amount\":42500000}",
+          "use": "The amount is normalized as a six-decimal Solana stablecoin typed amount."
+        },
+        {
+          "field": "buyback.refundAmount",
+          "text": "refundAmount",
+          "use": "The provider-built buyback response is normalized as the same typed amount before signing."
+        },
+        {
+          "field": "packStatus.send.insured_value",
+          "text": "\"insuredValue\": 50000000",
+          "use": "The documentation does not state this field's asset or unit. The stage reconciles whole-dollar and atomic candidates against the buyback quote."
+        },
+        {
+          "field": "openPack",
+          "text": "Both \"nft_address\" and \"transaction_signature\"/\"transactionSignature\" are present in the example.",
+          "use": "An award response is accepted only with its card address and signature; the lifecycle still requires memo-bound status and finalized chain evidence."
+        }
+      ]
+    },
+    {
+      "url": "https://docs.collectorcrypt.com/gacha/evm-api",
+      "scope": "EVM API only",
+      "quotes": [
+        {
+          "field": "insured_value",
+          "text": "Insured values and buyback amounts are expressed in whole USD",
+          "use": "This conflicts with the Solana winner example and is not used as a Solana unit assertion."
+        },
+        {
+          "field": "openPack",
+          "text": "calling it twice returns the same award",
+          "use": "The narrow sent-unknown retry is constrained by a memo-bound request digest and a matching card address; the source statement is EVM scoped."
+        }
+      ]
+    }
+  ],
+  "openFacts": [
+    {
+      "fact": "No authenticated pinned Solana machine response establishes a current contains type, instant-buyback rate, insured-value unit, or asset linkage.",
+      "resolution": "Capture and pin an authenticated Solana machine and winner response, then revise the adapter evidence contract if it differs."
+    },
+    {
+      "fact": "The idempotency statement is documented on the EVM page, while the Solana page documents an already-opened response shape.",
+      "resolution": "Keep retry restricted to a matching memo-bound card response and finalized chain evidence until Solana-specific idempotency documentation is available."
+    }
+  ]
+}

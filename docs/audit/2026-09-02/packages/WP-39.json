@@ -1,0 +1,72 @@
+{
+  "id": "WP-39",
+  "title": "Off-chain distribution signatures on the vault's typed data, configured keys, operations-trigger role, degraded-return gate",
+  "goal": "Close red-team findings RT-R58-02, RT-R58-03 and RT-R58-04 off-chain, matching the WP-38 contract change. (1) The distribution signer and the verifier sign the vault's EIP-712 PayoutAuthorization typed data with secp256k1 keys through the injected signer clients (roles distribution-signer and verifier from packages/adapters/src/signing), so the same two signatures gate the manifest off-chain and the vault on-chain; the Ed25519 fixture scheme stays only under the fixture evidence profile. (2) packages/runner/src/distribution/manifest.mjs must take the two public identities from configuration (the addresses pinned in bindings/robinhood-chain.json or the operator configuration) under the production profile; the hardcoded keys whose private counterparts live in test fixtures are used only by the fixture profile and never accepted in production. (3) Add the operations-trigger EVM signer role to packages/adapters/src/signing (a second EVM key distinct from the authorizer) and use it in the stages that PegCycleVault requires the trigger to call (executeOutbound and the return leg), so a live cycle can actually complete. (4) recordDegradedReturn with acceptDegraded true is only sent when a standing-authority scoped owner authorization for that exact cycle is present (through StandingAuthorityProvider), never on the worker's own decision; the dashboard exposes it as an explicit owner action.",
+  "deps": [
+    "WP-38",
+    "WP-36",
+    "WP-37",
+    "WP-33"
+  ],
+  "parallelGroup": 14,
+  "writeSet": [
+    "packages/runner/src/distribution/distribution-signer.mjs",
+    "packages/runner/src/distribution/manifest.mjs",
+    "packages/runner/src/distribution/settlement-worker.mjs",
+    "packages/runner/src/cycle/evidence-profile.mjs",
+    "packages/runner/test/distribution/**",
+    "packages/runner/test/integration/**",
+    "packages/adapters/src/signing/signer-client.mjs",
+    "packages/adapters/src/signing/*.mjs",
+    "packages/adapters/src/app/stages/distribution.mjs",
+    "packages/adapters/src/app/stages/payout.mjs",
+    "packages/adapters/src/app/stages/outbound.mjs",
+    "packages/adapters/src/app/stages/return.mjs",
+    "packages/adapters/src/app/stages/funding.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/bin/hookemon-verifier.mjs",
+    "packages/adapters/bin/hookemon-runner.mjs",
+    "packages/adapters/src/hook-contract-client.mjs (authorizePayout calldata with the two signatures)",
+    "packages/adapters/test/**",
+    "packages/dashboard/src/routes/operator.mjs",
+    "packages/dashboard/src/projections/decision-application.mjs",
+    "packages/dashboard/test/**",
+    "docs/modules/distribution-signer.md",
+    "docs/modules/signing.md",
+    "docs/modules/composition-root.md",
+    "docs/modules/index.json (only the sha256 entries of existing registered cards among these)"
+  ],
+  "readSet": [
+    "docs/modules/peg-cycle-vault.md as updated by WP-38 (typed-data schema, domain, pinned addresses)",
+    "packages/contracts/src/process/IPegCycleVault.sol as updated by WP-38",
+    "qa/redteam/revision-58-findings.json (RT-R58-02, RT-R58-03, RT-R58-04)",
+    "packages/runner/src/cycle/authorization-provider.mjs (StandingAuthorityProvider scopes)",
+    "packages/adapters/src/signing/standing-authority.mjs"
+  ],
+  "steps": [
+    "Implement the EIP-712 encoding of PayoutAuthorization in packages/runner (dependency-free keccak is available through the existing digest helpers or node:crypto; if keccak-256 is not available in the runner core, put the encoder in packages/adapters and pass the digest in) and a cross-check test against a Foundry-produced vector for the same struct (cast or a Forge test that prints the digest)",
+    "distribution-signer.mjs: production profile signs the typed-data digest through the injected signer client (secp256k1) and verifies with address recovery; fixture profile unchanged; manifest.mjs takes the two addresses from configuration in production and refuses the fixture identities there",
+    "Add the operations-trigger role; environment.mjs loads it as a second EVM signer; outbound.mjs and return.mjs call the trigger-gated vault functions with it; funding.mjs and payout.mjs keep the authorizer; compose refuses to start live mode when the two EVM identities are equal",
+    "hook-contract-client.mjs: authorizePayout calldata carries the two signatures; payout.mjs passes the signer approval and the verifier receipt signatures through",
+    "Degraded return: distribution or return stage sends recordDegradedReturn with acceptDegraded true only with a matching StandingAuthorityProvider authorization for that cycle; dashboard decision accept-degraded-return records the owner action and its authorization reference",
+    "Tests: two-signature round trip against the Foundry vector; production profile rejects fixture identities; live cycle with two EVM signers completes in compose.test.mjs; single EVM identity refuses to start; degraded acceptance without authorization is refused; run all suites and the scanner before the single commit"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test packages/dashboard/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "The off-chain approval and verification signatures are the same EIP-712 signatures the vault verifies, proven against a Foundry-produced digest vector",
+    "Under the production profile the fixture identities are rejected and the two addresses come from configuration",
+    "A live cycle with distinct authorizer and operations-trigger identities completes; a single shared identity refuses to start live mode",
+    "acceptDegraded is impossible without a scoped owner authorization",
+    "All suites green; clean-room scanner green; packages/runner and packages/dashboard keep zero npm dependencies"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context reviewer mandatory. No code path may read key material; signing is only through the injected signer clients. Keep gates/init.json untouched. This package depends on WP-38 being merged first; read its card and interface before coding. COORDINATOR NOTE (base state 2026-09-03 09:30): WP-38 is merged: PegCycleVault takes immutable distributionSigner and distributionVerifier, authorizePayout(authorization, distributionSignature, verifierSignature) verifies EIP-712 typed data with domain name HookemonPayoutVault version 1 (chainId, verifyingContract = vault) over the PayoutDistribution struct documented in docs/modules/peg-cycle-vault.md; the Solidity encoder lives in packages/contracts/src/process/PayoutDistributionSignatures.sol and the test helper in packages/contracts/test/helpers/PayoutSigning.sol (use them to produce the cross-check vector). WP-22 (registries, README, PRD, owner closeout) and WP-40 (release candidate) are in flight on other branches: do not touch README.md, product/PRD.md, release/**, scripts/verify-phase1-*.mjs or scripts/tests/phase1-*.test.mjs. The head is clean: forge 255/255, runner 383, adapters 347, dashboard 108, cleanroom green, scripts/tests 407/409 (the two release tests are WP-40)."
+}

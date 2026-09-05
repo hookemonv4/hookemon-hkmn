@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hookemon owner dashboard</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f4f5f7; --panel: #fff; --fg: #15171a; --muted: #626873; --border: #d4d8de; --accent: #0d6a3d; --danger: #a61b1b; --warning: #8a5a00; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #121416; --panel: #1c1f23; --fg: #f2f4f6; --muted: #a7adb5; --border: #363b42; --warning: #f4bc52; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 56px; }
+    h1 { margin: 0; font-size: 30px; line-height: 1.2; }
+    h2 { margin: 0 0 12px; font-size: 20px; }
+    h3 { margin: 0 0 6px; font-size: 16px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    section { margin-top: 16px; padding: 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+    button, input { width: 100%; min-height: 44px; font: inherit; border-radius: 6px; }
+    input { padding: 10px 12px; color: var(--fg); background: transparent; border: 1px solid var(--border); }
+    button { padding: 10px 14px; color: var(--fg); background: transparent; border: 1px solid var(--border); cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
+    button.approve { color: #fff; background: var(--accent); border-color: var(--accent); }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .badge { display: inline-flex; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 14px; font-weight: 700; white-space: nowrap; }
+    .grid { display: grid; gap: 12px; }
+    .two { grid-template-columns: 1fr; }
+    .controls { display: grid; gap: 10px; grid-template-columns: 1fr; }
+    .cards { display: grid; gap: 10px; }
+    .card { padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+    .label { color: var(--muted); font-size: 14px; }
+    .value { overflow-wrap: anywhere; font-weight: 600; }
+    .empty { color: var(--muted); font-style: italic; }
+    .warning { color: var(--warning); }
+    .message { min-height: 24px; margin-top: 12px; color: var(--muted); }
+    .meta { display: grid; gap: 4px; margin-top: 8px; }
+    .control-note { margin-top: 10px; font-size: 14px; }
+    @media (min-width: 735px) { main { padding: 40px; } .two { grid-template-columns: repeat(2, minmax(0, 1fr)); } .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (min-width: 1069px) { main { padding-inline: 56px; } .three { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="header">
+      <div><h1>Owner dashboard</h1><p>View the current cycle and use the controls already approved for the operator.</p></div>
+      <span id="networkBadge" class="badge">Network unknown</span>
+    </header>
+
+    <section>
+      <h2>Sign in</h2>
+      <div class="grid two"><label>Operator credential<input id="credential" type="password" autocomplete="off" /></label><button id="loadBtn" type="button">Load dashboard</button></div>
+      <div id="message" class="message" role="status"></div>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section>
+        <h2>Controls</h2>
+        <div class="controls">
+          <button id="pauseBtn" type="button">Pause new activity</button>
+          <button id="resumeBtn" type="button">Resume activity</button>
+          <button id="killBtn" class="danger" type="button">Stop with kill switch</button>
+        </div>
+        <p class="control-note">Each button records one request and sends it to the operator authority.</p>
+      </section>
+
+      <section><h2>Cycles</h2><div id="cycleList" class="cards"></div></section>
+      <section><h2>Claim capacity</h2><div id="claimCapacity" class="cards"></div></section>
+      <section><h2>Custody by cycle</h2><div id="custodyBuckets" class="cards"></div></section>
+      <section><h2>Manual approval</h2><p>Approve only a cycle digest supplied by the authority.</p><div id="approvalQueue" class="cards"></div><div class="grid two"><label>Cycle ID<input id="approvalCycleId" autocomplete="off" /></label><label>Cycle digest<input id="approvalCycleDigest" autocomplete="off" placeholder="sha256:..." /></label></div><button id="manualApprovalBtn" class="approve" type="button">Approve this cycle</button></section>
+      <section><h2>Held Epic cards</h2><p>Record a durable owner choice only from the held evidence supplied by the authority. Recording <code>sell</code> does not sell a card; it only records the choice for an authorized recovery operation.</p><div id="epicHeld" class="cards"></div><div class="grid two"><label>Cycle ID<input id="heldDecisionCycleId" autocomplete="off" /></label><label>Held evidence digest<input id="heldDecisionEvidenceDigest" autocomplete="off" placeholder="sha256:..." /></label><label>Cycle revision<input id="heldDecisionRevision" inputmode="numeric" autocomplete="off" /></label></div><div class="controls"><button id="recordSellDecisionBtn" class="approve" type="button">Record sell choice</button><button id="recordKeepHoldingDecisionBtn" type="button">Record keep-holding choice</button></div></section>
+      <section><h2>Alerts</h2><div id="alertFeed" class="cards"></div></section>
+      <section><h2>Payouts</h2><div id="payoutStatus" class="cards"></div></section>
+      <section><h2>Wallets</h2><p>Public identities only. Balances appear when the authority provides them.</p><div id="walletIdentities" class="cards"></div></section>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    var revision = null;
+    var $ = function (id) { return document.getElementById(id); };
+    var credential = function () { return $('credential').value.trim(); };
+    var message = function (text) { $('message').textContent = text; };
+    var requestId = function () { return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()); };
+    var pendingRequestStorageKey = 'hookemon.owner-dashboard.pending-requests.v1';
+    var pendingRequests = function () {
+      try {
+        var parsed = JSON.parse(sessionStorage.getItem(pendingRequestStorageKey) || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (_) { return {}; }
+    };
+    var savePendingRequests = function (requests) { sessionStorage.setItem(pendingRequestStorageKey, JSON.stringify(requests)); };
+    var requestFor = function (command) {
+      var key = JSON.stringify(command);
+      var requests = pendingRequests();
+      var existing = requests[key];
+      if (existing && typeof existing.requestId === 'string' && (existing.expectedVersion === null || Number.isSafeInteger(existing.expectedVersion))) {
+        return { key: key, request: { requestId: existing.requestId, expectedVersion: existing.expectedVersion, command: command } };
+      }
+      var request = { requestId: requestId(), expectedVersion: revision, command: command };
+      requests[key] = { requestId: request.requestId, expectedVersion: request.expectedVersion };
+      savePendingRequests(requests);
+      return { key: key, request: request };
+    };
+    var clearRequest = function (key) {
+      var requests = pendingRequests();
+      delete requests[key];
+      savePendingRequests(requests);
+    };
+    var isReconciledCommandState = function (state) { return state === 'APPLIED' || state === 'REJECTED'; };
+    var empty = function (target, text) { target.replaceChildren(Object.assign(document.createElement('p'), { className: 'empty', textContent: text })); };
+    var add = function (target, title, values) {
+      var card = document.createElement('article'); card.className = 'card';
+      var heading = document.createElement('h3'); heading.textContent = title; card.appendChild(heading);
+      Object.keys(values).forEach(function (label) { var row = document.createElement('div'); row.className = 'meta'; var key = document.createElement('span'); key.className = 'label'; key.textContent = label; var value = document.createElement('span'); value.className = 'value'; value.textContent = values[label] === null || values[label] === undefined ? 'Not available' : String(values[label]); row.append(key, value); card.appendChild(row); });
+      target.appendChild(card);
+    };
+    var amount = function (value) { return value && typeof value === 'object' ? value.amountAtomic + ' atomic units (' + value.assetId + ')' : value === null || value === undefined ? 'Not available' : String(value); };
+    var custodyLabel = { claimed: 'Claimed', bridgeOut: 'Bridged out', bridgeIn: 'Bridged in', packCost: 'Pack cost', buybackProceeds: 'Buyback proceeds', returnInput: 'Return sent', returnReceived: 'Returned', refunds: 'Refunds', residual: 'Residual', heldAssets: 'Held cards', payoutLiability: 'Payout waiting', dust: 'Dust', unattributed: 'Unattributed' };
+
+    async function api(path, options) {
+      var response = await fetch(path, Object.assign({ headers: { 'x-hookemon-proxy-credential': credential() } }, options || {}));
+      var text = await response.text(); var body = text ? JSON.parse(text) : null;
+      if (!response.ok) {
+        var error = new Error(body && body.code ? body.code : 'Request failed');
+        error.responseBody = body;
+        throw error;
+      }
+      return body;
+    }
+
+    function cycleStage(cycle) { return cycle.terminalState || (cycle.stages || []).filter(function (stage) { return stage.status !== 'COMPLETE'; }).map(function (stage) { return stage.stage; })[0] || 'Complete'; }
+    function renderCycles(cycles) {
+      var target = $('cycleList'); target.replaceChildren();
+      if (!cycles.length) return empty(target, 'No cycles are available.');
+      cycles.forEach(function (cycle) { add(target, cycle.cycleId, { Stage: cycleStage(cycle), 'Transaction or signature IDs': (cycle.transactionIds || []).join(', ') || 'Not available', State: cycle.terminalState || 'In progress' }); });
+    }
+    function renderCapacity(cap) {
+      var target = $('claimCapacity'); target.replaceChildren();
+      if (cap.onChainRemainingCapacity) add(target, 'On-chain six-hour claim capacity', { Remaining: amount(cap.onChainRemainingCapacity) });
+      else if (cap.offChain24Hour) add(target, '24-hour ledger capacity', { Used: cap.offChain24Hour.usedMicroUsdg, Limit: cap.offChain24Hour.limitMicroUsdg, Remaining: cap.offChain24Hour.remainingMicroUsdg });
+      else empty(target, 'Claim capacity is not available.');
+    }
+    function renderCustody(buckets) {
+      var target = $('custodyBuckets'); target.replaceChildren();
+      if (!buckets.length) return empty(target, 'No custody buckets are available.');
+      buckets.forEach(function (entry) { var values = {}; Object.keys(entry.buckets || {}).forEach(function (name) { values[custodyLabel[name] || name] = amount(entry.buckets[name]); }); add(target, entry.cycleId + ' · ' + entry.assetId, values); });
+    }
+    function renderApproval(cycles) {
+      var target = $('approvalQueue'); target.replaceChildren();
+      var items = cycles.filter(function (cycle) { return cycle.cycleDigest; }).map(function (cycle) { return { cycleId: cycle.cycleId, digest: cycle.cycleDigest, stage: (cycle.stages || []).filter(function (stage) { return stage.status !== 'COMPLETE'; })[0]?.stage || 'Complete' }; });
+      if (!items.length) return empty(target, 'No authority-supplied cycle digests are waiting.');
+      items.forEach(function (item) { add(target, item.cycleId, { Stage: item.stage, 'Cycle digest': item.digest }); });
+    }
+    function renderHeld(cycles) {
+      var target = $('epicHeld'); target.replaceChildren(); var held = cycles.filter(function (cycle) { return /^HELD_/.test(cycle.terminalState || ''); });
+      if (!held.length) return empty(target, 'No held Epic cards are reported.');
+      held.forEach(function (cycle) {
+        add(target, cycle.cycleId, { Status: cycle.terminalState, 'Held evidence digest': cycle.heldEvidenceDigest, 'Cycle revision': cycle.version, 'Recorded choice': cycle.ownerDecision && cycle.ownerDecision.choice, Card: 'Not supplied by authority', Offer: 'Not supplied by authority', 'Insured value': 'Not supplied by authority', 'Matched unit': 'Not supplied by authority' });
+        if (cycle.terminalState === 'HELD_OWNER_DECISION' && cycle.heldEvidenceDigest && Number.isSafeInteger(cycle.version) && !$('heldDecisionCycleId').value && !$('heldDecisionEvidenceDigest').value && !$('heldDecisionRevision').value) {
+          $('heldDecisionCycleId').value = cycle.cycleId;
+          $('heldDecisionEvidenceDigest').value = cycle.heldEvidenceDigest;
+          $('heldDecisionRevision').value = String(cycle.version);
+        }
+      });
+    }
+    function renderAlerts(alerts) { var target = $('alertFeed'); target.replaceChildren(); if (!alerts.length) return empty(target, 'No alerts are reported.'); alerts.forEach(function (alert, index) { add(target, 'Alert ' + (index + 1), alert); }); }
+    function renderPayouts(cycles) { var target = $('payoutStatus'); target.replaceChildren(); if (!cycles.length) return empty(target, 'No payout status is available.'); cycles.forEach(function (cycle) { add(target, cycle.cycleId, { Status: cycle.payout && cycle.payout.status, 'Transaction or signature IDs': cycle.payout && (cycle.payout.transactionIds || []).join(', ') }); }); }
+    function renderWallets(identities) { var target = $('walletIdentities'); target.replaceChildren(); if (!identities || typeof identities !== 'object') return empty(target, 'No public wallet identities are available.'); Object.keys(identities).forEach(function (name) { add(target, name, { Value: typeof identities[name] === 'object' ? JSON.stringify(identities[name]) : identities[name] }); }); }
+
+    async function load() {
+      try {
+        var bootstrap = await api('/operator/api/bootstrap'); var dashboard = await api('/operator/api/dashboard'); var identities = await api('/operator/api/identities'); var network = await api('/operator/api/network');
+        revision = bootstrap.state.version; $('networkBadge').textContent = network.profile === 'mainnet' ? 'Mainnet' : 'Testnet';
+        renderCycles(dashboard.cycles || []); renderCapacity(dashboard.cap || {}); renderCustody((dashboard.custody && dashboard.custody.buckets) || []); renderApproval(dashboard.cycles || []); renderHeld(dashboard.cycles || []); renderAlerts(dashboard.alerts || []); renderPayouts(dashboard.cycles || []); renderWallets(identities.identities);
+        $('dashboard').hidden = false; message('Dashboard loaded.');
+      } catch (error) { message(error.message); }
+    }
+    async function dispatch(command) {
+      var pending = requestFor(command);
+      try {
+        var response = await api('/operator/api/decisions', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hookemon-proxy-credential': credential() }, body: JSON.stringify(pending.request) });
+        if (isReconciledCommandState(response.commandState)) clearRequest(pending.key);
+        message(response.code || 'Request recorded.');
+        await load();
+      } catch (error) {
+        if (isReconciledCommandState(error.responseBody && error.responseBody.commandState)) clearRequest(pending.key);
+        message(error.message);
+      }
+    }
+    $('loadBtn').addEventListener('click', load);
+    $('pauseBtn').addEventListener('click', function () { dispatch({ type: 'pause' }); });
+    $('resumeBtn').addEventListener('click', function () { dispatch({ type: 'resume' }); });
+    $('killBtn').addEventListener('click', function () { dispatch({ type: 'kill' }); });
+    $('manualApprovalBtn').addEventListener('click', function () { dispatch({ type: 'manual-approval', cycleId: $('approvalCycleId').value.trim(), cycleDigest: $('approvalCycleDigest').value.trim() }); });
+    var dispatchHeldOwnerDecision = function (choice) { dispatch({ type: 'held-owner-decision', cycleId: $('heldDecisionCycleId').value.trim(), heldEvidenceDigest: $('heldDecisionEvidenceDigest').value.trim(), expectedCycleRevision: Number($('heldDecisionRevision').value), choice: choice }); };
+    $('recordSellDecisionBtn').addEventListener('click', function () { dispatchHeldOwnerDecision('sell'); });
+    $('recordKeepHoldingDecisionBtn').addEventListener('click', function () { dispatchHeldOwnerDecision('keep-holding'); });
+  }());
+  </script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+{
+  "schema": "hookemon.collector-crypt-public-capture.v1",
+  "capturedAt": "2026-09-04T16:34:41Z",
+  "sources": [
+    {
+      "method": "GET",
+      "url": "https://collectorcrypt.com/api/machines",
+      "httpStatus": 200,
+      "contentType": "text/html",
+      "bodyBytes": 25865,
+      "sha256": "835716b115e8cce6a0fdd9c8b2f9acc7ce64f23ee1ccdf8d40550f6d2d088d37",
+      "json": false,
+      "observedFieldNames": [],
+      "conclusion": "The permitted public URL returned an HTML application document, not a JSON API response. It establishes no live machine, settlement, insured-value, prize-tier, program, or recipient binding."
+    },
+    {
+      "method": "GET",
+      "url": "https://docs.collectorcrypt.com/gacha/api",
+      "httpStatus": 200,
+      "contentType": "text/html; charset=utf-8",
+      "bodyBytes": 241771,
+      "sha256": "151e1125c21c04147b0905d952d20ddbd5e5ef262a4bcaa14cd0dba758b08016",
+      "documentedFields": {
+        "machines": {
+          "contains": {
+            "documentedType": "string",
+            "documentedExample": "description of contents"
+          }
+        },
+        "packStatus": {
+          "send": {
+            "insured_value": {
+              "documentedType": "number",
+              "assetAndUnit": "not stated"
+            },
+            "prize_tier": {
+              "documentedType": "number",
+              "mapping": {
+                "1": "epic",
+                "2": "rare",
+                "3": "uncommon",
+                "4": "common"
+              }
+            }
+          },
+          "buyback": {
+            "refund_amount": {
+              "documentedType": "string",
+              "unit": "six-decimal stablecoin base units",
+              "decimals": 6
+            }
+          }
+        },
+        "buybackAvailable": {
+          "amount": {
+            "documentedType": "number",
+            "unit": "six-decimal stablecoin base units",
+            "decimals": 6
+          }
+        },
+        "buybackCheck": {
+          "fields": [
+            "exists",
+            "playerWallet",
+            "nft",
+            "transactionSignature",
+            "buybackAmount",
+            "createdAt",
+            "status"
+          ],
+          "buybackAmount": {
+            "documentedType": "string"
+          },
+          "completedStatus": "complete"
+        }
+      }
+    }
+  ],
+  "unverified": [
+    "The permitted public machine URL did not return JSON, so it cannot prove a current machine schema or an integer contains value.",
+    "The documentation does not state the asset or unit for insured_value.",
+    "The documentation sample token mint is not a current provider binding.",
+    "The documentation does not publish a pinned program, recipient, or decoded transaction policy."
+  ]
+}

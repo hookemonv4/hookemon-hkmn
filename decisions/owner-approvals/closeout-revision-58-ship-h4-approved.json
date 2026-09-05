@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "ship",
+  "itemId": "H4",
+  "rationale": "Owner reviewed the advisory checklists recorded in ops/advisories/index.json for requirements revision 58; advisory only, the owner decision is final either way. This authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "ops/advisories/index.json": "1ac8d467a38a77c9d76047bff59f0690c18ce5ca3716cec74cadbac3bd8d3808",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8"
+  }
+}

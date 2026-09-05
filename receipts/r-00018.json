@@ -1,0 +1,16 @@
+{
+  "id": "r-00018",
+  "at": "2026-08-30T01:19:50.866Z",
+  "type": "project-integrated",
+  "phase": "init",
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "scripts/v4.mjs": "ed14d84d9e3c7a05fdfa71b3bf898cf5d68fbb030e4399d8def49817e508637d",
+    ".github/workflows/v4-gates.yml": "bb61c21abf7f34a0f152d5758cecd610b9044e92427a3ac99701690d5e79b356",
+    "scripts/check-cleanroom.mjs": "c245d215da9960c92fe820b1270609edcffa9ad2b39a16fa0f7506e77254ab6b",
+    "scripts/check-commit-identity.mjs": "2579cc7445175ff68da585f7c4ab2ac6cd2cc6a63cba8802c346105445f2c426",
+    "scripts/verify-control-dependencies.mjs": "01f7c1b884d5979f8bec8bb5ac04e3be4fd3a0b4aaeb2876395abb9bf6395edf"
+  }
+}

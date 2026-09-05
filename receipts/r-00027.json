@@ -1,0 +1,20 @@
+{
+  "id": "r-00027",
+  "at": "2026-08-30T04:24:34.487Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-baseline-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "PHASE 1 BASELINE APPROVED"
+  },
+  "inputHashes": {
+    "gates/init.json": "7608952c8ced7acf461e7e2302f1e6ecd11302c10cec68312196caecf0fbf776",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "product/PRD.md": "7404c10ea60841be2529aa936f9ec766f5bc4c1468adf7172e2fb6dab7a71302",
+    "decisions/owner-approvals/phase-1-baseline-approved.json": "c75dc066dd149d31cefaac7ecc3ff93c3c5330553c07e9ef63accca9f762289f"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "phase": "redteam",
+  "requirementsRevision": 55,
+  "architectureRevision": 4,
+  "reviewContract": {
+    "artifactOnly": true,
+    "authorReasoningIncluded": false,
+    "issuesOnly": true,
+    "instruction": "Assume the author is overconfident. Inspect only the frozen artifacts and executable evidence. Classify every defect and leave unresolved risk fail-closed."
+  },
+  "cycles": [
+    {
+      "cycle": 1,
+      "status": "SUBSTANTIVE_OPEN_FINDINGS",
+      "artifactSet": [
+        "specs/requirements.json",
+        "architecture/",
+        "feasibility/",
+        "gates/",
+        "docs/modules/",
+        "packages/contracts/",
+        "packages/runner/",
+        "tasks/"
+      ],
+      "reviewers": [
+        {
+          "id": "redteam-r55-control-and-buildability",
+          "context": "fresh",
+          "writeAccess": false,
+          "focus": "Gate evidence semantics, module authority, operations survivability, proof recovery, and production router binding",
+          "result": "Six valid-actionable findings: two resolved by reviewed control changes and four open fail-closed findings"
+        }
+      ],
+      "findingIds": ["RT-R55-01", "RT-R55-02", "RT-R55-03", "RT-R55-04", "RT-R55-05", "RT-R55-06"],
+      "classificationArtifact": "decisions/redteam/findings.json",
+      "resolutionArtifact": "qa/redteam/resolutions.json"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "r-00263",
+  "at": "2026-08-31T17:20:23.191Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-010",
+    "commitSha": "54553aa7adb4ca1805841178946395515c91a444",
+    "taskFingerprint": "7c69cfc5cb2354c4c9156d376e40b98a083aaf8860d42229181f102a62387990",
+    "requirementsRevision": 55,
+    "requirementsHash": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  },
+  "inputHashes": {
+    "packages/runner/src/cycle/verify-fixtures.mjs": "6e06460dd6dafc890319ee9a1297a33f9013a5204acb79e4da0d4f9a73cc2ead",
+    "packages/runner/test/cycle/security.test.mjs": "9e9eddeeded11304aa93c646f4cd98564d78930ade363851713f0943ed89f144",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

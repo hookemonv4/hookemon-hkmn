@@ -1,0 +1,60 @@
+{
+  "id": "WP-26",
+  "title": "Red-team refresh at revision 58",
+  "goal": "Re-run STRIDE against every new surface this revision introduces: automation, escrow, chunked payout, open-router/optional-hookData, distribution-signer split.",
+  "deps": [
+    "WP-01",
+    "WP-02",
+    "WP-03",
+    "WP-04",
+    "WP-05",
+    "WP-06",
+    "WP-07",
+    "WP-08",
+    "WP-09",
+    "WP-10",
+    "WP-11",
+    "WP-12",
+    "WP-13",
+    "WP-14",
+    "WP-15",
+    "WP-16",
+    "WP-17",
+    "WP-18",
+    "WP-19",
+    "WP-20",
+    "WP-21",
+    "WP-22",
+    "WP-23",
+    "WP-24",
+    "WP-25",
+    "WP-27",
+    "WP-28",
+    "WP-29"
+  ],
+  "parallelGroup": 9,
+  "writeSet": [
+    "qa/redteam/revision-58-findings.json",
+    "decisions/redteam/findings.json"
+  ],
+  "readSet": [
+    "current STRIDE artifacts (bound to revision 55, already stale)",
+    "scratchpad/w2/DESIGN.md"
+  ],
+  "steps": [
+    "Run the red-team doubt-loop process per AGENTS.md against the automation, escrow, chunked-payout, open-router, and distribution-signer surfaces",
+    "Carry forward or re-scope RT-R55-02/05/06 against the new revision",
+    "Specifically test: can a compromised worker host redirect a payout without both distribution-signer and verifier signatures; can the open-router relaxation be abused to bypass fee accrual; can a DEGRADED balance be swept by any code path"
+  ],
+  "tests": [
+    "red-team doubt-loop process per AGENTS.md (manual/documented, not an automated test command)"
+  ],
+  "acceptance": [
+    "Fresh findings recorded against every new surface introduced by this revision",
+    "No finding shows a path for a single compromised key to redirect a cycle's proceeds",
+    "No finding shows a path to auto-sweep a DEGRADED or quarantined balance"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "Runs last, after every other package has landed and revision 58's REQ text is final. R4: per AGENTS.md this is itself the fresh-context independent-reviewer/doubt-loop process \u2014 it must be run by someone (or an agent instance) who did not author WP-02..WP-14's changes, not self-certified by the implementer."
+}

@@ -1,0 +1,17 @@
+{
+  "schema": "hookemon.phase1-local-toolchain.v1",
+  "authority": "LOCAL_EXECUTABLE_BYTES_ONLY",
+  "node": {
+    "version": "v24.19.0",
+    "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+  },
+  "forge": {
+    "version": "1.7.1",
+    "commit": "4072e48705af9d93e3c0f6e29e93b5e9a40caed8",
+    "sha256": "e729589084ca2f1479354353d1ec3d4789451b577f4cdee4e7dc57cae64a38fa"
+  },
+  "solc": {
+    "version": "0.8.26+commit.8a97fa7a.Darwin.appleclang",
+    "sha256": "0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9"
+  }
+}

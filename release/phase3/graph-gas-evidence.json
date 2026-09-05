@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "hookemon.phase3.provider-graph-gas-evidence.v1",
+  "requirementsRevision": 65,
+  "status": "MEASURED",
+  "measurementStatus": "ACTUAL_ARCHIVE_ROUTER_CALL",
+  "scope": "Revision 65 three-target custom graph through the pinned archive router.",
+  "revision65Launch": {
+    "canonicalMarketAllocation": {
+      "assetId": "hkmn",
+      "amountAtomic": "1000000000000000000000000000",
+      "allocationBps": 10000
+    },
+    "otherHkmnAllocation": {
+      "amountAtomic": "0",
+      "allocationBps": 0
+    },
+    "ownerSeed": {
+      "assetId": "usdg",
+      "amountAtomic": "240000000"
+    },
+    "fee01": {
+      "platformShareBps": 10,
+      "status": "ACCEPTED",
+      "acceptedOn": "2026-09-04"
+    },
+    "graphCalls": [
+      "allocate(hook)",
+      "configureBindingHook(hook)",
+      "initializeGraphLaunch(custody,sqrtPriceX96)"
+    ]
+  },
+  "gasLimitSource": {
+    "kind": "conservative-genesis-envelope",
+    "path": "release/phase3/genesis-evidence.json",
+    "sha256": "sha256:353e6f6441b47695b41cee0c3645cde8dd7492d2f7f574bfb6aa4371e41bb6ba",
+    "blockGasLimit": 30000000,
+    "reason": "The official genesis limit is a conservative envelope for this proof; it is not an archive block-header value."
+  },
+  "observedCalleeGas": 9592526,
+  "transactionBaseGas": 21000,
+  "calldataBytes": 49668,
+  "calldataGas": 651348,
+  "intrinsicTransactionGas": 672348,
+  "observedTransactionGas": 10264874,
+  "documentedMargin": 1000000,
+  "assertedGasEnvelope": 11264874,
+  "remainingGenesisEnvelopeGas": 18735126,
+  "assertion": "observedTransactionGas + documentedMargin < conservativeGenesisGasEnvelope",
+  "archive": {
+    "chainId": 4663,
+    "blockNumber": 54484625,
+    "factory": {
+      "address": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+      "runtimeCodeHash": "0xd23692fae59331592048e71a96d4963e170ee56e449683dc9f7fa3f9470018b8"
+    },
+    "router": {
+      "address": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+      "runtimeCodeHash": "0x1dbbdaaad901ea3c6134dca0d4872a4789b3c071bf8ccfb44edd65d26d817388"
+    },
+    "permitAuthority": {
+      "address": "0xeD617CE7f82e2AB589aDeFFD319D1D872Bc8De06",
+      "runtimeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c"
+    },
+    "poolManager": {
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "runtimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+    }
+  },
+  "route": {
+    "selector": "0xe5f6b8cd",
+    "factorySelector": "0x196d9f22",
+    "targetCount": 3,
+    "initializerCount": 3,
+    "targetOrder": ["token", "custody", "hook"],
+    "initializers": [
+      "allocate(hook)",
+      "configureBindingHook(hook)",
+      "initializeGraphLaunch(custody,sqrtPriceX96)"
+    ],
+    "graphDeploymentHash": "0xe1b2b55129c74cc24d49d5da4f80d7573bb61b4e43bf1ed653950409d3dda0ef",
+    "deployments": {
+      "token": {
+        "address": "0x9EDD7Dc4c4b719623a28d7AEa72DCbc9C954B8C2",
+        "runtimeCodeHash": "0x2aa20909e57ee56fb5b49a02b96d11572fa4ef677c73b2d42dc19dad4e30454f"
+      },
+      "custody": {
+        "address": "0x4E7D85CeCaf0B06217B79736043D1127Fd24A727",
+        "runtimeCodeHash": "0x0d63637b005fc544332b142fa4debae3af6e3bc14dc7493a718b2154a70dfb87"
+      },
+      "hook": {
+        "address": "0xA32a6758Dcf40D17F66B8eE08C04910c23A0a0Cc",
+        "runtimeCodeHash": "0x2ca1fa1c1a23730bc06cb37a8bd38e1cc61e62880c84fa6022d7b23d94e79051"
+      }
+    }
+  },
+  "measurementMethod": {
+    "test": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol::testProviderRouterMeasuresThreeTargetGraphAndWritesStamp",
+    "snapshot": "direct factory deployGraph as the pinned router, then revertTo(snapshot) before the measured router call",
+    "signature": "only isValidSignature on the original pinned permit authority is mocked to return the EIP-1271 magic value; its code hash is asserted unchanged",
+    "calleeGasSource": "vm.lastCallGas().gasTotalUsed immediately after the encoded router launch call",
+    "intrinsicGasSource": "21,000 base gas plus 4 gas per zero calldata byte and 16 gas per non-zero calldata byte in the exact encoded launchAndStampV1 transaction",
+    "calldataSource": "abi.encodeWithSelector(IArchiveStampRouter.launchAndStampV1.selector, permit, stampRequest, routePayload, signature)"
+  },
+  "referenceSource": {
+    "commit": "cbcabd3cfc166124485c6f7e7c3951810cf60dc1",
+    "factorySourceSha256": "sha256:06a3acaf9beeb68647af231f5524c5a34dc013d99611a1b2d0a6c80895f595e9",
+    "routerSourceSha256": "sha256:ef87aa9338c364634bffda64423bd3fb096c1630a45cc58ecf854d24959ff163",
+    "sourcePath": "launchAndStampV1 -> deployGraph -> stamp write"
+  }
+}

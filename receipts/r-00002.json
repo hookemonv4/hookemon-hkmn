@@ -1,0 +1,13 @@
+{
+  "id": "r-00002",
+  "at": "2026-08-29T23:35:46.394Z",
+  "type": "project-integrated",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "scripts/v4.mjs": "10bf6aa99482abe679bd6181775611ab22c11bdcdbcb8fbc45b8dad60db928b5",
+    ".github/workflows/v4-gates.yml": "4a7debe0ee8a4d74a0058e3dbdfa7af9d1477cf741f94306e80bcd0ce83b81ce"
+  }
+}

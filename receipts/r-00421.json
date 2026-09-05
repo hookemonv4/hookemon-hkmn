@@ -1,0 +1,17 @@
+{
+  "id": "r-00421",
+  "at": "2026-09-01T16:48:13.765Z",
+  "type": "build-trace-verified",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "itemId": "B2",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0",
+    "tasks.json": "7c5f6231eb82555c9426568f9d656413937511926ce279730d7599ed1dcd67c8"
+  }
+}

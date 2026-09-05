@@ -1,0 +1,109 @@
+{
+  "schema": "hookemon-owner-launch-inputs-v1",
+  "recordedAt": "2026-09-05",
+  "source": "owner decisions recorded by the coordinator, 2026-09-04 and 2026-09-05",
+  "chainId": 4663,
+  "treasury": {
+    "address": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "role": "treasury beneficiary (0.40% stream), process-claim limit authority",
+    "custody": "Rabby browser wallet, dedicated account (owner statement 2026-09-04; no hardware wallet)",
+    "verification": {
+      "checksum": "EIP-55 valid",
+      "codeAtLatest": "0x (externally owned account)",
+      "balanceWeiAtLatest": "0",
+      "verifiedAt": "2026-09-04",
+      "rpc": "https://rpc.mainnet.chain.robinhood.com"
+    }
+  },
+  "operationsEvm": {
+    "address": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+    "keychain": {
+      "service": "hookemon-operations",
+      "account": "operator-evm"
+    },
+    "generatedBy": "hookemon-wallet generate (owner Mac login Keychain)",
+    "generatedAt": "2026-09-04T16:15:38.712Z",
+    "recordedAt": "2026-09-04",
+    "verification": {
+      "checksum": "EIP-55 valid",
+      "probe": "owner ran hookemon-wallet probe on 2026-09-04"
+    }
+  },
+  "operationsSolana": {
+    "publicKey": "BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE",
+    "keychain": {
+      "service": "hookemon-operations",
+      "account": "operator-solana"
+    },
+    "generatedBy": "hookemon-wallet generate (owner Mac login Keychain)",
+    "generatedAt": "2026-09-04T16:15:38.712Z",
+    "recordedAt": "2026-09-04",
+    "verification": {
+      "onCurve": true,
+      "probe": "owner ran hookemon-wallet probe on 2026-09-04"
+    }
+  },
+  "launchWallet": {
+    "address": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "note": "Owner decision 2026-09-04: the Treasury account signs the launch transaction and the seed transaction and holds the seed USDG.",
+    "recordedAt": "2026-09-04"
+  },
+  "processClaimLimit6hUsdgAtomic": "50000000000",
+  "processClaimLimitMaxUsdgAtomic": "500000000000",
+  "processClaimMaxCount": 24,
+  "manualApprovalCycles": 3,
+  "pool": {
+    "tickSpacing": null,
+    "sqrtPriceX96": null,
+    "range": "full range (owner accepted coordinator recommendation)",
+    "hkmnLiquidity": "1000000000000000000000000000",
+    "usdgLiquidity": "240000000",
+    "usdgLiquidityHuman": "240 USDG seed (from the owner's 300 USD total budget; owner decision 2026-09-05)",
+    "priceNote": "initial price = usdgLiquidity / hkmnLiquidity; computed into sqrtPriceX96 by the launch-input builder"
+  },
+  "metadata": {
+    "name": "Hookemon",
+    "symbol": "HKMN",
+    "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
+    "website": "https://hookemon.com",
+    "x": "https://x.com/hookemon4",
+    "image": "hookemon-mark.png 512x512 (icon/logo for Programmable, DexScreener, wallets); hookemon-logo.svg wordmark for the website; favicon.svg",
+    "banner": "hookemon-banner.jpeg 1500x500 (website design worktree apps/web/public/; also .webp) — used for X header, DexScreener/FOMO header and Programmable listing",
+    "ogImage": "og.png 1731x909 (website link preview; resize to 1200x630 in the website relaunch)"
+  },
+  "archiveRpcUrl": "provided by the owner on 2026-09-04 (Alchemy, network Robinhood Chain Mainnet); stored outside the repository in the operator environment as ROBINHOOD_FORK_RPC_URL; verified: chainId 0x1237, historical eth_call at latest-500000 works",
+  "note": "Only the owner supplies these values. Null means not yet provided. This file feeds release/phase3/launch-inputs.json; addresses are bound into the constructor and bindings only through the address manifest (WP04A) and are never derived.",
+  "operationsRotationDelaySeconds": 43200,
+  "ownerInputNotes": {
+    "processClaimLimit6h": "owner: 50000 USDG per six hours to start",
+    "processClaimLimitMax": "owner confirmed 2026-09-04: 500000 USDG (immutable)",
+    "processClaimMaxCount": "coordinator suggestion 24; owner did not object",
+    "operationsRotationDelaySeconds": "owner decision 2026-09-04: 12 hours (43200 s), immutable",
+    "manualApprovalCycles": "owner: 3"
+  },
+  "token": {
+    "name": "Hookemon",
+    "symbol": "HKMN",
+    "decimals": 18,
+    "totalSupply": "1000000000000000000000000000",
+    "totalSupplyHuman": "1,000,000,000 HKMN",
+    "split": "100 percent canonical-market allocation, zero other allocations (owner decision 2026-09-05)"
+  },
+  "firstRehearsal": {
+    "pack": "25 USD pack (code to be selected from GET /api/machines, e.g. sns_25)",
+    "mode": "rehearsal, manual approval, Collector-only first"
+  },
+  "budget": {
+    "totalUsd": 300,
+    "note": "owner decision 2026-09-05"
+  },
+  "programmableAcceptance": {
+    "recordedAt": "2026-09-05",
+    "statement": "The owner confirmed that Programmable accepted the Phase 3 launch route directly with the owner.",
+    "fee01": {
+      "basisPoints": 10,
+      "acceptedAt": "2026-09-04",
+      "status": "accepted"
+    }
+  }
+}

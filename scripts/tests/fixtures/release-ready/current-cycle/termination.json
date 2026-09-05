@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "hookemon.redteam-termination.v3",
+  "phase": "redteam",
+  "requirementsRevision": 63,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "findingStates": [
+    { "id": "RT-R55-01", "status": "RESOLVED" },
+    { "id": "RT-R55-03", "status": "RESOLVED" },
+    { "id": "RT-R55-04", "status": "RESOLVED" },
+    { "id": "RT-R58-01", "status": "RESOLVED" },
+    { "id": "RT-R58-02", "status": "RESOLVED" },
+    { "id": "RT-R58-03", "status": "RESOLVED" },
+    { "id": "RT-R58-04", "status": "RESOLVED" },
+    { "id": "RT-R58-05", "status": "RESOLVED" },
+    { "id": "RT-R58-06", "status": "RESOLVED" },
+    { "id": "RT-R58-07", "status": "RESOLVED" },
+    { "id": "RT-R58-08", "status": "RESOLVED" }
+  ]
+}

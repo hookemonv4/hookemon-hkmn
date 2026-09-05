@@ -1,0 +1,22 @@
+{
+  "id": "r-00426",
+  "at": "2026-09-01T16:48:30.058Z",
+  "type": "gate",
+  "phase": "ship",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 2,
+    "problems": [
+      "prerequisite build gate is FAILED via r-00425",
+      "H1: no status recorded",
+      "H2: no status recorded",
+      "H4: no status recorded"
+    ]
+  },
+  "inputHashes": {
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "gates/runs/ship.json": "8952af9ba72cb1e7f103fc0d0e8e6cd01e4a6f661baace9eda6c19fc2cf639e5",
+    "receipts/r-00333.json": "b2ddcf56dd6b3a214fae824c0baec38c1262f9142a8abed95833866eea61db2f",
+    "receipts/r-00334.json": "8f0df55592286904773767db1b0cbb1be86696013a4f1f46d004dfdb81bbb154"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "WP-04",
+  "title": "Payout hardening: sentinel fix, TREE_WIDTH literal, chunked payouts",
+  "goal": "Fix two low-risk contract bugs and add chunked-payout support so a single cycle's proceeds can be distributed to more than 1024 holders.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "packages/contracts/src/payout/PayoutCommitment.sol",
+    "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+    "packages/contracts/src/settlement/HolderSettlement.sol",
+    "packages/contracts/test/payout/PayoutCommitment.t.sol",
+    "packages/contracts/test/payout/CanonicalMerkleSum.t.sol",
+    "packages/contracts/test/settlement/HolderSettlement.t.sol"
+  ],
+  "readSet": [
+    "architecture/trust-boundaries.md (TB-16, TB-17)",
+    "architecture/interfaces.json"
+  ],
+  "steps": [
+    "Fix PayoutCommitment: replace the payoutId != bytes32(0) overload used by PayoutAlreadyFunded with an explicit `funded` boolean per record",
+    "Add a regression test proving a repeated authorization for payoutId == bytes32(0) reverts PayoutAlreadyFunded on the second call",
+    "Fix HolderSettlement: replace the hardcoded 1024 literal with CanonicalMerkleSum.TREE_WIDTH",
+    "Add parent/child chunk structure: commitPayoutChunk(payoutId, chunkIndex, rootHash, rootSum) under the existing single payoutId; enforce sum(chunk.rootSum) == payoutLiability[payoutId] exactly before any chunk is claimable",
+    "Add an explicit manifest-closed flag so a partial/abandoned chunk commitment can never leave holders permanently unpayable",
+    "Add chunkIndex parameter to HolderSettlement.payEntitlement; key paidEntitlements on (payoutId, chunkIndex, index)",
+    "Ship chunking inactive by default (chunk count fixed at 1) with a config path to activate multi-chunk mode later",
+    "Add tests: partial chunk set is rejected as claimable, exact-sum-across-chunks is enforced, single-chunk mode behaves identically to today's unchunked path, per-chunk pull payment works",
+    "Add a named MAX_CHUNKS_PER_PAYOUT constant (a declared maximum, not an unbounded loop) and a gas-metered test committing+claiming one full, maximally-deep 1024-leaf chunk, plus a second gas-metered test committing and closing out a full MAX_CHUNKS_PER_PAYOUT-chunk cycle, recording the total gas cost of each in the test output per security-and-evidence.md's 'hard maximums for callbacks, launch, claims, user exits, and keeper actions' requirement"
+  ],
+  "tests": [
+    "forge test --match-path 'test/payout/*.t.sol'",
+    "forge test --match-path 'test/settlement/*.t.sol'",
+    "forge test --match-path 'test/payout/*.t.sol' --gas-report"
+  ],
+  "acceptance": [
+    "A repeated bytes32(0) payoutId authorization reverts PayoutAlreadyFunded instead of silently overwriting",
+    "HolderSettlement no longer contains a bare 1024 literal",
+    "Chunk set is atomic: all-or-nothing claimable, sum invariant holds exactly",
+    "Single-chunk mode (today's default) behaves identically to the pre-change contract for existing fixture tests",
+    "A full 1024-leaf chunk's commit+claim gas cost is measured and recorded, not just asserted to succeed",
+    "A full MAX_CHUNKS_PER_PAYOUT-chunk cycle's total close-out gas cost is measured and recorded"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "Highest-risk new contract state in the whole design (new invariants). Bundle the two cheap bug fixes here since they touch the same files. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer before merge \u2014 do not self-approve."
+}

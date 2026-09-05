@@ -1,0 +1,11 @@
+{
+  "id": "r-00013",
+  "at": "2026-08-30T00:27:47.718Z",
+  "type": "domain-pack-validated",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/domain-packs.json": "8c65bffa55576c3dd7e4919d04f2b885b7052626db55f48471f395d63432093b"
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "productPhase": 3,
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "freezePhase": "feasibility",
+  "status": "PROVISIONAL",
+  "modules": [
+    {
+      "id": "operations-wallet",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "claimProcess(bytes32,uint256,address)", "status": "PROVISIONAL"},
+        {"name": "setProcessClaimLimit(uint256)", "status": "PROVISIONAL"},
+        {"name": "pauseProcessClaims()", "status": "PROVISIONAL"},
+        {"name": "unpauseProcessClaims()", "status": "PROVISIONAL"},
+        {"name": "scheduleOperationsRotation(address)", "status": "PROVISIONAL"},
+        {"name": "executeOperationsRotation()", "status": "PROVISIONAL"},
+        {"name": "remainingProcessClaimCapacity()", "status": "PROVISIONAL"},
+        {"name": "activeProcessClaimLimit()", "status": "PROVISIONAL"},
+        {"name": "scheduledOperationsRotation()", "status": "PROVISIONAL"},
+        {"name": "claimProgrammable(address)", "status": "PROVISIONAL"},
+        {"name": "claimProgrammable(uint256,address)", "status": "PROVISIONAL"},
+        {"name": "claimTreasury(address)", "status": "PROVISIONAL"},
+        {"name": "claimTreasury(uint256,address)", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "ProcessClaimWindowEntry", "status": "PROVISIONAL"},
+        {"name": "PendingProcessClaimLimit", "status": "PROVISIONAL"},
+        {"name": "ScheduledOperationsRotation", "status": "PROVISIONAL"}
+      ],
+      "events": [
+        {"name": "ProcessClaimed(bytes32,uint256,address,uint256,uint256,uint256)", "status": "PROVISIONAL"},
+        {"name": "ProcessClaimLimitSet(uint256)", "status": "PROVISIONAL"},
+        {"name": "ProcessClaimLimitIncreaseScheduled(uint256,uint256)", "status": "PROVISIONAL"},
+        {"name": "ProcessClaimsPaused(address)", "status": "PROVISIONAL"},
+        {"name": "ProcessClaimsUnpaused(address)", "status": "PROVISIONAL"},
+        {"name": "OperationsRotationScheduled(address,address,uint256)", "status": "PROVISIONAL"},
+        {"name": "OperationsRotationExecuted(address,address)", "status": "PROVISIONAL"}
+      ],
+      "unresolved": ["The initial process-claim limit X remains a launch input; Xmax, processClaimMaxCount, and the emergency rotation delay are fixed by revision 65."]
+    },
+    {
+      "id": "launch-orchestration",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "executeProviderGraphLaunch", "status": "PROVISIONAL"},
+        {"name": "executeOwnerSeed", "status": "PROVISIONAL"},
+        {"name": "hookSelfInitialize", "status": "PROVISIONAL"},
+        {"name": "mintAndSettlePosition", "status": "PROVISIONAL"},
+        {"name": "bindMintedPosition", "status": "PROVISIONAL"},
+        {"name": "stampLaunch", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "ProviderGraphLaunchV1", "status": "PROVISIONAL"},
+        {"name": "OwnerSeedV1", "status": "PROVISIONAL"},
+        {"name": "MintedPositionEvidence", "status": "PROVISIONAL"},
+        {"name": "LaunchPostconditions", "status": "PROVISIONAL"}
+      ],
+      "events": [
+        {"name": "ProviderGraphLaunched", "status": "PROVISIONAL"},
+        {"name": "PositionCustodyBound", "status": "PROVISIONAL"},
+        {"name": "LaunchStamped", "status": "PROVISIONAL"},
+        {"name": "OwnerSeeded", "status": "PROVISIONAL"}
+      ],
+      "unresolved": ["Provider graph admission, compiler profile, fixed-price input, and owner-signed seed inputs remain integration prerequisites."]
+    },
+    {
+      "id": "cycle-repository",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "prepareMutation", "status": "PROVISIONAL"},
+        {"name": "recordProviderAttempt", "status": "PROVISIONAL"},
+        {"name": "recordChainAttempt", "status": "PROVISIONAL"},
+        {"name": "recordRelayLeg", "status": "PROVISIONAL"},
+        {"name": "settleRelayLeg", "status": "PROVISIONAL"},
+        {"name": "recordStandingAuthorityDecision", "status": "PROVISIONAL"},
+        {"name": "reserveWalletNonce", "status": "PROVISIONAL"},
+        {"name": "recordPurchaseRequest", "status": "PROVISIONAL"},
+        {"name": "recordCustodyObservation", "status": "PROVISIONAL"},
+        {"name": "recordBroadcast", "status": "PROVISIONAL"},
+        {"name": "recordFinality", "status": "PROVISIONAL"},
+        {"name": "reconcileUnresolved", "status": "PROVISIONAL"},
+        {"name": "readCycle", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "CycleRecord", "status": "PROVISIONAL"},
+        {"name": "ProviderMutationAttemptV2", "status": "PROVISIONAL"},
+        {"name": "ChainTransactionAttemptV2", "status": "PROVISIONAL"},
+        {"name": "RelayLegV1", "status": "PROVISIONAL"},
+        {"name": "StandingAuthorityDecisionV1", "status": "PROVISIONAL"},
+        {"name": "WalletNonceReservationV1", "status": "PROVISIONAL"},
+        {"name": "PurchaseRequestV1", "status": "PROVISIONAL"},
+        {"name": "CycleMode", "status": "PROVISIONAL"},
+        {"name": "CustodyLedgerV2", "status": "PROVISIONAL"}
+      ],
+      "events": [
+        {"name": "CycleTransitionRecorded", "status": "PROVISIONAL"},
+        {"name": "ProviderAttemptRecorded", "status": "PROVISIONAL"},
+        {"name": "ChainAttemptRecorded", "status": "PROVISIONAL"},
+        {"name": "RelayLegRecorded", "status": "PROVISIONAL"},
+        {"name": "RelayLegSettled", "status": "PROVISIONAL"},
+        {"name": "StandingAuthorityDecisionRecorded", "status": "PROVISIONAL"},
+        {"name": "WalletNonceReserved", "status": "PROVISIONAL"},
+        {"name": "TransactionReconciled", "status": "PROVISIONAL"}
+      ],
+      "unresolved": ["Durable storage implementation, wallet-wide nonce fencing, RelayLegV1 observations, and standing-authority reservation remain build work, not a second authority model."]
+    },
+    {
+      "id": "transaction-policy",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "decodeAndAllow", "status": "PROVISIONAL"},
+        {"name": "validateSignedMessage", "status": "PROVISIONAL"},
+        {"name": "validateMoneyConfiguration", "status": "PROVISIONAL"},
+        {"name": "requestExternalSignature", "status": "PROVISIONAL"},
+        {"name": "checkSignOnlyReadiness", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "DecodedTransaction", "status": "PROVISIONAL"},
+        {"name": "CanonicalTransactionPolicyV1", "status": "PROVISIONAL"},
+        {"name": "MoneyConfigurationV1", "status": "PROVISIONAL"},
+        {"name": "SignerReadiness", "status": "PROVISIONAL"}
+      ],
+      "events": [
+        {"name": "TransactionRejected", "status": "PROVISIONAL"},
+        {"name": "MoneyConfigurationRejected", "status": "PROVISIONAL"},
+        {"name": "SignerReadinessFailed", "status": "PROVISIONAL"}
+      ],
+      "unresolved": ["Provider transaction schemas must be frozen from recorded read-only evidence before signing is enabled."]
+    },
+    {
+      "id": "eligibility-snapshot",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "freezeEligibilityBeforeClaim", "status": "PROVISIONAL"},
+        {"name": "verifyLogCompleteness", "status": "PROVISIONAL"},
+        {"name": "evaluatePayoutFeasibility", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "EligibilitySnapshot", "status": "PROVISIONAL"},
+        {"name": "SnapshotCompletenessProof", "status": "PROVISIONAL"},
+        {"name": "PayoutFeasibilityEnvelope", "status": "PROVISIONAL"}
+      ],
+      "events": [{"name": "EligibilityFrozen", "status": "PROVISIONAL"}],
+      "unresolved": ["Finality depth, archive RPC, and independent log source remain provider-bound facts."]
+    },
+    {
+      "id": "direct-payout",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "preparePayout", "status": "PROVISIONAL"},
+        {"name": "signPayout", "status": "PROVISIONAL"},
+        {"name": "broadcastPayout", "status": "PROVISIONAL"},
+        {"name": "recoverDroppedBroadcast", "status": "PROVISIONAL"},
+        {"name": "finalizePayout", "status": "PROVISIONAL"},
+        {"name": "quarantineFrozenRecipient", "status": "PROVISIONAL"},
+        {"name": "persistDustCarry", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "PayoutManifest", "status": "PROVISIONAL"},
+        {"name": "RecipientPayoutJournal", "status": "PROVISIONAL"},
+        {"name": "ChainTransactionAttemptV2", "status": "PROVISIONAL"},
+        {"name": "PayoutRecoveryEvidence", "status": "PROVISIONAL"},
+        {"name": "QuarantineLiability", "status": "PROVISIONAL"},
+        {"name": "PayoutDustCarryV1", "status": "PROVISIONAL"}
+      ],
+      "events": [
+        {"name": "PayoutBroadcast", "status": "PROVISIONAL"},
+        {"name": "PayoutBroadcastRecovered", "status": "PROVISIONAL"},
+        {"name": "RecipientFinalized", "status": "PROVISIONAL"},
+        {"name": "RecipientQuarantined", "status": "PROVISIONAL"},
+        {"name": "PayoutDustCarried", "status": "PROVISIONAL"}
+      ],
+      "unresolved": ["The live recipient-count and gas envelope must be measured before a claim is allowed."]
+    },
+    {
+      "id": "policy-engine",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "evaluateClaim", "status": "PROVISIONAL"},
+        {"name": "evaluatePurchase", "status": "PROVISIONAL"},
+        {"name": "evaluateSignature", "status": "PROVISIONAL"},
+        {"name": "recordManualApproval", "status": "PROVISIONAL"},
+        {"name": "enterHeldState", "status": "PROVISIONAL"},
+        {"name": "runCanaries", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "PolicySnapshot", "status": "PROVISIONAL"},
+        {"name": "SpendWindow", "status": "PROVISIONAL"},
+        {"name": "PurchaseRequestV1", "status": "PROVISIONAL"},
+        {"name": "CustodyLedgerV2", "status": "PROVISIONAL"},
+        {"name": "ManualApproval", "status": "PROVISIONAL"},
+        {"name": "HeldCardState", "status": "PROVISIONAL"},
+        {"name": "CanaryResult", "status": "PROVISIONAL"}
+      ],
+      "events": [
+        {"name": "PolicyRejected", "status": "PROVISIONAL"},
+        {"name": "HeldCardRecorded", "status": "PROVISIONAL"},
+        {"name": "CanaryDriftDetected", "status": "PROVISIONAL"}
+      ],
+      "unresolved": ["The adapter must persist reconciliation evidence proving the insured-value unit against the machine instantBuyback percentage; absent or contradictory evidence enters HELD_DATA_UNVERIFIED."]
+    },
+    {
+      "id": "deployment-manifest",
+      "status": "PROVISIONAL",
+      "operations": [
+        {"name": "buildDeploymentManifest", "status": "PROVISIONAL"},
+        {"name": "verifyDeploymentManifest", "status": "PROVISIONAL"},
+        {"name": "assertLegacyFamilyExcluded", "status": "PROVISIONAL"}
+      ],
+      "data": [
+        {"name": "DeploymentManifest", "status": "PROVISIONAL"},
+        {"name": "RuntimeEntry", "status": "PROVISIONAL"},
+        {"name": "ManifestDigest", "status": "PROVISIONAL"}
+      ],
+      "events": [{"name": "DeploymentManifestVerified", "status": "PROVISIONAL"}],
+      "unresolved": ["The exact provider-admitted deployment graph remains pending read-only admission evidence."]
+    }
+  ],
+  "rules": [
+    "Every interface in this artifact is provisional until Phase 3 feasibility freezes a replacement.",
+    "The legacy custody family stays frozen and never enters the Phase 3 deployment manifest.",
+    "Amounts use chainId, assetId, decimals, and integer-string amountAtomic; chain-4663 USDG and Solana stablecoins are distinct assets.",
+    "A provider response never becomes signable before semantic decoding, positive allowlisting, write-ahead persistence, and policy approval.",
+    "Operations claims, bridge actions, purchases, returns, and direct payouts share one CycleRepository and wallet-wide fencing lock.",
+    "Eligibility is frozen before claim at a finalized block; payout manifests are immutable after first broadcast.",
+    "Code readiness and launchEligible are distinct, and neither grants external execution authority."
+  ]
+}

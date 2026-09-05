@@ -1,0 +1,35 @@
+{
+  "graphDraftSha256": "sha256:3e7f6e61fd485c175b38e95300aa717ec59e8ed72669f4e89982f2389457c5d1",
+  "inputDigests": {
+    "addressManifestSha256": "sha256:60b548091b663ee11266a89f53cdbc1613e10e4f2366bbb64ba214043778005b",
+    "launchInputsSha256": "sha256:b4677fa0a58edb717fb491634fd04f057da49a60d6fdfb47fd92adc3a4b5e809"
+  },
+  "schemaVersion": "hookemon.phase3.local-package-manifest.v1",
+  "status": "ADDRESS_DERIVATION_PENDING",
+  "unverified": [
+    {
+      "blocking": true,
+      "code": "UNVERIFIED_LAUNCH_INTENT_PREIMAGE",
+      "path": "/launchIntentHash",
+      "reason": "Missing provider-supplied route namespace, route nonce, topology hash, target-id hashes, and serialized graph call data needed to derive the launchIntentHash preimage."
+    },
+    {
+      "blocking": false,
+      "code": "PROVIDER_API_KEY_PENDING",
+      "path": "/provider/apiKey",
+      "reason": "Provider preflight requires an authorized API key in the execution environment; the key is never persisted in this package."
+    },
+    {
+      "blocking": false,
+      "code": "OWNER_WALLET_FUNDING_PENDING",
+      "path": "/funding",
+      "reason": "The owner must fund the launch wallet and bind the final nonce, gas parameters and deadline after provider preflight."
+    },
+    {
+      "blocking": true,
+      "code": "BUILDER_IDENTITY_PENDING",
+      "path": "/builder",
+      "reason": "Missing: the builder public repository and contact. Resolve: bind the owner-provided public repository identity before preflight. Verified alternative: retain anonymous builder fields and block a provider-ready package."
+    }
+  ]
+}

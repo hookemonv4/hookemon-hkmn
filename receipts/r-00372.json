@@ -1,0 +1,17 @@
+{
+  "id": "r-00372",
+  "at": "2026-09-01T16:43:54.094Z",
+  "type": "scope-boundaries-recorded",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "itemId": "S4",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/spec.json": "ae874d461d1051d941331eb4961cf1adc2f1731b520c91cfcea6686fa7ce4b9f",
+    "product/PRD.md": "d4fe76c6b8a8846b92c7248594bb0e329b996b0882270c96e0e8ee478abbc952",
+    "product/SOURCE_BOUNDARY.md": "abf5931b4a3a27e0f637d8ea60f2fc7c7dfbdbe65e2143f913988eeaf6e79192"
+  }
+}

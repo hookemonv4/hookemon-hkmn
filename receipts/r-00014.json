@@ -1,0 +1,12 @@
+{
+  "id": "r-00014",
+  "at": "2026-08-30T00:27:48.067Z",
+  "type": "dependency-pin",
+  "phase": null,
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/dependency-pins.json": "1862a1a59609046325539207eafb1d657efc74306eafd90f4944feb413b27d40",
+    ".nvmrc": "7e8a2fa94951112b894a3dbe3d05efef5e9263741fa49125f0a70f40fedab4cc"
+  }
+}

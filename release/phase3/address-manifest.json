@@ -1,0 +1,227 @@
+{
+  "schemaVersion": "hookemon.phase3.address-manifest-draft.v1",
+  "status": "ADDRESS_DERIVATION_PENDING",
+  "launchInputsPath": "release/phase3/launch-inputs.json",
+  "deployer": {
+    "factory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "entrypoint": "launchAndStampV1",
+    "router": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+    "routeNamespace": null,
+    "routeNonce": null,
+    "topologyHash": null
+  },
+  "compiler": {
+    "solc": "0.8.26+commit.8a97fa7a",
+    "standardJson": {
+      "optimizer": {
+        "enabled": true,
+        "runs": 1000
+      },
+      "viaIR": false,
+      "evmVersion": "cancun",
+      "metadata": {
+        "appendCBOR": false,
+        "bytecodeHash": "none",
+        "useLiteralContent": false
+      }
+    },
+    "buildInfo": {
+      "status": "OPEN_FACT",
+      "localBuildInfoCount": 1,
+      "sourceCount": 31,
+      "sourceContentSha256": "sha256:608049e03747463d9f02d1bfed2051cea5bbba1dc3742f31d6a918b0634ecabc",
+      "reason": "Missing: address-bound constructor values and provider route fields. Resolve: materialize the provider graph after preflight and retain a fresh launch build. Verified alternative: this single pinned-profile build binds template bytecode and source content while all signable graph fields remain unset."
+    },
+    "solcLongVersion": "0.8.26+commit.8a97fa7a"
+  },
+  "targets": [
+    {
+      "targetId": "token",
+      "targetIndex": 0,
+      "componentKind": "token",
+      "sourcePath": "packages/contracts/src/launch/HKMNToken.sol",
+      "contractName": "HKMNToken",
+      "applicantSalt": null,
+      "effectiveSalt": null,
+      "address": null,
+      "constructor": {
+        "issuanceAuthority": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+        "expectedUsdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "decimals": 18,
+        "launchSqrtPriceX96": null
+      },
+      "initializerCalldata": null,
+      "deploymentValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "initializerValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "creationBytecodeHash": "0xbe3146f7eb5c0a9a287bb927f197c518611fed9e371f5262552856d6b3e52e58",
+      "runtimeTemplateCodeHash": "0xc79e26bd2c8c26952c04f1d3749db091f009febd7507b67232b3838bb148f429",
+      "runtimeCodeHash": null,
+      "artifactSha256": "sha256:8a134aa16b09ca267055c976d05c5760ccc865c35ab608ceed20248a0e54ac68",
+      "libraries": []
+    },
+    {
+      "targetId": "custody",
+      "targetIndex": 1,
+      "componentKind": "other",
+      "sourcePath": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "contractName": "PermanentPositionCustody",
+      "applicantSalt": null,
+      "effectiveSalt": null,
+      "address": null,
+      "constructor": {
+        "manager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+        "tokenId": 0
+      },
+      "initializerCalldata": null,
+      "deploymentValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "initializerValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "creationBytecodeHash": "0x778625cf6f5b602c891c7d605941d5e3cfc4662624a9407d67e2873cd4d99dd5",
+      "runtimeTemplateCodeHash": "0x06f47cecc7026b4d9c5d393c39f8883c7e87c3fdacd30cf6f496ee41c9d4ca0c",
+      "runtimeCodeHash": null,
+      "artifactSha256": "sha256:08043ea6d688242703d972040bb476b4d5da3ef4a5e9c04db1e0636a1ff86ae5",
+      "libraries": []
+    },
+    {
+      "targetId": "hook",
+      "targetIndex": 2,
+      "componentKind": "hook",
+      "sourcePath": "packages/contracts/src/HookemonHook.sol",
+      "contractName": "HookemonHook",
+      "applicantSalt": null,
+      "effectiveSalt": null,
+      "address": null,
+      "declaredHookPermissions": [
+        "beforeInitialize",
+        "beforeSwap",
+        "beforeSwapReturnDelta",
+        "afterSwap",
+        "afterSwapReturnDelta"
+      ],
+      "permissionMask": "0x20cc",
+      "constructor": {
+        "manager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+        "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "hkmn": null,
+        "tickSpacing": 60,
+        "programmable": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+        "treasury": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+        "operations": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+        "launchAuthority": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+        "issuanceAuthority": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+        "expectedDecimals": 18,
+        "bindingDigest": null,
+        "runtimeDigest": null,
+        "processClaimLimit6h": "50000000000",
+        "processClaimLimitMax": "500000000000",
+        "processClaimMaxCount": 24,
+        "operationsRotationDelay": "43200"
+      },
+      "initializer": {
+        "function": "initializeGraphLaunch(address,uint160)",
+        "sqrtPriceX96": null,
+        "calldata": null
+      },
+      "deploymentValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "initializerValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "creationBytecodeHash": "0x39c3aeecae31c42f7ad707dae7b18ea976687d33f715befbe9941b853e0af8c2",
+      "runtimeTemplateCodeHash": "0x95302da944386ccd8b7fb1b898d128098cce7aef178b318998a7a14c1897a36c",
+      "runtimeCodeHash": null,
+      "artifactSha256": "sha256:389f63c267cbb76cd703101fd22d00f1221656cd7ea3adcb082d2719dd41aa66",
+      "libraries": []
+    }
+  ],
+  "pool": {
+    "fee": 0,
+    "tickSpacing": 60,
+    "currency0": null,
+    "currency1": null,
+    "poolKey": null,
+    "poolId": null
+  },
+  "requiredGraphCalls": [
+    {
+      "callId": "token-allocate",
+      "targetId": "token",
+      "function": "allocate(address)",
+      "selector": "0xffd7d983",
+      "caller": "graph factory",
+      "argumentBindings": [
+        "resolved HookemonHook address"
+      ],
+      "calldata": null,
+      "reason": "The graph factory allocates the fixed supply after all target addresses are resolved."
+    },
+    {
+      "callId": "custody-bind-hook",
+      "targetId": "custody",
+      "function": "configureBindingHook(address)",
+      "selector": "0xc81cbd43",
+      "caller": "graph factory",
+      "argumentBindings": [
+        "resolved HookemonHook address"
+      ],
+      "calldata": null,
+      "reason": "The custody binds the resolved hook before the launch graph is initialized."
+    },
+    {
+      "callId": "hook-initialize-graph-launch",
+      "targetId": "hook",
+      "function": "initializeGraphLaunch(address,uint160)",
+      "selector": "0x726bb4ae",
+      "caller": "graph factory as graph initializer",
+      "argumentBindings": [
+        "resolved PermanentPositionCustody address",
+        "selected address-order sqrtPriceX96 candidate"
+      ],
+      "calldata": null,
+      "reason": "The graph initializer binds custody and initializes the canonical pool in one source-authorized call."
+    }
+  ],
+  "postDeployAssertions": [
+    "No graph transaction is signable until the provider supplies the encoded token-allocate, custody-bind-hook and hook-initialize-graph-launch calls in that order.",
+    "The three predicted addresses must have the exact materialized runtime hashes before the seed transaction is signed.",
+    "The hook address must satisfy permission mask 0x20cc.",
+    "The resolved PoolKey must use fee 0, spacing 60, the resolved currency ordering and the resolved hook.",
+    "The token balance and custody position must match the reconciled token allocation before the launch is considered complete.",
+    "The Permit2 allowance must be exact, live at signing time and cleared by the seed path."
+  ],
+  "openFacts": [
+    "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
+    "Missing: provider route fields, applicant salts and effective salts. Resolve: bind the provider route record and run deterministic address derivation. Verified alternative: keep addresses and graph digest unset while retaining only template hash evidence.",
+    "Missing: address-bound constructor arguments and encoded graph calls. Resolve: derive final target addresses, bind authority values and encode the required graph-call sequence. Verified alternative: retain null initializer calldata and prohibit signing.",
+    "Missing: the minted position token ID. Resolve: read the PositionManager mint result after the owner seed transaction and bind it through PermanentPositionCustody.bindMintedPosition. Verified alternative: deploy custody with constructor tokenId 0 and do not claim a bound position before seed.",
+    "Missing: final token and hook addresses. Resolve: run CREATE2 derivation after route fields are frozen and calculate the canonical PoolKey and PoolId. Verified alternative: retain the two address-order price candidates and leave pool identifiers unset."
+  ]
+}

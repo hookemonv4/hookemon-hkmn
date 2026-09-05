@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "hookemon.induced-failure-drill.v1",
+  "authority": "LOCAL_DIAGNOSTIC_EVIDENCE_ONLY",
+  "executedAt": "2026-08-31T21:53:24.000Z",
+  "scenario": {
+    "id": "phase1-manifest-digest-mismatch",
+    "injection": "HOOKEMON_PHASE1_MANIFEST_SHA256=64_ZERO_HEX",
+    "scope": "LOCAL_OFFLINE_RELEASE_VERIFIER_ONLY"
+  },
+  "telemetry": {
+    "source": "PROCESS_EXIT_AND_STDERR_ONLY",
+    "command": "env HOOKEMON_PHASE1_MANIFEST_SHA256=0000000000000000000000000000000000000000000000000000000000000000 OPENSSL_CONF=/dev/null /private/tmp/node-v24.19.0-darwin-arm64/bin/node scripts/verify-phase1-release.mjs",
+    "exitCode": 1,
+    "observed": "local candidate manifest digest does not match the caller-supplied digest",
+    "nodeVersion": "v24.19.0",
+    "candidateManifestSha256": "ec408b21c442e56f742861279b0de7575a4e0959f6bd32f93b8a829d233d21c3",
+    "injectedManifestSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "diagnosis": {
+    "classification": "CALLER_MANIFEST_DIGEST_MISMATCH",
+    "derivedOnlyFromTelemetry": true,
+    "outcome": "FAIL_CLOSED_LOCAL_VERIFIER_REJECTION"
+  },
+  "claims": {
+    "alertChannelTested": false,
+    "externalActionsPerformed": false,
+    "liveReadinessProven": false,
+    "operatingStateProven": false
+  }
+}

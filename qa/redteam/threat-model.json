@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "phase": "redteam",
+  "requirementsRevision": 55,
+  "architectureRevision": 4,
+  "method": "STRIDE",
+  "review": {
+    "reviewer": "redteam-r55-control-and-buildability",
+    "context": "fresh",
+    "artifactOnly": true,
+    "issuesOnly": true,
+    "criticalFindingCount": 0,
+    "highFindingCount": 3,
+    "resolvedControlFindingCount": 3
+  },
+  "categories": [
+    {
+      "category": "Spoofing",
+      "threats": [
+        {
+          "id": "STRIDE-R55-S-01",
+          "severity": "high",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "A test-local router or self-attested binding is substituted for the production Robinhood router and PoolManager settlement path.",
+          "affectedFindings": ["RT-R55-06"],
+          "requiredControl": "Release-bound runtime, PoolKey, callback, recipient settlement, and zero-surcharge proof against the actual production path."
+        }
+      ]
+    },
+    {
+      "category": "Tampering",
+      "threats": [
+        {
+          "id": "STRIDE-R55-T-01",
+          "severity": "resolved",
+          "status": "RESOLVED",
+          "scenario": "Malformed evidence or module-card metadata is used to manufacture a passing gate.",
+          "affectedFindings": ["RT-R55-01", "RT-R55-04"],
+          "control": "Exact semantic gate validation and transitive module-card authority with negative tests."
+        }
+      ]
+    },
+    {
+      "category": "Repudiation",
+      "threats": [
+        {
+          "id": "STRIDE-R55-R-01",
+          "severity": "resolved",
+          "status": "RESOLVED",
+          "scenario": "A stale revision-54/architecture-3 receipt was presented as current redteam authority, permitting historical continuation after the failed gate.",
+          "affectedFindings": ["RT-R55-03"],
+          "control": "The historical continuation is invalidated. Gate evaluation requires authoritative predecessors, rejects downstream overrides while a predecessor is failed or stale, and projects downstream phases stale; redteam remains FAILED with no override."
+        }
+      ]
+    },
+    {
+      "category": "Information Disclosure",
+      "threats": [],
+      "requiredNegativeEvidence": [
+        "No signing key, API credential, authorization secret, or privileged endpoint appears in repository, evidence, or publication artifacts."
+      ]
+    },
+    {
+      "category": "Denial of Service",
+      "threats": [
+        {
+          "id": "STRIDE-R55-D-01",
+          "severity": "high",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "Correlated publication or administrator failure makes unpaid entitlement proofs permanently unreconstructible.",
+          "affectedFindings": ["RT-R55-05"],
+          "requiredControl": "Normative retention, independent failure domains and administrators, content-addressed release archive, recovery, republish, and long-horizon verification."
+        }
+      ]
+    },
+    {
+      "category": "Elevation of Privilege",
+      "threats": [
+        {
+          "id": "STRIDE-R55-E-01",
+          "severity": "high",
+          "status": "OPEN_FAIL_CLOSED",
+          "scenario": "A compromised current Operations identity releases the complete accrued process liability despite the runner's separate 100 USDG cooperative cap.",
+          "affectedFindings": ["RT-R55-02"],
+          "requiredControl": "Explicit owner acceptance of the full accrued-liability exposure or an owner-approved onchain redesign; no fixed cap is inferred."
+        }
+      ]
+    }
+  ],
+  "resolvedFindingIds": ["RT-R55-01", "RT-R55-03", "RT-R55-04"],
+  "openFindingIds": ["RT-R55-02", "RT-R55-05", "RT-R55-06"],
+  "unresolvedCriticalCount": 0,
+  "unresolvedHighCount": 3,
+  "productionAuthorizationGranted": false,
+  "externalActionAuthorizationGranted": false
+}

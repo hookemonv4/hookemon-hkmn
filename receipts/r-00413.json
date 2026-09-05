@@ -1,0 +1,22 @@
+{
+  "id": "r-00413",
+  "at": "2026-09-01T16:47:05.183Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-005",
+    "commitSha": "74a4af0da4089be7bd3a24493cb5ff47e1e55d0b",
+    "taskFingerprint": "a23c43ac3ac3389b938ec1efcd79df76bd8159cfad753e472340df74ea20d917",
+    "requirementsRevision": 56,
+    "requirementsHash": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  },
+  "inputHashes": {
+    "packages/contracts/src/access/MoneyRoles.sol": "0b3c55e3654e99b3c913a63cc8ee5ecc78293c724e29e90901d257520d106372",
+    "packages/contracts/test/access/MoneyRoles.t.sol": "e2ec1f58eb82c2b12c116f99100a53b6aaf67f1bc62c21072830463b15442927",
+    "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol": "ab1dea2315d04bdf3060ef589735037ea8dbaaf0ee223463730056109b89eeac",
+    "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol": "591260198032f53e46b23514040fbc8f4514114340981ff91e047b079fd2cbb9",
+    "release/phase1/local-evidence.json": "0e329a0e73f0ee6957319ea860dfdaf0d8f347add1ddaf69de82dc9a0fe228ae",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

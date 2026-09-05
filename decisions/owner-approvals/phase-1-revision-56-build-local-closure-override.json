@@ -1,0 +1,24 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_OVERRIDE",
+  "phase": "build",
+  "itemId": null,
+  "rationale": "Owner overrides the Phase 1 build gate failed in r-00425 for local closure only. B1 through B5 remain evidenced, while B6 remains open because P1-006, P1-007, P1-009, and P1-010 share completion commit 1fcf3cee0c2226734c19780299707d9dba8d6509. This override does not claim task-commit integrity and authorizes no deployment, publication, credential access, signing, broadcast, asset movement, spending, or production use.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/owner-approvals/phase-1-build-spec-revision-56-approved.json": "5502ce4f7e2486b1f12465f723316982daf36cddd162a89176053d753bc278f6",
+    "docs/modules/index.json": "7f3e3ad331497c7067e8f72689e29dffdd88692abb7d1c06c9e5632880600b3d",
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "gates/runs/build.json": "9a5c04faf693c9be79c2c66711edeae6557ee6e50f758040f405b703302e45c4",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "qa/reviews/index.json": "689bbce8f573450e69e8da83c82c80fc53b0ced29e389257e44fc02b7eff6854",
+    "receipts/r-00420.json": "38d1badc6cecfd385f7cad00252ebf467c2d07a3533d640b160e0ca0276688d0",
+    "receipts/r-00421.json": "3b7baa3e06a528852571f8a8c16d891da8c3edd55150690ffa293ec9d15837cf",
+    "receipts/r-00422.json": "5331c9abdcb0cc8afd92fb6ff0796587b7cd1c371eef4c1e44e610d300615199",
+    "receipts/r-00423.json": "1945d2987cc8918cb121ca64e4504dfb82996c760892d7dfa42346133c1e3343",
+    "receipts/r-00424.json": "4313c4163aabb9ade015f54a93eb98c8bf4deb841949055b6c8ffb61329e9063",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0",
+    "tasks.json": "7c5f6231eb82555c9426568f9d656413937511926ce279730d7599ed1dcd67c8"
+  }
+}

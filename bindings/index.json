@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "bindings": [
+    {
+      "id": "robinhood-chain-r54-a3",
+      "path": "bindings/robinhood-chain.json",
+      "requirementsRevision": 54,
+      "architectureRevision": 3,
+      "manifestDigest": "sha256:be96048d000bf20f48f4cf5389cad755d928e32762ad1b9b88b5fc661377df08",
+      "status": "BUILD_ONLY_FAIL_CLOSED"
+    }
+  ]
+}

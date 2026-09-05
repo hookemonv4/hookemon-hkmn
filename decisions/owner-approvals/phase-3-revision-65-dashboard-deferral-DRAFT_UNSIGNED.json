@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "TASK_DEFER",
+  "phase": "build",
+  "itemId": "P1-011",
+  "rationale": "Phase 1 task P1-011 remains deferred under the owner-approved manual one-cycle boundary. DRAFT_UNSIGNED re-binding to requirements revision 65 after specs/requirements.json advanced from revision 58 to 65; this draft is not wired into tasks.json and does not replace the live decisions/task-deferrals/P1-011.json binding. The current task CLI cannot rebind an already deferred entry, and the approval draft binds the draft descriptor path instead of the canonical descriptor path, so an owner signature is necessary but not sufficient. An owner-authorized rebind operation must validate the existing deferral, produce canonical descriptor and approval bytes, and append the renewal receipt before this draft can replace the live binding. It authorizes no deployment, credential use, signing, broadcast, asset movement, spending, or publication.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "decisions/task-deferrals/P1-011-revision-65-rebind-DRAFT.json": "33850261b54abfe627ae1081aab387edeb56c8ce80ffd46e033f4723842ef3d7",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8"
+  }
+}

@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "productPhase": 3,
+  "architectureRevision": 9,
+  "requirementsRevision": 65,
+  "moduleIdPattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+  "moduleIdStatus": "STABLE",
+  "dependencyDirection": "Each module dependsOn the provider modules whose output, authority, or interface it consumes. Providers never call back into consumers.",
+  "deploymentBoundary": {
+    "tokenRuntimeCount": 1,
+    "hookRuntimeCount": 1,
+    "permanentPositionCustodyRuntimeCount": 1,
+    "operationsEvmIdentityCount": 1,
+    "operationsSolanaIdentityCount": 1,
+    "legacyCustodyFamilyRuntimeCount": 0,
+    "hookUpgradeable": false,
+    "runtimeAuthority": "content-addressed-phase3-deployment-manifest",
+    "deployedRuntimeModules": [
+      "token-core",
+      "canonical-market",
+      "fee-accounting",
+      "role-control",
+      "operations-wallet",
+      "launch-orchestration"
+    ],
+    "offchainExecutionModules": [
+      "cycle-repository",
+      "transaction-policy",
+      "policy-engine",
+      "cycle-runner",
+      "eligibility-snapshot",
+      "direct-payout",
+      "signing"
+    ],
+    "forbiddenProductionSurfaces": [
+      "legacy-custody-family-runtime",
+      "proxy",
+      "delegatecall-module-system",
+      "unbound-usdg-custody-address",
+      "generic-route-adapter-contract",
+      "onchain-merkle-payout-runtime",
+      "position-withdrawal",
+      "position-approval",
+      "position-operator",
+      "automatic-sale-after-hold",
+      "node-process-private-key"
+    ]
+  },
+  "modules": [
+    {
+      "id": "phase-boundary",
+      "capability": "Open the proposed Phase 3 specification while keeping code readiness, launch readiness, owner authorization, and live execution distinct.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": [],
+      "requirementIds": ["REQ-phase-boundary-1", "REQ-phase-boundary-2", "REQ-phase-boundary-3", "REQ-phase3-deployment-1"]
+    },
+    {
+      "id": "provider-binding",
+      "capability": "Bind current provider facts, fee policy, graph admission, and launch readiness without treating technical evidence as live authority.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": [],
+      "requirementIds": ["REQ-provider-binding-1", "REQ-provider-binding-2", "REQ-provider-binding-3", "REQ-provider-binding-4"]
+    },
+    {
+      "id": "deployment-manifest",
+      "capability": "Produce and validate the content-addressed Phase 3 runtime set and prove that the legacy custody family is not deployed.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["provider-binding"],
+      "requirementIds": ["REQ-phase3-deployment-1"]
+    },
+    {
+      "id": "role-control",
+      "capability": "Enforce immutable beneficiary, Treasury, and Operations authority transitions and the narrow claim-control surface.",
+      "deploymentPlacement": "immutable-hook-runtime",
+      "dependsOn": [],
+      "requirementIds": ["REQ-role-control-1", "REQ-role-control-2", "REQ-role-control-3", "REQ-role-control-4", "REQ-operations-wallet-1", "REQ-operations-wallet-2", "REQ-operations-wallet-3"]
+    },
+    {
+      "id": "token-core",
+      "capability": "Create the fixed HKMN token through the admitted launch path and preserve immutable project-fee-free transfers.",
+      "deploymentPlacement": "token-runtime",
+      "dependsOn": ["provider-binding"],
+      "requirementIds": ["REQ-token-core-1", "REQ-token-core-2", "REQ-token-core-3", "REQ-token-core-4"]
+    },
+    {
+      "id": "canonical-market",
+      "capability": "Authenticate one zero-LP-fee canonical market, enforce 0x20CC callback permissions, and reject unsupported self-calls and partial fills.",
+      "deploymentPlacement": "immutable-hook-runtime-plus-permanent-position-custody",
+      "dependsOn": ["token-core", "role-control"],
+      "requirementIds": ["REQ-canonical-market-1", "REQ-canonical-market-2", "REQ-canonical-market-3", "REQ-canonical-market-4", "REQ-canonical-market-5", "REQ-canonical-market-6", "REQ-canonical-market-7"]
+    },
+    {
+      "id": "fee-accounting",
+      "capability": "Account for gross USDG quote volume with isolated 10, 40, and 250 basis-point lifetime streams and solvent liabilities.",
+      "deploymentPlacement": "immutable-hook-runtime",
+      "dependsOn": ["canonical-market", "role-control"],
+      "requirementIds": ["REQ-fee-accounting-1", "REQ-fee-accounting-2", "REQ-fee-accounting-3", "REQ-fee-accounting-4", "REQ-fee-accounting-5", "REQ-fee-accounting-6", "REQ-fee-accounting-7", "REQ-fee-accounting-8", "REQ-fee-accounting-9"]
+    },
+    {
+      "id": "operations-wallet",
+      "capability": "Release bounded process liability only to the current Operations EVM identity, retain non-resetting claim history, and support a Treasury-only delayed emergency rotation.",
+      "deploymentPlacement": "immutable-hook-runtime-plus-external-operations-identities",
+      "dependsOn": ["fee-accounting", "role-control"],
+      "requirementIds": ["REQ-operations-wallet-1", "REQ-operations-wallet-2", "REQ-operations-wallet-3"]
+    },
+    {
+      "id": "launch-orchestration",
+      "capability": "Run the atomic provider graph transaction, then a separate atomic owner-signed seed transaction with retry-safe seed-local rollback.",
+      "deploymentPlacement": "immutable-launch-runtime",
+      "dependsOn": ["provider-binding", "token-core", "canonical-market", "fee-accounting", "operations-wallet"],
+      "requirementIds": ["REQ-launch-orchestration-1", "REQ-launch-orchestration-2"]
+    },
+    {
+      "id": "legacy-custody-family",
+      "capability": "Retain the former vault, escrow, route, commitment, settlement, and Merkle code as frozen source evidence while excluding it from every Phase 3 runtime.",
+      "deploymentPlacement": "frozen-not-deployed",
+      "dependsOn": [],
+      "requirementIds": ["REQ-phase3-deployment-1"]
+    },
+    {
+      "id": "adapters",
+      "capability": "Keep EVM and Solana clients dependency-injected and free of signing authority.",
+      "deploymentPlacement": "offchain-adapter-library",
+      "dependsOn": [],
+      "requirementIds": ["REQ-transaction-policy-1", "REQ-cycle-runner-3"]
+    },
+    {
+      "id": "hook-contract-client",
+      "capability": "Build typed reads and calldata for the Phase 3 hook interfaces without becoming a money authority.",
+      "deploymentPlacement": "offchain-adapter-library",
+      "dependsOn": ["adapters", "operations-wallet"],
+      "requirementIds": ["REQ-operations-wallet-1", "REQ-operations-wallet-2"]
+    },
+    {
+      "id": "robinhood-rpc-client",
+      "capability": "Read and broadcast pre-signed EVM transactions against the bound chain without holding keys.",
+      "deploymentPlacement": "offchain-adapter-library",
+      "dependsOn": ["adapters", "provider-binding"],
+      "requirementIds": ["REQ-transaction-policy-1", "REQ-eligibility-snapshot-1"]
+    },
+    {
+      "id": "solana-rpc-client",
+      "capability": "Construct and observe typed Solana transactions without key material or implicit asset conversion.",
+      "deploymentPlacement": "offchain-adapter-library",
+      "dependsOn": ["adapters", "provider-binding"],
+      "requirementIds": ["REQ-transaction-policy-1", "REQ-cycle-runner-3"]
+    },
+    {
+      "id": "relay-bridge-client",
+      "capability": "Treat bridge routes as untrusted data and settle each persisted Relay leg only from both own-RPC finalized deltas with unique transaction-hash attribution.",
+      "deploymentPlacement": "offchain-adapter-library",
+      "dependsOn": ["adapters", "provider-binding"],
+      "requirementIds": ["REQ-transaction-policy-1", "REQ-cycle-runner-3"]
+    },
+    {
+      "id": "collector-crypt-adapter",
+      "capability": "Validate documented pack, open, and buyback data, including reconciled insured-value units, before it can advance an Operations-wallet cycle.",
+      "deploymentPlacement": "offchain-adapter-library",
+      "dependsOn": ["adapters", "provider-binding"],
+      "requirementIds": ["REQ-cycle-runner-3", "REQ-epic-gate-1", "REQ-collector-crypt-adapter-1"]
+    },
+    {
+      "id": "transaction-policy",
+      "capability": "Decode and allowlist every provider transaction, require explicit typed minima and non-placeholder gas caps, then revalidate before external signing and broadcast.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["provider-binding", "adapters"],
+      "requirementIds": ["REQ-transaction-policy-1"]
+    },
+    {
+      "id": "cycle-repository",
+      "capability": "Persist immutable cycle modes, durable attempts, Relay legs, standing-authority reservations, wallet-wide nonce locks, custody observations, and recovery facts as the single money-mutation authority.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["operations-wallet"],
+      "requirementIds": ["REQ-cycle-repository-1", "REQ-cycle-runner-3"]
+    },
+    {
+      "id": "policy-engine",
+      "capability": "Apply caps, explicit production minima, holds, manual approvals, canaries, pause, loss, and custody controls before irreversible action.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["cycle-repository", "transaction-policy"],
+      "requirementIds": ["REQ-epic-gate-1", "REQ-policy-engine-1", "REQ-policy-engine-2"]
+    },
+    {
+      "id": "cycle-runner",
+      "capability": "Execute the nine ordered Operations-wallet stages; outbound spends only claimed principal and return bridges only cycle-attributed proceeds deltas.",
+      "deploymentPlacement": "offchain-execution",
+      "dependsOn": ["cycle-repository", "policy-engine", "transaction-policy", "signing", "hook-contract-client", "relay-bridge-client", "collector-crypt-adapter", "eligibility-snapshot"],
+      "requirementIds": ["REQ-cycle-runner-3", "REQ-epic-gate-1"]
+    },
+    {
+      "id": "eligibility-snapshot",
+      "capability": "Freeze a finalized, complete holder snapshot and payout feasibility envelope before an Operations claim.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["robinhood-rpc-client", "cycle-repository"],
+      "requirementIds": ["REQ-eligibility-snapshot-1"]
+    },
+    {
+      "id": "direct-payout",
+      "capability": "Pay the frozen manifest with durable signed records, same-nonce recovery, quarantine liabilities, and provenance-bound dust carry.",
+      "deploymentPlacement": "offchain-execution",
+      "dependsOn": ["eligibility-snapshot", "cycle-repository", "policy-engine", "transaction-policy", "signing"],
+      "requirementIds": ["REQ-direct-payout-1"]
+    },
+    {
+      "id": "signing",
+      "capability": "Invoke only the Operations EVM and Operations Solana signers outside Node and surface sign-only readiness failures.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["transaction-policy"],
+      "requirementIds": ["REQ-transaction-policy-1", "REQ-policy-engine-1"]
+    },
+    {
+      "id": "automation",
+      "capability": "Drive one policy-controlled cycle without creating a second store or bypassing journaled control.",
+      "deploymentPlacement": "offchain-execution",
+      "dependsOn": ["cycle-runner", "policy-engine"],
+      "requirementIds": ["REQ-policy-engine-1", "REQ-cycle-runner-3"]
+    },
+    {
+      "id": "scheduler",
+      "capability": "Schedule only the runner's policy-gated stages and never treat a timer as authorization.",
+      "deploymentPlacement": "offchain-execution",
+      "dependsOn": ["automation"],
+      "requirementIds": ["REQ-policy-engine-1"]
+    },
+    {
+      "id": "observability",
+      "capability": "Persist deduplicated drift and held-card alerts without logging credentials.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["cycle-repository", "policy-engine"],
+      "requirementIds": ["REQ-epic-gate-1", "REQ-policy-engine-2"]
+    },
+    {
+      "id": "composition-root",
+      "capability": "Compose the one repository, policy engine, adapters, signers, and projections under one network profile.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["cycle-runner", "eligibility-snapshot", "direct-payout", "signing", "scheduler", "observability"],
+      "requirementIds": ["REQ-cycle-repository-1", "REQ-policy-engine-1"]
+    },
+    {
+      "id": "dashboard",
+      "capability": "Expose authoritative status and policy controls that map to real repository actions without signing or broadcasting.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["composition-root"],
+      "requirementIds": ["REQ-dashboard-2", "REQ-policy-engine-1", "REQ-epic-gate-1"]
+    },
+    {
+      "id": "release-evidence",
+      "capability": "Prove code readiness and separately evaluate launchEligible without implying live authorization.",
+      "deploymentPlacement": "offchain-control",
+      "dependsOn": ["deployment-manifest", "launch-orchestration", "cycle-runner", "direct-payout", "observability"],
+      "requirementIds": ["REQ-release-evidence-1", "REQ-release-evidence-2", "REQ-release-evidence-3", "REQ-release-evidence-4", "REQ-release-evidence-5", "REQ-release-evidence-6", "REQ-release-evidence-7"]
+    },
+    {
+      "id": "website",
+      "capability": "Present status and the eventual canonical swap route from bound release evidence without wallet authority.",
+      "deploymentPlacement": "offchain-public-interface",
+      "dependsOn": ["dashboard", "release-evidence"],
+      "requirementIds": ["REQ-dashboard-2", "REQ-release-evidence-7", "REQ-canonical-market-7"]
+    }
+  ],
+  "topologicalOrder": [
+    "phase-boundary",
+    "provider-binding",
+    "deployment-manifest",
+    "role-control",
+    "token-core",
+    "canonical-market",
+    "fee-accounting",
+    "operations-wallet",
+    "launch-orchestration",
+    "legacy-custody-family",
+    "adapters",
+    "hook-contract-client",
+    "robinhood-rpc-client",
+    "solana-rpc-client",
+    "relay-bridge-client",
+    "collector-crypt-adapter",
+    "transaction-policy",
+    "signing",
+    "cycle-repository",
+    "policy-engine",
+    "eligibility-snapshot",
+    "cycle-runner",
+    "direct-payout",
+    "automation",
+    "scheduler",
+    "observability",
+    "composition-root",
+    "dashboard",
+    "release-evidence",
+    "website"
+  ],
+  "projection": {
+    "capabilityMapMarkdown": {
+      "path": "architecture/capability-map.md",
+      "sha256": "4e5384d698c01d8e8df82de856136dbe64259ce400dd46670b116de1beba8470"
+    },
+    "executionTopologyMarkdown": {
+      "path": "architecture/execution-topology.md",
+      "sha256": "7b7a17db7f6ea183f496ef70444bbab4a3a344f67e3451ce36b7f8f8e3e1f248"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "TASK_DEFER",
+  "phase": "build",
+  "itemId": "P1-011",
+  "rationale": "Dashboard deferred to Phase 2 by the owner-approved manual one-cycle scope",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/task-deferrals/P1-011.json": "3b1986b8afea9718ab0aedb1b447221816d30fe268723565ad8732b0660bfa7d",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8"
+  }
+}

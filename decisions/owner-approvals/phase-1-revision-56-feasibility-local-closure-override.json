@@ -1,0 +1,28 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_OVERRIDE",
+  "phase": "feasibility",
+  "itemId": null,
+  "rationale": "Owner overrides the current feasibility gate for local Phase 1 closure while F3 remains blocked by the recorded production integration facts. This override does not mark F3 passed or authorize deployment, credentials, signing, broadcast, asset movement, gas spend, publication, or production use.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "architecture/interfaces.json": "ec2532bb4a1399fb6dbe22e11b471c6124607ed2008a77eb7410fdbb707eb4ab",
+    "decisions/owner-approvals/phase-1-survivability-bounds-revision-56-approved.json": "6a55971438c7708c78714cce046ede926b55af5c314c5fedeaaf02acf782c19b",
+    "feasibility/integration-spikes.json": "14464a1d26bf88d0a7c74682f9fe51744b9a882c055655686d5597de971757b6",
+    "feasibility/interface-freeze.json": "2c58c83f18d3aa8c1a39e0f03c6f9a7d9e20e8a84793b259306c96158370c820",
+    "feasibility/model-results.json": "1593077a07fee406052840b5975519957cf89db6288b43d864baf3f69baed62b",
+    "feasibility/model.mjs": "30edf30a1bde4daa494f3dccf0364845bca780b7fdaf032ba412dc85d9cc809e",
+    "feasibility/risk-lanes.json": "18bd2fb5d70a27a5679618149c2b1505854893dcc12fea549cd64940e1d93352",
+    "feasibility/survivability-bounds.json": "d81da8da9a23b7a69e0d8a4ab1767b80660230b48c4d041b9f9609ede50cf9bb",
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "gates/runs/feasibility.json": "ab9d48769b6e8b842641f6f1095671823048e24e15f62c23a3a8cd92b9ed6f5d",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "receipts/r-00180.json": "dfe555ad3dca56dfb00024430fb8b2e951eaaaf99676643d65d1b259d62b0a8f",
+    "receipts/r-00382.json": "be9a03f42c5393b295095e96821fbe785848b735445e42e0d02790182c2acef9",
+    "receipts/r-00383.json": "d2b64c4b11196f3aceaa22d7c217e21d68aa3ac764cf8b4738a6e8591f1ffa27",
+    "receipts/r-00384.json": "4bece82497d2c8ee0306ab282128c8d959bd418f3ec12db370e90c9afda165c3",
+    "receipts/r-00385.json": "4a9132d886255fec81c3c7a1a4fa1637add3fa3fc954aa823f079746d4f510b4",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0"
+  }
+}

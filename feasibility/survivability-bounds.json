@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "hookemon.owner-survivability-bounds.v5",
+  "productPhase": 1,
+  "requirementsRevision": 56,
+  "architectureRevision": 4,
+  "approvalState": "OWNER_REAPPROVAL_REQUIRED_AFTER_EXPOSURE_CORRECTION",
+  "scope": "One separately authorized cooperative thin-V1 runner cycle and its payout, plus an adversarial compromised-Operations trigger case proving zero Operations custody; later unchanged V1 cycles and total future process accrual are not capped by this model instance",
+  "measurementBasis": {
+    "stableAssets": "Independent nominal atomic-unit ledgers; no exchange rate or atomic-unit equality is assumed between assets",
+    "stableAssetDecimals": 6,
+    "nativeGas": "Exact per-asset units, bound after the provider route and decoded action bundle are selected",
+    "excluded": [
+      "USDG or Circle USD Coin market-price deviation",
+      "issuer freeze, upgrade, or redemption loss",
+      "chain-liveness loss",
+      "token price, demand, or expected profitability"
+    ]
+  },
+  "immutableMarketBounds": {
+    "staticLpFeeBasisPoints": 0,
+    "additionalTradingFeeBasisPoints": 0,
+    "inclusiveHookFeeBasisPoints": 300,
+    "launchAllocationBasisPoints": 9000,
+    "maximumProjectControllableLaunchPositions": 0,
+    "absorber": "The immutable custody receiver accepts only the expected PositionManager mint and exposes no position-control or upgrade path. The launch principal is intentionally unrecoverable."
+  },
+  "candidateBounds": {
+    "maximumFeeConservationErrorAtomicUSDG": {
+      "value": "0",
+      "absorber": "Programmable and treasury liabilities round down independently; the process liability receives totalFee minus those liabilities so the three increases equal collected USDG exactly."
+    },
+    "maximumRecordedLiabilityLossAtomicUSDG": {
+      "value": "0",
+      "absorber": "Segregated hook liabilities and exact atomic state transitions keep every recorded liability fully backed."
+    },
+    "maximumPayoutUnderfundingAtomicUSDG": {
+      "value": "0",
+      "absorber": "Only actual finalized PegCycleVault USDG credit may fund a payout, and root sum, vault debit, hook credit, and funded liability are identical while Operations remains unchanged."
+    },
+    "maximumCommitmentAboveActualReturnedAtomicUSDG": {
+      "value": "0",
+      "absorber": "Payout funding atomically consumes one cycle-bound proceeds-attribution key whose value is the independently observed final PegCycleVault USDG credit."
+    },
+    "maximumDuplicateMisdirectedOrShortHolderPaymentAtomicUSDG": {
+      "value": "0",
+      "absorber": "A structured recipient-bound leaf, exact transfer deltas, and the payout-and-index paid key reject duplicate, redirected, short, failed, and replayed payment calls without mutation."
+    },
+    "maximumRejectedCooperativeRunnerRobinhoodUSDGActionMutationAtomicUSDG": {
+      "value": "0",
+      "absorber": "Each cooperative runner Robinhood USDG action validates its exact cap and consumes its action-specific authorization and receipt once. Operations remains a trigger only; unresolved provider, authorizer, route-executor, bridge, and policy-wallet risks are tracked separately."
+    },
+    "maximumRejectedCooperativeRunnerSolanaCircleCoinActionMutationAtomic": {
+      "value": "0",
+      "absorber": "Each cooperative runner Solana Circle USD Coin action validates its independent exact cap and consumes its action-specific authorization and receipt once."
+    },
+    "maximumRejectedCooperativeRunnerNftActionMutationCount": {
+      "value": "0",
+      "absorber": "The opened NFT remains custody-bound, and the exact post-open buyback authorization and receipt can consume it only once."
+    },
+    "minimumNoNewInflowRunwaySeconds": {
+      "value": "0",
+      "display": "No separate runway requirement",
+      "evidenceKind": "DECLARED_PHASE_SCOPE_NOT_A_TIME_SERIES_RESULT",
+      "absorber": "No runway mechanism is added. Existing hook and payout liabilities remain fully backed, and an external cycle loss never becomes a holder liability."
+    },
+    "maximumUnpaidEntitlementsInTheSinglePhaseOnePayout": {
+      "value": 1024,
+      "scope": "The one Phase 1 live proof payout",
+      "absorber": "The fixed depth-10 tree permits at most 1,024 indexed positions; every failed leaf remains fully funded and independently payable through the same non-expiring permissionless path."
+    },
+    "maximumAuthorizedCooperativeRunnerCycleNonGasPrincipalLossAtomicUSDG": {
+      "value": "100000000",
+      "display": "100 USDG",
+      "status": "OWNER_REAPPROVAL_REQUIRED_FOR_CORRECTED_SCOPE",
+      "scope": "One separately authorized cooperative runner action bundle only; not an onchain process-release cap or system-wide loss bound",
+      "absorber": "The cooperative runner rejects its own action above the separately authorized cap. Operations can trigger only an exact authorization whose immutable destination is PegCycleVault and never receives the principal."
+    }
+  },
+  "currentOperationsCompromiseExposure": {
+    "threat": "CURRENT_OPERATIONS_CREDENTIAL_COMPROMISE",
+    "status": "ZERO_CUSTODY_BY_CONSTRUCTION",
+    "maximumReleaseRule": "EXACT_AUTHORIZATION_TO_IMMUTABLE_PEG_CYCLE_VAULT",
+    "processPrincipalExposureAtomicUSDG": "0",
+    "returnedProceedsExposureAtomicUSDG": "0",
+    "modelObservedExposureAtomicUSDG": "0",
+    "modelObservedDisplay": "0 USDG process-principal exposure and 0 USDG returned-proceeds exposure in the adversarial vector",
+    "systemwideCustodyLossUpperBoundAtomicUSDG": "0",
+    "absorber": "The hook transfers only an immutable authorizer-approved amount to its mutually bound PegCycleVault, and returned proceeds enter that vault before payout commitment. Operations is only the recorded trigger and never a USDG source or destination."
+  },
+  "unresolvedExternalCompromiseExposure": {
+    "provider": {
+      "status": "UNRESOLVED_NONZERO",
+      "modeledLowerBoundAtomicUSDG": null,
+      "systemwideLossUpperBoundAtomicUSDG": null,
+      "reason": "The production provider and its exact transaction semantics are unbound. No zero or numeric upper-bound claim is supported."
+    },
+    "authorizer": {
+      "status": "UNRESOLVED_NONZERO",
+      "modeledLowerBoundAtomicUSDG": null,
+      "systemwideLossUpperBoundAtomicUSDG": null,
+      "reason": "The production immutable authorizer identity and operating controls are unbound. Exact authorization narrows actions but does not justify a zero compromise claim."
+    },
+    "routeExecutor": {
+      "status": "UNRESOLVED_NONZERO",
+      "modeledLowerBoundAtomicUSDG": null,
+      "systemwideLossUpperBoundAtomicUSDG": null,
+      "reason": "The production typed route executor and target bindings are unbound. Its compromise exposure remains nonzero and unquantified."
+    },
+    "bridge": {
+      "status": "UNRESOLVED_NONZERO",
+      "modeledLowerBoundAtomicUSDG": null,
+      "systemwideLossUpperBoundAtomicUSDG": null,
+      "reason": "The exact outbound and return bridge path, finality, and failure semantics are unbound. Bridge compromise exposure remains nonzero and unquantified."
+    },
+    "policyWallet": {
+      "status": "UNRESOLVED_NONZERO",
+      "modeledLowerBoundAtomicUSDG": null,
+      "systemwideLossUpperBoundAtomicUSDG": null,
+      "reason": "The Solana policy account and custody controls are unbound. Policy-wallet compromise exposure remains nonzero and unquantified."
+    }
+  },
+  "releaseBoundNumericCaps": {
+    "status": "PENDING_PROVIDER_BINDING_EVIDENCE_AND_SEPARATE_ACTION_AUTHORIZATION",
+    "requiredBeforeLiveAction": [
+      "maximum Robinhood USDG debit in atomic units",
+      "maximum Solana Circle USD Coin debit in atomic units",
+      "maximum Robinhood native-gas spend in wei",
+      "maximum Solana native-gas spend in lamports",
+      "maximum native-gas spend for any additional chain selected by the fixed conversion route"
+    ],
+    "rule": "Every value must be a concrete number derived from the final independently decoded action bundle. Exceeding any approved value is forbidden; these caps do not become hook policy or a long-term reserve."
+  },
+  "modelComparison": {
+    "command": "node feasibility/model.mjs --verify feasibility/model-results.json --verify-bounds feasibility/survivability-bounds.json",
+    "source": "feasibility/model-results.json#/candidateBoundComparison",
+    "candidateResult": "PASS_COOPERATIVE_RUNNER_SCOPE_ONLY",
+    "authority": "The comparison covers separately authorized cooperative runner actions only. It proves zero Operations custody but does not bound unresolved provider, authorizer, route-executor, bridge, or policy-wallet compromise exposure, approve candidates, or authorize an external action."
+  },
+  "ownerApprovalRequest": {
+    "pending": true,
+    "numbers": {
+      "maximumAuthorizedCooperativeRunnerCycleNonGasPrincipalLossAtomicUSDG": "100000000",
+      "minimumNoNewInflowRunwaySeconds": "0",
+      "maximumUnpaidEntitlementsInTheSinglePhaseOnePayout": 1024,
+      "allListedConservationAndRejectedCooperativeRunnerMutationBounds": "0"
+    },
+    "notAnActionAuthorization": true
+  },
+  "scopeClarifications": [
+    "The 100 USDG value limits only one separately authorized cooperative runner action bundle. It is not a system-wide loss bound and does not authorize vault funding, conversion, purchase, signing, broadcast, or spending.",
+    "A compromised current Operations identity may trigger only an existing exact authorization. Process principal moves to PegCycleVault and returned proceeds return to PegCycleVault, so Operations custody exposure is exactly zero.",
+    "Provider, authorizer, route-executor, bridge, and policy-wallet compromise remain separate unresolved nonzero risk classes without modeled numeric upper bounds until exact live bindings exist.",
+    "The model never compares Solana Circle USD Coin atoms with returned Robinhood USDG atoms; it records both finalized asset deltas independently.",
+    "The model covers one cycle instance and its payout without adding a concurrency policy or prohibiting later executions of unchanged V1 behavior.",
+    "If the selected pack and fixed conversion route cannot fit below the approved principal and per-asset gas caps, that binding is infeasible for Phase 1; the hook is not expanded with mutable caps or routing policy.",
+    "The 1,024-position number is a proof-depth boundary for the one Phase 1 payout, not holder ranking, Top-N logic, or a system-wide payout-count limit.",
+    "No long-term runway, reserve process, recurring-pack model, route optimizer, autonomous retry queue, or future-phase mechanism is introduced."
+  ],
+  "modelEvidence": "feasibility/model-results.json"
+}

@@ -1,0 +1,202 @@
+{
+  "schemaVersion": "hookemon.phase3.release-launch-inputs.v1",
+  "status": "ADDRESS_DERIVATION_PENDING",
+  "ownerInputPath": "decisions/owner-inputs/launch-inputs-owner.json",
+  "chain": {
+    "chainId": "4663",
+    "caip2": "eip155:4663",
+    "graphFactory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "launchAndStampV1Router": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+    "routeNamespace": null,
+    "routeNonce": null,
+    "topologyHash": null
+  },
+  "roles": {
+    "launchWallet": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "treasury": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "operations": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+    "programmablePlatform": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+    "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+    "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    "launchAuthority": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "issuanceAuthority": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd"
+  },
+  "token": {
+    "name": "Hookemon",
+    "symbol": "HKMN",
+    "decimals": 18,
+    "totalSupply": {
+      "chainId": "4663",
+      "assetId": "hkmn",
+      "decimals": 18,
+      "amountAtomic": "1000000000000000000000000000"
+    },
+    "allocation": {
+      "canonicalPoolBps": 10000,
+      "remainderCustodyBps": 0,
+      "canonicalPool": {
+        "chainId": "4663",
+        "assetId": "hkmn",
+        "decimals": 18,
+        "amountAtomic": "1000000000000000000000000000"
+      },
+      "remainderCustody": {
+        "chainId": "4663",
+        "assetId": "hkmn",
+        "decimals": 18,
+        "amountAtomic": "0"
+      }
+    },
+    "sourceCompatibility": {
+      "status": "VERIFIED",
+      "compiledSupplyAtomic": "1000000000000000000000000000",
+      "reason": "The pinned launch compiler profile confirms the Requirements revision 65 supply baseline: the owner's 2026-09-05 decision allocates the complete supply to the canonical market with zero other allocations. The DRAFT_UNSIGNED baseline records current subject hashes and is not transaction authorization."
+    }
+  },
+  "pool": {
+    "fee": 0,
+    "tickSpacing": 60,
+    "tickSpacingRationale": "The frozen Phase 3 hook composition passes tickSpacing 60 into its canonical-market binding, and 60 aligns the full range to -887220 through 887220. The retained provider material and hook source do not establish an independent provider-required fee-tier spacing, so this is a recorded owner/composition choice rather than a provider fact.",
+    "fullRange": {
+      "minimumTick": -887220,
+      "maximumTick": 887220
+    },
+    "quoteAsset": {
+      "chainId": "4663",
+      "assetId": "usdg",
+      "decimals": 6,
+      "amountAtomic": "240000000"
+    },
+    "baseAsset": {
+      "chainId": "4663",
+      "assetId": "hkmn",
+      "decimals": 18,
+      "amountAtomic": "1000000000000000000000000000"
+    },
+    "priceCandidates": {
+      "usdgCurrency0": {
+        "sqrtPriceX96": "161723809515207654588927258648643645224",
+        "liquidity": "489897948556635619",
+        "amount0Max": "240000000",
+        "amount1Max": "1000000000000000000000000000",
+        "consumedHkmn": "1000000000000000000000000000",
+        "swapFeeQuadrants": {
+          "zeroForOneExactInput": {
+            "currency": "currency0",
+            "basis": "gross-input",
+            "collectionPath": "before-swap-return-delta"
+          },
+          "zeroForOneExactOutput": {
+            "currency": "currency0",
+            "basis": "gross-input",
+            "collectionPath": "after-swap-return-delta"
+          },
+          "oneForZeroExactInput": {
+            "currency": "currency0",
+            "basis": "gross-output",
+            "collectionPath": "after-swap-return-delta"
+          },
+          "oneForZeroExactOutput": {
+            "currency": "currency0",
+            "basis": "gross-output",
+            "collectionPath": "before-swap-return-delta"
+          }
+        },
+        "sqrtLowerX96": "4306310044",
+        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
+        "consumedAmount0": "240000000",
+        "consumedAmount1": "1000000000000000000000000000"
+      },
+      "hkmnCurrency0": {
+        "sqrtPriceX96": "38813714284914462669",
+        "liquidity": "489897948572597439",
+        "amount0Max": "1000000000000000000000000000",
+        "amount1Max": "240000000",
+        "consumedHkmn": "1000000000000000000000000000",
+        "swapFeeQuadrants": {
+          "zeroForOneExactInput": {
+            "currency": "currency1",
+            "basis": "gross-output",
+            "collectionPath": "after-swap-return-delta"
+          },
+          "zeroForOneExactOutput": {
+            "currency": "currency1",
+            "basis": "gross-output",
+            "collectionPath": "before-swap-return-delta"
+          },
+          "oneForZeroExactInput": {
+            "currency": "currency1",
+            "basis": "gross-input",
+            "collectionPath": "before-swap-return-delta"
+          },
+          "oneForZeroExactOutput": {
+            "currency": "currency1",
+            "basis": "gross-input",
+            "collectionPath": "after-swap-return-delta"
+          }
+        },
+        "sqrtLowerX96": "4306310044",
+        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
+        "consumedAmount0": "1000000000000000000000000000",
+        "consumedAmount1": "240000000"
+      },
+      "selection": {
+        "status": "OPEN_FACT",
+        "rule": "Compare the resolved HKMN CREATE2 address with the fixed USDG address. The lower address is currency0.",
+        "selectedOrdering": null,
+        "selectedSqrtPriceX96": null,
+        "poolKey": null,
+        "poolId": null
+      }
+    }
+  },
+  "seed": {
+    "mode": "separate-owner-transaction",
+    "graphFunding": {
+      "chainId": "4663",
+      "assetId": "native",
+      "decimals": 18,
+      "amountAtomic": "0"
+    },
+    "permit2Allowance": {
+      "owner": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "spender": "resolved HookemonHook address",
+      "amountRule": "Exact selected USDG amount0Max or amount1Max; the hook sets and clears its downstream approval during the seed call.",
+      "expiration": null
+    },
+    "deadlinePolicy": {
+      "kind": "relative",
+      "maximumSecondsAfterWalletConfirmation": 900,
+      "actualDeadline": null,
+      "reason": "The contract only requires a future deadline; the signed value must be created after the final preflight response."
+    },
+    "refundAndDust": {
+      "intendedDestination": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "sourceBehavior": "Unused USDG is returned to the payer. A graph-mode seed requires zero HKMN residual after the position mint; any residual reverts the complete seed, including funding, mint, approvals, and custody binding."
+    }
+  },
+  "metadata": {
+    "name": "Hookemon",
+    "symbol": "HKMN",
+    "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
+    "website": "https://hookemon.com",
+    "x": "https://x.com/hookemon4",
+    "icon": {
+      "expectedFile": "hookemon-mark.png",
+      "status": "OPEN_FACT"
+    },
+    "banner": {
+      "expectedFile": "hookemon-banner.jpeg",
+      "status": "OPEN_FACT"
+    }
+  },
+  "openFacts": [
+    "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
+    "Missing: the CREATE2 HKMN and hook addresses. Resolve: derive them after the provider route and salts are fixed, then select the lower-address currency order and price candidate. Verified alternative: retain both computed orderings and leave PoolKey, PoolId and selection unset.",
+    "Missing: owner-selected seed deadline, Permit2 expiration, wallet nonce and gas parameters. Resolve: collect them from Rabby after final preflight and record the signed values. Verified alternative: retain the 900-second deadline ceiling and exact-allowance rule without a transaction payload.",
+    "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only."
+  ]
+}

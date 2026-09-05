@@ -1,0 +1,20 @@
+{
+  "id": "r-00524",
+  "at": "2026-09-03T11:06:40.556Z",
+  "type": "gate",
+  "phase": "redteam",
+  "result": "PASSED",
+  "data": {
+    "gateVersion": 2,
+    "problems": []
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "gates/runs/redteam.json": "06f1efc15dbb71ae666a0b3324a0ee0f22a720e1f12b7a45c3179ddd42676fed",
+    "receipts/r-00452.json": "c820fd1df1832ee13b981f198c7998d6e348efb977bc4e3450e9db64bd6fa4ce",
+    "receipts/r-00453.json": "8bebe0c70fd7effbb0fbbb8f232ddf50f51865c9060a64a445011d99ca0c822f",
+    "receipts/r-00454.json": "36b458736b6bf16b4f3e1aa807b2453579d6ddcf6c0399a2b7925fe1d70edb6e",
+    "receipts/r-00455.json": "a51329bda60b4dd574624ccd8f4cf244f51f4e45e9df81f6757500d4b49f7290",
+    "receipts/r-00456.json": "201b5a45b807c2a97833756d61023d4ec6148874d00c9d9b31eac915c094a727"
+  }
+}

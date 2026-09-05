@@ -1,0 +1,16 @@
+{
+  "id": "r-00526",
+  "at": "2026-09-03T11:06:40.583Z",
+  "type": "task-dependency-dag-verified",
+  "phase": "tasks",
+  "result": "PASSED",
+  "data": {
+    "itemId": "T2",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/tasks.json": "53eba48fcab9ca3c2d95e9225dbd8137720d756f017448ca15b2974a4eba7275",
+    "tasks.json": "9f5f55ce916514f8982ddf5295f007d14c1bdba218070af6b5e9d2f836cfd5d4"
+  }
+}

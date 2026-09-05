@@ -1,0 +1,20 @@
+{
+  "id": "r-00469",
+  "at": "2026-09-03T08:30:01.714Z",
+  "type": "owner-advisories-reviewed",
+  "phase": "ship",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/closeout-revision-58-ship-h4-approved.json",
+    "itemId": "H4",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner reviewed the advisory checklists recorded in ops/advisories/index.json for requirements revision 58; advisory only, the owner decision is final either way. This authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication."
+  },
+  "inputHashes": {
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "ops/advisories/index.json": "1ac8d467a38a77c9d76047bff59f0690c18ce5ca3716cec74cadbac3bd8d3808",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "decisions/owner-approvals/closeout-revision-58-ship-h4-approved.json": "6856be74bdd3d56a567ffccec14d5a2a8dc1176025fd5dd62a19e30b85ddec03"
+  }
+}

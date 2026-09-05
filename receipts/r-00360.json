@@ -1,0 +1,28 @@
+{
+  "id": "r-00360",
+  "at": "2026-09-01T15:27:18.645Z",
+  "type": "gate",
+  "phase": "redteam",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 2,
+    "problems": [
+      "prerequisite init gate is FAILED via r-00356",
+      "prerequisite spec gate is FAILED via r-00357",
+      "prerequisite architecture gate is FAILED via r-00358",
+      "prerequisite feasibility gate is FAILED via r-00359",
+      "R2: evidence r-00289 is STALE",
+      "R3: evidence r-00290 is STALE",
+      "R4: escalated — resolve or override",
+      "R5: evidence r-00291 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "gates/runs/redteam.json": "1a63c37c774f4f90748e82e0d61e1693d9ef4e4dcc0df6153600ad397991add8",
+    "receipts/r-00288.json": "784f9a996fcbe25a3eb1c95bb9e3110ad5cac405fd56cfab6a3ca1a09115ad52",
+    "receipts/r-00289.json": "8798fb500492a5ac22ba87a65482b2ff16fd5c87bd550dc09d165fd872b69c77",
+    "receipts/r-00290.json": "4e8542b6e3551d729b683135efe8eb87a7b76e69c2f0858ace36d505ecef718f",
+    "receipts/r-00291.json": "def88e72a4ac90e9817124fcc99392a43ab11103aaa81ebde6244f02c63d85d8"
+  }
+}

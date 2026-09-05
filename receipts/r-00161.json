@@ -1,0 +1,16 @@
+{
+  "id": "r-00161",
+  "at": "2026-08-30T14:21:56.857Z",
+  "type": "doubt-loop-review-run",
+  "phase": "redteam",
+  "result": "PASSED",
+  "data": {
+    "itemId": "R1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "qa/redteam/doubt-loop.json": "d642fa5a8b579e2c8239a357ee15cf3ead6041bf5e0bfb89cfa4559e424371a4"
+  }
+}

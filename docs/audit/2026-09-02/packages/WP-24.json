@@ -1,0 +1,37 @@
+{
+  "id": "WP-24",
+  "title": "Anvil-based hook integration test: block-pinned regression + current-head smoke test",
+  "goal": "Test the hook's swap path against real deployed Uniswap v4 bytecode with two distinct fork suites \u2014 a block-pinned reproducible suite for review/regression and a separate current-head smoke test for drift detection \u2014 per security-and-evidence.md, not one implicitly-current-head run.",
+  "deps": [
+    "WP-02",
+    "WP-05"
+  ],
+  "parallelGroup": 4,
+  "writeSet": [
+    "packages/contracts/test/integration/RobinhoodV4Fork.t.sol",
+    "packages/contracts/test/integration/RobinhoodV4ForkSmoke.t.sol"
+  ],
+  "readSet": [
+    "packages/contracts/test/integration/RobinhoodV4PoolManager.t.sol",
+    "scratchpad/w1/summaries/external-facts.json"
+  ],
+  "steps": [
+    "Extend RobinhoodV4PoolManager.t.sol's pattern (already deploys a real PoolManager/PositionManager from the pinned Uniswap submodules) into two suites",
+    "RobinhoodV4Fork.t.sol: fork at a fixed, recorded block number (pinned in the test file, not read from the environment at runtime) so the suite is byte-for-byte reproducible and reviewable; this is the suite CI runs on every change and a reviewer actually reads",
+    "RobinhoodV4ForkSmoke.t.sol: fork at current head (no pinned block), run only a minimal smoke path, and treat its failure as 'the pinned block's assumptions have drifted from live chain state, go re-pin and investigate' rather than 'the hook is broken' \u2014 mark it non-blocking/scheduled in CI, not a required check",
+    "Run the full swap path (with and without hookData) against the forked, real deployed bytecode in both suites",
+    "Assert the WP-02 fee-conformance and WP-05 optional-hookData behavior both hold against the pinned-block fork, not just the hand-written test harness"
+  ],
+  "tests": [
+    "forge test --match-path 'test/integration/RobinhoodV4Fork.t.sol'",
+    "forge test --match-path 'test/integration/RobinhoodV4ForkSmoke.t.sol' --fork-url $ROBINHOOD_RPC_URL"
+  ],
+  "acceptance": [
+    "The hook's swap path passes against real deployed PoolManager/PositionManager bytecode on a fork pinned to a fixed, recorded block number",
+    "A separate current-head smoke suite exists and is distinguishable in CI output from the pinned-block regression suite",
+    "Both the hookData-present and hookData-optional paths are exercised against the pinned-block fork"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "Read-only fork tests, no key needed; the pinned-block suite is safe to run in CI on every change, the current-head smoke suite runs on a schedule and is non-blocking."
+}

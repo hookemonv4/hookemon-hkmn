@@ -1,0 +1,16 @@
+{
+  "id": "r-00235",
+  "at": "2026-08-31T17:06:53.985Z",
+  "type": "functional-edge-cases-verified",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "itemId": "S2",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/spec.json": "53f541f618dcd7cf0cfd862f8683406c823d5e22924584b9abfdc1d15e1757ef",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

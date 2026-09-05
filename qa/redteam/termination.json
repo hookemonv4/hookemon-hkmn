@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "phase": "redteam",
+  "requirementsRevision": 55,
+  "architectureRevision": 4,
+  "maximumCycles": 3,
+  "cyclesCompleted": 1,
+  "outcome": "FAILED_OPEN_FINDINGS",
+  "terminationBasis": {
+    "finalCycleStatus": "SUBSTANTIVE_OPEN_FINDINGS",
+    "unresolvedCriticalCount": 0,
+    "unresolvedHighCount": 3,
+    "openFindingIds": ["RT-R55-02", "RT-R55-05", "RT-R55-06"],
+    "reviewerContext": "fresh",
+    "reviewerWriteAccess": false,
+    "authorReasoningProvided": false,
+    "issuesOnlyPrompt": true,
+    "ownerOverrideReceipt": null
+  },
+  "productionAuthorizationGranted": false,
+  "externalActionAuthorizationGranted": false
+}

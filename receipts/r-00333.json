@@ -1,0 +1,16 @@
+{
+  "id": "r-00333",
+  "at": "2026-08-31T21:59:33.379Z",
+  "type": "induced-failure-drill-verified",
+  "phase": "ship",
+  "result": "PASSED",
+  "data": {
+    "itemId": "H3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "qa/drills/induced-failure.json": "b22e617825d9cdaf9999f77e1f896da80d7d71a9122a17d0234af64b901ec517"
+  }
+}

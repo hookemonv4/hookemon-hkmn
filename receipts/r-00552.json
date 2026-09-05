@@ -1,0 +1,22 @@
+{
+  "id": "r-00552",
+  "at": "2026-09-03T11:30:42.861Z",
+  "type": "gate",
+  "phase": "feasibility",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 4,
+    "problems": [
+      "F3: evidence r-00180: feasibility/F3 cannot pass: integration spikes explicitly block F3"
+    ]
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "b5e15577156d7ab88131bc1f948f7bce5fbad67cc77897b3508dd24ff5813d75",
+    "gates/runs/feasibility.json": "690a943b014c48654e31f67af9359e2d3bf11d57552fe8304520133a45dc9ee3",
+    "receipts/r-00449.json": "c163e1db604f7b08a399574fcd866366cefc49e33c0bffe86bed714acf9bec0a",
+    "receipts/r-00450.json": "e1117e6f82f626eb380ac52839eb6cbe6a681cf6b5b0351458dea28f90824a6b",
+    "receipts/r-00180.json": "dfe555ad3dca56dfb00024430fb8b2e951eaaaf99676643d65d1b259d62b0a8f",
+    "receipts/r-00551.json": "4af4b973b0b3019b15a625877d9b71c46b508c0b21c9adedb3fd3e7ed2fc6439",
+    "receipts/r-00451.json": "f8a188b31af4c0fe514bad9a042aee9001a33fd5d8c320276bf49475c6b53f0e"
+  }
+}

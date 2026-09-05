@@ -1,0 +1,20 @@
+{
+  "id": "r-00465",
+  "at": "2026-09-03T08:30:01.691Z",
+  "type": "owner-spec-revision-approved",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/closeout-revision-58-build-b4-approved.json",
+    "itemId": "B4",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approves requirements revision 58 as the authoritative Phase 2 specification for local implementation and verification only; this authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication."
+  },
+  "inputHashes": {
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380",
+    "decisions/owner-approvals/closeout-revision-58-build-b4-approved.json": "962d6efc380a7fcdaa6c01d460e36b187d749e589f8d7f43093df3b0f4556cff"
+  }
+}

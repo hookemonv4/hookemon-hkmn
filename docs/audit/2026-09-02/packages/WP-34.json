@@ -1,0 +1,46 @@
+{
+  "id": "WP-34",
+  "title": "Production escrow observation and frozen cycle control in the operator module",
+  "goal": "Close the last fixture lock in packages/runner reported by WP-31 and WP-32: packages/runner/src/operator/cycle-escrow-observation.mjs is hardcoded to one fixture Ed25519 reader key and packages/runner/src/operator/cycle-plan.mjs createFrozenCycleControl only binds fixture evidence. Add a production path so a production-profile CycleRunner can be bound to a frozen cycle control whose bindingManifestDigest, outboundActionDigest and returnActionDigest come from the real bindings and the real preflight, and whose escrow observation is anchored in the injected EVM observer (USDG balance and transfer logs of the per-cycle PegCycleReturnEscrow on Robinhood Chain, read at latest with the block hash recorded and re-confirmed after finality, never requiring the finalized tag).",
+  "deps": ["WP-31"],
+  "parallelGroup": 9,
+  "writeSet": [
+    "packages/runner/src/operator/cycle-escrow-observation.mjs",
+    "packages/runner/src/operator/cycle-plan.mjs",
+    "packages/runner/src/cycle/evidence-profile.mjs",
+    "packages/runner/src/cycle/preflight.mjs",
+    "packages/runner/test/operator/**",
+    "packages/runner/test/integration/production-cycle.test.mjs",
+    "packages/runner/test/cycle/production-cycle.mjs",
+    "docs/modules/cycle-runner.md",
+    "docs/modules/index.json (only the sha256 entry of docs/modules/cycle-runner.md)"
+  ],
+  "readSet": [
+    "packages/runner/src/cycle/cycle-runner.mjs, reducer.mjs, schemas.mjs (production profile as merged by WP-31)",
+    "packages/runner/src/cycle/bindings.mjs and bindings/robinhood-chain.json, architecture/interfaces.json",
+    "packages/contracts/src/process/PegCycleVault.sol and PegCycleReturnEscrow.sol (computeCycleEscrow, escrow lifecycle)",
+    "packages/adapters/src/robinhood-rpc.mjs (what the EVM observer can actually provide; do not edit)",
+    "docs/modules/composition-root.md section Confirmed upstream blockers"
+  ],
+  "steps": [
+    "Add a production escrow-observation schema and verifier next to the fixture one: the observation carries escrow address, block number and hash, USDG balance, matching transfer logs and the observer confirmation; the verifier checks the escrow address against computeCycleEscrow semantics (CREATE2 from the vault and cycle id), the block hash against the observer, and the amounts against the frozen control",
+    "Extend createFrozenCycleControl with a production mode that binds the production preflight digests and the production escrow observation, selected through the evidence profile, leaving the fixture mode unchanged",
+    "Extend the production evidence profile so CycleRunner bound to a production frozen control accepts the vault call inputs derived from it",
+    "Extend production-cycle.test.mjs: the full cycle runs bound to a production frozen control, and negative tests reject a mismatched block hash, a wrong escrow address and an amount below the frozen minimum",
+    "Update docs/modules/cycle-runner.md and only its digest in docs/modules/index.json; run the runner suite, scripts/tests and the clean-room scanner before the single commit"
+  ],
+  "tests": [
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "A production-profile CycleRunner bound to a production frozen control completes a full cycle in production-cycle.test.mjs with vault call inputs derived from repository bindings",
+    "Mismatched block hash, wrong escrow address and insufficient amount are rejected",
+    "All previously passing runner tests still pass with unchanged expectations",
+    "packages/runner keeps zero npm dependencies; clean-room scanner green"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context reviewer mandatory. The public Robinhood RPC serves state only at latest; never require finalized. COORDINATOR NOTE: split out of WP-32; disjoint from WP-33 (packages/adapters) and runs in parallel with it. WP-35 depends on both."
+}

@@ -1,0 +1,53 @@
+{
+  "id": "WP-38",
+  "title": "On-chain payout authorization hardening: two pinned distribution signatures required by the vault",
+  "goal": "Close red-team findings RT-R58-01 and RT-R58-03 at the contract layer. Today PegCycleVault.authorizePayout and PayoutCommitment.commitPayoutChunk trust the vault authorizer alone, so one compromised worker key can author an arbitrary payout manifest naming itself as beneficiary. Change the vault so a payout authorization is only accepted when it carries two valid EIP-712 signatures over the PayoutAuthorization fields (requirementsRevision, chainId, cycleId, hook, vault, usdg, operationsTrigger, bindingManifestDigest, payoutId, manifestDigest, rootHash, rootSum) from two distinct addresses pinned immutably at deployment: the distribution signer and the distribution verifier (decision D7). The authorizer still submits the transaction, but cannot forge the manifest binding without both keys. Keep the requirement that operationsTrigger differs from the authorizer, and add explicit errors for a missing or duplicate signature, a signer address equal to the authorizer or the trigger, and a replayed authorization (payoutId consumed once per cycle). Update the bindings, the interface freeze, the module card, and all affected Forge tests and fork suites.",
+  "deps": ["WP-04", "WP-05", "WP-24", "WP-28"],
+  "parallelGroup": 13,
+  "writeSet": [
+    "packages/contracts/src/process/PegCycleVault.sol",
+    "packages/contracts/src/process/IPegCycleVault.sol",
+    "packages/contracts/src/payout/PayoutCommitment.sol",
+    "packages/contracts/src/HookemonHook.sol (only if the hook forwards payout authorizations)",
+    "packages/contracts/src/bindings/RobinhoodBindings.sol",
+    "packages/contracts/test/**",
+    "packages/contracts/script/** (deployment inputs for the two pinned addresses)",
+    "bindings/robinhood-chain.json",
+    "architecture/interfaces.json",
+    "feasibility/interface-freeze.json",
+    "docs/modules/peg-cycle-vault.md",
+    "docs/modules/payout-commitment.md",
+    "docs/modules/index.json (only the sha256 entries of the two cards)",
+    "specs/requirements.json (only if a requirement text must name the two-signature rule; keep revision 58 unless a text change is unavoidable)"
+  ],
+  "readSet": [
+    "qa/redteam/revision-58-findings.json and decisions/redteam/findings.json (RT-R58-01, RT-R58-02, RT-R58-03, RT-R58-04)",
+    "packages/contracts/src/process/PegCycleVault.sol authorizePayout, consumePayoutAuthorization, authorizeFunding (roles authorizer and operationsTrigger)",
+    "packages/contracts/src/payout/PayoutCommitment.sol and settlement/HolderSettlement.sol",
+    "packages/runner/src/distribution/distribution-signer.mjs and manifest.mjs (what the off-chain pair signs today; WP-39 moves it to the same EIP-712 payload)",
+    "scripts/check-binding-drift.mjs and the binding manifest digest tooling",
+    "docs/audit/2026-09-02/design/DESIGN.md decision D7"
+  ],
+  "steps": [
+    "Define the EIP-712 domain (name, version, chainId, verifyingContract = vault) and the PayoutAuthorization typed struct in IPegCycleVault; add immutable distributionSigner and distributionVerifier addresses to the vault constructor with zero-address and equality checks",
+    "authorizePayout takes the authorization plus two signatures; recover both signers with the standard ECDSA library already vendored through the pinned dependencies (or a minimal audited recover), require signer == distributionSigner and verifier == distributionVerifier, reject malleable signatures (s in the upper half), reject a payoutId already consumed for the cycle",
+    "commitPayoutChunk stays gated to the vault authorizer path but must only accept a rootHash and rootSum that the vault has an authorization for (bind through the vault, no independent path)",
+    "Forge tests: happy path with two signatures, each negative path (missing, duplicate, wrong signer, wrong verifier, malleable, replay, signer equal to trigger or authorizer), fuzz on rootSum and chunk bounds, and the fork suites updated; keep forge test --ffi fully green",
+    "Refresh bindings/robinhood-chain.json localProof digests, architecture/interfaces.json and feasibility/interface-freeze.json with the existing tooling (never hand-edit hashes); update the two module cards and only their digests in docs/modules/index.json; run scripts/tests and the clean-room scanner before the single commit"
+  ],
+  "tests": [
+    "cd packages/contracts && forge test --ffi",
+    "node scripts/check-binding-drift.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "A payout authorization without both valid signatures from the two pinned addresses reverts; the authorizer alone cannot commit any payout",
+    "Replay of a payoutId, malleable signatures and signer addresses equal to the trigger or authorizer revert with named errors",
+    "forge test --ffi is fully green including the fork suites; binding drift check passes; scripts/tests show no new red beyond phase1-release and phase1-reproducibility",
+    "The typed-data schema is documented in docs/modules/peg-cycle-vault.md so WP-39 can produce byte-identical signatures off-chain"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context reviewer mandatory; the reviewer must try to construct a payout with one key and must check signature malleability and replay. Initialize the Uniswap submodules in the worktree before building (git submodule update --init for v4-core and v4-periphery, then their nested dependencies). Delete packages/contracts/out and cache before finishing. The sequencing constraint operationsTrigger != authorizer stays; WP-39 adds the second EVM signer role off-chain. Keep gates/init.json untouched."
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "AUTO-SCOPE PHASE-1-SPEC APPROVED",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "327e14a644919e7e7fc821dec8ef5bd8a1e7f9098662bcfdd94cf52f1666e61e",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "6eb2478f43e0e87a98da01ed868d737a19fe2038958b3e85fce2e5c411f14660"
+  }
+}

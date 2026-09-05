@@ -1,0 +1,17 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes adoption of requirements revision 64 while retaining architecture revision 9 for the Phase 3 Operations-wallet money path. It records the coordinator-selected 1,000,000,000 HKMN 18-decimal supply, 90/10 allocation, `TREASURY_ALLOCATION_DECISION_PENDING` non-circulating remainder custody, the exact three-call provider graph, and historical source separation. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/capability-map.json": "825bb23833caa6bcb4970ef32b9c3f5b4a52f901311f41d1a5b425d361b15ae6",
+    "architecture/interfaces.json": "7335deedd7c8fc3d31fa357265ce1643cdb46792e0eef4e0aa3e01ab20c3d6a6",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "1f76dd12e0d3e747f92f1235f3985c019705da8dd193cbc35e7af6f65c4184e5",
+    "product/delivery-boundary.json": "5b36a35a59a407c9bf86a2586b3eb5889207f61563ba3385dab7718e46534acc",
+    "specs/requirements.json": "431f9a15fcffa4465fc70963fa38aa64dbe0b28fcd758be857951bad202c8e78"
+  }
+}

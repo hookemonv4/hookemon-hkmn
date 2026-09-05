@@ -1,0 +1,16 @@
+{
+  "id": "r-00439",
+  "at": "2026-09-03T08:30:01.500Z",
+  "type": "typed-requirements-verified",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "itemId": "S1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

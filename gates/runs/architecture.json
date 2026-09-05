@@ -1,0 +1,28 @@
+{
+  "items": {
+    "A1": {
+      "status": "RUN",
+      "receipt": "r-00443"
+    },
+    "A2": {
+      "status": "RUN",
+      "receipt": "r-00623"
+    },
+    "A3": {
+      "status": "RUN",
+      "receipt": "r-00445"
+    },
+    "A4": {
+      "status": "RUN",
+      "receipt": "r-00446"
+    },
+    "A5": {
+      "status": "RUN",
+      "receipt": "r-00447"
+    },
+    "A6": {
+      "status": "RUN",
+      "receipt": "r-00561"
+    }
+  }
+}

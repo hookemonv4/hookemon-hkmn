@@ -1,0 +1,19 @@
+{
+  "id": "r-00262",
+  "at": "2026-08-31T17:20:23.044Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-001",
+    "commitSha": "324a8d84da99fee05afb47a8d3ade0dfca9ef389",
+    "taskFingerprint": "3a17d55d8e4c96702f4e69d82e4fe75833058c45dea895b5414ad4f93582048f",
+    "requirementsRevision": 55,
+    "requirementsHash": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  },
+  "inputHashes": {
+    "feasibility/interface-freeze.json": "e94cf27041cb1f25b8c80bb3a1c749eacb7c36313016a55bee589ad58c9be6db",
+    "bindings/robinhood-chain.json": "7ea9ec8e46c984d3e0ceec89de165f988609fc56e72c9305a98416c0a9d908cb",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

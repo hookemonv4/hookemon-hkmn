@@ -1,0 +1,55 @@
+{
+  "id": "WP-06",
+  "title": "Adapter package scaffold: pinned npm dependencies, CI dependency verification, operator config schema",
+  "goal": "Stand up the isolated packages/adapters npm package (viem and @solana/web3.js pinned by exact version with a package-lock.json), extend the control-dependency verifier and the CI workflow to install and verify that package by lockfile integrity, add the dashboard-editable operator configuration schema (interval, pack list, spend caps, pause flag) to the operator state file, and port the policy-wallet configuration-schema module from codex/complete-v4-hook. This is ordinary DevOps and schema work: the package handles no secret material and performs no signing; the signer is an injected client interface (signerClient.sign / signerClient.broadcast) supplied at runtime by the operator's own infrastructure, and the schema's only secret-related behavior is to reject any configuration object that carries secret-material fields (the field list already exists as prohibitedSecretFields in the complete-v4-hook module) so secrets can never end up in config files.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "packages/adapters/package.json",
+    "packages/adapters/package-lock.json",
+    "packages/adapters/README.md",
+    ".github/workflows/v4-gates.yml",
+    "product/dependency-pins.json",
+    "product/dependency-verification.json",
+    "scripts/verify-control-dependencies.mjs",
+    "scripts/tests/control-dependencies.test.mjs",
+    "packages/runner/src/config/state-schema.mjs",
+    "packages/runner/test/config/state-schema.test.mjs",
+    "packages/runner/src/automation/policy-wallets.mjs",
+    "packages/runner/test/automation/policy-wallets.test.mjs",
+    "docs/modules/adapters.md"
+  ],
+  "readSet": [
+    "<complete-v4-hook-checkout>/packages/runner/src/automation/policy-wallets.mjs and test (technique and schema reference)",
+    "packages/runner/src/operator/state-file.mjs (existing operator state schema and atomic write pattern)",
+    "scripts/verify-control-dependencies.mjs and product/dependency-pins.json (existing hash-pin conventions)",
+    ".github/workflows/v4-gates.yml (single permitted workflow; its sha256 is pinned in three places)"
+  ],
+  "steps": [
+    "Create packages/adapters/package.json (private, type module, engines node >=24) pinning exact versions of viem and @solana/web3.js as dependencies and nothing else; run npm install --ignore-scripts with Node 24 to generate package-lock.json; commit the lockfile; add a README describing the boundary (adapters are the only place with npm dependencies; the runner core stays builtin-only)",
+    "Add a CI step to .github/workflows/v4-gates.yml that runs npm ci --ignore-scripts in packages/adapters and then node --test packages/adapters/test (may be empty until WP-08/09/10) and recompute the workflow sha256 in product/dependency-pins.json, product/dependency-verification.json and scripts/verify-control-dependencies.mjs (the three-way pin) using the existing canonical-install-block conventions; keep the workflow otherwise byte-identical",
+    "Extend scripts/verify-control-dependencies.mjs to verify that packages/adapters/package-lock.json is lockfileVersion 3, that every dependency entry carries an integrity field, and that the direct dependency set is exactly the pinned set recorded in product/dependency-pins.json; add unit tests in scripts/tests/control-dependencies.test.mjs",
+    "Add packages/runner/src/config/state-schema.mjs: a validator for the operator configuration document (intervalMinutes 5..1440 default 20, allowedPackIds array of Collector pack codes, requestedOrders, maxBoostersPerCycle, maxUnitPriceMicroUsdg, maxCycleBudgetMicroUsdg, max24HourBudgetMicroUsdg, paused boolean, liveMode boolean default false, configurationRevision integer) with exact-schema rejection of unknown fields, and wire it into the operator state file as an optional `configuration` section with a revision counter; tests in packages/runner/test/config/state-schema.test.mjs",
+    "Port packages/runner/src/automation/policy-wallets.mjs and its test from the reference branch unchanged in behavior (schema-bound intents with allowedDestinations/allowedFunctions/allowedAssets/maxAmount, injected signerClient/observerClient/checkpointStore, rejection of secret-material config fields); keep the test's rejection cases using the existing field names with obviously fake placeholder values",
+    "Write docs/modules/adapters.md (R1 card) describing the dependency boundary and the signer client interface; do not edit docs/modules/index.json or architecture/capability-map.json (WP-21 registers it)"
+  ],
+  "tests": [
+    "node --test scripts/tests/control-dependencies.test.mjs",
+    "node --test packages/runner/test/config/state-schema.test.mjs",
+    "node --test packages/runner/test/automation/policy-wallets.test.mjs",
+    "node scripts/verify-control-dependencies.mjs",
+    "cd packages/adapters && npm ci --ignore-scripts"
+  ],
+  "acceptance": [
+    "packages/adapters installs from its lockfile with npm ci --ignore-scripts and the verifier confirms the exact pinned dependency set and lockfile integrity fields",
+    "scripts/verify-control-dependencies.mjs passes with the updated workflow sha256 in all three places",
+    "The configuration schema rejects unknown fields and out-of-range values and round-trips through the operator state file with a revision counter",
+    "The policy-wallet module rejects configuration objects that contain secret-material fields and never reads key material itself",
+    "packages/runner's existing tests still run with zero installs"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "RESUME NOTE: a previous agent started this package and was killed by a full disk before committing; its uncommitted work is in the worktree (git status shows modified .github/workflows/v4-gates.yml, product/dependency-pins.json, product/dependency-verification.json, scripts/verify-control-dependencies.mjs, scripts/tests/control-dependencies.test.mjs and an untracked packages/adapters/ directory). Inspect git diff first, keep what is correct, finish the remaining steps, and commit exactly once. Delete packages/adapters/node_modules before finishing (disk space is scarce; the lockfile is what gets committed, never node_modules). Retry after an automated content filter stopped the first run: keep wording operational (package manager, lockfile, CI step, schema validation). Do not generate, store, derive, print, or discuss secret material beyond the schema rejection rule. Must land before WP-08/09/10, which depend on this scaffold. COORDINATOR NOTE: the base now includes rev57's operator state-file; add the configuration section there without changing existing fields."
+}

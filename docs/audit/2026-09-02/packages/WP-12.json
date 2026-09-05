@@ -1,0 +1,36 @@
+{
+  "id": "WP-12",
+  "title": "Pro-rata manifest compiler",
+  "goal": "Compute real per-holder distribution amounts from a finalized snapshot and a cycle's returned proceeds, with dust carryforward and >1024-holder chunking.",
+  "deps": [
+    "WP-11",
+    "WP-04"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/runner/src/distribution/pro-rata.mjs",
+    "packages/runner/test/distribution/pro-rata.test.mjs"
+  ],
+  "readSet": [
+    "packages/runner/src/distribution/manifest.mjs",
+    "packages/runner/src/distribution/reconcile.mjs"
+  ],
+  "steps": [
+    "Compute amount_i = floor(balance_i * proceeds / totalEligibleSupply) per holder from the finalized snapshot",
+    "Track the floor-rounding dust (proceeds - sum(amount_i)) and carry it forward into the next cycle's distributable pool per decision D6's default",
+    "Chunk holders into deterministic, address-sorted <=1024-entry groups when the snapshot exceeds 1024 non-zero balances, feeding WP-04's chunk-commitment path",
+    "Feed output unmodified into the existing deriveHolderDistributionCandidate in reconcile.mjs/manifest.mjs"
+  ],
+  "tests": [
+    "node --test packages/runner/test/distribution/pro-rata.test.mjs"
+  ],
+  "acceptance": [
+    "Floor-rounding is exact: sum(amount_i) + dust == proceeds",
+    "Dust carries forward across two simulated cycles without loss",
+    "A >1024-holder synthetic snapshot chunks correctly and each chunk's rootSum sums to the total liability",
+    "Output passes reconcile.mjs's existing exact-sum, closed-shape checks unmodified"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Do not change reconcile.mjs's or manifest.mjs's existing verification invariants \u2014 this package must conform to them, not the reverse. RESUME NOTE: a previous agent started this package and was stopped after a few minutes (full disk); a few uncommitted edits may exist in the worktree (git status). Inspect them, keep what is correct, and complete the package; commit exactly once. Disk space is scarce: no npm installs, delete build artifacts, keep temp files small, stop and report on ENOSPC."
+}

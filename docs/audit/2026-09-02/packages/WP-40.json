@@ -1,0 +1,52 @@
+{
+  "id": "WP-40",
+  "title": "Release candidate for the Phase 2 tree: verifier surface policy and regenerated candidate manifests",
+  "goal": "Make scripts/tests/phase1-release.test.mjs and phase1-reproducibility.test.mjs pass on the Phase 2 tree so the CI step node --test scripts/tests/*.test.mjs is green. Two defects: (1) scripts/verify-phase1-release.mjs requiredCandidatePaths is a fixed Phase 1 list, so validateCandidateProductionSourceClosure reports a production Solidity source set mismatch because HookemonHook.sol, CustomLaunchStrategy.sol, PegCycleRouteExecutor.sol and PegCycleReturnEscrow.sol are now part of the import closure; adding them naively makes validateCustodySourceSurfaces reject them because the hook, the launcher and the route executor legitimately perform external calls and token transfers. Introduce an explicit surface policy: custody surfaces (PegCycleVault, PegCycleReturnEscrow, ProcessBudget, PayoutCommitment, HolderSettlement, FeeAccounting, MoneyRoles) keep the strict forbidden-authority rules; market and routing surfaces (HookemonHook, CanonicalMarket, HookemonIssuance, CustomLaunchStrategy, PegCycleRouteExecutor, RobinhoodBindings) get a documented allow-list of the exact external-call patterns they need and nothing else (no owner-mutable recipients, no arbitrary call targets, no selfdestruct, no delegatecall). (2) release/phase1/local-candidate.json and local-reproducibility.json bind stale hashes (specs/requirements.json is at revision 58, sources changed); regenerate them with the existing release tooling so the candidate digest, the deterministic vault identity and the reproducibility report agree with the tree. Keep the candidate format unchanged unless the verifier needs a field for the surface policy; if the format changes, bump it explicitly and update both tests together.",
+  "deps": ["WP-22", "WP-28", "WP-20", "WP-05"],
+  "parallelGroup": 15,
+  "writeSet": [
+    "scripts/verify-phase1-release.mjs",
+    "scripts/verify-phase1-reproducibility.mjs",
+    "scripts/tests/phase1-release.test.mjs",
+    "scripts/tests/phase1-reproducibility.test.mjs",
+    "scripts/tests/fixtures/** (release fixtures only)",
+    "release/phase1/local-candidate.json",
+    "release/phase1/local-reproducibility.json",
+    "release/phase1/local-evidence.json",
+    "release/phase1/local-toolchain.json",
+    "packages/contracts/script/release/** (only if the release plan script must list the new sources)",
+    "docs/modules/v4-evidence-control.md (only if the surface policy must be described there)",
+    "docs/modules/index.json (only the sha256 entry of a card you changed)"
+  ],
+  "readSet": [
+    "scripts/verify-phase1-release.mjs (requiredCandidatePaths, custodySourcePaths, validateCustodySourceSurfaces, validateCandidateProductionSourceClosure)",
+    "scripts/tests/phase1-release.test.mjs and phase1-reproducibility.test.mjs (what they assert and which fixtures they use)",
+    "git log -- release/phase1/local-candidate.json (how previous candidates were produced; the generator lives in the release harness commits)",
+    "packages/contracts/src/**/*.sol (which external calls each new surface makes)",
+    "gates/ship.json and gates/build.json (which evidence items consume the release files)",
+    ".github/workflows/v4-gates.yml (the exact CI commands)"
+  ],
+  "steps": [
+    "Find the generator that produced release/phase1/local-candidate.json (git log and the release harness in scripts/); if it is a script, reuse it; if it was an inline procedure, add a small scripts/release/build-local-candidate.mjs that reproduces it deterministically from the tree and the pinned toolchain",
+    "Add the surface policy to scripts/verify-phase1-release.mjs: an explicit map from path to surface class (custody or market-routing) with the allowed external-call patterns per class; extend requiredCandidatePaths to the full production closure; keep every existing negative test passing and add negative tests for a custody file that gains an external call and for a market file that gains an owner-mutable recipient",
+    "Regenerate the four release/phase1 files with the generator; verify with node scripts/verify-phase1-release.mjs and node scripts/verify-phase1-reproducibility.mjs; run node --test scripts/tests/*.test.mjs until 409/409",
+    "Run the full CI command list from .github/workflows/v4-gates.yml locally except the ledger status check (which only the owner closeout can turn green) and the clean-room scanner; report each result",
+    "Do not touch receipts/, STATE.md, state.json, tasks.json, gates/runs/*, gates/*.json or policy/policy.json; single commit"
+  ],
+  "tests": [
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/verify-phase1-release.mjs",
+    "node scripts/verify-phase1-reproducibility.mjs",
+    "node scripts/check-cleanroom.mjs .",
+    "cd packages/contracts && forge test --ffi"
+  ],
+  "acceptance": [
+    "node --test scripts/tests/*.test.mjs passes completely (409/409 or more)",
+    "The candidate covers the full production Solidity closure of the Phase 2 tree; custody surfaces keep the strict rules; market and routing surfaces are checked against an explicit allow-list",
+    "Regeneration is reproducible: running the generator twice yields byte-identical files",
+    "Clean-room scanner green; forge suite green"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "Fresh-context reviewer before merge. This package is on the critical path to a green PR #4: run it immediately after WP-22 merges and before the owner closeout. It will have to be re-run mechanically after every later contract change (WP-38, WP-39), so make the generator a one-command step and document it in docs/superpowers/plans/owner-closeout.md under a Regenerate release candidate heading (that file is owned by WP-22; append a section only). Initialize the Uniswap submodules in the worktree before forge. Use USDG, Circle USD and EVM L1 wording only."
+}

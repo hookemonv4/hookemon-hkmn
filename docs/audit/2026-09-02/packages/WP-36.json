@@ -1,0 +1,62 @@
+{
+  "id": "WP-36",
+  "title": "Close the last two live stages: card mint from the open transaction, holder index from transfer logs, re-authorization nonces",
+  "goal": "Make buyback and distribution reachable in liveMode true so a full eight-stage live cycle runs against fake transports, and remove the last known money-safety gap from WP-35's review. (1) Buyback: the Collector Crypt open response carries no card mint, so derive the mint from the open transaction itself: after open, read the transaction through solana-rpc (getTransaction with jsonParsed post token balances at finalized commitment), select the token account owned by the operator wallet whose balance went from 0 to 1 in that transaction, record the mint in the open evidence (the WP-31 production open schema already expects the mint from post token balances), and let the buyback stage use it; if more than one candidate mint appears, refuse with a named error instead of guessing. (2) Distribution: the holder snapshot needs every HKMN holder at the cycle block; add an eth_getLogs based transfer feed to robinhood-rpc (paged block ranges, topic filter for the ERC20 Transfer event, read at latest with block hashes recorded, never requiring finalized) and wire packages/runner/src/distribution/snapshot-indexer.mjs to it through the stage driver so the pro-rata manifest, the distribution signer approval and the verifier receipt from hookemon-verifier are produced and the payout stage becomes reachable. (3) Nonces: funding.mjs and payout.mjs derive EVM nonces deterministically from onchainCycleId, so a legitimate second authorizeFunding for the same cycle (after cancelExpiredFundingAuthorization or authorizeFundingAfterFailure) would collide; derive nonces from the attempt sequence recorded in the cycle repository (cycle id plus attempt index) so retries after a recorded failure get fresh nonces while a crash-resume of the same attempt reuses the recorded one.",
+  "deps": ["WP-35"],
+  "parallelGroup": 11,
+  "writeSet": [
+    "packages/adapters/src/app/stages/open.mjs",
+    "packages/adapters/src/app/stages/buyback.mjs",
+    "packages/adapters/src/app/stages/distribution.mjs",
+    "packages/adapters/src/app/stages/payout.mjs",
+    "packages/adapters/src/app/stages/funding.mjs",
+    "packages/adapters/src/app/stages/action-builder.mjs",
+    "packages/adapters/src/app/stage-driver.mjs",
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/src/app/cycle-repository.mjs",
+    "packages/adapters/src/solana-rpc.mjs",
+    "packages/adapters/src/robinhood-rpc.mjs",
+    "packages/adapters/src/collector-crypt.mjs (only if a documented endpoint is missing)",
+    "packages/adapters/test/app/**",
+    "packages/adapters/test/solana-rpc.test.mjs",
+    "packages/adapters/test/robinhood-rpc.test.mjs",
+    "docs/modules/composition-root.md",
+    "docs/modules/robinhood-rpc-client.md",
+    "docs/modules/solana-rpc-client.md"
+  ],
+  "readSet": [
+    "packages/adapters/src/app/stages/*.mjs and stage-driver.mjs as merged by WP-35 (reconcile requires receipt status and finality; stage-attempt bookkeeping)",
+    "packages/runner/src/cycle/schemas.mjs production open evidence (mint from post token balances) and evidence-profile.mjs",
+    "packages/runner/src/distribution/snapshot-indexer.mjs (input feed shape), pro-rata.mjs, distribution-signer.mjs, settlement-worker.mjs",
+    "packages/adapters/bin/hookemon-verifier.mjs and src/signing/*.mjs (verifier receipts, signer roles)",
+    "packages/runner/src/automation/automated-cycle-service.mjs STAGE_JOIN_PRECONDITIONS",
+    "docs/audit/2026-09-02/summaries/*.json entries about the Collector Crypt API and Solana token accounts",
+    "docs/modules/cycle-runner.md, composition-root.md, signing.md"
+  ],
+  "steps": [
+    "solana-rpc.mjs: add getTransactionTokenBalanceChanges(signature, {commitment}) returning owner, mint, pre and post amounts per token account from the parsed transaction; unit test with a fixture response; open.mjs records the derived mint in the open evidence and refuses on zero or multiple candidates",
+    "buyback.mjs: replace the refusal with the live path: getBuybackAvailable for the mint, build the buyback request, sign and broadcast through the Solana operator signer client, record the attempt, reconcile by transaction status and finality, translate into the runner evidence envelope",
+    "robinhood-rpc.mjs: add getTransferLogs({token, fromBlock, toBlock, pageSize}) over eth_getLogs with the ERC20 Transfer topic, block hash recorded per page; unit test with fixture responses including a paged range and a reorg-detected page (hash mismatch on re-read) that is retried",
+    "distribution.mjs: replace the refusal with the live path: snapshot holders at the cycle block through snapshot-indexer fed by getTransferLogs, compile the pro-rata manifest, obtain the distribution approval through the distribution signer client, wait for the verifier receipt from hookemon-verifier (poll the receipts directory with a bounded timeout), hand the pair to payout",
+    "funding.mjs and payout.mjs: nonce from the recorded attempt sequence; add tests for retry-after-recorded-failure (fresh nonce) and crash-resume (same nonce, no re-broadcast)",
+    "compose.test.mjs: a full liveMode true eight-stage cycle with fake transports and fake verifier receipts reaches a settled payout; per-stage crash-and-resume tests for buyback, distribution and payout; liveMode false proof still green; update the three cards; run adapters, runner, dashboard, scripts/tests and the clean-room scanner before the single commit"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test packages/dashboard/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "No LiveModeIntegrationPendingError remains; a liveMode true cycle with fake transports runs all eight stages to a settled payout in compose.test.mjs",
+    "The open evidence carries a mint derived from the transaction's token balance changes; ambiguous cases refuse with a named error",
+    "The holder snapshot is built from paged transfer logs with recorded block hashes and survives a simulated reorg on one page",
+    "Retry after a recorded failure uses a fresh nonce; crash-resume of the same attempt never re-broadcasts",
+    "With liveMode false no code path reaches sign or broadcast; all suites green; clean-room scanner green"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context reviewer mandatory; the reviewer must reproduce the eight-stage live proof, the liveMode false proof and the nonce tests, and must check that no key material is read anywhere. If a Collector Crypt or Solana fact is genuinely missing, model it as a validated configuration value and report it; never guess. The public Robinhood RPC serves state at latest only; never require finalized. Keep gates/init.json and docs/modules/index.json untouched (the coordinator registers cards after merge). The head is clean: cleanroom passes, runner 383, adapters 291, dashboard 108 green, scripts/tests 407/409 (phase1-release and phase1-reproducibility red, owned by WP-22; leave them)."
+}

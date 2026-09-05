@@ -1,0 +1,55 @@
+{
+  "id": "WP-17",
+  "title": "Dashboard backend: control service serving the hookemon.com contracts",
+  "goal": "Implement packages/dashboard as the control service behind the LIVE website https://hookemon.com (a Cloudflare Worker that proxies /api/cycle-status, /api/community-dashboard and /operator/api/* to an HTTPS control service). The service must serve, byte-exact to the website's strict validators, GET /healthz, GET /public/api/cycle-status (schemaVersion 3), GET /public/api/community-dashboard (schemaVersion 5), and the operator routes GET /operator/api/bootstrap, /operator/api/dashboard, /operator/api/cards, /operator/api/audit and POST /operator/api/decisions, authenticated by the x-hookemon-proxy-credential header (timing-safe compare) plus optional Cloudflare Access JWT (RS256 via JWKS, node:crypto) and recording every decision in an append-only hash-chained audit log. Decisions are the owner's control surface: interval, allowed packs/orders, pause/resume, spend caps, restart/reconcile request. Dependency-free (node:http, node:sqlite for the read projection only).",
+  "deps": [
+    "WP-14",
+    "WP-16",
+    "WP-15"
+  ],
+  "parallelGroup": 7,
+  "writeSet": [
+    "packages/dashboard/src/server.mjs",
+    "packages/dashboard/src/contracts/*.mjs",
+    "packages/dashboard/src/routes/*.mjs",
+    "packages/dashboard/src/projections/*.mjs",
+    "packages/dashboard/src/auth/*.mjs",
+    "packages/dashboard/src/storage/sqlite-projection.mjs",
+    "packages/dashboard/src/public/index.html",
+    "packages/dashboard/test/**/*.test.mjs",
+    "docs/modules/dashboard.md"
+  ],
+  "readSet": [
+    "<worktrees>/mainnet-cycle-canary/apps/web/lib/public-cycle-status.ts (exact public status contract, schemaVersion 3)",
+    "<worktrees>/mainnet-cycle-canary/apps/web/lib/public-community-snapshot.ts (exact community snapshot contract, schemaVersion 5)",
+    "<worktrees>/mainnet-cycle-canary/apps/web/lib/public-dashboard-profile.ts (profile/network shape; the mainnet profile must become Robinhood Chain 4663 + Solana mainnet, coordinated with WP-18)",
+    "<worktrees>/mainnet-cycle-canary/apps/web/worker/index.ts, worker/public-cycle-proxy.ts, worker/public-community-proxy.ts, worker/operator-proxy.ts (how the Worker calls the service: paths, headers, size limits, caching)",
+    "<worktrees>/mainnet-cycle-canary/apps/web/app/operator/OperatorControlPanel.tsx and operator-types.ts (operator API payloads)",
+    "<worktrees>/mainnet-cycle-canary/apps/operator/src/operator-control-api.js, operator-control-decision.js, operator-control-policy.js, operator-access-auth.js, public-community-snapshot.js, run-operator-control.js (legacy producer of the same contracts; technique reference only, re-implement clean-room)",
+    "scratchpad/w2/DESIGN.md section 5"
+  ],
+  "steps": [
+    "Read the website's validators first and write JSON-schema-like validators in packages/dashboard/src/contracts/ that reproduce their exact key sets and value rules (exact keys, money as decimal strings, ISO timestamps, countdownSeconds = ceil((nextCycleAt-generatedAt)/1000), schemaVersion 3 / 5, profile 'mainnet' with badge 'MAINNET')",
+    "Define the Robinhood network profile: evm:{name:'robinhood-chain', chainId:4663, label:'Robinhood Chain'} (or the exact shape the site profile file expects after WP-18 updates it), solana mainnet genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+    "Build the public cycle-status projection from the durable journal/scheduler state (WP-14/WP-27/WP-16 status projection): executionState active/paused, nextCycleAt from the scheduler, cycle actions/cards/roundAccounting from the reducer state, USDG/Circle USD amounts as micro units, no signer identities, no in-flight digests",
+    "Build the community snapshot: cumulative metrics over archived cycles, latestCycle with transactions {chain:'evm'|'solana', purpose, id} (map Robinhood tx hashes to chain 'evm' as the contract requires or extend the contract together with WP-18), last 12 cards, delayed flag and poolObservedAt freshness rule (90s)",
+    "Implement the operator routes and the decisions model: bootstrap (configuration + activeCycle + limits), dashboard (read model), cards (paginated history with filters/cursor), audit (hash-chained decision log, cursor/limit), decisions POST (interval, allowedPackIds, requestedOrders, maxBoostersPerCycle, spend caps, pause, resume, restart-request/reconcile-request); every decision validated against the standing-authority caps and written atomically to the operator state file (WP-06 schema) so the scheduler picks it up on the next tick",
+    "Auth: require x-hookemon-proxy-credential (timing-safe) on /operator/api/*; verify cf-access-jwt-assertion (RS256, JWKS URL and issuer/audience from config) when configured; public routes unauthenticated, GET only, no query strings, JSON with the same cache headers the Worker expects",
+    "Serve a minimal built-in static status page at / for local operation (dependency-free HTML) that reads the same two public endpoints; the production site remains hookemon.com",
+    "Tests: contract tests that feed the service output through a Node port of the website validators (copy the validation logic as test helpers, clean-room), auth tests (missing/invalid credential, JWT), decision validation and audit-chain tests, projection tests from fixture journals"
+  ],
+  "tests": [
+    "node --test packages/dashboard/test/**/*.test.mjs",
+    "node --test packages/dashboard/test/routes/*.test.mjs"
+  ],
+  "acceptance": [
+    "Every public response passes the website's exact validators (ported as test helpers) for schemaVersion 3 and 5",
+    "Operator routes reject without the proxy credential and, when configured, without a valid Access JWT",
+    "Decisions change interval/packs/pause and are visible to the scheduler via the operator state file; the audit log is hash-chained",
+    "Public routes never leak signer identities, exact holder balances, or in-flight authorization digests",
+    "node --test passes; packages/dashboard has no npm dependencies"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "The durable journal itself stays the hash-chained append-only file store; sqlite is a projection only. R3, exposes owner-authenticated control routes: per AGENTS.md, use a fresh-context independent reviewer before merge. COORDINATOR NOTE: the live website exists at https://hookemon.com; its source (Cloudflare Worker, vinext/React) lives only on the legacy branch codex/mainnet-cycle-canary under apps/web. This package must serve the site's existing contracts so the site goes from 'Connecting\u2026' to live data once PUBLIC_CYCLE_STATUS_URL / PUBLIC_COMMUNITY_SNAPSHOT_URL / OPERATOR_CONTROL_SERVICE_URL point at this service. CONTRACT FACTS extracted from the website source: operator decision types are activate, pause, run-cycle-now, skip-next-cycle, update-configuration (POST /operator/api/decisions); bootstrap payload keys: catalog, readiness, rewardRecipientLimits, state; dashboard payload keys: activeCycle, cycleStartProjectPoolObservedAt, execution, generatedAt, historyComplete, latestCycle, latestCycleTopAllocations, metrics, nextCycleAt; audit entries: action, actor, eventId, note, observedVersion, occurredAt, outcome, resultCode, sequence with nextCursor = last sequence; cards route: paginated with productId/rarity/from/to/minBuyback/maxBuyback filters and sort recent|buyback-desc|buyback-asc, response {cards, nextCursor, historyComplete}; ActiveCycle type: cycleId, status, updatedAt, configurationRevision, allowedPackIds, requestedOrders[{productId,quantity}], maxBoostersPerCycle, maxUnitPriceMicroUsdg, maxCycleBudgetMicroUsdg, max24HourBudgetMicroUsdg, revealedCards. The site's DashboardNetwork type currently allows only EVM L1 mainnet/Sepolia; WP-18 extends it with Robinhood Chain (chainId 4663, official explorer URL from docs.robinhood.com) and WP-17 must emit exactly the shape WP-18 defines: agree on network.evm = {name:'robinhood', chainId:4663, label:'Robinhood Chain'} unless the site tests demand otherwise. Read the exact producer/validator files listed in readSet before coding."
+}

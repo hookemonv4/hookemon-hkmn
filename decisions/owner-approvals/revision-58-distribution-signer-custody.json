@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes approval of REQ-distribution-2's distribution-signer/verifier custody split, as corrected by the owner (coordinator decision D7, MODIFIED) against the original design synthesis draft. The distribution-signer signature is produced by the worker's own automated process; the verifier is a separate, independently automated process holding its own key, designed to run on a different host from the worker, that independently recomputes the manifest's root hash and root sum from finalized chain data and signs only on an exact match. No human signs per cycle by default; an optional manual/human-signed verifier mode may exist as an operator override but is never the default path. This draft names no concrete host or operator identity for the verifier process — that assignment is a separate operational decision the owner makes before the verifier process is actually deployed, and the signer service refuses to produce a live distribution-signer or verifier signature until both this draft and decisions/owner-approvals/revision-58-standing-authority.json are signed.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/ADR-0021-autonomous-cycle-authority.md": "631ec53bd91869c9fd4b6ef91cc61937e489468bcf4e51caaec119b5561c5fc4",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

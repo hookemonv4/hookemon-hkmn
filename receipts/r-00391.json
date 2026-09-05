@@ -1,0 +1,16 @@
+{
+  "id": "r-00391",
+  "at": "2026-09-01T16:45:05.448Z",
+  "type": "threat-pass-completed",
+  "phase": "redteam",
+  "result": "PASSED",
+  "data": {
+    "itemId": "R5",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "qa/redteam/threat-model.json": "9d5fadfe6ccf636b0ee12326ba957fd28614b774596880761e69b0029b1d9622"
+  }
+}

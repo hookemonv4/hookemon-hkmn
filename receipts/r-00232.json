@@ -1,0 +1,20 @@
+{
+  "id": "r-00232",
+  "at": "2026-08-31T17:06:15.450Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-revision-55-cleanroom-baseline-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approved the manual one-cycle Phase 1 rescope and instructed continuous local completion while GitHub remains unavailable."
+  },
+  "inputHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "product/PRD.md": "ff3a9c2d4688ee93563555338a8442c9663975a56f3600593f377d535e340cb5",
+    "decisions/owner-approvals/phase-1-revision-55-cleanroom-baseline-approved.json": "a9e06c61d0b3e8059ffdf96447f51af34d558bd661382d107f84e53ff91903bf"
+  }
+}

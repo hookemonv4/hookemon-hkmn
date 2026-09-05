@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "hookemon.redteam-review-bundle.v1",
+  "phase": "redteam",
+  "requirementsRevision": 63,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "artifacts": {
+    "resolutions": {
+      "path": "qa/redteam/resolutions.json",
+      "sha256": "e9f0d5c56d77ee912d8608d1b7f3587bfd57166faebbbf1b50d4bcdde99588df"
+    },
+    "termination": {
+      "path": "qa/redteam/termination.json",
+      "sha256": "679ec9a1470697c245bdb9f90ada4cffbff369f260c431eb801be03ba26edb5f"
+    }
+  },
+  "findings": [
+    {
+      "id": "RT-R55-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "evidence-proof-validation",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R55-03",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "redteam-receipt-authority",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R55-04",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "module-card-index-authority",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "payout-authorization-binding",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-02",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "signer-key-separation",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-03",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "signer-role-separation",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-04",
+      "reportedSeverity": "medium",
+      "classification": "valid-tradeoff",
+      "canonicalIssue": "degraded-confirmation-binding",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-05",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "operations-liability-control",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-06",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "durable-proof-recovery",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-07",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "production-router-proof",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    },
+    {
+      "id": "RT-R58-08",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "holder-exclusion-completeness",
+      "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+    }
+  ]
+}

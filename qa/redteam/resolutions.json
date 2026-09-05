@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "phase": "redteam",
+  "requirementsRevision": 55,
+  "architectureRevision": 4,
+  "resolvedFindingIds": ["RT-R55-01", "RT-R55-03", "RT-R55-04"],
+  "openFindingIds": ["RT-R55-02", "RT-R55-05", "RT-R55-06"],
+  "resolutions": [
+    {
+      "findingId": "RT-R55-01",
+      "status": "RESOLVED",
+      "control": "F3 and F4 evidence is semantically validated at recording and receipt-verification time, with negative tests for malformed and forged inputs.",
+      "evidence": ["1e647d4", "ac02407", "scripts/tests/gates.test.mjs"]
+    },
+    {
+      "findingId": "RT-R55-03",
+      "status": "RESOLVED",
+      "control": "The historical continuation after the failed redteam gate is invalidated. Gate checks require authoritative predecessors, reject downstream overrides while a predecessor is failed or stale, and project downstream phases stale; the current redteam gate remains FAILED with no override.",
+      "evidence": ["0b91d9c", "8a3ff3f", "dd48c94", "scripts/tests/state.test.mjs", "state.json"]
+    },
+    {
+      "findingId": "RT-R55-04",
+      "status": "RESOLVED",
+      "control": "A6 transitively binds every current module card and validates exact identity, revision, digest, path, title, headings, and fence structure.",
+      "evidence": ["323b2f3", "9851a10", "fb983c6", "scripts/tests/gates.test.mjs"]
+    }
+  ],
+  "openControls": [
+    {
+      "findingId": "RT-R55-02",
+      "status": "OPEN_FAIL_CLOSED",
+      "requiredResolution": "Owner reapproval of corrected cooperative bounds and explicit acceptance or redesign of full accrued-liability Operations exposure."
+    },
+    {
+      "findingId": "RT-R55-05",
+      "status": "OPEN_FAIL_CLOSED",
+      "requiredResolution": "Approve and implement durable non-expiring proof retention, independent failure domains, recovery, republish, and long-horizon verification."
+    },
+    {
+      "findingId": "RT-R55-06",
+      "status": "OPEN_FAIL_CLOSED",
+      "requiredResolution": "Bind and execute the actual production Robinhood router and PoolManager settlement proof with zero additional surcharge."
+    }
+  ],
+  "unresolvedCriticalCount": 0,
+  "unresolvedHighCount": 3,
+  "productionAuthorizationGranted": false,
+  "externalActionAuthorizationGranted": false
+}

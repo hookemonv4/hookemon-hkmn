@@ -1,0 +1,16 @@
+{
+  "id": "r-00459",
+  "at": "2026-09-03T08:30:01.657Z",
+  "type": "task-risk-ordering-verified",
+  "phase": "tasks",
+  "result": "PASSED",
+  "data": {
+    "itemId": "T3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/tasks.json": "53eba48fcab9ca3c2d95e9225dbd8137720d756f017448ca15b2974a4eba7275",
+    "tasks.json": "56864737a9c80b072412e964091459402cc1f5b7d5160905c8b578fef7c058fa"
+  }
+}

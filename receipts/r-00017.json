@@ -1,0 +1,11 @@
+{
+  "id": "r-00017",
+  "at": "2026-08-30T01:19:50.838Z",
+  "type": "project-created",
+  "phase": "init",
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c"
+  }
+}

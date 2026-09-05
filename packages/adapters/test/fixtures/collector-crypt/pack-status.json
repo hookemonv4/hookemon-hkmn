@@ -1,0 +1,39 @@
+{
+  "memo": "953cc94e-fd51-4f5f-bbcc-5a35faf7df65",
+  "pack": {
+    "wallet": "GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm",
+    "transaction_signature": "5Nf9kZpurchaseSignature",
+    "created_at": "2025-05-26T17:30:00.000Z",
+    "status": "confirmed",
+    "webhook_received": true,
+    "refunded": null,
+    "refund_transaction_signature": null,
+    "turbo_mode": false,
+    "pack_type": "pokemon_50",
+    "token_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  },
+  "send": {
+    "from_wallet": "prize_wallet_public_key",
+    "to_wallet": "GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm",
+    "nft_address": "H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA",
+    "transaction_signature": "3Dq2kH65vqEzpBKczyDLzNYS8sXmtS5GS9MYTwjVaPM4tqVxjtPGnQG4mKpSPa5iTzqomhFgo9nYs3grRNPp68Fh",
+    "created_at": "2025-05-26T17:31:00.000Z",
+    "status": "confirmed",
+    "webhook_sent": true,
+    "points": 0,
+    "insured_value": 50000000,
+    "prize_tier": 4,
+    "vrf_proof": "vrf_proof_string"
+  },
+  "buyback": [
+    {
+      "user_wallet": "GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm",
+      "refund_amount": "42500000",
+      "created_at": "2025-05-26T17:32:33.588Z",
+      "webhook_confirmed": true,
+      "transaction_signature": "3Dq2kH65vqEzpBKczyDLzNYS8sXmtS5GS9MYTwjVaPM4tqVxjtPGnQG4mKpSPa5iTzqomhFgo9nYs3grRNPp68Fh",
+      "status": "complete",
+      "alt_recipient": null
+    }
+  ]
+}

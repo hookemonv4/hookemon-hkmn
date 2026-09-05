@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Owner approved the manual one-cycle Phase 1 design and instructed freigeben for requirements revision 55.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "53f541f618dcd7cf0cfd862f8683406c823d5e22924584b9abfdc1d15e1757ef",
+    "policy/policy.json": "9c8a032c3067b0ce5027507f0328e77fe4ae46960e776e8e8c4685bb69dfe41d",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

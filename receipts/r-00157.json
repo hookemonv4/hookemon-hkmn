@@ -1,0 +1,20 @@
+{
+  "id": "r-00157",
+  "at": "2026-08-30T14:21:01.912Z",
+  "type": "gate",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "gateVersion": 6,
+    "problems": []
+  },
+  "inputHashes": {
+    "gates/spec.json": "9f683e2dd6aa37ef2f461cedc2025ac9a8a6a1ee0fcc58a72b9989185be5e7a2",
+    "gates/runs/spec.json": "d8b5bfcdea761bdaedb704d21dc90f28c99721ec40e130f90793ec18131ecc53",
+    "receipts/r-00148.json": "3bf98f771174190463462dac81dc95d01db4ea2c9de620cb8e4999f14db413cd",
+    "receipts/r-00149.json": "5a71344fa86e9ef4aa3646e5e5113bb7d5bf9e494d37c7fa58ffb7e940880880",
+    "receipts/r-00150.json": "9a239ed9a4002b616f2fd9e7750e51a301d6239f0f21e2034dd24470303b0432",
+    "receipts/r-00151.json": "090e3d910716d7a2a369f174919972856e2da256fc053b9b57c5a0dc7ce0b5f3",
+    "receipts/r-00152.json": "fc1a3515beb657df0db759ed1c5b4cbc281b660aa4ae750a438d432f9e2bf4af"
+  }
+}

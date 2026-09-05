@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "hookemon.redteam-evidence.v1",
+  "phase": "redteam",
+  "requirementsRevision": 63,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "reviewedFindingIds": [
+    "RT-R55-01",
+    "RT-R55-03",
+    "RT-R55-04",
+    "RT-R58-01",
+    "RT-R58-02",
+    "RT-R58-03",
+    "RT-R58-04",
+    "RT-R58-05",
+    "RT-R58-06",
+    "RT-R58-07",
+    "RT-R58-08"
+  ],
+  "record": "Independent current-cycle review material used only by release-readiness tests."
+}

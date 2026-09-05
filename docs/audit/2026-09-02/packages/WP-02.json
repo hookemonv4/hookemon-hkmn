@@ -1,0 +1,38 @@
+{
+  "id": "WP-02",
+  "title": "Fee-policy conformance: cumulative remainder + minimum-quote revert",
+  "goal": "Close GAP-1/GAP-2: persist cumulative Programmable/project fee remainders across the pool's lifetime and revert any swap with gross executed-USDG below 1000 smallest units, per programmable-fee-policy.md v1.1.0.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "packages/contracts/src/accounting/FeeAccounting.sol",
+    "packages/contracts/src/market/CanonicalMarket.sol",
+    "packages/contracts/test/accounting/FeeAccounting.t.sol",
+    "packages/contracts/test/market/CanonicalMarket.t.sol"
+  ],
+  "readSet": [
+    "programmable-fee-policy.md",
+    "standard-fee-kernel.md"
+  ],
+  "steps": [
+    "Add two persisted uint256 cumulative-remainder accumulators (Programmable bucket, project/treasury+process bucket) matching the kernel doc's floor(sum(G_i*1000)/1e6) formula exactly",
+    "Modify _splitLiability to accumulate the per-swap floor remainder instead of discarding it, and to draw down the accumulator on the next swap once it exceeds one whole unit",
+    "Add a revert in _fee()/_splitLiability for any swap with executedUsdg < 1000",
+    "Update test_revision55RoundingAssignsEveryRemainderToProcess and testFuzz_revision55SplitConservesTotal to assert the new cumulative-remainder behavior instead of the old per-swap-floor behavior",
+    "Add boundary-case tests: remainder exactly at 1 unit, remainder never resets on a claim, swap of exactly 999 units reverts, swap of exactly 1000 units succeeds"
+  ],
+  "tests": [
+    "forge test --match-path 'test/accounting/*.t.sol'",
+    "forge test --match-path 'test/market/*.t.sol'"
+  ],
+  "acceptance": [
+    "Cumulative remainder never resets when Programmable or treasury claims their liability",
+    "A swap with executedUsdg < 1000 reverts atomically",
+    "100k-run fuzz conservation test still passes under the new accrual math (sum of all buckets + remainders == total fee collected)"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "Money-safety-critical accrual math change; needs a fresh-context independent reviewer per AGENTS.md before merge. The 0.10%/0.40%/2.50% bucket split this package's tests assume is UNCONFIRMED (owner decision D9 \u2014 the transcript's '0.5% treasury' is ambiguous between the current coded split and a literal 0.5% treasury bucket). Land the cumulative-remainder and minimum-quote-revert mechanics now (correct regardless of the split), but do not treat the specific bucket percentages as final until D9 is answered. COORDINATOR NOTE after WP-01: base now includes the SwapLiabilitiesAccrued event in FeeAccounting.sol; keep it and extend it if the cumulative remainders need to be observable."
+}

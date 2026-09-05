@@ -1,0 +1,17 @@
+{
+  "id": "r-00023",
+  "at": "2026-08-30T01:19:51.012Z",
+  "type": "dependency-pin",
+  "phase": "init",
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "product/dependency-pins.json": "8642ed8b017def7eeb013960a00497b612f79fa03db454d99a93472209e29651",
+    "product/dependency-verification.json": "b156047b89e8bdee2510d7e7b120da524bc5acd54cee4c5ae1ac07ed4bdf2bfa",
+    ".nvmrc": "7e8a2fa94951112b894a3dbe3d05efef5e9263741fa49125f0a70f40fedab4cc",
+    ".github/workflows/v4-gates.yml": "bb61c21abf7f34a0f152d5758cecd610b9044e92427a3ac99701690d5e79b356",
+    ".gitleaks.toml": "27630a96d6c55755cc37620f3933d5cab94b1eb78a726a32e11212972525d76e",
+    "packs/base/pack.json": "fec3e938aa995e1bfc20d26bc2a42e7191176df419eb4bf64820b36337a6f7de",
+    "scripts/verify-control-dependencies.mjs": "01f7c1b884d5979f8bec8bb5ac04e3be4fd3a0b4aaeb2876395abb9bf6395edf"
+  }
+}

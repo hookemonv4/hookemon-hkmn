@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "requirementsRevision": 55,
+  "interfaceBinding": "deferred-until-frozen",
+  "processReleaseIsolation": {
+    "requirements": ["REQ-process-budget-3"],
+    "cases": [
+      {
+        "releaseFailure": "wrong-caller",
+        "followingOperation": "canonical-trading",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "wrong-caller",
+        "followingOperation": "fee-accrual",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "wrong-caller",
+        "followingOperation": "fee-claim",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "wrong-caller",
+        "followingOperation": "valid-payout-funding",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "wrong-caller",
+        "followingOperation": "funded-holder-payment",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "replay",
+        "followingOperation": "canonical-trading",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "replay",
+        "followingOperation": "fee-accrual",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "replay",
+        "followingOperation": "fee-claim",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "replay",
+        "followingOperation": "valid-payout-funding",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "replay",
+        "followingOperation": "funded-holder-payment",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "over-liability",
+        "followingOperation": "canonical-trading",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "over-liability",
+        "followingOperation": "fee-accrual",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "over-liability",
+        "followingOperation": "fee-claim",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "over-liability",
+        "followingOperation": "valid-payout-funding",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "over-liability",
+        "followingOperation": "funded-holder-payment",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "token-failure",
+        "followingOperation": "canonical-trading",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "token-failure",
+        "followingOperation": "fee-accrual",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "token-failure",
+        "followingOperation": "fee-claim",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "token-failure",
+        "followingOperation": "valid-payout-funding",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      },
+      {
+        "releaseFailure": "token-failure",
+        "followingOperation": "funded-holder-payment",
+        "expected": { "releaseMutation": "none", "unusedProcessLiability": "unchanged", "followingOperation": "same-outcome-as-clean-baseline" }
+      }
+    ]
+  },
+  "stateful": {
+    "requirements": [
+      "REQ-payout-commitment-4",
+      "REQ-payout-commitment-6",
+      "REQ-holder-settlement-7"
+    ],
+    "minimumSequences": 100000,
+    "operations": [
+      "fee-accrual",
+      "fee-claim",
+      "process-release",
+      "payout-funding",
+      "holder-payment",
+      "retry",
+      "transfer-failure",
+      "direct-transfer",
+      "treasury-handover",
+      "operations-handover"
+    ],
+    "invariants": [
+      "hookUsdgBalance>=allRecognizedLiabilities",
+      "payoutFunded=payoutPaid+payoutUnpaid",
+      "onePayoutCannotMutateAnotherPayout",
+      "directOrExcessTransferCreatesNoLiability",
+      "failedCallLeavesNoPartialState"
+    ]
+  },
+  "gas": {
+    "requirements": ["REQ-holder-settlement-6"],
+    "providerLimit": "integration-pending",
+    "requiredHeadroom": "positive",
+    "cases": [
+      "index-0-valid-first-payment",
+      "index-1023-valid-first-payment",
+      "replay",
+      "malformed-depth",
+      "malformed-proof",
+      "maximum-subtree-sums",
+      "transfer-failure"
+    ]
+  }
+}

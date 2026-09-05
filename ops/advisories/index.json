@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "scope": "ACTIVE_PACK_ADVISORIES",
+  "authority": "LOCAL_INDEX_ONLY_REQUIRES_OWNER_REVIEW",
+  "activePacks": [
+    {
+      "id": "base",
+      "version": "0.1.0",
+      "manifest": "packs/base/pack.json",
+      "sha256": "fec3e938aa995e1bfc20d26bc2a42e7191176df419eb4bf64820b36337a6f7de",
+      "advisoryCount": 0
+    }
+  ],
+  "advisories": [],
+  "conclusion": "The sole active pack contributes no advisory checklists.",
+  "ownerReviewed": false,
+  "releaseApprovalGranted": false,
+  "externalActionAuthorizationGranted": false
+}

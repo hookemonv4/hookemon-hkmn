@@ -1,0 +1,17 @@
+{
+  "id": "r-00195",
+  "at": "2026-08-30T20:31:37.369Z",
+  "type": "task-projection-trace-verified",
+  "phase": "tasks",
+  "result": "PASSED",
+  "data": {
+    "itemId": "T5",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/tasks.json": "79fcf7f10b86433f446e289a362ce4b05cdce071d99750f5aa58ae165a36420a",
+    "specs/requirements.json": "c057236c281dd2acb94dbc6d80fc7e64548257a8e729dfacf835d460a3968d13",
+    "tasks.json": "5b5a50050abd3c0450f22d92d196a77dc30a59f5c882e0ae90fbfadf46b1871a"
+  }
+}

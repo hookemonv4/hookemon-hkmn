@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "programmable.custom-launch-capabilities.v4",
+  "apiVersion": "4",
+  "chain": {
+    "id": "4663",
+    "caip2": "eip155:4663",
+    "name": "Robinhood Chain Mainnet"
+  },
+  "chainDeploymentDescriptorDigest": "0x161bbb4f366bf986721e3201fbe1192fd5fbde44a8f0c6140c3116a863463f4e",
+  "profile": {
+    "schemaVersion": "programmable.custom-launch-profile-ref.v4",
+    "structuralProfileId": "programmable.custom-launch.robinhood-mainnet.v1",
+    "businessProfileId": "robinhood-production-launch",
+    "admissionDescriptorDigest": "sha256:99b4ccabdaaf143bad28a8f6af441a1b93e1f113d0179236328b7fa594d1f948",
+    "admissionPolicyDigest": "sha256:31e6b286ca839b31cb1edfe30c05d9f334892f3d84377961dc10b93959c7e216",
+    "admissionBindingDigest": "sha256:f31643e6e9ff6d5409d59a2fc3ac7fb5ac9cfcb3af08e95c9478bc95ddfa66a2",
+    "admissionSchemaDigest": "sha256:a28a6de6208d6ba7b65b4b706174509570955ba9ce9714624bcb2046ab7beae7",
+    "profileRevision": 1,
+    "profileVersion": "4.0.0",
+    "profileDigest": "sha256:484b1dc6e9091804fabc230f2b3a7504940fa00264f8e66e82a66a951e71f1a0"
+  },
+  "chainDeployment": {
+    "schemaVersion": "programmable.robinhood-chain-deployment.v1",
+    "chainDeploymentId": "robinhood-mainnet-custom-launch-v1",
+    "chainId": "4663",
+    "contracts": {
+      "programmableLaunchStampRouter": {
+        "address": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+        "runtimeCodeHash": "0x1dbbdaaad901ea3c6134dca0d4872a4789b3c071bf8ccfb44edd65d26d817388"
+      },
+      "permitAuthority": {
+        "address": "0xeD617CE7f82e2AB589aDeFFD319D1D872Bc8De06",
+        "runtimeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c"
+      },
+      "graphFactory": {
+        "address": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+        "runtimeCodeHash": "0xd23692fae59331592048e71a96d4963e170ee56e449683dc9f7fa3f9470018b8"
+      },
+      "poolManager": {
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "runtimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      },
+      "positionManager": {
+        "address": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+        "runtimeCodeHash": "0xc873e135dc9aaec88489cfbad146b4cb49d6a32e0d80326377784b7ba17670b2"
+      },
+      "stateView": {
+        "address": "0xF3334192D15450CdD385c8B70e03f9A6bD9E673b",
+        "runtimeCodeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6"
+      },
+      "v4Quoter": {
+        "address": "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94",
+        "runtimeCodeHash": "0xd707b1da8cb165e5ea35a3b4450d971eb562ec171e23492aa117036b78a868f6"
+      },
+      "permit2": {
+        "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+        "runtimeCodeHash": "0x5208783f52488f7d3493e5e38311ab707c1d75457fe472a19b0b4d57d66a7fca"
+      },
+      "universalRouter": {
+        "address": "0x06AfBA43Fd06227fA663b0DAecF536f6EaA6bf99",
+        "runtimeCodeHash": "0xbe8e8191bb42d843c2e948a5a55772eaab864ce01e54dcd47c9d089170b302d5"
+      }
+    },
+    "deploymentEvidence": {
+      "schemaVersion": "programmable.robinhood-atomic-root-deployment-evidence.v1",
+      "deploymentId": "robinhood-mainnet-custom-launch-v1",
+      "chainId": "4663",
+      "coveredContracts": [
+        "programmableLaunchStampRouter",
+        "graphFactory",
+        "permitAuthority"
+      ],
+      "resultingContracts": [
+        {
+          "contract": "permitAuthority",
+          "address": "0xeD617CE7f82e2AB589aDeFFD319D1D872Bc8De06",
+          "runtimeCodeHash": "0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c",
+          "stateEvidenceDigest": "sha256:137f4ffc362627944987524460ad429d3706faeeacbf70eb3d2a369d2c3d0202"
+        },
+        {
+          "contract": "graphFactory",
+          "address": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+          "runtimeCodeHash": "0xd23692fae59331592048e71a96d4963e170ee56e449683dc9f7fa3f9470018b8",
+          "stateEvidenceDigest": "sha256:0f0777574e17c446a489281fae417c75e06c8fc2938ad205b958747af2dfe614"
+        },
+        {
+          "contract": "programmableLaunchStampRouter",
+          "address": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+          "runtimeCodeHash": "0x1dbbdaaad901ea3c6134dca0d4872a4789b3c071bf8ccfb44edd65d26d817388",
+          "stateEvidenceDigest": "sha256:ea9a7374387c93fa145fa01b8daf66f73ea3fd779bcbd3444d53a1f8579f492a"
+        }
+      ],
+      "evidenceDigest": "sha256:13fe47a93d414bbdb6bd9cf16bbfefb6bc827d76643a59aa6be83e0803ffd747"
+    },
+    "externalRootDeploymentEvidence": [
+      {
+        "contract": "poolManager",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "runtimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+        "evidenceDigest": "sha256:19fd81eab9228d6bcb15f6a9736910670ea8da4e772abb04de262d8677d5d919"
+      },
+      {
+        "contract": "positionManager",
+        "address": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+        "runtimeCodeHash": "0xc873e135dc9aaec88489cfbad146b4cb49d6a32e0d80326377784b7ba17670b2",
+        "evidenceDigest": "sha256:1c63c0c1d97d3981bb537ec064e07edac9fc606b3a4766b6ba831e706a0c97f2"
+      },
+      {
+        "contract": "stateView",
+        "address": "0xF3334192D15450CdD385c8B70e03f9A6bD9E673b",
+        "runtimeCodeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6",
+        "evidenceDigest": "sha256:1c1fac08f22e8041a0737e2eff4cfc18c4523a2b774fe71f48d40399b9e93239"
+      },
+      {
+        "contract": "v4Quoter",
+        "address": "0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94",
+        "runtimeCodeHash": "0xd707b1da8cb165e5ea35a3b4450d971eb562ec171e23492aa117036b78a868f6",
+        "evidenceDigest": "sha256:57ddccbbb905c13f5a0a7d3a7646f4d2e7d05e351620066d66635d8fee03804e"
+      },
+      {
+        "contract": "universalRouter",
+        "address": "0x06AfBA43Fd06227fA663b0DAecF536f6EaA6bf99",
+        "runtimeCodeHash": "0xbe8e8191bb42d843c2e948a5a55772eaab864ce01e54dcd47c9d089170b302d5",
+        "evidenceDigest": "sha256:72f8a3b701264aeeb93a7b4583309ad6c1334f1cc8546475c20f76975a8fb7eb"
+      }
+    ],
+    "permit2GenesisProvenance": {
+      "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "runtimeCodeHash": "0x5208783f52488f7d3493e5e38311ab707c1d75457fe472a19b0b4d57d66a7fca",
+      "evidenceDigest": "sha256:93200f4be1543da0ea876af1d91ff0cd4dc3da0b500f170b3d42731776be8568"
+    }
+  },
+  "readiness": {
+    "status": "ready",
+    "reasonCodes": []
+  }
+}

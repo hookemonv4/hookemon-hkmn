@@ -1,0 +1,33 @@
+{
+  "id": "WP-19",
+  "title": "Programmable submission.json + launch plan",
+  "goal": "Prepare, but do not execute, the Programmable launch-admission artifacts for chain 4663.",
+  "deps": [
+    "WP-01",
+    "WP-05"
+  ],
+  "parallelGroup": 4,
+  "writeSet": [
+    "release/phase2/submission.json",
+    "release/phase2/launch-plan.md"
+  ],
+  "readSet": [
+    "programmable-v4-hook-builder skill's submission.json template",
+    "script/release/PhaseOneReleasePlan.sol"
+  ],
+  "steps": [
+    "Populate submission.json per the builder skill's schema with every provider-bound field knowable today (fee split, hook permission mask, hookData layout per WP-05, the pinned Programmable owner address per WP-05)",
+    "Set every unknowable field (deployment addresses, chain-deployment digest) explicitly to null / INTEGRATION_PENDING, never omitted",
+    "Write a launch-plan artifact mirroring PhaseOneReleasePlan.sol's pattern, extended to cover the new escrow and chunked-payout contracts"
+  ],
+  "tests": [
+    "node scripts/tests/phase2-launch-evidence.test.mjs"
+  ],
+  "acceptance": [
+    "Schema validates in INTEGRATION_PENDING state",
+    "Every knowable field is populated; every unknowable field is explicitly null, not omitted"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "Cannot execute submission until Programmable's Robinhood profile is readiness:available (external, out of the repo's control)."
+}

@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "hookemon.programmable-admission-preflight-probe.v1",
+  "purpose": "schema and route evidence only; this intentionally incomplete request cannot represent a launch",
+  "authorization": "Bearer credential supplied in request header; credential redacted and not stored",
+  "route": {
+    "method": "POST",
+    "url": "https://api.programmable.market/v4/chains/4663/custom-launches/preflight",
+    "documentedDescription": "Side-effect-free server-authoritative preflight",
+    "documentedResponseConstants": {
+      "quotaConsumed": false,
+      "nonceAllocated": false,
+      "persisted": false,
+      "walletSignatureRequiredLater": true,
+      "walletBroadcastByService": false
+    }
+  },
+  "request": {
+    "schemaVersion": "programmable.custom-launch-create-request.v4",
+    "chainId": "4663",
+    "caip2": "eip155:4663",
+    "intentionallyMissingRequiredTopLevelFields": [
+      "chainDeployment",
+      "chainDeploymentDescriptorDigest",
+      "profile",
+      "launchWallet",
+      "nonce",
+      "permitWindow",
+      "sourceDescriptor",
+      "sourceBundleManifest",
+      "externalContracts",
+      "projectMetadata",
+      "projectMetadataHash",
+      "projectMetadataImageArtifact",
+      "verificationBundle",
+      "funding",
+      "liquidityModel",
+      "launchIntentHash",
+      "agentAttestation"
+    ],
+    "graphBundle": {
+      "schemaVersion": "programmable.custom-graph-bundle.v1",
+      "sourceBundleSha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "targets": [
+        {
+          "targetId": "wp00b-evidence-only-token",
+          "applicantSalt": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "creationBytecode": "0x00",
+          "constructorArguments": "0x",
+          "initializerCalldata": "0x",
+          "constructorAddressLocators": [],
+          "initializerAddressLocators": [],
+          "deploymentValueWei": "0",
+          "initializerValueWei": "0",
+          "expectedRuntimeCodeHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "componentKind": "token",
+          "declaredHookPermissions": null
+        },
+        {
+          "targetId": "wp00b-evidence-only-hook",
+          "applicantSalt": "0x0000000000000000000000000000000000000000000000000000000000000002",
+          "creationBytecode": "0x00",
+          "constructorArguments": "0x",
+          "initializerCalldata": "0x",
+          "constructorAddressLocators": [],
+          "initializerAddressLocators": [],
+          "deploymentValueWei": "0",
+          "initializerValueWei": "0",
+          "expectedRuntimeCodeHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "componentKind": "hook",
+          "declaredHookPermissions": []
+        },
+        {
+          "targetId": "wp00b-evidence-only-other",
+          "applicantSalt": "0x0000000000000000000000000000000000000000000000000000000000000003",
+          "creationBytecode": "0x00",
+          "constructorArguments": "0x",
+          "initializerCalldata": "0x",
+          "constructorAddressLocators": [],
+          "initializerAddressLocators": [],
+          "deploymentValueWei": "0",
+          "initializerValueWei": "0",
+          "expectedRuntimeCodeHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "componentKind": "other",
+          "declaredHookPermissions": null
+        }
+      ],
+      "pool": {
+        "tokenTargetId": "wp00b-evidence-only-token",
+        "hookTargetId": "wp00b-evidence-only-hook",
+        "fee": 0,
+        "tickSpacing": 1
+      }
+    }
+  },
+  "response": {
+    "httpStatus": 400,
+    "schemaVersion": "programmable.api-error.v1",
+    "error": {
+      "code": "INVALID_REQUEST",
+      "message": "request has unknown or missing fields",
+      "requestId": "da292534-9ebe-4d4b-8b6a-60f9b5ba53ee",
+      "details": {
+        "apiVersion": "v4",
+        "chainId": "4663",
+        "caip2": "eip155:4663",
+        "retryable": false,
+        "timestamp": "2026-09-04T11:24:39.922Z"
+      }
+    }
+  },
+  "interpretation": "The route accepted the authenticated request and rejected its deliberately incomplete schema. It cannot certify a candidate graph, fee policy, exception, or launch eligibility. The documentation, not this error response, proves that the route has no durable side effect."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "r-00067",
+  "at": "2026-08-30T08:41:02.646Z",
+  "type": "spec-approval",
+  "phase": "spec",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "specs/requirements.json": "75b1228eee91c36915f8142635d246817493c6774f3909e131563e0e2881732a",
+    "decisions/owner-approvals/phase-1-spec-revision-49-approved.json": "4b0b958b4e8fd5f630458caff890c59d7115cf8b22d8e4888894fe57fc9772a0"
+  }
+}

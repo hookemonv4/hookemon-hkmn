@@ -1,0 +1,11 @@
+{
+  "id": "r-00042",
+  "at": "2026-08-30T07:29:21.760Z",
+  "type": "owner-decision",
+  "phase": "spec",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/OWNER_DECISIONS.md": "5b249a0dd70842b142314e72e31e90c6e4ba1ae406add3ad78f41297e1d90c44"
+  }
+}

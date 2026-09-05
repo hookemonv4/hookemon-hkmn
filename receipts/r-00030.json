@@ -1,0 +1,17 @@
+{
+  "id": "r-00030",
+  "at": "2026-08-30T04:24:34.587Z",
+  "type": "dependency-pin",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "itemId": "I5",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/init.json": "7608952c8ced7acf461e7e2302f1e6ecd11302c10cec68312196caecf0fbf776",
+    "product/dependency-pins.json": "2c3281bf85eda05b6bc8d868097ef118c850a423ec853b02e999c9adab468394",
+    "product/dependency-verification.json": "c65e2664b4ecac01e9691dcb99da0121605190c5abf6b8f6c4854aa27b595b22"
+  }
+}

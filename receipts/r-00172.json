@@ -1,0 +1,16 @@
+{
+  "id": "r-00172",
+  "at": "2026-08-30T14:40:17.653Z",
+  "type": "task-context-packs-verified",
+  "phase": "tasks",
+  "result": "PASSED",
+  "data": {
+    "itemId": "T4",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/tasks.json": "79fcf7f10b86433f446e289a362ce4b05cdce071d99750f5aa58ae165a36420a",
+    "tasks/context-packs.json": "8a6d851504548f3d1078e40924f5591ddc3d95b46cc844b1cf4f2f49f136a6c1"
+  }
+}

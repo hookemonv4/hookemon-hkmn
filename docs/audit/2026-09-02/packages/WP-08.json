@@ -1,0 +1,37 @@
+{
+  "id": "WP-08",
+  "title": "Collector Crypt provider adapter",
+  "goal": "Clean-room client for the real Collector Crypt gacha API, with --dry-run support.",
+  "deps": [
+    "WP-01",
+    "WP-06"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/adapters/src/collector-crypt.mjs",
+    "packages/adapters/test/collector-crypt.test.mjs"
+  ],
+  "readSet": [
+    "docs.collectorcrypt.com/gacha/api",
+    "product/SOURCE_BOUNDARY.md"
+  ],
+  "steps": [
+    "Implement typed client functions for GET /api/machines, POST /api/generatePack, POST /api/openPack, GET /api/buyback/available, POST /api/buyback, POST /api/submitTransaction, GET /api/pack/status against https://gacha.collectorcrypt.com",
+    "Always send the x-api-key header on every call, including the GET endpoints that currently work without one",
+    "Add exponential-backoff retry and idempotency via the runner's existing requestDigest pattern",
+    "Add a --dry-run mode that performs only the real read-only calls and refuses to call any mutation endpoint",
+    "Record fixture HTTP responses for CI; add a separate, explicitly-labeled live-read-only smoke test (GET /api/status, /api/machines) that is non-blocking in CI"
+  ],
+  "tests": [
+    "node --test packages/adapters/test/collector-crypt.test.mjs"
+  ],
+  "acceptance": [
+    "Every documented mutation endpoint has a typed client function",
+    "x-api-key is sent on every request, GET included",
+    "A network failure triggers idempotent retry, never a duplicate mutation",
+    "--dry-run never calls generatePack/openPack/buyback/submitTransaction"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "Reimplemented clean-room per product/SOURCE_BOUNDARY.md; the legacy canary branch's collector-crypt.js/collector-executor.js may inform technique only, never be copied."
+}

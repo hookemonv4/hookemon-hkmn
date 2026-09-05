@@ -1,0 +1,29 @@
+{
+  "id": "r-00541",
+  "at": "2026-09-03T11:30:41.855Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-009",
+    "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+    "taskFingerprint": "44a18893e01f5691520262301295032174e35a0ea2e9fcb6bdded122f600bcd8",
+    "requirementsRevision": 58,
+    "requirementsHash": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "inputHashes": {
+    "qa/reviews/p1-012-local-verification.json": "99b626bcf3f01b3418a254fc1118a50dd0608beb41e724eece424fc26a14ca1c",
+    "release/phase1/local-candidate.json": "25a064aafe99ccc42218daf21aaa96d821a1368dd76cc3d113af32b876803ad0",
+    "release/phase1/local-evidence.json": "80e697ab5a83d45786f40cba2624a04535102fc188006a146edc49ccb3d63b08",
+    "release/phase1/local-reproducibility.json": "7d7ffb99911a2ebcb4ccae1e2c9d20014d38fa7652988ad974091d8f27910947",
+    "release/phase1/local-toolchain.json": "4281412219042eb0949a0ef142afb361776428b70c5f2782c243b17355e92086",
+    "packages/runner/src/distribution/manifest.mjs": "23d671473cd0a3be54b98cc766a8b84a933a76a3862bb3fe4b017c0ef6fb3e60",
+    "packages/runner/src/distribution/merkle-sum.mjs": "7ce4aa8cecb0af2008088d3a7ce70f746be5cf994044d1c082e6ea53ce958ac1",
+    "packages/runner/src/distribution/reconcile.mjs": "e0e0af4e088fcb893e5d8367590c913034038e05f7652af27c2b037fdd36ded5",
+    "packages/runner/test/distribution/holder-candidate.test.mjs": "7498d342621acdcce1fa1b4e0d81c889d8adcc3dc2bc3ad0ccb6f04df686e7e2",
+    "packages/runner/test/distribution/manifest.test.mjs": "894006dbfd11f198ef7b98ce8a9ca085ff71099aaf739679666dd2935b2575bd",
+    "packages/runner/test/distribution/reconcile.test.mjs": "4e728a6984ebe31049d416920c05e3bba6ae606c0f80f98310b4383145da2c25",
+    "packages/runner/test/integration/phase-one-local-loop-adapter.mjs": "52129e76ee9420cd413df75cc0337f0bf70f06328207c88be8c54e33a5c05d5d",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

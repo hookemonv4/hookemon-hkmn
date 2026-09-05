@@ -1,0 +1,16 @@
+{
+  "nfts": [
+    {
+      "nft_address": "H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA",
+      "name": "Example Epic Card",
+      "description": "Documented response shape only",
+      "rarity": "epic",
+      "attributes": [],
+      "image": "https://example.invalid/card.png",
+      "insured_value": 50000000
+    }
+  ],
+  "hasMore": false,
+  "page": 1,
+  "limit": 50
+}

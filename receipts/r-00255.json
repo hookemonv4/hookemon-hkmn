@@ -1,0 +1,16 @@
+{
+  "id": "r-00255",
+  "at": "2026-08-31T17:16:26.932Z",
+  "type": "module-contracts-created",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A6",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "ebcf20fd9a6589d431e94f042f14afa7f1fad89073bd98294c2f79e454fac470",
+    "docs/modules/index.json": "a178b6baf6de6b99d881c9f79c0ecbbe9acd1cdc86be35cea488f6eb5fec4a46"
+  }
+}

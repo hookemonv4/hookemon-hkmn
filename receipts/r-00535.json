@@ -1,0 +1,32 @@
+{
+  "id": "r-00535",
+  "at": "2026-09-03T11:06:52.699Z",
+  "type": "gate",
+  "phase": "ship",
+  "result": "OVERRIDDEN",
+  "data": {
+    "gateVersion": 2,
+    "overriddenResult": "FAILED",
+    "problems": [
+      "H1: no status recorded",
+      "H2: no status recorded"
+    ],
+    "approvalInput": "decisions/owner-approvals/closeout-revision-58-ship-override-approved.json",
+    "rationale": "Owner overrides the ship gate for local revision-58 closure only. H1 remains open because no release reached operating state, H2 remains open because no alert was test-fired into a real channel; H3, H4 and H5 are recorded on the current tree. This override does not claim release or operating readiness and authorizes no deployment, publication, credential access, signing, broadcast, asset movement, spending, or production use.",
+    "rationalizationId": null,
+    "note": "A rationalization ID explains a block; it never authorizes. Only the owner does."
+  },
+  "inputHashes": {
+    "decisions/owner-approvals/closeout-revision-58-ship-h4-approved.json": "6856be74bdd3d56a567ffccec14d5a2a8dc1176025fd5dd62a19e30b85ddec03",
+    "gates/runs/ship.json": "03c51fe99c707e66d4e5cd3d32475ab3bb50ddd6df4cd5f62f22ffc68f75611f",
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "ops/HANDOFF.md": "8b64aa7d69d924f05a3287cfa675e5cf07361584ec76521eaedba230ce2daa4c",
+    "ops/advisories/index.json": "1ac8d467a38a77c9d76047bff59f0690c18ce5ca3716cec74cadbac3bd8d3808",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "qa/drills/induced-failure.json": "b22e617825d9cdaf9999f77e1f896da80d7d71a9122a17d0234af64b901ec517",
+    "receipts/r-00468.json": "f0d1c1d6ba7411c3e920b33c17f6530aba8a0acc9b37f3f9a94973c4fd8f6a08",
+    "receipts/r-00469.json": "6be737530168613e358619464ff6bec79fea59644d2459073affb15eaf982707",
+    "receipts/r-00470.json": "d341d5e35372790f29cbaa6fabb4f7a08fd74246dc22f1421aa794ed18d3cc87",
+    "decisions/owner-approvals/closeout-revision-58-ship-override-approved.json": "daa1057abfdece7f3844dafa4de373cdf71745760ecf1085ec4248e3f075e209"
+  }
+}

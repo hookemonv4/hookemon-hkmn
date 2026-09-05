@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Owner am 30.08.2026: S5, F2 und Merge von PR #1 wie beschrieben genehmigt. Genehmigt wird Requirements Revision 54 fuer Spec-Gate S5.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "9f683e2dd6aa37ef2f461cedc2025ac9a8a6a1ee0fcc58a72b9989185be5e7a2",
+    "policy/policy.json": "9c8a032c3067b0ce5027507f0328e77fe4ae46960e776e8e8c4685bb69dfe41d",
+    "specs/requirements.json": "c057236c281dd2acb94dbc6d80fc7e64548257a8e729dfacf835d460a3968d13"
+  }
+}

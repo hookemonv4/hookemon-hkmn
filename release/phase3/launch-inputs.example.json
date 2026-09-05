@@ -1,0 +1,159 @@
+{
+  "exampleOnly": true,
+  "schemaVersion": "hookemon.phase3.launch-inputs.v1",
+  "chain": {
+    "chainId": "4663",
+    "factory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "authorizedLauncher": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+    "routeNamespace": "0xPLACEHOLDER_ROUTE_NAMESPACE",
+    "routeNonce": "0xPLACEHOLDER_ROUTE_NONCE"
+  },
+  "graphAuthorization": {
+    "topologyHash": "0xPLACEHOLDER_TOPOLOGY_HASH",
+    "totalValue": {
+      "chainId": "4663",
+      "assetId": "native",
+      "decimals": 18,
+      "amountAtomic": "0"
+    }
+  },
+  "compilerProfile": {
+    "solc": "0.8.26+commit.8a97fa7a",
+    "optimizer": { "enabled": true, "runs": 1000 },
+    "viaIR": false,
+    "evmVersion": "cancun",
+    "metadata": {
+      "appendCBOR": false,
+      "bytecodeHash": "none",
+      "useLiteralContent": false
+    }
+  },
+  "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+  "roles": {
+    "manager": "0xPLACEHOLDER_MANAGER",
+    "positionManager": "0xPLACEHOLDER_POSITION_MANAGER",
+    "permit2": "0xPLACEHOLDER_PERMIT2",
+    "programmable": "0xPLACEHOLDER_PROGRAMMABLE_BENEFICIARY",
+    "treasury": "0xPLACEHOLDER_TREASURY",
+    "operations": "0xPLACEHOLDER_OPERATIONS",
+    "launchAuthority": "0xPLACEHOLDER_LAUNCH_AUTHORITY",
+    "issuanceAuthority": "0xPLACEHOLDER_ISSUANCE_AUTHORITY"
+  },
+  "pool": {
+    "fee": 0,
+    "tickSpacing": 60,
+    "priceCandidates": {
+      "usdgCurrency0": {
+        "sqrtPriceX96": "PLACEHOLDER_USDG_CURRENCY0_SQRT_PRICE_X96"
+      },
+      "hkmnCurrency0": {
+        "sqrtPriceX96": "PLACEHOLDER_HKMN_CURRENCY0_SQRT_PRICE_X96"
+      }
+    }
+  },
+  "hookConstructorConfig": {
+    "manager": { "ref": "roles.manager" },
+    "positionManager": { "ref": "roles.positionManager" },
+    "permit2": { "ref": "roles.permit2" },
+    "usdg": { "ref": "usdg" },
+    "hkmn": { "ref": "addresses.token" },
+    "tickSpacing": { "ref": "pool.tickSpacing" },
+    "programmable": { "ref": "roles.programmable" },
+    "treasury": { "ref": "roles.treasury" },
+    "operations": { "ref": "roles.operations" },
+    "launchAuthority": { "ref": "roles.launchAuthority" },
+    "issuanceAuthority": { "ref": "roles.issuanceAuthority" },
+    "expectedDecimals": 18,
+    "bindingDigest": "0xPLACEHOLDER_BINDING_DIGEST",
+    "runtimeDigest": "0xPLACEHOLDER_RUNTIME_DIGEST",
+    "processClaimLimit6h": "PLACEHOLDER_CLAIM_LIMIT",
+    "processClaimLimitMax": "PLACEHOLDER_CLAIM_LIMIT_MAX",
+    "processClaimMaxCount": "PLACEHOLDER_CLAIM_MAX_COUNT",
+    "operationsRotationDelay": "PLACEHOLDER_OPERATIONS_ROTATION_DELAY_SECONDS"
+  },
+  "targets": {
+    "token": {
+      "targetIndex": 0,
+      "targetId": "token",
+      "targetIdHash": "0xPLACEHOLDER_TOKEN_TARGET_ID_HASH",
+      "applicantSalt": { "mode": "fixed", "value": "0xPLACEHOLDER_TOKEN_APPLICANT_SALT" },
+      "artifactPath": "artifacts/token.json",
+      "contractName": "HKMNToken",
+      "constructorArguments": [
+        { "ref": "chain.factory" },
+        { "ref": "usdg" },
+        18,
+        { "ref": "pool.selectedPriceCandidate.sqrtPriceX96" }
+      ],
+      "initializerCalldata": "0xPLACEHOLDER_TOKEN_ALLOCATE",
+      "deploymentValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "initializerValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "runtimeImmutablePatches": []
+    },
+    "custody": {
+      "targetIndex": 1,
+      "targetId": "custody",
+      "targetIdHash": "0xPLACEHOLDER_CUSTODY_TARGET_ID_HASH",
+      "applicantSalt": { "mode": "fixed", "value": "0xPLACEHOLDER_CUSTODY_APPLICANT_SALT" },
+      "artifactPath": "artifacts/custody.json",
+      "contractName": "PermanentPositionCustody",
+      "constructorArguments": [
+        { "ref": "roles.positionManager" },
+        0
+      ],
+      "initializerCalldata": "0xPLACEHOLDER_CUSTODY_CONFIGURE_BINDING_HOOK",
+      "deploymentValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "initializerValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "runtimeImmutablePatches": []
+    },
+    "hook": {
+      "targetIndex": 2,
+      "targetId": "hook",
+      "targetIdHash": "0xPLACEHOLDER_HOOK_TARGET_ID_HASH",
+      "applicantSalt": { "mode": "mine", "start": "0", "maxAttempts": "200000" },
+      "artifactPath": "artifacts/hook.json",
+      "contractName": "HookemonHook",
+      "initializerCalldata": "0xPLACEHOLDER_HOOK_INITIALIZE_GRAPH_LAUNCH",
+      "deploymentValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "initializerValue": {
+        "chainId": "4663",
+        "assetId": "native",
+        "decimals": 18,
+        "amountAtomic": "0"
+      },
+      "runtimeImmutablePatches": [
+        {
+          "astId": "PLACEHOLDER_AST_ID",
+          "start": 0,
+          "length": 32,
+          "value": "0xPLACEHOLDER_RUNTIME_IMMUTABLE_BYTES"
+        }
+      ]
+    }
+  }
+}

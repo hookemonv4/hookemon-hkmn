@@ -1,0 +1,20 @@
+{
+  "id": "r-00367",
+  "at": "2026-09-01T16:43:44.387Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-revision-56-cleanroom-baseline-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approves the current product/PRD.md as the Phase 1 baseline, including requirements revision 56, immutable PegCycleVault custody, Operations as trigger only, and Phase 2 and Phase 3 remaining closed."
+  },
+  "inputHashes": {
+    "gates/init.json": "cdcf3eeb87f0870ac886ab5af69af15cc29063237eaecb6f9d4d832263347012",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "product/PRD.md": "d4fe76c6b8a8846b92c7248594bb0e329b996b0882270c96e0e8ee478abbc952",
+    "decisions/owner-approvals/phase-1-revision-56-cleanroom-baseline-approved.json": "bf0e1bcaeae6ae6ebc30050b94bdca728b346a57228e5cfad2c17b082fcd1604"
+  }
+}

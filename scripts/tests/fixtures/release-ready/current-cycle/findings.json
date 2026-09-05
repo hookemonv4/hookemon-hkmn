@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 2,
+  "phase": "redteam",
+  "requirementsRevision": 63,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "priorCycle": {
+    "cycle": 2,
+    "requirementsRevision": 58,
+    "architectureRevision": 5,
+    "note": "The current review carries forward a verified predecessor cycle."
+  },
+  "classificationPrecedence": [
+    "contract-misread",
+    "valid-actionable",
+    "valid-tradeoff",
+    "noise"
+  ],
+  "reviewBundle": {
+    "path": "qa/redteam/current-review-bundle.json",
+    "sha256": "5b02c26d40ffbfe4c5dacbcb29c6feca5f20ed1810d125991f1298b7b83ccc06"
+  },
+  "findings": [
+    {
+      "id": "RT-R55-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "evidence-proof-validation",
+      "summary": "The review verified evidence validation for the current cycle.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R55-03",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "redteam-receipt-authority",
+      "summary": "The review verified authoritative receipt selection.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R55-04",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "module-card-index-authority",
+      "summary": "The review verified module-card authority.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "payout-authorization-binding",
+      "summary": "The review verified payout authorization binding.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-02",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "signer-key-separation",
+      "summary": "The review verified signer key separation.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-03",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "signer-role-separation",
+      "summary": "The review verified signer-role separation.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-04",
+      "reportedSeverity": "medium",
+      "classification": "valid-tradeoff",
+      "canonicalIssue": "degraded-confirmation-binding",
+      "summary": "The review recorded a bounded confirmation trade-off.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-05",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "operations-liability-control",
+      "summary": "The review verified operations liability controls.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-06",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "durable-proof-recovery",
+      "summary": "The review verified recovery evidence.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-07",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "production-router-proof",
+      "summary": "The review verified production-route evidence.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R58-08",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "holder-exclusion-completeness",
+      "summary": "The review verified holder exclusion coverage.",
+      "status": "RESOLVED",
+      "evidence": ["qa/redteam/current-cycle-evidence.json"],
+      "disposition": "The reviewed control is resolved in the current cycle."
+    }
+  ],
+  "counts": {
+    "contract-misread": 0,
+    "valid-actionable": 10,
+    "valid-tradeoff": 1,
+    "noise": 0,
+    "resolved": 11,
+    "open": 0,
+    "inProgress": 0
+  }
+}

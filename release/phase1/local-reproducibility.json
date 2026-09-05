@@ -1,0 +1,805 @@
+{
+  "schema": "hookemon.phase1-local-reproducibility.v1",
+  "authority": "LOCAL_BUILD_EVIDENCE_ONLY_NO_RELEASE_APPROVAL",
+  "sourceCommit": "2e58d100be1b7617c2f299145d7b51fc4cb1bb6c",
+  "isolation": {
+    "sourceTrees": 2,
+    "sourceMethod": "INDEPENDENT_GIT_ARCHIVES_FROM_EXACT_COMMIT",
+    "independentOutputAndCacheDirectories": true,
+    "network": "OFFLINE",
+    "dependencyCopies": 2,
+    "dependencyMethod": "INDEPENDENT_CLEAN_COPIES_INSIDE_EACH_SOURCE_TREE",
+    "dependency": {
+      "path": "packages/contracts/lib/v4-core",
+      "commit": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "nested": [
+        {
+          "path": "lib/solmate",
+          "commit": "4b47a19038b798b4a33d9749d25e570443520647"
+        },
+        {
+          "path": "lib/openzeppelin-contracts",
+          "commit": "dbb6104ce834628e473d2173bbc9d47f81a9eec3"
+        }
+      ]
+    },
+    "additionalDependency": {
+      "path": "packages/contracts/lib/liquidity-launcher",
+      "commit": "1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a"
+    },
+    "secondaryDependency": {
+      "path": "packages/contracts/lib/v4-periphery",
+      "commit": "dce236d4e2057422d0791d9a973a58765eb46f65",
+      "nested": [
+        {
+          "path": "packages/contracts/lib/v4-periphery/lib/permit2",
+          "commit": "cc56ad0f3439c502c246fc5cfcc3db92bb8b7219"
+        }
+      ]
+    }
+  },
+  "toolchain": {
+    "node": {
+      "version": "v24.19.0",
+      "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1"
+    },
+    "forge": {
+      "version": "1.7.1",
+      "commit": "4072e48705af9d93e3c0f6e29e93b5e9a40caed8",
+      "sha256": "e729589084ca2f1479354353d1ec3d4789451b577f4cdee4e7dc57cae64a38fa"
+    },
+    "solc": {
+      "version": "0.8.26+commit.8a97fa7a.Darwin.appleclang",
+      "sha256": "0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9"
+    }
+  },
+  "staticInputs": {
+    "candidateManifestSha256": "1fc362a37f0c516f0d3d088aa9dda1c4c1610a4265a092980f911b4c9afdfb3c",
+    "runnerSourceCount": 24,
+    "runnerSourceSetSha256": "63da963ad88277c8ff370937bf0269e3bc63c6a063bea579801d5696b85014ec"
+  },
+  "reproducibility": {
+    "reproducible": true,
+    "artifactSetSha256": "10e04a8aec9ee440e8f9e1010336405f2bbdccabc8ca20c122211eda3c07877c",
+    "buildCount": 2,
+    "artifactCount": 32
+  },
+  "artifacts": [
+    {
+      "source": "src/access/MoneyRoles.sol",
+      "contract": "MoneyRoles",
+      "abiSha256": "e16b591d0de4a64d1bd61684a3dc77c3b44be7ab1343283c1915838529a31fc0",
+      "eventSchemaSha256": "65aa290ab0eece6e2bfaa87fad49dbd20f1f30afc0043fa86c175c38ba8fe6cd",
+      "methodIdentifiers": {
+        "acceptOperations()": "19df4514",
+        "acceptTreasury()": "e49d2a30",
+        "proposeOperations(address)": "f2ab0be5",
+        "proposeTreasury(address)": "f110ed67",
+        "readRoles(bytes32)": "47279253"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/accounting/FeeAccounting.sol",
+      "contract": "FeeAccounting",
+      "abiSha256": "a08e8dd8dd09bc130fd447518e057ed754a69ecdf58de27d4b471ba7f6ea0a09",
+      "eventSchemaSha256": "bf9de9c2d97bbcb85e76a55bc34d05c51699e8d964e94af5f3086e9bde298515",
+      "methodIdentifiers": {},
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/bindings/RobinhoodBindings.sol",
+      "contract": "IERC721OwnerOf",
+      "abiSha256": "f4bc1d1276c7640ebb2fcab9d2880bf2b7d0c2a69b7dee6ce77513434848ee85",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "ownerOf(uint256)": "6352211e"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/bindings/RobinhoodBindings.sol",
+      "contract": "IERC721Receiver",
+      "abiSha256": "631311ccabb8b5fc66f54de8760cc062122e265acf8720f4b40f002fa83bc768",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "onERC721Received(address,address,uint256,bytes)": "150b7a02"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/bindings/RobinhoodBindings.sol",
+      "contract": "ImmutableLaunchBinding",
+      "abiSha256": "379aaac8dfc82bebc511d63648eb3b3f9a0bd2fe22000633e87f12b8e0e3b3a0",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "bindingDigest()": "1c6e428a",
+        "custody()": "dda79b75",
+        "hook()": "7f5a7c7b",
+        "poolId()": "3e0dc34e",
+        "poolManager()": "dc4c90d3",
+        "positionManager()": "791b98bc",
+        "router()": "f887ea40",
+        "usdg()": "f5b91b7b"
+      },
+      "initcodeSha256": "0ad810851db05d4b0a0f8e9fe56ecfb753202740aa778e515c4d34e8afb87c0a",
+      "runtimeSha256": "592125f567eefef95fb9811ba55e3bea201dabfcfcf74add9987c374506a9f15",
+      "initcodeBytes": 4542,
+      "runtimeBytes": 559,
+      "localCompilerGas": {
+        "codeDepositCost": "111800",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/bindings/RobinhoodBindings.sol",
+      "contract": "PermanentPositionCustody",
+      "abiSha256": "0dc0b278d56ff88c7b28ada46cc7cab30baccb0c0605695f03bf9069bb67663d",
+      "eventSchemaSha256": "9fb9302460e37d22009f84b9122f9b717d15d04c4b46f930e7a607cfececb4dd",
+      "methodIdentifiers": {
+        "finalizePosition()": "bbfba9a8",
+        "onERC721Received(address,address,uint256,bytes)": "150b7a02",
+        "positionManager()": "791b98bc",
+        "positionReceived()": "cf8496b9",
+        "positionTokenId()": "ceefe5d1"
+      },
+      "initcodeSha256": "37bf83ebe29b14e09b0546f247756aadf2b6b2b2bb765b2289afd4bab349f116",
+      "runtimeSha256": "db35b5768fab2fc94feae62b6669d84a1615e559b5ff7e4f23a794665ecd4505",
+      "initcodeBytes": 1749,
+      "runtimeBytes": 1513,
+      "localCompilerGas": {
+        "codeDepositCost": "302600",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/bindings/RobinhoodBindings.sol",
+      "contract": "RobinhoodBindings",
+      "abiSha256": "a2601373ade64026f804600000f8dddc6b5df9987f9b4345986dc157ea2a31e0",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {},
+      "initcodeSha256": "da6cc45d3fb8ce3cb4ab2dfc6c875d0a705a5e6f9cef4852b494be15ccadef95",
+      "runtimeSha256": "8a0e079832f7460e636a7f6cd51dffd0eef690c6ea87495dda9c6fa677a0b9d1",
+      "initcodeBytes": 135,
+      "runtimeBytes": 85,
+      "localCompilerGas": {
+        "codeDepositCost": "17000",
+        "executionCost": "96",
+        "totalCost": "17096"
+      }
+    },
+    {
+      "source": "src/HookemonHook.sol",
+      "contract": "HookemonHook",
+      "abiSha256": "2ad596c86a42b7470cde7021b3fdd11cc3e227ea41ddaf4ea259cb3da9a55847",
+      "eventSchemaSha256": "eaa1a196da6efc5fc109667f80962f6057dc2df613184be2b501e1af90e9bad6",
+      "methodIdentifiers": {
+        "acceptOperations()": "19df4514",
+        "acceptTreasury()": "e49d2a30",
+        "afterAddLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),int256,int256,bytes)": "9f063efc",
+        "afterDonate(address,(address,address,uint24,int24,address),uint256,uint256,bytes)": "e1b4af69",
+        "afterInitialize(address,(address,address,uint24,int24,address),uint160,int24)": "6fe7e6eb",
+        "afterRemoveLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),int256,int256,bytes)": "6c2bbe7e",
+        "afterSwap(address,(address,address,uint24,int24,address),(bool,int256,uint160),int256,bytes)": "b47b2fb1",
+        "beforeAddLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)": "259982e5",
+        "beforeDonate(address,(address,address,uint24,int24,address),uint256,uint256,bytes)": "b6a8b0fa",
+        "beforeInitialize(address,(address,address,uint24,int24,address),uint160)": "dc98354e",
+        "beforeRemoveLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)": "21d0ee70",
+        "beforeSwap(address,(address,address,uint24,int24,address),(bool,int256,uint160),bytes)": "575e24b4",
+        "buyerHkmnCredit(address)": "e6901df0",
+        "claimProgrammable(address,address)": "f7fe3f17",
+        "claimTreasury(address,address)": "c8c889bd",
+        "commitPayoutChunk(bytes32,uint16,bytes32,uint256)": "e246eb29",
+        "fundPayoutFromPegCycle((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "5a97f343",
+        "getHookPermissions()": "c4e833ce",
+        "hkmn()": "03252bda",
+        "hookPermissionMask()": "54c010d8",
+        "hookUsdgBalance()": "3cc10ba7",
+        "isManifestClosed(bytes32)": "baea50e3",
+        "isPaid(bytes32,uint16,uint16)": "0af9fcac",
+        "isSolvent()": "5ce23950",
+        "lastExecutedUsdg()": "12646caa",
+        "lastHkmnRecipient()": "bba45fa3",
+        "lastOperationId()": "4d0a4205",
+        "lastRawPoolUsdgDelta()": "fc38c33a",
+        "openPegCycle(bytes32)": "0e563b37",
+        "payEntitlement(bytes32,uint16,uint16,address,uint256,bytes32[10],uint256[10])": "e25aa844",
+        "payoutLiability(bytes32)": "fbd29954",
+        "pegCycleVault()": "702fbe85",
+        "poolManager()": "dc4c90d3",
+        "prepareOfficialIssuance((uint8,address,address,address,address,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32))": "1e99e50f",
+        "processLiability()": "3e4c7986",
+        "proposeOperations(address)": "f2ab0be5",
+        "proposeTreasury(address)": "f110ed67",
+        "readFeeLiabilities(address)": "cee3f9bf",
+        "readPayout(bytes32)": "06258a8d",
+        "readPayoutChunk(bytes32,uint16)": "6c7715e0",
+        "readPayoutConservation(bytes32)": "6a54977c",
+        "readReleasedCycle(bytes32)": "5fb8e68f",
+        "readRoles(bytes32)": "47279253",
+        "readTokenState()": "8185471f",
+        "swapRouter()": "c31c9c07",
+        "tickSpacing()": "d0c93a7c",
+        "totalBuyerHkmnCredit()": "d5a37f55",
+        "totalLiability()": "0fc29349",
+        "usdg()": "f5b91b7b",
+        "verifyEntitlementProof(bytes32,uint16,uint16,address,uint256,bytes32[10],uint256[10])": "1cc2c3be",
+        "verifyIssuance((uint8,address,address,address,address,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32),(bytes32,address,bytes32,bytes32,uint8,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32),(address,address,uint256)[])": "75a1fddd"
+      },
+      "initcodeSha256": "6993cf00dd1dc5c3ac70ed4ac31e9995cfc954ad813796ce0af76383880289ab",
+      "runtimeSha256": "265eb91ac8e573a9f2201ed433413b2ffea4d979ec2812b84c5955b2d2b7f630",
+      "initcodeBytes": 28150,
+      "runtimeBytes": 25591,
+      "localCompilerGas": {
+        "codeDepositCost": "5118200",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/launch/CustomLaunchStrategy.sol",
+      "contract": "CustomLaunchStrategy",
+      "abiSha256": "f7e0de7900c7af1f0688a7bd5011ee448b1b4e76ef86ca1d72aeb2e9675bdb59",
+      "eventSchemaSha256": "a73085640cb0caa3b6e0a1c37750aaaab027058a225e3c59ff50f89d8bfce8e2",
+      "methodIdentifiers": {
+        "bindingManifestDigest()": "20dbddee",
+        "bindIssuanceGuard(address)": "f50c3465",
+        "decimals()": "313ce567",
+        "factory()": "c45a0155",
+        "initializeDistribution(address,uint256,bytes,bytes32)": "03770504",
+        "issuanceGuard()": "2557e5cd",
+        "issuanceGuardBound()": "ae5e9079",
+        "launch()": "01339c21",
+        "launched()": "8091f3bf",
+        "launcher()": "16eebd1e",
+        "marketPositionCustody()": "d06478dc",
+        "owner()": "8da5cb5b",
+        "projectWallet()": "beb08ab9",
+        "readPlaceholderCurve()": "1e4e9c89",
+        "remainderRepresentation()": "9a71f474",
+        "runtimeAuthorityDigest()": "69e5ef62"
+      },
+      "initcodeSha256": "f1605518113474efa25a83fea3a9275b0eb089c19fa8c8d31fa81a0fe1fb045a",
+      "runtimeSha256": "ab2320242e653b9fbbc6f795a8549677000d6afc26b446584ff9720a2380e1b7",
+      "initcodeBytes": 16636,
+      "runtimeBytes": 12699,
+      "localCompilerGas": {
+        "codeDepositCost": "2539800",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/launch/CustomLaunchStrategy.sol",
+      "contract": "IUERC20FactoryLike",
+      "abiSha256": "ebeb2edfd06d015019e36b853c77fa78e13367f3ceb65843a258a3e2d681ede8",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "getUERC20Address(string,string,uint8,address,bytes32)": "f752070e"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/launch/HookemonIssuance.sol",
+      "contract": "HookemonIssuance",
+      "abiSha256": "6f1e31172477ebf82ef31cd233891256b806dce1b3d574feb53dd863d62292d6",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "prepareOfficialIssuance((uint8,address,address,address,address,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32))": "1e99e50f",
+        "readTokenState()": "8185471f",
+        "verifyIssuance((uint8,address,address,address,address,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32),(bytes32,address,bytes32,bytes32,uint8,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32,bytes32,bytes32),(address,address,uint256)[])": "75a1fddd"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/market/CanonicalMarket.sol",
+      "contract": "CanonicalMarketCallback",
+      "abiSha256": "0d0cb156d81f9dd7a076ab8ca4ef8ee4d36ba646e48bc3413ee3681533816e4b",
+      "eventSchemaSha256": "0ef0786351b3ca11b3df42ed02a980100a5a462d07bad584c461bb1cc3b11aa2",
+      "methodIdentifiers": {
+        "afterAddLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),int256,int256,bytes)": "9f063efc",
+        "afterDonate(address,(address,address,uint24,int24,address),uint256,uint256,bytes)": "e1b4af69",
+        "afterInitialize(address,(address,address,uint24,int24,address),uint160,int24)": "6fe7e6eb",
+        "afterRemoveLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),int256,int256,bytes)": "6c2bbe7e",
+        "afterSwap(address,(address,address,uint24,int24,address),(bool,int256,uint160),int256,bytes)": "b47b2fb1",
+        "beforeAddLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)": "259982e5",
+        "beforeDonate(address,(address,address,uint24,int24,address),uint256,uint256,bytes)": "b6a8b0fa",
+        "beforeInitialize(address,(address,address,uint24,int24,address),uint160)": "dc98354e",
+        "beforeRemoveLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)": "21d0ee70",
+        "beforeSwap(address,(address,address,uint24,int24,address),(bool,int256,uint160),bytes)": "575e24b4",
+        "buyerHkmnCredit(address)": "e6901df0",
+        "hkmn()": "03252bda",
+        "hookPermissionMask()": "54c010d8",
+        "lastExecutedUsdg()": "12646caa",
+        "lastHkmnRecipient()": "bba45fa3",
+        "lastOperationId()": "4d0a4205",
+        "lastRawPoolUsdgDelta()": "fc38c33a",
+        "poolManager()": "dc4c90d3",
+        "swapRouter()": "c31c9c07",
+        "tickSpacing()": "d0c93a7c",
+        "totalBuyerHkmnCredit()": "d5a37f55",
+        "usdg()": "f5b91b7b"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/market/CanonicalMarket.sol",
+      "contract": "CanonicalSwapHookData",
+      "abiSha256": "2876dc0224172d848bc5fb2dcc06b9c8443321f62f6f1cb21ac5cc50168f31ba",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {},
+      "initcodeSha256": "c4efd32b12c23ae6c52cdf4cda0c1da03e0229005e8f8638cc927edc15f73dba",
+      "runtimeSha256": "caf7d780d4cb987152f5c68b2f3e13380a73e8e32654917ecdc1eb218f03d9b0",
+      "initcodeBytes": 135,
+      "runtimeBytes": 85,
+      "localCompilerGas": {
+        "codeDepositCost": "17000",
+        "executionCost": "96",
+        "totalCost": "17096"
+      }
+    },
+    {
+      "source": "src/payout/CanonicalMerkleSum.sol",
+      "contract": "CanonicalMerkleSum",
+      "abiSha256": "bb141e62dc34ff2628b80573f689668b6db37a032edcd7b806c3694ac592b94b",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {},
+      "initcodeSha256": "b2b0cb73441deb13f3248db013e3fd940581d3018efa4fe9a8c6c7c5afb52932",
+      "runtimeSha256": "280774a61f35af97bbe29d44d0bb0009593e5053ce9a8a10d3ab73133e498778",
+      "initcodeBytes": 135,
+      "runtimeBytes": 85,
+      "localCompilerGas": {
+        "codeDepositCost": "17000",
+        "executionCost": "96",
+        "totalCost": "17096"
+      }
+    },
+    {
+      "source": "src/payout/PayoutCommitment.sol",
+      "contract": "PayoutCommitment",
+      "abiSha256": "1a78dd099b7d44881f08c9011a6a3c1e18cab1a8d20e15862153b0114eb30148",
+      "eventSchemaSha256": "a7b4d3c7e5ead52139525a4d1a50221274ef800e712e40bb9d6b69a21c5c97a3",
+      "methodIdentifiers": {
+        "acceptOperations()": "19df4514",
+        "acceptTreasury()": "e49d2a30",
+        "commitPayoutChunk(bytes32,uint16,bytes32,uint256)": "e246eb29",
+        "fundPayoutFromPegCycle((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "5a97f343",
+        "isManifestClosed(bytes32)": "baea50e3",
+        "openPegCycle(bytes32)": "0e563b37",
+        "pegCycleVault()": "702fbe85",
+        "proposeOperations(address)": "f2ab0be5",
+        "proposeTreasury(address)": "f110ed67",
+        "readPayout(bytes32)": "06258a8d",
+        "readPayoutChunk(bytes32,uint16)": "6c7715e0",
+        "readPayoutConservation(bytes32)": "6a54977c",
+        "readReleasedCycle(bytes32)": "5fb8e68f",
+        "readRoles(bytes32)": "47279253"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/FundingAuthorizationValidation.sol",
+      "contract": "FundingAuthorizationValidation",
+      "abiSha256": "6b8d82d1c1a7fb70e69363de0a8626411a22bb6c15049167f899e644f738d701",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "verify(IPegCycleVault.FundingAuthorization,FundingAuthorizationValidation.VaultIdentity)": "1cfa2192"
+      },
+      "initcodeSha256": "a13fe470992abf37c3deb95c68b57318f61d885e94139a7cca70c78c55c8c287",
+      "runtimeSha256": "8f932dec6fc55afb86fba26f721bda00213dca982a02e8f84566d933f2c31a85",
+      "initcodeBytes": 1784,
+      "runtimeBytes": 1732,
+      "localCompilerGas": {
+        "codeDepositCost": "346400",
+        "executionCost": "413",
+        "totalCost": "346813"
+      }
+    },
+    {
+      "source": "src/process/IPegCycleRouteExecutor.sol",
+      "contract": "IPegCycleRouteExecutor",
+      "abiSha256": "10431db38ca76916d8430f995cd31fbe20b205f9431574767e81ae5b86d3f27d",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "executeOutbound(bytes32,address,uint256,address,bytes)": "3686c496"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/IPegCycleVault.sol",
+      "contract": "IPegCycleVault",
+      "abiSha256": "bfa0a0c8169040bf1fe9a79335e3dea68995e385bbd1d533ddf69af577276e50",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "authorizeFunding((uint32,uint256,bytes32,address,address,address,address,uint256,bytes32,bytes32,bytes32,address,uint256,uint256,uint256,uint256,uint256,uint64,uint256))": "80353ac8",
+        "authorizeFundingAfterFailure((uint32,uint256,bytes32,address,address,address,address,uint256,bytes32,bytes32,bytes32,address,uint256,uint256,uint256,uint256,uint256,uint64,uint256),bytes32,bytes32)": "b12235e8",
+        "authorizePayout((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256),bytes,bytes)": "015f4600",
+        "cancelExpiredFundingAuthorization(bytes32)": "9eb10a05",
+        "computeCycleEscrow(bytes32)": "4361c965",
+        "confirmFunding(bytes32,uint256)": "1014c05a",
+        "consumeFundingAuthorization(bytes32,address)": "69c3b3cb",
+        "consumePayoutAuthorization((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "600622c6",
+        "cycleEscrows(bytes32)": "036289ad",
+        "cycleLifecycles(bytes32)": "fdbf44d2",
+        "failedCycleSuccessors(bytes32)": "259e6cb9",
+        "failureReceiptDigests(bytes32)": "41a49aaf",
+        "isCycleConsumed(bytes32)": "f6c14a07",
+        "isNonceConsumed(uint256)": "2cc05b37",
+        "isPayoutIdConsumed(bytes32)": "0301198c",
+        "isReturnReceiptDigestConsumed(bytes32)": "3a18209d",
+        "readActiveAuthorization()": "d2be0885",
+        "readCommittedPayoutBinding(bytes32)": "51d999c9",
+        "readPendingAuthorization()": "8e8e8455",
+        "recordDegradedReturn(bytes32,bytes32,bool)": "8cd494c2",
+        "recordTerminalFailure(bytes32,bytes32)": "f3c9f317",
+        "recoveryPredecessors(bytes32)": "41c9c1ff",
+        "renewFundingAuthorizationDeadline((uint32,uint256,bytes32,address,address,address,address,uint256,bytes32,bytes32,bytes32,address,uint256,uint256,uint256,uint256,uint256,uint64,uint256))": "2befa57f",
+        "renewPayoutAuthorizationDeadline((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "4e1e7e9d"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/IPegCycleVault.sol",
+      "contract": "PayoutDomainTypedData",
+      "abiSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {},
+      "initcodeSha256": "b4a6d146551ff9367ae9251e41f41aeb70847a69a534786808c671ad1cea2988",
+      "runtimeSha256": "fe7eb72d6e0dc6d7caf79df57eaaad06f97091ca610d488fc4b4bcf4c3f6c5a3",
+      "initcodeBytes": 135,
+      "runtimeBytes": 85,
+      "localCompilerGas": {
+        "codeDepositCost": "17000",
+        "executionCost": "96",
+        "totalCost": "17096"
+      }
+    },
+    {
+      "source": "src/process/PayoutDistributionSignatures.sol",
+      "contract": "PayoutDistributionSignatures",
+      "abiSha256": "bd4a0012782bf39ada0f87de4632f88cd32d358983c1389a563ca3edeeb9ae8c",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "verify(bytes32,IPegCycleVault.PayoutAuthorization,PayoutDistributionSignatures.ActiveCycleContext,bytes,bytes,address,address)": "3384c292"
+      },
+      "initcodeSha256": "e1192d64f8448be58bfa234e3f79b0442f6cb745713c4ad86fe5e08335c140af",
+      "runtimeSha256": "7baf14721988bb3477da31e0610e2ec7cfc1574c89e42d09fdfc4ff4bbdf19f1",
+      "initcodeBytes": 2712,
+      "runtimeBytes": 2660,
+      "localCompilerGas": {
+        "codeDepositCost": "532000",
+        "executionCost": "595",
+        "totalCost": "532595"
+      }
+    },
+    {
+      "source": "src/process/PegCycleEscrowFactory.sol",
+      "contract": "PegCycleEscrowFactory",
+      "abiSha256": "f3fa310771d769883ec2d7636ffec32b20652e78732999dfe665dd1ca7b870fa",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "computeAddress(address,address,address,bytes32)": "d54246c1",
+        "deploy(address,address,address,bytes32)": "a1e7ac9e"
+      },
+      "initcodeSha256": "a2e7a30bbf2a86513770208d26c27b26e39219dfbf18a62cfcbfefb04c2dd20a",
+      "runtimeSha256": "02bb2373a6c58e4b2de3b2c4ce52c5fa4f0db1d229da1644cb2ee9572b8fbaa1",
+      "initcodeBytes": 4576,
+      "runtimeBytes": 4524,
+      "localCompilerGas": {
+        "codeDepositCost": "904800",
+        "executionCost": "969",
+        "totalCost": "905769"
+      }
+    },
+    {
+      "source": "src/process/PegCycleReturnEscrow.sol",
+      "contract": "IPegCycleEscrowUsdg",
+      "abiSha256": "2ed0f6b58cab54d3ef57b6338ea6f11eb84acc95e7bcd1e34b8b10f9304318c4",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "balanceOf(address)": "70a08231",
+        "transfer(address,uint256)": "a9059cbb"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/PegCycleReturnEscrow.sol",
+      "contract": "PegCycleReturnEscrow",
+      "abiSha256": "d4664f5c2e70ef184cff0a9e222f824ce650bf09b052cbb9a6e19b8060515e6a",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "coordinator()": "0a009097",
+        "cycleId()": "62e0accb",
+        "hook()": "7f5a7c7b",
+        "routeExecutor()": "748a7973",
+        "sendOutbound(uint256)": "1b905259",
+        "sendPayout(uint256)": "c3de3b88",
+        "usdg()": "f5b91b7b"
+      },
+      "initcodeSha256": "5266c644fcf6f34a487c4c32123cc4e578db9c1e6dffc0d7cff377c51d5574eb",
+      "runtimeSha256": "6650810e86e27ecde8c0c37fe450d267cd5b71eb91f55373009e001ad1c5fac9",
+      "initcodeBytes": 2792,
+      "runtimeBytes": 2173,
+      "localCompilerGas": {
+        "codeDepositCost": "434600",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/process/PegCycleRouteExecutor.sol",
+      "contract": "IPegCycleRouteUsdg",
+      "abiSha256": "2ed0f6b58cab54d3ef57b6338ea6f11eb84acc95e7bcd1e34b8b10f9304318c4",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "balanceOf(address)": "70a08231",
+        "transfer(address,uint256)": "a9059cbb"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/PegCycleRouteExecutor.sol",
+      "contract": "IPegCycleRouteVaultBinding",
+      "abiSha256": "492eb94ed9156b09484887b872f41854e8abf277d165d96290554d5ee34debb8",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "hook()": "7f5a7c7b"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/PegCycleRouteExecutor.sol",
+      "contract": "PegCycleRouteExecutor",
+      "abiSha256": "6c3b1b9c706fe200b99c376ce683f1228dcca199cbfc8ad0165029a4d3ba7a56",
+      "eventSchemaSha256": "e0ad8f2c9adb2f55dfc2c9c984773642bd655604f45196dc60680308d1605dcd",
+      "methodIdentifiers": {
+        "depositCallbackSelector()": "e56152e0",
+        "depositTarget()": "fb1fa08d",
+        "executeOutbound(bytes32,address,uint256,address,bytes)": "3686c496",
+        "usdg()": "f5b91b7b",
+        "vault()": "fbfa77cf"
+      },
+      "initcodeSha256": "d27e50049fc0ce402ea74a3b1ddae39ad4507740988a15ffa7ae607bf3fe9b32",
+      "runtimeSha256": "92b8a7c981e36606286da6f1f6022f866a9ecafb2e5e1be5afdf748592ca6733",
+      "initcodeBytes": 8413,
+      "runtimeBytes": 7764,
+      "localCompilerGas": {
+        "codeDepositCost": "1552800",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/process/PegCycleVault.sol",
+      "contract": "IPegCycleHookBinding",
+      "abiSha256": "fa676e839bd5a9d7c5fb9f7beb9179d76c7019c752e63da0b901ce5c8426d160",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "pegCycleVault()": "702fbe85"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/PegCycleVault.sol",
+      "contract": "IPegCycleUsdg",
+      "abiSha256": "a9c15cb2f10b87df1c6e79a08b6c5fb2430c30a20f6c0dd8d3370155e50cbc0d",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "allowance(address,address)": "dd62ed3e",
+        "balanceOf(address)": "70a08231"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/PegCycleVault.sol",
+      "contract": "PegCycleVault",
+      "abiSha256": "fee347977b301a60830e71df0c043b5f388620fbb948380cd9b034c5dac5fb73",
+      "eventSchemaSha256": "027b773b8cb6a093926d4eaf32f6b80acf6d8d851b0821123fd123eea4537dcd",
+      "methodIdentifiers": {
+        "authorizeFunding((uint32,uint256,bytes32,address,address,address,address,uint256,bytes32,bytes32,bytes32,address,uint256,uint256,uint256,uint256,uint256,uint64,uint256))": "80353ac8",
+        "authorizeFundingAfterFailure((uint32,uint256,bytes32,address,address,address,address,uint256,bytes32,bytes32,bytes32,address,uint256,uint256,uint256,uint256,uint256,uint64,uint256),bytes32,bytes32)": "b12235e8",
+        "authorizePayout((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256),bytes,bytes)": "015f4600",
+        "authorizer()": "d09edf31",
+        "bindHook(address)": "10202c54",
+        "bindingManifestDigest()": "20dbddee",
+        "cancelExpiredFundingAuthorization(bytes32)": "9eb10a05",
+        "computeCycleEscrow(bytes32)": "4361c965",
+        "confirmFunding(bytes32,uint256)": "1014c05a",
+        "consumeFundingAuthorization(bytes32,address)": "69c3b3cb",
+        "consumePayoutAuthorization((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "600622c6",
+        "cycleEscrows(bytes32)": "036289ad",
+        "cycleLifecycles(bytes32)": "fdbf44d2",
+        "deploymentAuthority()": "7138d7ba",
+        "executeOutbound(bytes32,bytes)": "bf26e968",
+        "failedCycleSuccessors(bytes32)": "259e6cb9",
+        "failureReceiptDigests(bytes32)": "41a49aaf",
+        "hook()": "7f5a7c7b",
+        "isCycleConsumed(bytes32)": "f6c14a07",
+        "isNonceConsumed(uint256)": "2cc05b37",
+        "isPayoutIdConsumed(bytes32)": "0301198c",
+        "isReturnReceiptDigestConsumed(bytes32)": "3a18209d",
+        "lifecycle()": "ac0cc868",
+        "payoutAuthorizationDigest()": "d1afe0e4",
+        "readActiveAuthorization()": "d2be0885",
+        "readCommittedPayoutBinding(bytes32)": "51d999c9",
+        "readPendingAuthorization()": "8e8e8455",
+        "recordDegradedReturn(bytes32,bytes32,bool)": "8cd494c2",
+        "recordTerminalFailure(bytes32,bytes32)": "f3c9f317",
+        "recoveryPredecessors(bytes32)": "41c9c1ff",
+        "renewFundingAuthorizationDeadline((uint32,uint256,bytes32,address,address,address,address,uint256,bytes32,bytes32,bytes32,address,uint256,uint256,uint256,uint256,uint256,uint64,uint256))": "2befa57f",
+        "renewPayoutAuthorizationDeadline((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "4e1e7e9d",
+        "REQUIREMENTS_REVISION()": "8e55e17b",
+        "routeExecutor()": "748a7973",
+        "terminalCycleId()": "9c42bb3c",
+        "terminalFailureReceiptDigest()": "7454c273",
+        "usdg()": "f5b91b7b"
+      },
+      "initcodeSha256": "47ed74837e1ac2893441643d3b495ef160be7964f3cd18ebfb5ae50701f8aec8",
+      "runtimeSha256": "8518c1c597a7a3b4e85924f4c47b1f8fd9d13f97002aa31e656161da4ee54524",
+      "initcodeBytes": 22236,
+      "runtimeBytes": 21036,
+      "localCompilerGas": {
+        "codeDepositCost": "4207200",
+        "executionCost": "infinite",
+        "totalCost": "infinite"
+      }
+    },
+    {
+      "source": "src/process/ProcessBudget.sol",
+      "contract": "IPegCycleVaultIdentity",
+      "abiSha256": "8f6e421a63856fe3cf980b60908e79fd82e2cbf48db4b48fd30731083185e5dd",
+      "eventSchemaSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "methodIdentifiers": {
+        "authorizer()": "d09edf31",
+        "routeExecutor()": "748a7973",
+        "usdg()": "f5b91b7b"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/process/ProcessBudget.sol",
+      "contract": "ProcessBudget",
+      "abiSha256": "dc50226bfaa4e4e9bcd90337027fe61a095a29f6de6b44f3332bf433045de0b3",
+      "eventSchemaSha256": "c8d4d88ffae945500201e8a5c267dc644e909c93f9f5384d914c35e63b2c863e",
+      "methodIdentifiers": {
+        "acceptOperations()": "19df4514",
+        "acceptTreasury()": "e49d2a30",
+        "openPegCycle(bytes32)": "0e563b37",
+        "pegCycleVault()": "702fbe85",
+        "proposeOperations(address)": "f2ab0be5",
+        "proposeTreasury(address)": "f110ed67",
+        "readReleasedCycle(bytes32)": "5fb8e68f",
+        "readRoles(bytes32)": "47279253"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    },
+    {
+      "source": "src/settlement/HolderSettlement.sol",
+      "contract": "HolderSettlement",
+      "abiSha256": "ad511e761d576cf5596bc994433318fe8aaf36b622de990736d59ee1f0ff80f3",
+      "eventSchemaSha256": "d4373524bd4130fc43c983f0274ca8f6426a336d9d46884f731c33fa4a7789cc",
+      "methodIdentifiers": {
+        "acceptOperations()": "19df4514",
+        "acceptTreasury()": "e49d2a30",
+        "commitPayoutChunk(bytes32,uint16,bytes32,uint256)": "e246eb29",
+        "fundPayoutFromPegCycle((uint32,uint256,bytes32,address,address,address,address,bytes32,bytes32,bytes32,bytes32,uint256,bytes32,bytes32,uint64,uint256))": "5a97f343",
+        "isManifestClosed(bytes32)": "baea50e3",
+        "isPaid(bytes32,uint16,uint16)": "0af9fcac",
+        "openPegCycle(bytes32)": "0e563b37",
+        "payEntitlement(bytes32,uint16,uint16,address,uint256,bytes32[10],uint256[10])": "e25aa844",
+        "pegCycleVault()": "702fbe85",
+        "proposeOperations(address)": "f2ab0be5",
+        "proposeTreasury(address)": "f110ed67",
+        "readPayout(bytes32)": "06258a8d",
+        "readPayoutChunk(bytes32,uint16)": "6c7715e0",
+        "readPayoutConservation(bytes32)": "6a54977c",
+        "readReleasedCycle(bytes32)": "5fb8e68f",
+        "readRoles(bytes32)": "47279253",
+        "verifyEntitlementProof(bytes32,uint16,uint16,address,uint256,bytes32[10],uint256[10])": "1cc2c3be"
+      },
+      "initcodeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "initcodeBytes": 0,
+      "runtimeBytes": 0,
+      "localCompilerGas": null
+    }
+  ],
+  "localGas": {
+    "authority": "LOCAL_FOUNDRY_TEST_MEASUREMENT_ONLY",
+    "test": "test/bindings/RobinhoodBindings.t.sol",
+    "passed": 7,
+    "contracts": [
+      {
+        "source": "src/bindings/RobinhoodBindings.sol",
+        "contract": "ImmutableLaunchBinding",
+        "localDeploymentGas": 264921,
+        "observedDeploymentSizeBytes": 5502,
+        "officialLimit": "INTEGRATION_PENDING",
+        "officialHeadroom": "NOT_CLAIMED"
+      },
+      {
+        "source": "src/bindings/RobinhoodBindings.sol",
+        "contract": "PermanentPositionCustody",
+        "localDeploymentGas": 378891,
+        "observedDeploymentSizeBytes": 1813,
+        "officialLimit": "INTEGRATION_PENDING",
+        "officialHeadroom": "NOT_CLAIMED"
+      }
+    ]
+  },
+  "productionLimits": {
+    "status": "INTEGRATION_PENDING",
+    "headroom": "NOT_CLAIMED",
+    "reason": "Official Robinhood deployment and gas limits are not bound by current local evidence."
+  }
+}

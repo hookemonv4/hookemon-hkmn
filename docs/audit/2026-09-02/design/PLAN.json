@@ -1,0 +1,1526 @@
+{
+  "revision": 58,
+  "base": "main (5b365c8) + semantic merge of codex/phase2-revision-57 + cherry-pick of codex/complete-v4-hook automation modules (dropping its conflicting HookemonHook.sol/ProcessBudget.sol changes, keeping only the additive SwapLiabilitiesAccrued event)",
+  "workPackages": [
+    {
+      "id": "WP-01",
+      "title": "Integration base: merge rev57 onto main",
+      "goal": "Produce a single integrated tree carrying main's Phase-1 contracts plus codex/phase2-revision-57's per-cycle CREATE2 return escrow and operator-control CLI, with the Foundry CI version-string fix and stale digests regenerated, so every later work package has one stable base.",
+      "deps": [],
+      "parallelGroup": 1,
+      "writeSet": [
+        "docs/modules/index.json",
+        "docs/modules/peg-cycle-vault.md",
+        "docs/modules/cycle-runner.md",
+        "gates/runs/init.json",
+        "packages/contracts/src/process/PegCycleVault.sol",
+        "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+        "packages/contracts/src/process/IPegCycleVault.sol",
+        "product/delivery-boundary.json",
+        "gates/receipts/r-00430.json",
+        "gates/receipts/r-00431.json",
+        "scripts/tests/final-review.test.mjs",
+        "tasks.json",
+        "packages/runner/src/operator/*",
+        "packages/runner/src/cycle/vault-payout-authorization.mjs",
+        "packages/runner/src/cycle/preflight.mjs",
+        ".github/workflows/v4-gates.yml"
+      ],
+      "readSet": [
+        "codex/phase2-revision-57 full diff (19 commits)",
+        "codex/complete-v4-hook full diff (25 commits, additive SwapLiabilitiesAccrued event only)",
+        "product/SOURCE_BOUNDARY.md",
+        "AGENTS.md"
+      ],
+      "steps": [
+        "git merge-tree the two branches against main; resolve the 8 known conflicts (docs/modules/index.json, docs/modules/peg-cycle-vault.md, gates/runs/init.json, PegCycleVault.sol, product/delivery-boundary.json, receipts r-00430/r-00431, final-review.test.mjs, tasks.json) favoring main's stricter _transferUsdg checks over complete-v4-hook's looser variant",
+        "Cherry-pick complete-v4-hook's SwapLiabilitiesAccrued event only; drop its HookemonHook.sol/ProcessBudget.sol claim-function changes entirely",
+        "Fix the stale cycle-runner.md digest bug already found live on rev57 commit 228d4b1",
+        "Apply the Foundry version-string CI fix that currently makes CI red on main",
+        "Regenerate every stale digest in docs/modules/index.json against the merged tree",
+        "Reconcile task-id collisions: reserve P2-001..012 for rev57's original scope"
+      ],
+      "tests": [
+        "forge test",
+        "node --test scripts/tests/*.test.mjs",
+        "node --test packages/runner/test/**"
+      ],
+      "acceptance": [
+        "Merge is git-clean with zero unresolved conflict markers",
+        "All 171 forge tests plus rev57's additional process/operator tests pass",
+        "node --test scripts/tests/gates.test.mjs reports no STALE gate from a digest mismatch",
+        "CI is green on the merged branch (Foundry version-string check passes)"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Every other work package depends on this landing first. Do not attempt partial merges of individual files without running the full suite."
+    },
+    {
+      "id": "WP-02",
+      "title": "Fee-policy conformance: cumulative remainder + minimum-quote revert",
+      "goal": "Close GAP-1/GAP-2: persist cumulative Programmable/project fee remainders across the pool's lifetime and revert any swap with gross executed-USDG below 1000 smallest units, per programmable-fee-policy.md v1.1.0.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "packages/contracts/src/accounting/FeeAccounting.sol",
+        "packages/contracts/src/market/CanonicalMarket.sol",
+        "packages/contracts/test/accounting/FeeAccounting.t.sol",
+        "packages/contracts/test/market/CanonicalMarket.t.sol"
+      ],
+      "readSet": [
+        "programmable-fee-policy.md",
+        "standard-fee-kernel.md"
+      ],
+      "steps": [
+        "Add two persisted uint256 cumulative-remainder accumulators (Programmable bucket, project/treasury+process bucket) matching the kernel doc's floor(sum(G_i*1000)/1e6) formula exactly",
+        "Modify _splitLiability to accumulate the per-swap floor remainder instead of discarding it, and to draw down the accumulator on the next swap once it exceeds one whole unit",
+        "Add a revert in _fee()/_splitLiability for any swap with executedUsdg < 1000",
+        "Update test_revision55RoundingAssignsEveryRemainderToProcess and testFuzz_revision55SplitConservesTotal to assert the new cumulative-remainder behavior instead of the old per-swap-floor behavior",
+        "Add boundary-case tests: remainder exactly at 1 unit, remainder never resets on a claim, swap of exactly 999 units reverts, swap of exactly 1000 units succeeds"
+      ],
+      "tests": [
+        "forge test --match-path 'test/accounting/*.t.sol'",
+        "forge test --match-path 'test/market/*.t.sol'"
+      ],
+      "acceptance": [
+        "Cumulative remainder never resets when Programmable or treasury claims their liability",
+        "A swap with executedUsdg < 1000 reverts atomically",
+        "100k-run fuzz conservation test still passes under the new accrual math (sum of all buckets + remainders == total fee collected)"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "Money-safety-critical accrual math change; needs a fresh-context independent reviewer per AGENTS.md before merge. The 0.10%/0.40%/2.50% bucket split this package's tests assume is UNCONFIRMED (owner decision D9 \u2014 the transcript's '0.5% treasury' is ambiguous between the current coded split and a literal 0.5% treasury bucket). Land the cumulative-remainder and minimum-quote-revert mechanics now (correct regardless of the split), but do not treat the specific bucket percentages as final until D9 is answered. COORDINATOR NOTE after WP-01: base now includes the SwapLiabilitiesAccrued event in FeeAccounting.sol; keep it and extend it if the cumulative remainders need to be observable."
+    },
+    {
+      "id": "WP-03",
+      "title": "Vault dead-end fixes: dust fast path + DEGRADED recovery",
+      "goal": "Close the two remaining PegCycleVault dead ends: a trivial-excess return locking authorizePayout forever, and a short/ambiguous return with no valid state transition.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "packages/contracts/src/process/PegCycleVault.sol",
+        "packages/contracts/src/process/IPegCycleVault.sol",
+        "packages/contracts/test/process/PegCycleVault.t.sol",
+        "packages/contracts/test/process/PegLegacyVaultDegraded.t.sol"
+      ],
+      "readSet": [
+        "ADR-0019",
+        "architecture/trust-boundaries.md"
+      ],
+      "steps": [
+        "Relax authorizePayout to accept balance >= rootSum, transferring exactly rootSum and leaving any excess in the escrow (no new state; this closes the pure stray-donation griefing case)",
+        "Add recordDegradedReturn(cycleId, receiptDigest, acceptDegraded) \u2014 authorizer-only, callable from OUTBOUND when balance is nonzero but satisfies neither the dust-fast-path nor the exact/minimum condition",
+        "Require acceptDegraded == true be set only via a distinct authorization schema field that the authorizer signs after an explicit, separately-logged confirmation step (document the off-chain confirmation protocol in a code comment and in docs/modules/peg-cycle-vault.md)",
+        "Add a new terminal DEGRADED state; quarantine the balance identically to FAILED (CREATE2-isolated, cannot contaminate a successor cycle)",
+        "Allow authorizeFundingAfterFailure-equivalent successor-cycle creation from DEGRADED",
+        "Add tests: a return below minimumReturnUsdg without acceptDegraded=true still reverts (no silent laxity); with the flag, DEGRADED is reached and a fresh cycle can start; balance in DEGRADED is never auto-swept; a trivial 1-unit-excess return via the dust fast path pays exactly rootSum and leaves the excess in place",
+        "Add a regression test for the FUNDED-with-expired-payout-authorization case: an authorization signed and then expired before authorizePayout consumes it must renew via the same cancelExpiredFundingAuthorization-family path, not lock principal (design.md section 2.5)"
+      ],
+      "tests": [
+        "forge test --match-path 'test/process/*.t.sol'"
+      ],
+      "acceptance": [
+        "A return >= rootSum by any amount pays out exactly rootSum, no more, no less",
+        "A nonzero return that is neither >= rootSum nor exactly 0 has a valid transition (DEGRADED) instead of being permanently stuck",
+        "recordDegradedReturn reverts unless acceptDegraded is explicitly true in the signed authorization",
+        "DEGRADED balance is never automatically moved anywhere by any contract function",
+        "An expired payout authorization on a FUNDED cycle renews cleanly instead of locking principal"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "This is the single highest-value correctness fix in the whole design \u2014 closes a previously-flagged critical dead end. Do not add any path that auto-sweeps a DEGRADED balance. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer (someone who has not written this diff) before merge \u2014 do not self-approve."
+    },
+    {
+      "id": "WP-04",
+      "title": "Payout hardening: sentinel fix, TREE_WIDTH literal, chunked payouts",
+      "goal": "Fix two low-risk contract bugs and add chunked-payout support so a single cycle's proceeds can be distributed to more than 1024 holders.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "packages/contracts/src/payout/PayoutCommitment.sol",
+        "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+        "packages/contracts/src/settlement/HolderSettlement.sol",
+        "packages/contracts/test/payout/PayoutCommitment.t.sol",
+        "packages/contracts/test/payout/CanonicalMerkleSum.t.sol",
+        "packages/contracts/test/settlement/HolderSettlement.t.sol"
+      ],
+      "readSet": [
+        "architecture/trust-boundaries.md (TB-16, TB-17)",
+        "architecture/interfaces.json"
+      ],
+      "steps": [
+        "Fix PayoutCommitment: replace the payoutId != bytes32(0) overload used by PayoutAlreadyFunded with an explicit `funded` boolean per record",
+        "Add a regression test proving a repeated authorization for payoutId == bytes32(0) reverts PayoutAlreadyFunded on the second call",
+        "Fix HolderSettlement: replace the hardcoded 1024 literal with CanonicalMerkleSum.TREE_WIDTH",
+        "Add parent/child chunk structure: commitPayoutChunk(payoutId, chunkIndex, rootHash, rootSum) under the existing single payoutId; enforce sum(chunk.rootSum) == payoutLiability[payoutId] exactly before any chunk is claimable",
+        "Add an explicit manifest-closed flag so a partial/abandoned chunk commitment can never leave holders permanently unpayable",
+        "Add chunkIndex parameter to HolderSettlement.payEntitlement; key paidEntitlements on (payoutId, chunkIndex, index)",
+        "Ship chunking inactive by default (chunk count fixed at 1) with a config path to activate multi-chunk mode later",
+        "Add tests: partial chunk set is rejected as claimable, exact-sum-across-chunks is enforced, single-chunk mode behaves identically to today's unchunked path, per-chunk pull payment works",
+        "Add a named MAX_CHUNKS_PER_PAYOUT constant (a declared maximum, not an unbounded loop) and a gas-metered test committing+claiming one full, maximally-deep 1024-leaf chunk, plus a second gas-metered test committing and closing out a full MAX_CHUNKS_PER_PAYOUT-chunk cycle, recording the total gas cost of each in the test output per security-and-evidence.md's 'hard maximums for callbacks, launch, claims, user exits, and keeper actions' requirement"
+      ],
+      "tests": [
+        "forge test --match-path 'test/payout/*.t.sol'",
+        "forge test --match-path 'test/settlement/*.t.sol'",
+        "forge test --match-path 'test/payout/*.t.sol' --gas-report"
+      ],
+      "acceptance": [
+        "A repeated bytes32(0) payoutId authorization reverts PayoutAlreadyFunded instead of silently overwriting",
+        "HolderSettlement no longer contains a bare 1024 literal",
+        "Chunk set is atomic: all-or-nothing claimable, sum invariant holds exactly",
+        "Single-chunk mode (today's default) behaves identically to the pre-change contract for existing fixture tests",
+        "A full 1024-leaf chunk's commit+claim gas cost is measured and recorded, not just asserted to succeed",
+        "A full MAX_CHUNKS_PER_PAYOUT-chunk cycle's total close-out gas cost is measured and recorded"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "Highest-risk new contract state in the whole design (new invariants). Bundle the two cheap bug fixes here since they touch the same files. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer before merge \u2014 do not self-approve."
+    },
+    {
+      "id": "WP-05",
+      "title": "Pin Programmable owner + open router / optional hookData",
+      "goal": "Compile-time pin the Programmable fee beneficiary to the policy-mandated address, emit claim events, and relax the single-router/mandatory-hookData binding so standard wallets, aggregators, and the Uniswap Trading API can swap against the pool.",
+      "deps": [
+        "WP-01",
+        "WP-02"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/contracts/src/bindings/RobinhoodBindings.sol",
+        "packages/contracts/src/accounting/FeeAccounting.sol",
+        "packages/contracts/src/HookemonHook.sol",
+        "packages/contracts/src/market/CanonicalMarket.sol",
+        "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+        "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol"
+      ],
+      "readSet": [
+        "programmable-fee-policy.md",
+        "compatibility-standard.md",
+        "bindings/robinhood-chain.json"
+      ],
+      "steps": [
+        "Add a compile-time constant / constructor-time require pinning programmableBeneficiary == 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+        "Add ProgrammableClaimed/TreasuryClaimed events to _claimLiability",
+        "Make hookData optional in CanonicalMarket: when absent or malformed, skip buyerHkmnCredit bookkeeping but still collect the fee and accrue liabilities normally for any caller/router",
+        "Keep full-fill-only enforcement (InvalidFinalizedSwap on partial fill) unchanged",
+        "Add new test cases: swap from an arbitrary router with no hookData succeeds and pays the exact fee with no buyerHkmnCredit; the existing strict-hookData path is unchanged for the automation's own swaps; RobinhoodBindings.validate() rejects a binding whose programmableBeneficiary is not the pinned address"
+      ],
+      "tests": [
+        "forge test --match-path 'test/bindings/*.t.sol'",
+        "forge test --match-path 'test/accounting/*.t.sol'",
+        "forge test --match-path 'test/market/*.t.sol'"
+      ],
+      "acceptance": [
+        "Deployment reverts if programmable != 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+        "ProgrammableClaimed/TreasuryClaimed events emitted with exact amounts on every claim",
+        "A swap from an arbitrary router with no hookData succeeds, pays the exact 3% fee, and credits no buyerHkmnCredit",
+        "The existing hookData-present path is byte-for-byte unchanged in behavior"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "Revisits an audited, tested invariant (single-router binding) \u2014 gated on owner decision D2 and a dedicated red-team pass (WP-26) before this is treated as final. Do not begin CREATE2 hook mining (WP-20) until this lands AND the router-address probe (WP-25) resolves. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer before merge \u2014 do not self-approve. COORDINATOR NOTE after WP-01: packages/contracts/src/HookemonHook.sol has pre-existing forge fmt drift; run forge fmt on it as part of this package so forge fmt --check passes."
+    },
+    {
+      "id": "WP-06",
+      "title": "Dependency + signer plumbing (packages/adapters scaffold)",
+      "goal": "Stand up the isolated packages/adapters boundary with pinned npm dependencies (viem, @solana/web3.js), the 3-way coordinated CI/dependency-pin update, the config store, and the policy-wallet signer schema \u2014 unblocks every adapter package.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "packages/adapters/package.json",
+        "packages/adapters/package-lock.json",
+        ".github/workflows/v4-gates.yml",
+        "product/dependency-pins.json",
+        "scripts/verify-control-dependencies.mjs",
+        "scripts/tests/control-dependencies.test.mjs",
+        "packages/runner/src/config/state-schema.mjs",
+        "packages/runner/src/automation/policy-wallets.mjs"
+      ],
+      "readSet": [
+        "codex/complete-v4-hook packages/runner/src/automation/policy-wallets.mjs",
+        "packages/runner/src/operator/state-file.mjs"
+      ],
+      "steps": [
+        "Create packages/adapters/package.json pinning exact versions of viem and @solana/web3.js; generate the lockfile",
+        "Update .github/workflows/v4-gates.yml to install and verify the new package by hash",
+        "Add packages/adapters's dependency footprint to product/dependency-pins.json",
+        "Extend scripts/verify-control-dependencies.mjs to cover the new package; add scripts/tests/control-dependencies.test.mjs cases",
+        "Port policy-wallets.mjs from codex/complete-v4-hook: schema-bound intents (allowedDestinations/allowedFunctions/allowedAssets/maxAmount), dependency-injected signerClient, and an explicit test asserting privateKey/secretKey/mnemonic/seed/keypair fields in config throw",
+        "Add spend-cap, allowlist, and interval config to the dashboard-editable operator state-file schema; document the secrets contract (OS keychain or remote provider handle, never raw key material in the file)"
+      ],
+      "tests": [
+        "node --test scripts/tests/control-dependencies.test.mjs",
+        "node --test packages/runner/test/automation/policy-wallets.test.mjs"
+      ],
+      "acceptance": [
+        "CI installs and verifies the new dependency footprint by hash",
+        "Signer config schema rejects any raw key-material field at construction time",
+        "packages/runner's existing tests still run with zero installs (no new dependency leaks into the deterministic core)"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "Must land before WP-08/09/10, which all depend on this scaffold."
+    },
+    {
+      "id": "WP-27",
+      "title": "Durable production cycle store: close the ~16-cycle in-memory recovery ceiling",
+      "goal": "Replace the all-in-memory FixtureCycleStore (RECOVERY_LIMITS.storeCycles=16, no disk persistence, no archiving) with a disk-backed store suitable for a scheduler that creates a new cycle every 20 minutes indefinitely, so the live cycle-count ceiling applies only to active cycles and a process restart recovers from disk rather than losing everything.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "packages/runner/src/cycle/cycle-store.mjs",
+        "packages/runner/src/cycle/durable-store.mjs",
+        "packages/runner/src/cycle/journal.mjs",
+        "packages/runner/test/cycle/durable-store.test.mjs"
+      ],
+      "readSet": [
+        "packages/runner/src/cycle/cycle-runner.mjs",
+        "scratchpad/w2/DESIGN.md section 2.5"
+      ],
+      "steps": [
+        "Read packages/runner/src/cycle/journal.mjs's RECOVERY_LIMITS and cycle-store.mjs's FixtureCycleStore to confirm the exact current ceiling (storeCycles=16, journalEvents=512 per cycle) before changing anything",
+        "Add a new durable-store.mjs: an append-only, disk-backed store keyed by cycleId that persists every committed journal entry to a file (or file-per-cycle directory), reloadable on process restart without depending on in-memory state surviving",
+        "Add an archiving policy: once a cycle reaches a terminal state (closed/FAILED/DEGRADED and settled), move it out of the 'active' working set the storeCycles-style ceiling applies to, into an append-only archive directory that is never re-loaded into the hot path \u2014 so the ceiling bounds concurrent/recent active cycles, not lifetime history",
+        "Keep FixtureCycleStore itself unchanged and in use for existing fixture/unit tests (it is fine as a bounded test double); wire production callers (WP-07's AutomatedCycleService, WP-14's scheduler) to the new durable-store.mjs instead",
+        "Add a test proving cycle #17 through #40 (beyond the old 16-cycle ceiling) all create, run, and recover correctly against the durable store",
+        "Add a crash-and-restart test: kill the process mid-cycle after 20+ prior cycles have completed, restart, and confirm the active cycle resumes correctly from disk"
+      ],
+      "tests": [
+        "node --test packages/runner/test/cycle/durable-store.test.mjs"
+      ],
+      "acceptance": [
+        "Creating and completing more than 16 cycles in sequence never throws a cycle-count-limit error against the durable store",
+        "A process restart after 20+ completed cycles recovers the active cycle correctly by reading from disk, not from in-memory state",
+        "Terminal (closed/FAILED/DEGRADED) cycles are archived out of the hot working set and are not re-loaded on every recovery pass",
+        "FixtureCycleStore's existing bounded behavior is unchanged for tests that still use it directly"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Closes a real gap the first draft of this plan left unaddressed: an always-on scheduler running every 20 minutes would otherwise hit a hard store-cycle-count-exceeded error within about 5.3 hours of continuous operation. WP-07 and WP-14 both depend on this landing first. COORDINATOR NOTE after WP-01: base now includes the rev57 operator state-file (packages/runner/src/operator/state-file.mjs) with lock/CAS/atomic-replace; reuse its patterns for the durable store; do not modify operator/* (WP-01 owned it) except through new files."
+    },
+    {
+      "id": "WP-21",
+      "title": "Requirements revision 58 + ADR-0021 + owner-approval drafts + delivery-boundary open",
+      "goal": "Author the formal spec/process artifacts that authorize everything else in this plan: new REQ ids, ADR-0021, unsigned owner-approval drafts, and the delivery-boundary/CI changes to open Phase 2.",
+      "deps": [
+        "WP-02",
+        "WP-03",
+        "WP-04"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "specs/requirements.json",
+        "decisions/ADR-0021-autonomous-cycle-authority.md",
+        "decisions/owner-approvals/revision-58-baseline.json",
+        "decisions/owner-approvals/revision-58-standing-authority.json",
+        "decisions/owner-approvals/revision-58-hookdata-relaxation.json",
+        "decisions/owner-approvals/revision-58-distribution-signer-custody.json",
+        "product/delivery-boundary.json",
+        "scripts/lib/ledger.mjs",
+        "architecture/capability-map.json",
+        "architecture/capability-map.md",
+        "architecture/interfaces.json",
+        "docs/modules/index.json",
+        "product/REQUIREMENTS_REVISION_58_PROPOSAL.md",
+        "product/PRD.md",
+        "product/OWNER_DECISIONS.md",
+        "decisions/task-deferrals/P1-011.json",
+        "tasks/P2-013.md",
+        "tasks/context-packs.json",
+        "gates/init.json"
+      ],
+      "readSet": [
+        "DESIGN.md sections 3 and 8",
+        "AGENTS.md",
+        "ADR-0018",
+        "ADR-0019"
+      ],
+      "steps": [
+        "Write REQ-fee-accounting-6/7/8, REQ-canonical-market-6, REQ-process-budget-6, REQ-payout-commitment-7/8, REQ-cycle-control-2, REQ-distribution-1/2, REQ-dashboard-2 into specs/requirements.json with exact acceptance text matching the shipped contract behavior from WP-02..05",
+        "Write ADR-0021 stating the five-identity custody model, the two-layer kill switch, the explicit non-adoption of a new on-chain pause role (citing TB-07 by name), and that autonomy changes who signs, not what is checked",
+        "Draft (unsigned) the four owner-approval JSON files per schema v4-owner-approval-v2",
+        "Flip product/delivery-boundary.json's phases.2 from CLOSED to OPEN, or mint fresh Phase-2-scoped task ids that do not need scripts/lib/ledger.mjs's hardcoded P1-011 deferral relaxed",
+        "Reserve P2-001..012 as codex/phase2-revision-57's canonical numbering; new task cards start at P2-013"
+      ],
+      "tests": [
+        "node --test scripts/tests/reqs.test.mjs",
+        "node --test scripts/tests/delivery-boundary.test.mjs"
+      ],
+      "acceptance": [
+        "Revision 58 traces cleanly against every contract change actually shipped in WP-02..05",
+        "Delivery-boundary phase 2 opens without breaking phase 1's closed invariants",
+        "ADR-0021 explicitly cites TB-07 when declining the guardian-role alternative"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "Needs the final REQ text from WP-02/03/04 settled first; do not draft owner-approval spend-cap numbers without decision D4's answer. COORDINATOR NOTE after WP-01: the merged tree carries specs/requirements.json revision 57, which breaks the sha256 binding of decisions/task-deferrals/P1-011.json and its owner approval (node scripts/check-delivery-boundary.mjs exits 1: 'deferred task P1-011 authority invalid' and 'unregistered normative file tasks/P1-011.md'). Resolve it here as part of revision 58: draft the re-bound deferral descriptor and an UNSIGNED owner-approval draft (clearly marked DRAFT_UNSIGNED in rationale, never with the approvalToken 'OWNER APPROVED'), register tasks/P1-011.md, and make scripts/tests/delivery-boundary.test.mjs and check-delivery-boundary.mjs pass while documenting exactly which artifacts still need the owner's signature. Do not fabricate an owner approval token. COORDINATOR NOTE (A6 coupling): gate A6 (scripts/lib/gates.mjs validateModuleIndex) requires docs/modules/index.json, architecture/capability-map.json (modules array and topologicalOrder, identical order) and specs/requirements.json to carry the same productPhase/architectureRevision/requirementsRevision and the same module set; bumping requirements to revision 58 therefore requires bumping index.json and capability-map.json (and capability-map.md projection, interfaces.json if tests bind it) in the same package. Register every module card that exists in docs/modules/ at your start (including cards added by group-2 packages such as durable-store, snapshot-indexer, adapters, phase2-readiness) with a real capability entry (capability text, deploymentPlacement, dependsOn, requirementIds bound to revision-58 REQ ids) and a correct topological position; leave gates.test.mjs and final-review.test.mjs green. Write product/REQUIREMENTS_REVISION_58_PROPOSAL.md (diff plus rationale per R2) and record the pending owner approvals in product/OWNER_DECISIONS.md as PROPOSED, never as approved. COORDINATOR NOTE (I6 coupling): gates/init.json item I6 lists every docs/modules/*.md card in its requiredInputs/allowedInputs (the evidence policy walks the directory), so every new card must also be added there in sorted position; register all currently unregistered cards (adapters.md, holder-snapshot-indexer.md is already listed, plus any card added by group-3 packages) and keep scripts/tests/final-review.test.mjs and gates.test.mjs green."
+    },
+    {
+      "id": "WP-07",
+      "title": "Port automation modules from complete-v4-hook",
+      "goal": "Bring the lease-fenced AutomatedCycleService, budget gate, and fee-settlement observer onto the merged base, rewired to the escrow-based funding model, the new DEGRADED/dust-fast-path vault states, and the durable production cycle store.",
+      "deps": [
+        "WP-01",
+        "WP-03",
+        "WP-05",
+        "WP-27",
+        "WP-29"
+      ],
+      "parallelGroup": 4,
+      "writeSet": [
+        "packages/runner/src/automation/automated-cycle-service.mjs",
+        "packages/runner/src/automation/budget-gate.mjs",
+        "packages/runner/src/automation/exclusive-lease.mjs",
+        "packages/runner/src/automation/fee-settlement.mjs",
+        "packages/runner/src/cycle/cycle-runner.mjs",
+        "packages/runner/test/automation/automated-cycle-service.test.mjs",
+        "packages/runner/test/integration/automated-cycle.test.mjs"
+      ],
+      "readSet": [
+        "codex/complete-v4-hook packages/runner/src/automation/* full diff",
+        "packages/contracts/src/process/IPegCycleVault.sol (from WP-03)"
+      ],
+      "steps": [
+        "Port the 189-line AutomatedCycleService (lease + budget-gate + 8-stage driver, dependency-injected leaseStore/budgetReader/cycleRepository/runnerFactory/stageDriver/feeSettlementObserver) largely as-is",
+        "Rewire the funding stage to target the per-cycle PegCycleReturnEscrow instead of the vault directly",
+        "Add a new stage boundary at the Track-B join (design \u00a72.4 step 9) that blocks on both the finalized return amount and the distribution-signer/verifier signatures before calling authorizePayout",
+        "Port CycleRunner.supersedeUnobservedIntent unchanged (dual independent observer proofs + fresh owner-signed authorization)",
+        "Carry forward the additive SwapLiabilitiesAccrued event integration"
+      ],
+      "tests": [
+        "node --test packages/runner/test/automation/**",
+        "node --test packages/runner/test/integration/automated-cycle.test.mjs"
+      ],
+      "acceptance": [
+        "All ported automation tests pass against the merged, revised contracts",
+        "No duplicate on-chain function signatures between ported code and WP-01/03/05's contracts",
+        "The new Track-B join stage blocks correctly until both preconditions are present in a fixture test"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "This is the automation core; it must not reintroduce complete-v4-hook's conflicting HookemonHook.sol/ProcessBudget.sol changes. R3, touches money-moving stage transitions: per AGENTS.md, use a fresh-context independent reviewer before merge."
+    },
+    {
+      "id": "WP-08",
+      "title": "Collector Crypt provider adapter",
+      "goal": "Clean-room client for the real Collector Crypt gacha API, with --dry-run support.",
+      "deps": [
+        "WP-01",
+        "WP-06"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/adapters/src/collector-crypt.mjs",
+        "packages/adapters/test/collector-crypt.test.mjs"
+      ],
+      "readSet": [
+        "docs.collectorcrypt.com/gacha/api",
+        "product/SOURCE_BOUNDARY.md"
+      ],
+      "steps": [
+        "Implement typed client functions for GET /api/machines, POST /api/generatePack, POST /api/openPack, GET /api/buyback/available, POST /api/buyback, POST /api/submitTransaction, GET /api/pack/status against https://gacha.collectorcrypt.com",
+        "Always send the x-api-key header on every call, including the GET endpoints that currently work without one",
+        "Add exponential-backoff retry and idempotency via the runner's existing requestDigest pattern",
+        "Add a --dry-run mode that performs only the real read-only calls and refuses to call any mutation endpoint",
+        "Record fixture HTTP responses for CI; add a separate, explicitly-labeled live-read-only smoke test (GET /api/status, /api/machines) that is non-blocking in CI"
+      ],
+      "tests": [
+        "node --test packages/adapters/test/collector-crypt.test.mjs"
+      ],
+      "acceptance": [
+        "Every documented mutation endpoint has a typed client function",
+        "x-api-key is sent on every request, GET included",
+        "A network failure triggers idempotent retry, never a duplicate mutation",
+        "--dry-run never calls generatePack/openPack/buyback/submitTransaction"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "Reimplemented clean-room per product/SOURCE_BOUNDARY.md; the legacy canary branch's collector-crypt.js/collector-executor.js may inform technique only, never be copied."
+    },
+    {
+      "id": "WP-09",
+      "title": "Relay bridge provider adapter",
+      "goal": "Clean-room client for Relay's cross-chain USDG<->Circle USD bridge, with --dry-run support.",
+      "deps": [
+        "WP-01",
+        "WP-06"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/adapters/src/relay-client.mjs",
+        "packages/adapters/test/relay-client.test.mjs"
+      ],
+      "readSet": [
+        "api.relay.link docs",
+        "product/SOURCE_BOUNDARY.md"
+      ],
+      "steps": [
+        "Implement typed client functions for POST /quote/v2 and GET /intents/status/v3 against https://api.relay.link",
+        "Cover both bridge directions: Robinhood USDG (4663) -> Solana Circle USD (792703809) outbound, and the reverse for return",
+        "Add a --dry-run mode: quotes are read-only and always allowed; execution is refused unless liveMode is explicitly true",
+        "Add a quote-vs-execution differential check: the adapter compares the executed amount from /intents/status/v3 against the originally quoted amount and flags the delta explicitly, rather than trusting the quote as final",
+        "Add callback/status authentication: an /intents/status/v3 response is only accepted if it authenticates back to the specific intent digest this adapter itself submitted, never matched loosely by chain/asset/amount alone",
+        "Add exact-refund handling: a partial-fill or refund response produces an exact accounted amount (not an estimate), surfaced as a typed result the caller must handle explicitly",
+        "Add reentrancy/venue-failure isolation: a Relay outage, timeout, or malformed response fails the adapter call cleanly with a typed error, never leaves the caller able to infer the bridge succeeded",
+        "Add a test feeding a recorded partial-fill/refund fixture response through the real adapter code path (not a hand-authored journal entry) and assert it produces the recordDegradedReturn-eligible signal that WP-03/WP-23's DEGRADED path consumes \u2014 this closes the gap between the adapter's own failure semantics and the on-chain DEGRADED recovery path",
+        "Record fixture responses for CI; add a separate live-read-only /chains smoke test, non-blocking in CI"
+      ],
+      "tests": [
+        "node --test packages/adapters/test/relay-client.test.mjs"
+      ],
+      "acceptance": [
+        "Both bridge directions have a typed client function",
+        "No test in the default CI run executes a live quote",
+        "depositEnabled is checked for both currencies/chains before a quote is trusted",
+        "A quote-vs-execution amount mismatch is detected and surfaced, not silently accepted",
+        "An /intents/status/v3 response that does not authenticate to the submitted intent digest is rejected",
+        "A recorded partial-fill/refund fixture, run through the real adapter, produces the exact same DEGRADED-eligible signal WP-03/WP-23 already test against"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "The first real quote this adapter executes is itself an ask-first action for the owner to approve before dry-run graduates to live."
+    },
+    {
+      "id": "WP-10",
+      "title": "Robinhood/Solana RPC + contract-call adapters",
+      "goal": "viem-based EVM and raw-JSON-RPC Solana wrappers for every contract call and balance/receipt read the cycle needs.",
+      "deps": [
+        "WP-01",
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06"
+      ],
+      "parallelGroup": 4,
+      "writeSet": [
+        "packages/adapters/src/robinhood-rpc.mjs",
+        "packages/adapters/src/solana-rpc.mjs",
+        "packages/adapters/src/hook-contract-client.mjs",
+        "packages/adapters/test/robinhood-rpc.test.mjs",
+        "packages/adapters/test/solana-rpc.test.mjs",
+        "packages/adapters/test/hook-contract-client.test.mjs"
+      ],
+      "readSet": [
+        "scratchpad/w1/summaries/external-facts.json",
+        "packages/contracts/src/process/IPegCycleVault.sol"
+      ],
+      "steps": [
+        "Implement viem-based typed calls for openPegCycle/authorizeFunding/executeOutbound/authorizePayout/consumePayoutAuthorization/recordDegradedReturn against the finalized ABI from WP-01/03/04/05",
+        "Implement balance reads and finalized-block transaction/receipt fetches for both chains",
+        "Implement raw Solana JSON-RPC wrappers for transaction construction/signing/submission via @solana/web3.js",
+        "Add exact-parameter encoding tests for every contract call used by the cycle data flow"
+      ],
+      "tests": [
+        "node --test packages/adapters/test/robinhood-rpc.test.mjs",
+        "node --test packages/adapters/test/solana-rpc.test.mjs",
+        "node --test packages/adapters/test/hook-contract-client.test.mjs",
+        "forge test --match-path 'test/integration/anvil-fork/*.t.sol' (against a local anvil fork)"
+      ],
+      "acceptance": [
+        "Every contract call used by the cycle data flow has a typed adapter function with an exact-parameter encoding test",
+        "A local anvil fork of finalized Robinhood state confirms the encoded calls match the deployed ABI"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "The one place a real dependency (viem) is justified per the \u00a76 decision."
+    },
+    {
+      "id": "WP-11",
+      "title": "Holder snapshot indexer",
+      "goal": "Produce a real, authenticated HKMN holder balance snapshot from finalized Transfer logs, excluding non-holder addresses.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "packages/runner/src/distribution/snapshot-indexer.mjs",
+        "packages/runner/test/distribution/snapshot-indexer.test.mjs"
+      ],
+      "readSet": [
+        "packages/runner/src/distribution/reconcile.mjs (existing validateSnapshot schema)"
+      ],
+      "steps": [
+        "Read HKMN Transfer logs from Robinhood RPC up to a fixed finalized block and fold them into current per-address balances",
+        "Compute the exclusion list: canonical pool, hook, vault, every per-cycle escrow (via the same CREATE2 formula the contracts use), treasury",
+        "Produce the hookemon.hkmn-holder-snapshot.v1 schema: finalized block number/hash, per-holder balance, total supply, exclusion list with justification",
+        "Add a synthetic Transfer-log fixture test proving two independent runs from the same finalized block produce byte-identical snapshots"
+      ],
+      "tests": [
+        "node --test packages/runner/test/distribution/snapshot-indexer.test.mjs"
+      ],
+      "acceptance": [
+        "Snapshot schema matches what reconcile.mjs's existing validateSnapshot already expects",
+        "Excluded addresses (pool/hook/vault/every escrow/treasury) never appear as recipients",
+        "Two independent runs against the same finalized block produce identical output (TB-16 dual-builder requirement)"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Log-derived, not eth_call-derived, specifically so a second builder can independently reproduce it."
+    },
+    {
+      "id": "WP-19",
+      "title": "Programmable submission.json + launch plan",
+      "goal": "Prepare, but do not execute, the Programmable launch-admission artifacts for chain 4663.",
+      "deps": [
+        "WP-01",
+        "WP-05"
+      ],
+      "parallelGroup": 4,
+      "writeSet": [
+        "release/phase2/submission.json",
+        "release/phase2/launch-plan.md"
+      ],
+      "readSet": [
+        "programmable-v4-hook-builder skill's submission.json template",
+        "script/release/PhaseOneReleasePlan.sol"
+      ],
+      "steps": [
+        "Populate submission.json per the builder skill's schema with every provider-bound field knowable today (fee split, hook permission mask, hookData layout per WP-05, the pinned Programmable owner address per WP-05)",
+        "Set every unknowable field (deployment addresses, chain-deployment digest) explicitly to null / INTEGRATION_PENDING, never omitted",
+        "Write a launch-plan artifact mirroring PhaseOneReleasePlan.sol's pattern, extended to cover the new escrow and chunked-payout contracts"
+      ],
+      "tests": [
+        "node scripts/tests/phase2-launch-evidence.test.mjs"
+      ],
+      "acceptance": [
+        "Schema validates in INTEGRATION_PENDING state",
+        "Every knowable field is populated; every unknowable field is explicitly null, not omitted"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "Cannot execute submission until Programmable's Robinhood profile is readiness:available (external, out of the repo's control)."
+    },
+    {
+      "id": "WP-20",
+      "title": "Custom LiquidityLauncher strategy + HookemonIssuance wiring + CREATE2 hook mining",
+      "goal": "Write and test a custom launch strategy (the stock InstantLaunchStrategy is unusable), wire it to the existing fail-closed HookemonIssuance guard so HKMN is actually created through the launchpad, and mine the hook's CREATE2 address against the finalized permission mask.",
+      "deps": [
+        "WP-05",
+        "WP-25"
+      ],
+      "parallelGroup": 4,
+      "writeSet": [
+        "packages/contracts/src/launch/CustomLaunchStrategy.sol",
+        "packages/contracts/test/launch/CustomLaunchStrategy.t.sol",
+        "packages/contracts/test/launch/HookemonIssuanceIntegration.t.sol",
+        "scripts/mine-hook-address.mjs"
+      ],
+      "readSet": [
+        "Uniswap liquidity-launcher SDK docs",
+        "scratchpad/w2/DESIGN.md sections 3.8 and 7",
+        "packages/contracts/src/launch/HookemonIssuance.sol"
+      ],
+      "steps": [
+        "Write a custom LiquidityLauncher strategy contract (not native-ETH, not fixed-1e9-supply) and its tests, against a fork of the vendored liquidity-launcher submodule",
+        "Wire CustomLaunchStrategy as the concrete provider adapter HookemonIssuance.sol's own doc comment calls for: call prepareOfficialIssuance with a plan matching the fixed 90%/10% split (WHOLE_HKMN_SUPPLY=420_690_000_000, otherAllocation=0) already enforced in HookemonIssuance._validatePlan, using decision D10's answer (or, if D10 is still open, a clearly-labeled placeholder per design.md section 3.8) for remainderRepresentation and the LBP curve parameters",
+        "Perform the real mint/allocation through LiquidityLauncher/UERC20Factory, then call verifyIssuance with the real observed balances and a 2-element TransferRecord trace proving the market and remainder legs landed exactly as planned",
+        "Add HookemonIssuanceIntegration.t.sol: a regression test proving readTokenState().status reaches OBSERVATION_VERIFIED_PROVIDER_BINDING_PENDING only after a real (forked) launch call through CustomLaunchStrategy, never from a hand-constructed observation not actually produced by the launcher",
+        "Do not begin CREATE2 mining until WP-05's hookData relaxation is finalized and WP-25's Universal Router probe has resolved which router address is live",
+        "Mine the hook address against the finalized permission mask using the RPC-verified-live router address"
+      ],
+      "tests": [
+        "forge test --match-path 'test/launch/*.t.sol'"
+      ],
+      "acceptance": [
+        "Strategy compiles and passes unit tests against a forked launcher",
+        "A forked launch call through CustomLaunchStrategy actually mints/allocates HKMN and HookemonIssuance.verifyIssuance accepts the resulting observation",
+        "A hand-constructed (not launcher-produced) observation is rejected by verifyIssuance's existing trace/allocation checks",
+        "Mined hook address matches the finalized permission mask",
+        "Mining used the router address confirmed live by WP-25's probe, not an unverified pin"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Hard-blocked on WP-25 completing first, not merely sequenced after \u2014 mining before the router address resolves risks a wasted or wrong mine. Also gated on owner decision D10 (remainderRepresentation custody + LBP curve parameters) for the final, non-placeholder version \u2014 see design.md section 3.8/11 D10 for what may proceed against a documented placeholder in the meantime."
+    },
+    {
+      "id": "WP-25",
+      "title": "Evidence/reproducibility refresh: dry-run harness + binding drift-check",
+      "goal": "Build the standalone verification script that resolves the Universal Router address discrepancy and continuously re-probes every external precondition this design depends on.",
+      "deps": [
+        "WP-01"
+      ],
+      "parallelGroup": 2,
+      "writeSet": [
+        "scripts/verify-phase2-readiness.mjs",
+        "scripts/check-binding-drift.mjs",
+        "scripts/tests/verify-phase2-readiness.test.mjs"
+      ],
+      "readSet": [
+        "feasibility/verify-robinhood-binding.mjs",
+        "bindings/robinhood-chain.json",
+        "scratchpad/w1/summaries/external-facts.json"
+      ],
+      "steps": [
+        "Model scripts/verify-phase2-readiness.mjs on feasibility/verify-robinhood-binding.mjs's existing fail-closed pattern",
+        "Probe Collector Crypt's /api/status+/api/machines, Relay's /chains, Programmable's discovery/capabilities endpoints, and the Uniswap deployments page against a fresh finalized RPC read",
+        "Specifically resolve the Universal Router address: compare the repo-pinned 0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99 against Uniswap's public deployments page value 0x8876789976decbfcbbbe364623c63652db8c0904 for chain 4663 via an on-chain runtime-codehash probe, and report which one is actually live",
+        "Report INTEGRATION_PENDING/PASSED per precondition, never silently pass",
+        "Add a read-only, non-blocking CI job that re-runs this on a schedule (matches AGENTS.md's at-most-one-60-minute-or-slower-watchdog rule)"
+      ],
+      "tests": [
+        "node --test scripts/tests/verify-phase2-readiness.test.mjs",
+        "node scripts/verify-phase2-readiness.mjs --offline (fixture mode for CI)"
+      ],
+      "acceptance": [
+        "Script reports which Universal Router address is actually live on-chain, with the evidence (runtime codehash comparison) recorded",
+        "Script reports INTEGRATION_PENDING vs PASSED for every one of this design's external preconditions",
+        "WP-20 cannot proceed with mining until this script reports the router address as resolved"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "This package must complete before WP-20; none of the three source designs hard-blocked mining on this probe, which this synthesis explicitly fixes."
+    },
+    {
+      "id": "WP-12",
+      "title": "Pro-rata manifest compiler",
+      "goal": "Compute real per-holder distribution amounts from a finalized snapshot and a cycle's returned proceeds, with dust carryforward and >1024-holder chunking.",
+      "deps": [
+        "WP-11",
+        "WP-04"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/runner/src/distribution/pro-rata.mjs",
+        "packages/runner/test/distribution/pro-rata.test.mjs"
+      ],
+      "readSet": [
+        "packages/runner/src/distribution/manifest.mjs",
+        "packages/runner/src/distribution/reconcile.mjs"
+      ],
+      "steps": [
+        "Compute amount_i = floor(balance_i * proceeds / totalEligibleSupply) per holder from the finalized snapshot",
+        "Track the floor-rounding dust (proceeds - sum(amount_i)) and carry it forward into the next cycle's distributable pool per decision D6's default",
+        "Chunk holders into deterministic, address-sorted <=1024-entry groups when the snapshot exceeds 1024 non-zero balances, feeding WP-04's chunk-commitment path",
+        "Feed output unmodified into the existing deriveHolderDistributionCandidate in reconcile.mjs/manifest.mjs"
+      ],
+      "tests": [
+        "node --test packages/runner/test/distribution/pro-rata.test.mjs"
+      ],
+      "acceptance": [
+        "Floor-rounding is exact: sum(amount_i) + dust == proceeds",
+        "Dust carries forward across two simulated cycles without loss",
+        "A >1024-holder synthetic snapshot chunks correctly and each chunk's rootSum sums to the total liability",
+        "Output passes reconcile.mjs's existing exact-sum, closed-shape checks unmodified"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Do not change reconcile.mjs's or manifest.mjs's existing verification invariants \u2014 this package must conform to them, not the reverse."
+    },
+    {
+      "id": "WP-13",
+      "title": "Distribution-signer / verifier service",
+      "goal": "Stand up the owner-held, non-worker signing service that independently approves and verifies each cycle's payout manifest before authorizePayout can be produced.",
+      "deps": [
+        "WP-01",
+        "WP-04"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/runner/src/distribution/distribution-signer.mjs",
+        "packages/runner/test/distribution/distribution-signer.test.mjs",
+        "docs/modules/distribution-signer.md"
+      ],
+      "readSet": [
+        "scratchpad/w2/DESIGN.md sections 2.3 and 4.8",
+        "packages/runner/src/distribution/manifest.mjs"
+      ],
+      "steps": [
+        "Implement a CLI/service, separate from the scheduler process, with two invocation modes: distribution-signer (reads the compiled manifest + finalized return amount, independently recomputes the root hash/root sum, signs an approval) and verifier (repeats the recomputation from the same finalized snapshot with a second independent key, signs a matching receipt)",
+        "Enforce that both signatures reference the exact same rootHash/rootSum before either is considered valid",
+        "Add an explicit test asserting the service never reads or holds the scheduler's policy-wallet key material (structural separation, not just convention)",
+        "Wire the output into a schema the vault authorizer's PayoutAuthorization step (WP-07) can consume"
+      ],
+      "tests": [
+        "node --test packages/runner/test/distribution/distribution-signer.test.mjs"
+      ],
+      "acceptance": [
+        "A payout manifest is only usable in a PayoutAuthorization once both the distribution-signer and verifier signatures are present and agree on the same rootHash/rootSum",
+        "The service process never has access to the policy-wallet or vault-authorizer key material",
+        "A mismatched verifier reconstruction is rejected, not silently accepted"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "This is the graft from product-first's custody idea (decision D7) closing the tournament's sharpest identified gap: no single compromised worker host can both compute and self-approve a fraudulent manifest. R3, controls payout authorization: per AGENTS.md, use a fresh-context independent reviewer before merge."
+    },
+    {
+      "id": "WP-14",
+      "title": "Scheduler + cycle-worker wiring",
+      "goal": "Wire the interval-driven scheduler to the ported AutomatedCycleService, the durable cycle store, and every adapter, producing the actual unattended 20-minute loop.",
+      "deps": [
+        "WP-07",
+        "WP-08",
+        "WP-09",
+        "WP-10",
+        "WP-27",
+        "WP-28"
+      ],
+      "parallelGroup": 5,
+      "writeSet": [
+        "packages/runner/src/scheduler/scheduler.mjs",
+        "packages/runner/test/scheduler/scheduler.test.mjs",
+        "packages/runner/test/integration/full-cycle-dry-run.test.mjs"
+      ],
+      "readSet": [
+        "packages/runner/src/operator/state-file.mjs",
+        "packages/runner/src/automation/exclusive-lease.mjs"
+      ],
+      "steps": [
+        "Implement a dependency-free setInterval/unref'd loop reading intervalMs from the operator state file (default 1,200,000ms)",
+        "Check the pause flag before starting any new cycle-triggering call; let an in-flight cycle finish its current stage before halting on pause",
+        "Acquire the exclusive lease before calling AutomatedCycleService.runOnce()/.recoverActiveCycle()",
+        "Wire liveMode: false -> true as a single explicit config flag checked by the signer service on every request, never inferred",
+        "Add an integration test proving a full dry-run cycle (real read-only probes + fixture-signed mutations) completes end to end"
+      ],
+      "tests": [
+        "node --test packages/runner/test/scheduler/scheduler.test.mjs",
+        "node --test packages/runner/test/integration/full-cycle-dry-run.test.mjs"
+      ],
+      "acceptance": [
+        "Pause blocks the next cycle from starting; resume continues an interrupted one",
+        "An interval change takes effect on the next tick",
+        "A full dry-run cycle (real read-only probes + fixture-signed mutations) completes end to end",
+        "liveMode never flips without an explicit config write"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "The actual autonomous loop the owner asked for. Must stay in dry-run mode (WP-25's script confirms preconditions) until ADR-0021 is signed. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer before merge \u2014 do not self-approve."
+    },
+    {
+      "id": "WP-23",
+      "title": "End-to-end fixture regression: chunking + degraded-return + dust fast path",
+      "goal": "Prove WP-03/WP-04's new contract states behave correctly through the full existing fixture cycle pipeline.",
+      "deps": [
+        "WP-01",
+        "WP-03",
+        "WP-04"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/runner/test/integration/chunked-payout.test.mjs",
+        "packages/runner/test/integration/degraded-return.test.mjs",
+        "packages/runner/test/integration/dust-fast-path.test.mjs"
+      ],
+      "readSet": [
+        "packages/runner/test/cycle/*",
+        "packages/runner/test/distribution/*"
+      ],
+      "steps": [
+        "Simulate a >1024-holder cycle through the existing fixture harness and prove it completes via the chunked-payout path",
+        "Simulate a degraded-return cycle (short/ambiguous return) and prove it reaches DEGRADED, quarantines correctly, and a successor cycle can start",
+        "Simulate a trivial-excess return and prove the dust fast path pays exactly rootSum and leaves the excess untouched"
+      ],
+      "tests": [
+        "node --test packages/runner/test/**"
+      ],
+      "acceptance": [
+        "A simulated >1024-holder cycle completes through the existing fixture pipeline",
+        "A simulated degraded-return cycle completes through recovery to a successor cycle",
+        "A simulated dust-excess cycle pays exactly rootSum"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Keep the existing dual-copy/dual-signature Merkle verification intact throughout."
+    },
+    {
+      "id": "WP-24",
+      "title": "Anvil-based hook integration test: block-pinned regression + current-head smoke test",
+      "goal": "Test the hook's swap path against real deployed Uniswap v4 bytecode with two distinct fork suites \u2014 a block-pinned reproducible suite for review/regression and a separate current-head smoke test for drift detection \u2014 per security-and-evidence.md, not one implicitly-current-head run.",
+      "deps": [
+        "WP-02",
+        "WP-05"
+      ],
+      "parallelGroup": 4,
+      "writeSet": [
+        "packages/contracts/test/integration/RobinhoodV4Fork.t.sol",
+        "packages/contracts/test/integration/RobinhoodV4ForkSmoke.t.sol"
+      ],
+      "readSet": [
+        "packages/contracts/test/integration/RobinhoodV4PoolManager.t.sol",
+        "scratchpad/w1/summaries/external-facts.json"
+      ],
+      "steps": [
+        "Extend RobinhoodV4PoolManager.t.sol's pattern (already deploys a real PoolManager/PositionManager from the pinned Uniswap submodules) into two suites",
+        "RobinhoodV4Fork.t.sol: fork at a fixed, recorded block number (pinned in the test file, not read from the environment at runtime) so the suite is byte-for-byte reproducible and reviewable; this is the suite CI runs on every change and a reviewer actually reads",
+        "RobinhoodV4ForkSmoke.t.sol: fork at current head (no pinned block), run only a minimal smoke path, and treat its failure as 'the pinned block's assumptions have drifted from live chain state, go re-pin and investigate' rather than 'the hook is broken' \u2014 mark it non-blocking/scheduled in CI, not a required check",
+        "Run the full swap path (with and without hookData) against the forked, real deployed bytecode in both suites",
+        "Assert the WP-02 fee-conformance and WP-05 optional-hookData behavior both hold against the pinned-block fork, not just the hand-written test harness"
+      ],
+      "tests": [
+        "forge test --match-path 'test/integration/RobinhoodV4Fork.t.sol'",
+        "forge test --match-path 'test/integration/RobinhoodV4ForkSmoke.t.sol' --fork-url $ROBINHOOD_RPC_URL"
+      ],
+      "acceptance": [
+        "The hook's swap path passes against real deployed PoolManager/PositionManager bytecode on a fork pinned to a fixed, recorded block number",
+        "A separate current-head smoke suite exists and is distinguishable in CI output from the pinned-block regression suite",
+        "Both the hookData-present and hookData-optional paths are exercised against the pinned-block fork"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "Read-only fork tests, no key needed; the pinned-block suite is safe to run in CI on every change, the current-head smoke suite runs on a schedule and is non-blocking."
+    },
+    {
+      "id": "WP-15",
+      "title": "Payout submitter / settlement worker",
+      "goal": "Actually pay every committed holder leaf, once, with crash-safe resume.",
+      "deps": [
+        "WP-04",
+        "WP-10",
+        "WP-12",
+        "WP-13"
+      ],
+      "parallelGroup": 5,
+      "writeSet": [
+        "packages/runner/src/distribution/settlement-worker.mjs",
+        "packages/runner/test/distribution/settlement-worker.test.mjs"
+      ],
+      "readSet": [
+        "packages/contracts/src/settlement/HolderSettlement.sol (payEntitlement ABI, from WP-04)"
+      ],
+      "steps": [
+        "After a distribution is verified, funded, and both distribution-signer/verifier signatures are present (WP-13), call HolderSettlement.payEntitlement once per leaf (per chunk if chunked)",
+        "Add retry/backoff and track paid/unpaid per leaf in the durable journal",
+        "Add a crash-mid-distribution resume test: kill the worker after N of M leaves are paid, restart, confirm it resumes without double-payment attempts (or safely no-ops on retry since payEntitlement itself reverts EntitlementAlreadyPaid)"
+      ],
+      "tests": [
+        "node --test packages/runner/test/distribution/settlement-worker.test.mjs"
+      ],
+      "acceptance": [
+        "Every committed leaf/chunk gets paid exactly once",
+        "A crash resumes without a double-payment attempt succeeding (protected both by the worker's own journal and the contract's own revert)"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "Idempotent by construction at the contract layer; the journal-level idempotency is a defense-in-depth, not the only guard."
+    },
+    {
+      "id": "WP-16",
+      "title": "Observability",
+      "goal": "Structured cycle-status logging, a minimal alert webhook so a stuck or degraded cycle actually pages someone, and protocol-fee-brick detection on the canonical pool.",
+      "deps": [
+        "WP-14"
+      ],
+      "parallelGroup": 6,
+      "writeSet": [
+        "packages/runner/src/observability/logger.mjs",
+        "packages/runner/src/observability/status-projection.mjs",
+        "packages/runner/src/observability/alert-webhook.mjs",
+        "packages/runner/src/observability/protocol-fee-monitor.mjs",
+        "packages/runner/test/observability/*.test.mjs"
+      ],
+      "readSet": [
+        "ops/HANDOFF.md",
+        "scratchpad/w2/DESIGN.md section 3.7"
+      ],
+      "steps": [
+        "Add structured JSON logging per stage transition (console.error/console.log with a fixed schema, no dependency)",
+        "Add a cycle-status projection consumed by the dashboard",
+        "Add a minimal alert webhook fired on DEGRADED/FAILED/lease-contention transitions",
+        "Add one integration test that actually fires the webhook against a mock endpoint (closing the 'no alert channel has ever been test-fired' gap noted in ops/HANDOFF.md)",
+        "Add protocol-fee-monitor.mjs: poll StateLibrary.getSlot0's protocol-fee field for the canonical pool on every scheduler tick (piggybacking on the existing budget-gate pool-state read, no extra RPC call) and fire the same alert-webhook path the instant it goes nonzero \u2014 before the next swap even hits the hook's revert, per design.md section 3.7's governance-brick risk",
+        "Add a test simulating a nonzero protocol fee appearing on a fixture pool-state read and asserting the alert fires exactly once, not once per subsequent tick"
+      ],
+      "tests": [
+        "node --test packages/runner/test/observability/*.test.mjs"
+      ],
+      "acceptance": [
+        "Status projection reflects live journal state",
+        "A DEGRADED/FAILED transition fires a webhook, proven by an integration test, not just code inspection",
+        "A simulated nonzero protocol-fee reading fires the alert webhook on the first tick it appears, deduplicated on subsequent ticks"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "Intentionally not a full alerting stack; the simplest thing that actually pages someone. Protocol-fee monitoring answers owner decision D11's monitoring-only baseline (option a) regardless of which further option the owner later picks; it does not block on D11's answer."
+    },
+    {
+      "id": "WP-17",
+      "title": "Dashboard backend: control service serving the hookemon.com contracts",
+      "goal": "Implement packages/dashboard as the control service behind the LIVE website https://hookemon.com (a Cloudflare Worker that proxies /api/cycle-status, /api/community-dashboard and /operator/api/* to an HTTPS control service). The service must serve, byte-exact to the website's strict validators, GET /healthz, GET /public/api/cycle-status (schemaVersion 3), GET /public/api/community-dashboard (schemaVersion 5), and the operator routes GET /operator/api/bootstrap, /operator/api/dashboard, /operator/api/cards, /operator/api/audit and POST /operator/api/decisions, authenticated by the x-hookemon-proxy-credential header (timing-safe compare) plus optional Cloudflare Access JWT (RS256 via JWKS, node:crypto) and recording every decision in an append-only hash-chained audit log. Decisions are the owner's control surface: interval, allowed packs/orders, pause/resume, spend caps, restart/reconcile request. Dependency-free (node:http, node:sqlite for the read projection only).",
+      "deps": [
+        "WP-14",
+        "WP-16",
+        "WP-15"
+      ],
+      "parallelGroup": 7,
+      "writeSet": [
+        "packages/dashboard/src/server.mjs",
+        "packages/dashboard/src/contracts/*.mjs",
+        "packages/dashboard/src/routes/*.mjs",
+        "packages/dashboard/src/projections/*.mjs",
+        "packages/dashboard/src/auth/*.mjs",
+        "packages/dashboard/src/storage/sqlite-projection.mjs",
+        "packages/dashboard/src/public/index.html",
+        "packages/dashboard/test/**/*.test.mjs",
+        "docs/modules/dashboard.md"
+      ],
+      "readSet": [
+        "<worktrees>/mainnet-cycle-canary/apps/web/lib/public-cycle-status.ts (exact public status contract, schemaVersion 3)",
+        "<worktrees>/mainnet-cycle-canary/apps/web/lib/public-community-snapshot.ts (exact community snapshot contract, schemaVersion 5)",
+        "<worktrees>/mainnet-cycle-canary/apps/web/lib/public-dashboard-profile.ts (profile/network shape; the mainnet profile must become Robinhood Chain 4663 + Solana mainnet, coordinated with WP-18)",
+        "<worktrees>/mainnet-cycle-canary/apps/web/worker/index.ts, worker/public-cycle-proxy.ts, worker/public-community-proxy.ts, worker/operator-proxy.ts (how the Worker calls the service: paths, headers, size limits, caching)",
+        "<worktrees>/mainnet-cycle-canary/apps/web/app/operator/OperatorControlPanel.tsx and operator-types.ts (operator API payloads)",
+        "<worktrees>/mainnet-cycle-canary/apps/operator/src/operator-control-api.js, operator-control-decision.js, operator-control-policy.js, operator-access-auth.js, public-community-snapshot.js, run-operator-control.js (legacy producer of the same contracts; technique reference only, re-implement clean-room)",
+        "scratchpad/w2/DESIGN.md section 5"
+      ],
+      "steps": [
+        "Read the website's validators first and write JSON-schema-like validators in packages/dashboard/src/contracts/ that reproduce their exact key sets and value rules (exact keys, money as decimal strings, ISO timestamps, countdownSeconds = ceil((nextCycleAt-generatedAt)/1000), schemaVersion 3 / 5, profile 'mainnet' with badge 'MAINNET')",
+        "Define the Robinhood network profile: evm:{name:'robinhood-chain', chainId:4663, label:'Robinhood Chain'} (or the exact shape the site profile file expects after WP-18 updates it), solana mainnet genesis 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+        "Build the public cycle-status projection from the durable journal/scheduler state (WP-14/WP-27/WP-16 status projection): executionState active/paused, nextCycleAt from the scheduler, cycle actions/cards/roundAccounting from the reducer state, USDG/Circle USD amounts as micro units, no signer identities, no in-flight digests",
+        "Build the community snapshot: cumulative metrics over archived cycles, latestCycle with transactions {chain:'evm'|'solana', purpose, id} (map Robinhood tx hashes to chain 'evm' as the contract requires or extend the contract together with WP-18), last 12 cards, delayed flag and poolObservedAt freshness rule (90s)",
+        "Implement the operator routes and the decisions model: bootstrap (configuration + activeCycle + limits), dashboard (read model), cards (paginated history with filters/cursor), audit (hash-chained decision log, cursor/limit), decisions POST (interval, allowedPackIds, requestedOrders, maxBoostersPerCycle, spend caps, pause, resume, restart-request/reconcile-request); every decision validated against the standing-authority caps and written atomically to the operator state file (WP-06 schema) so the scheduler picks it up on the next tick",
+        "Auth: require x-hookemon-proxy-credential (timing-safe) on /operator/api/*; verify cf-access-jwt-assertion (RS256, JWKS URL and issuer/audience from config) when configured; public routes unauthenticated, GET only, no query strings, JSON with the same cache headers the Worker expects",
+        "Serve a minimal built-in static status page at / for local operation (dependency-free HTML) that reads the same two public endpoints; the production site remains hookemon.com",
+        "Tests: contract tests that feed the service output through a Node port of the website validators (copy the validation logic as test helpers, clean-room), auth tests (missing/invalid credential, JWT), decision validation and audit-chain tests, projection tests from fixture journals"
+      ],
+      "tests": [
+        "node --test packages/dashboard/test/**/*.test.mjs",
+        "node --test packages/dashboard/test/routes/*.test.mjs"
+      ],
+      "acceptance": [
+        "Every public response passes the website's exact validators (ported as test helpers) for schemaVersion 3 and 5",
+        "Operator routes reject without the proxy credential and, when configured, without a valid Access JWT",
+        "Decisions change interval/packs/pause and are visible to the scheduler via the operator state file; the audit log is hash-chained",
+        "Public routes never leak signer identities, exact holder balances, or in-flight authorization digests",
+        "node --test passes; packages/dashboard has no npm dependencies"
+      ],
+      "risk": "R3",
+      "model": "sonnet",
+      "notes": "The durable journal itself stays the hash-chained append-only file store; sqlite is a projection only. R3, exposes owner-authenticated control routes: per AGENTS.md, use a fresh-context independent reviewer before merge. COORDINATOR NOTE: the live website exists at https://hookemon.com; its source (Cloudflare Worker, vinext/React) lives only on the legacy branch codex/mainnet-cycle-canary under apps/web. This package must serve the site's existing contracts so the site goes from 'Connecting\u2026' to live data once PUBLIC_CYCLE_STATUS_URL / PUBLIC_COMMUNITY_SNAPSHOT_URL / OPERATOR_CONTROL_SERVICE_URL point at this service. CONTRACT FACTS extracted from the website source: operator decision types are activate, pause, run-cycle-now, skip-next-cycle, update-configuration (POST /operator/api/decisions); bootstrap payload keys: catalog, readiness, rewardRecipientLimits, state; dashboard payload keys: activeCycle, cycleStartProjectPoolObservedAt, execution, generatedAt, historyComplete, latestCycle, latestCycleTopAllocations, metrics, nextCycleAt; audit entries: action, actor, eventId, note, observedVersion, occurredAt, outcome, resultCode, sequence with nextCursor = last sequence; cards route: paginated with productId/rarity/from/to/minBuyback/maxBuyback filters and sort recent|buyback-desc|buyback-asc, response {cards, nextCursor, historyComplete}; ActiveCycle type: cycleId, status, updatedAt, configurationRevision, allowedPackIds, requestedOrders[{productId,quantity}], maxBoostersPerCycle, maxUnitPriceMicroUsdg, maxCycleBudgetMicroUsdg, max24HourBudgetMicroUsdg, revealedCards. The site's DashboardNetwork type currently allows only EVM L1 mainnet/Sepolia; WP-18 extends it with Robinhood Chain (chainId 4663, official explorer URL from docs.robinhood.com) and WP-17 must emit exactly the shape WP-18 defines: agree on network.evm = {name:'robinhood', chainId:4663, label:'Robinhood Chain'} unless the site tests demand otherwise. Read the exact producer/validator files listed in readSet before coding."
+    },
+    {
+      "id": "WP-18",
+      "title": "Website integration: port hookemon.com source and update it for Robinhood + the new control service",
+      "goal": "Re-home the live hookemon.com website (Cloudflare Worker + vinext/React app, source only on the legacy branch codex/mainnet-cycle-canary under apps/web) into a standalone git repository directory at <worktrees>/hookemon-web (git init there; NOT inside the clean-room tree, because the clean-room repo forbids extra workflows and npm dependencies), update it for the Robinhood Chain 4663 / USDG product and the new control service contracts, keep the comic assets and deploy workflow, and document the exact Cloudflare secret values the owner must set to switch the site to the new backend.",
+      "deps": [
+        "WP-17"
+      ],
+      "parallelGroup": 8,
+      "writeSet": [
+        "<worktrees>/hookemon-web/** (new standalone repository)",
+        "docs/modules/website.md"
+      ],
+      "readSet": [
+        "<worktrees>/mainnet-cycle-canary/apps/web (entire app, tests, worker, deploy scripts)",
+        "<worktrees>/mainnet-cycle-canary/.github/workflows/deploy-web.yml",
+        "packages/dashboard (WP-17) contracts and README",
+        "scratchpad/w2/DESIGN.md section 5"
+      ],
+      "steps": [
+        "Create <worktrees>/hookemon-web as a fresh git repository (git init, identity Hookemon) and copy apps/web from the legacy worktree plus .github/workflows/deploy-web.yml into it; do not copy any secrets, .env files, or unrelated legacy code",
+        "Update lib/public-dashboard-profile.ts: the mainnet profile targets Robinhood Chain (chainId 4663, label 'Robinhood Chain') and Solana mainnet; keep testnet as a documented dev profile; coordinate the exact network shape with WP-17's contracts",
+        "Update copy and tests where the product changed: USDG (not Circle USD) for holder distributions on Robinhood, pro-rata automatic payouts, 20-minute cycle, Collector Crypt buyback, remove anything that claims a live mainnet or an audit; keep the comic and design intact",
+        "Point the Worker's expected upstream paths at the new control service (same paths: /public/api/cycle-status, /public/api/community-dashboard, /operator/api/*) and update README with the five Worker secrets and the deploy runbook (manual workflow_dispatch after CI)",
+        "Run npm ci --ignore-scripts and npm test (build + tests) in the new repository with Node 22.13+ (use <home>/.nvm/versions/node/v22.23.2/bin or v24); make the tests pass against a fixture from packages/dashboard's contract tests",
+        "Commit in the new repository with the repo commit rules (English, one line, no trailers); do NOT create a GitHub repository or deploy: report the exact commands and secrets the owner must run/set"
+      ],
+      "tests": [
+        "cd <worktrees>/hookemon-web && npm test",
+        "node --test packages/dashboard/test/routes/*.test.mjs (contract fixtures shared with the site)"
+      ],
+      "acceptance": [
+        "The website builds and its test suite passes in the new repository",
+        "The mainnet profile names Robinhood Chain 4663 and the copy no longer refers to Circle USD holder payouts or a live mainnet claim",
+        "A fixture produced by packages/dashboard validates in the site's public validators",
+        "README documents the exact Cloudflare secrets and the deploy steps; no GitHub repo was created and nothing was deployed"
+      ],
+      "risk": "R2",
+      "model": "sonnet",
+      "notes": "COORDINATOR NOTE: the legacy GitHub repositories (legacy-org/legacy-org, legacy-org/hkmn) are not resolvable any more; the only website source is the local legacy branch. Creating the GitHub repository and deploying are owner actions (ask first). CONTRACT FACTS extracted from the website source: operator decision types are activate, pause, run-cycle-now, skip-next-cycle, update-configuration (POST /operator/api/decisions); bootstrap payload keys: catalog, readiness, rewardRecipientLimits, state; dashboard payload keys: activeCycle, cycleStartProjectPoolObservedAt, execution, generatedAt, historyComplete, latestCycle, latestCycleTopAllocations, metrics, nextCycleAt; audit entries: action, actor, eventId, note, observedVersion, occurredAt, outcome, resultCode, sequence with nextCursor = last sequence; cards route: paginated with productId/rarity/from/to/minBuyback/maxBuyback filters and sort recent|buyback-desc|buyback-asc, response {cards, nextCursor, historyComplete}; ActiveCycle type: cycleId, status, updatedAt, configurationRevision, allowedPackIds, requestedOrders[{productId,quantity}], maxBoostersPerCycle, maxUnitPriceMicroUsdg, maxCycleBudgetMicroUsdg, max24HourBudgetMicroUsdg, revealedCards. The site's DashboardNetwork type currently allows only EVM L1 mainnet/Sepolia; WP-18 extends it with Robinhood Chain (chainId 4663, official explorer URL from docs.robinhood.com) and WP-17 must emit exactly the shape WP-18 defines: agree on network.evm = {name:'robinhood', chainId:4663, label:'Robinhood Chain'} unless the site tests demand otherwise. Read the exact producer/validator files listed in readSet before coding."
+    },
+    {
+      "id": "WP-22",
+      "title": "Module cards + README/PRD docs",
+      "goal": "Document every new/changed module and update top-level project docs to describe the Phase 2 loop.",
+      "deps": [
+        "WP-01",
+        "WP-02",
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06",
+        "WP-07",
+        "WP-08",
+        "WP-09",
+        "WP-10",
+        "WP-11",
+        "WP-12",
+        "WP-13",
+        "WP-14",
+        "WP-15",
+        "WP-16",
+        "WP-17"
+      ],
+      "parallelGroup": 8,
+      "writeSet": [
+        "docs/modules/peg-cycle-escrow.md",
+        "docs/modules/automated-cycle-service.md",
+        "docs/modules/pro-rata-distribution.md",
+        "docs/modules/holder-snapshot-indexer.md",
+        "docs/modules/distribution-signer.md",
+        "docs/modules/dashboard.md",
+        "docs/modules/adapters.md",
+        "docs/modules/index.json",
+        "README.md",
+        "PRD.md",
+        "architecture/capability-map.json",
+        "architecture/capability-map.md",
+        "architecture/interfaces.json",
+        "gates/init.json"
+      ],
+      "readSet": [
+        "every module written by WP-01..17"
+      ],
+      "steps": [
+        "Write or update a docs/modules card for every new/changed module listed in the write set, matching the R1 doc-duty format",
+        "Update docs/modules/index.json's digest registry for all of them",
+        "Update README.md and PRD.md to describe the actual Phase 2 autonomous loop, dashboard, and distribution-signer custody model"
+      ],
+      "tests": [
+        "node --test scripts/tests/gates.test.mjs"
+      ],
+      "acceptance": [
+        "Every new/changed module has a current, digest-matching card",
+        "architecture A6 gate check passes with no stale digest"
+      ],
+      "risk": "R1",
+      "model": "sonnet",
+      "notes": "Doc duty (R1); trails the functional work packages it describes. COORDINATOR NOTE (A6 coupling): register every module card added by groups 3-8 in docs/modules/index.json AND architecture/capability-map.json (modules + topologicalOrder, same order) so gate A6 passes; recompute every digest. COORDINATOR NOTE (I6 coupling): gates/init.json item I6 lists every docs/modules/*.md card in its requiredInputs/allowedInputs (the evidence policy walks the directory), so every new card must also be added there in sorted position; register all currently unregistered cards (adapters.md, holder-snapshot-indexer.md is already listed, plus any card added by group-3 packages) and keep scripts/tests/final-review.test.mjs and gates.test.mjs green."
+    },
+    {
+      "id": "WP-26",
+      "title": "Red-team refresh at revision 58",
+      "goal": "Re-run STRIDE against every new surface this revision introduces: automation, escrow, chunked payout, open-router/optional-hookData, distribution-signer split.",
+      "deps": [
+        "WP-01",
+        "WP-02",
+        "WP-03",
+        "WP-04",
+        "WP-05",
+        "WP-06",
+        "WP-07",
+        "WP-08",
+        "WP-09",
+        "WP-10",
+        "WP-11",
+        "WP-12",
+        "WP-13",
+        "WP-14",
+        "WP-15",
+        "WP-16",
+        "WP-17",
+        "WP-18",
+        "WP-19",
+        "WP-20",
+        "WP-21",
+        "WP-22",
+        "WP-23",
+        "WP-24",
+        "WP-25",
+        "WP-27",
+        "WP-28",
+        "WP-29"
+      ],
+      "parallelGroup": 9,
+      "writeSet": [
+        "qa/redteam/revision-58-findings.json",
+        "decisions/redteam/findings.json"
+      ],
+      "readSet": [
+        "current STRIDE artifacts (bound to revision 55, already stale)",
+        "scratchpad/w2/DESIGN.md"
+      ],
+      "steps": [
+        "Run the red-team doubt-loop process per AGENTS.md against the automation, escrow, chunked-payout, open-router, and distribution-signer surfaces",
+        "Carry forward or re-scope RT-R55-02/05/06 against the new revision",
+        "Specifically test: can a compromised worker host redirect a payout without both distribution-signer and verifier signatures; can the open-router relaxation be abused to bypass fee accrual; can a DEGRADED balance be swept by any code path"
+      ],
+      "tests": [
+        "red-team doubt-loop process per AGENTS.md (manual/documented, not an automated test command)"
+      ],
+      "acceptance": [
+        "Fresh findings recorded against every new surface introduced by this revision",
+        "No finding shows a path for a single compromised key to redirect a cycle's proceeds",
+        "No finding shows a path to auto-sweep a DEGRADED or quarantined balance"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "Runs last, after every other package has landed and revision 58's REQ text is final. R4: per AGENTS.md this is itself the fresh-context independent-reviewer/doubt-loop process \u2014 it must be run by someone (or an agent instance) who did not author WP-02..WP-14's changes, not self-certified by the implementer."
+    },
+    {
+      "id": "WP-28",
+      "title": "PegCycleRouteExecutor: Relay outbound route contract",
+      "goal": "Implement the immutable typed route executor contract that IPegCycleRouteExecutor declares and that PegCycleVault/PegCycleReturnEscrow are bound to, so an escrow can move the exact authorized USDG principal into the Relay bridge deposit for the Robinhood->Solana leg without any generic call, approval, rescue, or arbitrary-recipient surface (closes confirmed finding HK-013).",
+      "deps": [
+        "WP-03",
+        "WP-09"
+      ],
+      "parallelGroup": 4,
+      "writeSet": [
+        "packages/contracts/src/process/PegCycleRouteExecutor.sol",
+        "packages/contracts/src/process/IPegCycleRouteExecutor.sol",
+        "packages/contracts/test/process/PegCycleRouteExecutor.t.sol",
+        "packages/contracts/test/process/PegCycleVault.t.sol",
+        "docs/modules/peg-cycle-route-executor.md",
+        "docs/modules/index.json"
+      ],
+      "readSet": [
+        "packages/contracts/src/process/PegCycleVault.sol",
+        "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+        "packages/adapters/src/relay-client.mjs (WP-09, for the exact Relay EVM deposit shape: approve + deposit/transfer to the quote's solver/depository address with the request id)",
+        "scratchpad/w1/summaries/external-facts.json",
+        "scratchpad/w1/summaries/branch-canary-legacy.json (Relay EVM step shape: steps[].items[].data = {to,data,value})"
+      ],
+      "steps": [
+        "Read IPegCycleRouteExecutor.sol and every call site in PegCycleVault.sol/PegCycleReturnEscrow.sol (executeOutbound, sendOutbound) to fix the exact interface the executor must satisfy; extend the interface only if the vault needs a return value it lacks",
+        "Design the executor as an immutable contract bound at construction to: the USDG token, the coordinator vault, the escrow factory/CREATE2 formula, and an immutable allowlist of exactly one Relay deposit target (address) plus one selector or plain-transfer mode; no owner, no setter, no generic call, no delegatecall, no approve-to-arbitrary, no rescue, no sweep",
+        "executeRoute(cycleId, amount, routeParams): callable only by the bound vault during executeOutbound; pulls exactly `amount` USDG from the calling escrow (or receives it, matching the vault's existing transfer order), verifies exact balance deltas before and after, then performs the Relay outbound deposit for the bound target with the cycle-bound request identifier in calldata; reverts on any residual balance left in the executor",
+        "Bind the route parameters to the FundingAuthorization's outboundActionDigest so the vault-authorized route (target, amount, request id, minimum receive) cannot be swapped at execution time",
+        "Emit RouteExecuted(cycleId, target, amount, requestIdDigest) and expose immutable getters only",
+        "Tests: only the vault can call; wrong cycle/amount/target reverts; exact delta enforced; residual balance reverts; no selector outside the declared set (surface test like PegCycleVault.surface.test.mjs pattern); integration test through PegCycleVault.executeOutbound with a mock Relay depository that records the deposit",
+        "Write docs/modules/peg-cycle-route-executor.md and add its digest to docs/modules/index.json"
+      ],
+      "tests": [
+        "forge test --match-path 'test/process/*.t.sol'"
+      ],
+      "acceptance": [
+        "A contract implementing IPegCycleRouteExecutor exists, compiles, and PegCycleVault.executeOutbound completes against it in a test",
+        "Only the bound vault can trigger a route; target, amount and request id are bound to the authorized outbound digest",
+        "The executor never retains USDG and exposes no generic call, approval, rescue, sweep, owner, or upgrade surface",
+        "Module card and index digest present"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "Money-moving contract: fresh-context independent review before merge. The Relay EVM deposit shape must come from Relay's current API (quote steps) as recorded by WP-09, never from the legacy branch's hardcoded addresses."
+    },
+    {
+      "id": "WP-29",
+      "title": "Reducer production model: bridge legs, automated authorization provider, void path, revision pin",
+      "goal": "Turn the fixture-only cycle reducer into a production-capable state machine without breaking the fixture tests: model the two bridge legs explicitly, replace the per-step fixture owner signatures with a pluggable authorization provider (fixture mode for tests, standing-authority policy signer for production), add a void/terminal path for external mutations that never broadcast, replace exact-zero isolation invariants on publicly fundable accounts with exact-delta accounting, fix the buyback NFT/Circle USD unit conflation, and unpin the preflight from revision 56 (closes confirmed findings HK-019, HK-020, HK-023, HK-024, HK-025, HK-026, HK-027, HK-028, HK-030).",
+      "deps": [
+        "WP-01",
+        "WP-27"
+      ],
+      "parallelGroup": 3,
+      "writeSet": [
+        "packages/runner/src/cycle/reducer.mjs",
+        "packages/runner/src/cycle/schemas.mjs",
+        "packages/runner/src/cycle/authorization.mjs",
+        "packages/runner/src/cycle/execution-accounting.mjs",
+        "packages/runner/src/cycle/blockhash-validity.mjs",
+        "packages/runner/src/cycle/decoder.mjs",
+        "packages/runner/src/cycle/collector.mjs",
+        "packages/runner/src/cycle/bindings.mjs",
+        "packages/runner/src/cycle/preflight.mjs",
+        "packages/runner/src/cycle/authorization-provider.mjs",
+        "packages/runner/test/cycle/*.test.mjs",
+        "packages/runner/test/cycle/fixture-cycle.mjs",
+        "packages/runner/test/cycle/fixture-crypto.mjs",
+        "docs/modules/cycle-runner.md",
+        "docs/modules/index.json"
+      ],
+      "readSet": [
+        "scratchpad/w1/FINDINGS_REPORT.md (themes: fixture-only runner, autonomy/scheduling/persistence)",
+        "scratchpad/w2/DESIGN.md sections 2.3-2.5",
+        "packages/runner/src/cycle/cycle-runner.mjs (do not modify; WP-07 owns it)",
+        "codex/complete-v4-hook reducer.mjs delta (supersedeUnobservedIntent) as technique reference"
+      ],
+      "steps": [
+        "Introduce an AuthorizationProvider interface (verifyStepAuthorization(intent) -> verified record) with two implementations: FixtureAuthorizationProvider (current Ed25519 fixture keys, used by every existing test) and StandingAuthorityProvider (verifies a policy-signed step authorization bound to an owner-signed standing-authority document with per-cycle spend cap, cycles-per-day cap, allowed packs, allowed destinations, expiry; keys are injected, never read from files); the reducer must not know which one is active",
+        "Model the outbound leg (Robinhood USDG -> Solana Circle USD via Relay) and the return leg (Solana Circle USD -> Robinhood USDG) as explicit reducer stages with their own intents, request digests, chain identifiers (eip155:4663 and solana mainnet genesis), and receipt kinds; stop forcing every action onto Solana and stop comparing block heights across chains",
+        "Add a void path: an external-mutation-attempted record may be resolved as VOID when a signed observer proof shows the signed bytes were never broadcast before their last-valid height (or nonce/expiry), allowing a fresh intent with a new digest; keep supersedeUnobservedIntent semantics compatible with WP-07's port",
+        "Replace exact-zero balance invariants on publicly fundable accounts with exact expected-delta accounting (before/after, attributable amounts), so a stray donation cannot wedge the cycle",
+        "Fix the buyback accounting so the NFT unit (quantity 1) and the Circle USD refund amount are separate fields with separate checks",
+        "Enforce the vault-debit ordering: no purchase intent before the funding stage is finalized and the Collector generate response is verified",
+        "Make preflight accept the current interfaces.json product phase and revision (read them from architecture/interfaces.json, do not hardcode 56) while still failing closed on a missing or malformed freeze",
+        "Keep decoder.mjs's fixture envelope for tests and add a DecodedMessage schema that WP-10's real Solana/EVM decoders (in packages/adapters) can produce; the reducer validates the decoded schema, never raw bytes",
+        "Keep every existing fixture test green (adapt fixtures where the schema changes; do not delete tests) and add tests for the standing-authority provider (cap exceeded, wrong pack, expired document, wrong destination all reject), the void path, the two bridge legs, and the buyback unit split",
+        "Update docs/modules/cycle-runner.md and its index digest"
+      ],
+      "tests": [
+        "node --test packages/runner/test/cycle/*.test.mjs",
+        "node packages/runner/src/cycle/verify-fixtures.mjs",
+        "node --test packages/runner/test/distribution/*.test.mjs packages/runner/test/operator/*.test.mjs"
+      ],
+      "acceptance": [
+        "All existing runner tests pass (adapted, not deleted) and new provider/void/bridge-leg tests pass",
+        "No fixture Ed25519 key is required by the production authorization provider path",
+        "A never-broadcast mutation can be voided with observer proof and the cycle continues with a fresh intent",
+        "Preflight passes against the merged tree's interfaces.json without a hardcoded revision",
+        "packages/runner still imports only Node builtins"
+      ],
+      "risk": "R4",
+      "model": "sonnet",
+      "notes": "Highest-leverage runner change; fresh-context independent review required. Coordinate schema names with WP-07 (cycle-runner.mjs) which runs in the next group and will adapt to your exported API; document every exported function change in notes."
+    }
+  ],
+  "ownerDecisions": [
+    {
+      "id": "D1",
+      "question": "Which unmerged branch's task numbering becomes canonical for Phase 2?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "codex/phase2-revision-57's P2-001..012 stays canonical; complete-v4-hook's automation work is renumbered starting P2-013."
+        },
+        {
+          "letter": "b",
+          "text": "Fresh P2b-0xx prefix for everything new."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": [
+        "WP-21"
+      ]
+    },
+    {
+      "id": "D2",
+      "question": "Ship the open-router / optional-hookData change (WP-05), or keep the current single-router design?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Ship it \u2014 the community cannot buy HKMN through any standard wallet, aggregator, or the Uniswap Trading API today, a HIGH-severity usability/trust gap for a community token."
+        },
+        {
+          "letter": "b",
+          "text": "Keep it locked \u2014 it is a tested, audited, currently-correct invariant; any relaxation is new attack surface."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": [
+        "WP-05",
+        "WP-07",
+        "WP-10",
+        "WP-19",
+        "WP-20",
+        "WP-24",
+        "WP-26"
+      ]
+    },
+    {
+      "id": "D3",
+      "question": "Signer backend for the automated policy wallets: OS keychain (local) or a remote policy-wallet provider?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Start local (OS keychain) \u2014 matches the one proven historical mainnet run, lowest infra cost."
+        },
+        {
+          "letter": "b",
+          "text": "Start remote (Privy-equivalent custodial policy-wallet provider) \u2014 higher setup cost, no single-machine dependency."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": [
+        "WP-06",
+        "WP-14"
+      ]
+    },
+    {
+      "id": "D4",
+      "question": "What per-cycle spend cap and cycles-per-day cap should the first live standing authority carry?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Mirror the legacy canary's proven scale (~$25 pack + bridge fees, one-off, widened only after several clean observed cycles)."
+        },
+        {
+          "letter": "b",
+          "text": "Owner names a different explicit number."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": [
+        "WP-21",
+        "WP-14"
+      ]
+    },
+    {
+      "id": "D5",
+      "question": "Ship chunked payouts (WP-04) active before first live launch, or built-but-inactive?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Active before launch \u2014 future-proofs against holder growth immediately, but is the highest-risk new contract surface in the design."
+        },
+        {
+          "letter": "b",
+          "text": "Built and tested now, shipped inactive (chunk count fixed at 1), activated only once real holder count approaches 1024."
+        }
+      ],
+      "recommended": "b",
+      "blocksPackages": [
+        "WP-04",
+        "WP-12",
+        "WP-15",
+        "WP-23"
+      ]
+    },
+    {
+      "id": "D6",
+      "question": "Where should floor-rounding dust go if a token migration or wind-down ever happens?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Carries forward forever into the next cycle's distributable pool (current running default)."
+        },
+        {
+          "letter": "b",
+          "text": "Owner names an explicit destination at wind-down time."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": [
+        "WP-12"
+      ]
+    },
+    {
+      "id": "D7",
+      "question": "Distribution-signer custody: a single owner-held key, or an owner-held distribution-signer plus an independent verifier (2-of-2)?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Single owner-held distribution-signer key, no independent verifier."
+        },
+        {
+          "letter": "b",
+          "text": "Owner-held distribution-signer plus a second, independently-held verifier key; both signatures required before a PayoutAuthorization is producible."
+        }
+      ],
+      "recommended": "b",
+      "blocksPackages": [
+        "WP-13",
+        "WP-15",
+        "WP-21"
+      ]
+    },
+    {
+      "id": "D8",
+      "question": "Add a new on-chain guardian/pause role to ProcessBudget, or rely on the two-layer kill switch (off-chain pause flag + on-chain key revocation) only?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Add an on-chain guardian pause role on ProcessBudget."
+        },
+        {
+          "letter": "b",
+          "text": "No new on-chain role; rely on the off-chain pause flag plus on-chain vault-authorizer/policy-wallet key revocation via the existing two-step MoneyRoles.sol handover."
+        }
+      ],
+      "recommended": "b",
+      "blocksPackages": [
+        "WP-21"
+      ]
+    },
+    {
+      "id": "D9",
+      "question": "Confirm the fee-split reading: does the transcript's '0.5% treasury' mean the currently-coded 0.40% treasury + 0.10% Programmable combined share, or a literal 0.5% treasury bucket carved out separately from Programmable's 0.10% (which would change the 2.50% process-budget figure and require a FeeAccounting.sol behavior change, not just a REQ-text update)?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Confirm the currently-coded 0.10% Programmable + 0.40% treasury reading (they sum to the transcript's 0.5%) \u2014 no contract change beyond WP-02's cumulative-remainder mechanics, WP-02/WP-21 proceed as scoped."
+        },
+        {
+          "letter": "b",
+          "text": "The transcript meant something else \u2014 state the owner's actual intended split; treat it as a FeeAccounting.sol bucket-percentage change scoped alongside WP-02."
+        }
+      ],
+      "recommended": "n/a \u2014 this is a factual question about what the owner meant, not an engineering trade-off; no default is assumed",
+      "blocksPackages": [
+        "WP-02",
+        "WP-21"
+      ]
+    },
+    {
+      "id": "D10",
+      "question": "HookemonIssuance.sol already fixes total supply (420,690,000,000 scaled units) and the 90%/10% market/remainder split in code, with zero owner pre-mint. What should remainderRepresentation (the 10% custody destination) actually be, and what LBP price-curve parameters (starting price, duration/decay) should CustomLaunchStrategy use to execute the 90% market allocation?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Owner names both the remainder-custody contract and the LBP curve parameters now, so WP-20 is fully scoped before it starts."
+        },
+        {
+          "letter": "b",
+          "text": "WP-20 proceeds against a documented placeholder (a simple timelocked treasury multisig for remainderRepresentation, a conservative default LBP curve) that the owner can override before the actual mainnet launch call, never before \u2014 safe because nothing executes against real funds until explicitly promoted per the 'blocked on funded wallets' gate."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": [
+        "WP-20"
+      ]
+    },
+    {
+      "id": "D11",
+      "question": "How much operational-response investment is the protocol-fee-brick risk (design.md section 3.7 \u2014 Uniswap governance setting a nonzero protocol fee bricks every swap on the pool with no on-chain remedy) worth, beyond the monitoring/alert WP-16 already builds?",
+      "options": [
+        {
+          "letter": "a",
+          "text": "Monitoring/alert only (WP-16, already scoped and unblocked by this decision) \u2014 the owner is paged the moment it happens and decides the response live."
+        },
+        {
+          "letter": "b",
+          "text": "Monitoring plus a documented pool-migration runbook prepared in advance (new hook deployment + a defined re-launch path), so the response is not designed from scratch during an incident."
+        },
+        {
+          "letter": "c",
+          "text": "Both, plus a standing pre-authorized automated response (e.g., auto-pause the scheduler on detection) that does not wait for a human."
+        }
+      ],
+      "recommended": "a",
+      "blocksPackages": []
+    }
+  ],
+  "externalReadiness": [
+    {
+      "item": "Programmable's Robinhood Chain 4663 launch profile (currently status: planned, readiness: unavailable, reasonCodes: [ROBINHOOD_CHAIN_PROFILE_UNAVAILABLE])",
+      "blocks": [
+        "WP-19",
+        "WP-20"
+      ],
+      "dryRunBehavior": "submission.json and the launch plan are fully prepared with every knowable field populated and every unknowable field explicitly null/INTEGRATION_PENDING; no real submission or registration call is ever attempted until the capabilities endpoint reports readiness: available for chain 4663."
+    },
+    {
+      "item": "Universal Router address discrepancy (repo-pinned 0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99 vs. Uniswap's public deployments page value 0x8876789976decbfcbbbe364623c63652db8c0904 for chain 4663)",
+      "blocks": [
+        "WP-20",
+        "WP-24"
+      ],
+      "dryRunBehavior": "WP-25's scripts/verify-phase2-readiness.mjs performs an on-chain runtime-codehash probe against a finalized RPC read and reports which address is actually live; WP-20 (CREATE2 mining) and WP-24 (anvil fork test) are hard-blocked on that probe's PASSED result, not merely sequenced after it."
+    },
+    {
+      "item": "Live production credentials: Collector Crypt x-api-key, a Relay API key (if required for production rate limits), Robinhood/Solana RPC endpoints beyond the free public read-only ones, and the signer backend's actual key material",
+      "blocks": [
+        "WP-08",
+        "WP-09",
+        "WP-10",
+        "WP-14"
+      ],
+      "dryRunBehavior": "Adapters run only against recorded fixtures and read-only public endpoints (/api/status, /api/machines, /chains, RPC reads); every mutation call is refused with a structured 'would have done X, blocked because Y' record until the owner supplies credentials."
+    },
+    {
+      "item": "Funded process-budget balance (from real swap volume against a real, launched pool) and a funded policy-wallet gas float on both chains",
+      "blocks": [
+        "WP-14"
+      ],
+      "dryRunBehavior": "The scheduler runs in liveMode: false; every stage executes against real read-only probes but every mutating call is short-circuited into the existing fixture-signed path instead of a real broadcast, identical in shape to today's PhaseOneLocalLoop fixture harness."
+    },
+    {
+      "item": "Owner signature on ADR-0021 and the four owner-approval drafts (revision-58 baseline, standing-authority spend caps, hookData-relaxation approval, distribution-signer custody assignment), plus assignment of the two real distribution-signer/verifier key holders (decision D7)",
+      "blocks": [
+        "WP-07",
+        "WP-13",
+        "WP-14",
+        "WP-15"
+      ],
+      "dryRunBehavior": "All automation modules ship and pass their full test suites, but the signer service (both the policy-wallet signers and the distribution-signer/verifier service) refuses to produce any live-mode signature until ADR-0021 and the owner-approval artifacts are actually signed and the verifier-side key holders are assigned to real identities."
+    }
+  ]
+}

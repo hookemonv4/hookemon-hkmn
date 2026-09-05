@@ -1,0 +1,46 @@
+{
+  "id": "WP-28",
+  "title": "PegCycleRouteExecutor: Relay outbound route contract",
+  "goal": "Implement the immutable typed route executor contract that IPegCycleRouteExecutor declares and that PegCycleVault/PegCycleReturnEscrow are bound to, so an escrow can move the exact authorized USDG principal into the Relay bridge deposit for the Robinhood->Solana leg without any generic call, approval, rescue, or arbitrary-recipient surface (closes confirmed finding HK-013).",
+  "deps": [
+    "WP-03",
+    "WP-09"
+  ],
+  "parallelGroup": 4,
+  "writeSet": [
+    "packages/contracts/src/process/PegCycleRouteExecutor.sol",
+    "packages/contracts/src/process/IPegCycleRouteExecutor.sol",
+    "packages/contracts/test/process/PegCycleRouteExecutor.t.sol",
+    "packages/contracts/test/process/PegCycleVault.t.sol",
+    "docs/modules/peg-cycle-route-executor.md",
+    "docs/modules/index.json"
+  ],
+  "readSet": [
+    "packages/contracts/src/process/PegCycleVault.sol",
+    "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+    "packages/adapters/src/relay-client.mjs (WP-09, for the exact Relay EVM deposit shape: approve + deposit/transfer to the quote's solver/depository address with the request id)",
+    "scratchpad/w1/summaries/external-facts.json",
+    "scratchpad/w1/summaries/branch-canary-legacy.json (Relay EVM step shape: steps[].items[].data = {to,data,value})"
+  ],
+  "steps": [
+    "Read IPegCycleRouteExecutor.sol and every call site in PegCycleVault.sol/PegCycleReturnEscrow.sol (executeOutbound, sendOutbound) to fix the exact interface the executor must satisfy; extend the interface only if the vault needs a return value it lacks",
+    "Design the executor as an immutable contract bound at construction to: the USDG token, the coordinator vault, the escrow factory/CREATE2 formula, and an immutable allowlist of exactly one Relay deposit target (address) plus one selector or plain-transfer mode; no owner, no setter, no generic call, no delegatecall, no approve-to-arbitrary, no rescue, no sweep",
+    "executeRoute(cycleId, amount, routeParams): callable only by the bound vault during executeOutbound; pulls exactly `amount` USDG from the calling escrow (or receives it, matching the vault's existing transfer order), verifies exact balance deltas before and after, then performs the Relay outbound deposit for the bound target with the cycle-bound request identifier in calldata; reverts on any residual balance left in the executor",
+    "Bind the route parameters to the FundingAuthorization's outboundActionDigest so the vault-authorized route (target, amount, request id, minimum receive) cannot be swapped at execution time",
+    "Emit RouteExecuted(cycleId, target, amount, requestIdDigest) and expose immutable getters only",
+    "Tests: only the vault can call; wrong cycle/amount/target reverts; exact delta enforced; residual balance reverts; no selector outside the declared set (surface test like PegCycleVault.surface.test.mjs pattern); integration test through PegCycleVault.executeOutbound with a mock Relay depository that records the deposit",
+    "Write docs/modules/peg-cycle-route-executor.md and add its digest to docs/modules/index.json"
+  ],
+  "tests": [
+    "forge test --match-path 'test/process/*.t.sol'"
+  ],
+  "acceptance": [
+    "A contract implementing IPegCycleRouteExecutor exists, compiles, and PegCycleVault.executeOutbound completes against it in a test",
+    "Only the bound vault can trigger a route; target, amount and request id are bound to the authorized outbound digest",
+    "The executor never retains USDG and exposes no generic call, approval, rescue, sweep, owner, or upgrade surface",
+    "Module card and index digest present"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "Money-moving contract: fresh-context independent review before merge. The Relay EVM deposit shape must come from Relay's current API (quote steps) as recorded by WP-09, never from the legacy branch's hardcoded addresses."
+}

@@ -1,0 +1,350 @@
+{
+  "schemaVersion": "hookemon.robinhood-binding.v2",
+  "productPhase": 1,
+  "requirementsRevision": 54,
+  "architectureRevision": 3,
+  "phase3": {
+    "requirementsRevision": 65,
+    "architectureRevision": 9,
+    "status": "INTEGRATION_PENDING",
+    "operationsWallet": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+    "programmableBeneficiary": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "permit2": {
+      "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+      "runtimeCodeHash": "0x5208783f52488f7d3493e5e38311ab707c1d75457fe472a19b0b4d57d66a7fca",
+      "evidencePath": "scripts/tests/fixtures/programmable/capabilities-4663.json",
+      "evidencePointer": "/chainDeployment/permit2GenesisProvenance",
+      "evidenceDigest": "sha256:93200f4be1543da0ea876af1d91ff0cd4dc3da0b500f170b3d42731776be8568"
+    }
+  },
+  "observedAt": "2026-08-30",
+  "bindingMode": "BUILD_ONLY_FAIL_CLOSED",
+  "manifestDigest": "sha256:be96048d000bf20f48f4cf5389cad755d928e32762ad1b9b88b5fc661377df08",
+  "sourceSetDigest": "sha256:35ffa674dfdbee0fceef1e64614b3291cd19c2f862fc9fb6c5a0dda7bc25b031",
+  "abiSetDigest": "sha256:19419411f02f975f7dc1c62dd948017119d882787c6f5525813f1a60fd8d864e",
+  "runtimeSetDigest": "sha256:a11752c21fc1d8c536e769a57ca10811ae310c5285bd1c84ed2068ec6545595e",
+  "chain": {
+    "name": "Robinhood Chain",
+    "chainId": 4663,
+    "rpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+    "genesisHash": "0xaad15f3d702aaea00caf3e9bb56395efe9127bc3b31b24921abf1eee3409305c",
+    "nativeGasAsset": "ETH",
+    "probeMethods": [
+      "eth_chainId",
+      "eth_getBlockByNumber",
+      "eth_getCode",
+      "eth_getProof",
+      "eth_getStorageAt",
+      "eth_call"
+    ]
+  },
+  "sources": [
+    {
+      "id": "robinhood-deploy-contracts",
+      "authority": "Robinhood Chain official documentation",
+      "url": "https://docs.robinhood.com/chain/deploy-smart-contracts/",
+      "revision": "observed-2026-08-30",
+      "sha256": "sha256:3ae83ebe5c6166a0984104c95e8e0e26d9321395a9804a2f3fce00d862909421"
+    },
+    {
+      "id": "robinhood-token-contracts",
+      "authority": "Robinhood Chain official documentation",
+      "url": "https://docs.robinhood.com/chain/contracts/",
+      "revision": "observed-2026-08-30",
+      "sha256": "sha256:aed3b208ea188c0fccdc3e562529a77a039d8beac83d89557ad3744c5c643a80"
+    },
+    {
+      "id": "uniswap-chain-4663-deployment",
+      "authority": "Uniswap official contracts repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/contracts/4cfc406c8e34da3ce04e60657a7825075b64fd22/deployments/json/4663.json",
+      "revision": "4cfc406c8e34da3ce04e60657a7825075b64fd22",
+      "sha256": "sha256:21964cefbfc24b0ee89e7427acf74d223ce5a50aeb4216a9bac361a6148dea15"
+    },
+    {
+      "id": "uniswap-v4-hooks-interface",
+      "authority": "Uniswap v4-core official repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-core/46c6834698c48bc4a463a86d8420f4eb1d7f3b75/src/interfaces/IHooks.sol",
+      "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "sha256": "sha256:6eb35c9c598eb932e963219f1ff180748bc4c30ac6a02d924893b3c29abb1d73"
+    },
+    {
+      "id": "uniswap-v4-hooks-library",
+      "authority": "Uniswap v4-core official repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-core/46c6834698c48bc4a463a86d8420f4eb1d7f3b75/src/libraries/Hooks.sol",
+      "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "sha256": "sha256:297d577998cdede64d48b47b12f15e4f442eea032fbb9676bb3c2f89da89b83c"
+    },
+    {
+      "id": "uniswap-v4-position-manager",
+      "authority": "Uniswap v4-periphery official repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-periphery/dce236d4e2057422d0791d9a973a58765eb46f65/src/PositionManager.sol",
+      "revision": "dce236d4e2057422d0791d9a973a58765eb46f65",
+      "sha256": "sha256:2e3c0043654fea263377c5e09c31344946751c8b8ace60580f5090385d3b4428"
+    },
+    {
+      "id": "uniswap-liquidity-launcher-guide",
+      "authority": "Uniswap liquidity-launcher official repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/liquidity-launcher/1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a/docs/DeploymentGuide.md",
+      "revision": "1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a",
+      "sha256": "sha256:285a7ba71185c32d51497b2a842572ee4efc041edf386b34aaf687e860939ae6"
+    },
+    {
+      "id": "uniswap-uerc20-factory",
+      "authority": "Uniswap UERC20 factory official repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/uerc20-factory/a747318fcce114f56a3a21b8bcec83663a61208b/README.md",
+      "revision": "a747318fcce114f56a3a21b8bcec83663a61208b",
+      "sha256": "sha256:7f0dbac79269feab4adfaf4d077cc03c912485d750539c1bcbbee3e7ad508ac3"
+    },
+    {
+      "id": "uniswap-liquidity-launcher-addresses",
+      "authority": "Uniswap SDKs official repository",
+      "url": "https://raw.githubusercontent.com/Uniswap/sdks/48dea05c1800598a31005c333c08344e53e2b9c6/sdks/liquidity-launcher-sdk/src/addresses.ts",
+      "revision": "48dea05c1800598a31005c333c08344e53e2b9c6",
+      "sha256": "sha256:f7b15f6d12d2a874ea7fddabd4dee689f574ef078f84347284fc373974da54d4"
+    }
+  ],
+  "abiSources": [
+    {
+      "id": "IPoolManager",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-core/46c6834698c48bc4a463a86d8420f4eb1d7f3b75/src/interfaces/IPoolManager.sol",
+      "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "sha256": "sha256:a98405333567e4ab344489728014795721cf0071c151536377d2fcc986e0600c"
+    },
+    {
+      "id": "IHooks",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-core/46c6834698c48bc4a463a86d8420f4eb1d7f3b75/src/interfaces/IHooks.sol",
+      "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "sha256": "sha256:6eb35c9c598eb932e963219f1ff180748bc4c30ac6a02d924893b3c29abb1d73"
+    },
+    {
+      "id": "PoolKey",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-core/46c6834698c48bc4a463a86d8420f4eb1d7f3b75/src/types/PoolKey.sol",
+      "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "sha256": "sha256:99e1afe285b5c614ebc9586ab5196db9d24a63fd924a449f5d99f490a6a6d6a9"
+    },
+    {
+      "id": "PoolOperation",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-core/46c6834698c48bc4a463a86d8420f4eb1d7f3b75/src/types/PoolOperation.sol",
+      "revision": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+      "sha256": "sha256:cf72ad0c3e5e91662029e862acd841fabce8753040b0d4e802dee64ef1157232"
+    },
+    {
+      "id": "IPositionManager",
+      "url": "https://raw.githubusercontent.com/Uniswap/v4-periphery/dce236d4e2057422d0791d9a973a58765eb46f65/src/interfaces/IPositionManager.sol",
+      "revision": "dce236d4e2057422d0791d9a973a58765eb46f65",
+      "sha256": "sha256:439bcd1310f47092a15fa1cc98971898a536eaaff91ac397d8b12eee3c7d79c1"
+    }
+  ],
+  "contracts": {
+    "usdg": {
+      "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "runtimeCodeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+      "runtimeSha256": "sha256:c85d18dc1e49769e01f9f88981176e213b2bc24d2f14d33a81d54bc06579f6db",
+      "codeSize": 170,
+      "metadata": {
+        "name": "Global Dollar",
+        "symbol": "USDG",
+        "decimals": 6
+      },
+      "proxy": {
+        "kind": "ERC1967_UUPS",
+        "implementation": "0x68184c449e1a8f34fa18d289737129fd27b66f8f",
+        "adminSlot": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "usdgImplementation": {
+      "address": "0x68184c449e1a8f34fa18d289737129fd27b66f8f",
+      "runtimeCodeHash": "0x3a551ac5c744af57e68a1d1431ac403c0f516ffd7d224a75746aee11fc4f3baf",
+      "runtimeSha256": "sha256:0d8203b94e33c2458a137c0c70d2491f3625837405a74fd332f4cba5a979c372",
+      "codeSize": 18644,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "poolManager": {
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "runtimeCodeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626",
+      "runtimeSha256": "sha256:6eb21c69298b064e37fcf8089a941ae096fe08c0f179b2d399567aef1b10585b",
+      "codeSize": 24009,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "positionManager": {
+      "address": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+      "runtimeCodeHash": "0xc873e135dc9aaec88489cfbad146b4cb49d6a32e0d80326377784b7ba17670b2",
+      "runtimeSha256": "sha256:711c3ab6c4d7465f2c2f5cf91ab12b4fbb263677be40352013b7ebd85534954e",
+      "codeSize": 23877,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "stateView": {
+      "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+      "runtimeCodeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6",
+      "runtimeSha256": "sha256:60cd24035661345b74c14895a641420f2598f910e376fb3f115bbd6bf504c8c0",
+      "codeSize": 3531,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "universalRouter": {
+      "address": "0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99",
+      "runtimeCodeHash": "0xbe8e8191bb42d843c2e948a5a55772eaab864ce01e54dcd47c9d089170b302d5",
+      "runtimeSha256": "sha256:01c1f00a112cdbd902431cf4dc3ea00aa8aeafc1cd0bd3347ebe66732988fb5b",
+      "codeSize": 24546,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "liquidityLauncher": {
+      "address": "0x0000FffFBE8efE702c8703aE3477FF5dE3d319C0",
+      "runtimeCodeHash": "0x4a586d925c9d59ece13ce2239ebd7dea9ee725f9d33c6667e0fd16ae8d977d80",
+      "runtimeSha256": "sha256:845a88f3a3207bab40f54df56966ed05a0f28bd2bc7f71cac57ac10c30f38cfa",
+      "codeSize": 4127,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "uerc20Factory": {
+      "address": "0x000000e200088D55C39a11F609E5F667729ad49b",
+      "runtimeCodeHash": "0x9f042af1533641f048ced56b55898d9e87b2ccb0ec6854292e2cd8ea733e6aeb",
+      "runtimeSha256": "sha256:e20c2898dd817156b650828a1793cffe69f6710aaa4b1f394e648d148467caab",
+      "codeSize": 13380,
+      "proxy": {
+        "kind": "NONE"
+      }
+    },
+    "lbpStrategy": {
+      "address": "0x05d552391067389EE44fec3924157ed33F976000",
+      "runtimeCodeHash": "0x6e822d6a2f634311363ec357109a691d86912414df5c211a2f6ac6de9a680d68",
+      "runtimeSha256": "sha256:b9b208d11fbe89a62331570b70de2479d9f8130d4990f823634eab083cea8a19",
+      "codeSize": 20624,
+      "proxy": {
+        "kind": "NONE"
+      }
+    }
+  },
+  "market": {
+    "poolKey": {
+      "status": "INTEGRATION_PENDING",
+      "currency0": null,
+      "currency1": null,
+      "staticLpFee": 0,
+      "tickSpacing": null,
+      "hook": null,
+      "reason": "HKMN and the CREATE2 hook do not exist before an owner-authorized deployment. Address ordering and the final PoolId therefore remain unresolved."
+    },
+    "hookPermissions": {
+      "mask": "0x20cc",
+      "beforeInitialize": true,
+      "beforeSwap": true,
+      "afterSwap": true,
+      "beforeSwapReturnDelta": true,
+      "afterSwapReturnDelta": true,
+      "allOtherPermissions": false,
+      "reason": "External pool initialization is rejected while before-swap specified deltas and after-swap unspecified deltas cover USDG as either specified or unspecified currency."
+    },
+    "hookFee": {
+      "totalBasisPoints": 300,
+      "programmableBasisPoints": 10,
+      "treasuryBasisPoints": 40,
+      "processRule": "total minus the independently rounded Programmable and treasury amounts"
+    },
+    "executedUsdgNormalization": {
+      "specifiedUsdg": "ABS_FINAL_CALLER_SPECIFIED_DELTA_AFTER_FULL_FILL",
+      "unspecifiedUsdg": "ABS_RAW_POOL_UNSPECIFIED_DELTA_BEFORE_AFTERSWAP_HOOK_DELTA",
+      "partialFillPolicy": "REVERT_WHOLE_SWAP"
+    },
+    "additionalTradingFeeBasisPoints": {
+      "protocol": 0,
+      "router": 0,
+      "provider": 0,
+      "integrator": 0,
+      "tokenTransfer": 0,
+      "other": 0
+    },
+    "launchAllocationBasisPoints": 10000,
+    "custody": {
+      "proofStatus": "PROVED_LOCALLY",
+      "construction": "PermanentPositionCustody binds one expected PositionManager token ID, permits one ownerOf-verified permissionless finalization after direct mint, and exposes no position-control authority.",
+      "projectControlled": false,
+      "upgradeable": false,
+      "forbiddenAuthorityPaths": {
+        "transfer": false,
+        "approval": false,
+        "liquidityDecrease": false,
+        "principalWithdrawal": false,
+        "feeCollection": false,
+        "rescue": false,
+        "upgrade": false,
+        "delegatecall": false,
+        "successorControl": false
+      },
+      "productionRuntimeStatus": "INTEGRATION_PENDING"
+    },
+    "quadrantProof": {
+      "coverage": 8,
+      "tokenOrders": [
+        "USDG_HKMN",
+        "HKMN_USDG"
+      ],
+      "directions": [
+        "BUY_HKMN",
+        "SELL_HKMN"
+      ],
+      "exactness": [
+        "EXACT_INPUT",
+        "EXACT_OUTPUT"
+      ],
+      "fullFillRequired": true,
+      "postCustodyBuy": true,
+      "postCustodySell": true,
+      "ordinaryUserTransfers": true
+    }
+  },
+  "localProof": {
+    "artifacts": [
+      {
+        "path": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+        "sha256": "sha256:e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18"
+      },
+      {
+        "path": "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+        "sha256": "sha256:bfa9d0c737a27009241e0b8033b5ab8aa1f74e0165e7f64bd9ba49cfd02ace10"
+      },
+      {
+        "path": "packages/contracts/test/bindings/RobinhoodV4PoolManager.t.sol",
+        "sha256": "sha256:e031c101fbf1ccdee34f9a91ea4bd09dcfd9d3c8f362ee3bc3de0847413a519f"
+      },
+      {
+        "path": "feasibility/model.mjs",
+        "sha256": "sha256:28301f8312488a0c9cec157962f35e517417048d71fb01d1bf81d9a4b09d0a3e"
+      }
+    ],
+    "verification": [
+      "forge fmt --check --root packages/contracts",
+      "forge test --root packages/contracts --match-path 'test/bindings/*.t.sol' -vvv",
+      "node feasibility/verify-robinhood-binding.mjs bindings/robinhood-chain.json",
+      "node feasibility/verify-robinhood-binding.mjs bindings/robinhood-chain.json --reproducible-build /absolute/clean-checkout-a /absolute/clean-checkout-b"
+    ]
+  },
+  "productionReadiness": {
+    "status": "INTEGRATION_PENDING",
+    "ready": false,
+    "blockers": [
+      "DEPLOYED_ROBINHOOD_POOLMANAGER_CALLBACK_AND_SETTLEMENT_FORK",
+      "PROGRAMMABLE_OWNER_AND_CLAIM_DESTINATION_POLICY_RESOLUTION",
+      "EXACT_OUTPUT_USDG_Q_GROSS_NET_AND_FEE_CUSTODY_SEMANTICS",
+      "CANONICAL_POOLKEY_ADDRESS_ORDER_TICK_SPACING_AND_POOLID",
+      "CREATE2_HOOK_ADDRESS_INITCODE_AND_RUNTIME",
+      "HKMN_ADDRESS_AND_RUNTIME",
+      "PERMANENT_CUSTODY_DEPLOYMENT_RUNTIME_AND_POSITION_TOKEN",
+      "PROGRAMMABLE_ROBINHOOD_ADMISSION_AND_BENEFICIARY_BINDING",
+      "ROBINHOOD_USDG_COMPLETE_VERIFIED_ABI_AND_BEHAVIOR",
+      "ROUTER_AND_PROVIDER_ZERO_SURCHARGE_INTEGRATION_PROOF",
+      "SUPPORTED_POST_CUSTODY_FORK_BUY_AND_SELL"
+    ],
+    "rule": "Every blocker remains fail-closed before custody, liability mutation, signing, broadcast, deployment, asset movement, gas spend, or publication."
+  }
+}

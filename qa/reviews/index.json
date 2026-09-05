@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "scope": "PHASE_1_AND_PHASE_2_LOCAL_REVIEW_EVIDENCE",
+  "authority": "LOCAL_ONLY_NOT_RELEASE_APPROVAL",
+  "integrationBase": "8dbbed848b93ccde4da926483494081723c11fb7",
+  "reviewPolicy": {
+    "ownerInstruction": "ONE_REVIEW_PER_RISKY_TASK",
+    "secondReviewAfterFixes": "NOT_RUN_PER_OWNER_INSTRUCTION",
+    "meaning": "A focused retest verifies each remediation, but does not convert a CHANGES_REQUESTED review into APPROVED."
+  },
+  "phaseOneDisposition": {
+    "zeroSevereFindings": false,
+    "releaseApproved": false,
+    "openHighRedteamFindings": [
+      "RT-R55-02",
+      "RT-R55-05",
+      "RT-R55-06"
+    ],
+    "note": "Three high red-team findings remain open; this index is neither zero-severe evidence nor release approval."
+  },
+  "phaseTwoDisposition": {
+    "localOnly": true,
+    "releaseApproved": false,
+    "productionReady": false,
+    "requirementsRevision": 57,
+    "architectureRevision": 5,
+    "note": "Manual cycle control is locally verified; production integrations and owner-controlled release gates remain open."
+  },
+  "reviews": [
+    {
+      "id": "P1-LOCAL-MARKET-LOOP",
+      "reviewedRange": {
+        "base": "5b9774dd0df79ca408c0d9d02dbf1683c0f819be",
+        "head": "86046f2f702ab3b29f46f738f903f7df0d9cd4d4"
+      },
+      "initialOutcome": "APPROVED",
+      "findingCount": 0,
+      "integratedAs": "4adcefb8deffa21f28d9e29751f10ccf0a3626eb",
+      "verification": {
+        "focusedTest": "1/1 passed"
+      }
+    },
+    {
+      "id": "P1-GATE-FAIL-CLOSED",
+      "reviewedRange": {
+        "base": "5b9774dd0df79ca408c0d9d02dbf1683c0f819be",
+        "head": "3db67cf3e8cddee81d9e27f081553d51b63019b6"
+      },
+      "initialOutcome": "CHANGES_REQUESTED",
+      "findings": [
+        "A downstream gate could still be owner-overridden while an upstream prerequisite was failed."
+      ],
+      "remediation": {
+        "commit": "157a7d3058e8878172d22e4af816d33c4587f4f4",
+        "integratedAs": "8a3ff3fcfb9945879b144694d172101b75536ae2",
+        "summary": "Reject downstream overrides until prerequisite gates are authoritative.",
+        "verification": "44/44 gate and state tests passed",
+        "followUpReview": "NOT_RUN_PER_OWNER_INSTRUCTION"
+      },
+      "finalDisposition": "REMEDIATED_LOCALLY_NOT_RE_REVIEWED"
+    },
+    {
+      "id": "P1-REPRODUCIBILITY",
+      "reviewedRange": {
+        "base": "5b9774dd0df79ca408c0d9d02dbf1683c0f819be",
+        "head": "0247b9f517db78aa998aae28b2cc041423cb5cce"
+      },
+      "initialOutcome": "CHANGES_REQUESTED",
+      "findings": [
+        "Gas evidence did not enforce the exact production-contract set and section bounds.",
+        "The gas run did not require the exact six-test completion summary.",
+        "Executable identity was not fully bound to the trusted toolchain and frozen pins.",
+        "Candidate verification did not fully bind the trusted manifest digest, unique paths, and exact runner set.",
+        "Dependency cleanliness did not include untracked files.",
+        "Report output needed repository-bound, non-symlink, atomic writes."
+      ],
+      "remediation": {
+        "commit": "b43285ba4660bebb9a7b465057f55d20e85a157c",
+        "integratedAs": "184a90ef74df7498021141f9e593f02575de3554",
+        "summary": "Closed all six review findings in the verifier, report, documentation, and focused regressions.",
+        "verification": "9/9 focused tests passed; real offline reproducibility run passed",
+        "followUpReview": "NOT_RUN_PER_OWNER_INSTRUCTION"
+      },
+      "finalDisposition": "REMEDIATED_LOCALLY_NOT_RE_REVIEWED"
+    },
+    {
+      "id": "RT-R55-03-CLOSURE",
+      "reviewedRange": {
+        "base": "dd48c94239f279e254b29156eac96736fdfcacb4",
+        "head": "3440e9cccb4a79f31128243eb45ed8a27cad2531"
+      },
+      "initialOutcome": "APPROVED",
+      "findingCount": 0,
+      "integratedAs": "e1583eadbe7afce28b5273fd69bba57493aa777e",
+      "verification": {
+        "focusedGateRegression": "4/4 passed",
+        "jsonConsistency": "passed",
+        "isolatedProbeGate": "FAILED as intended"
+      },
+      "scopeLimit": "Only RT-R55-03 was closed; RT-R55-02, RT-R55-05, and RT-R55-06 remain open high findings."
+    },
+    {
+      "id": "P1-RELEASE-VERIFIER",
+      "reviewedRange": {
+        "base": "184a90ef74df7498021141f9e593f02575de3554",
+        "head": "bfdeee869e7556b109966cd20ac00a65f00e6bdd"
+      },
+      "initialOutcome": "CHANGES_REQUESTED",
+      "findings": [
+        "The release verifier needed to recompute the exact canonical artifact digest and set.",
+        "Static inputs, source-commit manifest, and local gas evidence needed exact binding.",
+        "Forge scratch cleanup needed to survive body and post-check failures outside a hostile TMPDIR.",
+        "Tool executables needed to be absolute regular non-symlink files."
+      ],
+      "remediation": {
+        "commit": "52c92e1df45eb56acafb6ca06214feef7863d9e5",
+        "integratedAs": "7eb01de7ad87a1160877324f2208de26d15a48fc",
+        "summary": "Closed all four verifier findings and refreshed the exact candidate shape.",
+        "verification": "8/8 focused release tests passed; 1/1 isolated integration smoke passed",
+        "followUpReview": "NOT_RUN_PER_OWNER_INSTRUCTION"
+      },
+      "finalDisposition": "REMEDIATED_LOCALLY_NOT_RE_REVIEWED"
+    },
+    {
+      "id": "P1-012-RELEASE-HARNESS",
+      "reviewedRange": {
+        "base": "ddd5c29d59688ff556af923e5e81a88840b935bd",
+        "head": "8135a2e90df5d73cc45027be7ac96b93f977145a"
+      },
+      "initialOutcome": "CHANGES_REQUESTED",
+      "findings": [
+        "The harness did not exercise the productive PayoutCommitment path.",
+        "The release-plan source guard could miss fallback or receive entry points and comment-based bypasses.",
+        "The release verifier did not bind the local reproducibility report.",
+        "Runtime validation did not bind expected code hashes.",
+        "The verifier did not require positive invariant run and call counts."
+      ],
+      "remediation": {
+        "commits": [
+          "59f705b3a11b4c5d8a942a0c640f190e9c34e8f8",
+          "151e2e48c7ecb7a0d16481609d995a594ebdd5bd",
+          "db4143a2988148599dca67dbe7e09e207190f5e4",
+          "405d56602f362b6aa7be29152b7fbfd21737b8cb"
+        ],
+        "integratedAs": "8dbbed848b93ccde4da926483494081723c11fb7",
+        "summary": "Closed all five findings in the harness, release-plan guard, reproducibility binding, runtime checks, and invariant-output parser.",
+        "verification": "10/10 focused Node tests passed; 8/8 Forge tests passed; all 7 invariants reported 256 runs and 128000 calls; integrated local release verification passed with 51 files and 5 checks",
+        "followUpReview": "NOT_RUN_PER_OWNER_INSTRUCTION"
+      },
+      "finalDisposition": "REMEDIATED_LOCALLY_NOT_RE_REVIEWED"
+    },
+    {
+      "id": "P2-OPERATOR-CONTROL-LOCAL",
+      "artifact": "qa/reviews/phase2-operator-control-local-verification.json",
+      "requirementsRevision": 57,
+      "architectureRevision": 5,
+      "initialOutcome": "CHANGES_REQUESTED",
+      "findingCount": 5,
+      "finalDisposition": "REMEDIATED_LOCALLY_WITH_FOCUSED_REGRESSION",
+      "releaseApproved": false,
+      "productionReady": false
+    }
+  ]
+}

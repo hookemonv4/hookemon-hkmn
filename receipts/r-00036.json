@@ -1,0 +1,11 @@
+{
+  "id": "r-00036",
+  "at": "2026-08-30T07:14:03.222Z",
+  "type": "autonomy-grant",
+  "phase": "spec",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/PHASE_1_SPEC_AUTONOMY_GRANT.md": "6ee78e1c8082092952210134544f555dc8f030c96e24f6fea29fe1d04175bf8d"
+  }
+}

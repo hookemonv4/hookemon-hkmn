@@ -1,0 +1,1494 @@
+{
+  "schemaVersion": "hookemon.finding-traceability.v1",
+  "generatedFrom": [
+    "docs/audit/2026-09-04/findings/verified-L3.json",
+    "docs/audit/2026-09-04/findings/verified-L1-L2-L4-L5-L6.json"
+  ],
+  "workPackageIds": [
+    "WP23",
+    "WP00a",
+    "WP00b",
+    "WP18",
+    "WP01",
+    "WP02",
+    "WP03A",
+    "WP04a",
+    "WP04b",
+    "WP04c",
+    "WP04A",
+    "WP05",
+    "WP06",
+    "WP07-0",
+    "WP07",
+    "WP08a",
+    "WP08b",
+    "WP09a",
+    "WP09b",
+    "WP10a",
+    "WP10b",
+    "WP12",
+    "WP13",
+    "WP14",
+    "WP15",
+    "WP17",
+    "WP19",
+    "WP20",
+    "WP22b",
+    "WP26",
+    "WP27",
+    "WP28",
+    "WP16",
+    "WP24",
+    "WP25"
+  ],
+  "findings": [
+    {
+      "id": "L1-M1",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Documented launch path has no code that seeds canonical HKMN/USDG liquidity",
+      "where": "packages/contracts/src/launch/CustomLaunchStrategy.sol:59-67,122-129,261-272,323-344,464-480 (PlaceholderMarketPositionCustody/PlaceholderLbpCurve); packages/contracts/src/HookemonHook.sol:218-257; docs/modules/token-core.md:14-17; docs/modules/custom-launch-strategy.md:7,43-45",
+      "disposition": {
+        "wp": [
+          "WP04c"
+        ],
+        "acceptance": "The atomic launch composition seeds the canonical pool and finalizes custody in one transaction."
+      }
+    },
+    {
+      "id": "L1-M2",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "A known final PoolKey can be pre-initialized at an attacker-chosen price before launch",
+      "where": "packages/contracts/lib/v4-core/src/PoolManager.sol:117-142,145-184; packages/contracts/lib/v4-core/src/libraries/Pool.sol:100-107; packages/contracts/src/HookemonHook.sol:66-71,98-152; packages/contracts/lib/v4-core/src/libraries/Hooks.sol:177-205; bindings/robinhood-chain.json:198-206",
+      "disposition": {
+        "wp": [
+          "WP04a"
+        ],
+        "acceptance": "External initialization is rejected while the approved launch path can initialize exactly once."
+      }
+    },
+    {
+      "id": "L1-M3",
+      "severity": "HIGH",
+      "tag": "DECISION",
+      "verdict": "CONTESTED",
+      "title": "Partial fills deliberately revert the whole swap in every quadrant -- not yet a ratified product rule",
+      "where": "packages/contracts/src/market/CanonicalMarket.sol:262-287; packages/contracts/lib/v4-core/src/libraries/Pool.sol:343-462; packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol:661-724; bindings/robinhood-chain.json:223-227",
+      "disposition": {
+        "wp": [
+          "WP00a",
+          "WP05"
+        ],
+        "acceptance": "The owner-approved partial-fill policy is enforced by the fork proof."
+      }
+    },
+    {
+      "id": "L1-M4",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONTESTED",
+      "title": "The '3.00% split 10/40/250 bps' claim does not match the implemented invariant, and a second, non-cumulative fee formula lives dormant in the bindings validator",
+      "where": "packages/contracts/src/accounting/FeeAccounting.sol:207-262; packages/contracts/src/market/CanonicalMarket.sol:275-287; packages/contracts/src/bindings/RobinhoodBindings.sol:273-307; packages/contracts/test/accounting/FeeAccounting.t.sol:48-70,151; docs/modules/fee-accounting.md:23-39",
+      "disposition": {
+        "wp": [
+          "WP03A"
+        ],
+        "acceptance": "Gross-volume accounting conserves all three cumulative fee streams across every swap path."
+      }
+    },
+    {
+      "id": "L1-M5",
+      "severity": "HIGH",
+      "tag": "EXTERNAL",
+      "verdict": "CONFIRMED",
+      "title": "The PoolManager protocol-fee controller can halt all canonical swaps",
+      "where": "packages/contracts/src/market/CanonicalMarket.sol:289-298; packages/contracts/lib/v4-core/src/ProtocolFees.sol:24-48; packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol:726-774",
+      "disposition": {
+        "wp": [
+          "WP14",
+          "WP19"
+        ],
+        "acceptance": "Pre-signature canaries stop on drift and the incident runbook defines safe recovery."
+      }
+    },
+    {
+      "id": "L1-M6",
+      "severity": "HIGH",
+      "tag": "EXTERNAL",
+      "verdict": "CONFIRMED",
+      "title": "USDG upgrade/pause/freeze/transfer-policy changes are not fully fail-closed for user receipts",
+      "where": "bindings/robinhood-chain.json:124-146; packages/contracts/src/HookemonHook.sol:218-257; packages/contracts/src/accounting/FeeAccounting.sol:92-107,180-200; packages/contracts/lib/v4-core/src/PoolManager.sol:291-297,349-365; packages/contracts/lib/v4-core/src/types/Currency.sol:40-87",
+      "disposition": {
+        "wp": [
+          "WP14",
+          "WP19"
+        ],
+        "acceptance": "Pre-signature canaries stop on drift and the incident runbook defines safe recovery."
+      }
+    },
+    {
+      "id": "L1-M7",
+      "severity": "HIGH",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "Live PoolManager/router/quoter production-path proof and source-to-deployed-bytecode provenance are absent or degraded",
+      "where": "packages/contracts/test/integration/HookemonHook.t.sol:227-242,388-529; packages/contracts/test/bindings/RobinhoodV4PoolManager.t.sol:71-165,220-302; packages/contracts/test/integration/RobinhoodV4Fork.t.sol:14-30,121-125,154-350; packages/contracts/test/integration/RobinhoodV4ForkSmoke.t.sol:128-165; .github/workflows/v4-gates.yml:174-184; packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol:10-12,40-62; product/dependency-pins.json:93-111; bindings/robinhood-chain.json:43-60,148-160",
+      "disposition": {
+        "wp": [
+          "WP18",
+          "WP05"
+        ],
+        "acceptance": "The non-skipping fork suite proves the configured router, quoter, runtime, and launch path."
+      }
+    },
+    {
+      "id": "L1-M8",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Router identity is pinned in config/mining/binding tooling but never enforced by the hook at runtime, and a second live Universal-Router-shaped contract is unaccounted for",
+      "where": "packages/contracts/src/market/CanonicalMarket.sol:149-186,193-213; packages/contracts/src/bindings/RobinhoodBindings.sol:32-33,151-156; scripts/mine-hook-address.mjs:46-60,130-148,214-221; scripts/verify-phase2-readiness.mjs:10-16,117-198; bindings/robinhood-chain.json:169-175",
+      "disposition": {
+        "wp": [
+          "WP01",
+          "WP05",
+          "WP22b"
+        ],
+        "acceptance": "Router removal or the operational pin produces one coherent deployment candidate."
+      }
+    },
+    {
+      "id": "L1-M9",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Programmable launch readiness tooling is not bound to production launch code, and its status logic disagrees with the current live discovery facts",
+      "where": "packages/contracts/src/launch/CustomLaunchStrategy.sol:279-315; scripts/verify-phase2-readiness.mjs:35-36,293-329; bindings/robinhood-chain.json:292-308",
+      "disposition": {
+        "wp": [
+          "WP17"
+        ],
+        "acceptance": "The two-stage gate reports repair and launch eligibility from current provider facts."
+      }
+    },
+    {
+      "id": "L1-M11",
+      "severity": "MEDIUM",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "The real vendored LiquidityLauncher/UERC20Factory cannot compile under this repo's frozen dependency pins; issuance is tested only against hand-written mocks",
+      "where": "docs/modules/custom-launch-strategy.md:11,45; packages/contracts/src/launch/CustomLaunchStrategy.sol:18-31",
+      "disposition": {
+        "wp": [
+          "WP18"
+        ],
+        "acceptance": "The real vendored launch dependencies compile under the pinned build profile."
+      }
+    },
+    {
+      "id": "L1-M12",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Prior-audit L1 claim ledger: several 'sound/tested' claims are only PARTIAL or REFUTED against source-verified reality",
+      "where": "docs/superpowers/plans/2026-09-04-money-path-audit-findings-and-masterplan.md:7-25,121-124; docs/superpowers/plans/2026-09-04-money-path-audit-handover.md:29-52,113-142",
+      "disposition": {
+        "wp": [
+          "WP00a",
+          "WP20"
+        ],
+        "acceptance": "The approved revision aligns the specification, architecture, and delivery-boundary records."
+      }
+    },
+    {
+      "id": "L2-M1",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Outbound route data cannot decode against the deployed executor's ABI (K1, part 1)",
+      "where": "packages/adapters/src/app/stages/action-builder.mjs:202-219 (extractRouteData); packages/adapters/src/app/stages/funding.mjs:140-145; packages/adapters/src/app/stages/outbound.mjs:60-82; packages/contracts/src/process/PegCycleRouteExecutor.sol:26-33,91-121",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M2",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "The production runner never calls openPegCycle -- a cycle never reaches FUNDED (K2)",
+      "where": "packages/adapters/src/app/stages/funding.mjs:180-197; packages/adapters/src/hook-contract-client.mjs:178-180 (buildOpenPegCycleCall); packages/contracts/src/process/PegCycleVault.sol:198-205,311-320; packages/contracts/src/process/ProcessBudget.sol:56-70",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M3",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "commitPayoutChunk lets the single authorizer key redirect an entire funded payout -- the dual-signature protection is decorative for the only active payout path",
+      "where": "packages/contracts/src/payout/PayoutCommitment.sol:107-120,134-170 (commitPayoutChunk); packages/contracts/src/settlement/HolderSettlement.sol:81-115 (_verifyEntitlementProof); packages/contracts/src/process/PayoutDistributionSignatures.sol:72-114; packages/contracts/test/payout/PayoutCommitment.t.sol:292-318",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M4",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "The workflow funds a payout but never commits or settles it -- holders are never paid automatically (K3)",
+      "where": "packages/adapters/src/app/stages/payout.mjs:1-9,117-235; packages/adapters/src/hook-contract-client.mjs:78-84; packages/runner/src/distribution/settlement-worker.mjs:174-290; packages/adapters/bin/hookemon-runner.mjs (grep: zero references to settlement-worker/settleDistribution/commitPayoutChunk/payEntitlement)",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M5",
+      "severity": "HIGH",
+      "tag": "EXTERNAL",
+      "verdict": "CONFIRMED",
+      "title": "Relay attribution from the executor is not established even if the decode is fixed (K1, part 2)",
+      "where": "packages/adapters/src/app/stages/funding.mjs:125-145; packages/adapters/src/app/stages/action-builder.mjs:202-219; packages/contracts/src/process/PegCycleReturnEscrow.sol:43-46; packages/contracts/src/process/PegCycleRouteExecutor.sol:103-120,138-164; packages/adapters/src/relay-client.mjs:1-40 (module header)",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M6",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "A funded cycle (FUNDED state) has no abort, route-replacement, or recovery path",
+      "where": "packages/contracts/src/process/PegCycleVault.sol:250-263,311-337; packages/contracts/src/process/PegCycleReturnEscrow.sol:43-51",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M7",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "One unsolicited USDG unit can permanently disable the shared route executor",
+      "where": "packages/contracts/src/process/PegCycleRouteExecutor.sol:16-24,109-120; packages/contracts/test/process/PegCycleRouteExecutor.t.sol:105-117",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M8",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Return proceeds are neither finalized nor attributable before being treated as payout basis (H3)",
+      "where": "packages/adapters/src/app/stages/return.mjs:76-89,103-121; packages/adapters/src/app/stages/distribution.mjs:298-345; packages/adapters/src/robinhood-rpc.mjs:118-148; packages/contracts/src/process/PayoutDistributionSignatures.sol:81-99",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M9",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Escrow residue, failed-cycle USDG, and degraded returns are permanently locked forever with no sweep (H1)",
+      "where": "packages/contracts/src/process/PegCycleReturnEscrow.sol:1-73 (whole file -- only sendOutbound/sendPayout, both coordinator-gated); packages/contracts/src/process/PegCycleVault.sol:430-456,459-486,573-585 (recordTerminalFailure/recordDegradedReturn never move balance); packages/contracts/test/process/PegCycleVault.t.sol:717-738; packages/contracts/test/process/PegCycleReturnDegraded.t.sol:143-171; packages/contracts/test/process/PegCycleVaultRecovery.t.sol:485-517 (negative test proving no sweep exists); docs/modules/peg-cycle-vault.md:45,76",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M10",
+      "severity": "HIGH",
+      "tag": "EXTERNAL",
+      "verdict": "CONFIRMED",
+      "title": "USDG proxy pause/freeze/callback behavior can halt every custody movement in this lane",
+      "where": "packages/contracts/src/HookemonHook.sol:243-256; packages/contracts/src/accounting/FeeAccounting.sol:180-200; packages/contracts/src/process/PegCycleRouteExecutor.sol:138-172; packages/contracts/src/process/PegCycleReturnEscrow.sol:53-71",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M11",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Production minima and gas caps silently default to one atomic unit (H2)",
+      "where": "packages/adapters/src/app/stages/funding.mjs:171-175; packages/contracts/src/process/FundingAuthorizationValidation.sol:75-86; packages/contracts/src/process/PayoutDistributionSignatures.sol:89-98",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M12",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONTESTED",
+      "title": "Settlement marks a holder paid after RPC acceptance, not finality",
+      "where": "packages/runner/src/distribution/settlement-worker.mjs:218-290; packages/adapters/src/robinhood-rpc.mjs:328-337; packages/runner/test/distribution/settlement-worker.test.mjs:231-278",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M13",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Programmable cannot choose a per-claim destination -- claimProgrammable/claimTreasury force destination == beneficiary",
+      "where": "packages/contracts/src/HookemonHook.sol:170-184; packages/contracts/src/access/MoneyRoles.sol:132-145; packages/contracts/src/accounting/FeeAccounting.sol:121-148; bindings/robinhood-chain.json:292-308",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M14",
+      "severity": "HIGH",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "The collector-only rehearsal and the 'full' compose test do not exercise this money path at all",
+      "where": "packages/adapters/src/app/stage-driver.mjs:166-179; ../pr5.diff:1213-1226,1341,1447; packages/adapters/test/app/compose.test.mjs:614,672,681,776,879",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M15",
+      "severity": "HIGH",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "No test connects the real off-chain-to-on-chain route-data pipeline; the adapters fixture is a 4-byte placeholder",
+      "where": "packages/adapters/test/app/stages-live.test.mjs:50,167-168 (ROUTE_DATA = '0x1234abcd'); packages/contracts/test/process/PegCycleRouteExecutor.t.sol (every test builds routeData directly via abi.encode(RouteParams{...})); packages/contracts/test/fork/ (directory does not exist in this export)",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M16",
+      "severity": "MEDIUM",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Predicted escrow dust permanently consumes a planned cycle identity",
+      "where": "packages/contracts/src/process/PegCycleEscrowFactory.sol:37-49; packages/contracts/src/process/FundingAuthorizationValidation.sol:79-86; packages/contracts/src/process/PegCycleVault.sol:282-285,538-567; packages/contracts/test/process/PegCycleVaultRecovery.t.sol:195-209",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M17",
+      "severity": "MEDIUM",
+      "tag": "DECISION",
+      "verdict": "CONFIRMED",
+      "title": "Dual signatures do not bind return evidence or authorization lifetime",
+      "where": "packages/contracts/src/process/IPegCycleVault.sol:11-21; packages/contracts/src/process/PayoutDistributionSignatures.sol:120-137; packages/contracts/src/process/PegCycleVault.sol:398-413,443-446",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M18",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Distribution evidence records the authorizer identity, not Operations, as operationsTrigger (M2)",
+      "where": "packages/adapters/src/app/stages/funding.mjs:125-177; packages/adapters/src/app/stages/payout.mjs:84-102; packages/adapters/src/app/stages/distribution.mjs:323-345; packages/runner/src/distribution/reconcile.mjs:216-239",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M19",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Distribution fails above 1,024 eligible holders even though the contract supports 64 chunks (M3)",
+      "where": "packages/adapters/src/app/stages/distribution.mjs:404-414; packages/contracts/src/payout/CanonicalMerkleSum.sol:4-7; packages/contracts/src/payout/PayoutCommitment.sol:33-35,134-169",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M20",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Claims and process-recovery controls have no production command path (K4/H5)",
+      "where": "packages/runner/src/automation/fee-settlement.mjs:23-107; packages/adapters/bin/hookemon-runner.mjs:60-76,287-303; packages/contracts/src/process/PegCycleVault.sol:234-263,398-485",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L2-M21",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Documentation contradicts both the source code and stated release readiness",
+      "where": "docs/modules/peg-cycle-vault.md:5,17,24,45,76-80; docs/modules/peg-cycle-route-executor.md:5,41-44; packages/contracts/src/process/PegCycleVault.sol:430-485; bindings/robinhood-chain.json:292-308",
+      "disposition": {
+        "notApplicable": "The phase-three deployment manifest excludes this legacy process contract and records the decision."
+      }
+    },
+    {
+      "id": "L3-M1",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "openPegCycle is never called anywhere in the driven production path",
+      "where": "packages/runner/src/automation/automated-cycle-service.mjs:12-21; packages/adapters/src/app/compose.mjs:371-388; packages/adapters/src/hook-contract-client.mjs:178-180; packages/adapters/src/app/stages/funding.mjs:180-197; packages/contracts/src/process/ProcessBudget.sol:56-70; packages/contracts/src/process/PegCycleVault.sol:311-320",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP07"
+        ],
+        "acceptance": "The authoritative cycle repository and write-ahead schema replace the old money path."
+      }
+    },
+    {
+      "id": "L3-M2",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "commitPayoutChunk/payEntitlement are never called, and no calldata builder for them even exists",
+      "where": "packages/adapters/bin/hookemon-runner.mjs:60-76; packages/adapters/src/app/stages/payout.mjs:117-234; packages/adapters/src/hook-contract-client.mjs (full file — no PayoutCommitment/HolderSettlement ABI entries); packages/runner/src/distribution/settlement-worker.mjs:1-12; packages/contracts/src/payout/PayoutCommitment.sol:93-170; packages/contracts/src/settlement/HolderSettlement.sol:33-56,90-98; packages/adapters/src/app/stages/distribution.mjs:408-414",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L3-M3",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "The real CLI's payout authorization omits the USDG contract address entirely",
+      "where": "packages/adapters/src/app/environment.mjs:405-436; packages/adapters/bin/hookemon-runner.mjs:147-166; packages/adapters/src/app/compose.mjs:322-350; packages/adapters/src/app/stages/payout.mjs:84-102,187-195; packages/adapters/src/app/stages/action-builder.mjs:47-53",
+      "disposition": {
+        "wp": [
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L3-M4",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Relay's raw calldata is passed straight through instead of the route executor's expected RouteParams ABI",
+      "where": "packages/adapters/src/app/stages/action-builder.mjs:203-219 (extractRouteData); packages/adapters/src/app/stages/funding.mjs:140-145; packages/adapters/src/app/stages/outbound.mjs:60-82; packages/contracts/src/process/PegCycleRouteExecutor.sol:16-24,26-44,91-120",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L3-M5",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Safety minima and gas caps silently default to the literal atomic-unit value '1' at two independent layers",
+      "where": "packages/adapters/src/app/environment.mjs:373-381; packages/adapters/src/app/compose.mjs:322-336; packages/adapters/src/app/stages/funding.mjs:171-175; packages/adapters/src/app/stages/leg-actions.mjs:42-61,110-129",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Production configuration is explicit, fail-closed, and checked before any irreversible action."
+      }
+    },
+    {
+      "id": "L3-M6",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "open and purchase are the only two of eight live stages that skip the pre-mutation crash-safety guard, and stage-driver.mjs's own header now misdescribes this",
+      "where": "packages/adapters/src/app/stages/open.mjs:78-89 (mutateOpen); packages/adapters/src/app/stages/purchase.mjs:14-28 (mutatePurchase); packages/adapters/src/app/stage-driver.mjs:36-39,225-239; packages/adapters/src/app/stages/rehearsal.mjs:106-169; packages/adapters/src/app/stages/buyback.mjs:55-58",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP08b"
+        ],
+        "acceptance": "Write-ahead records and mutation fencing prevent duplicate external effects after restart."
+      }
+    },
+    {
+      "id": "L3-M7",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Cross-chain return proceeds are not cycle-attributed and the escrow credit used for distribution is never finality-checked",
+      "where": "packages/adapters/src/app/stages/return.mjs:62-121,157-184; packages/adapters/src/relay-client.mjs:515-518,636-668; packages/adapters/src/app/stages/distribution.mjs:298-321 (vs. the same file's own finality-checked totalSupply anchor at :238-246); packages/adapters/src/robinhood-rpc.mjs:118-149",
+      "disposition": {
+        "wp": [
+          "WP07",
+          "WP09b"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L3-M8",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Four of five contract recovery functions remain calldata-builder-only with no CLI caller; only accept-degraded-return is genuinely wired",
+      "where": "packages/adapters/src/hook-contract-client.mjs:104-118,152-171 (buildAuthorizeFundingAfterFailureCall, buildCancelExpiredFundingAuthorizationCall, buildRenewFundingAuthorizationDeadlineCall, buildRenewPayoutAuthorizationDeadlineCall, buildRecordTerminalFailureCall); packages/adapters/bin/hookemon-runner.mjs:60-76,226-269; packages/adapters/src/app/stages/return.mjs:124-185",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Recovery commands resume or abort only durable, explicit cycle states."
+      }
+    },
+    {
+      "id": "L3-M9",
+      "severity": "HIGH",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Lease/process fencing is incomplete: stale O_EXCL locks, un-journaled outbound/return failures, and a durable-store cache race can produce independent cycles or double-signing",
+      "where": "packages/adapters/src/app/lease-store.mjs:94-145; packages/runner/src/cycle/durable-store.mjs:462-473,556-577; packages/adapters/src/app/cycle-repository.mjs:130-155; packages/adapters/bin/hookemon-runner.mjs:60-76,235-268; packages/adapters/src/app/stages/outbound.mjs:88-105; packages/adapters/src/app/stages/return.mjs:103-121; packages/runner/src/automation/exclusive-lease.mjs:55-100; packages/adapters/src/app/stages/funding.mjs:180-183; packages/runner/src/automation/automated-cycle-service.mjs:177-199",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP07"
+        ],
+        "acceptance": "Write-ahead records and mutation fencing prevent duplicate external effects after restart."
+      }
+    },
+    {
+      "id": "L3-M10",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Rehearsal and production can share an armed live state, while dashboard caps/pack controls do not actually gate spending",
+      "where": "packages/adapters/src/app/environment.mjs:217-246; packages/adapters/src/app/stage-driver.mjs:166-180; packages/runner/src/scheduler/scheduler.mjs:137-195; packages/runner/src/config/state-schema.mjs:8-19,126-157; packages/adapters/src/app/compose.mjs:201-229,396-405; packages/adapters/src/app/stages/purchase.mjs:19-24",
+      "disposition": {
+        "wp": [
+          "WP10a",
+          "WP12"
+        ],
+        "acceptance": "Policy controls gate claims and purchases before signing and persist their accounting."
+      }
+    },
+    {
+      "id": "L3-M11",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "The production CycleRunner / standing-authority journal (Track B) is never constructed; the live money path runs on a separate, simpler bookkeeping layer (Track A)",
+      "where": "packages/adapters/src/app/compose.mjs:378-388,439-446 (runnerFactory: cycleId => ({ cycleId })); packages/adapters/src/app/cycle-repository.mjs:20-49; packages/runner/src/cycle/evidence-profile.mjs:68-76; packages/runner/src/cycle/authorization-provider.mjs:17-23; packages/runner/src/cycle/schemas.mjs:14-31; packages/adapters/src/app/stages/return.mjs:76-89",
+      "disposition": {
+        "wp": [
+          "WP07-0"
+        ],
+        "acceptance": "The authoritative cycle repository and write-ahead schema replace the old money path."
+      }
+    },
+    {
+      "id": "L3-M13",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Standing-authority intent expiry is checked against the signed intent's own issuedAt timestamp, not wall-clock time at use",
+      "where": "packages/runner/src/cycle/authorization-provider.mjs:120-136,151-172; packages/runner/src/cycle/cycle-runner.mjs:236-259; packages/adapters/src/app/stages/return.mjs:157-184",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L3-M14",
+      "severity": "MEDIUM",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Evidence/accounting records the authorizer's address in the operations-trigger field, and labels funded-but-unpaid liabilities as settled",
+      "where": "packages/adapters/src/app/stages/distribution.mjs:323-345,424-449 (line 330: operationsTrigger: config.accounts.evm); packages/adapters/src/app/accounting-projection.mjs:56-79,102-145; packages/adapters/src/app/stages/payout.mjs:128-151",
+      "disposition": {
+        "wp": [
+          "WP07",
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L3-M15",
+      "severity": "MEDIUM",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Relay address-equality check can accept a wrong-case Solana address, and there is no route-expiry recovery between funding and outbound",
+      "where": "packages/adapters/src/relay-client.mjs:47-67,153-160,301-321,524-605; packages/adapters/src/app/stages/funding.mjs:137,140-145; packages/adapters/src/app/stages/outbound.mjs:8-18,64-82",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L3-M16",
+      "severity": "MEDIUM",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "PR #5's non-Solana changes add rehearsal capability but not production proof, and required CI does not exercise the changed test suites",
+      "where": "pr5.diff (full file list); packages/adapters/bin/hookemon-runner.mjs:121-131,133-171; packages/adapters/src/app/{environment,compose,stage-driver}.mjs; packages/adapters/src/app/accounting-projection.mjs:74-79,111-145; packages/dashboard/src/{contracts/operator-contracts,projections/operator-projection,public/index,routes/operator,server}.mjs; packages/runner/src/{config/state-schema,operator/pack-selection}.mjs; packages/adapters/test/app/compose.test.mjs:614-621,681-789; .github/workflows/v4-gates.yml:150-160",
+      "disposition": {
+        "wp": [
+          "WP12",
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L3-M17",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONTESTED",
+      "title": "PR #5's rehearsal signer imports raw Solana private key material into the Node process, contradicting the general external-signer isolation model",
+      "where": "packages/adapters/rehearsal/macos-keychain-solana-signer.mjs:33-71,74-119; packages/adapters/src/signing/keychain-signer.mjs:12-18,69-104; docs/modules/signing.md:90-105",
+      "disposition": {
+        "wp": [
+          "WP08a"
+        ],
+        "acceptance": "Signing stays outside Node and policy decoders reject an unapproved transaction."
+      }
+    },
+    {
+      "id": "L3-M20",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "PR #5 introduces a character-code obfuscation that evades the clean-room governance scanner rather than complying with it",
+      "where": "packages/adapters/src/app/accounting-projection.mjs:25,74-79; scripts/check-cleanroom.mjs:129-155; docs/modules/clean-room-guard.md",
+      "disposition": {
+        "wp": [
+          "WP15"
+        ],
+        "acceptance": "The scanner detects unsafe reconstruction and the source tree contains no forbidden marker."
+      }
+    },
+    {
+      "id": "L3-M23",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Live configuration gaps (Collector Crypt, Solana signer, pack code, production distribution identity) surface only after irreversible on-chain work, not before",
+      "where": "packages/adapters/src/app/stages/funding.mjs:90-104; packages/adapters/src/app/compose.mjs:185-198; packages/adapters/src/app/stages/purchase.mjs:14-24; packages/adapters/src/app/environment.mjs:371-395; packages/adapters/src/app/stages/distribution.mjs:208-217; packages/adapters/src/app/stages/payout.mjs:168-173",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Production configuration is explicit, fail-closed, and checked before any irreversible action."
+      }
+    },
+    {
+      "id": "L4-M1",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Open can complete with mint:null when Collector's 'already opened' response lacks transactionSignature — buyback permanently unreachable",
+      "where": "packages/adapters/src/collector-crypt.mjs:233-237 (assertOpenPackResponse only requires success:boolean); packages/adapters/src/app/stages/open.mjs:52-56,78-90 (deriveCardMintFromOpenTransaction returns null instead of throwing when transactionSignature is absent; mutateOpen records {mint:null} as a normal non-throwing result); packages/adapters/src/app/stage-driver.mjs:17-24,225-239 (any non-null reconcile() result, mint:null included, is treated as permanent stage completion); packages/adapters/test/app/compose.test.mjs:245-333.",
+      "disposition": {
+        "wp": [
+          "WP08b"
+        ],
+        "acceptance": "Collector mutations reconcile ambiguous outcomes without retrying a sent request."
+      }
+    },
+    {
+      "id": "L4-M2",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Provider-supplied purchase/buyback/return transactions are blindly signed with no transaction-policy validation",
+      "where": "packages/adapters/src/app/stages/purchase.mjs:19-24; packages/adapters/src/app/stages/buyback.mjs:60-72; packages/adapters/src/app/stages/return.mjs:76-88; packages/adapters/rehearsal/macos-keychain-solana-signer.mjs:96-111.",
+      "disposition": {
+        "wp": [
+          "WP08a"
+        ],
+        "acceptance": "Signing stays outside Node and policy decoders reject an unapproved transaction."
+      }
+    },
+    {
+      "id": "L4-M3",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Purchase marks itself complete on Collector's 'submitted'/'confirmed' status without independently confirming Solana finality",
+      "where": "packages/adapters/src/collector-crypt.mjs:257-263 (submitTransaction accepts 'submitted'|'confirmed'|'finalized'); packages/adapters/src/app/stages/purchase.mjs:21-29 (mutatePurchase records provider status as completion; reconcileLivePurchase is a pass-through readStageAttempt with no Solana confirmation); packages/adapters/src/app/stages/open.mjs:81-85 (open proceeds immediately once purchase is complete); contrast buyback.mjs:82-102, return.mjs:103-122, rehearsal.mjs:150-170, all of which poll getSignatureStatuses to 'finalized' before completing.",
+      "disposition": {
+        "wp": [
+          "WP08b"
+        ],
+        "acceptance": "Collector mutations reconcile ambiguous outcomes without retrying a sent request."
+      }
+    },
+    {
+      "id": "L4-M4",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONTESTED",
+      "title": "purchase/open lack a readStageAttempt guard, and every stage's durable record is written only after the external effect — both allow a crash or lost response to force a duplicate real-money mutation on retry",
+      "where": "packages/adapters/src/app/stages/purchase.mjs:14-25 (mutatePurchase, no readStageAttempt guard); packages/adapters/src/app/stages/open.mjs:78-86 (mutateOpen, no readStageAttempt guard); packages/adapters/src/app/stage-driver.mjs:225-239 (execute() records the attempt only AFTER mutate() fully resolves, never mid-mutate — a narrower window affecting even the guarded stages: buyback.mjs:50-51, outbound.mjs:51, payout.mjs:126, return.mjs:65-66, rehearsal.mjs:106-147); packages/adapters/src/collector-crypt.mjs:13-38,321-344 (idempotency key is in-process only, no server-side guarantee documented or relied upon).",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP08b"
+        ],
+        "acceptance": "Write-ahead records and mutation fencing prevent duplicate external effects after restart."
+      }
+    },
+    {
+      "id": "L4-M5",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "macOS Keychain signer swallows the OS error text and has no timeout — every real signing failure is opaque and can hang forever",
+      "where": "packages/adapters/rehearsal/macos-keychain-solana-signer.mjs:74-81 (defaultReadSecret spawns `security find-generic-password ... -w` with no timeout), invoked from :96-97 inside sign() on every purchase/buyback/rehearsal-payout signing call; packages/adapters/bin/hookemon-runner.mjs:121-130 (per-tick logging still surfaces only this opaque message).",
+      "disposition": {
+        "wp": [
+          "WP08a"
+        ],
+        "acceptance": "Signing stays outside Node and policy decoders reject an unapproved transaction."
+      }
+    },
+    {
+      "id": "L4-M6",
+      "severity": "MEDIUM",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "Signer v0/partial-signing preservation is implemented but not actually proven by tests — sources disagree on whether it is 'verified'",
+      "where": "packages/adapters/rehearsal/macos-keychain-solana-signer.mjs:33-71,74-80,96-111 (commits 0df0c45, 0a4653d); packages/adapters/test/rehearsal-signer.test.mjs:8-57.",
+      "disposition": {
+        "wp": [
+          "WP08a"
+        ],
+        "acceptance": "Signing stays outside Node and policy decoders reject an unapproved transaction."
+      }
+    },
+    {
+      "id": "L4-M7",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Collector API response contract is under-validated across all mutation endpoints, with no fetch timeout or durable reconciliation",
+      "where": "packages/adapters/src/collector-crypt.mjs:42-60,127-160,229-270,288-344; packages/adapters/test/fixtures/collector-crypt/pack-status.json:15-37; packages/adapters/test/collector-crypt.test.mjs:182-191,291-320.",
+      "disposition": {
+        "wp": [
+          "WP08b"
+        ],
+        "acceptance": "Collector mutations reconcile ambiguous outcomes without retrying a sent request."
+      }
+    },
+    {
+      "id": "L4-M8",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Buyback executes with no code-level minimum-ratio floor on Collector's reported refund amount",
+      "where": "packages/adapters/src/app/stages/buyback.mjs:45-73 (mutateBuyback); packages/adapters/src/collector-crypt.mjs:229-270 (buyback/available response contract, amount never bound to policy); packages/adapters/test/fixtures/collector-crypt/machines.json:2-37 (instantBuyback:85 present in the fixture but unconsumed anywhere in code).",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Production configuration is explicit, fail-closed, and checked before any irreversible action."
+      }
+    },
+    {
+      "id": "L4-M9",
+      "severity": "HIGH",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Solana transaction liveness and blockhash safety are not wired into the live stage path — no retry/backoff, no priority fee, no blockhash refresh",
+      "where": "packages/adapters/src/solana-rpc.mjs:66-126,175-185,221-225,381-397 (single 15s attempt, no retry/backoff/failover; getTransaction accepts only version <=0); packages/adapters/src/app/stages/rehearsal.mjs:118-135 (payout builder adds no ComputeBudgetProgram instructions and discards lastValidBlockHeight); packages/runner/src/cycle/blockhash-validity.mjs:62-83 (a validator exists in packages/runner but the active adapter composition never constructs or drives CycleRunner).",
+      "disposition": {
+        "wp": [
+          "WP08a",
+          "WP13"
+        ],
+        "acceptance": "Signing stays outside Node and policy decoders reject an unapproved transaction."
+      }
+    },
+    {
+      "id": "L4-M10",
+      "severity": "MEDIUM",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Rehearsal payout is operationally brittle: delta-based rather than dedicated-account bound, misclassifies RPC errors, and is not chunked for large recipient counts",
+      "where": "packages/adapters/src/app/stages/rehearsal.mjs:41-58,61-80,106-147,118-132,150-169; packages/adapters/src/app/environment.mjs:217-246 (readRehearsal allows 1-50 recipients with no cross-check against transaction size); docs/rehearsal/collector-only.md:44-46.",
+      "disposition": {
+        "wp": [
+          "WP09b",
+          "WP12"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L4-M11",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Production configuration can silently degrade into collector-only rehearsal mode",
+      "where": "packages/adapters/src/app/environment.mjs:217-246,321-437; packages/adapters/src/app/stage-driver.mjs:166-179; docs/operations/production-env-checklist.md:8-10; packages/adapters/test/app/environment.test.mjs:46-90.",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Production configuration is explicit, fail-closed, and checked before any irreversible action."
+      }
+    },
+    {
+      "id": "L4-M12",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Production outbound cannot execute Relay's recorded EVM quote — parser mismatch plus architectural incompatibility with the contract-mediated sender (confirms Devin K1)",
+      "where": "packages/adapters/src/app/stages/action-builder.mjs:211-219 (extractRouteData); packages/adapters/test/fixtures/relay/quote-outbound.json:3-52; packages/adapters/src/app/stages/funding.mjs:140-145; packages/contracts/src/process/PegCycleRouteExecutor.sol:26-44,91-116,138-164; packages/adapters/src/relay-client.mjs:40-45,574-606 (prepareExecution/simulateExecution built for a wallet-style signer that signs and broadcasts Relay's own step bytes directly).",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L4-M13",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Production return rejects Relay's recorded Solana quote and never independently confirms delivery",
+      "where": "packages/adapters/src/app/stages/return.mjs:70-121; packages/adapters/test/fixtures/relay/quote-return.json:3-83; packages/adapters/test/app/stages-live.test.mjs:400-440.",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L4-M14",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Relay quote integrity, expiry, and restart recovery are not bound to the cycle, and Solana address comparison is unsound",
+      "where": "packages/adapters/src/relay-client.mjs:153-161,301-332,515-518,580-668; packages/adapters/src/app/stages/funding.mjs:137-145,171-176; packages/adapters/test/fixtures/relay/quote-outbound.json:158-194,332-390; packages/adapters/src/app/environment.mjs:373-381.",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L4-M15",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Production sweeps the operator balance while rehearsal distributes only observed buyback proceeds; settlement mint is never verified.",
+      "where": "packages/adapters/src/relay-client.mjs:47-67; packages/adapters/src/app/stages/return.mjs:70-76; packages/adapters/src/app/stages/rehearsal.mjs:41-58; packages/adapters/src/app/stages/leg-actions.mjs:21-39,110-129.",
+      "disposition": {
+        "wp": [
+          "WP07",
+          "WP12"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L4-M16",
+      "severity": "MEDIUM",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "CI excludes the critical stage tests, and runner-level blockhash/decoder protections are never wired into the active path",
+      "where": ".github/workflows/v4-gates.yml:20-65,155-160; packages/adapters/test/app/compose.test.mjs:245-333; packages/adapters/test/app/stages-live.test.mjs:165-175,400-440; packages/adapters/src/app/cycle-repository.mjs:20-49; packages/runner/src/cycle/decoder.mjs:269-310; packages/runner/src/cycle/collector.mjs:212-245; packages/adapters/test/collector-crypt.live-smoke.test.mjs:14-34.",
+      "disposition": {
+        "wp": [
+          "WP13",
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L5-M1",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Dashboard spend caps and pack allow-list never reach the real automated purchase/spend path",
+      "where": "packages/dashboard/src/public/index.html:141-186,239-245; packages/runner/src/config/state-schema.mjs:8-19,93-137; packages/adapters/src/app/compose.mjs:201-230,396-405 (buildBudgetReader); packages/runner/src/automation/budget-gate.mjs:1-54 (decideCycleBudget's 5-field schema); packages/adapters/src/app/environment.mjs:371-380 (HOOKEMON_PACK_CODE / HOOKEMON_MIN_*); packages/adapters/src/app/stages/purchase.mjs:14-24,20",
+      "disposition": {
+        "wp": [
+          "WP10a"
+        ],
+        "acceptance": "Policy controls gate claims and purchases before signing and persist their accounting."
+      }
+    },
+    {
+      "id": "L5-M2",
+      "severity": "CRITICAL",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Dashboard and operator CLI track a different lifecycle store than automation",
+      "where": "packages/dashboard/src/routes/operator.mjs:78-87; packages/dashboard/src/projections/operator-projection.mjs:30-51,87-150; packages/runner/src/operator/state-file.mjs:434-452; packages/adapters/src/app/compose.mjs:352-405; packages/runner/src/operator/cli.mjs:69-94; packages/runner/test/operator/cli.test.mjs:172-181",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP10b"
+        ],
+        "acceptance": "The authoritative cycle repository and write-ahead schema replace the old money path."
+      }
+    },
+    {
+      "id": "L5-M3",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Dashboard defaults to testnet identity while runner defaults to mainnet",
+      "where": "packages/dashboard/src/server.mjs:120-124; packages/adapters/src/app/compose.mjs:154-173; packages/dashboard/src/contracts/dashboard-profile.mjs:16-42; packages/adapters/src/app/environment.mjs:143-148,329-335",
+      "disposition": {
+        "wp": [
+          "WP10b"
+        ],
+        "acceptance": "Dashboard controls use the authoritative repository and do not imply an inert or spending action."
+      }
+    },
+    {
+      "id": "L5-M4",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Automation never calls openPegCycle — the on-chain cycle never opens",
+      "where": "packages/runner/src/automation/automated-cycle-service.mjs:12-21; packages/adapters/src/app/stages/funding.mjs:180-197; packages/adapters/src/hook-contract-client.mjs:178-180",
+      "disposition": {
+        "wp": [
+          "WP07-0",
+          "WP07"
+        ],
+        "acceptance": "The authoritative cycle repository and write-ahead schema replace the old money path."
+      }
+    },
+    {
+      "id": "L5-M5",
+      "severity": "CRITICAL",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Holder settlement (commitPayoutChunk / payEntitlement) is never invoked from any binary, and the settlement worker rejects the production artifact schema",
+      "where": "packages/adapters/src/app/stages/payout.mjs:1-9,34-51,117-209; packages/runner/src/distribution/manifest.mjs:437-482; packages/runner/src/distribution/settlement-worker.mjs:99-120,174-212,240-289; packages/adapters/bin/hookemon-runner.mjs:26-39,60-101,287-310",
+      "disposition": {
+        "wp": [
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L5-M6",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONTESTED",
+      "title": "Settlement worker marks a broadcast acknowledgement as PAID without a finalized receipt or on-chain verification",
+      "where": "packages/runner/src/distribution/settlement-worker.mjs:240-289",
+      "disposition": {
+        "wp": [
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L5-M7",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Distribution dust is computed but never carried into the next cycle",
+      "where": "packages/runner/src/distribution/pro-rata.mjs:118-167,175-186; packages/adapters/src/app/stages/distribution.mjs:399-414,404; packages/runner/test/distribution/pro-rata.test.mjs:121-146",
+      "disposition": {
+        "wp": [
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L5-M8",
+      "severity": "HIGH",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Payout chunking exists as a library but is disabled in the live distribution stage above 1,024 holders",
+      "where": "packages/runner/src/distribution/pro-rata.mjs:189-229; packages/adapters/src/app/stages/distribution.mjs:404-413; packages/runner/src/distribution/reconcile.mjs:102-121",
+      "disposition": {
+        "wp": [
+          "WP09b"
+        ],
+        "acceptance": "The direct payout path persists each transition and marks payment complete only after finality."
+      }
+    },
+    {
+      "id": "L5-M9",
+      "severity": "HIGH",
+      "tag": "EXTERNAL",
+      "verdict": "CONTESTED",
+      "title": "Robinhood RPC's latest-only state reads make the payout/holder balance snapshot non-atomic and not cryptographically pinned",
+      "where": "packages/adapters/src/robinhood-rpc.mjs:90-149,113-148,176-196,237-325; packages/adapters/src/app/stages/distribution.mjs:237-272,298-321,238-247",
+      "disposition": {
+        "wp": [
+          "WP09a"
+        ],
+        "acceptance": "Eligibility is pinned before claim and the replayed state passes completeness checks."
+      }
+    },
+    {
+      "id": "L5-M10",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Historical cycle-escrow exclusion depends only on the current local state directory, not on-chain history",
+      "where": "packages/adapters/src/app/stages/distribution.mjs:150-183; packages/adapters/src/app/cycle-repository.mjs:197-211; packages/runner/src/distribution/snapshot-indexer.mjs:40-42,193-207,218-231",
+      "disposition": {
+        "wp": [
+          "WP09a"
+        ],
+        "acceptance": "Eligibility is pinned before claim and the replayed state passes completeness checks."
+      }
+    },
+    {
+      "id": "L5-M11",
+      "severity": "MEDIUM",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Closed-proceeds ledger evidence binds the wrong operations-trigger identity",
+      "where": "packages/adapters/src/app/stages/distribution.mjs:324-345,330,424-449,437; packages/runner/src/distribution/reconcile.mjs:216-226; packages/adapters/src/app/stages/funding.mjs:128-135",
+      "disposition": {
+        "wp": [
+          "WP07"
+        ],
+        "acceptance": "Relay stages persist requests, validate policy, and require attributable finalized deltas."
+      }
+    },
+    {
+      "id": "L5-M12",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Exclusive lease acquisition is sound, but does not fence a stale worker's in-flight mutation once its lease has expired or been reassigned",
+      "where": "packages/runner/src/scheduler/scheduler.mjs:216-256,99-264; packages/runner/src/automation/automated-cycle-service.mjs:122-149,177-205,12-21; packages/adapters/src/app/stage-driver.mjs:225-239; packages/adapters/src/app/stages/purchase.mjs:14-29; packages/adapters/src/app/stages/open.mjs:78-90; packages/adapters/src/collector-crypt.mjs:13-35",
+      "disposition": {
+        "wp": [
+          "WP07-0"
+        ],
+        "acceptance": "Write-ahead records and mutation fencing prevent duplicate external effects after restart."
+      }
+    },
+    {
+      "id": "L5-M13",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONTESTED",
+      "title": "Dashboard request IDs are accepted but never stored or consulted, so duplicate operator requests are not deduplicated",
+      "where": "packages/dashboard/src/routes/operator.mjs:238-281; packages/dashboard/src/contracts/operator-contracts.mjs:63-75; packages/dashboard/src/projections/decision-application.mjs:115-121",
+      "disposition": {
+        "wp": [
+          "WP10b"
+        ],
+        "acceptance": "Dashboard controls use the authoritative repository and do not imply an inert or spending action."
+      }
+    },
+    {
+      "id": "L5-M14",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "The dashboard's \"Reconcile without spending\" control is mislabeled: it and Restart can both trigger real purchases and bridges",
+      "where": "packages/dashboard/src/public/index.html:189-195; packages/dashboard/src/projections/decision-application.mjs:128-135,115-135; packages/adapters/src/app/compose.mjs:119-127,113-128; packages/runner/src/automation/automated-cycle-service.mjs:177-199",
+      "disposition": {
+        "wp": [
+          "WP10b"
+        ],
+        "acceptance": "Dashboard controls use the authoritative repository and do not imply an inert or spending action."
+      }
+    },
+    {
+      "id": "L5-M15",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Several dashboard-accepted decisions are audit-only with no live production wiring (accept-degraded-return, skip-next-cycle) or are inert outside a fully composed runner (run-now)",
+      "where": "packages/dashboard/src/projections/decision-application.mjs:115-150,122-127,136-149; packages/adapters/src/app/compose.mjs:94-137 (ctx never sets recordDegradedReturnAcceptance); packages/adapters/bin/hookemon-runner.mjs:60-76,235-268",
+      "disposition": {
+        "wp": [
+          "WP10b"
+        ],
+        "acceptance": "Dashboard controls use the authoritative repository and do not imply an inert or spending action."
+      }
+    },
+    {
+      "id": "L5-M16",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Audit log append is after-the-fact and unsafe across concurrent dashboard processes",
+      "where": "packages/dashboard/src/routes/operator.mjs:244-269; packages/dashboard/src/auth/audit-log.mjs:36-101,123-145; packages/dashboard/src/server.mjs:107-112",
+      "disposition": {
+        "wp": [
+          "WP10b"
+        ],
+        "acceptance": "Dashboard controls use the authoritative repository and do not imply an inert or spending action."
+      }
+    },
+    {
+      "id": "L5-M18",
+      "severity": "HIGH",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Alerts, structured logging, and protocol-fee monitoring are fully built and unit-tested but not composed into the live runner or dashboard",
+      "where": "packages/runner/src/observability/protocol-fee-monitor.mjs:1-16,49-93; packages/runner/src/observability/alert-webhook.mjs:90-149,114-145; packages/runner/src/observability/logger.mjs:81-88; packages/adapters/src/app/compose.mjs:396-405,129-133; packages/adapters/bin/hookemon-runner.mjs:26-39,121-131 (bespoke plain-text stderr logTick instead); packages/dashboard/src/server.mjs:171-175 (bare console.error onError); packages/runner/test/observability/alert-webhook.test.mjs:43-161; packages/runner/test/observability/protocol-fee-monitor.test.mjs:20-92",
+      "disposition": {
+        "wp": [
+          "WP14"
+        ],
+        "acceptance": "One composed alert sink deduplicates drift alerts and redacts sensitive values."
+      }
+    },
+    {
+      "id": "L5-M19",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "macOS keychain signer backend cannot supply the operationsTrigger or distributionSigner roles required by production",
+      "where": "packages/adapters/src/app/environment.mjs:354-363,468-486; packages/adapters/src/app/stages/outbound.mjs:54-83; packages/adapters/src/app/stages/distribution.mjs:208-217; packages/adapters/src/app/stages/payout.mjs:117-146",
+      "disposition": {
+        "wp": [
+          "WP08a"
+        ],
+        "acceptance": "Signing stays outside Node and policy decoders reject an unapproved transaction."
+      }
+    },
+    {
+      "id": "L5-M20",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Reusing a rehearsal state directory/schema can contaminate a production deployment",
+      "where": "packages/runner/src/config/state-schema.mjs:8-19,140-157; packages/runner/src/operator/state-file.mjs:158-160,434-452,460-509; packages/adapters/src/app/environment.mjs:348-349,425-436; packages/adapters/src/app/cycle-repository.mjs:197-211",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Production configuration is explicit, fail-closed, and checked before any irreversible action."
+      }
+    },
+    {
+      "id": "L5-M21",
+      "severity": "HIGH",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Dashboard has no explicit bind-host/TLS/secret-redaction posture, so network exposure is not fail-closed by default",
+      "where": "packages/dashboard/src/server.mjs:182-189,187,120-147 (no HOOKEMON_DASHBOARD_HOST or bind-address config); packages/dashboard/src/routes/operator.mjs:34-58; packages/runner/src/observability/logger.mjs:81-88; packages/adapters/bin/hookemon-runner.mjs:121-130,184; packages/runner/src/observability/alert-webhook.mjs:144-145",
+      "disposition": {
+        "openFailClosed": "PLAN does not state a bind-host or TLS posture for the dashboard; keep exposure fail-closed until an approved criterion exists."
+      }
+    },
+    {
+      "id": "L5-M22",
+      "severity": "MEDIUM",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "Required CI omits the scheduler, automation, dashboard, config, and observability test suites",
+      "where": ".github/workflows/v4-gates.yml:150-160; packages/dashboard/test/routes/server.test.mjs:192-284; packages/runner/test/automation/automated-cycle-service.test.mjs:104-125; packages/runner/test/observability/protocol-fee-monitor.test.mjs:20-92",
+      "disposition": {
+        "wp": [
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L5-M23",
+      "severity": "HIGH",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Safety minima (bridge/buyback return floors) default to 1 atomic unit when unset",
+      "where": "packages/adapters/src/app/environment.mjs:373-377,371-380 (HOOKEMON_MIN_ROBINHOOD_RECEIVE / HOOKEMON_MIN_SOLANA_RECEIVE / HOOKEMON_MIN_RETURN_USDG all defaultValue:'1'); packages/adapters/src/app/compose.mjs:335-336 (minimums/nativeGasCaps repeat the same '1' fallback); packages/adapters/src/app/stages/funding.mjs:171-175",
+      "disposition": {
+        "wp": [
+          "WP12"
+        ],
+        "acceptance": "Production configuration is explicit, fail-closed, and checked before any irreversible action."
+      }
+    },
+    {
+      "id": "L5-M24",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "No rolling 24-hour spend-window accounting primitive exists anywhere in the codebase",
+      "where": "packages/runner/src/config/state-schema.mjs:15,116-117 (max24HourBudgetMicroUsdg only cross-checked against maxCycleBudgetMicroUsdg); packages/runner/src/automation/budget-gate.mjs:1-54 (decideCycleBudget has no time dimension at all)",
+      "disposition": {
+        "wp": [
+          "WP10a"
+        ],
+        "acceptance": "Policy controls gate claims and purchases before signing and persist their accounting."
+      }
+    },
+    {
+      "id": "L6-M1",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "CustomLaunchStrategy never initializes the pool or seeds liquidity — no canonical USDG/HKMN pool or permanent position is ever created",
+      "where": "packages/contracts/src/launch/CustomLaunchStrategy.sol:56-67,163-194,207-236,261-315,323-345,384-405,464-480 (launch() only mints via the factory and splits 90%/10% into plain ERC20 transfers to issuanceGuard and a PlaceholderMarketPositionCustody that permanently locks any NFT sent to it, with no release function); packages/contracts/src/launch/HookemonIssuance.sol:13-17,116-138 (guard ends at OBSERVATION_VERIFIED_PROVIDER_BINDING_PENDING, not a provider-attested launch state); vs claims at release/phase2/submission.json:25-55,99-115 (launchLifecycle.poolInitialization/liquidityFormation say the strategy calls PoolManager.initialize and forms the permanent canonical position) and docs/modules/custom-launch-strategy.md:7,18-19 (pool seeding is admitted to be a deliberately separate, unimplemented later action).",
+      "disposition": {
+        "wp": [
+          "WP04c"
+        ],
+        "acceptance": "The atomic launch composition seeds the canonical pool and finalizes custody in one transaction."
+      }
+    },
+    {
+      "id": "L6-M2",
+      "severity": "CRITICAL",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Programmable readiness checker is structurally unable to report launch readiness, and public self-serve launch is unavailable on the live facts regardless",
+      "where": "scripts/verify-phase2-readiness.mjs:31-36,175-198,293-330 (PROGRAMMABLE_DISCOVERY_URL points at 'developers.programmable.family', a domain nothing else in the repo treats as authoritative — every other doc, e.g. release/phase2/launch-plan.md:81, uses programmable.market; the pass condition is a strict-equality check against the literal string 'available', which the live v4 capabilities endpoint has never returned — observed 'unavailable' on 2026-09-02/03 and 'ready' on 2026-09-04, never 'available'); docs/modules/release-evidence.md:20,36.",
+      "disposition": {
+        "wp": [
+          "WP17"
+        ],
+        "acceptance": "The two-stage gate reports repair and launch eligibility from current provider facts."
+      }
+    },
+    {
+      "id": "L6-M3",
+      "severity": "CRITICAL",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Redteam gate is recorded PASSED while its own current findings ledger has two unresolved CRITICAL payout-security findings the resolutions evidence never accounts for",
+      "where": "decisions/redteam/findings.json:4-6,84-114,158-166 (requirementsRevision 58 cycle 2; RT-R58-01 and RT-R58-02, both severity critical, status OPEN_FAIL_CLOSED; counts.open:7); gates/redteam.json:5 (R3 requires resolutions.json to show all valid-actionable criticals resolved or owner-overridden); qa/redteam/resolutions.json:3-4,44 (still stamped requirementsRevision 55, unresolvedCriticalCount:0, lists only RT-R55-* ids); receipts/r-00638.json (cites input receipts r-00452..r-00456, predating this closeout run); state.json:26-29 / STATE.md:14 (redteam: PASSED).",
+      "disposition": {
+        "wp": [
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L6-M4",
+      "severity": "CRITICAL",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "The submission's claimed LBP launch route is architecturally incompatible with HookemonHook",
+      "where": "release/phase2/submission.json:108-115 (describes an LBP curve migration route); packages/contracts/lib/liquidity-launcher/docs/DeploymentGuide.md:76-82 (requires a nonzero LBP hook exposing BEFORE_INITIALIZE and inheriting InitializerHook); packages/contracts/src/HookemonHook.sol:66-71 (advertises only swap-related permissions), :98-104 (beforeInitialize explicitly reverts).",
+      "disposition": {
+        "wp": [
+          "WP20"
+        ],
+        "acceptance": "The release package binds the approved graph, build evidence, and current phase records."
+      }
+    },
+    {
+      "id": "L6-M5",
+      "severity": "CRITICAL",
+      "tag": "DEFECT",
+      "verdict": "CONFIRMED",
+      "title": "Clean-room scanner is bypassed via runtime String.fromCharCode construction of a forbidden legacy identifier in live accounting code",
+      "where": "packages/adapters/src/app/accounting-projection.mjs:25,74-79 (legacy accounting field reconstruction); packages/adapters/test/app/accounting-projection.test.mjs:112-122; scripts/check-cleanroom.mjs:129-164,214-235",
+      "disposition": {
+        "wp": [
+          "WP15"
+        ],
+        "acceptance": "The scanner detects unsafe reconstruction and the source tree contains no forbidden marker."
+      }
+    },
+    {
+      "id": "L6-M6",
+      "severity": "HIGH",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "No provider-ready, authoritative deployment graph or manifest exists for the launch contract set",
+      "where": "release/phase2/launch-plan.md:103-135 (no execution entrypoint or implemented verifier exists); packages/contracts/script/release/PhaseOneReleasePlan.sol:6-8,119-145 (only validates supplied hashes/addresses, does not produce them); packages/contracts/src/bindings/RobinhoodBindings.sol:28-40,151-168; src/launch/CustomLaunchStrategy.sol:122-129,196-205,279-315; src/process/PegCycleRouteExecutor.sol:64-83, PegCycleVault.sol:136-188; src/HookemonHook.sol:31-64; scripts/mine-hook-address.mjs:130-149,258-292; src/process/PegCycleEscrowFactory.sol:30-66; FundingAuthorizationValidation.sol:6-17.",
+      "disposition": {
+        "wp": [
+          "WP00b",
+          "WP20",
+          "WP04A"
+        ],
+        "acceptance": "The release package binds the approved graph, build evidence, and current phase records."
+      }
+    },
+    {
+      "id": "L6-M7",
+      "severity": "HIGH",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "The real vendored Liquidity Launcher / UERC20 Factory composition is never compiled or tested — CI and local tests only exercise local mock fixtures, due to an unresolved OpenZeppelin version conflict",
+      "where": "docs/modules/custom-launch-strategy.md:11,38,45 (open environment gap: real vendored LiquidityLauncher/UERC20Factory cannot be compiled here today); packages/contracts/test/launch/CustomLaunchStrategy.t.sol:20-24,47-72; test/launch/fixtures/TestLiquidityLauncherStack.sol:15-41; src/launch/CustomLaunchStrategy.sol:18-47 (deliberately avoids importing the real factory interfaces); packages/contracts/remappings.txt (@openzeppelin/ pinned to v4-core's vendored OZ 5.0.2); .github/workflows/v4-gates.yml:161-185 (submodules checked out, forge test --ffi runs, but never touches the broken import chain).",
+      "disposition": {
+        "wp": [
+          "WP18"
+        ],
+        "acceptance": "The real vendored launch dependencies compile under the pinned build profile."
+      }
+    },
+    {
+      "id": "L6-M8",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONTESTED",
+      "title": "Universal Router resolution, hook mining, and immutable binding disagree — two live router candidates both have deployed code",
+      "where": "scripts/verify-phase2-readiness.mjs:31-32,175-198 (accepts either live router candidate if Uniswap's registry identifies it); packages/contracts/src/bindings/RobinhoodBindings.sol:32-35,151-156 (hard-pins only 0x06afBA43...BF99); scripts/mine-hook-address.mjs:42-49,214-221 (also hard-pins that address unless --allow-unverified-router is passed).",
+      "disposition": {
+        "wp": [
+          "WP01",
+          "WP05",
+          "WP22b"
+        ],
+        "acceptance": "Router removal or the operational pin produces one coherent deployment candidate."
+      }
+    },
+    {
+      "id": "L6-M9",
+      "severity": "HIGH",
+      "tag": "CONFLICT",
+      "verdict": "CONTESTED",
+      "title": "Revision-58 owner-approval artifacts contradict the owner decision record — files carry both 'DRAFT_UNSIGNED:' rationale text and an 'OWNER APPROVED' token",
+      "where": "product/OWNER_DECISIONS.md:51-62 (authoritative record: revision 58 proposed and unsigned); decisions/owner-approvals/revision-58-baseline.json:7-8; revision-58-standing-authority.json:7-8; revision-58-distribution-signer-custody.json:7-8; revision-58-hookdata-relaxation.json:7-8; phase-2-revision-58-spec-s5-approved.json:7-8 (each combines 'DRAFT_UNSIGNED:' rationale text with an 'OWNER APPROVED' token); scripts/lib/gates.mjs:550-564 (parser accepts any nonempty approved/authorized token and matching hashes, does not reject contradictory draft language).",
+      "disposition": {
+        "wp": [
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L6-M10",
+      "severity": "HIGH",
+      "tag": "TEST",
+      "verdict": "CONFIRMED",
+      "title": "CI omits dashboard tests and the runner config-schema test PR #5 changed",
+      "where": ".github/workflows/v4-gates.yml:148-185,150-154 (CI runs only runner cycle/distribution/operator tests, no dashboard tests); scripts/verify-control-dependencies.mjs:36-50 (freezes exactly that narrowed command); pr5.diff:2054-2084,2667-2749,2773-2910 (PR #5 changes dashboard contracts/routes/server and tests), :2913-2954 (changes packages/runner/src/config/state-schema.mjs and its omitted dedicated test); docs/modules/dashboard.md:141-168 (suite covers auth, decision validation, audit integrity, projections, server routes).",
+      "disposition": {
+        "wp": [
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L6-M11",
+      "severity": "MEDIUM",
+      "tag": "MISSING",
+      "verdict": "CONFIRMED",
+      "title": "Compiler/build evidence is insufficient for exact CREATE2 preimage or provider bytecode admission",
+      "where": "packages/contracts/foundry.toml:7-11 (only sets solc version, Cancun, optimizer, runs); product/dependency-pins.json:57-76; .github/workflows/v4-gates.yml:41-56 (verifies Foundry 1.7.1 exactly); release/phase1/local-toolchain.json:1-16 (local Darwin artifact records 0.8.26+commit.8a97fa7a.Darwin.appleclang, unused by CI); feasibility/verify-robinhood-binding.mjs:1054-1069 (checks only forge config values), :135-142 (revision-56 reproducibility evidence pending).",
+      "disposition": {
+        "wp": [
+          "WP00b",
+          "WP18",
+          "WP04A"
+        ],
+        "acceptance": "Address derivation is reproducible from frozen graph and compiler inputs."
+      }
+    },
+    {
+      "id": "L6-M12",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Requirements/architecture revision numbers are inconsistent across every Phase-2 launch-readiness artifact (54/3, 56/4, 57/5, 58/x all treated as 'current' somewhere)",
+      "where": "packages/contracts/src/bindings/RobinhoodBindings.sol:16-17,122-127 (REQUIREMENTS_REVISION=54, ARCHITECTURE_REVISION=3, hard-enforced by validate()); bindings/robinhood-chain.json:2-8,292-308 (54/3); product/dependency-pins.json:59-60 (56/4); feasibility/interface-freeze.json:4-5 (57/5 overall) vs :35-36,73-74 (providerBinding pinned 54/3, PASSED_HISTORICAL_REVISION_54_SOURCE_BOUND) vs :130-131 (56/4) vs :136-137 (57/5); decisions/redteam/findings.json:4 (58); decisions/owner-approvals/revision-58-*.json.",
+      "disposition": {
+        "wp": [
+          "WP00a"
+        ],
+        "acceptance": "The approved revision aligns the specification, architecture, and delivery-boundary records."
+      }
+    },
+    {
+      "id": "L6-M13",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "launch-plan.md's own Phase-2 evidence table is stale — it says the route executor is only an interface when a full implementation already exists in the same tree",
+      "where": "release/phase2/launch-plan.md:67-76,71 (routeExecutorAddress row: 'INTEGRATION_PENDING -- IPegCycleRouteExecutor is an interface only; no concrete implementation exists in this tree yet'); packages/contracts/src/process/PegCycleRouteExecutor.sol:16-25 (174-line concrete, immutable contract implementing IPegCycleRouteExecutor); release/phase2/submission.json:1220,1882 (submission still marks the concrete route executor pending).",
+      "disposition": {
+        "wp": [
+          "WP20"
+        ],
+        "acceptance": "The release package binds the approved graph, build evidence, and current phase records."
+      }
+    },
+    {
+      "id": "L6-M14",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Phase-status conflict: README says only Phase 1 is open while the delivery-boundary manifest says Phase 1 complete and Phase 2 open",
+      "where": "README.md:33-41 (only Phase 1 open); product/delivery-boundary.json:3-7 (Phase 1 complete, Phase 2 open), :9-15 (delivery boundary controls only declared operational roots, which exclude release/); docs/modules/delivery-boundary.md:15-28.",
+      "disposition": {
+        "wp": [
+          "WP00a",
+          "WP20"
+        ],
+        "acceptance": "The approved revision aligns the specification, architecture, and delivery-boundary records."
+      }
+    },
+    {
+      "id": "L6-M15",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Programmable launch-step API key environment variable name is inconsistent across docs, and neither name is implemented in runtime code",
+      "where": "HOOKEMON_PROGRAMMABLE_API_KEY in release/phase2/launch-plan.md:94-101,98, docs/superpowers/plans/2026-09-03-phase2-status-and-continuation.md:89,111, docs/superpowers/plans/owner-closeout.md:261; PROGRAMMABLE_API_KEY (unprefixed) in docs/superpowers/plans/2026-09-04-money-path-audit-handover.md:160-164; packages/adapters/src/app/environment.mjs:41-140,168-171 (allow-list rejects unknown HOOKEMON_* variables and contains neither name).",
+      "disposition": {
+        "wp": [
+          "WP00a",
+          "WP20"
+        ],
+        "acceptance": "The approved revision aligns the specification, architecture, and delivery-boundary records."
+      }
+    },
+    {
+      "id": "L6-M16",
+      "severity": "MEDIUM",
+      "tag": "CONFLICT",
+      "verdict": "CONFIRMED",
+      "title": "Commit-identity exception allowlist is not itself integrity-protected — a PR can widen the allowlist that excuses its own non-conforming commits",
+      "where": "scripts/check-commit-identity.mjs:8-33 (historical identity exception map); pr5.diff:3052-3068 (historical committer identity commits); scripts/check-append-only.mjs:41; scripts/verify-control-dependencies.mjs:24",
+      "disposition": {
+        "wp": [
+          "WP16"
+        ],
+        "acceptance": "The explicit CI list executes every required script, runner, adapter, and dashboard suite."
+      }
+    },
+    {
+      "id": "L6-M17",
+      "severity": "MEDIUM",
+      "tag": "EXTERNAL",
+      "verdict": "CONFIRMED",
+      "title": "'Green CI' on PR #5 is neither production readiness nor independently proven from this export — no external protected merge/check control exists",
+      "where": "scripts/v4.mjs:23-36 (status --check accepts PASSED, OVERRIDDEN, and PENDING); .github/workflows/v4-gates.yml:60-64 (invokes it as a projection consistency check); STATE.md:19-21 (current ship override still says release and operating readiness are absent); docs/control-authority.md:3-9 (repo explicitly says an external protected control is needed and does not claim one exists); pr5.diff:1-10 (cadbd0c: CI timeout 20→30 min only), :1000-1015 (26aa87c: runtime legacy-field reconstruction), :3052-3074 (918fb00: 14 exact historical identity exceptions), :3085-3097 (8f63771: re-records task evidence after generated projection), :2972-3017,3146-3158 (workflow hash re-pins to match the changed workflow).",
+      "disposition": {
+        "wp": [
+          "WP24"
+        ],
+        "acceptance": "Repair merge eligibility requires current checks and protected integration evidence."
+      }
+    }
+  ]
+}

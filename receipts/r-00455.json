@@ -1,0 +1,16 @@
+{
+  "id": "r-00455",
+  "at": "2026-09-03T08:30:01.634Z",
+  "type": "doubt-loop-termination-verified",
+  "phase": "redteam",
+  "result": "PASSED",
+  "data": {
+    "itemId": "R4",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "qa/redteam/termination.json": "d696526a2ba42e958574671f80bb0e46ddffa296140aa101f1a949f3500b9469"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "WP-18",
+  "title": "Website integration: port hookemon.com source and update it for Robinhood + the new control service",
+  "goal": "Re-home the live hookemon.com website (Cloudflare Worker + vinext/React app, source only on the legacy branch codex/mainnet-cycle-canary under apps/web) into a standalone git repository directory at <worktrees>/hookemon-web (git init there; NOT inside the clean-room tree, because the clean-room repo forbids extra workflows and npm dependencies), update it for the Robinhood Chain 4663 / USDG product and the new control service contracts, keep the comic assets and deploy workflow, and document the exact Cloudflare secret values the owner must set to switch the site to the new backend.",
+  "deps": [
+    "WP-17"
+  ],
+  "parallelGroup": 8,
+  "writeSet": [
+    "<worktrees>/hookemon-web/** (new standalone repository)",
+    "docs/modules/website.md"
+  ],
+  "readSet": [
+    "<worktrees>/mainnet-cycle-canary/apps/web (entire app, tests, worker, deploy scripts)",
+    "<worktrees>/mainnet-cycle-canary/.github/workflows/deploy-web.yml",
+    "packages/dashboard (WP-17) contracts and README",
+    "scratchpad/w2/DESIGN.md section 5"
+  ],
+  "steps": [
+    "Create <worktrees>/hookemon-web as a fresh git repository (git init, identity Hookemon) and copy apps/web from the legacy worktree plus .github/workflows/deploy-web.yml into it; do not copy any secrets, .env files, or unrelated legacy code",
+    "Update lib/public-dashboard-profile.ts: the mainnet profile targets Robinhood Chain (chainId 4663, label 'Robinhood Chain') and Solana mainnet; keep testnet as a documented dev profile; coordinate the exact network shape with WP-17's contracts",
+    "Update copy and tests where the product changed: USDG (not Circle USD) for holder distributions on Robinhood, pro-rata automatic payouts, 20-minute cycle, Collector Crypt buyback, remove anything that claims a live mainnet or an audit; keep the comic and design intact",
+    "Point the Worker's expected upstream paths at the new control service (same paths: /public/api/cycle-status, /public/api/community-dashboard, /operator/api/*) and update README with the five Worker secrets and the deploy runbook (manual workflow_dispatch after CI)",
+    "Run npm ci --ignore-scripts and npm test (build + tests) in the new repository with Node 22.13+ (use <home>/.nvm/versions/node/v22.23.2/bin or v24); make the tests pass against a fixture from packages/dashboard's contract tests",
+    "Commit in the new repository with the repo commit rules (English, one line, no trailers); do NOT create a GitHub repository or deploy: report the exact commands and secrets the owner must run/set"
+  ],
+  "tests": [
+    "cd <worktrees>/hookemon-web && npm test",
+    "node --test packages/dashboard/test/routes/*.test.mjs (contract fixtures shared with the site)"
+  ],
+  "acceptance": [
+    "The website builds and its test suite passes in the new repository",
+    "The mainnet profile names Robinhood Chain 4663 and the copy no longer refers to Circle USD holder payouts or a live mainnet claim",
+    "A fixture produced by packages/dashboard validates in the site's public validators",
+    "README documents the exact Cloudflare secrets and the deploy steps; no GitHub repo was created and nothing was deployed"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "COORDINATOR NOTE: the legacy GitHub repositories (legacy-org/legacy-org, legacy-org/hkmn) are not resolvable any more; the only website source is the local legacy branch. Creating the GitHub repository and deploying are owner actions (ask first). CONTRACT FACTS extracted from the website source: operator decision types are activate, pause, run-cycle-now, skip-next-cycle, update-configuration (POST /operator/api/decisions); bootstrap payload keys: catalog, readiness, rewardRecipientLimits, state; dashboard payload keys: activeCycle, cycleStartProjectPoolObservedAt, execution, generatedAt, historyComplete, latestCycle, latestCycleTopAllocations, metrics, nextCycleAt; audit entries: action, actor, eventId, note, observedVersion, occurredAt, outcome, resultCode, sequence with nextCursor = last sequence; cards route: paginated with productId/rarity/from/to/minBuyback/maxBuyback filters and sort recent|buyback-desc|buyback-asc, response {cards, nextCursor, historyComplete}; ActiveCycle type: cycleId, status, updatedAt, configurationRevision, allowedPackIds, requestedOrders[{productId,quantity}], maxBoostersPerCycle, maxUnitPriceMicroUsdg, maxCycleBudgetMicroUsdg, max24HourBudgetMicroUsdg, revealedCards. The site's DashboardNetwork type currently allows only EVM L1 mainnet/Sepolia; WP-18 extends it with Robinhood Chain (chainId 4663, official explorer URL from docs.robinhood.com) and WP-17 must emit exactly the shape WP-18 defines: agree on network.evm = {name:'robinhood', chainId:4663, label:'Robinhood Chain'} unless the site tests demand otherwise. Read the exact producer/validator files listed in readSet before coding."
+}

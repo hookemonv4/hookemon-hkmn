@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "hookemon.phase3.genesis-evidence.v1",
+  "sourceUrl": "https://cdn.robinhood.com/assets/generated_assets/hoodchain_docsite/chain-node-configs/robinhood-genesis.json",
+  "sha256": "sha256:353e6f6441b47695b41cee0c3645cde8dd7492d2f7f574bfb6aa4371e41bb6ba",
+  "retrievedAt": "2026-09-05",
+  "chainId": 4663,
+  "blockGasLimit": 30000000,
+  "maxCodeSize": 98304,
+  "maxInitCodeSize": 196608
+}

@@ -1,0 +1,40 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Canonical receipt SHA-256 input hashes misclassified as generic API keys"
+condition = "AND"
+paths = ['''(?:^|/)receipts/r-[0-9]{5}\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*(?:"decisions/ADR-0002-launchpad-token-issuance\.md": "(?:fe20fd72714625746bd59c7c1d14341496e2bad92ea36bba924cbe11c2c1d95a|4cc79b69d493302b87044e768688b591fbc8418b538b884f3bc73de22480d1a2)"|"docs/modules/token-core\.md": "(?:6a99552ea4f401525dda218ca7f6f0d29ba9b21e1bf37491f260932a68bb38f8|308c53154bb2bae575a005f66270a21dbfb6ded485f313d03f108d8e63dc49ca|99b4318705f44c944268cd2bba928c338c4cf1a18f4e737640c6250618f2246f)"),?\s*$''']
+
+[[rules.allowlists]]
+description = "Deterministic pool token-order label misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)feasibility/model\.mjs$''']
+regexTarget = "line"
+regexes = ['''^\s*tokenOrder: usdgIsCurrency0 \? "USDG_HKMN" : "HKMN_USDG",\s*$''']
+
+[[rules.allowlists]]
+description = "Public Solana token mint in the Collector Crypt pack-status test fixture misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/fixtures/collector-crypt/pack-status\.json$''']
+regexTarget = "secret"
+regexes = ['''^EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v$''']
+
+[[rules.allowlists]]
+description = "Public token contract address constant in the Robinhood RPC test misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/robinhood-rpc\.test\.mjs$''']
+regexTarget = "secret"
+regexes = ['''^0x5fc5360d0400a0fd4f2af552add042d716f1d168$''']
+
+[[rules.allowlists]]
+description = "Opt-in live smoke flag in the Collector Crypt adapter card misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)docs/modules/collector-crypt-adapter\.md$''']
+regexTarget = "secret"
+regexes = ['''^COLLECTOR_CRYPT_LIVE_SMOKE=1$''']

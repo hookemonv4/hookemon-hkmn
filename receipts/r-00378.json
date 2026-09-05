@@ -1,0 +1,16 @@
+{
+  "id": "r-00378",
+  "at": "2026-09-01T16:44:04.093Z",
+  "type": "risk-classes-defined",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A4",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "000eb1273c2bf4d237c60d4c8b9ad926ca4e7a2d62fdf32d575dac30cac03dae",
+    "architecture/risk-classes.json": "7f4ed8a1b152dbc41523ba9808bb690bcd0bc1c47b10aaf4f41583d173510b08"
+  }
+}

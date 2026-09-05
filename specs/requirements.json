@@ -1,0 +1,734 @@
+{
+  "revision": 65,
+  "requirements": [
+    {
+      "id": "REQ-token-core-1",
+      "kind": "functional",
+      "title": "Single fixed HKMN issuance",
+      "statement": "Given the officially bound Launchpad mechanism and approved issuance parameters, when production HKMN is initialized, then Hookemon with symbol HKMN and exactly 1,000,000,000 fixed units with 18 decimals is created once and the complete supply is assigned to the canonical market. No treasury, custody, non-circulating, or other allocation exists. Edge case: duplicate initialization, a later mint, an unsupported allocation, or a fallback that gives a project role any HKMN allocation reverts without state change.",
+      "measurement": "Deployment tests assert exact name, symbol, 18 decimals, total supply, a 1,000,000,000 HKMN canonical-market allocation, zero other allocations, and rejection of every duplicate or unauthorized issuance path.",
+      "module": "token-core",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-token-core-2",
+      "kind": "security",
+      "title": "No privileged token controls",
+      "statement": "HKMN exposes no owner mint, blacklist, confiscation, hidden transfer tax, proxy upgrade, delegatecall replacement, or destructive control path.",
+      "measurement": "ABI and selector allowlists, runtime opcode inspection, pinned static analysis, and negative authorization tests report zero forbidden control paths.",
+      "module": "token-core",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-token-core-3",
+      "kind": "functional",
+      "title": "Wallet transfers are project-fee free",
+      "statement": "Given a valid wallet-to-wallet HKMN transfer, when the transfer executes, then the recipient receives the complete transferred amount and no Hookemon fee liability changes. Edge case: zero-value and self-transfers create no project fee or hidden balance adjustment.",
+      "measurement": "Balance and liability snapshots cover zero, one-unit, maximum practical, self-transfer, and at least 10,000 fuzzed transfer amounts.",
+      "module": "token-core",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-token-core-4",
+      "kind": "compatibility",
+      "title": "Launchpad-compatible issuance",
+      "statement": "The token creation path uses the official Programmable Robinhood Launchpad interface, requests 18 decimals when supported, and otherwise accepts only the mechanism mandatory canonical decimals value bound by official compatibility evidence.",
+      "measurement": "The release manifest records the exact Launchpad ABI, version, source revision, runtime hash, supported decimals behavior, allocation behavior, and treasury-lock capability with no unresolved field.",
+      "module": "token-core",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-provider-binding-1",
+      "kind": "compatibility",
+      "title": "Official Robinhood production binding",
+      "statement": "The production release binds chain ID 4663, registry, RPC, genesis, USDG identity and behavior, Launchpad, Registrar admission, PoolManager, router, complete PoolKey, callback semantics, fee semantics, gas limits, code-size limits, ABI versions, source revisions, and runtime code hashes from official Robinhood-specific evidence.",
+      "measurement": "A schema-validated binding manifest and live read-only probes match 100 percent of required identities, versions, hashes, limits, and chain facts.",
+      "module": "provider-binding",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-provider-binding-2",
+      "kind": "functional",
+      "title": "Atomic provider binding fails closed",
+      "statement": "Given the final provider and deployment configuration, when the production hook is created, then one atomic single-use initialization binds nonzero and mutually valid USDG, HKMN, PoolManager, complete PoolKey, Programmable beneficiary, treasury, Operations trigger, PegCycleVault, distinct immutable cycle authorizer, immutable typed route executor, callback permissions, and officially required hook-address construction before custody or liability mutation is enabled. The hook and vault are mutually bound before use. Edge case: any missing, zero, stale, overlapping, mismatched, partially initialized, reinitialized, wrong-permission-bit, or wrong-address-preimage field fails before custody or liability state changes.",
+      "measurement": "One positive deployment vector and one negative vector per identity, mutual hook-vault binding, authorizer separation, route-executor binding, PoolKey field, permission bit, address-construction input, zero or duplicate role, partial initialization, and reinitialization attempt prove identical pre-call and post-call balances and zero usable partial deployment.",
+      "module": "provider-binding",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-provider-binding-3",
+      "kind": "operational",
+      "title": "Binding evidence is reproducible",
+      "statement": "Every provider binding is content-addressed, versioned, attributable to an official source, and reproducible from the exact release revision without credentials or mutable self-attestation.",
+      "measurement": "A clean-room verification command reproduces every recorded digest and read-only chain probe twice with zero differences.",
+      "module": "provider-binding",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-canonical-market-1",
+      "kind": "functional",
+      "title": "Exactly one canonical market",
+      "statement": "Given the authenticated final PoolManager and complete bound USDG/HKMN PoolKey, when a supported swap finalizes, then Hookemon fee accounting may mutate for that market only. Edge case: the same assets with a different manager, fee, tick spacing, hook, currency ordering, or pool identifier create no Hookemon liability.",
+      "measurement": "One positive canonical vector and field-by-field negative vectors assert exact liability deltas and zero mutation for every foreign market.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-canonical-market-2",
+      "kind": "security",
+      "title": "Callback and PoolKey authentication",
+      "statement": "Only the bound PoolManager invoking the supported callback with the complete bound PoolKey and well-formed final deltas can enter fee mutation.",
+      "measurement": "Adversarial tests cover EOA calls, spoof managers, altered PoolKeys, malformed deltas, unsupported callback stages, and reentrant entry; all unauthorized mutation counts remain zero.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-canonical-market-3",
+      "kind": "compatibility",
+      "title": "Address-derived currency ordering",
+      "statement": "The canonical PoolKey derives currency0 and currency1 only from final bound token addresses and never from the display notation USDG/HKMN.",
+      "measurement": "Both possible HKMN address orderings pass the complete swap matrix and resolve to the same product economics.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-1",
+      "kind": "functional",
+      "title": "Exact collected-USDG fee split",
+      "statement": "Given official fee semantics and a supported finalized swap with executed USDG quote volume Q, when accounting runs, then totalFee is floor(Q multiplied by 300 divided by 10,000), Programmable liability is floor(Q multiplied by 10 divided by 10,000), treasury liability is floor(Q multiplied by 40 divided by 10,000), and process liability receives totalFee minus those two liabilities. The actual collected USDG equals the three liability increases exactly. Edge case: minimum-unit rounding, exact output, zero totalFee, or an unsupported partial fill never overcharges, creates unfunded liability, or leaves unaccounted fee dust.",
+      "measurement": "The bound conformance suite covers all eight buy or sell by exact-input or exact-output by token-order combinations, every rounding transition around zero and one unit, and at least 100,000 fuzzed Q values; every accepted vector proves exact collected-USDG conservation and every rejected vector proves zero mutation.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-2",
+      "kind": "functional",
+      "title": "Liability ownership freezes at accrual",
+      "statement": "Given a supported fee accrual, when it is recorded, then Programmable, treasury, and process-budget liabilities remain separate and the Programmable and treasury beneficiary identities are frozen to those active at accrual. Edge case: a later treasury or Operations handover does not rewrite historical Programmable or treasury ownership and does not change the accrued process-budget amount.",
+      "measurement": "Multi-epoch accrual and handover tests assert exact historical Programmable and treasury beneficiary balances across at least three handovers and assert that current Operations release authority changes without changing accrued process liability.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-3",
+      "kind": "functional",
+      "title": "Isolated successful fee claims",
+      "statement": "Given a beneficiary with earned liability, when that beneficiary claims to a nonzero caller-selected destination, then only that beneficiary liability decreases and the hook USDG balance decrease and selected destination balance increase both equal the claimed amount exactly. Edge case: an overclaim, wrong beneficiary, zero destination, reverted transfer, false return, non-exact source or destination balance delta, or reentrancy leaves every liability unchanged.",
+      "measurement": "A claim matrix covers equality and plus-one boundaries, historical beneficiaries, wrong callers, self and third-party destinations, every supported USDG failure mode, exact pre-call and post-call source and destination balance deltas, and the global money-path lock; process liability remains unavailable through beneficiary claims.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-4",
+      "kind": "reliability",
+      "title": "Global USDG solvency",
+      "statement": "Across every permitted Phase 3 hook operation sequence, actual hook USDG balance remains at least the sum of unpaid Programmable, treasury, and process liabilities. Excluded legacy vault, payout-commitment, and holder-settlement liabilities are not Phase 3 runtime obligations.",
+      "measurement": "Stateful invariant fuzzing runs at least 100,000 operation sequences across accrual, beneficiary claims, bounded process releases, failed transfers, and Treasury or Operations handovers with zero solvency violation.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-5",
+      "kind": "security",
+      "title": "Money paths resist reentrancy and token failure",
+      "statement": "No external USDG interaction can reenter any money-moving path, leave completion state after an unsuccessful transfer or non-exact source or destination balance delta, redirect another liability, underpay a destination, or create value from false, reverted, malformed, short-delta, or excess-delta token behavior.",
+      "measurement": "Reentrant and adversarial-token harnesses plus pinned static analysis produce zero duplicate transfer, recipient underpayment, surviving partial state, non-exact source or destination balance delta, post-call insolvency, or cross-liability finding.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-process-budget-1",
+      "kind": "functional",
+      "title": "Minimal atomic PegCycleVault funding",
+      "statement": "Given one exact unexpired revision-56 funding authorization from the immutable authorizer, the current Operations trigger, its unique cycle identifier, a positive amount, and sufficient accrued process liability, when Operations opens the cycle, then the hook debits process liability only while its USDG balance decreases and the mutually bound PegCycleVault balance increases by the exact amount atomically. The cycle identifier, amount, authorization digest, vault, and Operations trigger become immutable, while Operations receives and controls no USDG. Edge case: an amount above liability, zero amount, reused identifier or nonce, stale Operations trigger, alternate vault or return destination, wrong chain, hook, USDG, binding or action digest, expired authorization, false token return, revert, reentrancy, or non-exact source or destination balance delta leaves liability and cycle state unchanged.",
+      "measurement": "Zero, equality, and plus-one amount boundaries, exact and altered authorization fields, current and stale Operations triggers, alternate destinations, nonce and cycle replay, token failure, reentrancy, and exact hook, vault, and Operations pre-call and post-call balance vectors assert the event, storage, liability, transfer, and zero-Operations-custody outcomes.",
+      "module": "process-budget",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-process-budget-2",
+      "kind": "security",
+      "title": "Permanent cycle replay protection",
+      "statement": "A successfully funded cycle identifier, funding nonce, outbound action, payout identifier, payout nonce, and return-receipt digest are each single-use in their domain, and none of their bound fields can be rewritten.",
+      "measurement": "Replay with identical and individually altered payload fields always produces zero transfer and zero storage mutation.",
+      "module": "process-budget",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-process-budget-3",
+      "kind": "reliability",
+      "title": "Accrual survives release unavailability",
+      "statement": "A rejected or unavailable cycle opening does not stop supported trading, fee accrual, fee claims, valid vault-funded payout commitment, or holder payments, and unused process liability remains available.",
+      "measurement": "The supported operation matrix has identical accounting outcomes before and after wrong-caller, replayed, over-liability, wrong-authorization, and token-failure opening attempts except for the expected rejected opening.",
+      "module": "process-budget",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-process-budget-4",
+      "kind": "operational",
+      "title": "Small offchain spend preflight",
+      "statement": "Before an external pack purchase, the cycle runner records the cycle identifier, Operations trigger, PegCycleVault account, Solana policy account, vault return account, authorized USDG amount, total principal and spend cap, separate native-gas caps for every involved chain, exact external binding-manifest and outbound and return action digests, and exact owner authorization. These fields remain offchain and do not create mutable hook configuration or liability.",
+      "measurement": "Cycle-artifact schema tests reject every missing field, any Operations custody role, a return account other than PegCycleVault, principal above either the authorization or funded amount, spend or native gas above any cap, a zero or mismatched binding-manifest or action digest, and any mismatch between the recorded cycle or custody identities and the onchain vault record.",
+      "module": "process-budget",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-process-budget-5",
+      "kind": "security",
+      "title": "No speculative process-policy surface",
+      "statement": "The V1 hook and PegCycleVault expose no mutable process cap, specification hash, policy registry, pack configuration, scheduler setting, marketplace setting, generic destination, generic call, generic approval, rescue, sweep, proxy, upgrade, delegatecall, administrator, or successor-control field or function. Operations is a trigger only. Value movement is bounded by the immutable vault, distinct authorizer, typed route executor, exact authorization, accrued process liability, and single-use cycle lifecycle.",
+      "measurement": "ABI, selector, storage-layout, event, and state-transition scans report zero forbidden process-policy, arbitrary-destination, generic-execution, approval, rescue, or upgrade surface, while negative authorization, identity, digest, expiry, amount, destination, and replay tests cover every opening and outbound input.",
+      "module": "process-budget",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-1",
+      "kind": "functional",
+      "title": "Atomic sum-bound payout funding",
+      "statement": "Given the immutable authorizer records one exact unexpired payout authorization for an active outbound PegCycleVault cycle, a caller supplies that exact authorization with an unused payout identifier, nonzero canonical-manifest digest, nonzero return-receipt digest, nonzero fixed-depth Merkle-sum root, and root sum equal to the vault's exact attributable returned USDG, when any caller funds the payout, then the vault USDG balance decreases, the hook USDG balance increases, and the payout liability is credited by the exact positive root sum atomically. Operations remains historical trigger metadata and its balance is unchanged. Edge case: Operations funding, external-wallet funding, altered authorization, reused nonce, payout or receipt, unknown or wrong-state cycle, zero digest, zero root, zero total, root-sum mismatch, unrelated vault balance, short or excess source or destination balance delta, direct transfer, false return, expiry, revert, or reentrancy creates no payout or entitlement.",
+      "measurement": "Exact and field-by-field altered authorization, identifier, cycle, nonce, receipt, nonzero digest, nonzero root, root-sum, exact vault and hook balance deltas, unchanged Operations balance, raw-transfer, false-return, reverted-transfer, expiry, and reentrancy vectors assert atomic event, storage, balance, authorization evidence, and liability outcomes with zero partially funded payout.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-2",
+      "kind": "functional",
+      "title": "Immutable minimal payout identity",
+      "statement": "Given a committed payout, when any later operation references it, then cycle identifier, historical Operations trigger, vault authorization digest, return-receipt digest, payout identifier, canonical-manifest digest, Merkle-sum root, and funded total remain unchanged. Edge case: identifier, nonce, or receipt reuse and any metadata rewrite revert; the one-cycle Phase 1 vault permits no supplemental payout.",
+      "measurement": "Field-by-field mutation and replay vectors plus event-to-storage equality cover every committed field.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-3",
+      "kind": "security",
+      "title": "Canonical fixed-depth Merkle-sum proof domain",
+      "statement": "Every V1 distribution is a canonical depth-10 tree with 1,024 indexed positions. Canonical manifest bytes are Solidity ABI encoding of a fixed manifest tag, schema version 1, chain ID, hook, cycle identifier, payout identifier, finalized snapshot number and hash, and entries sorted by unique index; each entry encodes uint16 index, recipient, positive amount, and positive direct HKMN snapshot balance. The manifest digest is keccak256 of those bytes. For a nonempty index, leaf hash is keccak256 of Solidity ABI encoding of a fixed leaf tag, chain ID, hook, cycle identifier, payout identifier, manifest digest, uint16 index, recipient, and amount. An empty position has zero sum and a hash over a distinct empty tag plus the same domain and index. At level i, bit i of the index chooses left or right. Each internal hash uses a distinct node tag, level, ordered child hashes, and checked uint256 child sums. The paid key is exactly payout identifier plus index, and every proof has exactly 10 sibling hashes and sums.",
+      "measurement": "Independent Solidity and non-Solidity builders reproduce identical manifest bytes, digest, roots, and proofs; vectors altering a tag, schema, encoding, snapshot, manifest digest, index bit, sibling order, sibling hash, sibling sum, level, recipient, amount, direct balance, tree depth, duplicate position, overflow, or padding rule fail with zero payment and zero state mutation, while all 1,024 positions and complete leaf sums are covered.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-4",
+      "kind": "reliability",
+      "title": "Per-payout conservation and isolation",
+      "statement": "For every committed payout and state, funded equals paid plus unpaid, every valid unpaid leaf remains fully backed, and committed funds cannot be claimed as fees, moved into another peg cycle, or redirected to another payout.",
+      "measurement": "Per-payout stateful invariant fuzzing executes at least 100,000 mixed fee, release, funding, payment, retry, and transfer-failure sequences with zero conservation, overcommitment, or isolation violation.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-5",
+      "kind": "compatibility",
+      "title": "Content-addressed algorithm-neutral payout ABI",
+      "statement": "The payout interface carries only the exact vault authorization domain, cycle and historical Operations-trigger identities, payout identifier, canonical-manifest digest, return-action and receipt digests, fixed-depth Merkle-sum root, and funded total; it does not embed a configurable recipient limit, holder ranking, LP ownership, marketplace, generic route, scheduling, or observation-cutoff algorithm.",
+      "measurement": "ABI schema and selector scans assert every required authorization and payout field and the absence of configurable-limit, ranking, LP, marketplace, generic-route, scheduler, and cutoff-algorithm fields; independent manifest tooling reconstructs the exact root and proofs from the bound digest.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-6",
+      "kind": "security",
+      "title": "No privileged V1 surplus withdrawal",
+      "statement": "A direct or excess USDG transfer creates no fee, process, payout, or entitlement liability, and the V1 hook exposes no surplus sweep, rescue, arbitrary withdrawal, or arbitrary-recipient money path.",
+      "measurement": "ABI, selector, storage, and adversarial caller scans find zero privileged surplus or rescue path; direct and excess transfer tests show unchanged liabilities and preserved solvency.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-1",
+      "kind": "functional",
+      "title": "Immediate permissionless entitlement payment",
+      "statement": "Given a funded payout and one valid unpaid depth-10 Merkle-sum proof, when any caller submits it, then the hook transfers the exact amount only to the recipient committed at that index and marks the paid key composed of payout identifier and index exactly once. Edge case: a duplicate index, duplicate proof, alternate caller, altered recipient, altered amount, noncanonical path, or reordered proof cannot block a distinct index, redirect payment, or repeat payment.",
+      "measurement": "Caller, all-index, proof, retry, duplicate-index, duplicate-proof, altered-leaf, noncanonical-path, and reordered-proof property tests assert one exact recipient transfer maximum per payout-and-index and identical behavior for the V1 worker and a holder-submitted call.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-2",
+      "kind": "functional",
+      "title": "Recipient transfer failure isolation",
+      "statement": "Given one recipient transfer fails, when its permissionless payment call reverts, then that leaf remains unpaid and every separately completed leaf remains paid. Edge case: repeated failure of one leaf does not block any other valid leaf or change the failed leaf's amount.",
+      "measurement": "Independent success, single-failure, repeated-failure, and interleaved-recipient calls use recipient-specific transfer harnesses and assert exact paid bits, remaining totals, balances, and events.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-3",
+      "kind": "functional",
+      "title": "One non-expiring payment path",
+      "statement": "Given any valid unpaid entitlement in a funded payout, when its proof is submitted immediately or at any later block, then the same permissionless function may pay it once and the entitlement never expires. Edge case: no readiness delay, emergency mode, worker-only period, or prior failed attempt changes the proof or paid-state rules.",
+      "measurement": "Funding-block, later-block, failed-attempt, long-horizon, worker-caller, holder-caller, and replay tests assert identical validation and one payment maximum.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-4",
+      "kind": "security",
+      "title": "No V1 recipient replacement surface",
+      "statement": "The V1 hook cannot replace, remap, redirect, or administratively rewrite a recipient committed in a funded payout. Wallet replacement and holder verification are deferred to a later specification and reserve no V1 selector, storage, or authority.",
+      "measurement": "ABI, selector, event, storage-layout, and authorization scans find zero replacement or recipient-remapping path, and adversarial calls cannot change any committed leaf or paid bit.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-5",
+      "kind": "functional",
+      "title": "Prepublished reconstructible entitlement proofs",
+      "statement": "Given canonical manifest bytes and their derived root are ready, when a payout funding action is prepared, then the offchain preflight refuses to submit it until two independent publication locations return digest-matching canonical bytes. After funding, any holder or observer can retrieve either copy and deterministic tooling verifies the event-bound digest and reconstructs every padded leaf, root sum, proof, amount, recipient, and payout-and-index paid status without the Hookemon API. Edge case: an unavailable location, reordered entry, altered byte, noncanonical serialization, or mismatched digest blocks funding preflight and cannot reconstruct the committed root or produce an accepted proof because the manifest digest is part of every leaf domain.",
+      "measurement": "Funding-preflight tests require two independently fetched digest-matching copies before submission; two independent proof builders then reproduce the committed root and every proof from either location, while unavailable-location, reorder, byte-change, serialization-change, and digest-mismatch vectors fail and onchain payout-and-index paid-bit reads remain available.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-6",
+      "kind": "performance",
+      "title": "Bounded single-entitlement payment gas",
+      "statement": "Every V1 entitlement proof has exactly 10 levels and at most 1,024 indexed positions, and a worst-case valid or invalid payment executes below the officially bound Robinhood transaction and block gas limits with positive headroom.",
+      "measurement": "Gas snapshots cover index 0, index 1,023, first payment, replay, malformed depth, malformed proof, maximum subtree sums, and transfer failure against the exact official limits and record numeric positive headroom.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-holder-settlement-7",
+      "kind": "security",
+      "title": "Settlement transfer ordering and reentrancy safety",
+      "statement": "The payment path uses one global money-path lock, reverts all state unless the hook USDG balance decreases and the committed recipient USDG balance increases by the exact leaf amount, and cannot duplicate, redirect, or corrupt an entitlement through reentrancy.",
+      "measurement": "False, revert, malformed-return, short or excess source delta, short or excess destination delta, proxy-behavior, and reentrant-token harnesses plus static analysis produce zero double payment, recipient underpayment, surviving partial state, or post-call solvency finding.",
+      "module": "holder-settlement",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-role-control-1",
+      "kind": "functional",
+      "title": "Minimal caller-by-operation matrix",
+      "statement": "Given a protected Phase 3 operation, when called by its authorized identity, then the immutable Programmable beneficiary and each treasury beneficiary claim only their accrued liability to a nonzero caller-selected destination, and current Operations alone may claim one bounded process amount to itself for a permanently unique cycle. The CycleRepository and policy engine remain the authority for every later money mutation; Operations receives no authority to change beneficiary liabilities, approve an arbitrary destination, or bypass policy, fencing, or reconciliation. Edge case: every wrong, zero, unrelated, stale, or non-cycle-bound caller and every altered authorization is rejected without mutation or redirection.",
+      "measurement": "A complete caller-by-operation matrix tests Programmable, current and historical treasury, current, former, and unrelated Operations identities against every protected method; it expects exact approved destinations, bounded self-claims, no unauthorized policy bypass, and no unintended success or redirection.",
+      "module": "role-control",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-role-control-2",
+      "kind": "functional",
+      "title": "Two-step treasury and Operations handover",
+      "statement": "Given the current Treasury or Operations account proposes its own nonzero successor, when and only when that proposed account accepts the current proposal, then the respective future-facing role changes and old and new identities are emitted. An ordinary Operations proposal, acceptance, replacement, or cancellation is forbidden while an emergency Operations rotation is pending. Only a new explicit Treasury emergency-rotation intent may supersede that pending rotation, and it starts a fresh immutable 43200-second delay. A released cycle retains its recorded Operations identity as audit evidence. Edge case: third-party acceptance, zero proposal, stale proposal, cross-role proposal, Operations cancellation of a pending rotation, or an implicit delay reset fails without mutation.",
+      "measurement": "Proposal, replacement, acceptance, cross-role, stale-caller, pending-rotation, and explicit Treasury-reschedule tests cover Treasury and Operations transitions and assert unchanged historical liabilities, immutable 43200-second rotation delay, and no Operations cancellation path.",
+      "module": "role-control",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-role-control-3",
+      "kind": "security",
+      "title": "No V1 admin, automation, or pause role",
+      "statement": "The Phase 3 hook exposes no generic admin, automation-only settlement role, arbitrary operator, policy manager, or emergency withdrawal authority. Treasury may use only the bounded process-claim limit, pause, unpause, and delayed emergency Operations-rotation controls; Treasury and Operations handovers remain the only mutable role transitions.",
+      "measurement": "ABI, selector, event, storage-layout, and caller-matrix scans find zero generic authority surface and exactly the bounded claim-control and role-transition state machines.",
+      "module": "role-control",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-role-control-4",
+      "kind": "security",
+      "title": "Immutable economics and historical rights",
+      "statement": "No treasury or Operations handover can alter the Programmable beneficiary or share, redirect another liability class, rewrite historical treasury ownership, withdraw funded payout money, rewrite a cycle or payout, or alter a paid entitlement.",
+      "measurement": "ABI and storage inspection plus at least three treasury and Operations handovers preserve every historical balance, cycle, payout, proof domain, paid bit, and commitment hash.",
+      "module": "role-control",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-1",
+      "kind": "performance",
+      "title": "Deployable runtime and initcode size",
+      "statement": "Final runtime and initcode remain below every hard size and deployment-gas limit of the officially selected Robinhood Programmable path.",
+      "measurement": "Exact compiler and deployment reports compare byte and gas totals numerically with every official limit and record positive headroom.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-2",
+      "kind": "operational",
+      "title": "Byte-reproducible release closure",
+      "statement": "The exact integrated SHA, pinned toolchain, official bindings, source closure, selected Treasury and Operations-trigger addresses, immutable PegCycleVault, authorizer, typed route executor and policy-account identities, custody-control records, and recovery procedures reproduce ABI, method identifiers, event schema, initcode, runtime bytecode, and deployment manifest byte-for-byte. The hook does not require or infer a particular wallet implementation or account type.",
+      "measurement": "Two isolated clean builds produce identical SHA-256 values for 100 percent of release artifacts and no undeclared input, while read-only address probes and owner authorization reproduce every bound Treasury, Operations-trigger, vault, authorizer, route-executor, and policy-account identity and the release evidence contains non-secret custody-control and recovery records for each role.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-3",
+      "kind": "security",
+      "title": "Zero unresolved severe findings",
+      "statement": "Pinned static analysis and independent adversarial review complete with zero unresolved critical or high findings for the exact release closure.",
+      "measurement": "Analyzer outputs and a finding inventory record severity, disposition, evidence, reviewer independence, and zero open critical or high item.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-4",
+      "kind": "operational",
+      "title": "Complete thin-V1 release proof",
+      "statement": "A local or fork run first proves launch-ready initialization, one canonical HKMN buy, exact fee accounting, one exact-authorized process-liability debit into the immutable PegCycleVault, typed outbound execution, exact returned USDG to that vault, sum-bound payout funding from that vault, one or more holder payments, zero Operations USDG custody, final reconciliation, and deterministic replay of pinned fixtures for both conversions and the Collector pack, open, and buyback sequence. No fixture proves a real external action. One separately authorized and capped live cycle then binds one continuous cycle identifier and receipt chain across at least one real canonical HKMN buy, its exact fee split, vault funding from the resulting accrued process liability, the fixed Robinhood-USDG-to-Solana-USD Coin route, one configured non-turbo Collector Crypt Solana pack purchase and open through the bound policy account, one standard finalized buyback, the fixed Solana-USD Coin-to-Robinhood-USDG return to PegCycleVault, payout funding from the PegCycleVault using that exact returned USDG, at least one holder payment from that exact payout, and final reconciliation.",
+      "measurement": "The evidence bundle separates local or fork fixture results from the live receipt bundle. The live bundle binds one cycle identifier to release SHA, canonical swap transaction and executed USDG volume, exact fee and process-liability deltas, funding authorization and vault-funding transaction, binding-manifest and outbound and return action digests, immutable custody identities, chain and asset identities, addresses, blocks or slots, conversion receipts, Collector memo and API snapshot, decoded purchase and buyback transactions, Solana signatures, exact PegCycleVault USDG and policy-wallet USD Coin balance deltas, unchanged Operations USDG balance, NFT custody transitions, distribution artifact digest, payout authorization and funding transaction, at least one holder-payment transaction referencing that payout, final contract, receipt, manifest, and entitlement reconciliation, measured gas, and exact owner-approved USDG, USD Coin, SOL, and other involved native-gas caps.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-5",
+      "kind": "migration",
+      "title": "No legacy migration or canary promotion",
+      "statement": "No historical state, liability, address, ABI, dependency assumption, code hash, test, audit, receipt, or evidence becomes production authority, and a disposable canary can never become production.",
+      "measurement": "Clean-room and delivery-boundary scans report zero active historical authority reference, and production and canary manifests use distinct identities and source-bound approvals.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-6",
+      "kind": "operational",
+      "title": "External actions require exact authorization",
+      "statement": "Key access, signing, broadcast, launch, canary execution, and any asset or gas spending occur only under a separate owner authorization bound to exact actions, revisions, destinations, amounts, and aggregate caps.",
+      "measurement": "Approval subject hashes match the final action plan exactly, and resulting receipts remain at or below every approved amount and gas cap.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-phase-boundary-1",
+      "kind": "compatibility",
+      "title": "Thin production V1 boundary",
+      "statement": "Phase 1 contains the immutable money kernel, one manually started one-shot runner for the fixed Robinhood-USDG-to-Solana-USD Coin route, one operator-selected Collector Crypt Solana pack purchase and open, one standard buyback, the fixed Solana-USD Coin-to-Robinhood-USDG return, exact payout funding, a deterministic distribution compiler, and a permissionless payment worker. Dashboard, user interface, scheduler, continuous operation, catalog persistence, route optimization, and multi-pack execution are deferred to Phase 2. The hook itself contains no scheduler, holder ranking, LP ownership calculation, marketplace call, route logic, pack policy, sale logic, API, dashboard setting, or user-interface behavior.",
+      "measurement": "ABI, module, dependency, custody, and delivery-boundary scans find only the approved V1 components, zero marketplace or product behavior inside the hook, and zero deferred selector or storage reservation.",
+      "module": "phase-boundary",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-phase-boundary-2",
+      "kind": "migration",
+      "title": "Product Phase 2 starts from a fresh specification",
+      "statement": "Product Phase 2 remains closed until the Phase 1 interface and evidence handoff passes, then begins with a fresh v4 Spec revision and new owner approval rather than inheriting non-operative future notes.",
+      "measurement": "Delivery-boundary validation shows only Product Phase 1 open, and the Phase 2 start gate requires a new requirements revision hash and owner approval receipt.",
+      "module": "phase-boundary",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-phase-boundary-3",
+      "kind": "security",
+      "title": "Clean-room authority order",
+      "statement": "Only explicit current owner decisions, official versioned provider evidence, requirements and ADRs derived from them, and new exact-release tests or receipts can authorize Phase 1 behavior.",
+      "measurement": "Source-closure review and automated scans find zero production constant, interface, address, fee, role, or readiness claim whose sole source is historical code or evidence.",
+      "module": "phase-boundary",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-canonical-market-4",
+      "kind": "functional",
+      "title": "Buyer receives canonical HKMN output",
+      "statement": "Given a buyer submits a supported canonical HKMN purchase and the bound PoolManager finalizes it, when settlement completes, then the buyer receives the exact HKMN output produced by the verified swap semantics and fee accounting uses only the executed USDG volume. Edge case: a reverted, zero-output, unsupported partial, or foreign-pool operation neither credits HKMN nor creates Hookemon liabilities.",
+      "measurement": "Integration tests cover exact-input and exact-output buys in both address orderings, minimum-unit rounding, zero output, revert, unsupported partial execution, and a foreign pool; buyer balances and liability deltas match the bound PoolManager result exactly.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-cycle-runner-1",
+      "kind": "functional",
+      "title": "One fixed pack cycle",
+      "statement": "Given one owner-authorized cycle, a successfully funded immutable PegCycleVault, and one approved external binding manifest that positively fixes Robinhood chain ID 4663, Solana mainnet, Circle USD Coin mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v with six decimals, the Operations trigger, vault account, distinct policy account, vault return account, one public pack, quantity one, non-turbo mode, the Collector production API snapshot, and exact outbound and return conversions, when the operator completes the V1 runner, then authorized Robinhood USDG leaves only the vault through its immutable typed route executor, the pack is purchased and finalized for the policy account, pack status reproduces the bound policy account, pack, mode, memo, and token mint, one idempotent open transfers the NFT to that account, one standard eligible buyback atomically debits that NFT to the original Collector prize-wallet destination and credits the exact approved positive refund amount, not less than the owner minimum receive, to the bound policy token account, and operator-assisted conversion returns the realized USD Coin as actual USDG only to PegCycleVault; Operations never serves as source, player, NFT recipient, buyback recipient, return recipient, payer, or custodian. Every conversion, API mutation, signature, broadcast, and spend remains separately authorized. Before each external mutation, a durable journal records the authorized intent and canonical request fields and digest without secrets, then hash-chains the response digest, provider partial-signature set, memo, decoded transaction-message digest, recent blockhash and last-valid height, owner authorization, exact signed-bytes digest, broadcast signature, and independently verified finality evidence. Every purchase, buyback, outbound-conversion, and return receipt has one globally unique consumption key. A separate post-open authorization binds the exact awarded NFT mint, current onchain owner, return destination, fixed token mint and account, absent alternate recipient, API refund amount, and owner minimum receive. Edge case: any Operations custody role or deviation from the positive binding, request, status, transaction, authorization, or custody chain; blocked wallet; rejection; timeout; expiry; duplicate or unresolved intent; reused receipt; ambiguous or pending settlement; ineligible, short, or amount-mismatched buyback; or unsold NFT cannot complete the cycle or trigger payout funding.",
+      "measurement": "Deterministic fixture, binding-validator, journal-recovery, receipt-consumption, status-reconciliation, custody, authorization, and transaction-decoder tests cover the exact success sequence, every bound field, every listed edge class, crash or restart at every journal boundary, blind retry, API replay, and globally duplicated receipt without implementing route discovery, a quote engine, generic provider adapters, or automatic conversion retries. The live release proof binds one separately authorized receipt bundle containing the cycle identifier, binding-manifest digest, exact canonical generate, open, and buyback request fields and response digests, route quotes and transactions, API snapshot and non-secret credential identifier, pack code and price, pack-status fields, memo, provider partial signatures, decoded transaction-message digests, recent blockhash validity, owner authorizations, exact signed-bytes digests, finalized Solana purchase and buyback signatures independently verified through the bound RPC, exact awarded-NFT custody and debit, Collector return destination, approved refund amount and minimum receive, exact token credit, unique receipt-consumption keys, return-route receipt, and every spend and gas cap.",
+      "module": "cycle-runner",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-cycle-runner-2",
+      "kind": "functional",
+      "title": "Actual net USDG return",
+      "statement": "Given a finalized standard buyback, a closed cycle ledger, actual returned USDG credited only to PegCycleVault, a finalized Robinhood snapshot block, and one explicit owner-approved recipient-and-amount manifest, when a holder distribution is prepared, then the ledger reconciles the exact vault USDG debit, canonical policy-account Solana USD Coin credit, pack debit, NFT receipt, NFT return, buyback USD Coin credit, return-route USD Coin debit, and final attributable vault USDG credit; every unique nonzero recipient has a positive direct HKMN balance at the snapshot, every index is unique from 0 through 1,023, and leaf amounts and funded total equal that final USDG credit rather than an estimate, pack price, insured value, buyback quote, API response, gross amount, or assumed conversion rate. Edge case: an unresolved NFT, intended return-route USD Coin, pending or unmatched transaction, unrelated vault USDG movement in the reconciliation window, any Operations USDG custody or balance basis, zero, negative, wrong-asset, short or nonfinal return, nonholder, duplicate recipient, duplicate index, zero recipient, zero amount, or wrong total creates no payout.",
+      "measurement": "Cycle reconciliation verifies the complete ordered transaction and custody ledger, exact per-transaction token deltas, an activity-isolated final PegCycleVault USDG credit window, unchanged Operations USDG balance, recorded external costs and native gas, finalized-block direct HKMN balance reads, owner-approved canonical manifest bytes, unique indices and recipients, and compiled leaf sums; positive cases match the funded total exactly and every edge vector produces zero payout commitment.",
+      "module": "cycle-runner",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-canonical-market-5",
+      "kind": "security",
+      "title": "Permanent zero-LP-fee market custody",
+      "statement": "The canonical USDG/HKMN market uses a zero static LP fee, and the launch position representing the complete HKMN market allocation is held through an immutable non-upgradeable custody path that exposes no transfer, approval, liquidity-decrease, principal-withdrawal, fee-collection, rescue, delegatecall, or project-controlled successor authority. The approved inclusive 3.00 percent Hookemon hook fee is the only trading fee on the canonical route; no protocol, router, provider, integrator, token-transfer, or other surcharge may supplement it, while network gas remains a separate execution cost. Edge case: locking the launch position never blocks a valid buy or sell, freezes a user balance, adds a second trading fee, or gives any worker, deployer, treasury, Operations, or arbitrary caller control of pool principal.",
+      "measurement": "Deployment and integration tests assert PoolKey fee zero, exact complete-supply launch-position funding, permanent non-project-controlled position custody, zero forbidden ABI selectors and authority paths, zero fee-collection authority, successful supported buys and sells after custody, unchanged user transferability, and exactly one approved 3.00 percent hook-fee liability split with no LP, protocol, router, provider, integrator, token-transfer, or other additional trading charge.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-cycle-control-1",
+      "kind": "functional",
+      "title": "Manual frozen cycle control and safe recovery",
+      "statement": "Given an exact pack snapshot and no frozen active plan, when the operator selects one available pack, sets the bounded money parameters, and explicitly freezes a cycle, then the system binds one canonical plan digest to a fresh cycle identifier, quantity one, non-turbo mode, the selected pack snapshot, principal and minimum-return amounts, native-gas caps, one cycle-specific return escrow, and the required authorization; none of those frozen fields can change afterward. Given an interrupted nonterminal cycle, when the operator resumes it, then the durable journal is reconstructed and every unresolved external intent is reconciled before the same next step can continue without a blind retry. Given a terminally failed cycle with its exact cycle-bound failure receipt, when the operator starts again, then only a fresh cycle identifier, fresh nonce, and distinct immutable return escrow can fund the next cycle, while any delayed return remains quarantined in the failed cycle escrow. Edge case: an altered or stale pack snapshot or plan, a concurrent cycle, a reused cycle, nonce, payout, return receipt, or failure receipt, a wrong return escrow, a direct unattributed transfer, or a retry without reconciliation cannot start, advance, contaminate, or fund a later cycle or payout.",
+      "measurement": "Focused Forge state-machine and invariant tests prove distinct deterministic return escrows, exact failure-bound fresh-cycle transitions, delayed-return isolation, replay rejection, exact balance deltas, zero Operations custody, expired pending-authorization cleanup, and deadline-only renewal of frozen funded and returned states. Focused Node tests prove exact pack selection, freeze immutability, one active cycle, atomic durable-file recovery, status and same-cycle resume at every journal boundary, terminal-failure-only replacement by a fresh cycle, and reconciliation before retry. ABI and source scans reject generic calls, approvals, rescue, sweep, schedulers, concurrency, automatic pack selection, and production signing or broadcast.",
+      "module": "cycle-runner",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-fee-accounting-6",
+      "kind": "security",
+      "title": "Cumulative cross-swap fee remainder",
+      "statement": "Given the canonical pool's inclusive 3.00 percent fee split, when a swap accrues Programmable or project (treasury plus process) liability, then any fractional-unit remainder from that swap's floor division persists in a per-stream cumulative accumulator for the canonical pool's entire lifetime, and a later swap whose accrual carries that accumulator past one whole smallest USDG unit pays the carried unit out of that same swap's collection. Edge case: a Programmable or treasury claim never resets, discards, zeroes, or redistributes either live remainder, and no sequence of individually-floored swaps can suppress the eventual platform or project entitlement by keeping every single swap's own floor below one unit.",
+      "measurement": "Forge boundary tests assert the remainder is unchanged by a claim, a remainder that reaches the basis-point denominator on one swap correctly carries exactly one additional unit into that swap's own fee, and a 100,000-run fuzz test proves the sum of every liability bucket plus both live remainders equals the total USDG fee collected across the run.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-7",
+      "kind": "security",
+      "title": "Minimum executed-quote revert",
+      "statement": "Given a supported canonical swap, when the finalized executed USDG quote volume is a positive amount below 1,000 smallest USDG units, then the swap reverts atomically before any liability accrual, balance change, or event. Edge case: a swap of exactly 999 smallest units reverts and a swap of exactly 1,000 smallest units succeeds and accrues normally; the existing zero-amount rejection is unchanged.",
+      "measurement": "Forge tests assert a swap of exactly 999 units reverts SwapBelowMinimumQuote with unchanged liabilities and balances, a swap of exactly 1,000 units succeeds, and the fuzz conservation test from REQ-fee-accounting-6 only exercises amounts at or above the minimum.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-8",
+      "kind": "security",
+      "title": "Pinned Programmable beneficiary and claim events",
+      "statement": "Given hook deployment, when the constructor binds the Programmable beneficiary, then deployment reverts unless that address equals the policy-mandated address `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c`. Given a successful Programmable or treasury liability claim, when `_claimLiability` transfers the exact accrued amount, then it emits a `ProgrammableClaimed` or `TreasuryClaimed` event carrying the exact beneficiary and the exact claimed amount. Edge case: a deployment attempt naming any other nonzero, non-self address reverts before any storage is written; the existing zero-address and self-address rejections are unchanged.",
+      "measurement": "Forge tests assert deployment reverts for every non-pinned nonzero candidate address, deployment with the pinned address succeeds, and a claim from each of the Programmable and treasury liability buckets emits the exact matching event with the exact claimed amount and beneficiary.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-canonical-market-6",
+      "kind": "compatibility",
+      "title": "Hook data is ignored by the canonical market",
+      "statement": "Given a supported canonical swap, when the caller supplies any hookData bytes, then the swap authenticates against the actual finalized pool delta, collects the exact inclusive fee, and accrues every liability normally. hookData is ignored and cannot create buyer credit, alter callback context, or change accounting. Edge case: absent, malformed, and arbitrary hookData bytes have identical accounting behavior, while full-fill-only enforcement (`InvalidFinalizedSwap` on a partial fill) remains unchanged.",
+      "measurement": "Forge tests assert arbitrary routers and absent, malformed, and arbitrary hookData bytes produce identical fees and liabilities with no buyer-credit state, while partial-fill rejection remains enforced for every input form.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-process-budget-6",
+      "kind": "reliability",
+      "title": "Dust fast path and quarantined degraded return",
+      "statement": "Given an escrow return balance greater than or equal to the committed `rootSum`, when the vault authorizer calls `authorizePayout`, then exactly `rootSum` is transferred to the hook and any excess above `rootSum` remains in the escrow for a later explicit sweep, never absorbed into the payout. Given an escrow return balance that is nonzero and satisfies neither that condition nor the exact-zero failure condition, when the vault authorizer calls `recordDegradedReturn` with `acceptDegraded` explicitly true on the signed authorization, then the cycle moves to a terminal, quarantined `DEGRADED` state that permits a fresh successor cycle while the degraded balance is never automatically swept anywhere. Edge case: `recordDegradedReturn` reverts unless `acceptDegraded` is explicitly true; a `DEGRADED` balance is never read, moved, or credited by any other contract function; and an authorization that expires before being consumed at any stage renews through the same expired-authorization renewal path rather than locking principal.",
+      "measurement": "Forge tests assert a return above `rootSum` by any amount pays out exactly `rootSum` and leaves the excess in place; a nonzero return that is neither `>= rootSum` nor exactly zero has no valid transition without `acceptDegraded=true` and reaches `DEGRADED` with it; a `DEGRADED` balance is provably unreachable by every sweep, rescue, or successor-funding path; and a `FUNDED` cycle whose payout authorization expired before consumption renews cleanly instead of locking principal.",
+      "module": "process-budget",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-7",
+      "kind": "functional",
+      "title": "Chunked payout manifests",
+      "statement": "Given a funded payout liability keyed by one `payoutId`, when the vault authorizer commits one or more independent depth-10 Merkle-sum chunks via `commitPayoutChunk(payoutId, chunkIndex, rootHash, rootSum)`, then no chunk becomes claimable until the exact sum of every committed chunk's `rootSum` equals the payout's funded liability and the manifest is explicitly closed. Edge case: a partial or abandoned chunk commitment can never leave a holder permanently unpayable, a single-chunk manifest (chunk count fixed at one) behaves identically to the pre-chunking unchunked path for every existing fixture, and `HolderSettlement.payEntitlement` pays a leaf only against its own `(payoutId, chunkIndex, index)` key.",
+      "measurement": "Forge tests assert an incomplete chunk set is rejected as claimable, the exact-sum-across-chunks invariant is enforced before the manifest closes, single-chunk mode reproduces every pre-chunking fixture test byte for byte, and per-chunk pull payment succeeds only against its own chunk's committed root.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-payout-commitment-8",
+      "kind": "security",
+      "title": "Bounded chunk count and measured claim cost",
+      "statement": "Given the chunked payout manifest of REQ-payout-commitment-7, when a chunk is committed, then its `chunkIndex` must be below a named, declared `MAX_CHUNKS_PER_PAYOUT` constant and each chunk's tree stays bound by the existing `TREE_WIDTH` leaf ceiling; no unbounded loop over chunks or leaves exists anywhere in the commit or claim path. Edge case: a `chunkIndex` at or above `MAX_CHUNKS_PER_PAYOUT` reverts before any chunk state is written.",
+      "measurement": "A gas-metered Forge test commits and claims one full, maximally-deep 1,024-leaf chunk and records its total gas cost; a second gas-metered test commits and closes out a full `MAX_CHUNKS_PER_PAYOUT`-chunk cycle and records its total close-out gas cost; both costs are recorded as evidence, not merely asserted to succeed.",
+      "module": "payout-commitment",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-cycle-control-2",
+      "kind": "operational",
+      "title": "Autonomous scheduler under a standing owner authority",
+      "statement": "Given an owner-approved standing signing authority naming an exact per-cycle spend cap, an exact maximum-cycles-per-day cap, and an immediately effective pause and key-revocation kill switch, when the scheduler's interval timer fires, then it may trigger cycle stages autonomously subject to both caps and to the current pause state, checked fresh on every signing request rather than cached. Edge case: revoking or rotating the vault-authorizer or policy-wallet signer keys stops every subsequent autonomous signing request immediately regardless of an in-flight cycle stage, and no autonomous action is exempt from the exact schema-bound, journaled authorization every manual action already requires under REQ-cycle-control-1.",
+      "measurement": "Node tests prove a scheduler tick refuses to start a new cycle while paused, a tick refuses to exceed either cap, a revoked signer key is rejected by the signer service on its very next signing request with no cached-authority window, and every autonomously triggered stage produces the same durable journal and authorization record shape a manually triggered stage produces.",
+      "module": "cycle-control",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-distribution-1",
+      "kind": "functional",
+      "title": "Finalized-snapshot holder balances",
+      "statement": "Given a caller-supplied, finalized-block-bounded set of HKMN Transfer logs, when the holder-snapshot indexer folds them into a balance snapshot, then that snapshot is the sole source of holder balances for pro-rata distribution computation, and every address on a documented exclusion list (canonical pool, hook, vault, every per-cycle escrow, treasury) is removed from the payable holder set while its balance is still disclosed as excluded, never silently dropped. Edge case: an unordered or gap-containing log sequence, or a folded total that disagrees with the caller-supplied ground-truth total supply, fails closed rather than producing a plausible but wrong snapshot.",
+      "measurement": "Node tests prove the snapshot excludes every documented address, disagreement between the folded and supplied total supply throws, out-of-order or negative-implying logs throw, and two independent snapshot builds from the same finalized block and the same log set produce byte-identical digests.",
+      "module": "distribution",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-distribution-2",
+      "kind": "security",
+      "title": "Dual automated distribution signature, no per-cycle human key",
+      "statement": "Given a compiled pro-rata manifest and the finalized returned proceeds amount for a cycle, when a `PayoutAuthorization` referencing that manifest's root hash and root sum is produced, then it requires two independent signatures before it is usable: a distribution-signer signature produced by the worker's own automated process, and a verifier signature produced by a separate, independently automated verifier process holding its own key, designed to run on a different host from the worker, which independently recomputes the identical root hash and root sum from finalized chain data and signs only on an exact match. No human signature is required per cycle by default. Edge case: a manifest carrying only one of the two signatures, or two signatures whose independently reconstructed root hash or root sum disagree, cannot be consumed by `authorizePayout`; an optional manual, human-signed verifier mode may exist as an operator override but is never the default path; the verifier's key never resides on the worker host.",
+      "measurement": "Node tests prove a single-signature manifest is rejected, a distribution-signer/verifier root-hash or root-sum disagreement is rejected, a matching pair of independently produced automated signatures is accepted with no human action, an optional manual-override path is exercised separately from the default automated path, and the verifier process's own key inventory is disjoint from the worker's key inventory by construction.",
+      "module": "distribution",
+      "status": "superseded"
+    },
+    {
+      "id": "REQ-dashboard-2",
+      "kind": "functional",
+      "title": "Read-only public status and owner-authenticated config control",
+      "statement": "Given the dashboard's public surface, when any caller reads current cycle stage, next scheduled run, recent cycle outcomes, cumulative distributed total, holder count, or a disclosed degraded or quarantined balance, then no response requires authentication, mutates state, or discloses a signer identity, an exact holder balance, or an in-flight authorization digest before it is safe to disclose. Given the dashboard's owner surface, when the owner reads or writes interval, pack codes, pause state, or spend cap through a timing-safe-compared bearer credential, then the write is schema-validated and never itself moves funds, signs, or broadcasts. Edge case: kicking a stuck cycle (`supersede`) and the distribution-signer/verifier approval are never dashboard buttons; both require an out-of-band signature the dashboard can only surface as a status line, never trigger.",
+      "measurement": "Node tests prove every public endpoint requires no credential and returns no signer identity, exact balance, or in-flight digest; every owner endpoint rejects a missing or incorrect bearer credential; a config write is rejected against the schema when malformed; and no HTTP route exists that signs, broadcasts, or moves funds directly.",
+      "module": "dashboard",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-phase3-deployment-1",
+      "kind": "security",
+      "title": "Operations-wallet deployment boundary",
+      "statement": "Given a Phase 3 release candidate, when its content-addressed deployment manifest is built, then the deployed money path contains one immutable hook, permanent position custody, the Operations EVM account, and the Operations Solana account, while the legacy vault, escrow, route, Merkle-commitment, and holder-settlement contract family is frozen source evidence and absent from the manifest. Edge case: a manifest that includes any excluded legacy runtime, grants a withdrawal path from position custody, or lacks an exact digest is rejected before launch work begins.",
+      "measurement": "The deployment-manifest validator checks the complete runtime set, its content digest, immutable custody surface, and the absence of every excluded legacy family entry; a negative fixture for each excluded class fails validation.",
+      "module": "deployment-manifest",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-operations-wallet-1",
+      "kind": "security",
+      "title": "Bounded Operations process claim",
+      "statement": "Given accrued process liability, when current Operations calls claimProcess(bytes32 cycleId, uint256 amountAtomicUsdg, address destination), then the hook accepts only a nonzero permanently unused cycleId, a positive amount no greater than both liability and remaining capacity, and destination equal to msg.sender. It debits and transfers atomically, permanently records the cycleId, emits cycleId, amount, destination, timestamp, cap, and used-after, and exposes remainingProcessClaimCapacity(). Edge case: a zero or reused cycleId, zero amount, wrong caller, third-party destination, excessive amount, failed transfer, or reentrancy leaves liabilities, history, and balances unchanged.",
+      "measurement": "Forge tests cover every authorization and amount boundary, transfer rollback, reentrancy, event fields, permanent cycle replay rejection, solvency before and after, and independent preservation of fee remainders.",
+      "module": "operations-wallet",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-operations-wallet-2",
+      "kind": "security",
+      "title": "Strict rolling process-claim control",
+      "statement": "Given the process-claim ledger, when capacity is calculated, then successful claims count while block.timestamp minus claimedAt is strictly less than 21600 seconds and a claim exactly 21600 seconds old is expired. Retained active entries are bounded by immutable constructor-configured processClaimMaxCount, hard-capped at 64 for gas. Treasury may decrease the limit or set it to zero immediately, may schedule an increase no greater than immutable Xmax of 500000 USDG expressed as {chainId: 4663, assetId: USDG, decimals: 6, amountAtomic: 500000000000}, and that increase activates only after 21600 seconds. No limit change resets history or usage. The immutable constructor-provided Operations rotation delay is 43200 seconds. Treasury may schedule and execute an emergency Operations rotation; scheduling and rotation auto-pause claims, rotation never clears history, Operations cannot cancel a pending rotation, and only a new Treasury emergency-rotation intent can supersede it with a fresh delay. Edge case: an over-Xmax increase, early activation, processClaimMaxCount above 64, paused claim, stale rotation, Operations cancellation, or history reset fails without mutation.",
+      "measurement": "Forge tests prove the strict equality boundary, bounded-entry gas behavior, immediate decrease and zero, delayed increase, immutable 500000 USDG Xmax, processClaimMaxCount hard cap of 64, non-resetting usage, automatic pause, immutable 43200-second rotation delay, Treasury-only rescheduling, and continuity of history across rotation.",
+      "module": "operations-wallet",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-operations-wallet-3",
+      "kind": "security",
+      "title": "Beneficiary claims use actual destinations",
+      "statement": "Given an accrued Programmable or treasury liability, when its beneficiary calls claimProgrammable or claimTreasury with a destination, then the caller must be that beneficiary, destination must be nonzero, and the exact transfer and event must use that destination rather than an ignored argument or implicit recipient. Edge case: a non-beneficiary caller, zero destination, failed transfer, or reentrant call leaves the designated liability unchanged.",
+      "measurement": "Forge tests cover self and third-party destinations, zero and unauthorized rejection, partial and full claims, exact transfer and event targets, and unchanged process remainders.",
+      "module": "operations-wallet",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-launch-orchestration-1",
+      "kind": "security",
+      "title": "Authorized atomic hook launch",
+      "statement": "Given the authorized Programmable provider graph transaction, when the one-time graph launch runs, then it atomically deploys the token, custody, and hook targets and executes exactly three ordered calls: `token.allocate(hook)`, `custody.configureBindingHook(hook)`, and `hook.initializeGraphLaunch(custody, sqrtPriceX96)`. The third call alone performs hook-self PoolManager.initialize at the fixed price under the 0x20CC hook-permission mask. Every other initializer reverts. Launch stamping is part of this provider graph transaction. Edge case: an external initialization attempt before or after graph launch, an unauthorized caller, a second graph launch, a reordered call, an extra call, or any failed graph substep reverts the whole graph transaction.",
+      "measurement": "Provider-shaped, fork, and unit tests derive the allocation selector from the compiled token ABI and prove the three-target graph, exact selector sequence, call count, allocation, custody configuration, mask, external-init rejection, one hook-self initialization at the fixed price, graph launchAuthority gate, graph stamp, one-time state, and whole-graph rollback at each graph substep.",
+      "module": "launch-orchestration",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-launch-orchestration-2",
+      "kind": "security",
+      "title": "Atomic liquidity mint and permanent custody binding",
+      "statement": "Given a completed provider graph launch, when the separate owner-signed seed transaction executes, then Permit2 pulls USDG from the fixed payer and PositionManager MINT_POSITION and SETTLE_PAIR mint the complete HKMN allocation into the canonical position held by permanent custody. Unused USDG returns to the payer and any HKMN residual reverts the seed. The seed transaction sets and clears its allowance atomically and custody binds the actually minted token id only after verifying owner, PoolKey, ticks, and liquidity. Until this seed succeeds, HKMN allocated to the hook is non-transferable to every other recipient and swaps cannot occur because the initialized pool has no liquidity. Custody exposes no withdrawal, approval, or operator path. A seed failure rolls back only seed-local funding, mint, approval, refund, and custody state; the completed provider graph remains and the owner may retry the same seed. Edge case: a wrong token id, owner, range, liquidity, funding amount, allowance cleanup, residual balance, or seed failure cannot undo the graph or leave a seed-local effect.",
+      "measurement": "Pinned fork and provider-shaped tests exercise the real manager, PositionManager, and Permit2 interfaces; assert exact allowances, deltas, payer USDG refund, complete HKMN position funding, zero treasury HKMN allocation, custody binding, non-transferable pre-seed HKMN, no-liquidity swap refusal, no stranded seed-local balances, graph persistence after each failed seed substep, and successful retry.",
+      "module": "launch-orchestration",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-canonical-market-7",
+      "kind": "security",
+      "title": "Gross-volume fee basis across all swap forms",
+      "statement": "Given a supported canonical swap in either currency order, direction, and exactness form, when its gross USDG quote volume is authenticated, then the hook applies the 10, 40, and 250 basis-point streams to that gross volume. Exact-output quoting uses a monotonic gross-up where gross minus the sum of stream deltas equals requested net. A gross volume below 1000 atomic USDG reverts. selfCallPolicy is same-pool-swap-forbidden, and REVERT_WHOLE_SWAP is the ratified partial-fill policy. Edge case: a partial fill, cross-pool self-call, incorrect gross-up, or under-minimum volume produces no collection or liability mutation.",
+      "measurement": "Fork and property tests cover all eight ordering, direction, and exactness combinations, exact-output gross-up, the 999 and 1000 boundaries, whole-swap rollback, and exact PoolManager and caller deltas.",
+      "module": "canonical-market",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-fee-accounting-9",
+      "kind": "security",
+      "title": "Three independent lifetime fee remainders",
+      "statement": "Given fee accrual over the canonical pool lifetime, when each gross quote volume is split, then the 10, 40, and 250 basis-point streams maintain independent quotient and remainder accumulators. Claims never reset, merge, discard, or redistribute any accumulator. Edge case: splitting a volume into many swaps cannot suppress any stream's eventual atomic unit, and an unsuccessful claim leaves every remainder unchanged.",
+      "measurement": "Property tests compare split and unsplit sequences, prove per-stream lifetime conservation for 10, 40, and 250 basis points, and assert claim-invariant remainders across every claim path.",
+      "module": "fee-accounting",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-cycle-repository-1",
+      "kind": "reliability",
+      "title": "One authoritative journaled cycle repository",
+      "statement": "Given any money mutation, when a dashboard, CLI, scheduler, public projection, or runner stage requests it, then one CycleRepository and policy engine are the sole authority for state and every client uses its durable transitions. A provider attempt is write-ahead PREPARED, then NOT_SENT for a pre-call failure with no provider contact and retry permission, SENT_UNKNOWN for post-send ambiguity with observation only, or RESPONSE_RECORDED followed by RECONCILED. A durable chain attempt is PREPARED(requestDigest, policyDigest, fencingToken), then SIGNED(rawSignedBytesHash, nonceOrBlockhash, txHash, approvedSemanticsDigest), BROADCAST, FINALIZED, or REFUSED(reason, fencingToken). Raw signed bytes remain immutably retrievable by their content address. A RelayLegV1 persists cycleId, direction, relayRequestId, quoteDigest, both chain transaction hashes, typed source and destination amounts, both finality observations, and netDeltaAtomic. A source or destination transaction hash attributes to exactly one relay leg across all cycles and directions. A leg is SETTLED only after this process observes both finalized deltas through its own RPC clients and attributes the destination delta by amount, time window, and memo or relayRequestId; Relay status alone cannot settle it. Partial, refund, late, and wrong-asset outcomes enter respectively HELD_RELAY_PARTIAL, HELD_RELAY_REFUND, HELD_RELAY_LATE, and HELD_RELAY_WRONG_ASSET. A StandingAuthorityDecisionV1 atomically persists authorityDigest, verifiedAt, intentDigest, dayCapReservation, and nonceReservation on first use after a wall-clock expiry check; an expired authority is refused and replay is idempotent. CycleRecord persists immutable production or rehearsal mode. The custody ledger separates finalized observed balances from obligations, counts unresolved principal exactly once, and classifies expected cycle assets separately from unattributed external deposits that pause new claims. Each transition is written before its irreversible effect; restart revalidates the persisted approvedSemanticsDigest before any rebroadcast and never creates a new nonce, blockhash, bytes, or signature while unresolved. Edge case: timeout, disconnect, or 5xx after send is SENT_UNKNOWN and supports observation only.",
+      "measurement": "Node tests inject crashes at every transition, pre-call failures, lost responses, concurrent clients, fencing contention, cross-mode service calls, nonce contention, external deposits, and state recovery. They assert one durable store, write-ahead ordering, byte-identical rebroadcast after approval-digest revalidation, exact unresolved-principal accounting, no duplicate effect, cross-cycle relay-hash rejection, dual-RPC settlement, destination attribution, named relay recovery states, atomic standing-authority reservations, wall-clock expiry refusal, and idempotent authority replay.",
+      "module": "cycle-repository",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-transaction-policy-1",
+      "kind": "security",
+      "title": "Semantic transaction policy before external signing",
+      "statement": "Given a provider-produced EVM, Solana legacy, or Solana v0 transaction including address lookup tables, when a signature is requested, then the runner canonical validator schema hookemon.transaction-policy.v1 version 1 positively allowlists chain or program, target or selector, source, destination, mint, exact or bounded amount, value, gas, fee payer, co-signer, blockhash or deadline, priority fee, and absence of extra instructions. The adapters decoder must emit that identical canonical schema, not an adapter-only variant. Every money minimum is an explicit TypedAmount. EVM per-transaction gas price cap and native reserve, and Solana priority-fee cap and lamport reserve, are required configuration fields. The literal atomic value '1' is a configuration error for any minimum or gas cap. The signed message is validated again before broadcast. There are exactly two signer identities, Operations EVM and Operations Solana; signing occurs outside the Node process unless a recorded owner exception applies. Edge case: an unknown target, mismatched address bytes, changed message, invalid co-signer, stale blockhash, missing gas cap, placeholder configuration, timeout, or secret-bearing signer path refuses signing.",
+      "measurement": "Negative fixtures for EVM and both Solana formats prove each allowlist field is enforced; configuration tests require each explicit minimum and gas cap and reject a literal atomic value '1'; parity fixtures prove the adapters decoder produces hookemon.transaction-policy.v1 version 1; signer tests prove external invocation, timeout visibility, two-identity separation, and pre-broadcast revalidation.",
+      "module": "transaction-policy",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-cycle-runner-3",
+      "kind": "functional",
+      "title": "Cycle-attributed operations-wallet stages",
+      "statement": "Given a planned cycle, when the runner executes it, then its ordered stages are eligibility-snapshot, claim-process, outbound, purchase, open, epic-gate, buyback, return, and payout. The runner persists the immutable cycle mode before stage execution and production services refuse rehearsal cycles while rehearsal services refuse production cycles. Before signing a purchase, it persists typed {chainId, assetId, decimals, amountAtomic} values for unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share the same asset identity, and policy reserves totalAtomic plus boundedOverheadAtomic. Outbound can use only the cycle's claimed principal. Return can bridge only the cycle-attributed proceeds delta. The custody ledger records finalized observed current balances separately from obligations, counts unresolved principal exactly once, records expected cycle assets separately from unattributed external deposits, and pauses new claims for those deposits. Only finalized, cycle-attributed return deltas may become an Operations USDG credit or payout basis. Edge case: an unattributed inbound deposit, cross-mode request, mismatched purchase total, bridge-funded cross-cycle action, or attempt to finance one cycle with another fails closed.",
+      "measurement": "End-to-end fakes and fork tests assert exact nine-stage order, typed-amount validation, purchase arithmetic and reserve, immutable mode isolation, asset separation, cycle-attribution keys, claimed-principal-only outbound, proceeds-delta-only return, finality before completion, observed-balance and obligation conservation, one-time unresolved-principal accounting, pause on unattributed deposits, and independent gas reserves.",
+      "module": "cycle-runner",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-epic-gate-1",
+      "kind": "security",
+      "title": "Fail-closed epic-card hold policy",
+      "statement": "Given a returned card and a buyback offer validated by REQ-collector-crypt-adapter-1, when the card is eligible for sale, then it is held exactly when offerAtomic multiplied by 100 is less than insuredValueAtomic multiplied by 40; equality sells. Missing or invalid data, missing mint, rarity conflict, buyback unavailable, changed quote, wrong mint, or an unverified insured-value reconciliation enters a HELD_* state, never auto-sells, raises an alarm, and requires an idempotent owner decision for its only next transition. In v1, a held card blocks new claims.",
+      "measurement": "BigInt and lifecycle tests cover strict inequality, equality, every fail-closed HELD_* class, immutable held state, idempotent owner decisions, insured-value reconciliation failure, and the new-claim block.",
+      "module": "policy-engine",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-eligibility-snapshot-1",
+      "kind": "security",
+      "title": "Pre-claim finalized eligibility snapshot",
+      "statement": "Given a planned cycle, when eligibility-snapshot runs as the first cycle stage, then before claimProcess the runner pins a finalized block and hash, replays HKMN Transfer logs from deployment through that block, reconciles mint minus burn against the launch manifest, rechecks the block hash after scanning, and proves log completeness through an independent second source or archive RPC. It excludes zero and burn addresses, Hook, PoolManager, custody, Operations, Treasury, Programmable, launch contracts, and historical role holders while allowing contract holders to receive USDG at their own addresses. It evaluates recipient count, measured gas, gas-price cap, native balance, and transaction count before claim. Edge case: a reorg, incomplete or unordered logs, supply mismatch, missing source, or infeasible payout envelope prevents the claim.",
+      "measurement": "Snapshot tests inject each log and reorg fault, compare deterministic manifests, prove supply reconciliation and hash recheck, and assert no claim request is prepared before the feasibility envelope passes.",
+      "module": "eligibility-snapshot",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-direct-payout-1",
+      "kind": "security",
+      "title": "Finalized direct holder payout",
+      "statement": "Given a finalized cycle-attributed Operations USDG credit and its frozen eligibility manifest, when payout begins, then the runner sends direct USDG transfers to each holder through the durable chain-attempt contract: PREPARED(requestDigest, policyDigest, fencingToken), SIGNED(rawSignedBytesHash, nonceOrBlockhash, txHash, approvedSemanticsDigest), BROADCAST, FINALIZED, or REFUSED(reason, fencingToken). The wallet-wide nonce lock covers claim, outbound, return, and payout. SIGNED records retain immutable retrievable signed bytes and recover after restart. A dropped BROADCAST resolves by receipt search or a replacement using the same nonce and calldata, after revalidating the persisted approvedSemanticsDigest. It marks paid only after an exact finalized delta. The manifest becomes immutable after its first broadcast; frozen recipients become quarantine liabilities without blocking the rest of the manifest; dust carry is durable and atomically consumed and written between cycles. Edge case: a crash, RPC acknowledgement without finality, duplicate recipient, nonce collision, replacement with different calldata, changed approval digest, dropped broadcast, frozen recipient, or dust replay cannot create a double payment or silently change the manifest.",
+      "measurement": "Node tests cover restart at every payout boundary, durable signed-record recovery, approval-digest revalidation, exact recipient deltas, immutable manifests, same-nonce-and-calldata replacement, receipt search for a dropped broadcast, wallet-wide nonce fencing, refusal fencing, frozen-recipient quarantine with continuation, durable dust carry, and recipient counts through the verified feasibility envelope.",
+      "module": "direct-payout",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-policy-engine-1",
+      "kind": "operational",
+      "title": "Atomic policy controls and rehearsal mode",
+      "statement": "Given an Operations-wallet cycle, when it reaches a claim, purchase, or signature boundary, then the policy engine atomically maps dashboard caps and allowlists to micro-USDG controls, enforces a rolling 24-hour spend ledger, maximum cycles per day, per-cycle cap, rolling realized-plus-at-risk loss cap, maximum outstanding custody, and an execution pause or kill switch before every signature. It verifies all persisted purchase fields: unitPriceAtomic, quantity, totalAtomic, and boundedOverheadAtomic; enforces totalAtomic equals quantity multiplied by unitPriceAtomic; and reserves totalAtomic plus boundedOverheadAtomic. It evaluates finalized observed balances and obligations separately, with unresolved principal counted once. The first N production cycles require digest-bound manual approval. Cycle mode is persisted at creation and immutable; production and rehearsal services refuse the other mode. The production return minimum is the explicit TypedAmount {chainId: 4663, assetId: USDG, decimals: 6, amountAtomic: 0}; it means no general return minimum. No minimum or gas cap has an implicit atomic-unit default. Edge case: pause, cap breach, missing manual approval, held card, foreign mode, mismatched purchase arithmetic, placeholder minimum or gas cap, or unattributed deposit refuses the next irreversible action.",
+      "measurement": "Policy and runner tests prove atomic cap application, rolling-window accounting, loss and custody limits, purchase-field validation and reserve, observed-balance and obligation separation, pause-before-signature, digest binding, immutable mode isolation, explicit zero production return minimum, required gas-cap configuration, restart evidence, and no duplicate effect.",
+      "module": "policy-engine",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-collector-crypt-adapter-1",
+      "kind": "compatibility",
+      "title": "Collector Crypt documented response contract",
+      "statement": "Given a Collector Crypt pack or buyback response, when the adapter validates it, then prize tiers are numeric 1 through 4, buyback amounts are configured Solana stablecoin base units with six decimals, contains accepts an integer or numeric string, and openPack uses the documented idempotent operation. insured_value is usable only when reconciliation proves its unit against the machine instantBuyback percentage; otherwise the cycle enters HELD_DATA_UNVERIFIED. Edge case: an unsupported tier, malformed contains value, non-idempotent open result, missing unit proof, or reconciliation mismatch cannot authorize purchase, sale, or payout.",
+      "measurement": "Adapter and lifecycle fixtures cover all four tiers, integer and numeric-string contains values, documented idempotent openPack replay, configured Solana stablecoin base-unit accounting, insured-value reconciliation, and HELD_DATA_UNVERIFIED on every missing or contradictory proof.",
+      "module": "collector-crypt-adapter",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-provider-binding-4",
+      "kind": "compatibility",
+      "title": "Provider-bound fee and launch readiness",
+      "statement": "Given Phase 3 provider evidence, when the release package evaluates readiness, then repairMergeEligible and launchEligible are distinct. Code readiness cannot authorize live readiness, signing, broadcast, deployment, or spend. FEE-01 records the accepted 10 basis-point share to the pinned Programmable recipient on 2026-09-04. Programmatic provider access is read-only preflight and validation only. Edge case: an unavailable public route, unresolved provider preimage, recipient, rounding, accrual, claim mechanism, graph, or readiness signal keeps launchEligible false.",
+      "measurement": "Recorded provider acceptance, probes, and release-gate tests prove each required evidence field, the separate readiness flags, the accepted fee share, and refusal of every unresolved or contradictory response.",
+      "module": "provider-binding",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-release-evidence-7",
+      "kind": "operational",
+      "title": "Phase 3 code and live readiness separation",
+      "statement": "Given a Phase 3 candidate, when release evidence is evaluated, then cleanroom, deployment-manifest, control-dependency, traceability, non-skipping fork proof, current-head canary, and runner evidence establish code readiness only. launchEligible additionally requires current provider admission, exact graph and binding evidence, operational canaries, and all owner-gated live prerequisites. Edge case: a green local build, dry run, or CI result without live readiness remains non-authorizing.",
+      "measurement": "Release tests exercise every boolean readiness combination, assert a named blocker for each false prerequisite, and prove no code-ready state is reported as launch eligible.",
+      "module": "release-evidence",
+      "status": "approved"
+    },
+    {
+      "id": "REQ-policy-engine-2",
+      "kind": "operational",
+      "title": "Pre-signature canaries and durable alerts",
+      "statement": "Given any irreversible signature request, when the policy engine evaluates it, then it checks chain id, contract and proxy runtime hashes, USDG decimals and pause or freeze state for Operations and destinations, roles, protocol fee, router and quoter hashes, provider-policy digest, nonce or blockhash, gas reserves, pause and loss limits, and unattributed custody. A detected drift blocks signing, creates one durable deduplicated alert, and remains observable without exposing credentials. Edge case: any missing, stale, contradictory, or unverified canary result fails closed before a signature exists.",
+      "measurement": "Canary tests inject each drift class and assert signature refusal, one persisted alert per condition, redaction, recovery only after the current evidence passes, and no duplicate alert across restart.",
+      "module": "policy-engine",
+      "status": "approved"
+    }
+  ]
+}

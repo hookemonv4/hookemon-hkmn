@@ -1,0 +1,18 @@
+{
+  "id": "r-00376",
+  "at": "2026-09-01T16:44:04.024Z",
+  "type": "provisional-interfaces-verified",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A2",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "000eb1273c2bf4d237c60d4c8b9ad926ca4e7a2d62fdf32d575dac30cac03dae",
+    "architecture/interfaces.json": "ec2532bb4a1399fb6dbe22e11b471c6124607ed2008a77eb7410fdbb707eb4ab",
+    "architecture/provisional-interfaces.json": "1096988ff7befa6273e1e6ff57056f222f2456689d0f80dd0ef93f3cd284c1af",
+    "feasibility/interface-freeze.json": "2c58c83f18d3aa8c1a39e0f03c6f9a7d9e20e8a84793b259306c96158370c820"
+  }
+}

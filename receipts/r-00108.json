@@ -1,0 +1,16 @@
+{
+  "id": "r-00108",
+  "at": "2026-08-30T12:03:31.153Z",
+  "type": "trust-boundaries-reviewed",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A5",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "f208f92bab9c252dc847e282e0fb12d4c7b7e2149aa3082db0b57381e2e3241e",
+    "architecture/trust-boundaries.md": "dfdfbaa13f02866282fcb2d301da6bd2a1a3a8e12dc24b76f8d685f19b2c70c6"
+  }
+}

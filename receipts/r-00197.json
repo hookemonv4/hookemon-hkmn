@@ -1,0 +1,20 @@
+{
+  "id": "r-00197",
+  "at": "2026-08-30T20:44:54.401Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-revision-54-current-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner am 30.08.2026: S5, F2 und Merge von PR #1 wie beschrieben genehmigt. Genehmigt wird Requirements Revision 54 fuer Spec-Gate S5."
+  },
+  "inputHashes": {
+    "gates/spec.json": "9f683e2dd6aa37ef2f461cedc2025ac9a8a6a1ee0fcc58a72b9989185be5e7a2",
+    "policy/policy.json": "9c8a032c3067b0ce5027507f0328e77fe4ae46960e776e8e8c4685bb69dfe41d",
+    "specs/requirements.json": "c057236c281dd2acb94dbc6d80fc7e64548257a8e729dfacf835d460a3968d13",
+    "decisions/owner-approvals/phase-1-spec-revision-54-current-approved.json": "f496de54d099b840e101438469196eec28fa4513c6c13c5a5cc5bfe32d99ae36"
+  }
+}

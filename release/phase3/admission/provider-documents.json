@@ -1,0 +1,340 @@
+{
+  "schemaVersion": "hookemon.programmable-admission-provider-evidence.v1",
+  "observedAt": "2026-09-04T11:24:39.922Z",
+  "scope": {
+    "chainId": "4663",
+    "caip2": "eip155:4663",
+    "apiVersion": "v4",
+    "collection": "read-only provider documentation and public provider source"
+  },
+  "documents": [
+    {
+      "name": "capabilities",
+      "method": "GET",
+      "url": "https://api.programmable.market/v4/chains/4663/capabilities",
+      "httpStatus": 200,
+      "responseSha256": "sha256:657709fcd451323d7c734c10bcf3a7c85b205dbf33538324d319f7112d2bc4c8",
+      "serverTime": "2026-09-04T11:14:32.652Z"
+    },
+    {
+      "name": "readiness",
+      "method": "GET",
+      "url": "https://api.programmable.market/v4/chains/4663/readiness",
+      "httpStatus": 200,
+      "responseSha256": "sha256:3ac77dcec3bfb443fce0080f25cffc58f46955af1dab98f872cd349f90640260"
+    },
+    {
+      "name": "openapi",
+      "method": "GET",
+      "url": "https://programmable.market/openapi/custom-launch-v4.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:6dccb474a7d0b2c664157369b46a223d66a4d72d2e211064d15896f5abfc99db"
+    },
+    {
+      "name": "public-discovery",
+      "method": "GET",
+      "url": "https://programmable.market/.well-known/programmable.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:486f072e4c62f03b20d689eea90da4b66165ac073dca318282f00f673e2828af"
+    },
+    {
+      "name": "pack-config",
+      "method": "GET",
+      "url": "https://programmable.market/schemas/custom-launch/v4/pack-config.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:0295020845d3d9328cf6be3da81e39da29ce929cd3e8672d9ac4f2d96f886a90"
+    },
+    {
+      "name": "admission-descriptor",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/policy/custom-launch-admission-v4.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:99b4ccabdaaf143bad28a8f6af441a1b93e1f113d0179236328b7fa594d1f948"
+    },
+    {
+      "name": "business-policy",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/policy/launch-policy.v1.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:31e6b286ca839b31cb1edfe30c05d9f334892f3d84377961dc10b93959c7e216"
+    },
+    {
+      "name": "admission-schema",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/policy/schemas/custom-launch-admission-v4.schema.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:a28a6de6208d6ba7b65b4b706174509570955ba9ce9714624bcb2046ab7beae7"
+    },
+    {
+      "name": "admission-binding",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/.programmable/custom-launch-admission.v4.json",
+      "httpStatus": 200,
+      "responseSha256": "sha256:f31643e6e9ff6d5409d59a2fc3ac7fb5ac9cfcb3af08e95c9478bc95ddfa66a2"
+    },
+    {
+      "name": "reference-chain-profile",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/spec/robinhood-custom-launch/chain-4663.v1.json",
+      "httpStatus": 200,
+      "sourceCommit": "cbcabd3cfc166124485c6f7e7c3951810cf60dc1"
+    },
+    {
+      "name": "reference-graph-deployer-source",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/src/ProgrammableCreate2GraphDeployerV1.sol",
+      "httpStatus": 200,
+      "responseSha256": "sha256:06a3acaf9beeb68647af231f5524c5a34dc013d99611a1b2d0a6c80895f595e9"
+    },
+    {
+      "name": "reference-router-source",
+      "method": "GET",
+      "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/src/robinhood-custom-launch/ProgrammableLaunchStampRouterV1.sol",
+      "httpStatus": 200,
+      "responseSha256": "sha256:ef87aa9338c364634bffda64423bd3fb096c1630a45cc58ecf854d24959ff163"
+    }
+  ],
+  "capabilities": {
+    "schemaVersion": "programmable.custom-launch-capabilities.v2",
+    "apiVersion": "v4",
+    "chain": {
+      "id": "4663",
+      "caip2": "eip155:4663",
+      "name": "Robinhood Chain Mainnet"
+    },
+    "profile": {
+      "schemaVersion": "programmable.custom-launch-profile-ref.v4",
+      "structuralProfileId": "programmable.custom-launch.robinhood-mainnet.v1",
+      "businessProfileId": "robinhood-production-launch",
+      "admissionDescriptorDigest": "sha256:99b4ccabdaaf143bad28a8f6af441a1b93e1f113d0179236328b7fa594d1f948",
+      "admissionPolicyDigest": "sha256:31e6b286ca839b31cb1edfe30c05d9f334892f3d84377961dc10b93959c7e216",
+      "admissionBindingDigest": "sha256:f31643e6e9ff6d5409d59a2fc3ac7fb5ac9cfcb3af08e95c9478bc95ddfa66a2",
+      "admissionSchemaDigest": "sha256:a28a6de6208d6ba7b65b4b706174509570955ba9ce9714624bcb2046ab7beae7",
+      "profileRevision": 1,
+      "profileVersion": "4.0.0",
+      "profileDigest": "sha256:484b1dc6e9091804fabc230f2b3a7504940fa00264f8e66e82a66a951e71f1a0"
+    },
+    "readiness": {
+      "status": "ready",
+      "reasonCodes": []
+    },
+    "graph": {
+      "minimumTargets": 3,
+      "maximumTargets": 16,
+      "targetComponentKinds": ["token", "hook", "other"],
+      "requiredGraphDescription": "One acyclic executable graph with exactly one token and one hook."
+    },
+    "funding": {
+      "modes": ["none", "wallet-transaction-value"]
+    },
+    "toolchains": [
+      {
+        "compiler": "solc",
+        "version": "0.8.26+commit.8a97fa7a",
+        "digest": "sha256:35ba6661f3bdaed995fc7af14c405502290cf681b3fd062fe8738cfdf6db14ed"
+      }
+    ],
+    "safety": {
+      "serverAuthoritative": true,
+      "clientBypassAccepted": false,
+      "walletSignatureProduced": false,
+      "transactionBroadcast": false,
+      "feeBehaviorClaim": false,
+      "universalFeeBehaviorClaim": false,
+      "genericClaimingLive": false
+    },
+    "walletHandoff": {
+      "schemaVersion": "programmable.exact-wallet-transaction.v4",
+      "walletHandoffBaseUrl": "https://programmable.market/developers/api-keys",
+      "separateWalletSignatureRequired": true
+    }
+  },
+  "v4RequestContract": {
+    "additionalProperties": false,
+    "required": [
+      "schemaVersion",
+      "chainId",
+      "caip2",
+      "chainDeployment",
+      "chainDeploymentDescriptorDigest",
+      "profile",
+      "launchWallet",
+      "nonce",
+      "permitWindow",
+      "sourceDescriptor",
+      "sourceBundleManifest",
+      "externalContracts",
+      "graphBundle",
+      "projectMetadata",
+      "projectMetadataHash",
+      "projectMetadataImageArtifact",
+      "verificationBundle",
+      "funding",
+      "liquidityModel",
+      "launchIntentHash",
+      "agentAttestation"
+    ],
+    "funding": {
+      "schemaVersion": "programmable.custom-launch-funding-intent.v2",
+      "mode": ["none", "wallet-transaction-value"],
+      "valueWei": "integer string"
+    },
+    "liquidityModel": {
+      "model": [
+        "none-empty-pool",
+        "project-provided-liquidity",
+        "hook-owned-liquidity",
+        "externally-managed-position",
+        "custom-bonding-or-curve"
+      ],
+      "declaredLaunchState": [
+        "pool-not-initialized",
+        "pool-initialized-empty",
+        "liquidity-required",
+        "liquidity-provided-by-launch",
+        "custom-settlement"
+      ]
+    },
+    "externalContract": {
+      "required": [
+        "schemaVersion",
+        "chainId",
+        "caip2",
+        "address",
+        "runtimeCodeHash",
+        "sourceEvidenceDigest",
+        "role",
+        "startBlock",
+        "auditBlock",
+        "locator",
+        "mutability"
+      ],
+      "locatorPhases": ["constructor", "initializer"]
+    },
+    "verificationBundle": {
+      "schemaVersion": "programmable.exact-source-verification-bundle.v2",
+      "compilationUnitRequired": [
+        "compilationUnitId",
+        "compilerVersion",
+        "standardJsonInputBase64",
+        "standardJsonInputSha256"
+      ],
+      "componentRequired": [
+        "targetId",
+        "compilationUnitId",
+        "sourcePath",
+        "contractName",
+        "constructorArguments",
+        "runtimeMaterialization"
+      ]
+    },
+    "platformFeeConfigurationField": "absent"
+  },
+  "admissionAuthority": {
+    "admissionEvidenceAuthority": "private-custom-launch-api",
+    "backendAuthoritative": true,
+    "agentAdmissionAuthority": false,
+    "clientAdmissionAuthority": false,
+    "platformAdmissionReceiptRequired": true,
+    "policySelection": {
+      "authenticatedChainBoundRequestRequired": true,
+      "clientSelectable": false,
+      "selectedBy": "api-server-chain-binding"
+    },
+    "staticAdmission": {
+      "unknownFindingDisposition": "needs-evidence",
+      "noveltyIsNotARejectionReason": true
+    }
+  },
+  "preflightContract": {
+    "path": "/v4/chains/4663/custom-launches/preflight",
+    "description": "Side-effect-free server-authoritative preflight",
+    "responseConstants": {
+      "quotaConsumed": false,
+      "nonceAllocated": false,
+      "persisted": false,
+      "walletSignatureRequiredLater": true,
+      "walletBroadcastByService": false
+    }
+  },
+  "packConfigContract": {
+    "url": "https://programmable.market/schemas/custom-launch/v4/pack-config.json",
+    "platformFeePolicy": {
+      "required": true,
+      "status": "required-default-configuration",
+      "appliesTo": "new-robinhood-v4-api-custom-launches-only",
+      "changesExistingLaunches": false,
+      "rateBps": 20,
+      "ratePpm": 2000,
+      "ratePercent": "0.20%",
+      "recipient": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
+      "basis": null,
+      "feeCurrency": null,
+      "accountingMode": null,
+      "rounding": null,
+      "accrual": null,
+      "claimMechanism": null,
+      "enforcement": "not-guaranteed-onchain",
+      "canonicalOnchainEnforcementProven": false,
+      "guaranteedRevenue": false,
+      "feeBehaviorClaim": false,
+      "universalFeeBehaviorClaim": false
+    }
+  },
+  "publicDiscovery": {
+    "status": "release-candidate",
+    "activationStage": "pending-public-discovery-promotion",
+    "publicAuthorization": false,
+    "publicWrites": false,
+    "releaseReady": false,
+    "activationBlockers": [
+      "public-cli-release",
+      "generated-release-evidence",
+      "clean-room-end-to-end-proof",
+      "public-indexing-canary"
+    ],
+    "cli": {
+      "sourceCandidateVersion": "4.0.0",
+      "sourceCandidate": true,
+      "released": false,
+      "installable": false,
+      "signsWalletTransactions": false,
+      "broadcastsWalletTransactions": false
+    }
+  },
+  "referenceImplementation": {
+    "sourceCommit": "cbcabd3cfc166124485c6f7e7c3951810cf60dc1",
+    "chainProfileCompiler": {
+      "solc": "0.8.26",
+      "evmVersion": "cancun",
+      "optimizer": true,
+      "optimizerRuns": 1000,
+      "bytecodeHash": "none",
+      "cborMetadata": false,
+      "binaryLabel": "solc-0.8.26+commit.8a97fa7a.Darwin.appleclang"
+    },
+    "standardJsonSettings": {
+      "optimizer": {"enabled": true, "runs": 1000},
+      "viaIR": false,
+      "evmVersion": "cancun",
+      "metadata": {"appendCBOR": false, "bytecodeHash": "none", "useLiteralContent": false}
+    },
+    "graphFactory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "launchStampRouter": "0x34965F2A2ee9254522232C32F02056E92BE0C98a",
+    "routerSourceRules": {
+      "externalCaller": "permit.launchWallet",
+      "factoryCaller": "launch stamp router",
+      "targetDeployment": "all graph targets before all initializers, in one reverting transaction",
+      "poolState": "uninitialized before graph execution and initialized after graph execution"
+    },
+    "create2SaltInputs": [
+      "chainId",
+      "factory",
+      "routeNamespace",
+      "routeNonce",
+      "targetIdHash",
+      "applicantSalt",
+      "authorizedLauncher"
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "WP-35",
+  "title": "Live stage paths: drive all eight cycle stages through CycleRunner in the stage driver",
+  "goal": "Replace the six remaining LiveModeIntegrationPendingError refusals in packages/adapters/src/app/stage-driver.mjs with real execute paths so a liveMode true cycle runs end to end: funding, outbound, return and payout on Robinhood Chain (calldata from hook-contract-client, signed through the operator signer client from WP-33, broadcast through robinhood-rpc, observed until CycleRunner's production profile accepts the evidence); buyback on Solana (collector-crypt buyback with the card mint from the open evidence, signed and broadcast through the Solana operator signer client and solana-rpc); distribution through snapshot-indexer, pro-rata, the distribution signer client and the verifier receipts written by hookemon-verifier; every stage follows the stage-by-stage call surface in docs/modules/cycle-runner.md, records the broadcast before observing, and never re-broadcasts a transaction whose signature is already recorded. Purchase and open keep their existing live paths but move onto CycleRunner evidence as well, so the parallel journal in cycle-repository.mjs disappears except for the stage-attempt record.",
+  "deps": [
+    "WP-32",
+    "WP-33",
+    "WP-34"
+  ],
+  "parallelGroup": 10,
+  "writeSet": [
+    "packages/adapters/src/app/stage-driver.mjs",
+    "packages/adapters/src/app/stages/*.mjs",
+    "packages/adapters/src/app/cycle-repository.mjs",
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/README.md",
+    "packages/adapters/bin/hookemon-runner.mjs",
+    "packages/adapters/src/*.mjs (smallest missing adapter function only, with a test)",
+    "packages/adapters/test/app/**",
+    "packages/adapters/test/*.test.mjs (only for added adapter functions)",
+    "docs/modules/composition-root.md",
+    "docs/modules/index.json (only the sha256 entry of docs/modules/composition-root.md)"
+  ],
+  "readSet": [
+    "docs/modules/cycle-runner.md (stage-by-stage call surface; follow it literally)",
+    "packages/runner/src/cycle/cycle-runner.mjs, evidence-profile.mjs, reducer.mjs",
+    "packages/runner/src/operator/cycle-plan.mjs and cycle-escrow-observation.mjs (WP-34 production path)",
+    "packages/adapters/src/signing/*.mjs (WP-33 signer clients and standing authority)",
+    "packages/adapters/src/hook-contract-client.mjs, robinhood-rpc.mjs, solana-rpc.mjs, collector-crypt.mjs, relay-client.mjs",
+    "packages/runner/src/automation/automated-cycle-service.mjs (reconcile returns null until the mutation is durably done)",
+    "packages/runner/src/distribution/{snapshot-indexer,pro-rata,distribution-signer,settlement-worker}.mjs"
+  ],
+  "steps": [
+    "Split stage-driver.mjs into one module per stage under packages/adapters/src/app/stages, each exporting probe (liveMode false) and execute plus reconcile (liveMode true) following the call surface table",
+    "Robinhood stages: build calldata with hook-contract-client, sign with the operator EVM signer client, broadcast with robinhood-rpc, then observe receipts and logs and translate them into the runner's canonical evidence envelope; the vault inputs come from the WP-34 frozen control",
+    "Solana buyback: getBuybackAvailable for the mint from the open evidence, build the buyback request through collector-crypt, sign and broadcast through the Solana operator signer client and solana-rpc, observe the transaction and translate it into the envelope",
+    "Distribution: snapshot holders at the cycle block through snapshot-indexer, compile the pro-rata manifest, obtain the distribution approval through the distribution signer client, wait for the verifier receipt written by hookemon-verifier, then hand the pair to settlement-worker for the payout stage",
+    "Idempotency: a broadcast signature is recorded durably before observation; on retry the stage resumes observation instead of re-broadcasting; crash-and-resume tests between every pair of stages",
+    "Tests with fake transports and throwing signer stubs: a full liveMode true cycle runs all eight stages; a liveMode false cycle never reaches sign or broadcast; run the adapters suite, the runner suite, the dashboard suite, scripts/tests and the clean-room scanner before the single commit; update docs/modules/composition-root.md and only its digest in docs/modules/index.json"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test packages/dashboard/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "No LiveModeIntegrationPendingError remains; a liveMode true cycle with fake transports runs all eight stages through CycleRunner's production profile to a settled payout",
+    "With liveMode false no code path reaches sign or broadcast (throwing stubs)",
+    "Crash-and-resume between every pair of stages never double-spends and never re-broadcasts a recorded signature",
+    "All suites green; clean-room scanner green; packages/runner and packages/dashboard keep zero npm dependencies"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context reviewer mandatory; the reviewer must reproduce the liveMode false proof and the crash-and-resume proof and must check that no key material is read anywhere. If a Collector Crypt, Relay or Robinhood fact is missing (endpoint, program id, deposit address), model it as a validated configuration value and report it; never guess. This is the package that makes live mode reachable; nothing runs live before the launch gating in the handoff plan is satisfied. COORDINATOR NOTE: split out of WP-32; depends on WP-33 (signer clients) and WP-34 (frozen control production path). COORDINATOR NOTE (base state after WP-33/34): WP-33 delivered packages/adapters/src/signing (signer-client.mjs wrapSignerClient with the liveMode gate, external-module-signer.mjs, keychain-signer.mjs through an injected exec, standing-authority.mjs with buildCanonicalStandingAuthorityDocument, attachOwnerSignature, loadVerifiedStandingAuthorityDocument), environment.mjs loadOperatorSignerClient and loadStandingAuthority (not yet called by bin/hookemon-runner.mjs: wire them in this package), bin/hookemon-verifier.mjs as the separate verifier process (role string is exactly verifier, re-exported from packages/runner/src/distribution/distribution-signer.mjs VERIFIER_ROLE). WP-34 delivered packages/runner/src/operator/cycle-escrow-observation.mjs verifyProductionCycleEscrowObservation(value, {observers}) and createFrozenCycleControl(input, deps) where deps.observers.evm is optional (live check only when supplied) and a usdgBalance >= plan.minimumRobinhoodReceive floor always runs; the production frozen control path is exercised in packages/runner/test/integration/production-cycle.test.mjs. Read docs/modules/signing.md, cycle-runner.md and composition-root.md before coding. The head is clean: cleanroom passes, runner and adapters and dashboard suites green, scripts/tests 407/409 (phase1-release and phase1-reproducibility red, owned by WP-22; leave them). Register nothing in docs/modules/index.json beyond the composition-root.md digest; do not edit gates/init.json."
+}

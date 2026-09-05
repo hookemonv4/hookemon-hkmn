@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "Owner approved the lean Phase 2 PRD assumptions for local implementation: manual pre-freeze control, exact resume, and a fresh isolated cycle after terminal failure.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "cdcf3eeb87f0870ac886ab5af69af15cc29063237eaecb6f9d4d832263347012",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "product/PRD.md": "c8e563538b1a2fa885cfbf6cb9377582df03c6c36642070dc14de35775f35509"
+  }
+}

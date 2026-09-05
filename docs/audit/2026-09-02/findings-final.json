@@ -1,0 +1,2914 @@
+[
+  {
+    "id": "HK-001",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 145,
+    "title": "Expired pending funding authorization can never be cleared, bricking the vault before any funds move",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "In authorizeFunding, treat an expired pending authorization as replaceable: if (pendingAuthorization.cycleId != 0 && pendingAuthorization.expiresAt > block.timestamp) revert AuthorizationUnavailable(); delete pendingAuthorization; then proceed. Add a test that authorizes, warps past expiry, and re-authorizes with a fresh nonce/cycleId.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 3
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 0
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 0
+      }
+    ]
+  },
+  {
+    "id": "HK-002",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 207,
+    "title": "FUNDED with expired funding authorization locks the released principal forever",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Either drop the redundant expiry re-check in executeOutbound (the deadline is already enforced at consumeFundingAuthorization and the route is digest-bound), or add a hook-initiated cancelFunding(cycleId) that returns the exact amount to the hook, re-credits process liability, and returns lifecycle to PAYOUT_COMMITTED/EMPTY.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 2
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 1
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-003",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 283,
+    "title": "RETURNED state has no exit: a 1-unit dust donation or an expired payout authorization both permanently lock the cycle's returned proceeds",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "In consumePayoutAuthorization require balanceOf(vault) >= rootSum and transfer exactly rootSum (drop the exact-equality and the post-transfer balance==0 checks; surplus stays in the vault for the next cycle's authorizePayout to absorb). Separately, allow the authorizer to replace an unconsumed, expired payout authorization while lifecycle == RETURNED (new nonce, same cycleId, re-pinned rootSum) so a missed deadline is recoverable. Add tests for both: donation-after-authorizePayout, and expiry-then-reauthorize.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 0
+      },
+      {
+        "file": "contracts-process--correctness",
+        "index": 1
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 2
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 1
+      },
+      {
+        "file": "contracts-payout--correctness",
+        "index": 0
+      },
+      {
+        "file": "contracts-payout--security",
+        "index": 0
+      }
+    ]
+  },
+  {
+    "id": "HK-004",
+    "file": "packages/contracts/test/process/PegCycleVault.t.sol",
+    "line": 133,
+    "title": "PegCycleVault's own expiry and terminal-failure tests certify the dead-ends above as \"unchanged\" instead of exercising a recovery, and the terminal-failure test hides its griefing dead-end behind a mock-only burn",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add tests that, after each expiry, assert a fresh authorizeFunding/executeOutbound/consume path succeeds (they will fail until HK-001/002/003 are fixed); replace the terminal-failure test's usdg.burn with a recovery path that exists in production (e.g. a sweep to the hook), and add an explicit griefing test that a stranger's 1-unit transfer cannot block the authorizer.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 0
+      },
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-005",
+    "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+    "line": 4,
+    "title": "No HKMN token creation or Launchpad issuance path exists anywhere in the repository",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Under a fresh owner-approved spec revision, add a launch adapter that binds the official Robinhood path (UERC20Factory.createToken with the approved name/symbol/decimals/totalSupply, plus LiquidityLauncher distribution placing 90% into the canonical pool position custodied by PermanentPositionCustody and 10% into an evidence-bound lock), record its ABI/runtime hashes in bindings/robinhood-chain.json, and re-enable the disabled FixedSupplyBinding test against that path.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 0
+      },
+      {
+        "file": "contracts-launch--security",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-006",
+    "file": "packages/runner/src/cycle/schemas.mjs",
+    "line": 284,
+    "title": "Collector Crypt / provider receipt verification is fixture-only end to end; every production entry point throws INTEGRATION_PENDING",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Introduce a provider adapter interface (verifyReceipt, verifyCollectorStatus, verifyOpenCustody, verifyRpcFinality) selected by configuration, with a production implementation that calls the real Collector Crypt API and independent Solana/EVM RPCs; keep the fixture implementation for tests only and retire the throwing stubs once the adapter exists.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 0
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 0
+      },
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 4
+      },
+      {
+        "file": "runner-cycle-a--security",
+        "index": 3
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 0
+      }
+    ]
+  },
+  {
+    "id": "HK-007",
+    "file": "packages/runner/src/cycle/decoder.mjs",
+    "line": 152,
+    "title": "Transaction decoder only understands a fixture hex-JSON envelope, not real Solana or EVM wire transactions",
+    "severity": "critical",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Implement a production decoder that parses Solana MessageV0/legacy bytes, enforces program-id and account allowlists derived from the binding manifest, and verifies signatures against configured signer pubkeys (multi-signer); add a separate EVM decoder for the Robinhood legs. Keep the fixture codec test-only.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-008",
+    "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+    "line": 157,
+    "title": "Per-swap independent flooring with no 1,000-unit minimum violates the mandatory Programmable fee policy v1.1.0",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "Obtain an explicit owner/Programmable-maintainer waiver recorded in product/OWNER_DECISIONS.md, or: (a) revert when |amountSpecified|/executedUsdg < 1000 in the accounting seam, and (b) replace _splitLiability with persistent numerator remainders (programmableNumerator += executedUsdg*10; fee = numerator/10_000; numerator %= 10_000, same for treasury) that claims never reset.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 0
+      },
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 0
+      },
+      {
+        "file": "contracts-kernel--security",
+        "index": 3
+      },
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 0
+      }
+    ]
+  },
+  {
+    "id": "HK-009",
+    "file": "packages/contracts/src/market/CanonicalMarket.sol",
+    "line": 240,
+    "title": "Any nonzero v4 protocol fee permanently bricks every swap on the canonical pool",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Single-router binding & swap execution",
+    "repair": "Drop the protocolFee == 0 term from _matches() (keep k.fee == 0 and liveLpFee == 0), add a test that swaps succeed with a nonzero protocol fee, and document that protocol fees do not alter the hook's basis. If the owner insists on rejecting protocol fees, obtain a written commitment from the Robinhood Chain PoolManager owner before deployment.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 0
+      },
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-010",
+    "file": "packages/contracts/src/market/CanonicalMarket.sol",
+    "line": 157,
+    "title": "Immutable single-router binding plus a mandatory 128-byte bespoke hookData makes every standard swap path revert",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Single-router binding & swap execution",
+    "repair": "Accept empty hookData for fee purposes (treat recipient/operationId as optional observation fields, keep the router-sender binding only for the operator client's own swaps) and drop the constructor-time router pin or replace it with a PoolManager-only check, since the fee is already enforced entirely in-hook.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-011",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 306,
+    "title": "Partial return below minimumReturnUsdg has no valid transition; funds stay stuck in OUTBOUND",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Let recordTerminalFailure accept a nonzero balance and sweep it exactly to the hook as a (possibly below-minimum) payout, or allow authorizePayout with rootSum < minimumReturnUsdg when explicitly flagged as a degraded return. Cover with a test that returns minimumReturnUsdg - 1.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 4
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 4
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-012",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 309,
+    "title": "FAILED is an absorbing state for an immutable 1:1 vault, so one terminal failure locks all future process fees in the hook",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "For Phase 1, document plainly that FAILED ends the hook's process budget permanently and that the process share should be treated as at-risk. For the autonomous target, either allow FAILED -> EMPTY via an authorizer call once the failure receipt is recorded and balance is zero, or adopt the per-cycle vault design already sketched on codex/phase2-revision-57.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 5
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 3
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 4
+      },
+      {
+        "file": "contracts-payout--correctness",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-013",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 92,
+    "title": "No route-executor implementation exists; the vault and hook are immutably bound to an executor that must be deployed first",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Before any deployment, implement and audit a concrete IPegCycleRouteExecutor adapter for the chosen bridge/purchase route, pin its address in bindings/robinhood-chain.json, and add a fork test proving executeOutbound's balance-delta and allowance checks hold against it.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 6
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-014",
+    "file": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+    "line": 6,
+    "title": "Hard cap of 1,024 recipients per cycle with no chunking mechanism",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Decide and specify a chunking rule explicitly (multiple payoutIds per cycle, each with its own rootSum summing to the vault balance) or an accumulate-then-distribute rule, and add the rounding-remainder rule to the manifest spec; alternatively raise TREE_DEPTH if gas permits.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 2
+      },
+      {
+        "file": "contracts-payout--security",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-015",
+    "file": "packages/contracts/src/payout/PayoutCommitment.sol",
+    "line": 8,
+    "title": "Manifest recipients/amounts are unverifiable on-chain; the vault authorizer key controls the entire distribution",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "For Phase 2, keep the authorizer cold-approved, or add an on-chain constraint the hook itself can check (e.g. checkpointed HKMN balances via an ERC20Votes-style interface with amount == unpaidTotal * checkpointBalance / snapshotSupply), or at minimum require a second independent verifier signature plus a delay between authorizePayout and consumePayoutAuthorization so a monitoring process can veto a wrong manifest.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--security",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-016",
+    "file": "packages/contracts/src/settlement/HolderSettlement.sol",
+    "line": 26,
+    "title": "Phase 1's \"permissionless payment worker\" has no implementation; settlement is pull-only, one leaf per transaction, and nothing drives it",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Add a small off-chain worker under packages/runner (Phase 2 spec revision required) that reads the published manifest, rebuilds proofs with the canonical Merkle-sum tooling, skips already-paid leaves, and submits payEntitlement per leaf with retry; specify who pays gas and the retry policy.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 0
+      },
+      {
+        "file": "contracts-payout--correctness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-017",
+    "file": ".github/workflows/v4-gates.yml",
+    "line": 168,
+    "title": "CI and the release gate execute only the bindings and market test suites; process, payout, settlement, access, launch, blind and the real-PoolManager/adversarial suites never run on merge",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add forge test --match-path for test/accounting, test/integration/HookemonHook.t.sol, test/process, test/payout, test/settlement, test/access, test/launch and the blind suites (plus node --test for the JS blind suites) to the v4-gates workflow, and register each as a required check with expected pass counts in scripts/verify-phase1-release.mjs.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 1
+      },
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-019",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 408,
+    "title": "The vault can be debited and a pack purchased before any Collector generate step occurs; the cycle is then permanently stuck with no return path",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "In evidenceForTransition, require for next === 'outbound-finalized' that state.collector.generateIntent, its authorization, and collector.generated all exist and are externally reconciled; equivalently, make verifyIntent for 'outbound' throw when state.collector.generated is null instead of silently guarding on it.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 0
+      }
+    ]
+  },
+  {
+    "id": "HK-020",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 321,
+    "title": "No void/failure path for an external mutation that never broadcasts; a crash or a dropped/expired transaction strands the cycle forever",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Add a negative-reconciliation event (e.g. 'external-mutation-voided') accepted only with independently verified evidence that the signed transaction cannot land (blockhash-validity evidence with observedHeight > lastValidHeight plus a signature-not-found RPC attestation bound to signedBytesDigest); once voided, allow a fresh intent/attempt with a new blockhash for the same actionKind.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 1
+      },
+      {
+        "file": "runner-cycle-a--security",
+        "index": 2
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-021",
+    "file": "packages/runner/src/cycle/journal.mjs",
+    "line": 7,
+    "title": "RECOVERY_LIMITS make the cycle store unreopenable after roughly five closed cycles",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Raise storeAuthorizations to at least storeCycles * 24 (384), enforce the same cap inside commit() so a live store can never grow into an un-reopenable snapshot, and add a test that closes storeCycles cycles and successfully reopens the snapshot.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 2
+      },
+      {
+        "file": "runner-cycle-a--security",
+        "index": 0
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 3
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-022",
+    "file": "packages/runner/src/cycle/cycle-store.mjs",
+    "line": 138,
+    "title": "The cycle store and journal are in-memory only with no durable persistence, no scheduler, and no cross-process lock",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Implement a durable store adapter (e.g. SQLite via node:sqlite, or an fsync'd append-only file) whose commit() resolves only after durable persistence, with the CAS enforced at the row/version level and a lease so only one process may commit for a cycle; add a separate scheduler service that drives CycleRunner on an interval with per-step timeouts and reconciliation-on-restart. Keep FixtureCycleStore for tests only.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 3
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 2
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 6
+      },
+      {
+        "file": "runner-cycle-a--security",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-023",
+    "file": "packages/runner/src/cycle/schemas.mjs",
+    "line": 113,
+    "title": "Action policy hardcodes fixture accounts, pack id and amounts; no real pack selection or budget sizing exists",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Replace FIXTURE_ACTION_POLICY with a policy derived from the preflight/binding manifest: an allowed-pack catalog, amounts from the released process budget and a live pack quote with a slippage-derived minimumReceive, real account addresses from the binding manifest, and a card mint taken from verified open-custody evidence rather than a constant.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 1
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 5
+      },
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 15
+      }
+    ]
+  },
+  {
+    "id": "HK-024",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 531,
+    "title": "Activity-isolation invariants require exact-zero balances on publicly fundable accounts, so a dust transfer permanently blocks cycle closure",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Verify balance deltas (post - pre == amount, attributable by transactionSignature) rather than absolute-zero opening balances and single-movement windows, or guarantee per-cycle fresh escrow accounts, and add a journaled 'foreign-movement-acknowledged' event so an honest operator can close a dusted cycle without forging evidence.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--security",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-025",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 749,
+    "title": "Every cycle step needs a distinct, fresh owner-signed authorization (roughly 23-24 per cycle) with no automated signer, and expiry is checked against a frozen 2029 clock rather than real time",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Specify and get owner approval for a bounded automated authority: a policy-wallet/signer service holding a delegated key with per-cycle spend caps, a pack allow-list and an interval, producing per-step authorizations and Solana signatures under those caps, with the owner key reserved for changing the policy; inject a real, bounded-skew clock in place of the frozen constant.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 5
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-026",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 573,
+    "title": "Single-chain model: every action is forced onto Solana; the USDG(Robinhood)-to-Circle USD(Solana) bridge legs are entirely unmodeled",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Model each action with its own chain domain and per-chain finalized block height, split outbound/return into explicit bridge-out (EVM burn/lock receipt) and bridge-in (Solana mint/credit receipt) actions with their own evidence, and bind the vault activity window to EVM block hashes only.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 6
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 7
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-027",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 275,
+    "title": "Buyback accounting conflates NFT units with the Circle USD refund amount",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Give the action separate inputAmount (NFT units, always '1' for a buyback) and expectedOutputAmount/minimumReceive (Circle USD) fields; bind refundAmount to the Circle USD expectation and relation.amountIn to inputAmount, and make the purchase relation carry NFT quantity and Circle USD amountIn separately.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-028",
+    "file": "packages/runner/src/cycle/preflight.mjs",
+    "line": 28,
+    "title": "The runner refuses to load at all unless interfaces.json says productPhase 1 / revision 56 / architecture 4, and demands a fixture-signed release attestation every cycle",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Move the revision pin into the binding manifest / policy loaded at runtime rather than a compile-time assertion, implement a production release verifier that reads finalized PegCycleVault release events via RPC, and let the scheduler derive releasedAmount from the on-chain process-budget balance each cycle.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 4
+      },
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-029",
+    "file": "packages/runner/src/cycle/vault-payout-authorization.mjs",
+    "line": 146,
+    "title": "Holder payout automation stops at digest computation; nothing signs, submits, or publishes anything on-chain",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Add a payout executor module: sign the digest with the configured authorizer key, build and broadcast the fundPayout transaction via the Robinhood RPC, verify the emitted event and record it as a receipt, then push-pay all entries via payEntitlement (batched, idempotent via isPaid), journaling each transaction hash and publishing the manifest to at least two independent locations as the docs require.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 8
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-030",
+    "file": "packages/runner/src/cycle/execution-accounting.mjs",
+    "line": 6,
+    "title": "Balance-delta accounting and blockhash liveness are attested only by hardcoded fixture oracle keys; no RPC or indexer client exists",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Implement an RPC-backed accounting producer using getTransaction's meta.preBalances/postBalances, token balances and meta.fee, and a blockhash-validity producer using getLatestBlockhash/isBlockhashValid; sign attestations with a configured oracle key (or verify unsigned RPC data directly), and add the opening+movements==closing check inside verifyAccountActivity itself.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-031",
+    "file": "packages/runner/src/distribution/manifest.mjs",
+    "line": 227,
+    "title": "Distribution manifest proof domain (chainId, hook) is taken from the caller-supplied approval and never bound to the runner's actual chain/hook, so a funded payout can become permanently unclaimable",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Add chainId and hook fields to the approval binding and to the verification receipt (from artifact.domain), and require in reducer.recordDistributionVerification that they equal state.preflight.releaseEvidence.chainId and state.preflight.hook; additionally have verifyApproval reject an approval whose chainId/hook does not match the closed-proceeds-basis chain, and fix the test fixture to use one consistent chainId.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--correctness",
+        "index": 0
+      },
+      {
+        "file": "runner-distribution--security",
+        "index": 1
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 0
+      }
+    ]
+  },
+  {
+    "id": "HK-032",
+    "file": "packages/runner/src/distribution/manifest.mjs",
+    "line": 366,
+    "title": "verifyDistributionCopies forwards candidateDigest/ownerApprovalDigest unverified and never re-checks the owner approval it is meant to independently confirm",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Give verifyDistributionCopies the approval, closedProceedsBasis, snapshot and entries; have it re-run compileApprovedDistribution (or at minimum verifyApproval + deriveHolderDistributionCandidate) and compare the recomputed digests with the supplied artifact before issuing the receipt; add ownerApprovalDigest, snapshotDigest and entriesDigest to the receipt and check them in the reducer against a journaled approval record.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--correctness",
+        "index": 1
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-033",
+    "file": "packages/runner/src/distribution/reconcile.mjs",
+    "line": 328,
+    "title": "No pro-rata invariant is enforced anywhere; any USDG split that sums to the cycle's credit is accepted",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Define the pro-rata rule once in reconcile.mjs (e.g. floor(proceeds * balance / sumBalances) per holder with a deterministic remainder rule such as largest-remainder-to-lowest-index), have deriveHolderDistributionCandidate compute entries from the snapshot itself rather than trusting caller-supplied entries, and add a property test asserting the sum equals proceeds and each amount is within one atomic unit of its exact share.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--correctness",
+        "index": 2
+      },
+      {
+        "file": "runner-distribution--security",
+        "index": 2
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-034",
+    "file": "packages/runner/src/distribution/reconcile.mjs",
+    "line": 282,
+    "title": "Runner-side snapshots with more than 1,024 holders are rejected outright, with no chunking and no snapshot-completeness binding",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Implement chunking (split into ceil(n/1024) payoutIds per cycle, each with its own manifest and vault authorization) or an explicit approved selection rule (e.g. top-1024 by balance with remainder carried to the next cycle), and add snapshot coverage fields (totalSupply, includedSupply, excluded-dust total) that the candidate digest binds and the reducer checks.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 3
+      },
+      {
+        "file": "runner-distribution--security",
+        "index": 3
+      },
+      {
+        "file": "runner-distribution--correctness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-035",
+    "file": "packages/runner/src/distribution/reconcile.mjs",
+    "line": 268,
+    "title": "No live holder-snapshot source exists; finality and balances are entirely caller-asserted",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Add a snapshot provider module that reads a finalized Robinhood block, replays Transfer events or multicalls balanceOf for known holders (excluding the hook/vault/treasury addresses), emits a signed snapshot under a distinct verifier key and authority string, and binds tokenAddress/chainId to the launch bindings inside validateSnapshot.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-036",
+    "file": "packages/runner/src/distribution/manifest.mjs",
+    "line": 11,
+    "title": "The production distribution verifier trusts hardcoded fixture Ed25519 keys whose private halves are committed in the repository",
+    "severity": "high",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Move both public keys out of source into injected configuration (constructor/option parameter, or an environment-provided SPKI hex validated at startup) and fail closed if they equal the committed fixture constants outside a declared test/fixture chain id; add a test asserting a receipt signed by a different key is rejected.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--security",
+        "index": 0
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 5
+      },
+      {
+        "file": "runner-distribution--correctness",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-037",
+    "file": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+    "line": 133,
+    "title": "The Programmable beneficiary is never pinned to the policy-mandated owner address 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "Add a PROGRAMMABLE_OWNER constant with the exact policy address to RobinhoodBindings.sol, include binding.programmableBeneficiary != PROGRAMMABLE_OWNER in the InvalidKnownProviderIdentity condition, add the same check to PhaseOneReleasePlan, and have the deployment script derive config.programmable from that constant.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 1
+      },
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 3
+      },
+      {
+        "file": "contracts-kernel--security",
+        "index": 6
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-038",
+    "file": "packages/contracts/src/market/CanonicalMarket.sol",
+    "line": 157,
+    "title": "hookData recipient/operationId are attacker-controlled through the real, bound UniversalRouter",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Single-router binding & swap execution",
+    "repair": "Either remove recipient/operationId from hookData and the buyerHkmnCredit/last* state entirely (they add no fee-accounting safety), or bind them cryptographically (hookData carries an operations-role signature over operationId/recipient/params, with operationId marked consumed). Off-chain code must reconcile via the swap's own transaction receipt/BalanceDelta, never via the last* storage globals.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 1
+      },
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 3
+      },
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-039",
+    "file": "packages/contracts/src/market/CanonicalMarket.sol",
+    "line": 222,
+    "title": "Exact-output quadrants charge 3% of the net leg, not the gross quote-side amount (2.913% effective), leaving Programmable 9.7 bps short of the mandatory 10 bps floor",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "Gross up in both exact-output quadrants: fee = ceil(net * 300 / 9_700), i.e. solve for the gross amount G such that G - floor(G*300/10000) = net (or charge fee on net+fee iteratively) in _beforeSwap and _validateFinalizedSwap; update RobinhoodBindings._validateHookAccounting identically and add tests asserting fee/gross == 3% in all four quadrants; record the decision in a new ADR.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 2
+      },
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-040",
+    "file": "packages/contracts/src/HookemonHook.sol",
+    "line": 156,
+    "title": "Programmable/treasury claims cannot name a destination and emit no event, conflicting with the policy's owner-selected-destination rule",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "Resolve the blocker with the owner and Programmable maintainers before deployment; if the policy wins, allow msg.sender == owner to pass any nonzero destination != address(this), thread it through _claimLiability, and emit ProgrammableClaimed/TreasuryClaimed(beneficiary, destination, amount) events.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 4
+      },
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 2
+      },
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 5
+      },
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-042",
+    "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+    "line": 81,
+    "title": "No fee-collection amounts in the swap event and no claim event at all, so on-chain reconciliation of liabilities is impossible",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "Add event FeeAccrued(executedUsdg, totalFee, programmableFee, treasuryFee, processFee, treasuryBeneficiary) in _accrueAuthenticatedSwap and event FeeLiabilityClaimed(class, beneficiary, destination, amount) in _claimLiability, and freeze both in architecture/interfaces.json before deployment.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 5
+      },
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-043",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 301,
+    "title": "recordTerminalFailure is callable immediately after executeOutbound as a single-key kill switch, with no timelock or pre-commitment",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Require a minimum elapsed time since executeOutbound (record an outboundAt timestamp) before recordTerminalFailure is callable, and/or require the failure receipt digest to be pre-committed inside the FundingAuthorization so failure evidence is bound at authorization time rather than freely chosen after the fact.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--security",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-044",
+    "file": "packages/contracts/src/settlement/HolderSettlement.sol",
+    "line": 45,
+    "title": "An unpayable or issuer-frozen leaf locks its share of the payout forever: no sweep, expiry, or correction path",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Keep the on-chain no-sweep guarantee, but have the offchain manifest builder query the USDG proxy's freeze view before building a snapshot and exclude frozen addresses at that point; specify a Phase 2 long-horizon re-commitment rule (e.g. after N years an unpaid remainder may be re-rooted into a new payoutId) if the owner wants stuck value ever recoverable.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 3
+      },
+      {
+        "file": "contracts-payout--security",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-046",
+    "file": "packages/contracts/src/settlement/HolderSettlement.sol",
+    "line": 33,
+    "title": "REQ-holder-settlement-6's mandatory gas-headroom evidence does not exist",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add a forge gas-snapshot test covering index 0, index 1023, replay, malformed proof and transfer failure, writing numeric headroom against the bound Robinhood gas limit from bindings/robinhood-chain.json, and cite it from the module card.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-047",
+    "file": "packages/contracts/script/release/PhaseOneReleasePlan.sol",
+    "line": 134,
+    "title": "Hook CREATE2/runtime verification is self-referential: it never recomputes the hook's init-code preimage and never checks the v4 permission-bit mask",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Extend Plan with HookemonHook.ConstructorConfig fields and recompute hookInitCodeHash = keccak256(abi.encodePacked(type(HookemonHook).creationCode, abi.encode(config))) exactly as already done for the vault; add the uint160(expectedHook) & 0x3FFF == 0x00CC check; extend Plan with the PoolManager/router/HKMN/PoolKey/custody identities and staticcall PegCycleVault(expectedVault).hook() inside verifyDeployedRuntime to confirm mutual binding; make the invariant fixture deploy a real HookemonHook so the recomputation is actually exercised.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 0
+      },
+      {
+        "file": "contracts-launch--security",
+        "index": 0
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 1
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-048",
+    "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+    "line": 206,
+    "title": "Two Solidity implementations of the issuance-trace rule disagree, and neither matches the vendored launchpad's actual transfer topology",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Define one trace rule in a shared library used by both the guard and the spec that models the bound path explicitly (mint 0->issuanceSource, then exactly one direct leg each to canonicalMarket and remainderRepresentation, sum-of-outbound == totalSupply), and record in bindings/robinhood-chain.json which address issuanceSource actually is once the launchpad path is bound.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-049",
+    "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+    "line": 145,
+    "title": "HKMN decimals are frozen into the hook before the token exists, with no repository artifact binding the value to what the launchpad will actually mint",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Add hkmn.decimals (and the resulting scaled totalSupply/marketAllocation/remainderAllocation) to bindings/robinhood-chain.json, have the release runner derive both HookemonHook.ConstructorConfig.expectedDecimals and the launchpad's createToken decimals argument from that single field, and assert equality in PhaseOneReleasePlan or the runner's pre-flight.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 2
+      },
+      {
+        "file": "contracts-launch--security",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-050",
+    "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+    "line": 135,
+    "title": "The issuance guard is evidence-only and gates nothing: no swap, claim or payout path reads its status, and observation.token is never checked against the hook's own HKMN",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Either (a) pass Currency.unwrap(config.hkmn) into HookemonIssuance and revert InvalidIdentity when observation.token != hkmn, and require GuardStatus verified before the first authenticated swap/fee accrual, or (b) remove the guard from the immutable hook entirely and move issuance evidence to the offchain release manifest, matching the owner-approved thin-V1 boundary.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--security",
+        "index": 2
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 3
+      },
+      {
+        "file": "contracts-launch--correctness",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-051",
+    "file": "packages/contracts/test/blind/token-roles/FixedSupplyBlindSpec.sol",
+    "line": 58,
+    "title": "FixedSupplyBlindSpec has no live binding, so REQ-token-core-2 and REQ-token-core-3's mandatory measurements are never actually executed",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add a local concrete binding that deploys a fixed-supply ERC20 (e.g. via a local UERC20 factory) plus PermanentPositionCustody so the spec runs in CI now, and keep the provider-bound binding as a second subclass once the Launchpad is actually bound (HK-005).",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 5
+      },
+      {
+        "file": "contracts-launch--security",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-052",
+    "file": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+    "line": 522,
+    "title": "Recipient authentication is proven only by a bespoke test router, not by the hook or the bound UniversalRouter (test-side view of HK-038)",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Either document buyerHkmnCredit as router-attested only and drop the recipient-rejection claim from the evidence docs, or add an integration test against a UniversalRouter-equivalent router that shows the hook's actual (non-enforcing) behavior when hookData.recipient differs from the settled recipient.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-053",
+    "file": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+    "line": 362,
+    "title": "Sell-side quadrants and the gross-quote basis are not independently verified through a real PoolManager in any gated test",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "In HookemonHook.t.sol's quadrant runner, compute the gross amount from the returned BalanceDelta independently (assert abs(usdgDelta) + fee == lastExecutedUsdg for unspecified quadrants) rather than trusting the hook's own output, and add real-PoolManager sell quadrants to the CI-gated market suite.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-054",
+    "file": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+    "line": 750,
+    "title": "Foreign-pool rejection is tested only for the fee field; tickSpacing, hooks, currency order and currency-pair mutation vectors are all missing",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Extend the key-mutation helper with an enum covering tickSpacing, hooks, currency0/1 replacement, and currency ordering, asserting InvalidCanonicalPoolKey with zero fee collection for each mutation, and add an afterSwap variant of the same matrix.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-055",
+    "file": "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol",
+    "line": 251,
+    "title": "The release-gated local loop proves the canonical buy against an extsload-only PoolManager stub with a fee that is simply minted, not collected",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Replace LocalLoopPoolManager with a real PoolManager + PoolSwapTest (as HookemonHook.t.sol already does) and run the loop against the concrete HookemonHook, or explicitly label the gate's result as 'accounting-only, no pool execution' in the release evidence docs.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-056",
+    "file": "packages/contracts/foundry.toml",
+    "line": 1,
+    "title": "The requirement-mandated 100,000 fuzz/invariant runs (and 10,000 for token-core fuzzing) are not configured anywhere; every gate accepts Forge's 256-run default",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add [fuzz] runs = 100000 and [invariant] runs = 100000 (or a dedicated release profile) to foundry.toml, pass the equivalent --fuzz-runs/FOUNDRY_INVARIANT_RUNS flags in the release script, and tighten the release script's run-count regex to the actual required minimum per requirement.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 6
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-057",
+    "file": "packages/contracts/test/integration/HookemonHook.t.sol",
+    "line": 483,
+    "title": "The claim-destination test itself asserts that the owner cannot select a per-claim destination, contrary to the Programmable policy, and no test anywhere pins the programmable beneficiary to the mandated owner address",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "Decide with the Programmable maintainers whether owner-only-destination is acceptable; if not, update this test to allow msg.sender == owner to pass any nonzero destination and pass once HK-040 is fixed. Add a deployment-plan test asserting config.programmable equals the exact policy-mandated address for the production plan.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-058",
+    "file": "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol",
+    "line": 474,
+    "title": "invariant_onlyBoundOperationsCanReleaseProcessFunds exercises a harness-only binder function, not the production openPegCycle path",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Point attemptUnauthorizedOrReplay at the `payout` PayoutCommitmentHarness's real openPegCycle with a staged funding authorization, calling from `stranger`, and assert no vault or hook balance change; drop or clearly rename the bindCycleForFixture-based path.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-059",
+    "file": "packages/contracts/test/payout/PayoutCommitment.t.sol",
+    "line": 435,
+    "title": "The adversarial-USDG matrices validate four hand-written harness token adapters, not the production HookemonHook token adapter",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Extract the production adapter into a shared internal library or mixin used by both HookemonHook and every harness, or run the adversarial matrix once directly against HookemonHook (in test/integration) and reference that run from the other suites.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-060",
+    "file": "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+    "line": 119,
+    "title": "PermanentPositionCustody.onERC721Received is never executed by any test",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add tests that call custody.onERC721Received directly from the mock manager with a wrong caller, from != 0, a wrong tokenId, and the happy path, asserting positionReceived and the PositionPermanentlyReceived event in each case.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-061",
+    "file": "packages/contracts/test/blind/payout-settlement/scenario-matrix.json",
+    "line": 13,
+    "title": "The frozen scenario-matrix.json (revision 55) pins money flows that directly contradict the implemented revision-56 contracts and their own passing executable tests",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Re-freeze the matrix at revision 56 with the actual vault-custody deltas (or mark it explicitly superseded and remove it from the test tree), align interfaceBinding to the implemented state, and add a single cross-reference note stating which revision each pinned constant belongs to.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-062",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 1020,
+    "title": "Distribution verification requires the journal's cycleId to be a non-zero bytes32, but CycleJournal accepts any identifier, and the mismatch is discovered only after the cycle has closed",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Enforce the bytes32 cycleId format in CycleRunner's constructor (or against preflight.releaseEvidence's cycle id) so an invalid id fails fast before any mutation, rather than only at distribution time.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 5
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 15
+      }
+    ]
+  },
+  {
+    "id": "HK-063",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 1097,
+    "title": "Every authorization-expiry and timestamp check compares against one frozen 2029 clock constant, never wall time",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Inject a real, bounded-skew clock into CycleRunner/reducer (default Date.now, fixed only in tests), stamp each journal entry with its own timestamp as part of the digested entry, and validate approval expiry against the injected clock at the moment of consumption.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--security",
+        "index": 4
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 9
+      },
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-065",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 528,
+    "title": "Closed-ledger validation requires the vault to be fully drained with a zero pre-return balance, incompatible with any shared-treasury model",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Either adopt a per-cycle escrow address for both release and return and bind it in the preflight, or relax the closure checks to delta-based accounting (destination delta equals the receipt's amountOut, with the activity window filtered to the specific return transaction signature rather than requiring an empty account).",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-066",
+    "file": "packages/runner/src/cycle/cycle-runner.mjs",
+    "line": 83,
+    "title": "No observability surface exists anywhere in the runner or distribution pipeline for a community dashboard",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Add a read-only describe() method returning stage, unresolved mutations with attempt time, the next required event kind, consumed/pending authorization slots, awaited receipts and last-event timestamp, and emit the same as structured logs on every commit; add an equivalent status projection for the distribution pipeline.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 10
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 10
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 13
+      }
+    ]
+  },
+  {
+    "id": "HK-067",
+    "file": "packages/runner/src/cycle/cycle-runner.mjs",
+    "line": 59,
+    "title": "No forward recovery path exists when the journal and the store snapshot diverge; an empty store silently rebuilds cross-cycle registries from a single cycle",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Make the store the single source of truth (fold journal entries into it, persisted in one transaction) and allow recovery when the supplied journal is a strict prefix or extension of the stored one by replaying only the tail through the transaction.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-068",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 321,
+    "title": "No cross-cycle concurrency guard exists; the unresolved-mutation lock is scoped to one cycle only",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Autonomy / scheduling / persistence gaps",
+    "repair": "Add a store-level lease/active-cycle record, checked in begin(), so a new cycle may start only when no other cycle in the store has an unresolved mutation or a stage earlier than 'closed'; an unmerged prior branch (codex/complete-v4-hook) already sketches this as an automation service.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-070",
+    "file": "packages/runner/src/cycle/cycle-runner.mjs",
+    "line": 313,
+    "title": "Manifest bytes, entries, the approval, and the 1,024 proofs are never journaled or persisted anywhere",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Persist the compiled artifact (manifest bytes, entries, approval, proofs) alongside the verification receipt in the journal or a dedicated durable store, keyed by payoutId, before any payment automation is built on top of it.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-071",
+    "file": "packages/runner/test/integration/phase-one-local-loop-adapter.mjs",
+    "line": 117,
+    "title": "payoutId, nonce and expiresAt for the vault payout authorization are free-form caller inputs with no deterministic derivation",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Derive payoutId deterministically from cycleId (and a chunk index once HK-034's chunking lands), derive nonce from a persisted monotonic counter scoped to the payout domain, and derive expiresAt from the cycle's own release evidence plus a configured window; validate all three against those derivations before signing.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-072",
+    "file": "packages/runner/src/distribution/reconcile.mjs",
+    "line": 303,
+    "title": "Every snapshot holder must receive at least 1 atomic USDG and the entry set must exactly equal the full snapshot, so dust holders make small cycles undistributable",
+    "severity": "medium",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Relax the entries-equal-snapshot rule to require entries be a subset of the snapshot (every entry recipient exists with a matching balance, recipients unique) while every holder with a positive computed share must be present; define explicitly that zero-share holders are omitted for that cycle, mirroring the Programmable fee policy's cumulative-remainder style if a longer-term fairness guarantee is wanted.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--security",
+        "index": 4
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 2
+      },
+      {
+        "file": "runner-distribution--correctness",
+        "index": 3
+      }
+    ]
+  },
+  {
+    "id": "HK-073",
+    "file": "packages/contracts/src/market/CanonicalMarket.sol",
+    "line": 225,
+    "title": "Full-fill-or-revert makes any price-limit or thin-liquidity partial fill abort the whole swap",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Single-router binding & swap execution",
+    "repair": "Either accept partial fills and charge the fee on the executed amount (matching the policy's stated basis) or explicitly document full-fill-or-revert as an approved Phase 1 simplification in specs/requirements.json.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 5
+      },
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-074",
+    "file": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+    "line": 16,
+    "title": "DISPUTED: RobinhoodBindings pins REQUIREMENTS_REVISION 54 (and the hookData domain tag R54_A3) while the approved requirements revision is 56",
+    "severity": "low",
+    "status": "disputed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Either reconcile RobinhoodBindings.REQUIREMENTS_REVISION with the live revision (56) before any production release binding is produced, or, if the dissent's reading is endorsed by the owner, add an explicit one-line comment/decision record stating that this constant intentionally preserves the historical revision-54 provider-fact snapshot and is expected to remain 54.",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-075",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 136,
+    "title": "Frozen minimum-receive and gas-cap fields are validated at authorization time but never enforced or forwarded to the route executor",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Thread minimumReceive and the gas cap through to IPegCycleRouteExecutor's call and require the executor to report and be checked against both, once a real executor implementation exists (see HK-013).",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-076",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 249,
+    "title": "Funding and payout authorizations share one global nonce space",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Split the nonce namespace into two independent counters/mappings, one for funding authorizations and one for payout authorizations.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 8
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 7
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-077",
+    "file": "packages/contracts/src/process/ProcessBudget.sol",
+    "line": 43,
+    "title": "Role-distinctness/identity checks are asymmetric across MoneyRoles, ProcessBudget and PegCycleVault constructors",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Factor the distinctness check into one shared internal helper used identically by all three constructors, and add a test enumerating every role pair for each contract.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 9
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 9
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-078",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 358,
+    "title": "Custody correctness depends on a strict 32-byte true-return requirement on USDG.transfer that is unverified against the production proxy",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Add a fork test against the actual deployed USDG proxy address that calls transfer and asserts the return data shape matches what PegCycleVault expects, before relying on this in production.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--security",
+        "index": 8
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-079",
+    "file": "packages/contracts/src/process/ProcessBudget.sol",
+    "line": 67,
+    "title": "The funding-authorization digest is not retained per cycle, unlike the payout side",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "PegCycleVault dead-end / absorbing states",
+    "repair": "Retain the consumed funding-authorization digest per cycle in the same manner as the payout side, and expose it through a view function for reconciliation tooling.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-080",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 17,
+    "title": "The docstring says \"single-cycle\" but the lifecycle intentionally loops for unlimited sequential cycles",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Update the docstring to describe the sequential-cycle design accurately, cross-referencing docs/modules/peg-cycle-vault.md.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 6
+      },
+      {
+        "file": "contracts-process--correctness",
+        "index": 12
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-081",
+    "file": "packages/contracts/src/access/MoneyRoles.sol",
+    "line": 166,
+    "title": "Superseded revision-55 payout-funding helper functions remain as dead code in MoneyRoles, alongside a dead wrapper used only by the test harness",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Remove the superseded revision-55 helpers and the test-only _bindCycleOperations wrapper from the production contract, or move the latter into a test-only harness contract that inherits from MoneyRoles.",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 7
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 10
+      },
+      {
+        "file": "contracts-process--correctness",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-082",
+    "file": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+    "line": 116,
+    "title": "verify() reverts with SumOverflow instead of returning false on an overflowing proof",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Either document verify() as revert-on-overflow explicitly, or catch the overflow internally and return false instead, matching the boolean-return contract implied by its name and callers.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-083",
+    "file": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs",
+    "line": 337,
+    "title": "The canonical test vector and its Solidity anchor use chainId 466, not Robinhood Chain 4663",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Add a second canonical vector domain-bound to chainId 4663 (or update the existing one), and regenerate the Solidity anchor to match, once the real hook address is known.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 6
+      },
+      {
+        "file": "contracts-payout--security",
+        "index": 7
+      },
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-084",
+    "file": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs",
+    "line": 263,
+    "title": "The JS verifyProof implementation compares root sums by string identity rather than numeric/BigInt equality",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Compare as BigInt values (BigInt(a) === BigInt(b)) rather than as strings.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-085",
+    "file": "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol",
+    "line": 71,
+    "title": "A local forge run recorded the repository's one end-to-end payout test as failing",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Reproduce the failure in a clean environment, determine whether it is an environment/toolchain issue (e.g. missing --ffi, stale solc) or a real regression, and fix the underlying cause; add this test to a gate that would have caught it (see HK-017).",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--security",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-086",
+    "file": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+    "line": 162,
+    "title": "Canonical manifest validation does not enforce unique recipients, although the PRD requires it",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Add a uniqueness check for recipient addresses to the on-chain (or at minimum the off-chain manifest-compilation) validation path, matching the PRD's stated requirement.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--security",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-087",
+    "file": "packages/contracts/src/settlement/HolderSettlement.sol",
+    "line": 78,
+    "title": "The hardcoded 1024 recipient/leaf cap in HolderSettlement duplicates CanonicalMerkleSum.TREE_WIDTH instead of referencing it",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Replace the hardcoded 1024 in HolderSettlement.sol with a reference to CanonicalMerkleSum.TREE_WIDTH.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 3
+      },
+      {
+        "file": "contracts-payout--correctness",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-088",
+    "file": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+    "line": 153,
+    "title": "verify() re-implements the proof-fold loop instead of calling the existing rootFromProof helper, which is otherwise unused in production",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Have verify() call rootFromProof internally instead of duplicating its logic, or remove rootFromProof if it is intentionally kept separate for gas reasons and document why.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 4
+      },
+      {
+        "file": "contracts-payout--correctness",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-089",
+    "file": "docs/modules/holder-settlement.md",
+    "line": 38,
+    "title": "The holder-settlement module card's operational command references a machine-local solc path",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Update the documented command to use a portable solc resolution (e.g. via foundry's own toolchain management or a relative/PATH-based reference) rather than a hardcoded local path.",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-090",
+    "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+    "line": 109,
+    "title": "The one-shot issuance \"prepare\" step has no cancel path; a wrong frozen plan permanently strands the immutable hook",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Add an authorizer-gated cancelPrepare()/re-prepare path usable only before verifyIssuance has succeeded, so an operational mistake in the prepare step does not require a full redeploy.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-091",
+    "file": "packages/contracts/remappings.txt",
+    "line": 3,
+    "title": "The vendored liquidity-launcher and uerc20-factory submodules are pinned and remapped but cannot actually be imported or compiled under the repo's current remappings",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Either resolve the transitive dependency pin mismatch (align the submodules' own lib/ dependencies with the repo's), or drop the unused submodule pins until a launch adapter is actually being written, to avoid carrying broken vendored code.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 5
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-092",
+    "file": ".gitmodules",
+    "line": 4,
+    "title": "v4-periphery is pinned at a branch-tip commit with a mismatched nested v4-core gitlink, rather than a release tag",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Pin v4-periphery to a tagged release once one exists that matches the repo's v4-core version, or explicitly document why a branch-tip pin is currently necessary and track the resulting risk.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--security",
+        "index": 4
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-093",
+    "file": "packages/contracts/foundry.toml",
+    "line": 8,
+    "title": "The build leaves CBOR metadata hashing at Solidity compiler defaults",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Consider setting bytecodeHash = 'none' (or 'ipfs' consistently) in foundry.toml's [profile.default] if exact reproducible builds or minimal bytecode size are goals, especially given HK-097's EIP-170 size headroom concern.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--security",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-094",
+    "file": "packages/contracts/script/release/PhaseOneReleasePlan.sol",
+    "line": 15,
+    "title": "The issuance guard adds a third privileged identity and post-deployment mutable state to an otherwise immutable hook",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Launch / token-issuance path missing",
+    "repair": "Document the issuance authority's exact powers and blast radius alongside the vault authorizer and operations trigger in the trust-model documentation, and consider whether it should be time-limited or revocable given it acts only pre-launch.",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-095",
+    "file": "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol",
+    "line": 499,
+    "title": "The custody invariant targets a MockPositionManager whose selectors do not exist on the real v4 PositionManager",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Replace MockPositionManager with the real v4-periphery PositionManager (or a faithful wrapper of its actual selectors) in the invariant handler.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-096",
+    "file": "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol",
+    "line": 382,
+    "title": "Invariant handlers swallow claim failures, making a claim-liveness regression undetectable by the gated fuzz suites",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Have the invariant handlers record claim attempts and failures, and add an invariant asserting that a claim which should succeed (nonzero liability, valid destination) does not revert.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-097",
+    "file": "packages/contracts/test/accounting/FeeAccounting.t.sol",
+    "line": 607,
+    "title": "The fee-split fuzz test's oracle duplicates the implementation formula, making it tautological",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Rewrite the fuzz oracle using an independently-reasoned reference implementation (e.g. computed via a different arithmetic path or against the policy document's own worked examples) rather than mirroring _splitLiability's exact formula.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-098",
+    "file": "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol",
+    "line": 685,
+    "title": "requirementsRevision is hardcoded to 56 in two gated test suites while the bindings library pins revision 54, and no test cross-checks the two",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Add a single test that imports RobinhoodBindings.REQUIREMENTS_REVISION and asserts it against specs/requirements.json's revision field (whatever the resolved answer to HK-074 turns out to be), and have the two gated suites reference that same constant instead of a separate hardcoded literal.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-099",
+    "file": "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol",
+    "line": 204,
+    "title": "PhaseOneLocalLoop requires --ffi that foundry.toml does not enable, and one documented command runs it without --ffi",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Either set ffi = true in the relevant foundry.toml profile used for this test, or update every documented command to consistently pass --ffi, and make the test fail loudly (not silently skip) when FFI is unavailable.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 13
+      }
+    ]
+  },
+  {
+    "id": "HK-100",
+    "file": "packages/contracts/test/blind/market-fees/BlindMarketFeesAcceptance.t.sol",
+    "line": 28,
+    "title": "Roughly 52 test_ functions across two abstract blind suites never execute, yet TEST_MATRIX.md still cites them as coverage",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Either bind the abstract suites to concrete local fixtures so they actually execute (as recommended for HK-051), or update TEST_MATRIX.md to clearly mark these as unbound/not-currently-executing.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-101",
+    "file": "packages/contracts/test/payout/CanonicalMerkleSum.t.sol",
+    "line": 64,
+    "title": "CanonicalMerkleSum entry-validation and proof-index branches listed as required mutations are untested on-chain",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add the missing on-chain Solidity test cases for each listed branch to bring Solidity coverage in line with the module's own mutation-testing checklist.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-102",
+    "file": "packages/contracts/test/process/PegCycleVault.t.sol",
+    "line": 253,
+    "title": "Reentrancy tests cannot distinguish the reentrancy guard from any other nested-call failure",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Assert the specific Reentrancy() revert selector (or equivalent custom error) in each reentrancy test, and add a positive control that would fail without the guard.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-103",
+    "file": "packages/contracts/test/process/PegCycleVault.t.sol",
+    "line": 102,
+    "title": "Rejection-chain tests assert only 'reverted' with no selector check and no closing positive control",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Assert the specific expected custom-error selector for each rejection case, and add a closing positive-control assertion that the corresponding valid call succeeds.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-104",
+    "file": "packages/contracts/test/settlement/HolderSettlement.t.sol",
+    "line": 271,
+    "title": "HolderSettlement guard branches and the manifest-to-digest link are not exercised through actual settlement calls",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Add integration-style tests that exercise the guard branches and the manifest->digest link together through actual payEntitlement calls, not only in isolation.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-105",
+    "file": "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+    "line": 176,
+    "title": "The quadrant fee test mirrors the library's own formula and asserts a hardcoded field; partial-fill is covered in only one of the four quadrants",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Test-gate coverage gaps (CI does not enforce invariants)",
+    "repair": "Use an independently-derived expected value rather than mirroring the library formula, and extend the partial-fill scenario to cover all four quadrants.",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-106",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 841,
+    "title": "A second, distinct provider receipt for the same action is accepted, making the cycle permanently unclosable",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Reject a second receipt for an action that already has one recorded (or require byte-for-byte equality with the first before accepting it as a no-op duplicate), and add a test for the conflicting-receipt case.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-107",
+    "file": "packages/runner/src/cycle/journal.mjs",
+    "line": 214,
+    "title": "CycleJournal.prepareIntent is dead code that bypasses the store's CAS and emits an event kind the reducer rejects",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Remove prepareIntent, append and appendEvent from the module's exports (or delete them entirely) unless they serve a documented purpose, in which case fix them to route through the store's CAS and an event kind the reducer actually accepts.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 7
+      },
+      {
+        "file": "runner-cycle-a--security",
+        "index": 7
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 13
+      }
+    ]
+  },
+  {
+    "id": "HK-108",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 988,
+    "title": "Two different \"version\" counters share the same name but count different things",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Rename one of the two fields (e.g. store's to journalEntryCount or similar) to remove the naming collision and make the distinction obvious at every call site.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 8
+      },
+      {
+        "file": "runner-cycle-a--security",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-109",
+    "file": "packages/runner/src/cycle/schemas.mjs",
+    "line": 270,
+    "title": "Non-canonical base64url signature encodings are accepted across several verifiers, giving one logical signature multiple valid digests",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Tighten every signature-parsing regex across schemas.mjs, execution-accounting.mjs and manifest.mjs to require strict canonical base64url (no padding, standard alphabet only, no whitespace), and add a test asserting a non-canonical variant of a valid signature is rejected.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--security",
+        "index": 6
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 1
+      },
+      {
+        "file": "runner-distribution--security",
+        "index": 5
+      },
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-110",
+    "file": "packages/runner/src/cycle/schemas.mjs",
+    "line": 195,
+    "title": "Exported assertVerifiedOwnerApproval / assertVerifiedPostOpenBuybackApproval perform no signature verification despite their names",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Either rename these functions to reflect that they only validate shape (e.g. assertOwnerApprovalShape), or move the actual signature check into them so the names are accurate.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--security",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-111",
+    "file": "packages/runner/src/cycle/cycle-runner.mjs",
+    "line": 121,
+    "title": "Method names imply network execution but the runner performs no I/O; the Collector generate response is entirely self-fabricated",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Fixture-only runner (no production integration)",
+    "repair": "Rename these methods to make their fixture/simulation nature explicit (e.g. simulateCollectorGeneratePack) until the real provider adapter from HK-006's repair exists, at which point the names can describe real I/O.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 14
+      }
+    ]
+  },
+  {
+    "id": "HK-112",
+    "file": "packages/runner/src/cycle/collector.mjs",
+    "line": 13,
+    "title": "The Collector authorization expiry clock is a private copy of the frozen validation-timestamp constant, duplicated instead of imported",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Import the shared FIXTURE_AUTHORIZATION_VALIDATED_AT constant (or its eventual real-clock replacement) from its single source of truth instead of redefining it locally in collector.mjs.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 0
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-113",
+    "file": "packages/runner/src/cycle/decoder.mjs",
+    "line": 121,
+    "title": "verifyDecodedTransaction returns an undomained digest that no consumer uses and that mismatches the canonical messageDigest",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Either remove the unused, inconsistent digest from the return value, or fix it to use the same domain-separation scheme as the canonical messageDigest so it is safe to consume later.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 1
+      }
+    ]
+  },
+  {
+    "id": "HK-114",
+    "file": "packages/runner/src/cycle/authorization.mjs",
+    "line": 77,
+    "title": "AuthorizationLedger.consume and FixtureReceiptRegistry are unused, exported modules with weaker semantics than the production store's equivalents",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Remove both unused modules, or clearly mark them test-only and move them under packages/runner/test, and if any of their functionality is actually needed, port it into the production authorization/receipt-registry path instead of maintaining a parallel weaker implementation.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 2
+      },
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 3
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-115",
+    "file": "packages/runner/src/cycle/verify-fixtures.mjs",
+    "line": 5,
+    "title": "A production source file (verify-fixtures.mjs) depends on a test helper and executes a full cycle at import time, and is itself executed by the CI gate",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Move verify-fixtures.mjs (or the parts of it that depend on test/cycle/fixture-cycle.mjs) out of src/ and into test/ or scripts/, since it is fundamentally a test/verification utility, not production runner code; make its own test independent of the invoking cwd.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 5
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 8
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 12
+      },
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 14
+      }
+    ]
+  },
+  {
+    "id": "HK-116",
+    "file": "packages/runner/src/cycle/collector.mjs",
+    "line": 24,
+    "title": "assertExpiry throws an unlabeled RangeError for an unparseable expiry string instead of a clear, typed validation error",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Validate the expiry string's parseability explicitly and throw a clear, labeled error (e.g. InvalidExpiryFormat) identifying the offending field and value before attempting arithmetic on it.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-117",
+    "file": "packages/runner/src/cycle/bindings.mjs",
+    "line": 22,
+    "title": "validateBinding lacks plain-object and property-accessor guards, re-reads fields after validation, and builds one of its regexes in an obfuscated way",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Add a plain-object guard (e.g. Object.getPrototypeOf(input) === Object.prototype) before validating, freeze or snapshot the validated fields once and read only from the snapshot afterward, and replace the obfuscated regex construction with a normal literal.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--security",
+        "index": 2
+      },
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 8
+      },
+      {
+        "file": "runner-cycle-b--security",
+        "index": 3
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 11
+      },
+      {
+        "file": "runner-cycle-b--autonomy-readiness",
+        "index": 13
+      }
+    ]
+  },
+  {
+    "id": "HK-118",
+    "file": "packages/runner/src/cycle/execution-accounting.mjs",
+    "line": 88,
+    "title": "verifyAccountActivity does not itself reconcile balances to movements; that arithmetic lives only in the reducer",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Move the opening+movements==closing check into verifyAccountActivity itself so the module provides the guarantee its name implies, independent of whether the reducer also happens to check it.",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--security",
+        "index": 4
+      }
+    ]
+  },
+  {
+    "id": "HK-119",
+    "file": "packages/runner/src/distribution/reconcile.mjs",
+    "line": 201,
+    "title": "requirementsRevision is hardcoded to 56 independently in reconcile.mjs and vault-payout-authorization.mjs",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Introduce one shared requirementsRevision constant (imported from a single config/binding source) and have both files reference it instead of hardcoding the literal separately.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--correctness",
+        "index": 6
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-120",
+    "file": "packages/runner/src/distribution/manifest.mjs",
+    "line": 350,
+    "title": "verifyDistributionCopies rebuilds the Merkle-sum tree redundantly, four times, after an initial byte-equality check has already passed",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Rebuild the tree once and reuse the result for all subsequent checks within the same verifyDistributionCopies call.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--correctness",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-121",
+    "file": "packages/runner/src/distribution/merkle-sum.mjs",
+    "line": 11,
+    "title": "A full-width (1,022-1,024 entry) manifest exceeds the journal's canonical string length limit and can never be digested or journaled",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Holder payout & distribution pipeline",
+    "repair": "Either raise the journal's canonical-string length limit to comfortably accommodate a full 1,024-entry manifest, or split the journaled representation (e.g. store a digest plus a separate asset reference to the full manifest bytes) so the length limit no longer constrains the maximum holder count.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--security",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-122",
+    "file": "tasks/P1-009.md",
+    "line": 35,
+    "title": "The documented distribution verification command and publication rule do not match the code",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Update tasks/P1-009.md to describe the actual current state of the code (including that publication is not yet implemented, per HK-029), and revisit the doc once HK-029's repair lands.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-123",
+    "file": "packages/runner/src/distribution/merkle-sum.mjs",
+    "line": 9,
+    "title": "A cross-package relative import reaches into the canonical Merkle-sum implementation rather than a package-level dependency",
+    "severity": "low",
+    "status": "confirmed",
+    "theme": "Code hygiene, dead code, duplication",
+    "repair": "Replace the relative cross-package import with a proper workspace package dependency (e.g. a shared internal package published to the monorepo's workspace) so the coupling is explicit and resilient to directory moves.",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-R01",
+    "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+    "line": 9,
+    "title": "Owner transcript fee split (0.5% treasury + 0.1% Programmable) differs from the coded 0.40/0.10/2.50 split",
+    "severity": "info",
+    "status": "refuted",
+    "theme": "Programmable fee-policy conformance",
+    "repair": "N/A (refuted — no repair needed)",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-I01",
+    "file": "packages/contracts/src/market/CanonicalMarket.sol",
+    "line": 222,
+    "title": "RobinhoodBindings.validateQuadrant duplicates the runtime fee/quadrant math and is exercised only by tests, not consumed by the runtime hook.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 6
+      },
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-I02",
+    "file": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+    "line": 33,
+    "title": "bindings/robinhood-chain.json's universalRouter address fails EIP-55 checksum (cosmetic; Solidity address comparisons are case-insensitive).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-I03",
+    "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+    "line": 59,
+    "title": "Every swap and claim fails closed on any external USDG balance shortfall with no recovery path (fail-closed by design, noted for completeness).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--security",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-I04",
+    "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+    "line": 14,
+    "title": "The liability ledger is not keyed by poolId/currency as the policy contemplates; single-pool scope is implicit rather than explicit.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--spec-conformance",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-I05",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 223,
+    "title": "RetainedAllowance check is unreachable because the vault never approves anything to a third party.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--correctness",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-I06",
+    "file": "packages/contracts/src/process/PegCycleVault.sol",
+    "line": 37,
+    "title": "No lifecycle timestamps or deadline views exist for stuck-cycle detection tooling to query.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-I07",
+    "file": "packages/contracts/src/payout/PayoutCommitment.sol",
+    "line": 48,
+    "title": "PayoutAlreadyFunded sentinel on payoutId==0 is unreachable and therefore safe: both the vault and the ledger independently reject a zero payoutId (verified, not a defect).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 9
+      },
+      {
+        "file": "contracts-payout--security",
+        "index": 6
+      },
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 5
+      }
+    ]
+  },
+  {
+    "id": "HK-I08",
+    "file": "packages/contracts/src/payout/PayoutCommitment.sol",
+    "line": 27,
+    "title": "Payout identity per REQ-payout-commitment-2 is split across the hook and vault; the hook's event omits the vault authorization and return-receipt digests.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-I09",
+    "file": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+    "line": 170,
+    "title": "ManifestEntry.directBalance is conformant: bound only in the manifest bytes, intentionally never checked on-chain (verified, not a defect).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 12
+      },
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-I10",
+    "file": "packages/runner/src/distribution/manifest.mjs",
+    "line": 360,
+    "title": "The two-location manifest-publication preflight (REQ-holder-settlement-5) is explicitly out of scope for the local runner; tracked as open red-team item RT-R55-05.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 2
+      }
+    ]
+  },
+  {
+    "id": "HK-I11",
+    "file": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs",
+    "line": 66,
+    "title": "Solidity/JS Merkle-sum parity and the from-scratch Keccak primitive were independently re-verified in this audit session and found correct.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--correctness",
+        "index": 8
+      },
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-I12",
+    "file": "packages/contracts/test-vectors/payout/canonical-merkle-sum-v1.json",
+    "line": 12,
+    "title": "The canonical test vector uses chainId 466 and a placeholder hook address, not Robinhood Chain 4663 (see HK-083).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-payout--spec-conformance",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-I13",
+    "file": "packages/contracts/script/release/PhaseOneReleasePlan.sol",
+    "line": 57,
+    "title": "The USDG runtime-codehash check only covers the 170-byte UUPS proxy shell, not the implementation logic behind it.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 6
+      }
+    ]
+  },
+  {
+    "id": "HK-I14",
+    "file": "packages/contracts/test/blind/token-roles/FixedSupplyBlindSpec.sol",
+    "line": 507,
+    "title": "The forbidden-selector scan does not skip PUSH immediates and only recognises PUSH4-encoded selectors; combined with HK-051 the whole spec is currently dead code anyway.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 7
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-I15",
+    "file": "packages/contracts/foundry.toml",
+    "line": 11,
+    "title": "HookemonHook's runtime bytecode is within 752 bytes of the EIP-170 24,576-byte limit at current optimizer settings — worth monitoring as features are added.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--correctness",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-I16",
+    "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+    "line": 9,
+    "title": "WHOLE_HKMN_SUPPLY and the 90% allocation formula are duplicated with different arithmetic across four files with no shared source (PhaseOneReleasePlan.sol, HookemonIssuance.sol, and two others).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--security",
+        "index": 7
+      },
+      {
+        "file": "contracts-launch--security",
+        "index": 8
+      },
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-I17",
+    "file": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+    "line": 16,
+    "title": "REQUIREMENTS_REVISION 54 vs. PegCycleVault's 56 is documented elsewhere as an intentional split between provider-fact history and current tracked build evidence (background context for the disputed HK-074).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-launch--spec-conformance",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-I18",
+    "file": "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+    "line": 7,
+    "title": "FeeAccountingInvariant.t.sol is orphaned: not run by CI, the release script, or any documented command (see HK-017).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 14
+      }
+    ]
+  },
+  {
+    "id": "HK-I19",
+    "file": "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol",
+    "line": 71,
+    "title": "No test in the unit covers a scheduler, overlapping cycles, expiry recovery, or a terminal-failure restart, all of which the owner's autonomous design requires.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-a--test-coverage-gaps",
+        "index": 15
+      }
+    ]
+  },
+  {
+    "id": "HK-I20",
+    "file": "packages/contracts/test/bindings/RobinhoodBindings.t.sol",
+    "line": 132,
+    "title": "Several assertions in this suite test only a mock or a nonexistent selector and prove nothing about the actual src contract.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-I21",
+    "file": "packages/contracts/test/process/PegCycleVault.t.sol",
+    "line": 799,
+    "title": "Outbound route execution and the Collector Crypt sale path are represented only by a burning mock; no test constrains what a real executor must do (relates to HK-013).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-tests-b--test-coverage-gaps",
+        "index": 13
+      }
+    ]
+  },
+  {
+    "id": "HK-I22",
+    "file": "packages/runner/src/cycle/schemas.mjs",
+    "line": 17,
+    "title": "The buyback receipt relation models the prize wallet debiting 10 units of the NFT mint, which no real buyback receipt can satisfy (background to HK-027).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--correctness",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-I23",
+    "file": "packages/runner/src/cycle/reducer.mjs",
+    "line": 1025,
+    "title": "Distribution rootSum must equal 100% of the returned vault credit; no fee split or principal retention exists at this layer (by design at this layer, per the owner's model — full return credit is distributed).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-a--security",
+        "index": 10
+      },
+      {
+        "file": "runner-cycle-a--autonomy-readiness",
+        "index": 16
+      }
+    ]
+  },
+  {
+    "id": "HK-I24",
+    "file": "packages/runner/src/cycle/collector.mjs",
+    "line": 110,
+    "title": "Collector custody/finality blockHash is validated as a generic identifier while every other blockHash field in the schema is validated as hex, an inconsistency worth normalizing.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 7
+      }
+    ]
+  },
+  {
+    "id": "HK-I25",
+    "file": "packages/runner/src/cycle/execution-accounting.mjs",
+    "line": 71,
+    "title": "Native-gas reconciliation requires actualDebit === transactionFee exactly, which a real Solana transaction (with priority fees, etc.) will not satisfy.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 10
+      }
+    ]
+  },
+  {
+    "id": "HK-I26",
+    "file": "packages/runner/src/cycle/decoder.mjs",
+    "line": 149,
+    "title": "broadcastSignature assumes the first required signer is always the fee payer, an assumption not guaranteed by the Solana transaction format in general.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 11
+      }
+    ]
+  },
+  {
+    "id": "HK-I27",
+    "file": "packages/runner/src/cycle/preflight.mjs",
+    "line": 79,
+    "title": "Release-evidence transaction/block identifiers are typed as sha256: digests rather than EVM transaction/block hashes, an internal naming/typing inconsistency for the Robinhood (EVM) leg.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 12
+      }
+    ]
+  },
+  {
+    "id": "HK-I28",
+    "file": "packages/runner/test/cycle/security.test.mjs",
+    "line": 1705,
+    "title": "A field-binding test silently skips mutations that the encoder itself rejects, reducing its actual coverage below what it appears to test.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--correctness",
+        "index": 13
+      }
+    ]
+  },
+  {
+    "id": "HK-I29",
+    "file": "packages/runner/src/cycle/vault-payout-authorization.mjs",
+    "line": 126,
+    "title": "Keccak-256 and ABI encoding for the payout authorization digest were independently re-verified against Foundry cast and the vault's struct layout and found correct.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-cycle-b--security",
+        "index": 9
+      }
+    ]
+  },
+  {
+    "id": "HK-I30",
+    "file": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs",
+    "line": 286,
+    "title": "JS/Solidity Merkle-sum parity re-verified against the sparse 5-entry canonical vector in this session (positive note, no defect).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--correctness",
+        "index": 8
+      },
+      {
+        "file": "runner-distribution--security",
+        "index": 8
+      }
+    ]
+  },
+  {
+    "id": "HK-I31",
+    "file": "packages/runner/src/distribution/manifest.mjs",
+    "line": 340,
+    "title": "Three-copy manifest verification is in-process byte equality, not independent custody across separate processes/machines; a single compromised process can fabricate all three copies.",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "runner-distribution--security",
+        "index": 7
+      },
+      {
+        "file": "runner-distribution--autonomy-readiness",
+        "index": 14
+      }
+    ]
+  },
+  {
+    "id": "HK-I32",
+    "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+    "line": 9,
+    "title": "An owner transcript reportedly says '0.5% treasury, 0.1% Programmable'; the code and product/OWNER_DECISIONS.md agree on 0.10/0.40/2.50 — flagged for the owner to confirm which is authoritative, not a code defect (see also HK-R01, refuted on the same point).",
+    "severity": "info",
+    "status": "confirmed",
+    "theme": "Info / observations",
+    "repair": "N/A (informational)",
+    "sourceRefs": [
+      {
+        "file": "contracts-kernel--correctness",
+        "index": 7
+      },
+      {
+        "file": "contracts-process--security",
+        "index": 12
+      },
+      {
+        "file": "contracts-process--spec-conformance",
+        "index": 11
+      }
+    ]
+  }
+]

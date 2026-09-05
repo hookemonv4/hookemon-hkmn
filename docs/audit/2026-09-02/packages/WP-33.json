@@ -1,0 +1,54 @@
+{
+  "id": "WP-33",
+  "title": "Signer and authority subsystem: injected signer clients, standing-authority document loading, verifier process wiring",
+  "goal": "Build the runtime pieces the live stage paths need to sign anything, without the repository ever handling key material. Three parts. (1) A signer-client seam in packages/adapters/src/signing: an interface {role, sign(request), broadcast(signed)} for the roles operator (EVM on Robinhood Chain and Solana), distribution-signer and distribution-verifier, with two implementations: an external-module signer (the operator supplies a path to their own module that exports sign and broadcast, the same pattern packages/runner/src/distribution/distribution-signer.mjs already uses for its --signer module) and a local OS-keychain-backed signer that only calls a keychain command-line tool through an injected exec function and never reads key files itself; both are validated at construction and both refuse to run when liveMode is false. (2) Standing-authority document handling: load, validate and expose the owner-signed standing-authority document that packages/runner/src/cycle/authorization-provider.mjs StandingAuthorityProvider consumes (caps per cycle and per day, allowed packs, expiry), from a path in the environment configuration, with a tool that prints the canonical document for the owner to sign outside the repository and verifies a signed one. (3) Verifier process wiring per decision D7: bin/hookemon-verifier.mjs runs the distribution verifier as its own process with its own signer client, watching the distribution directory and writing verification receipts the runner consumes (packages/runner/src/distribution/distribution-signer.mjs verifier mode), so the runner process never holds the verifier role.",
+  "deps": ["WP-30", "WP-31", "WP-32", "WP-13"],
+  "parallelGroup": 9,
+  "writeSet": [
+    "packages/adapters/src/signing/signer-client.mjs",
+    "packages/adapters/src/signing/external-module-signer.mjs",
+    "packages/adapters/src/signing/keychain-signer.mjs",
+    "packages/adapters/src/signing/standing-authority.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/bin/hookemon-verifier.mjs",
+    "packages/adapters/bin/hookemon-authority.mjs",
+    "packages/adapters/package.json",
+    "packages/adapters/README.md",
+    "packages/adapters/test/signing/**",
+    "packages/adapters/test/app/**",
+    "docs/modules/signing.md"
+  ],
+  "readSet": [
+    "packages/runner/src/cycle/authorization-provider.mjs (StandingAuthorityProvider input shape and verification rules)",
+    "packages/runner/src/distribution/distribution-signer.mjs (signer and verifier module contract, CLI modes)",
+    "packages/runner/src/automation/policy-wallets.mjs (schema-bound intents, prohibited secret fields)",
+    "packages/adapters/src/app/*.mjs (where the clients are injected)",
+    "docs/audit/2026-09-02/design/DESIGN.md decisions D3 and D7",
+    "docs/modules/cycle-runner.md and composition-root.md"
+  ],
+  "steps": [
+    "Define the signer-client interface and a conformance test suite that every implementation must pass (role check, refuses when liveMode is false, never returns or logs key material, deterministic request canonicalisation)",
+    "Implement external-module-signer.mjs (dynamic import of an operator-supplied module path, validated exports) and keychain-signer.mjs (keychain command invoked through an injected exec function; tests use a fake exec; the module never opens key files)",
+    "Implement standing-authority.mjs: canonical document builder, validator, and loader; bin/hookemon-authority.mjs print and verify subcommands; the verifier uses the same rules as StandingAuthorityProvider",
+    "Implement bin/hookemon-verifier.mjs as a separate process: polls the distribution directory, verifies each manifest independently, writes receipts through the verifier signer client; refuses to start if its signer role is not distribution-verifier",
+    "Wire environment.mjs and compose.mjs: signer clients are constructed from configuration and injected; the runner process never constructs the verifier client",
+    "Tests with fakes only; run the adapters suite, the runner suite, scripts/tests and the clean-room scanner before the single commit; write docs/modules/signing.md (six sections, PENDING_REGISTRATION)"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/**/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "Both signer implementations pass the same conformance suite; neither reads key files; the keychain signer only calls the injected exec",
+    "A standing-authority document round-trips through print, external signing (simulated in tests), verify and StandingAuthorityProvider consumption",
+    "hookemon-verifier runs as a separate process in a test (child_process with fakes) and produces receipts the runner accepts",
+    "With liveMode false every signer client refuses to sign or broadcast",
+    "All suites green; clean-room scanner green"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "R4: fresh-context reviewer mandatory; the reviewer must confirm that no code path reads, prints, derives or stores key material and that the verifier role cannot be held by the runner process. Wording rule for this repository: describe signing as an injected client interface; never write instructions for generating, exporting or storing keys. COORDINATOR NOTE: this package was split out of WP-32 after its reviewer confirmed the live wiring needs a signer subsystem that did not exist. Disjoint from WP-34 (packages/runner/src/operator) and can run in parallel with it."
+}

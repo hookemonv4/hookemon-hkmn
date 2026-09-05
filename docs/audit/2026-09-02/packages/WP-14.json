@@ -1,0 +1,43 @@
+{
+  "id": "WP-14",
+  "title": "Scheduler + cycle-worker wiring",
+  "goal": "Wire the interval-driven scheduler to the ported AutomatedCycleService, the durable cycle store, and every adapter, producing the actual unattended 20-minute loop.",
+  "deps": [
+    "WP-07",
+    "WP-08",
+    "WP-09",
+    "WP-10",
+    "WP-27",
+    "WP-28"
+  ],
+  "parallelGroup": 5,
+  "writeSet": [
+    "packages/runner/src/scheduler/scheduler.mjs",
+    "packages/runner/test/scheduler/scheduler.test.mjs",
+    "packages/runner/test/integration/full-cycle-dry-run.test.mjs"
+  ],
+  "readSet": [
+    "packages/runner/src/operator/state-file.mjs",
+    "packages/runner/src/automation/exclusive-lease.mjs"
+  ],
+  "steps": [
+    "Implement a dependency-free setInterval/unref'd loop reading intervalMs from the operator state file (default 1,200,000ms)",
+    "Check the pause flag before starting any new cycle-triggering call; let an in-flight cycle finish its current stage before halting on pause",
+    "Acquire the exclusive lease before calling AutomatedCycleService.runOnce()/.recoverActiveCycle()",
+    "Wire liveMode: false -> true as a single explicit config flag checked by the signer service on every request, never inferred",
+    "Add an integration test proving a full dry-run cycle (real read-only probes + fixture-signed mutations) completes end to end"
+  ],
+  "tests": [
+    "node --test packages/runner/test/scheduler/scheduler.test.mjs",
+    "node --test packages/runner/test/integration/full-cycle-dry-run.test.mjs"
+  ],
+  "acceptance": [
+    "Pause blocks the next cycle from starting; resume continues an interrupted one",
+    "An interval change takes effect on the next tick",
+    "A full dry-run cycle (real read-only probes + fixture-signed mutations) completes end to end",
+    "liveMode never flips without an explicit config write"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "The actual autonomous loop the owner asked for. Must stay in dry-run mode (WP-25's script confirms preconditions) until ADR-0021 is signed. R4/money-safety-critical: per AGENTS.md, this package needs a fresh-context independent reviewer before merge \u2014 do not self-approve."
+}

@@ -1,0 +1,32 @@
+{
+  "id": "r-00632",
+  "at": "2026-09-04T04:08:37.823Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-007",
+    "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+    "taskFingerprint": "a220a956dc7cbecd0dab82292abdeb01555e76fc7612f2af8e3e9c3d882c11c3",
+    "requirementsRevision": 58,
+    "requirementsHash": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "inputHashes": {
+    "qa/reviews/p1-012-local-verification.json": "99b626bcf3f01b3418a254fc1118a50dd0608beb41e724eece424fc26a14ca1c",
+    "release/phase1/local-candidate.json": "1e71a385dff3dc2152eaeaa226163d5ddc2c59811c8a1c0156197267f2bd9c77",
+    "release/phase1/local-evidence.json": "80e697ab5a83d45786f40cba2624a04535102fc188006a146edc49ccb3d63b08",
+    "release/phase1/local-reproducibility.json": "7d7ffb99911a2ebcb4ccae1e2c9d20014d38fa7652988ad974091d8f27910947",
+    "release/phase1/local-toolchain.json": "4281412219042eb0949a0ef142afb361776428b70c5f2782c243b17355e92086",
+    "packages/contracts/src/payout/CanonicalMerkleSum.sol": "d4946c1410c119eb50c48d812a4e84874340eb13aaa097178dc29f282ddf980c",
+    "packages/contracts/src/payout/PayoutCommitment.sol": "3081c43b69cc505743a27c15ada2a99938c6e5a02c053c654f6a0ccc19968f76",
+    "packages/contracts/src/process/IPegCycleVault.sol": "75492882b2183b7d9189a6f57a3d23b18106e0caed8d49274795a6d48f22d59f",
+    "packages/contracts/src/process/PegCycleVault.sol": "b28ef834b3aac0133c2f76060d410981b714acaa7339bbf71ff30588d9a2af69",
+    "packages/contracts/test/payout/CanonicalMerkleSum.t.sol": "3f8a56110e7ae9d9d38eac8160b2fca0e6a1127186df53e4cfc6e4ce914affb5",
+    "packages/contracts/test/payout/PayoutCommitment.t.sol": "db5e02d44a50b32b5625ddc9b47e328f6934371553abafd4e0c1f4f2367ece89",
+    "packages/contracts/test-js/payout/canonical-merkle-sum.test.mjs": "d78cd45cce0a2be46439e043c6fdb37ca86763254138194cc7cad1646e0f160d",
+    "packages/contracts/test-vectors/payout/canonical-merkle-sum-v1.json": "0d95d43ac7012aa0b514c12dd48eadc44c06ca3e5f5018033eeee56e0873f675",
+    "packages/contracts/test/integration/PhaseOneLocalLoop.t.sol": "e14579a48d5c91ff5dc391780ce961909cf7873ed98a4fb17d2d2bb0cfedc0ad",
+    "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol": "4ec3bbb63560184d3b138706142c70f645d63abeabc7f3cb9d501e67c0753af0",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

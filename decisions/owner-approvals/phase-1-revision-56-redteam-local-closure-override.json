@@ -1,0 +1,23 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_OVERRIDE",
+  "phase": "redteam",
+  "itemId": null,
+  "rationale": "Owner overrides the current red-team gate for local Phase 1 closure while R4 remains escalated, the bound red-team artifacts still identify requirements revision 55, and the recorded open high findings remain unresolved. This override does not resolve those findings or authorize deployment, credentials, signing, broadcast, asset movement, gas spend, publication, or production use.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/redteam/findings.json": "1330e0da0b69fc7e76a4943176b8eb56366c032c23207c9945bd255a334465bc",
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "gates/runs/redteam.json": "a8b4cdf8a8801a92493cea0d5ea84d89adb8a37aab20420f9866c289d5ebd1ce",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "qa/redteam/doubt-loop.json": "19be53a1bc7c109932eddd25bad91e57387f045ae9abc5b86fdde7bc62e9fbda",
+    "qa/redteam/resolutions.json": "0145b1cca2325bcd7d4e3eb7ecfeefbec6fc98479d9c590d04faa68adeab37f7",
+    "qa/redteam/termination.json": "d696526a2ba42e958574671f80bb0e46ddffa296140aa101f1a949f3500b9469",
+    "qa/redteam/threat-model.json": "9d5fadfe6ccf636b0ee12326ba957fd28614b774596880761e69b0029b1d9622",
+    "receipts/r-00388.json": "81a6df2095dc7eca4fa577a9af15bff442d5d812e8db73e6d6a77fcf02b11db8",
+    "receipts/r-00389.json": "5a3f00cb64a5b5081fc511992132d75aeca1f7b540ca91a9f3ffabca0d7f1b47",
+    "receipts/r-00390.json": "d6046538ce5c21d5f945a6a7bab4fd7171cd7c61d7dfb429b6ca089fbed6ff37",
+    "receipts/r-00391.json": "c7c7c9ba753a407ae61bcfab0526ef0f1892fb014887f98fb96921013e32d77b"
+  }
+}

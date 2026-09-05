@@ -1,0 +1,18 @@
+{
+  "id": "r-00309",
+  "at": "2026-08-31T20:26:54.950Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-005",
+    "commitSha": "74a4af0da4089be7bd3a24493cb5ff47e1e55d0b",
+    "taskFingerprint": "a23c43ac3ac3389b938ec1efcd79df76bd8159cfad753e472340df74ea20d917",
+    "requirementsRevision": 55,
+    "requirementsHash": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  },
+  "inputHashes": {
+    "packages/contracts/test/access/MoneyRoles.t.sol": "e2ec1f58eb82c2b12c116f99100a53b6aaf67f1bc62c21072830463b15442927",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

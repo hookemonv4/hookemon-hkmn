@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "productPhase": 3,
+  "architectureRevision": 9,
+  "requirementsRevision": 65,
+  "requiredSections": [
+    "Purpose",
+    "Public interface",
+    "Invariants",
+    "State transitions",
+    "Operational commands",
+    "Recovery pointers"
+  ],
+  "interfaceStatus": "PROVISIONAL",
+  "modules": [
+    {
+      "id": "phase-boundary",
+      "path": "docs/modules/phase-boundary.md",
+      "sha256": "856e2ec0e7477c97541158679063d1f3c4c5e560e7781c4aab2d8cab6a7a66a3"
+    },
+    {
+      "id": "provider-binding",
+      "path": "docs/modules/provider-binding.md",
+      "sha256": "25305b7549bf27ea119e187fa1e8426192e335fec1638e2a988ede84f6ac46df"
+    },
+    {
+      "id": "deployment-manifest",
+      "path": "docs/modules/deployment-manifest.md",
+      "sha256": "27e4f74dfe8c10bc251a9eec3aab01d96da202eeff24703de8176fffb8a0c173"
+    },
+    {
+      "id": "role-control",
+      "path": "docs/modules/role-control.md",
+      "sha256": "1d2fd8dfc4bdb9ba3a91e0fbc163b9a0db135ebf8d5e125fc9c90fca96e5eab6"
+    },
+    {
+      "id": "token-core",
+      "path": "docs/modules/token-core.md",
+      "sha256": "87d5880d9b73bf9560bd624105c465b07a5fc54b623cfdb129adf8594f3397a8"
+    },
+    {
+      "id": "canonical-market",
+      "path": "docs/modules/canonical-market.md",
+      "sha256": "3788a5d35284b01f29c4f3158d1b2e250ea8a216a8bc81c1ca421ef4506f6f43"
+    },
+    {
+      "id": "fee-accounting",
+      "path": "docs/modules/fee-accounting.md",
+      "sha256": "596d55d0fc304740e49fa468ac5966007dbdba144b48b9ce9a442b602963d4d6"
+    },
+    {
+      "id": "operations-wallet",
+      "path": "docs/modules/operations-wallet.md",
+      "sha256": "b89e5cf31a1e07b1cf3b4261a31f1d44a5281cb1d174118d715a074d3d1bcc89"
+    },
+    {
+      "id": "launch-orchestration",
+      "path": "docs/modules/launch-orchestration.md",
+      "sha256": "7b9022b4f9454acf3d8217c669bc4a38733d5f73dba3b3f80fe17d88ea05786d"
+    },
+    {
+      "id": "legacy-custody-family",
+      "path": "docs/modules/legacy-custody-family.md",
+      "sha256": "43d98a42f75d7028c16043e000d5b2ad4fcfeea2e9d9473fb14df66a340c4d1f"
+    },
+    {
+      "id": "adapters",
+      "path": "docs/modules/adapters.md",
+      "sha256": "d8a70df0ce3a522d0f1c0420610526c745660672015a1c2be1904fe41443d2a8"
+    },
+    {
+      "id": "hook-contract-client",
+      "path": "docs/modules/hook-contract-client.md",
+      "sha256": "a7adbef4d130aaac655028563b292fc2e09ece41edc24e18382ff198c9833b5d"
+    },
+    {
+      "id": "robinhood-rpc-client",
+      "path": "docs/modules/robinhood-rpc-client.md",
+      "sha256": "e242893508cfd14c2884f3c962050daa2a0d27500064b7c6f5d046220ced6c70"
+    },
+    {
+      "id": "solana-rpc-client",
+      "path": "docs/modules/solana-rpc-client.md",
+      "sha256": "c9321ce6eb62d81c65d948720ea9633ab635d4e09d555e68221fcf5130fef5bf"
+    },
+    {
+      "id": "relay-bridge-client",
+      "path": "docs/modules/relay-bridge-client.md",
+      "sha256": "4ca997ac2d604e62d86925eb99c4d5d9d1ea5c973e40b3b6ca1b63260e64ea03"
+    },
+    {
+      "id": "collector-crypt-adapter",
+      "path": "docs/modules/collector-crypt-adapter.md",
+      "sha256": "ad0012e02b880eecadda583d7ad99e7065156f8261fb32820aebb0ca28eef01d"
+    },
+    {
+      "id": "transaction-policy",
+      "path": "docs/modules/transaction-policy.md",
+      "sha256": "ab877f335a086ef36592a05cc0114a466b475926d807009559684164b6627b94"
+    },
+    {
+      "id": "signing",
+      "path": "docs/modules/signing.md",
+      "sha256": "de7208984d54511b2c45c3cd3ffb64df6cc7a6b8ede1aa9f70c1f5761cdc2826"
+    },
+    {
+      "id": "cycle-repository",
+      "path": "docs/modules/cycle-repository.md",
+      "sha256": "a7a37bd1717eee956a1842bd1cf7220cde878a5a065ece21e8fbaf032a3cdd5b"
+    },
+    {
+      "id": "policy-engine",
+      "path": "docs/modules/policy-engine.md",
+      "sha256": "09e8cc1527523c7564fedde60d73cf368e258df3e56538f7df490dd01676c4ab"
+    },
+    {
+      "id": "eligibility-snapshot",
+      "path": "docs/modules/eligibility-snapshot.md",
+      "sha256": "640c21496e4045a7c1a4fd14bbe5069920b68efac7f9ad2a9229fa0e5c615816"
+    },
+    {
+      "id": "cycle-runner",
+      "path": "docs/modules/cycle-runner.md",
+      "sha256": "8cc42696004559ad324e7cb4e4b520e9a185fade0c20d881e2a2616b165b6e01"
+    },
+    {
+      "id": "direct-payout",
+      "path": "docs/modules/direct-payout.md",
+      "sha256": "5e3572dbaa7f6f73fee7d861ec6d89cc8d5e2524d2a77bfc26a075c9f9adcce5"
+    },
+    {
+      "id": "automation",
+      "path": "docs/modules/automation.md",
+      "sha256": "1d1730ad05934983838964f2cf77b478c4a6b90964282a9c828f80cc7aafcb5d"
+    },
+    {
+      "id": "scheduler",
+      "path": "docs/modules/scheduler.md",
+      "sha256": "9af7544a934fd22a3325d2d018135a01b76cc85546b0bd9fbaad98759668a92e"
+    },
+    {
+      "id": "observability",
+      "path": "docs/modules/observability.md",
+      "sha256": "a38eda37cf795c5044c7443ee83e0bd63985a129c2eb3d4a462f5f90917f68b8"
+    },
+    {
+      "id": "composition-root",
+      "path": "docs/modules/composition-root.md",
+      "sha256": "af6f3b083424c8256e90a0b8cee20201728b9a8497e7d36808ccaacf52cb8e95"
+    },
+    {
+      "id": "dashboard",
+      "path": "docs/modules/dashboard.md",
+      "sha256": "0251ea99e5715d4cee24b734cc11582eeaf0e2672da4ab97229d2059e2fbf327"
+    },
+    {
+      "id": "release-evidence",
+      "path": "docs/modules/release-evidence.md",
+      "sha256": "1b41304621ca6421f909bc983d3a21b45650625e7ca0a963f29237cb7c69ad6e"
+    },
+    {
+      "id": "website",
+      "path": "docs/modules/website.md",
+      "sha256": "1968ba6775e0b519ee82ba171dac7f64b7977fc69ea318b055d37154d752cb71"
+    }
+  ]
+}

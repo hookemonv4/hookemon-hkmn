@@ -1,0 +1,45 @@
+{
+  "id": "WP-07",
+  "title": "Port automation modules from complete-v4-hook",
+  "goal": "Bring the lease-fenced AutomatedCycleService, budget gate, and fee-settlement observer onto the merged base, rewired to the escrow-based funding model, the new DEGRADED/dust-fast-path vault states, and the durable production cycle store.",
+  "deps": [
+    "WP-01",
+    "WP-03",
+    "WP-05",
+    "WP-27",
+    "WP-29"
+  ],
+  "parallelGroup": 4,
+  "writeSet": [
+    "packages/runner/src/automation/automated-cycle-service.mjs",
+    "packages/runner/src/automation/budget-gate.mjs",
+    "packages/runner/src/automation/exclusive-lease.mjs",
+    "packages/runner/src/automation/fee-settlement.mjs",
+    "packages/runner/src/cycle/cycle-runner.mjs",
+    "packages/runner/test/automation/automated-cycle-service.test.mjs",
+    "packages/runner/test/integration/automated-cycle.test.mjs"
+  ],
+  "readSet": [
+    "codex/complete-v4-hook packages/runner/src/automation/* full diff",
+    "packages/contracts/src/process/IPegCycleVault.sol (from WP-03)"
+  ],
+  "steps": [
+    "Port the 189-line AutomatedCycleService (lease + budget-gate + 8-stage driver, dependency-injected leaseStore/budgetReader/cycleRepository/runnerFactory/stageDriver/feeSettlementObserver) largely as-is",
+    "Rewire the funding stage to target the per-cycle PegCycleReturnEscrow instead of the vault directly",
+    "Add a new stage boundary at the Track-B join (design \u00a72.4 step 9) that blocks on both the finalized return amount and the distribution-signer/verifier signatures before calling authorizePayout",
+    "Port CycleRunner.supersedeUnobservedIntent unchanged (dual independent observer proofs + fresh owner-signed authorization)",
+    "Carry forward the additive SwapLiabilitiesAccrued event integration"
+  ],
+  "tests": [
+    "node --test packages/runner/test/automation/**",
+    "node --test packages/runner/test/integration/automated-cycle.test.mjs"
+  ],
+  "acceptance": [
+    "All ported automation tests pass against the merged, revised contracts",
+    "No duplicate on-chain function signatures between ported code and WP-01/03/05's contracts",
+    "The new Track-B join stage blocks correctly until both preconditions are present in a fixture test"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "This is the automation core; it must not reintroduce complete-v4-hook's conflicting HookemonHook.sol/ProcessBudget.sol changes. R3, touches money-moving stage transitions: per AGENTS.md, use a fresh-context independent reviewer before merge."
+}

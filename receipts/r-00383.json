@@ -1,0 +1,20 @@
+{
+  "id": "r-00383",
+  "at": "2026-09-01T16:44:15.559Z",
+  "type": "owner-survivability-bounds-approved",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-survivability-bounds-revision-56-approved.json",
+    "itemId": "F2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approves the corrected revision 56 survivability bounds: zero listed conservation and rejected-action errors, zero Operations custody exposure, no separate runway requirement, at most 1,024 positions in the single Phase 1 payout, and a 100 USDG non-gas principal-loss cap for one separately authorized cooperative runner action bundle. Unresolved provider, authorizer, route-executor, bridge, and policy-wallet compromise exposures remain nonzero and unquantified. This approval authorizes no external action."
+  },
+  "inputHashes": {
+    "feasibility/survivability-bounds.json": "d81da8da9a23b7a69e0d8a4ab1767b80660230b48c4d041b9f9609ede50cf9bb",
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "decisions/owner-approvals/phase-1-survivability-bounds-revision-56-approved.json": "6a55971438c7708c78714cce046ede926b55af5c314c5fedeaaf02acf782c19b"
+  }
+}

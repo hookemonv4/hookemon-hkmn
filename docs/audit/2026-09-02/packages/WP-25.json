@@ -1,0 +1,38 @@
+{
+  "id": "WP-25",
+  "title": "Evidence/reproducibility refresh: dry-run harness + binding drift-check",
+  "goal": "Build the standalone verification script that resolves the Universal Router address discrepancy and continuously re-probes every external precondition this design depends on.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "scripts/verify-phase2-readiness.mjs",
+    "scripts/check-binding-drift.mjs",
+    "scripts/tests/verify-phase2-readiness.test.mjs"
+  ],
+  "readSet": [
+    "feasibility/verify-robinhood-binding.mjs",
+    "bindings/robinhood-chain.json",
+    "scratchpad/w1/summaries/external-facts.json"
+  ],
+  "steps": [
+    "Model scripts/verify-phase2-readiness.mjs on feasibility/verify-robinhood-binding.mjs's existing fail-closed pattern",
+    "Probe Collector Crypt's /api/status+/api/machines, Relay's /chains, Programmable's discovery/capabilities endpoints, and the Uniswap deployments page against a fresh finalized RPC read",
+    "Specifically resolve the Universal Router address: compare the repo-pinned 0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99 against Uniswap's public deployments page value 0x8876789976decbfcbbbe364623c63652db8c0904 for chain 4663 via an on-chain runtime-codehash probe, and report which one is actually live",
+    "Report INTEGRATION_PENDING/PASSED per precondition, never silently pass",
+    "Add a read-only, non-blocking CI job that re-runs this on a schedule (matches AGENTS.md's at-most-one-60-minute-or-slower-watchdog rule)"
+  ],
+  "tests": [
+    "node --test scripts/tests/verify-phase2-readiness.test.mjs",
+    "node scripts/verify-phase2-readiness.mjs --offline (fixture mode for CI)"
+  ],
+  "acceptance": [
+    "Script reports which Universal Router address is actually live on-chain, with the evidence (runtime codehash comparison) recorded",
+    "Script reports INTEGRATION_PENDING vs PASSED for every one of this design's external preconditions",
+    "WP-20 cannot proceed with mining until this script reports the router address as resolved"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "This package must complete before WP-20; none of the three source designs hard-blocked mining on this probe, which this synthesis explicitly fixes."
+}

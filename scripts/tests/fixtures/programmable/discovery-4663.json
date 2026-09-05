@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "2.0.0",
+  "platformId": "programmable",
+  "chains": [
+    {
+      "chainId": 4663,
+      "caip2": "eip155:4663",
+      "name": "Robinhood Chain Mainnet",
+      "explorerUrl": "https://robinhoodchain.blockscout.com",
+      "status": "release-candidate",
+      "customLaunchApiVersion": "4",
+      "runtimeStatus": "routes-deployed",
+      "activationStage": "pending-public-discovery-promotion",
+      "targetLaunchPath": "public-self-serve",
+      "publicAuthorization": false,
+      "publicWrites": false,
+      "releaseReady": false,
+      "externalIndexingGuaranteed": false
+    }
+  ],
+  "customLaunchApi": {
+    "versions": {
+      "v4": {
+        "chainId": 4663,
+        "apiVersion": "4",
+        "status": "release-candidate",
+        "activationBlockers": [
+          "public-cli-release",
+          "generated-release-evidence",
+          "clean-room-end-to-end-proof",
+          "public-indexing-canary"
+        ]
+      }
+    }
+  }
+}

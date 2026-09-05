@@ -1,0 +1,18 @@
+{
+  "id": "r-00297",
+  "at": "2026-08-31T18:34:32.473Z",
+  "type": "scenario-model-run",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "itemId": "F1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "feasibility/model-results.json": "6be05c7d69db03bf7ad65dc8697d224fd9d99e3a1e164fbd3ce948cb93fe511d",
+    "feasibility/model.mjs": "e66062510b31b555e07e5fa235af3e68d164da84d2967255ffdd6b5b95e99b73",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

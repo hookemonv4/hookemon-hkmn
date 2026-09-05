@@ -1,0 +1,19 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes adoption of requirements revision 65 while retaining architecture revision 9 for the Phase 3 Operations-wallet money path. It records the owner-directed 1,000,000,000 HKMN 18-decimal supply, 100 percent canonical-market allocation, zero other allocations, 240 USDG seed from the 300 USD budget, the approved X profile, and the owner-recorded Programmable route and 10 bps fee acceptance. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/capability-map.json": "5084346bb35177b5fe9c2400c37782d383b0323bea97dfaf3d425de0578b32ec",
+    "architecture/interfaces.json": "3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "d6a6929206fffb5a11cff0c44319aa288cfdcb93a48f83278349834a4f631447",
+    "decisions/owner-inputs/launch-inputs-owner.json": "bd48bf2d59c8685631243b3a883ad366266268e699f7730363c0df7fb809b7a3",
+    "decisions/owner-inputs/programmable-acceptance.json": "d9efda3241b8a924ac2068e976353576da076a832d0ef890d58b8ef75a64dc44",
+    "product/delivery-boundary.json": "5b36a35a59a407c9bf86a2586b3eb5889207f61563ba3385dab7718e46534acc",
+    "specs/requirements.json": "927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
+  }
+}

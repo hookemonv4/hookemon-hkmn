@@ -1,0 +1,243 @@
+{
+  "schemaVersion": "hookemon.interfaces.v1",
+  "source": "Approved Phase 3 plan sections 4, 6, 9, and 11",
+  "productPhase": 3,
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
+  "bindingManifest": "release/phase3/deployment-manifest.json",
+  "bindingManifestDigest": null,
+  "freezeRules": {
+    "interfaceStatus": "PROVISIONAL",
+    "freezeRequiredBeforeBuild": true,
+    "legacyCustodyFamily": "FROZEN_NOT_DEPLOYED",
+    "runtimeSetAuthority": "content-addressed-deployment-manifest"
+  },
+  "phaseBoundary": {
+    "phase": 3,
+    "codeReadinessDoesNotAuthorizeLive": true,
+    "launchEligibleRequiredForLive": true,
+    "ownerActionsRemainSeparate": ["signing", "broadcast", "deployment", "spend", "publication"],
+    "legacyCustodyFamilyDeployment": "FORBIDDEN"
+  },
+  "canonicalMarket": {
+    "hookPermissionMask": "0x20CC",
+    "enabledCallbacks": ["beforeInitialize", "beforeSwap", "afterSwap", "beforeSwapReturnDelta", "afterSwapReturnDelta"],
+    "externalBeforeInitialize": "REVERT",
+    "selfInitialization": "AUTHORIZED_ATOMIC_LAUNCH_LEG_ONLY",
+    "poolDomain": "ONE_HOOK_ONE_POOL_ID_ONE_USDG_LIABILITY_DOMAIN",
+    "selfCallPolicy": "same-pool-swap-forbidden",
+    "partialFillPolicy": "REVERT_WHOLE_SWAP",
+    "hookData": {"used": false}
+  },
+  "feeContract": {
+    "basis": "GROSS_USDG_QUOTE_VOLUME",
+    "supportedCombinations": 8,
+    "streams": [
+      {"name": "programmable", "basisPoints": 10, "remainder": "independent-lifetime"},
+      {"name": "treasury", "basisPoints": 40, "remainder": "independent-lifetime"},
+      {"name": "process", "basisPoints": 250, "remainder": "independent-lifetime"}
+    ],
+    "exactOutput": "monotonic gross such that gross minus sum(streamDelta(gross)) equals requestedNet",
+    "minimumGrossAtomicUsdg": "1000",
+    "claimsResetRemainders": false,
+    "confusion": {
+      "id": "FEE-01",
+      "defaultOption": "A",
+      "status": "PENDING_PROVIDER_BOUND_CONFIRMATION",
+      "options": {
+        "A": "10/40/250 within 300",
+        "B": "20/40/240 within 300",
+        "C": "20/40/250 totaling 310",
+        "D": "another route"
+      }
+    }
+  },
+  "processClaims": {
+    "operation": "claimProcess(bytes32 cycleId,uint256 amountAtomicUsdg,address destination)",
+    "caller": "current-operations",
+    "destination": "msg.sender",
+    "cycleId": "nonzero-unused-permanently",
+    "amount": "positive-and-no-greater-than-liability-and-remaining-capacity",
+    "window": {
+      "seconds": 21600,
+      "inclusion": "block.timestamp - claimedAt < 21600",
+      "equality": "expired",
+      "entryBound": "N"
+    },
+    "treasuryControls": {
+      "setProcessClaimLimit": "decrease-or-zero-immediate; increase-at-most-Xmax-after-21600s; history-and-usage-never-reset",
+      "pauseProcessClaims": "immediate",
+      "unpauseProcessClaims": "Treasury-only when no emergency rotation is pending",
+      "scheduleOperationsRotation": "Treasury-only; uses the immutable 43200-second delay; clears and freezes ordinary Operations handover; auto-pauses; only a new Treasury intent may supersede it with a fresh delay; history never clears",
+      "executeOperationsRotation": "Treasury-only after the scheduled 43200-second delay; replaces Operations and leaves claims paused"
+    },
+    "rotation": {
+      "immutableConstructorInput": true,
+      "productionDelaySeconds": 43200,
+      "processClaimMaxCountHardCap": 64,
+      "xmax": {"chainId": 4663, "assetId": "USDG", "decimals": 6, "amountAtomic": "500000000000"},
+      "pendingOperationsCancellation": "forbidden",
+      "treasuryReschedule": "requires a new Treasury intent and starts a new delay"
+    },
+    "event": "ProcessClaimed(bytes32,uint256,address,uint256,uint256,uint256); ProcessClaimLimitSet(uint256); ProcessClaimLimitIncreaseScheduled(uint256,uint256); ProcessClaimsPaused(address); ProcessClaimsUnpaused(address); OperationsRotationScheduled(address,address,uint256); OperationsRotationExecuted(address,address)",
+    "view": "remainingProcessClaimCapacity(); activeProcessClaimLimit(); scheduledOperationsRotation()"
+  },
+  "beneficiaryClaims": {
+    "programmable": {"operations": "claimProgrammable(address); claimProgrammable(uint256,address)", "caller": "beneficiary", "destination": "nonzero-caller-selected", "eventDestination": "actual-transfer-target"},
+    "treasury": {"operations": "claimTreasury(address); claimTreasury(uint256,address)", "caller": "beneficiary", "destination": "nonzero-caller-selected", "eventDestination": "actual-transfer-target"}
+  },
+  "launch": {
+    "atomicity": {
+      "providerGraphTransaction": {
+        "atomic": true,
+        "targets": ["token", "custody", "hook"],
+        "steps": ["deploy three targets", "allocate complete HKMN supply via token.allocate(hook)", "configure custody", "initialize pool at fixed price", "stamp launch"]
+      },
+      "ownerSeedTransaction": {
+        "atomic": true,
+        "steps": ["Permit2 pull at most 240000000 atomic USDG", "PositionManager mint full HKMN allocation to custody", "return unused USDG to payer"],
+        "failure": "roll back seed-local state only and allow retry"
+      },
+      "preSeed": {
+        "hookHkmn": "the complete HKMN allocation is held at the hook and non-transferable to every other recipient until seed succeeds",
+        "swaps": "unavailable because the initialized pool has no liquidity"
+      }
+    },
+    "positionCustody": {"withdraw": false, "approval": false, "operator": false}
+  },
+  "amount": {
+    "shape": ["chainId", "assetId", "decimals", "amountAtomic"],
+    "amountAtomic": "integer-string",
+    "evmUsdg": {"chainId": 4663, "assetId": "USDG", "decimals": 6},
+    "solanaStablecoins": "distinct-assets-never-1-to-1-without-quote-and-finalized-deltas",
+    "minimaAndGasCaps": {
+      "moneyMinimums": "every money minimum is an explicit TypedAmount",
+      "productionReturnMinimum": {"chainId": 4663, "assetId": "USDG", "decimals": 6, "amountAtomic": "0"},
+      "requiredGasCaps": ["evmPerTransactionGasPriceCap", "evmNativeReserve", "solanaPriorityFeeCap", "solanaLamportReserve"],
+      "placeholderAtomicAmount": {"value": "1", "status": "configuration-error"}
+    }
+  },
+  "cycleExecution": {
+    "stages": ["eligibility-snapshot", "claim-process", "outbound", "purchase", "open", "epic-gate", "buyback", "return", "payout"],
+    "providerAttempt": {
+      "schema": "hookemon.provider-mutation-attempt.v2",
+      "states": ["PREPARED", "NOT_SENT", "SENT_UNKNOWN", "RESPONSE_RECORDED", "RECONCILED"],
+      "transitions": ["PREPARED -> NOT_SENT -> PREPARED", "PREPARED -> SENT_UNKNOWN -> RESPONSE_RECORDED -> RECONCILED", "PREPARED -> RESPONSE_RECORDED -> RECONCILED"],
+      "notSent": "pre-call failure; retryable before provider contact",
+      "sentUnknown": "post-send ambiguity; observation-only and never resent"
+    },
+    "chainAttempt": {
+      "schema": "hookemon.chain-transaction-attempt.v2",
+      "states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED", "REFUSED"],
+      "preparedFields": ["requestDigest", "policyDigest", "fencingToken"],
+      "signedFields": ["rawSignedBytesHash", "nonceOrBlockhash", "txHash", "approvedSemanticsDigest"],
+      "storedSignedBytes": "immutable retrievable content-addressed bytes",
+      "transitions": ["PREPARED -> SIGNED -> BROADCAST -> FINALIZED", "PREPARED -> REFUSED"],
+      "refusedFields": ["reason", "fencingToken"],
+      "consumers": ["signer-wrapper", "payout", "relay-stages", "collector-handlers"],
+      "restart": "revalidate persisted approvedSemanticsDigest before any rebroadcast"
+    },
+    "relaySettlement": {
+      "schema": "hookemon.relay-leg.v1",
+      "directions": ["outbound", "return"],
+      "recordFields": ["cycleId", "direction", "relayRequestId", "quoteDigest", "sourceChainId", "sourceTxHash", "sourceAssetId", "sourceDecimals", "sourceAmountAtomic", "destinationChainId", "destinationTxHash", "destinationAssetId", "destinationDecimals", "destinationAmountAtomic", "finalizedAtSource", "finalizedAtDestination", "netDeltaAtomic"],
+      "amountEncoding": "source and destination amounts are TypedAmount fields split into their named components; netDeltaAtomic is an integer string in destination-asset units",
+      "transactionHashUniqueness": "each sourceTxHash and destinationTxHash attributes to exactly one RelayLegV1 across all cycles and directions",
+      "settlement": "SETTLED only after this process observes both finalized chain deltas through its own RPC clients and attributes the destination delta by matching amount, time window, and memo or relayRequestId; Relay status alone never settles a leg",
+      "terminalRecoveryStates": ["HELD_RELAY_PARTIAL", "HELD_RELAY_REFUND", "HELD_RELAY_LATE", "HELD_RELAY_WRONG_ASSET"],
+      "fundingIsolation": "outbound uses only the cycle claimed principal; return uses only the cycle-attributed proceeds delta"
+    },
+    "standingAuthority": {
+      "record": "StandingAuthorityDecisionV1",
+      "fields": ["authorityDigest", "verifiedAt", "intentDigest", "dayCapReservation", "nonceReservation"],
+      "firstUse": "check wall-clock expiry and atomically persist the decision with its day-cap and nonce reservations before any signable action",
+      "expiry": "an expired authority is refused at first use",
+      "replay": "replaying the persisted decision is idempotent and cannot reserve a second cap or nonce"
+    },
+    "purchaseRequest": {
+      "schema": "hookemon.purchase-request.v1",
+      "persistence": "persisted before signing",
+      "fields": {"unitPriceAtomic": "TypedAmount", "quantity": "positive-integer-string", "totalAtomic": "TypedAmount", "boundedOverheadAtomic": "TypedAmount"},
+      "invariants": ["totalAtomic.amountAtomic equals unitPriceAtomic.amountAtomic multiplied by quantity", "policy reserves totalAtomic plus boundedOverheadAtomic", "all money fields use the existing typed amount shape"]
+    },
+    "cycleMode": {
+      "values": ["production", "rehearsal"],
+      "persistence": "stored in CycleRepository at creation and immutable for the cycle",
+      "isolation": "production services refuse rehearsal cycles and rehearsal services refuse production cycles"
+    },
+    "custodyLedger": {
+      "schema": "hookemon.custody-ledger.v2",
+      "verifiedCurrentBalance": "finalized observed on-chain TypedAmount",
+      "obligations": "tracked separately from verified balance; unresolved principal is counted once",
+      "expectedCycleAssets": "cycle-attributed TypedAmounts",
+      "unattributedExternalDeposits": "separate classification that pauses new claims"
+    },
+    "terminalHold": {"states": "HELD_*", "nextTransition": "idempotent-owner-decision"},
+    "writeAhead": true,
+    "walletLock": "one-wallet-wide-nonce-and-fencing-lock",
+    "return": "finalized-cycle-attributed-delta-only"
+  },
+  "transactionPolicy": {
+    "formats": ["EVM", "Solana legacy", "Solana v0 with address lookup tables"],
+    "allowlist": ["chain-or-program", "target-or-selector", "source", "destination", "mint", "amount", "value", "gas", "fee-payer", "co-signer", "no-extra-instructions", "deadline-or-blockhash", "priority-fee"],
+    "wireSchema": {
+      "id": "hookemon.transaction-policy.v1",
+      "version": 1,
+      "authority": "the runner canonical validator is authoritative",
+      "canonicalValidator": "packages/runner/src/cycle/money-schemas.mjs#assertTransactionPolicy",
+      "adapterDecoder": "must emit the identical canonical schema"
+    },
+    "revalidateSignedMessageBeforeBroadcast": true,
+    "signers": ["operations-evm", "operations-solana"],
+    "nodeSigning": "FORBIDDEN_UNLESS_RECORDED_OWNER_EXCEPTION"
+  },
+  "eligibilitySnapshot": {
+    "timing": "before-claim-at-finalized-block",
+    "algorithm": ["pin block and hash", "replay Transfer logs from deployment", "reconcile mint-minus-burn to launch manifest", "recheck hash", "prove completeness through second source or archive RPC"],
+    "exclusions": ["zero", "burn", "hook", "pool-manager", "custody", "operations", "treasury", "programmable", "launch-contracts", "historical-role-holders"],
+    "contractHolders": "pay-to-own-address",
+    "feasibility": ["recipient-count", "measured-gas", "gas-price-cap", "native-balance", "transaction-count"]
+  },
+  "payout": {
+    "model": "direct-per-holder-usdg-transfer",
+    "states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED"],
+    "manifest": "immutable-after-first-broadcast",
+    "replacement": "same-nonce-and-calldata-only",
+    "frozenRecipient": "quarantine-liability",
+    "finality": "exact-finalized-recipient-delta",
+    "durability": {
+      "walletNonceLock": "one repository-backed lock covers claim, outbound, return, and payout",
+      "signedRecords": "SIGNED records remain durable and recoverable after restart",
+      "droppedBroadcast": "resolve by receipt search or replacement using the same nonce and calldata",
+      "frozenRecipient": "quarantine the liability without blocking the rest of the manifest",
+      "dustCarry": "persist and atomically consume provenance-bound carry between cycles"
+    }
+  },
+  "policyEngine": {
+    "controls": ["dashboard-caps-and-allowlists-atomic-at-claim-and-purchase", "rolling-24h-spend", "max-cycles-per-day", "per-cycle-cap", "rolling-realized-plus-at-risk-loss-cap", "max-outstanding-custody", "pause-or-kill-switch-before-every-signature", "digest-bound-manual-approval-for-first-N-production-cycles"],
+    "epicRule": "hold iff offerAtomic * 100 < insuredValueAtomic * 40; equality sells",
+    "held": "HELD_* is fail-closed, alarmed, never-auto-sold, and blocks-new-claims-in-v1",
+    "canaries": ["chain-id", "runtime-hashes", "USDG-decimals-pause-freeze", "roles", "protocol-fee", "router-and-quoter-hashes", "provider-policy-digest", "nonce-or-blockhash", "gas-reserves", "pause-and-loss-limits", "unattributed-custody"],
+    "rehearsal": "runner mode with bounded cycles, cap, restart injection, and evidence JSON"
+  },
+  "readiness": {
+    "repairMergeEligible": "code-and-integration-repair-gate",
+    "launchEligible": "provider-admission-exact-graph-operational-canaries-and-owner-gated-live-prerequisites",
+    "technicalEvidenceAuthorizesAction": false
+  },
+  "moduleInterfaces": [
+    {"id": "operations-wallet", "operations": ["claimProcess(bytes32,uint256,address)", "setProcessClaimLimit(uint256)", "pauseProcessClaims()", "unpauseProcessClaims()", "scheduleOperationsRotation(address)", "executeOperationsRotation()", "remainingProcessClaimCapacity()", "activeProcessClaimLimit()", "scheduledOperationsRotation()", "claimProgrammable(address)", "claimProgrammable(uint256,address)", "claimTreasury(address)", "claimTreasury(uint256,address)"], "records": ["ProcessClaimWindowEntry", "PendingProcessClaimLimit", "ScheduledOperationsRotation"], "events": ["ProcessClaimed(bytes32,uint256,address,uint256,uint256,uint256)", "ProcessClaimLimitSet(uint256)", "ProcessClaimLimitIncreaseScheduled(uint256,uint256)", "ProcessClaimsPaused(address)", "ProcessClaimsUnpaused(address)", "OperationsRotationScheduled(address,address,uint256)", "OperationsRotationExecuted(address,address)"]},
+    {"id": "launch-orchestration", "operations": ["executeProviderGraphLaunch", "executeOwnerSeed", "hookSelfInitialize", "mintAndSettlePosition", "bindMintedPosition", "stampLaunch"], "records": ["ProviderGraphLaunchV1", "OwnerSeedV1", "MintedPositionEvidence", "LaunchPostconditions"], "events": ["ProviderGraphLaunched", "PositionCustodyBound", "LaunchStamped", "OwnerSeeded"]},
+    {"id": "cycle-repository", "operations": ["prepareMutation", "recordProviderAttempt", "recordChainAttempt", "recordRelayLeg", "settleRelayLeg", "recordStandingAuthorityDecision", "reserveWalletNonce", "recordPurchaseRequest", "recordCustodyObservation", "recordBroadcast", "recordFinality", "reconcileUnresolved", "readCycle"], "records": ["CycleRecord", "ProviderMutationAttemptV2", "ChainTransactionAttemptV2", "RelayLegV1", "StandingAuthorityDecisionV1", "WalletNonceReservationV1", "PurchaseRequestV1", "CycleMode", "CustodyLedgerV2"], "events": ["CycleTransitionRecorded", "ProviderAttemptRecorded", "ChainAttemptRecorded", "RelayLegRecorded", "RelayLegSettled", "StandingAuthorityDecisionRecorded", "WalletNonceReserved", "TransactionReconciled"]},
+    {"id": "transaction-policy", "operations": ["decodeAndAllow", "validateSignedMessage", "validateMoneyConfiguration", "requestExternalSignature", "checkSignOnlyReadiness"], "records": ["DecodedTransaction", "CanonicalTransactionPolicyV1", "MoneyConfigurationV1", "SignerReadiness"], "events": ["TransactionRejected", "MoneyConfigurationRejected", "SignerReadinessFailed"]},
+    {"id": "eligibility-snapshot", "operations": ["freezeEligibilityBeforeClaim", "verifyLogCompleteness", "evaluatePayoutFeasibility"], "records": ["EligibilitySnapshot", "SnapshotCompletenessProof", "PayoutFeasibilityEnvelope"], "events": ["EligibilityFrozen"]},
+    {"id": "direct-payout", "operations": ["preparePayout", "signPayout", "broadcastPayout", "recoverDroppedBroadcast", "finalizePayout", "quarantineFrozenRecipient", "persistDustCarry"], "records": ["PayoutManifest", "RecipientPayoutJournal", "ChainTransactionAttemptV2", "PayoutRecoveryEvidence", "QuarantineLiability", "PayoutDustCarryV1"], "events": ["PayoutBroadcast", "PayoutBroadcastRecovered", "RecipientFinalized", "RecipientQuarantined", "PayoutDustCarried"]},
+    {"id": "policy-engine", "operations": ["evaluateClaim", "evaluatePurchase", "evaluateSignature", "recordManualApproval", "enterHeldState", "runCanaries"], "records": ["PolicySnapshot", "SpendWindow", "PurchaseRequestV1", "CustodyLedgerV2", "ManualApproval", "HeldCardState", "CanaryResult"], "events": ["PolicyRejected", "HeldCardRecorded", "CanaryDriftDetected"]},
+    {"id": "deployment-manifest", "operations": ["buildDeploymentManifest", "verifyDeploymentManifest", "assertLegacyFamilyExcluded"], "records": ["DeploymentManifest", "RuntimeEntry", "ManifestDigest"], "events": ["DeploymentManifestVerified"]}
+  ],
+  "productionBlockers": ["provider-bound-FEE-01-confirmation", "provider-graph-admission", "pinned-archive-fork-evidence", "launch-inputs", "finalized-snapshot-log-source", "payout-feasibility-envelope", "owner-gated-live-prerequisites"],
+  "proof": {"required": ["non-skipping-pinned-fork-suite", "current-head-canary", "deployment-manifest-validation", "cycle-restart-recovery", "direct-payout-finality", "cleanroom-and-traceability-controls"]},
+  "providerBinding": {"status": "INTEGRATION_PENDING", "readOnlyPreflight": true},
+  "tokenRuntimeAuthority": {"status": "INTEGRATION_PENDING_EXACT_HKMN_RUNTIME", "productionBlocker": "HKMN_ADDRESS_AND_RUNTIME"}
+}

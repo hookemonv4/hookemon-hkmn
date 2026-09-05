@@ -1,0 +1,21 @@
+{
+  "schema": "hookemon.task-local-verification.v1",
+  "authority": "LOCAL_TEST_EVIDENCE_ONLY",
+  "taskId": "P1-010",
+  "taskCompletionCommit": "54553aa7adb4ca1805841178946395515c91a444",
+  "verifiedHead": "ea3897ef93c55ed6f83d94219e18302dbd53e852",
+  "includedRecoveryFix": "ac8071ef696e6f5bc76c6a3524591f2d529ea269",
+  "includedDistributionIntegration": "04ede1d40772133d52e9e7202f6c481256e37e40",
+  "command": "env OPENSSL_CONF=/dev/null /private/tmp/node-v24.19.0-darwin-arm64/bin/node --test packages/runner/test/cycle/*.test.mjs",
+  "result": {
+    "tests": 72,
+    "passed": 72,
+    "failed": 0,
+    "skipped": 0
+  },
+  "externalActionsPerformed": false,
+  "limits": [
+    "The suite uses pinned local fixtures and does not prove provider or production readiness.",
+    "The task completion commit remains immutable; verifiedHead records the later integrated recovery and distribution fixes covered by this run."
+  ]
+}

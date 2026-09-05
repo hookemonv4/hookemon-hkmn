@@ -1,0 +1,20 @@
+{
+  "id": "r-00238",
+  "at": "2026-08-31T17:06:53.998Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-revision-55-current-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approved requirements revision 55 for the manual one-cycle Phase 1 scope and instructed local completion."
+  },
+  "inputHashes": {
+    "gates/spec.json": "53f541f618dcd7cf0cfd862f8683406c823d5e22924584b9abfdc1d15e1757ef",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4",
+    "decisions/owner-approvals/phase-1-spec-revision-55-current-approved.json": "1f9d63f4442c035fb2b8612c0a23b74c3bf53dc7e888991ecc6830316edb760a"
+  }
+}

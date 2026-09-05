@@ -1,0 +1,21 @@
+{
+  "id": "r-00559",
+  "at": "2026-09-04T02:09:31.164Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P2-001",
+    "commitSha": "26aa87cb8b2f82b4de2ab6360026ed5bb5b952e2",
+    "taskFingerprint": "04eec480055fb609cb5d4d74f9cec31d1195500160ace2ba3c22979f288e85d7",
+    "requirementsRevision": 58,
+    "requirementsHash": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "inputHashes": {
+    "packages/adapters/test/app/compose.test.mjs": "78a73ea870566b1004c3d571ad94712fdfb8bd978bd9997e53a5fd57136a59c0",
+    "packages/dashboard/test/routes/server.test.mjs": "d44844cda9d5f06c800da9eb068ca646d6ba64aa065057842271c38502aa5956",
+    "packages/adapters/test/app/stages-rehearsal.test.mjs": "4b3c09c010239b05711a56aea8f7e7b2ffa109faf5ba33a5ccb3f1d32b1419c8",
+    "packages/adapters/test/app/accounting-projection.test.mjs": "230e63c3f88f4c347c2ec7f94b874d7f8c656051bbec10962cd45cc0313db600",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

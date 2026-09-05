@@ -1,0 +1,53 @@
+{
+  "id": "WP-01",
+  "title": "Integration base: merge rev57 onto main",
+  "goal": "Produce a single integrated tree carrying main's Phase-1 contracts plus codex/phase2-revision-57's per-cycle CREATE2 return escrow and operator-control CLI, with the Foundry CI version-string fix and stale digests regenerated, so every later work package has one stable base.",
+  "deps": [],
+  "parallelGroup": 1,
+  "writeSet": [
+    "docs/modules/index.json",
+    "docs/modules/peg-cycle-vault.md",
+    "docs/modules/cycle-runner.md",
+    "gates/runs/init.json",
+    "packages/contracts/src/process/PegCycleVault.sol",
+    "packages/contracts/src/process/PegCycleReturnEscrow.sol",
+    "packages/contracts/src/process/IPegCycleVault.sol",
+    "product/delivery-boundary.json",
+    "gates/receipts/r-00430.json",
+    "gates/receipts/r-00431.json",
+    "scripts/tests/final-review.test.mjs",
+    "tasks.json",
+    "packages/runner/src/operator/*",
+    "packages/runner/src/cycle/vault-payout-authorization.mjs",
+    "packages/runner/src/cycle/preflight.mjs",
+    ".github/workflows/v4-gates.yml"
+  ],
+  "readSet": [
+    "codex/phase2-revision-57 full diff (19 commits)",
+    "codex/complete-v4-hook full diff (25 commits, additive SwapLiabilitiesAccrued event only)",
+    "product/SOURCE_BOUNDARY.md",
+    "AGENTS.md"
+  ],
+  "steps": [
+    "git merge-tree the two branches against main; resolve the 8 known conflicts (docs/modules/index.json, docs/modules/peg-cycle-vault.md, gates/runs/init.json, PegCycleVault.sol, product/delivery-boundary.json, receipts r-00430/r-00431, final-review.test.mjs, tasks.json) favoring main's stricter _transferUsdg checks over complete-v4-hook's looser variant",
+    "Cherry-pick complete-v4-hook's SwapLiabilitiesAccrued event only; drop its HookemonHook.sol/ProcessBudget.sol claim-function changes entirely",
+    "Fix the stale cycle-runner.md digest bug already found live on rev57 commit 228d4b1",
+    "Apply the Foundry version-string CI fix that currently makes CI red on main",
+    "Regenerate every stale digest in docs/modules/index.json against the merged tree",
+    "Reconcile task-id collisions: reserve P2-001..012 for rev57's original scope"
+  ],
+  "tests": [
+    "forge test",
+    "node --test scripts/tests/*.test.mjs",
+    "node --test packages/runner/test/**"
+  ],
+  "acceptance": [
+    "Merge is git-clean with zero unresolved conflict markers",
+    "All 171 forge tests plus rev57's additional process/operator tests pass",
+    "node --test scripts/tests/gates.test.mjs reports no STALE gate from a digest mismatch",
+    "CI is green on the merged branch (Foundry version-string check passes)"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Every other work package depends on this landing first. Do not attempt partial merges of individual files without running the full suite."
+}

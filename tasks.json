@@ -1,0 +1,250 @@
+{
+  "generatedAt": "2026-09-04T02:07:52.198Z",
+  "tasks": [
+    {
+      "id": "P1-001",
+      "title": "Freeze immutable launch contract",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [
+        "REQ-provider-binding-1",
+        "REQ-provider-binding-2",
+        "REQ-provider-binding-3",
+        "REQ-canonical-market-5",
+        "REQ-fee-accounting-1",
+        "REQ-phase-boundary-1",
+        "REQ-phase-boundary-3"
+      ],
+      "status": "done",
+      "commitSha": "324a8d84da99fee05afb47a8d3ade0dfca9ef389"
+    },
+    {
+      "id": "P1-002",
+      "title": "Execute canonical market swap",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-001"
+      ],
+      "reqs": [
+        "REQ-canonical-market-1",
+        "REQ-canonical-market-2",
+        "REQ-canonical-market-3",
+        "REQ-canonical-market-4"
+      ],
+      "status": "done",
+      "commitSha": "254ea93d5705518c96c5597f82d523b9a466f13f"
+    },
+    {
+      "id": "P1-003",
+      "title": "Issue fixed HKMN supply",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-002"
+      ],
+      "reqs": [
+        "REQ-token-core-1",
+        "REQ-token-core-2",
+        "REQ-token-core-3",
+        "REQ-token-core-4"
+      ],
+      "status": "done",
+      "commitSha": "9b9a70437432a9358234437476e11be28dedb90b"
+    },
+    {
+      "id": "P1-004",
+      "title": "Accrue isolated USDG liabilities",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-005"
+      ],
+      "reqs": [
+        "REQ-fee-accounting-2",
+        "REQ-fee-accounting-3",
+        "REQ-fee-accounting-4",
+        "REQ-fee-accounting-5"
+      ],
+      "status": "done",
+      "commitSha": "939c79ff69d94266da24534c1b0612fa6f8354d0"
+    },
+    {
+      "id": "P1-005",
+      "title": "Enforce minimal money roles",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-003"
+      ],
+      "reqs": [
+        "REQ-role-control-1",
+        "REQ-role-control-2",
+        "REQ-role-control-3",
+        "REQ-role-control-4"
+      ],
+      "status": "done",
+      "commitSha": "74a4af0da4089be7bd3a24493cb5ff47e1e55d0b"
+    },
+    {
+      "id": "P1-006",
+      "title": "Release one process cycle",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-004"
+      ],
+      "reqs": [
+        "REQ-process-budget-1",
+        "REQ-process-budget-2",
+        "REQ-process-budget-3",
+        "REQ-process-budget-5"
+      ],
+      "status": "done",
+      "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509"
+    },
+    {
+      "id": "P1-007",
+      "title": "Fund one payout commitment",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-006"
+      ],
+      "reqs": [
+        "REQ-payout-commitment-1",
+        "REQ-payout-commitment-2",
+        "REQ-payout-commitment-3",
+        "REQ-payout-commitment-4",
+        "REQ-payout-commitment-5",
+        "REQ-payout-commitment-6"
+      ],
+      "status": "done",
+      "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509"
+    },
+    {
+      "id": "P1-008",
+      "title": "Pay one holder entitlement",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-007"
+      ],
+      "reqs": [
+        "REQ-holder-settlement-1",
+        "REQ-holder-settlement-2",
+        "REQ-holder-settlement-3",
+        "REQ-holder-settlement-4",
+        "REQ-holder-settlement-6",
+        "REQ-holder-settlement-7"
+      ],
+      "status": "done",
+      "commitSha": "27d6cc3a20ec23833be5b86b08b153e9327d5b7f"
+    },
+    {
+      "id": "P1-009",
+      "title": "Compile realized holder distribution",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-001"
+      ],
+      "reqs": [
+        "REQ-cycle-runner-2",
+        "REQ-holder-settlement-5"
+      ],
+      "status": "done",
+      "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509"
+    },
+    {
+      "id": "P1-010",
+      "title": "Journal one pack cycle",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-001"
+      ],
+      "reqs": [
+        "REQ-process-budget-4",
+        "REQ-cycle-runner-1"
+      ],
+      "status": "done",
+      "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509"
+    },
+    {
+      "id": "P1-011",
+      "title": "Render loop dashboard",
+      "phase": "build",
+      "risk": "ordinary",
+      "deps": [
+        "P1-001"
+      ],
+      "reqs": [],
+      "status": "deferred",
+      "deferApproval": "decisions/owner-approvals/phase-2-revision-58-dashboard-deferral-approved.json",
+      "deferDescriptor": "decisions/task-deferrals/P1-011.json",
+      "deferPrestateFingerprint": "b05e44062790639cf601a6a69776054b814b981924c0aa5f60d44c34b83f8031"
+    },
+    {
+      "id": "P1-012",
+      "title": "Close thin-V1 release evidence",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-008",
+        "P1-009",
+        "P1-010"
+      ],
+      "reqs": [
+        "REQ-release-evidence-1",
+        "REQ-release-evidence-2",
+        "REQ-release-evidence-3",
+        "REQ-release-evidence-4",
+        "REQ-release-evidence-5",
+        "REQ-release-evidence-6",
+        "REQ-phase-boundary-2"
+      ],
+      "status": "done",
+      "commitSha": "8df379b99e05f156fd1959c8ac7d0bb421dfd80f"
+    },
+    {
+      "id": "P1-013",
+      "title": "Integrate canonical v4 hook accounting",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "P1-004"
+      ],
+      "reqs": [
+        "REQ-canonical-market-5",
+        "REQ-fee-accounting-1"
+      ],
+      "status": "done",
+      "commitSha": "741aaaea2c5cc69895a1d17b1ce72932b490c692"
+    },
+    {
+      "id": "P2-001",
+      "title": "Phase 2 autonomous cycle rebuild (WP-01 to WP-40)",
+      "phase": "build",
+      "risk": "ordinary",
+      "deps": [],
+      "reqs": [
+        "REQ-cycle-control-1",
+        "REQ-cycle-control-2",
+        "REQ-fee-accounting-6",
+        "REQ-fee-accounting-7",
+        "REQ-fee-accounting-8",
+        "REQ-canonical-market-6",
+        "REQ-process-budget-6",
+        "REQ-payout-commitment-7",
+        "REQ-payout-commitment-8",
+        "REQ-distribution-1",
+        "REQ-distribution-2",
+        "REQ-dashboard-2"
+      ],
+      "status": "done",
+      "commitSha": "26aa87cb8b2f82b4de2ab6360026ed5bb5b952e2"
+    }
+  ]
+}

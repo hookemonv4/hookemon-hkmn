@@ -1,0 +1,33 @@
+{
+  "id": "WP-11",
+  "title": "Holder snapshot indexer",
+  "goal": "Produce a real, authenticated HKMN holder balance snapshot from finalized Transfer logs, excluding non-holder addresses.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "packages/runner/src/distribution/snapshot-indexer.mjs",
+    "packages/runner/test/distribution/snapshot-indexer.test.mjs"
+  ],
+  "readSet": [
+    "packages/runner/src/distribution/reconcile.mjs (existing validateSnapshot schema)"
+  ],
+  "steps": [
+    "Read HKMN Transfer logs from Robinhood RPC up to a fixed finalized block and fold them into current per-address balances",
+    "Compute the exclusion list: canonical pool, hook, vault, every per-cycle escrow (via the same CREATE2 formula the contracts use), treasury",
+    "Produce the hookemon.hkmn-holder-snapshot.v1 schema: finalized block number/hash, per-holder balance, total supply, exclusion list with justification",
+    "Add a synthetic Transfer-log fixture test proving two independent runs from the same finalized block produce byte-identical snapshots"
+  ],
+  "tests": [
+    "node --test packages/runner/test/distribution/snapshot-indexer.test.mjs"
+  ],
+  "acceptance": [
+    "Snapshot schema matches what reconcile.mjs's existing validateSnapshot already expects",
+    "Excluded addresses (pool/hook/vault/every escrow/treasury) never appear as recipients",
+    "Two independent runs against the same finalized block produce identical output (TB-16 dual-builder requirement)"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Log-derived, not eth_call-derived, specifically so a second builder can independently reproduce it."
+}

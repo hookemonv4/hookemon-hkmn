@@ -1,0 +1,16 @@
+{
+  "id": "r-00334",
+  "at": "2026-08-31T21:59:37.099Z",
+  "type": "operations-handoff-complete",
+  "phase": "ship",
+  "result": "PASSED",
+  "data": {
+    "itemId": "H5",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "ops/HANDOFF.md": "8b64aa7d69d924f05a3287cfa675e5cf07361584ec76521eaedba230ce2daa4c"
+  }
+}

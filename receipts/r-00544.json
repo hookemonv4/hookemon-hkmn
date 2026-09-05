@@ -1,0 +1,25 @@
+{
+  "id": "r-00544",
+  "at": "2026-09-03T11:30:42.217Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P2-001",
+    "commitSha": "2d415d4ce0b0e22eb5beb109398f188feab94795",
+    "taskFingerprint": "617c449c6196b2501e6e92f752f405a4638a8ab9bc88d95112bba4fd9844069e",
+    "requirementsRevision": 58,
+    "requirementsHash": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "inputHashes": {
+    "release/phase1/local-evidence.json": "80e697ab5a83d45786f40cba2624a04535102fc188006a146edc49ccb3d63b08",
+    "release/phase1/local-candidate.json": "25a064aafe99ccc42218daf21aaa96d821a1368dd76cc3d113af32b876803ad0",
+    "release/phase1/local-reproducibility.json": "7d7ffb99911a2ebcb4ccae1e2c9d20014d38fa7652988ad974091d8f27910947",
+    "qa/redteam/revision-58-findings.json": "9a176f17f1186b0ff72a976d91ddda5a6e1183acec3511d8cac9a37f2d5bcf6e",
+    "packages/contracts/test/process/PayoutDualSignature.t.sol": "13866dc7bb23236ee748cee2c4989a27a5694a36829f1375ff0df9cd6a2e2484",
+    "packages/adapters/test/app/compose.test.mjs": "d4aa574974446984f5c89b2284a689ef9701c861573e8d215d469e2aa8beda11",
+    "packages/runner/test/integration/production-cycle.test.mjs": "4364726dc662d508ed63f4fe2ed180e05187cb6f4f009c149f1392d68c19fb1d",
+    "packages/dashboard/test/routes/server.test.mjs": "23e3dff4ca9f15e83573df1003240c1cf5196b9a4ca523dcf591067a828cda83",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

@@ -1,0 +1,744 @@
+{
+  "schemaVersion": 1,
+  "openDeliveryPhase": 3,
+  "phases": {
+    "1": "COMPLETE",
+    "2": "COMPLETE",
+    "3": "OPEN"
+  },
+  "operationalRoots": [
+    "specs",
+    "interfaces",
+    "bindings",
+    "tasks",
+    "gates"
+  ],
+  "registries": [
+    {
+      "id": "requirements",
+      "sources": [
+        {
+          "file": "specs/requirements.json",
+          "recordsAt": "/requirements",
+          "recordIdProperty": "id"
+        }
+      ]
+    },
+    {
+      "id": "tasks",
+      "sources": [
+        {
+          "file": "tasks.json",
+          "recordsAt": "/tasks",
+          "recordIdProperty": "id",
+          "optional": true
+        },
+        {
+          "file": "tasks/context-packs.json",
+          "records": [
+            {
+              "recordId": "context-packs",
+              "pointer": "/cards"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interfaces",
+      "sources": [
+        {
+          "file": "interfaces/index.json",
+          "recordsAt": "/interfaces",
+          "recordIdProperty": "id",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "id": "product-dependencies",
+      "sources": [
+        {
+          "file": "product/dependency-pins.json",
+          "records": [
+            {
+              "recordId": "DEP-control-runtime",
+              "pointer": "/controlRuntime"
+            },
+            {
+              "recordId": "DEP-base-pack",
+              "pointer": "/contentAddresses/basePack"
+            },
+            {
+              "recordId": "DEP-workflow",
+              "pointer": "/contentAddresses/workflow"
+            },
+            {
+              "recordId": "DEP-action-checkout",
+              "pointer": "/contentAddresses/githubActions/actions~1checkout"
+            },
+            {
+              "recordId": "DEP-gitleaks",
+              "pointer": "/securityTools/gitleaks"
+            },
+            {
+              "recordId": "DEP-phase1-toolchain",
+              "pointer": "/phase1Toolchain"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bindings",
+      "sources": [
+        {
+          "file": "bindings/index.json",
+          "recordsAt": "/bindings",
+          "recordIdProperty": "id",
+          "optional": true
+        },
+        {
+          "file": "bindings/robinhood-chain.json",
+          "records": [
+            {
+              "recordId": "robinhood-chain-manifest",
+              "pointer": "/manifestDigest"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "release-gates",
+      "sources": [
+        {
+          "file": "gates/init.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/spec.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/architecture.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/feasibility.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/redteam.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/tasks.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/build.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        },
+        {
+          "file": "gates/ship.json",
+          "recordsAt": "/items",
+          "recordIdProperty": "id"
+        }
+      ]
+    }
+  ],
+  "sidecars": [
+    {
+      "recordId": "requirements:REQ-token-core-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-token-core-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-token-core-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-token-core-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-provider-binding-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-provider-binding-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-provider-binding-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-process-budget-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-process-budget-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-process-budget-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-process-budget-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-process-budget-5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-6",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-6",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-holder-settlement-7",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-role-control-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-role-control-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-role-control-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-role-control-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-6",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-phase-boundary-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-phase-boundary-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-phase-boundary-3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-cycle-runner-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-cycle-runner-2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-cycle-control-1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-001",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-002",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-003",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-004",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-005",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-006",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-007",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-008",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-009",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-010",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-012",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P1-013",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "tasks:P2-001",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "tasks:context-packs",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "product-dependencies:DEP-control-runtime",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "product-dependencies:DEP-base-pack",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "product-dependencies:DEP-workflow",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "product-dependencies:DEP-action-checkout",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "product-dependencies:DEP-gitleaks",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "product-dependencies:DEP-phase1-toolchain",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "bindings:robinhood-chain-r54-a3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "bindings:robinhood-chain-manifest",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:I1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:I2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:I3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:I4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:I5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:I6",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:S1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:S2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:S3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:S4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:S5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:A1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:A2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:A3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:A4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:A5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:A6",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:F1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:F2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:F3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:F4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:F5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:R1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:R2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:R3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:R4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:R5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:T1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:T2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:T3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:T4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:T5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:B1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:B2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:B3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:B4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:B5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:B6",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:H1",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:H2",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:H3",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:H4",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "release-gates:H5",
+      "deliveryPhase": 1
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-6",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-7",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-8",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-6",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-process-budget-6",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-7",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-payout-commitment-8",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-cycle-control-2",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-distribution-1",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-distribution-2",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-dashboard-2",
+      "deliveryPhase": 2
+    },
+    {
+      "recordId": "requirements:REQ-phase3-deployment-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-operations-wallet-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-operations-wallet-2",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-operations-wallet-3",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-launch-orchestration-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-launch-orchestration-2",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-canonical-market-7",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-fee-accounting-9",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-cycle-repository-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-transaction-policy-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-cycle-runner-3",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-epic-gate-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-collector-crypt-adapter-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-eligibility-snapshot-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-direct-payout-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-policy-engine-1",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-provider-binding-4",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-release-evidence-7",
+      "deliveryPhase": 3
+    },
+    {
+      "recordId": "requirements:REQ-policy-engine-2",
+      "deliveryPhase": 3
+    }
+  ]
+}

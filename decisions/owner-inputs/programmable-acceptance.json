@@ -1,0 +1,17 @@
+{
+  "schema": "hookemon-programmable-acceptance-v1",
+  "recordedAt": "2026-09-05",
+  "source": "owner decision recorded by the coordinator",
+  "provider": "Programmable",
+  "ownerStatement": "Programmable confirmed the Phase 3 launch route directly with the owner. No provider-acceptance decision remains open.",
+  "acceptedItems": [
+    {
+      "id": "FEE-01",
+      "description": "Programmable platform share",
+      "basisPoints": 10,
+      "acceptedAt": "2026-09-04",
+      "status": "accepted"
+    }
+  ],
+  "scope": "This record confirms acceptance only. It does not provide provider-supplied launch-intent preimage fields, credentials, signing authority, funding, deployment, or broadcast authorization."
+}

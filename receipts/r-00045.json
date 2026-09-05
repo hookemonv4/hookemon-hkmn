@@ -1,0 +1,14 @@
+{
+  "id": "r-00045",
+  "at": "2026-08-30T07:59:39.244Z",
+  "type": "owner-decision",
+  "phase": "spec",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/OWNER_DECISIONS.md": "f364108abe9031b35ef4ae462f762928d51e21a1462f3d9c2fb930f9bdee47ce",
+    "product/PRD.md": "c672c6233b31329ef82d4f6d1a8fe0497d8b2afd4732847b60f6a8c5de95cd9a",
+    "specs/requirements.json": "6eb2478f43e0e87a98da01ed868d737a19fe2038958b3e85fce2e5c411f14660",
+    "decisions/ADR-0010-treasury-only-surplus-recovery.md": "78a1ecc0c996fa1726b05358a58cacb3ef8e3ab8783201b1546d62a3d22c3bde"
+  }
+}

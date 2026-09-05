@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "TASK_DEFER",
+  "phase": "build",
+  "itemId": "P1-011",
+  "rationale": "Dashboard deferred to Phase 2 by the owner-approved manual one-cycle scope. DRAFT_UNSIGNED re-binding to requirements revision 58 after WP-21 advanced specs/requirements.json (revision 56 -> 58); this draft is not wired into tasks.json and does not replace the live decisions/task-deferrals/P1-011.json binding until the owner signs a matching approval and the ledger re-records the deferral.",
+  "approvalToken": "DRAFT_UNSIGNED - NOT YET OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/task-deferrals/P1-011-revision-58-rebind-DRAFT.json": "e581c97a480bbf0b24aa65554dbe85b0dd282e5bfd48c036e51c413078d7081c",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8"
+  }
+}

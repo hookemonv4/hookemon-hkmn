@@ -1,0 +1,29 @@
+{
+  "id": "r-00335",
+  "at": "2026-08-31T22:11:30.813Z",
+  "type": "module-contracts-created",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A6",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "000eb1273c2bf4d237c60d4c8b9ad926ca4e7a2d62fdf32d575dac30cac03dae",
+    "architecture/capability-map.json": "113f4a50e84a7ca3b392ae417352395749d7aa20aa924d39bac788004c22a8c5",
+    "docs/modules/canonical-market.md": "51a512df587907e28a835ec832dff9b5b792e63f43622aa849e2ffd24a34c22b",
+    "docs/modules/cycle-runner.md": "9ec090e11070e14b9350fe677ca23dc81a10e2dbd20cf8239efe84a0db91823c",
+    "docs/modules/fee-accounting.md": "d35b22a92c56a193e97569f82e72fd7738b511071a4aaa044dd03774aa397865",
+    "docs/modules/holder-settlement.md": "98104edc6d5c1a92a55ea86e05dd816ccab39bff1bd015d585d9978dd41c6386",
+    "docs/modules/index.json": "695fdefcc3a1838993cfdb2732396e7d33bc891f8823a70dde0b53e86b74370c",
+    "docs/modules/payout-commitment.md": "8638bcbeff314c715b166f8e630334f14e01b06fc8b6a5493f786740b2816cd4",
+    "docs/modules/phase-boundary.md": "03a51226acbf75623fd9b177b44d82b1baab6d86bf67fab245702656ddda6312",
+    "docs/modules/process-budget.md": "bdf96aa8fcee8a5e3dcb0b414fdf21c64068e3c319114cb91ae8bb611226d281",
+    "docs/modules/provider-binding.md": "247ea6fb2a99f2437d3642c06654ef64faef2e23eabb9f0362dbf8db560eedc8",
+    "docs/modules/release-evidence.md": "cef1bad929995c25c5b3fe6341a89a34d452ad71389e0553787b0bec2a4a38c0",
+    "docs/modules/role-control.md": "7675c2feeaeb04f49fdfb83d46977f372d0d99b9670c94b5163c9834e8ca4363",
+    "docs/modules/token-core.md": "99b4318705f44c944268cd2bba928c338c4cf1a18f4e737640c6250618f2246f",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

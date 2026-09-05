@@ -1,0 +1,20 @@
+{
+  "id": "r-00176",
+  "at": "2026-08-30T17:57:46.231Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-continuous-baseline-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Kontinuierliche Arbeits-Policy (Auto-Chaining, Never-stand-still, codex/-Pushes und Draft-PRs erlaubt; Merge/Deploy/Geld/Secrets bleiben ask-first) plus PRD-Phasen-Klarstellung als neue Phase-1-Baseline. Owner am 30.08.2026: sag commit und verteil, dann mache ich. Wenn wir schon dabei sind, dann schliesse gerne alles. Alle Commits, dass es sauber ist, sodass ich mit den neuen Einstellungen neu durchlaufen lassen kann."
+  },
+  "inputHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "policy/policy.json": "9c8a032c3067b0ce5027507f0328e77fe4ae46960e776e8e8c4685bb69dfe41d",
+    "product/PRD.md": "2a6c443d41fa48fc4fd4e512a2ae5f05f58e1022d318acc82b5a7bf3e212b7c6",
+    "decisions/owner-approvals/phase-1-continuous-baseline-approved.json": "a92aaa8cd54f307403c5d97de4471893ef5f8a360da6961d765ef1dadc4e932f"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "r-00425",
+  "at": "2026-09-01T16:48:15.050Z",
+  "type": "gate",
+  "phase": "build",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 2,
+    "problems": [
+      "B6: no status recorded"
+    ]
+  },
+  "inputHashes": {
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "gates/runs/build.json": "9a5c04faf693c9be79c2c66711edeae6557ee6e50f758040f405b703302e45c4",
+    "receipts/r-00420.json": "38d1badc6cecfd385f7cad00252ebf467c2d07a3533d640b160e0ca0276688d0",
+    "receipts/r-00421.json": "3b7baa3e06a528852571f8a8c16d891da8c3edd55150690ffa293ec9d15837cf",
+    "receipts/r-00422.json": "5331c9abdcb0cc8afd92fb6ff0796587b7cd1c371eef4c1e44e610d300615199",
+    "receipts/r-00423.json": "1945d2987cc8918cb121ca64e4504dfb82996c760892d7dfa42346133c1e3343",
+    "receipts/r-00424.json": "4313c4163aabb9ade015f54a93eb98c8bf4deb841949055b6c8ffb61329e9063"
+  }
+}

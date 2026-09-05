@@ -1,0 +1,20 @@
+{
+  "id": "r-00312",
+  "at": "2026-08-31T20:27:17.462Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-007",
+    "commitSha": "519417c6e9608d5b6b10ace42fad79a5770cf633",
+    "taskFingerprint": "a589cb3d1c63c2deaf959b2f97dd5fc2ea64780f785f5729ae1dde09d657b7e3",
+    "requirementsRevision": 55,
+    "requirementsHash": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  },
+  "inputHashes": {
+    "packages/contracts/test/payout/PayoutCommitment.t.sol": "c6e5310f02e17aa04fa92e6da22e62ad8dcd0347fd3f6172fae72922fb087df5",
+    "packages/contracts/test/payout/CanonicalMerkleSum.t.sol": "2d4422cedd544ecaf1455e753c5d51a1e6a3dd80d7688543efcf8ff3772a91a5",
+    "packages/contracts/test-js/payout/canonical-merkle-sum.test.mjs": "d78cd45cce0a2be46439e043c6fdb37ca86763254138194cc7cad1646e0f160d",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

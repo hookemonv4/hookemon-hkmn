@@ -1,0 +1,20 @@
+{
+  "id": "r-00089",
+  "at": "2026-08-30T11:44:55.707Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-thin-v1-prd-revision-53-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "PHASE-1 PRD, REQUIREMENTS REVISION 53 UND ADR-0013 BIS ADR-0016 GENEHMIG"
+  },
+  "inputHashes": {
+    "gates/init.json": "f54b2ac9902b8004c87eacbdbcff8a175e0617e2c90decf948b9c29d4409715e",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "product/PRD.md": "0a2fdd225be72d59f6997f99b7e11658af8e6de1aacfe0fa2e24389c37e6844f",
+    "decisions/owner-approvals/phase-1-thin-v1-prd-revision-53-approved.json": "f7d1c813417b4caf741df77f64bca171524c04cddd7db177ee4aa41b92e6e71f"
+  }
+}

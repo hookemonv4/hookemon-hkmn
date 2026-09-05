@@ -1,0 +1,129 @@
+{
+  "unit": "contracts-payout",
+  "root": "<repo>",
+  "filesRead": [
+    { "path": "packages/contracts/src/payout/PayoutCommitment.sol", "lines": 106 },
+    { "path": "packages/contracts/src/payout/CanonicalMerkleSum.sol", "lines": 176 },
+    { "path": "packages/contracts/src/settlement/HolderSettlement.sol", "lines": 99 },
+    { "path": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs", "lines": 379 },
+    { "path": "packages/contracts/test-vectors/payout/canonical-merkle-sum-v1.json", "lines": 26688 },
+    { "path": "packages/contracts/test-js/payout/canonical-merkle-sum.test.mjs", "lines": 139 }
+  ],
+  "note_on_test_vector_file": "canonical-merkle-sum-v1.json is a single machine-generated JSON object (schema hookemon-canonical-merkle-sum-v1): domain/snapshot/entries/manifest/root/proofsDigest + a 1024-entry 'proofs' array (each {siblingHashes[10], siblingSums[10]}), one array element per line, which is why it is 26688 lines. Read via jq/node rather than manual scroll: verified top-level shape, verified all 1024 proofs have exactly 10 sibling hashes (well-formed 0x + 64 hex chars) and 10 sibling sums (decimal strings) with zero malformed entries, and confirmed root.sum (1500) equals the sum of the 5 populated entries (100+200+300+400+500). Then ran the real test suite (node --test) which re-derives the whole tree from tooling/payout/canonical-merkle-sum.mjs and deep-equals every one of the 1024 leaves/proofs plus the manifest bytes/digest and orderedProofsDigest against this exact file -- all 4 tests passed. This is a stronger check of full-file correctness than manual line-reading would have been.",
+  "purpose": "A depth-10, width-1024 canonical Merkle-sum tree used to commit one payout distribution (which HKMN/USDG amount goes to which recipient after a Collector Crypt cycle's proceeds return to the hook) as a single on-chain root (hash+sum), plus a pull-based settlement contract that lets anyone pay any committed recipient once, permissionlessly, against a Merkle-sum proof, funded by an accounting ledger that enforces funded = paid + unpaid at all times.",
+  "publicInterface": {
+    "CanonicalMerkleSum.sol (library, internal-only, no external ABI)": [
+      "manifestBytes(chainId,hook,cycleId,payoutId,snapshotNumber,snapshotHash,ManifestEntry[]) pure returns bytes -- ABI-encodes+validates the offchain manifest",
+      "nonemptyLeaf(Domain,index,recipient,amount) pure returns Node{hash,sum}",
+      "emptyLeaf(Domain,index) pure returns Node{hash,sum=0}",
+      "parentNode(level,left,right) pure returns Node (overflow-checked sum)",
+      "rootFromProof(leaf,index,siblingHashes[10],siblingSums[10]) pure returns Node",
+      "verify(Domain,index,recipient,amount,siblingHashes[10],siblingSums[10],expectedRootHash,expectedRootSum) pure returns bool",
+      "constants TREE_DEPTH=10, TREE_WIDTH=1024, SCHEMA_VERSION=1, 4 domain-separation tag hashes",
+      "errors: InvalidIndex, InvalidRecipient, InvalidAmount, InvalidDirectBalance, EntriesNotStrictlyIncreasing, SumOverflow"
+    ],
+    "PayoutCommitment.sol (abstract, extends ProcessBudget)": [
+      "external fundPayoutFromPegCycle(IPegCycleVault.PayoutAuthorization) moneyPath returns PayoutRecord -- one-shot: consumes a vault authorization, requires the hook's USDG balance to have increased by exactly authorization.rootSum, stores the record, credits payoutLiability, requires solvency, emits PayoutFunded",
+      "external view readPayout(payoutId) returns PayoutRecord",
+      "external view readPayoutConservation(payoutId) returns (funded,paid,unpaid)",
+      "internal _readPayout, internal _consumePayoutEntitlement(payoutId,amount) -- moves amount unpaid->paid and debits the liability ledger",
+      "errors: PayoutAlreadyFunded, PayoutBalanceDeltaMismatch, InsufficientPayoutLiability",
+      "event PayoutFunded(payoutId,cycleId,operationsTrigger,manifestDigest,rootHash,rootSum)"
+    ],
+    "HolderSettlement.sol (abstract, extends PayoutCommitment)": [
+      "external payEntitlement(payoutId,index,recipient,amount,siblingHashes[10],siblingSums[10]) moneyPath -- NO access control / no msg.sender check: anyone can call this to pay any not-yet-paid, proof-valid entitlement to the recipient named in the proof; marks paid, consumes liability, transfers USDG, requires solvency, emits EntitlementPaid",
+      "external view verifyEntitlementProof(...) returns bool",
+      "external view isPaid(payoutId,index) returns bool",
+      "errors: InvalidEntitlementProof, EntitlementAlreadyPaid",
+      "event EntitlementPaid(payoutId,index,recipient,amount)"
+    ],
+    "tooling/payout/canonical-merkle-sum.mjs (Node/offchain, ESM, zero deps -- includes a from-scratch Keccak-256/SHA3 permutation)": [
+      "keccak256(bytes) -- hand-rolled Keccak-f[1600] (RATE_BYTES=136, standard 0x01/0x80 padding), no external crypto lib",
+      "manifestBytes/nonemptyLeaf/emptyLeaf/parentNode/verifyProof/orderedProofsDigest/buildDistribution -- JS mirror of the Solidity library plus tree-building and proof-generation helpers not present onchain",
+      "canonicalVector() / writeCanonicalVector(path) -- generates the fixture in test-vectors/payout/canonical-merkle-sum-v1.json; also runnable as a CLI: `node canonical-merkle-sum.mjs OUTPUT_PATH`",
+      "exports DEPTH=10, WIDTH=1024, UINT256_MAX, TAGS"
+    ]
+  },
+  "invariants": [
+    "funded = paid + unpaid: enforced arithmetically (unpaidTotal -= amount; paidTotal += amount on every consume) and only ever initialized once per payoutId (paidTotal=0, unpaidTotal=rootSum) at funding time.",
+    "One-payment-per-leaf: paidEntitlements[payoutId][index] boolean, set true before the external transfer (checks-effects-interactions), independent of who calls payEntitlement.",
+    "Balance-delta binding at funding time: fundPayoutFromPegCycle requires hookBalanceAfter-hookBalanceBefore == authorization.rootSum exactly (not >=), reverting PayoutBalanceDeltaMismatch otherwise -- this is the only onchain check that ties the committed rootSum to real incoming USDG.",
+    "Global solvency: _requireSolvent() (hook USDG balance >= sum of all liabilities: programmable+treasury+process+payout) is called after crediting a new payout and after every entitlement payment.",
+    "Domain separation: 4 distinct keccak256(name-string) tags (manifest/nonemptyLeaf/emptyLeaf/node) prevent cross-type or cross-level hash collisions/second-preimage games.",
+    "Sum binding: every parent node's hash preimage includes both children's (hash,sum) pairs, so a proof cannot supply an inconsistent sibling sum without also changing the resulting hash chain (SumOverflow guarded with a subtraction-based check, not addition-overflow).",
+    "Strict leaf ordering in the offchain manifest: entries must be strictly increasing by index (both Solidity _validateEntries and JS validateEntries), and index<1024, recipient nonzero and != hook, amount>0, directBalance>0.",
+    "Global moneyPath reentrancy guard (in FeeAccounting.sol, inherited): a single boolean blocks reentry into ANY money-path function while one is executing, not just self-reentry -- fundPayoutFromPegCycle and payEntitlement both use it.",
+    "Fee split constants live in FeeAccounting.sol (not in the requested file list but load-bearing for solvency): TOTAL_FEE_BPS=300, PROGRAMMABLE_FEE_BPS=10, TREASURY_FEE_BPS=40, processFee=totalFee-programmableFee-treasuryFee=250bps. This matches the owner-approved repo split (0.10% Programmable + 0.40% treasury + 2.50% process budget = 3.00%) and confirms 0.4+0.1=0.5 lines up with the owner's 'separated 0.5%' statement."
+  ],
+  "stateTransitions": [
+    "unfunded -> funded: fundPayoutFromPegCycle (once per payoutId, guarded by PayoutAlreadyFunded -- see suspicion about payoutId==bytes32(0))",
+    "funded, unpaidTotal>0, paidEntitlements[id][idx]=false -> paidEntitlements[id][idx]=true, unpaidTotal-=amount, paidTotal+=amount, USDG transferred: payEntitlement (idempotent no-op protection via EntitlementAlreadyPaid revert, not silent skip)",
+    "No transition exists to reclaim/sweep/expire an unpaid remainder, and no transition ever un-funds or corrects a bad rootHash/rootSum once committed -- a bad manifest is permanent for that payoutId."
+  ],
+  "externalDependencies": [
+    "ProcessBudget (packages/contracts/src/process/ProcessBudget.sol) -- PayoutCommitment's base class, not in the read set; supplies constructor wiring and presumably the process-budget spend path.",
+    "FeeAccounting.sol (packages/contracts/src/accounting/FeeAccounting.sol) -- read out-of-scope for context: supplies moneyPath, _requireSolvent, _hookUsdgBalance, _transferExactUsdg, _creditPayoutLiability, _debitPayoutLiability, the fee-split constants, and the abstract _usdgBalanceOf/_transferUsdg/_currentTreasuryBeneficiary hooks whose concrete USDG-adapter implementation is explicitly still 'integration-pending' per its own doc comment.",
+    "IPegCycleVault (packages/contracts/src/process/IPegCycleVault.sol) -- PayoutCommitment trusts consumePayoutAuthorization() to have validated the PayoutAuthorization (requirementsRevision, cycleId, manifestDigest, rootHash, rootSum, returnReceiptDigest, expiry, nonce, etc.) before returning operationsTrigger; PayoutCommitment itself does not re-derive or check rootHash/manifestDigest validity, only the resulting balance delta.",
+    "HookemonHook.sol wires HolderSettlement (and therefore PayoutCommitment/CanonicalMerkleSum) into the concrete deployed hook contract alongside CanonicalMarketCallback and HookemonIssuance.",
+    "canonical-merkle-sum.mjs has zero npm dependencies -- it reimplements Keccak-256 from scratch (custom permute/rotateLeft/ROUND_CONSTANTS) rather than using a pinned crypto library; correctness rests entirely on this file's own bit-manipulation code plus the checked-in fixture."
+  ],
+  "testStatus": {
+    "js": "node --test packages/contracts/test-js/payout/canonical-merkle-sum.test.mjs was run in this session (Node 24.19.0, single test file, allowed per task instructions): 4/4 pass in ~3.3s. Coverage: (1) full 1024-leaf/1024-proof reproduction and cross-check against the checked-in fixture including manifest bytes/digest, root, and the ordered proofs digest; (2) 7 malformed-manifest rejections (non-increasing index, duplicate index, index==WIDTH, amount=0, directBalance=0, zero recipient, recipient==hook); (3) negative-proof mutation tests (flipped sibling hash, incremented sibling sum, wrong index/bit-path, wrong proof array length, changed domain payoutId changes root); (4) parentNode uint256 sum-overflow rejection.",
+    "solidity": "NOT run in this task (forge build/test explicitly forbidden -- a baseline run was said to be in progress). Confirmed by grep that Solidity-side unit/integration/invariant tests exist and reference these exact contracts: packages/contracts/test/payout/CanonicalMerkleSum.t.sol, packages/contracts/test/payout/PayoutCommitment.t.sol, packages/contracts/test/settlement/HolderSettlement.t.sol, plus packages/contracts/test/integration/PhaseOneLocalLoop.t.sol and packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol. Compiled JSON artifacts for all of these already exist under packages/contracts/out/ (e.g. out/CanonicalMerkleSum.t.sol/CanonicalMerkleSumTest.json, out/PayoutCommitment.t.sol/PayoutCommitmentHarness.json, out/HolderSettlement.t.sol/HolderSettlementHarness.json), meaning a prior forge build succeeded against this exact source at some point, but current pass/fail status of these Solidity tests was not (re)verified here and is unknown as of this read.",
+    "cross-implementation parity": "Not verified by execution (would require running the Solidity test suite against the same fixture). Verified manually instead, field-by-field: tag ordering/typing in every abi.encode call in CanonicalMerkleSum.sol was compared word-for-word against the corresponding encodeStatic([...]) call in canonical-merkle-sum.mjs for manifestBytes, nonemptyLeaf, emptyLeaf, and parentNode, including the dynamic-array head/offset/tail layout for the ManifestEntry[] argument, uint16/uint8/address 32-byte-word padding conventions, and the index-bit sibling-selection direction in rootFromProof/verify vs. buildDistribution/verifyProof. All match. The JSON test-vector fixture itself was generated by this same .mjs file (per the CLI entry point), so the fixture cannot itself prove Solidity parity -- only a running forge test with FFI/matching Solidity constants could close that gap."
+  },
+  "autonomyGaps": [
+    "Manifest/root authenticity is explicitly out of scope for these contracts: PayoutCommitment.sol's own header doc says 'Manifest publication and independent proof verification remain offchain preflight duties.' fundPayoutFromPegCycle only checks that the USDG balance increased by exactly rootSum; it never reconstructs or spot-checks the Merkle-sum tree from real entries. For a fully unattended 20-minute cycle, whatever offchain service builds the manifest (which holder gets how much) and gets pegCycleVault to authorize it is a single point of failure with no onchain fallback verification -- that service is not present in this file set.",
+    "No push/keeper distribution exists here: settlement is strictly pull-based -- someone (a bot, in the fully-autonomous target) must call payEntitlement separately for every one of up to 1024 leaf indices per payout, per cycle, supplying the exact proof. Nothing in PayoutCommitment/HolderSettlement enumerates holders or drives payment automatically; an external keeper/automation component (not among the read files, and per repository facts, still Phase 2 / deferred) is required to actually realize 'proceeds ... distributed pro rata to HKMN holders automatically.'",
+    "No sweep/expiry/reclaim path for unpaid remainders: if a holder never claims (e.g., they don't run a bot, or a proof submission is censored/fails), unpaidTotal for that payoutId sits forever with no mechanism in these 3 files to redirect it (e.g., after a timeout) -- relevant for a dashboard that must show 'stuck cycle' status and offer a restart/kick action per the owner's ask, since a stuck *unclaimed* holder payout isn't something these contracts let an operator kick.",
+    "Fixed 1024-leaf capacity per payoutId (TREE_WIDTH): if HKMN's holder count for a given pro-rata distribution ever exceeds 1024, a single payoutId/manifest cannot represent it; nothing in these files chunks a large holder set across multiple payoutIds automatically.",
+    "The `directBalance` field on each ManifestEntry is validated (must be nonzero) in both Solidity and JS but is never consumed by any comparison/assertion against `amount` anywhere in these files -- if it was meant to enforce some accounting relationship (e.g., paid amount can't exceed a holder's already-custodied balance), that check is not implemented here, which matters for an autonomous system meant to run without manual sanity-checking of each cycle's payout.",
+    "USDG token adapter is still integration-pending (FeeAccounting.sol's own header comment): _usdgBalanceOf/_transferUsdg are abstract virtual hooks with no concrete implementation visible in this file set, so the actual funding/payment path cannot be exercised end-to-end from these files alone."
+  ],
+  "suspicions": [
+    {
+      "file": "packages/contracts/src/payout/PayoutCommitment.sol",
+      "line": 48,
+      "note": "PayoutAlreadyFunded guard is `if (payouts[authorization.payoutId].payoutId != bytes32(0)) revert PayoutAlreadyFunded();`. This uses the struct's own payoutId field equal to bytes32(0) as the 'slot empty' sentinel. If authorization.payoutId is itself bytes32(0), the stored record's payoutId field is always set to bytes32(0) too (record.payoutId = authorization.payoutId), so the guard condition is permanently false for that key -- fundPayoutFromPegCycle can be called an unlimited number of times for payoutId==bytes32(0), each call overwriting the prior PayoutRecord (resetting paidTotal to 0 and unpaidTotal to the new rootSum) while leftover paidEntitlements[bytes32(0)][index] bits from the previous generation remain permanently 'paid' and block re-claiming those indices under the new record. Whether this is reachable depends on whether IPegCycleVault (out of scope) ever allows payoutId==bytes32(0) to be authorized; nothing in this file itself forbids it."
+    },
+    {
+      "file": "packages/contracts/src/settlement/HolderSettlement.sol",
+      "line": 78,
+      "note": "`_verifyEntitlementProof` hardcodes the tree width as the literal `1024` (`index >= 1024`) instead of referencing `CanonicalMerkleSum.TREE_WIDTH`. Currently correct since TREE_WIDTH==1024, but it is a duplicated magic number that would silently desynchronize from the library if TREE_WIDTH ever changes."
+    },
+    {
+      "file": "packages/contracts/src/payout/CanonicalMerkleSum.sol",
+      "line": 34,
+      "note": "ManifestEntry.directBalance is required to be nonzero (line 170) but is not referenced by any arithmetic check elsewhere in this file or in PayoutCommitment/HolderSettlement -- it only affects manifestDigest (and therefore leaf hashes) indirectly. Purpose and intended invariant unclear from the code alone (see openQuestions)."
+    },
+    {
+      "file": "packages/contracts/tooling/payout/canonical-merkle-sum.mjs",
+      "line": 66,
+      "note": "keccak256 is a from-scratch, ~90-line hand-rolled Keccak-f[1600] implementation with no unit tests of the primitive in isolation (only end-to-end tree/tag outputs are asserted against the fixture in canonical-merkle-sum.test.mjs). If it happened to be subtly wrong in a way that still produced internally self-consistent tree structure (extremely unlikely given padding/rotation constants match the public Keccak spec, but not independently cross-checked here against e.g. Node's built-in crypto or a known keccak256 test vector), the offchain manifest/root would not match what the Solidity keccak256 actually computes on-chain, and every proof built offchain would fail onchain verification. This file has zero external dependencies by design, which is good for supply-chain safety but removes the option of cross-checking against a well-known audited implementation at import time."
+    }
+  ],
+  "keyFacts": {
+    "TREE_DEPTH": 10,
+    "TREE_WIDTH": 1024,
+    "SCHEMA_VERSION": 1,
+    "MANIFEST_TAG": "0xe233262d6b4897b325c0dbd557cbf2f2cb7fc50bd733773363c7081ef0531690",
+    "NONEMPTY_LEAF_TAG": "0xd37de1da5c23bd627715b91a7599c49a9ce84bd89a6a12296a68da81d999954c",
+    "EMPTY_LEAF_TAG": "0xeb9ee6d019ec108540d8da56b7766b816d5f025aaf6309d1917298b559b198d4",
+    "NODE_TAG": "0x2d812371b1e4d5cd1ba18b7691b42f7a51afff661d6f18bed93cd006b5281ede",
+    "canonical_vector_manifest_digest": "0x4550f1964b800f4f1ecd2f911d505716e9612584c9fc141c68ea25c37802c135",
+    "canonical_vector_root_hash": "0x5d8190ebdd464920299e6f975e600a3a0fb0dbbed61ad4086b0f36acef8fdcea",
+    "canonical_vector_root_sum": "1500 (= 100+200+300+400+500, the 5 populated entries at indices 0,1,17,511,1023 out of 1024)",
+    "canonical_vector_proofsDigest": "0xcd7ef3c72e4ecb1503bc321ef4d0bee5c39a80ab5d33eaa8520e8b78a73647ae",
+    "fee_split_bps_from_FeeAccounting.sol": "TOTAL=300 (3.00%), PROGRAMMABLE=10 (0.10%), TREASURY=40 (0.40%), PROCESS(derived)=250 (2.50%) -- matches owner-approved repo split cited in the task brief",
+    "test_vector_file_size_bytes": 1019220,
+    "js_test_run_result": "4 pass / 0 fail, node --test, ~3.3s wall clock, Node v24.19.0"
+  },
+  "openQuestions": [
+    "What is ManifestEntry.directBalance actually for, given it is validated but never compared to `amount` or used in any onchain arithmetic in these 3 contracts? Is there a missing check elsewhere (e.g. in IPegCycleVault or an offchain validator not in this file set) that relates it to `amount`?",
+    "Given settlement is pull-based per-leaf (max 1024 leaves per payoutId) and there is no sweep/expiry, what component is responsible for (a) actually calling payEntitlement for every holder every cycle, and (b) reclaiming/redirecting a stuck/unclaimed remainder -- is this covered in one of the two unmerged Phase 2 branches (codex/phase2-revision-57 or codex/complete-v4-hook) rather than in packages/contracts/src?",
+    "Is payoutId==bytes32(0) reachable in practice (e.g. could IPegCycleVault.consumePayoutAuthorization ever return/accept it, perhaps as an uninitialized-nonce edge case), which would make the PayoutAlreadyFunded bypass at PayoutCommitment.sol:48 exploitable rather than theoretical?",
+    "Has the Solidity-side test suite (test/payout/CanonicalMerkleSum.t.sol, test/payout/PayoutCommitment.t.sol, test/settlement/HolderSettlement.t.sol) actually been run against the current source since the last policy/state changes referenced in the repository facts (PR #2/#3 STALE-state issues), and does it include an FFI or hardcoded cross-check against this exact JS-generated fixture, or only Solidity-internal fixtures?",
+    "Does any component enforce that a single HKMN holder distribution (potentially far more than 1024 addresses) gets chunked across multiple payoutIds/manifests, or is 1024 assumed to always be sufficient for the community's holder count?"
+  ],
+  "outputPath": "<scratch>/w1/summaries/contracts-payout.json"
+}

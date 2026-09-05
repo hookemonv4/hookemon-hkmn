@@ -1,0 +1,15 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes owner adoption of requirements revision 58 as a whole — the cumulative fee remainder and minimum-quote revert (already shipped and tested by WP-02), the PegCycleVault dust fast path and quarantined DEGRADED return (already shipped and tested by WP-03), chunked payouts shipped inactive at chunk count one (already shipped and tested by WP-04), and a future re-binding of the pre-existing P1-011 dashboard deferral to revision 58's requirements content once a fresh, owner-reviewed deferral descriptor exists. decisions/task-deferrals/P1-011.json itself is left untouched, still bound to its originally owner-approved revision 56 content, and decisions/owner-approvals/phase-1-revision-55-dashboard-deferral-approved.json's real OWNER APPROVED signature is not re-pointed at any revision-58 content — check-delivery-boundary.mjs currently reports that deferral's authority as invalid pending exactly this future re-binding. This draft grants no deployment, credential, signing, broadcast, asset-movement, spending, or publication authority. It does not by itself authorize REQ-cycle-control-2, REQ-distribution-1/2, REQ-canonical-market-6, REQ-fee-accounting-8, or REQ-dashboard-2 to run live — those wait on the separate standing-authority, hookdata-relaxation, and distribution-signer-custody drafts alongside decisions/ADR-0021-autonomous-cycle-authority.md.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380",
+    "product/REQUIREMENTS_REVISION_58_PROPOSAL.md": "cd0b875933bf6bddd7cc279a769c1036c8f3f14d88fffe203087bba973e5bf8c",
+    "product/delivery-boundary.json": "ea3162b7b47144720d16212932e5d7048c6626de05620e590e141b3aa496e166",
+    "decisions/task-deferrals/P1-011.json": "3b1986b8afea9718ab0aedb1b447221816d30fe268723565ad8732b0660bfa7d"
+  }
+}

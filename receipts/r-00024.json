@@ -1,0 +1,15 @@
+{
+  "id": "r-00024",
+  "at": "2026-08-30T01:19:51.041Z",
+  "type": "cleanroom-project-policy-generated",
+  "phase": "init",
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "AGENTS.md": "11bc01de2ac59cd9f82dfeddd6812c79ee317552cdb121dd48436c130c89cb24",
+    "CLAUDE.md": "0e3ed763093c66d913e3097c5dfb23910f3b4baa69f7515eaeef3ac41b472ed6",
+    "RULES.md": "8d203aa98db0a439678723e4f070b6d4361ba0e610645fba4079e10c15fff6c0",
+    "README.md": "a45bb5c4660754ec353b37ae9199a46855363d5da41cd9b46b6073fff1ddfb8d"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "r-00462",
+  "at": "2026-09-03T08:30:01.674Z",
+  "type": "task-ledger-complete",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "itemId": "B1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "tasks.json": "56864737a9c80b072412e964091459402cc1f5b7d5160905c8b578fef7c058fa"
+  }
+}

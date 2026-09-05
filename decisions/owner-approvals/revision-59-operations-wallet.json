@@ -1,0 +1,17 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes the bounded Operations process claim, Treasury limit and rotation controls, one-time atomic launch, semantic transaction policy, external signer pair, write-ahead recovery, and policy-controlled cycle stages. It does not convert readiness, a draft, or an approval record into live execution authority. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/execution-topology.md": "491ddadfc6c366d338c6fb4505386dec1380b228428ae2ca26c2663d1b475cd2",
+    "architecture/interfaces.json": "fece0278bb8b975828836517ab86fc97c7cdba69a7c6e65a5660719251beff2e",
+    "architecture/trust-boundaries.md": "d61e6928574f7e718d1573ef6b7ef9424336b99cc086cbec8401b1de2bae6e48",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "fc19b6ad3fa4f9c911a9e2c62c465b05b7c4dffd2342e19ec4c022ce9d7e823a",
+    "specs/requirements.json": "79855056e16c6c006825cde67ac610182007de4bfd6798f2b66574b2d361506b"
+  }
+}

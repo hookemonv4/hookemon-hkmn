@@ -1,0 +1,81 @@
+{
+  "schema": "hookemon.task-local-verification.v1",
+  "authority": "LOCAL_FIXTURE_AND_OFFLINE_TESTS_ONLY",
+  "taskId": "P1-012",
+  "testedSourceCommit": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+  "integratedCompletionCommit": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+  "scopedTreesIdentical": true,
+  "manifestSha256": "12d2afd5c4760e1c7ac2bf2b2ca8b1cbbc747a14a220232a216c0be7a8b6e8cb",
+  "result": {
+    "status": "PASS",
+    "files": 85,
+    "checks": 6,
+    "externalActionPolicy": "POLICY_ONLY_DENY_UNLESS_SEPARATELY_OWNER_AUTHORIZED",
+    "phaseTwo": "CLOSED_REQUIRES_FRESH_SPEC_AND_OWNER_APPROVAL"
+  },
+  "releaseHarness": {
+    "tests": 10,
+    "invariants": 9,
+    "runsPerInvariant": 256,
+    "callsPerInvariant": 128000,
+    "positiveRunsAndCallsRequired": true
+  },
+  "reproducibility": {
+    "sourceCommit": "1fcf3cee0c2226734c19780299707d9dba8d6509",
+    "builds": 2,
+    "artifacts": 20,
+    "artifactSetSha256": "14c952c33d7b5656db85a4e16aab6ee678b804818fbc8e6cc28aff35c2458a23",
+    "localGasTests": 6,
+    "productionHeadroom": "NOT_CLAIMED"
+  },
+  "onlineBindingRecheck": {
+    "recheckedInThisRun": false,
+    "observedAt": "2026-09-01T00:15:31Z",
+    "status": "FAIL_CLOSED_OFFICIAL_SOURCE_DRIFT",
+    "verifierOutcome": "robinhood-deploy-contracts source digest mismatch",
+    "sources": [
+      {
+        "id": "robinhood-deploy-contracts",
+        "expectedSha256": "3ae83ebe5c6166a0984104c95e8e0e26d9321395a9804a2f3fce00d862909421",
+        "observedSha256": "3b26fe65d97fa691315bedb77fe5369149c1ca0579d9a2962677399a28f5a580",
+        "matches": false
+      },
+      {
+        "id": "robinhood-token-contracts",
+        "expectedSha256": "aed3b208ea188c0fccdc3e562529a77a039d8beac83d89557ad3744c5c643a80",
+        "observedSha256": "8d388cc4894dc3e3fb793cc3f8635ac20c3b508e5453b54dbdc8f726a6f2e501",
+        "matches": false
+      },
+      {
+        "id": "uniswap-chain-4663-deployment",
+        "expectedSha256": "21964cefbfc24b0ee89e7427acf74d223ce5a50aeb4216a9bac361a6148dea15",
+        "observedSha256": "21964cefbfc24b0ee89e7427acf74d223ce5a50aeb4216a9bac361a6148dea15",
+        "matches": true
+      },
+      {
+        "id": "uniswap-liquidity-launcher-addresses",
+        "expectedSha256": "f7b15f6d12d2a874ea7fddabd4dee689f574ef078f84347284fc373974da54d4",
+        "observedSha256": "f7b15f6d12d2a874ea7fddabd4dee689f574ef078f84347284fc373974da54d4",
+        "matches": true
+      }
+    ],
+    "productionReady": false,
+    "externalActionsPerformed": false
+  },
+  "externalStatus": {
+    "programmablePreviousChainDocs": "UNVERIFIED_FOR_ROBINHOOD_API_SHAPE_ONLY",
+    "programmableRobinhoodLaunch": "INTEGRATION_PENDING",
+    "robinhoodPegCycleRoute": "INTEGRATION_PENDING",
+    "solanaPolicyCustody": "INTEGRATION_PENDING",
+    "mainnetCanary": "SEPARATE_EXACT_ACTION_AUTHORIZATION_REQUIRED",
+    "productionReady": false
+  },
+  "externalActionsPerformed": false,
+  "limits": [
+    "The candidate is not release approval and does not prove production readiness.",
+    "Current official Robinhood source drift, deployed PoolManager and final PoolKey fork behavior, and production Programmable launch and admission support remain unresolved.",
+    "The route executor, bridge, Solana policy account, Collector mutation schemas, finality, live return attribution, production USDG semantics, and official gas and code-size headroom remain unbound.",
+    "Provider, authorizer, route-executor, bridge, and policy-wallet compromise exposure is not declared zero.",
+    "GitHub CI and merge remain unavailable; deploy, sign, spend, publish, and Mainnet canary remain separately unauthorized."
+  ]
+}

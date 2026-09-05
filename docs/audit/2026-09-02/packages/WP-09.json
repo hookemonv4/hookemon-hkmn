@@ -1,0 +1,43 @@
+{
+  "id": "WP-09",
+  "title": "Relay bridge provider adapter",
+  "goal": "Clean-room client for Relay's cross-chain USDG<->Circle USD bridge, with --dry-run support.",
+  "deps": [
+    "WP-01",
+    "WP-06"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/adapters/src/relay-client.mjs",
+    "packages/adapters/test/relay-client.test.mjs"
+  ],
+  "readSet": [
+    "api.relay.link docs",
+    "product/SOURCE_BOUNDARY.md"
+  ],
+  "steps": [
+    "Implement typed client functions for POST /quote/v2 and GET /intents/status/v3 against https://api.relay.link",
+    "Cover both bridge directions: Robinhood USDG (4663) -> Solana Circle USD (792703809) outbound, and the reverse for return",
+    "Add a --dry-run mode: quotes are read-only and always allowed; execution is refused unless liveMode is explicitly true",
+    "Add a quote-vs-execution differential check: the adapter compares the executed amount from /intents/status/v3 against the originally quoted amount and flags the delta explicitly, rather than trusting the quote as final",
+    "Add callback/status authentication: an /intents/status/v3 response is only accepted if it authenticates back to the specific intent digest this adapter itself submitted, never matched loosely by chain/asset/amount alone",
+    "Add exact-refund handling: a partial-fill or refund response produces an exact accounted amount (not an estimate), surfaced as a typed result the caller must handle explicitly",
+    "Add reentrancy/venue-failure isolation: a Relay outage, timeout, or malformed response fails the adapter call cleanly with a typed error, never leaves the caller able to infer the bridge succeeded",
+    "Add a test feeding a recorded partial-fill/refund fixture response through the real adapter code path (not a hand-authored journal entry) and assert it produces the recordDegradedReturn-eligible signal that WP-03/WP-23's DEGRADED path consumes \u2014 this closes the gap between the adapter's own failure semantics and the on-chain DEGRADED recovery path",
+    "Record fixture responses for CI; add a separate live-read-only /chains smoke test, non-blocking in CI"
+  ],
+  "tests": [
+    "node --test packages/adapters/test/relay-client.test.mjs"
+  ],
+  "acceptance": [
+    "Both bridge directions have a typed client function",
+    "No test in the default CI run executes a live quote",
+    "depositEnabled is checked for both currencies/chains before a quote is trusted",
+    "A quote-vs-execution amount mismatch is detected and surfaced, not silently accepted",
+    "An /intents/status/v3 response that does not authenticate to the submitted intent digest is rejected",
+    "A recorded partial-fill/refund fixture, run through the real adapter, produces the exact same DEGRADED-eligible signal WP-03/WP-23 already test against"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "The first real quote this adapter executes is itself an ask-first action for the owner to approve before dry-run graduates to live."
+}

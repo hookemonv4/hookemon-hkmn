@@ -1,0 +1,69 @@
+{
+  "id": "WP-30",
+  "title": "Production composition root: wire scheduler, automation service, durable store and adapters into one runnable entrypoint",
+  "goal": "Close the gap WP-14 reported: AutomatedCycleService and Scheduler exist only with test fixtures for cycleRepository, stageDriver and leaseStore. Build the real composition in packages/adapters (the only package allowed to carry npm dependencies) so that one command starts the autonomous loop: read the operator state file, run the scheduler, and drive a full cycle through the real modules (durable store as cycle repository, on-disk lease store, a stage driver that maps each cycle stage to CycleRunner plus the adapters: fund from the vault via hook-contract-client, bridge outbound via relay-client and the route executor, buy and open the pack and sell via the Collector Crypt buyback with collector-crypt, bridge the proceeds back, snapshot holders and compile the pro-rata manifest, obtain the signer and verifier approvals, submit the payout via settlement-worker). Dry run by default: with liveMode false every stage performs only read-only probes and records what it would do; with liveMode true mutations go through the injected signer client. Configuration and credentials come from environment variables or an operator-supplied module path, never from files inside the repository.",
+  "deps": [
+    "WP-07",
+    "WP-08",
+    "WP-09",
+    "WP-10",
+    "WP-14",
+    "WP-15",
+    "WP-27",
+    "WP-28",
+    "WP-29"
+  ],
+  "parallelGroup": 6,
+  "writeSet": [
+    "packages/adapters/src/app/compose.mjs",
+    "packages/adapters/src/app/stage-driver.mjs",
+    "packages/adapters/src/app/lease-store.mjs",
+    "packages/adapters/src/app/cycle-repository.mjs",
+    "packages/adapters/src/app/environment.mjs",
+    "packages/adapters/bin/hookemon-runner.mjs",
+    "packages/adapters/package.json",
+    "packages/adapters/README.md",
+    "packages/adapters/test/app/*.test.mjs",
+    "docs/modules/composition-root.md"
+  ],
+  "readSet": [
+    "packages/runner/src/automation/automated-cycle-service.mjs",
+    "packages/runner/src/scheduler/scheduler.mjs",
+    "packages/runner/src/cycle/durable-store.mjs",
+    "packages/runner/src/cycle/cycle-runner.mjs",
+    "packages/runner/src/automation/exclusive-lease.mjs",
+    "packages/runner/src/distribution/settlement-worker.mjs",
+    "packages/runner/src/distribution/{snapshot-indexer,pro-rata,distribution-signer}.mjs",
+    "packages/runner/src/operator/state-file.mjs",
+    "packages/runner/src/config/state-schema.mjs",
+    "packages/adapters/src/*.mjs",
+    "packages/runner/test/integration/full-cycle-dry-run.test.mjs and automated-cycle.test.mjs (how the fixtures compose the seams)",
+    "docs/audit/2026-09-02/design/DESIGN.md"
+  ],
+  "steps": [
+    "Read the seams first: list every method AutomatedCycleService, Scheduler and settlement-worker require from cycleRepository, stageDriver, leaseStore and the signer/verifier clients, and write them down as a table in docs/modules/composition-root.md before coding",
+    "cycle-repository.mjs: adapt the WP-27 durable store to the cycleRepository interface (readActiveCycle, createCycle, readStage, completeStage, and whatever else the service requires); lease-store.mjs: an on-disk lease store with atomic rename and heartbeat, single-process safe",
+    "stage-driver.mjs: one handler per stage; each handler has a probe path (liveMode false: read-only RPC and API calls, evidence recorded, no mutation) and an execute path (liveMode true: build calldata with hook-contract-client, sign via the injected signer client, broadcast via robinhood-rpc or solana-rpc, then observe until the reducer accepts the evidence); every stage is idempotent on retry and returns the evidence shape the reducer expects",
+    "compose.mjs: build everything from an explicit config object (paths, RPC URLs, API base URLs, chain ids from bindings/robinhood-chain.json, signer client instances) and return {scheduler, service, shutdown}; environment.mjs: read that config from environment variables and validate it with an exact schema, rejecting any field that looks like secret material in the repository tree",
+    "bin/hookemon-runner.mjs: CLI with subcommands run (start scheduler), tick (one tick then exit), dry-run (force liveMode false for one cycle), status (print the projection); add it to packages/adapters/package.json bin and document usage in README.md",
+    "Tests in packages/adapters/test/app: compose from a temp directory with fake RPC/API transports (the same injected-transport pattern the adapter tests use), run a complete dry-run cycle through the real scheduler, service, durable store and stage driver; prove that liveMode false never calls sign or broadcast; prove that a crash between stages resumes at the right stage after restart; prove the lease prevents two runners on the same directory",
+    "Run the whole adapters suite, the runner suite, scripts/tests and the clean-room scanner before committing"
+  ],
+  "tests": [
+    "cd packages/adapters && npm ci --ignore-scripts && node --test test/app/*.test.mjs",
+    "cd packages/adapters && node --test test/*.test.mjs",
+    "node --test packages/runner/test/**/*.test.mjs",
+    "node --test scripts/tests/*.test.mjs",
+    "node scripts/check-cleanroom.mjs ."
+  ],
+  "acceptance": [
+    "One command (node packages/adapters/bin/hookemon-runner.mjs dry-run --state <file>) runs a complete cycle through the real scheduler, automation service, durable store and stage driver against injected fake transports and exits 0 with a written journal",
+    "With liveMode false no code path reaches signerClient.sign or any broadcast function (asserted by a test with throwing stubs)",
+    "A crash between stages resumes at the right stage on restart (durable store evidence)",
+    "The runner core (packages/runner) gains no npm dependency; all composition lives in packages/adapters",
+    "Configuration is validated with an exact schema, credentials come only from environment or an injected module, and nothing secret is written into the repository or the journal"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "This is the package that makes the product actually runnable, so an R4 fresh-context reviewer is mandatory before merge and must check: liveMode gating, idempotency of every stage on retry, and that no key material is read by this package (only an injected signer client interface with sign/broadcast). Keep the owner product simple: default configuration is one pack per cycle every 20 minutes, dry run. If a needed adapter function does not exist yet, add the smallest missing function to the adapter in packages/adapters/src with a test, and say so in the report. If a seam mismatch in packages/runner blocks you (a method the service requires that the durable store cannot offer), do not edit packages/runner; report it as a blocker with the exact method name. COORDINATOR NOTE (base state, 2026-09-02 evening): integration head is clean (cleanroom passes, runner 312/312, scripts/tests 407/409 with only phase1-release and phase1-reproducibility red, owned by WP-22; leave them). Merged and available: WP-07 automation core (packages/runner/src/automation/automated-cycle-service.mjs: constructor takes leaseStore, cycleRepository, stageDriver with reconcile/execute/commit, budget gate, fee settlement, Track-B join), WP-14 scheduler (packages/runner/src/scheduler/scheduler.mjs: buildWorker({liveMode, configuration}) => {runOnce, recoverActiveCycle}, re-reads the operator state file every tick), WP-15 settlement worker, WP-27 durable store, WP-29 CycleRunner + AuthorizationProvider seam, WP-12/13 pro-rata + signer/verifier, adapters in packages/adapters/src (collector-crypt, relay-client, robinhood-rpc, solana-rpc, hook-contract-client). Operator configuration fields live in packages/runner/src/config/state-schema.mjs. Write any new docs/modules card in the R1 six-section format and list it as PENDING_REGISTRATION; do not edit docs/modules/index.json, architecture/capability-map.json or gates/init.json (the coordinator registers cards after merge)."
+}

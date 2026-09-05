@@ -1,0 +1,24 @@
+{
+  "items": {
+    "F1": {
+      "status": "RUN",
+      "receipt": "r-00449"
+    },
+    "F5": {
+      "status": "RUN",
+      "receipt": "r-00451"
+    },
+    "F3": {
+      "status": "RUN",
+      "receipt": "r-00180"
+    },
+    "F4": {
+      "status": "RUN",
+      "receipt": "r-00627"
+    },
+    "F2": {
+      "status": "RUN",
+      "receipt": "r-00450"
+    }
+  }
+}

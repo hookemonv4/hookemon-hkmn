@@ -1,0 +1,16 @@
+{
+  "id": "r-00163",
+  "at": "2026-08-30T14:21:57.034Z",
+  "type": "critical-findings-resolved",
+  "phase": "redteam",
+  "result": "PASSED",
+  "data": {
+    "itemId": "R3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/redteam.json": "c7d09b3897ea4cd9d1f200a4a4b1d4e1cc41b24b8f92c39569994f96b55d37fd",
+    "qa/redteam/resolutions.json": "f701c579707782dd99ee254578627f4b8c78cac3d5aec7f42beb42da43a92a30"
+  }
+}

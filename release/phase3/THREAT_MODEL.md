@@ -1,0 +1,9 @@
+# Phase 3 threat model
+
+The primary boundary is a deterministic CREATE2 graph whose token and hook constructor arguments must agree with the full canonical-market allocation and final currency order. An unbound route namespace, nonce, topology hash, salt, or address could produce a graph different from the reviewed package. The graph has exactly three ABI-derived calls: `token.allocate(hook)`, `custody.configureBindingHook(hook)`, and `hook.initializeGraphLaunch(custody,sqrtPriceX96)`. No signature is permitted until the provider binds their selectors, target order, arguments, and encoded call data.
+
+The seed boundary includes an exact Permit2 USDG allowance, hook permission mask, full-range liquidity, and a deadline. The allowance names the resolved hook and covers at most `240000000` atomic USDG. The selected exact tuple consumes the complete HKMN supply; a graph-mode residual reverts the whole seed. Unused USDG is returned to the payer and permanent custody receives only the minted LP position.
+
+The fee boundary uses return deltas before or after the swap according to quote currency and exact-input or exact-output quadrant. The platform recipient is fixed at `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c`, and the collection policy forbids same-pool self-calls. The accepted 10 bps platform share does not replace required preflight checks for callback signs, gross-up behavior, rounding, partial fills, slippage, and settlement.
+
+The package contains no private key, provider credential, signed authorization, deployment transaction, or broadcast operation. Requirements revision 65 does not grant transaction authority. A failed code-hash or policy check leaves the graph unseeded; a post-deployment mismatch requires a new reviewed package rather than compensating transfers or broader approvals.

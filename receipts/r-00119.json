@@ -1,0 +1,16 @@
+{
+  "id": "r-00119",
+  "at": "2026-08-30T13:13:52.746Z",
+  "type": "risk-lane-escalation-verified",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "itemId": "F5",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "feasibility/risk-lanes.json": "2406978c24e812321a466c9b3a9fb209dbede1398f6d87eb0ae73cafc999a4ae"
+  }
+}

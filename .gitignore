@@ -1,0 +1,39 @@
+.DS_Store
+
+# Local credentials and environment
+.env
+.env.*
+*.pem
+*.key
+.secrets/
+
+# Dependencies and tool caches
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.v4/
+.wrangler/
+
+# Build and verification outputs
+artifacts/
+cache/
+out/
+coverage/
+dist/
+build/
+*.tsbuildinfo
+
+# Phase 3 package validation consumes these pinned compiler artifacts as release evidence.
+!release/phase3/artifacts/
+release/phase3/artifacts/*
+!release/phase3/artifacts/token.json
+!release/phase3/artifacts/custody.json
+!release/phase3/artifacts/hook.json
+
+# Local runtime state
+.local-state/
+.worktrees/
+logs/
+*.log
+*.pid

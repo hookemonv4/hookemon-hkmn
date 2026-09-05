@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "Owner approves the current product/PRD.md as the Phase 1 baseline, including requirements revision 56, immutable PegCycleVault custody, Operations as trigger only, and Phase 2 and Phase 3 remaining closed.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "cdcf3eeb87f0870ac886ab5af69af15cc29063237eaecb6f9d4d832263347012",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "product/PRD.md": "d4fe76c6b8a8846b92c7248594bb0e329b996b0882270c96e0e8ee478abbc952"
+  }
+}

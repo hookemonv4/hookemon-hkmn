@@ -1,0 +1,475 @@
+{
+  "schemaVersion": 1,
+  "requirementsRevision": 55,
+  "sourceCommit": "ceb3510ceb8111f534d5f5d60011f77722439c81",
+  "interfaceBinding": "deferred-until-frozen",
+  "constants": {
+    "merkleDepth": 10,
+    "merklePositions": 1024,
+    "entitlementDelaySeconds": 0,
+    "recipientReplacement": "forbidden"
+  },
+  "scenarios": [
+    {
+      "id": "process-release-exact-liability",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1", "REQ-process-budget-2"],
+      "given": "The current Operations account releases the full positive process liability to itself under a fresh cycle identifier.",
+      "expected": {
+        "outcome": "commit",
+        "hookUsdgDelta": "-amount",
+        "operationsUsdgDelta": "+amount",
+        "processLiabilityDelta": "-amount",
+        "cycleAuthority": "current-operations-at-release",
+        "cycleRecord": "immutable"
+      }
+    },
+    {
+      "id": "process-release-zero-amount",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "The current Operations account attempts to release zero.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-liability-plus-one",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "The current Operations account attempts to release one unit above the process liability.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-stale-operations",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "A former Operations account attempts a new cycle release after handover.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-alternate-destination",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1", "REQ-process-budget-5"],
+      "given": "A release attempt tries to direct USDG anywhere other than the current Operations caller.",
+      "expected": { "outcome": "absent-surface", "destinationChoice": "impossible" }
+    },
+    {
+      "id": "process-release-cycle-replay",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-2"],
+      "given": "The exact payload for an already released cycle is submitted again.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-replay-mutated-amount",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-2"],
+      "given": "An already released cycle identifier is reused with another amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-handover-preserves-cycle",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-2"],
+      "given": "Operations changes after a cycle has been released.",
+      "expected": {
+        "outcome": "commit",
+        "cycleAuthority": "historical-cycle-bound-operations",
+        "cycleRecord": "unchanged"
+      }
+    },
+    {
+      "id": "process-release-false-return",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "USDG returns false during release.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-revert",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "USDG reverts during release.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-malformed-return",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "USDG returns malformed data during release.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-short-source-delta",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "The hook USDG debit is less than the release amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-short-destination-delta",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "The Operations USDG credit is less than the release amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-excess-source-delta",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "The hook USDG debit exceeds the release amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-excess-destination-delta",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "The Operations USDG credit exceeds the release amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-reentrancy",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-1"],
+      "given": "USDG attempts to reenter a money-moving path during release.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "process-release-failure-isolates-other-money-paths",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-3"],
+      "given": "A release is rejected before trading, accrual, fee claims, funded payout operations, and holder payments continue.",
+      "expected": {
+        "outcome": "commit",
+        "unusedProcessLiability": "unchanged",
+        "unrelatedSupportedOperations": "unblocked"
+      }
+    },
+    {
+      "id": "process-release-forbidden-policy-surface",
+      "task": "P1-006",
+      "requirements": ["REQ-process-budget-5"],
+      "given": "The process module is inspected for admin, pause, caps, policy, scheduler, marketplace, destination, and external execution controls.",
+      "expected": { "outcome": "absent-surface", "forbiddenSurfaceCount": 0 }
+    },
+    {
+      "id": "payout-funding-cycle-bound-operations",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1", "REQ-payout-commitment-2"],
+      "given": "The Operations identity frozen into the cycle funds a fresh payout for the exact positive root sum.",
+      "expected": {
+        "outcome": "commit",
+        "payer": "historical-cycle-bound-operations",
+        "operationsUsdgDelta": "-rootSum",
+        "hookUsdgDelta": "+rootSum",
+        "payoutRecord": "immutable"
+      }
+    },
+    {
+      "id": "payout-funding-current-non-cycle-operations",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "The current Operations identity differs from the identity frozen into the referenced cycle.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-payer-mismatch",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "The caller and the measured USDG payer are not the same cycle-bound Operations identity.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-unknown-cycle",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "Funding references a cycle that was never released.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-zero-identity-field",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "The payout identifier, manifest digest, root hash, or root sum is zero.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-identifier-replay",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1", "REQ-payout-commitment-2"],
+      "given": "A committed payout identifier is submitted again.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-field-mutation",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-2"],
+      "given": "A later operation attempts to change the cycle, Operations identity, manifest digest, root, or funded total.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-same-cycle-new-identifier",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-2"],
+      "given": "Supplemental realized proceeds use a fresh payout identifier under the same released cycle.",
+      "expected": { "outcome": "commit", "existingPayouts": "unchanged" }
+    },
+    {
+      "id": "payout-funding-false-return",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "USDG returns false during payout funding.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-revert",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "USDG reverts during payout funding.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-malformed-return",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "USDG returns malformed data during payout funding.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-short-source-delta",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "The cycle-bound Operations USDG debit is less than the root sum.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-short-destination-delta",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "The hook USDG credit is less than the root sum.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-excess-source-delta",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1", "REQ-payout-commitment-6"],
+      "given": "The cycle-bound Operations USDG debit exceeds the root sum.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-excess-destination-delta",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1", "REQ-payout-commitment-6"],
+      "given": "The hook USDG credit exceeds the root sum.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-direct-transfer",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-6"],
+      "given": "USDG arrives through a direct transfer without a valid funding action.",
+      "expected": { "outcome": "no-liability", "recognizedLiabilityDelta": 0 }
+    },
+    {
+      "id": "payout-funding-reentrancy",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-1"],
+      "given": "USDG attempts to reenter another money-moving path during funding.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-funding-conservation",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-4"],
+      "given": "Funding and any sequence of valid or rejected payments are observed for one payout.",
+      "expected": { "outcome": "commit", "conservation": "funded=paid+unpaid", "crossPayoutMutation": "none" }
+    },
+    {
+      "id": "payout-funding-forbidden-surplus-path",
+      "task": "P1-007",
+      "requirements": ["REQ-payout-commitment-5", "REQ-payout-commitment-6"],
+      "given": "The payout module is inspected for ranking, routing, scheduling, replacement, sweep, rescue, and arbitrary withdrawal behavior.",
+      "expected": { "outcome": "absent-surface", "forbiddenSurfaceCount": 0 }
+    },
+    {
+      "id": "settlement-permissionless-exact-recipient-credit",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1", "REQ-holder-settlement-7"],
+      "given": "Any caller submits a valid unpaid proof for the committed recipient and amount.",
+      "expected": {
+        "outcome": "commit",
+        "destination": "committed-recipient",
+        "hookUsdgDelta": "-amount",
+        "recipientUsdgDelta": "+amount",
+        "paidKey": "payoutId+index"
+      }
+    },
+    {
+      "id": "settlement-index-zero",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1", "REQ-holder-settlement-6"],
+      "given": "A valid proof pays index zero.",
+      "expected": { "outcome": "commit", "recipientUsdgDelta": "+amount" }
+    },
+    {
+      "id": "settlement-index-1023",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1", "REQ-holder-settlement-6"],
+      "given": "A valid proof pays index 1,023.",
+      "expected": { "outcome": "commit", "recipientUsdgDelta": "+amount" }
+    },
+    {
+      "id": "settlement-replay",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1"],
+      "given": "An already paid payout-and-index proof is submitted again.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-altered-recipient",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1", "REQ-holder-settlement-4"],
+      "given": "A caller changes the recipient encoded by the proof.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-altered-amount",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1"],
+      "given": "A caller changes the amount encoded by the proof.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-malformed-depth",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1", "REQ-holder-settlement-6"],
+      "given": "A proof has any depth other than ten.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-reordered-proof",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-1"],
+      "given": "Sibling hashes or sums are reordered.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-recipient-failure-isolation",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-2"],
+      "given": "One recipient-specific transfer fails after another leaf has completed.",
+      "expected": { "outcome": "revert", "stateMutation": "none", "otherPaidKeys": "unchanged" }
+    },
+    {
+      "id": "settlement-recipient-retry",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-2", "REQ-holder-settlement-3"],
+      "given": "A previously failed recipient transfer is retried with the same valid proof.",
+      "expected": { "outcome": "commit", "recipientUsdgDelta": "+amount", "paidKey": "payoutId+index" }
+    },
+    {
+      "id": "settlement-before-300-seconds",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-3"],
+      "given": "A valid unpaid proof is submitted before 300 seconds have elapsed.",
+      "expected": { "outcome": "commit", "validationRule": "same-immediate-permissionless-path" }
+    },
+    {
+      "id": "settlement-at-300-seconds",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-3"],
+      "given": "A valid unpaid proof is submitted exactly 300 seconds after funding.",
+      "expected": { "outcome": "commit", "validationRule": "same-immediate-permissionless-path" }
+    },
+    {
+      "id": "settlement-after-300-seconds",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-3"],
+      "given": "A valid unpaid proof is submitted after 300 seconds have elapsed.",
+      "expected": { "outcome": "commit", "validationRule": "same-immediate-permissionless-path" }
+    },
+    {
+      "id": "settlement-long-horizon",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-3"],
+      "given": "A valid unpaid proof is submitted after an arbitrarily long delay.",
+      "expected": { "outcome": "commit", "validationRule": "same-immediate-permissionless-path" }
+    },
+    {
+      "id": "settlement-manual-wallet-replacement-same-cycle-treasury",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-4"],
+      "given": "An actor attempts manual recipient-wallet replacement within the same cycle using a Treasury destination.",
+      "expected": { "outcome": "absent-surface", "recipientMutation": "impossible" }
+    },
+    {
+      "id": "settlement-manual-wallet-replacement-cross-cycle",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-4"],
+      "given": "An actor attempts recipient-wallet replacement across cycles or to any alternate destination.",
+      "expected": { "outcome": "absent-surface", "recipientMutation": "impossible" }
+    },
+    {
+      "id": "settlement-false-return",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-2", "REQ-holder-settlement-7"],
+      "given": "USDG returns false during entitlement payment.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-revert",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-2", "REQ-holder-settlement-7"],
+      "given": "USDG reverts during entitlement payment.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-malformed-return",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "USDG returns malformed data during entitlement payment.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-short-source-delta",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "The hook USDG debit is less than the entitlement amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-short-recipient-delta",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "The committed recipient USDG credit is less than the entitlement amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-excess-source-delta",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "The hook USDG debit exceeds the entitlement amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-excess-recipient-delta",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "The committed recipient USDG credit exceeds the entitlement amount.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-proxy-behavior",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "USDG proxy behavior changes return data or measured balance effects.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "settlement-reentrancy",
+      "task": "P1-008",
+      "requirements": ["REQ-holder-settlement-7"],
+      "given": "USDG attempts to reenter any money-moving path during entitlement payment.",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    }
+  ]
+}

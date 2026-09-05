@@ -1,0 +1,23 @@
+{
+  "id": "r-00618",
+  "at": "2026-09-04T04:07:07.408Z",
+  "type": "gate",
+  "phase": "init",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 4,
+    "problems": [
+      "I5: evidence r-00545 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/init.json": "ab227534842f4c462c8024661597d5d01c4e2024bf2f46a309f797dede806373",
+    "gates/runs/init.json": "255fd1a040c25107a69fd187741afbade476c3b9d00460e36178ebe634bb3991",
+    "receipts/r-00433.json": "2aaeb6736dded697ecb6a072d4c141e74430d1784c63118f92d0e78768613f10",
+    "receipts/r-00434.json": "d3e4a776f77247df6868ed99379dbc287a43cb72b2a4fcc55e82233ec60b9d74",
+    "receipts/r-00435.json": "0cc6872a8ce43798c7c7161148e4ac45cdfcfbce9ad77f34e4963f2b842ff1e3",
+    "receipts/r-00436.json": "b9329cc32a21e9a3c9a84c3928a80b27eac750d861b903779a2b2f655ac855fa",
+    "receipts/r-00545.json": "1ea06420359cf1dc855efafcf19a105ca489a7c3dc74be28433d7071a40a76d7",
+    "receipts/r-00617.json": "27458d80bbf30e761d340a1d213ff3704641f53455d535045b16694014a0df1c"
+  }
+}

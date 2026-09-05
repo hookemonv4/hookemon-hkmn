@@ -1,0 +1,35 @@
+{
+  "schema": "v4-task-deferral-v1",
+  "action": "TASK_DEFER",
+  "taskId": "P1-011",
+  "phase": "build",
+  "targetStatus": "deferred",
+  "rationale": "Dashboard deferred to Phase 2 by the owner-approved manual one-cycle scope. DRAFT_UNSIGNED re-binding to requirements revision 58 after WP-21 advanced specs/requirements.json (revision 56 -> 58); this draft is not wired into tasks.json and does not replace the live decisions/task-deferrals/P1-011.json binding until the owner signs a matching approval and the ledger re-records the deferral.",
+  "prestate": {
+    "id": "P1-011",
+    "title": "Render loop dashboard",
+    "phase": "build",
+    "risk": "ordinary",
+    "deps": [
+      "P1-001"
+    ],
+    "reqs": [],
+    "status": "done",
+    "leaseToken": 1,
+    "completionCommit": "27e675ba61538b1d39e1a5ebf5e01a49e1e2c112"
+  },
+  "prestateFingerprint": "b05e44062790639cf601a6a69776054b814b981924c0aa5f60d44c34b83f8031",
+  "requirements": {
+    "path": "specs/requirements.json",
+    "revision": 58,
+    "sha256": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "decision": {
+    "path": "decisions/ADR-0018-manual-one-cycle-phase-boundary.md",
+    "sha256": "65ee8b6b48ad409bed26ec9d44c8aa952d16f292374f0abbd1df165a9363f5f3"
+  },
+  "design": {
+    "path": "docs/superpowers/specs/2026-08-31-manual-one-cycle-design.md",
+    "sha256": "7cf6f733e9925d5552999d8d0c076a0eb72f4a45be5768ed4991baf0bf8bfe82"
+  }
+}

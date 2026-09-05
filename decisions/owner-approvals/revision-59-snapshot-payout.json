@@ -1,0 +1,17 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes the finalized pre-claim eligibility snapshot, payout feasibility envelope, direct holder transfers, immutable post-broadcast manifest, same-action recovery, and frozen-recipient quarantine liability. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "architecture/failure-modes.md": "c93adef79b4ab548f1cffede645eb70bc517f9e5efe5d4494a7f0a27c785ee9a",
+    "architecture/interfaces.json": "fece0278bb8b975828836517ab86fc97c7cdba69a7c6e65a5660719251beff2e",
+    "architecture/trust-boundaries.md": "d61e6928574f7e718d1573ef6b7ef9424336b99cc086cbec8401b1de2bae6e48",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "fc19b6ad3fa4f9c911a9e2c62c465b05b7c4dffd2342e19ec4c022ce9d7e823a",
+    "specs/requirements.json": "79855056e16c6c006825cde67ac610182007de4bfd6798f2b66574b2d361506b"
+  }
+}

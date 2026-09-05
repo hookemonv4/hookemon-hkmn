@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 4,
+  "result": "PASSED",
+  "errors": [],
+  "node": {
+    "expected": "24.19.0",
+    "actual": "24.19.0",
+    "versionFile": "24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "distribution": "darwin-arm64",
+    "url": "https://nodejs.org/download/release/v24.19.0/node-v24.19.0-darwin-arm64.tar.xz",
+    "archiveSha256": "3f1cf157479c1480352083105e13faf9d008ede98e7e157746b6df940d197b94",
+    "expectedExecutableSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+    "actualExecutableSha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+    "workflow": {
+      "version": "24.19.0",
+      "url": "https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz",
+      "archiveSha256": "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647",
+      "executableSha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12"
+    }
+  },
+  "basePack": {
+    "path": "packs/base/pack.json",
+    "expectedSha256": "fec3e938aa995e1bfc20d26bc2a42e7191176df419eb4bf64820b36337a6f7de",
+    "actualSha256": "fec3e938aa995e1bfc20d26bc2a42e7191176df419eb4bf64820b36337a6f7de"
+  },
+  "githubActions": {
+    "actions/checkout": [
+      {
+        "workflow": ".github/workflows/control-gate.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/control-gate.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/fork-pin-canary.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/fork-proof.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/identity-gate.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/identity-gate.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/v4-gates.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      }
+    ]
+  },
+  "workflowIntegrity": {
+    "path": ".github/workflows/v4-gates.yml",
+    "expectedSha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276",
+    "actualSha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276"
+  },
+  "forkProof": {
+    "path": ".github/workflows/fork-proof.yml",
+    "expectedSha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21",
+    "actualSha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
+  },
+  "forkPinCanary": {
+    "path": ".github/workflows/fork-pin-canary.yml",
+    "expectedSha256": "d96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a",
+    "actualSha256": "d96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a"
+  },
+  "identityGate": {
+    "path": ".github/workflows/identity-gate.yml",
+    "expectedSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019",
+    "actualSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019"
+  },
+  "controlGate": {
+    "path": ".github/workflows/control-gate.yml",
+    "expectedSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50",
+    "actualSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50"
+  },
+  "controlScripts": {
+    "commitIdentityAllowlist": {
+      "path": "scripts/check-commit-identity.mjs",
+      "expectedSha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba",
+      "actualSha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba"
+    },
+    "forkPinVerifier": {
+      "path": "scripts/verify-fork-pin.mjs",
+      "expectedSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
+      "actualSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
+      "closure": [
+        {
+          "path": "scripts/verify-fork-pin.mjs",
+          "sha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a",
+          "actualSha256": "09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a"
+        },
+        {
+          "path": "scripts/programmable/lib/keccak.mjs",
+          "sha256": "ce4ea412ddd845b7495fc960f16855a2d5dea62482f224c5dc4cd8aefaede863",
+          "actualSha256": "ce4ea412ddd845b7495fc960f16855a2d5dea62482f224c5dc4cd8aefaede863"
+        }
+      ]
+    },
+    "releaseClosureBuilder": {
+      "path": "scripts/programmable/vendor/programmable-v4-hook-builder/manifest.json",
+      "expectedSha256": "d3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b",
+      "actualSha256": "d3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b",
+      "sourceTreeSha256": "4795ee279dec6ae22e047e6fe6c032b85f242cc96797f40d4560f70b6e8559ae",
+      "actualSourceTreeSha256": "4795ee279dec6ae22e047e6fe6c032b85f242cc96797f40d4560f70b6e8559ae",
+      "entrypoint": "scripts/cli-review-target.mjs",
+      "upstream": {
+        "repositorySha256": "7cfbbd3098251021760b48e6bb57b934c9f8fbbb58dc2b053a2440dc0408cc19",
+        "version": "v0.4.0",
+        "ref": "refs/tags/v0.4.0",
+        "tree": "237a64de92efdb0e84954e42c654f83f926e82c3",
+        "path": "skills/programmable-v4-hook-builder",
+        "normalization": "cleanroom-labels-v1"
+      }
+    },
+    "controlDependencyVerifier": {
+      "path": "scripts/verify-control-dependencies.mjs",
+      "expectedSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+      "actualSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+      "closure": [
+        {
+          "path": "scripts/verify-control-dependencies.mjs",
+          "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+          "actualSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
+        },
+        {
+          "path": "scripts/lib/util.mjs",
+          "sha256": "887bdba5ffbed11e6cb16e72b8ebbeddff822575c20b9b60b2e7b80bf17eead8",
+          "actualSha256": "887bdba5ffbed11e6cb16e72b8ebbeddff822575c20b9b60b2e7b80bf17eead8"
+        }
+      ]
+    }
+  },
+  "controlInputs": {
+    "archiveForkProofTest": {
+      "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "expectedSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8",
+      "actualSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8"
+    }
+  },
+  "workflowPolicy": {
+    "forbiddenRuntimeKeys": []
+  },
+  "phase1Toolchain": {
+    "foundry": {
+      "version": "1.7.1",
+      "commit": "4072e48705af9d93e3c0f6e29e93b5e9a40caed8",
+      "distribution": "linux-amd64",
+      "url": "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_linux_amd64.tar.gz",
+      "archiveSha256": "cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b",
+      "executableSha256": "4f77da0810de94325734855d0ad58d70640aa8a5b2a837608ddf8c26da34355c",
+      "workflow": {
+        "version": "1.7.1",
+        "commit": "4072e48705af9d93e3c0f6e29e93b5e9a40caed8",
+        "url": "https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_linux_amd64.tar.gz",
+        "archiveSha256": "cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b",
+        "executableSha256": "4f77da0810de94325734855d0ad58d70640aa8a5b2a837608ddf8c26da34355c"
+      }
+    }
+  },
+  "securityTools": {
+    "gitleaks": {
+      "version": "8.30.1",
+      "distribution": "linux-x64",
+      "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+      "archiveSha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+      "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
+      "config": {
+        "path": ".gitleaks.toml",
+        "expectedSha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029",
+        "actualSha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029"
+      },
+      "workflow": {
+        "version": "8.30.1",
+        "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+        "archiveSha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+        "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
+        "configSha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029"
+      }
+    }
+  },
+  "npmDependencies": {
+    "adapters": {
+      "packagePath": "packages/adapters/package.json",
+      "lockfilePath": "packages/adapters/package-lock.json",
+      "dependencies": {
+        "@solana/web3.js": "1.98.4",
+        "viem": "2.56.3"
+      },
+      "lockfileVersion": 3,
+      "resolvedEntryCount": 89
+    }
+  },
+  "controlGatePinBump": {
+    "schema": "hookemon.control-gate-pin-bump.v1",
+    "approvalToken": "DRAFT_UNSIGNED",
+    "baseTree": "513e48fde602a11165a949aee2adab3bd7b2e2cb",
+    "candidateTree": "UNCOMMITTED_DRAFT",
+    "basePinsSha256": "424e759a826a06a4b42c265d4386bf0f954862659a919fb543c42a9edb05e43e",
+    "candidatePinsSha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
+    "baseChecker": {
+      "path": "scripts/verify-control-dependencies.mjs",
+      "blobId": "c9f23621ad2e5f417622f58cf1c179fd1649453f"
+    },
+    "controls": [
+      {
+        "path": ".github/workflows/fork-proof.yml",
+        "previousSha256": "98377853771897e42de785b7434e2c8b09d9fef5affdb09a0b8b1e38beafa309",
+        "sha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
+      },
+      {
+        "path": "scripts/verify-control-dependencies.mjs",
+        "previousSha256": "7aa86a0ca84796980bdfce068c2ebbe63e2f69f038732227542a80e94e92dbaf",
+        "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+[profile.default]
+src = "packages/contracts/src"
+test = "packages/contracts/test"
+out = "packages/contracts/out"
+cache_path = "packages/contracts/cache"
+libs = ["packages/contracts/lib"]
+auto_detect_remappings = false
+solc_version = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 20_000

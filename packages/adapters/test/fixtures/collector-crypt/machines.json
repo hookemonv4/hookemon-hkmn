@@ -1,0 +1,39 @@
+{
+  "machines": [
+    {
+      "code": "pokemon_50",
+      "name": "Elite Pack",
+      "shortName": "Elite",
+      "image": "image_url",
+      "thumbnailUrl": "thumbnail_url",
+      "videoSrc": "video_url",
+      "videoHevc": "hevc_video_url",
+      "public": true,
+      "price": 50,
+      "contains": "description of contents",
+      "instantBuyback": 85,
+      "freeSpins": false,
+      "turboMode": false,
+      "pointsMultiplier": 1,
+      "odds": {
+        "epic": 0.01,
+        "rare": 0.04,
+        "uncommon": 0.15,
+        "common": 0.8
+      },
+      "tierRanges": {
+        "common": { "start": 0, "end": 25 },
+        "uncommon": { "start": 25, "end": 75 },
+        "rare": { "start": 75, "end": 200 },
+        "epic": { "start": 200, "end": 99999 }
+      },
+      "stock": {
+        "common": 34,
+        "uncommon": 42,
+        "rare": 86,
+        "epic": 124
+      },
+      "ev": 0
+    }
+  ]
+}

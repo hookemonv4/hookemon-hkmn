@@ -1,0 +1,106 @@
+name: fork-proof
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fork-proof-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  fork-proof:
+    environment: fork-proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Require main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo "fork-proof only runs from refs/heads/main." >&2
+            exit 1
+          }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Node (fork-proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version='24.19.0'
+          node_url='https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz'
+          node_archive_sha256='14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647'
+          node_executable_sha256='bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12'
+          node_archive="${RUNNER_TEMP}/node-v${node_version}-linux-x64.tar.xz"
+          node_root="${RUNNER_TEMP}/node-v${node_version}-linux-x64"
+          node_executable="${node_root}/bin/node"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$node_archive" "$node_url"
+          printf '%s  %s\n' "$node_archive_sha256" "$node_archive" | sha256sum --check
+          tar -xJf "$node_archive" -C "$RUNNER_TEMP"
+          printf '%s  %s\n' "$node_executable_sha256" "$node_executable" | sha256sum --check
+          echo "${node_root}/bin" >> "$GITHUB_PATH"
+          [[ "$("$node_executable" --version)" == "v${node_version}" ]]
+      - name: Install pinned Foundry (fork-proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          foundry_version='1.7.1'
+          foundry_commit='4072e48705af9d93e3c0f6e29e93b5e9a40caed8'
+          foundry_url='https://github.com/foundry-rs/foundry/releases/download/v1.7.1/foundry_v1.7.1_linux_amd64.tar.gz'
+          foundry_archive_sha256='cf7e688ed0c4c48adffca788b496076e31060b67ac5afe1e43dbb5499c20c88b'
+          foundry_executable_sha256='4f77da0810de94325734855d0ad58d70640aa8a5b2a837608ddf8c26da34355c'
+          foundry_archive="${RUNNER_TEMP}/foundry_v${foundry_version}_linux_amd64.tar.gz"
+          foundry_root="${RUNNER_TEMP}/foundry-v${foundry_version}-linux-amd64"
+          foundry_executable="${foundry_root}/forge"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$foundry_archive" "$foundry_url"
+          printf '%s  %s\n' "$foundry_archive_sha256" "$foundry_archive" | sha256sum --check
+          mkdir -p "$foundry_root"
+          tar -xzf "$foundry_archive" -C "$foundry_root"
+          printf '%s  %s\n' "$foundry_executable_sha256" "$foundry_executable" | sha256sum --check
+          foundry_version_output="$("$foundry_executable" --version)"
+          [[ "$foundry_version_output" == *"Version: ${foundry_version}"* ]]
+          [[ "$foundry_version_output" == *"Commit SHA: ${foundry_commit}"* ]]
+          echo "$foundry_root" >> "$GITHUB_PATH"
+      - name: Initialize pinned top-level contract dependencies
+        run: git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery
+      - name: Initialize pinned contract dependency closure
+        run: |
+          git -C packages/contracts/lib/v4-core submodule update --init --recursive
+          git -C packages/contracts/lib/v4-periphery submodule update --init lib/permit2
+      - name: Initialize pinned launch dependencies
+        run: git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory
+      - name: Run the mandatory archive fork proof
+        shell: bash
+        env:
+          ROBINHOOD_FORK_RPC_URL: ${{ secrets.ROBINHOOD_FORK_RPC_URL }}
+          ROBINHOOD_FORK_PINNED: 'true'
+        run: |
+          set -euo pipefail
+          if [[ -z "${ROBINHOOD_FORK_RPC_URL:-}" ]]; then
+            echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof." >&2
+            exit 1
+          fi
+          verify_regular_git_blob() {
+            local path="$1"
+            local expected_sha256="$2"
+            local metadata listed_path mode type blob_id
+            [[ ! -L "$path" && -f "$path" ]]
+            metadata="$(git ls-tree HEAD -- "$path")"
+            [[ -n "$metadata" ]]
+            IFS=$'\t' read -r metadata listed_path <<< "$metadata"
+            read -r mode type blob_id <<< "$metadata"
+            [[ "$mode" == '100644' && "$type" == 'blob' && "$listed_path" == "$path" ]]
+            [[ "$(git hash-object "$path")" == "$blob_id" ]]
+            printf '%s  %s\n' "$expected_sha256" "$path" | sha256sum --check
+          }
+          fork_pin_scripts_verify_fork_pin_mjs_sha256='09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a'
+          fork_pin_scripts_programmable_lib_keccak_mjs_sha256='ce4ea412ddd845b7495fc960f16855a2d5dea62482f224c5dc4cd8aefaede863'
+          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8'
+          verify_regular_git_blob 'scripts/verify-fork-pin.mjs' "$fork_pin_scripts_verify_fork_pin_mjs_sha256"
+          verify_regular_git_blob 'scripts/programmable/lib/keccak.mjs' "$fork_pin_scripts_programmable_lib_keccak_mjs_sha256"
+          verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"
+          node scripts/verify-fork-pin.mjs
+          FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'

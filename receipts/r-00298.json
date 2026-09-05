@@ -1,0 +1,17 @@
+{
+  "id": "r-00298",
+  "at": "2026-08-31T18:34:37.363Z",
+  "type": "interfaces-frozen",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "itemId": "F4",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "architecture/interfaces.json": "758d1a9166ecfb3e1965e6fb7524dbfd23a906359850a21db98f05d96c1422ac",
+    "feasibility/interface-freeze.json": "b2e8f1b780a6bd39d5693d521834f1cf7e8715415cedf692b4c32b9f5a5a3ec1"
+  }
+}

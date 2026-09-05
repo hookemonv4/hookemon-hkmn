@@ -1,0 +1,32 @@
+{
+  "id": "r-00189",
+  "at": "2026-08-30T20:31:37.167Z",
+  "type": "architecture-decisions-recorded",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "itemId": "S3",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/spec.json": "9f683e2dd6aa37ef2f461cedc2025ac9a8a6a1ee0fcc58a72b9989185be5e7a2",
+    "decisions/ADR-0001-clean-room-programmable-robinhood.md": "c4e189a0a0e6b4e6175050b27335aa4aba40383f86ddda6bdf0afbd974d6c5b1",
+    "decisions/ADR-0002-launchpad-token-issuance.md": "4cc79b69d493302b87044e768688b591fbc8418b538b884f3bc73de22480d1a2",
+    "decisions/ADR-0003-segregated-usdg-liabilities.md": "5fc0f38c35f6c26a7ba2de7d62435464b1dea0f34eecb1be35c972a1949459b3",
+    "decisions/ADR-0004-attested-process-budget-release.md": "3ef16ccb11516cc7050804d725f1af1232b4c115cc17f5e9ca88e9b90eff1bb3",
+    "decisions/ADR-0005-funded-payout-state-machine.md": "36ae0b68aad56b2ba783e00ab5dc29007539016edcfebef6275523a9d269376f",
+    "decisions/ADR-0006-bounded-role-and-pause-matrix.md": "441ce1885002a95d909011caf74c996dc0b5762d58c55309c64267434fe6e0c7",
+    "decisions/ADR-0007-phase-1-interface-boundary.md": "ff9dc7a63f3109e45ca4ce13d7f1e434bd17e6bb01661f25f0aa950b7c463b8f",
+    "decisions/ADR-0008-immutable-successor-lifecycle.md": "25e7a78801660f410b409e35e83a04029cccd6173d369a8eac0b092bbc190e86",
+    "decisions/ADR-0009-official-provider-binding.md": "2e8161ed1bd6b10252a3085669f7f045fbb313d1ea264f9aef772a4099e74986",
+    "decisions/ADR-0010-treasury-only-surplus-recovery.md": "8cb42c10529a1719b334a8583bec48e7e2a60295b2acb5452984576f7f4fad35",
+    "decisions/ADR-0011-operations-wallet-cycle-authority.md": "3531f302e2377ac369c3a68c808162bc04bb4670643906ac617d7fed657d87a1",
+    "decisions/ADR-0012-admin-only-entitlement-replacement.md": "8e1abaa87c65ef470c285d83ffa7d837826f125f470dcdd11d7b92725032e0b6",
+    "decisions/ADR-0013-thin-production-v1-boundary.md": "9bced5b794dc9f5e2b04c5ed7e0af55180235b764e41aaf7a00c919d11ab48b8",
+    "decisions/ADR-0014-sum-bound-permissionless-payouts.md": "58953d1c3616cd77b1a5eaf9de42d5463cb459f3eceb86aa77238418bbf4f4a4",
+    "decisions/ADR-0015-minimal-money-authority.md": "2afc717f8e9ebcc4f7262057bbb28d64a5f88bce91994c4dec88ff04b1753087",
+    "decisions/ADR-0016-exact-fee-rounding.md": "f9301d6b69cb1d5e340334562cca5247f7bf58fa796fd0c30ce9de4460559165",
+    "decisions/ADR-0017-permanent-zero-lp-fee-market.md": "4b4bf429b228b8319bb467b376db26838394457fbb12a85593460b4efdc2b819"
+  }
+}

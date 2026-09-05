@@ -1,0 +1,18 @@
+{
+  "name": "@hookemon/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "hookemon-runner": "bin/hookemon-runner.mjs",
+    "hookemon-verifier": "bin/hookemon-verifier.mjs",
+    "hookemon-authority": "bin/hookemon-authority.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "viem": "2.56.3",
+    "@solana/web3.js": "1.98.4"
+  }
+}

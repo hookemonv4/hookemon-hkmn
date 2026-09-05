@@ -1,0 +1,20 @@
+{
+  "id": "r-00047",
+  "at": "2026-08-30T08:00:50.852Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-baseline-revision-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "AUTO-SCOPE PHASE-1-SPEC APPROVED"
+  },
+  "inputHashes": {
+    "gates/init.json": "7608952c8ced7acf461e7e2302f1e6ecd11302c10cec68312196caecf0fbf776",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "product/PRD.md": "c672c6233b31329ef82d4f6d1a8fe0497d8b2afd4732847b60f6a8c5de95cd9a",
+    "decisions/owner-approvals/phase-1-spec-baseline-revision-approved.json": "1926fdfb05146a992c7a5f1a9859ff0e0c79c59f3c7f82dd3366c4fefcdbbb38"
+  }
+}

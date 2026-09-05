@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "90 % HKMN dauerhaft und nicht entziehbar im USDG/HKMN-Pool, LP-Fee 0 %, ausschließlich die genehmigte 3 %-Hook-Fee? arbeite weiter lass die agenten jetzt alle laufen ohne fragen",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "product/PRD.md": "ab8b638e20d89ab468e99f4f3a8f62a39df1e0b64fb6cd226ae7c8f4a8426bd4"
+  }
+}

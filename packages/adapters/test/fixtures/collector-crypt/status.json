@@ -1,0 +1,16 @@
+{
+  "machineStatus": "running",
+  "legendaryStatus": "open",
+  "eliteStatus": "open",
+  "freePacksStatus": "closed",
+  "sportsStatus": "closed",
+  "gachas": [
+    {
+      "code": "pokemon_50",
+      "name": "Elite Pack",
+      "price": 50,
+      "status": "open",
+      "isOpen": true
+    }
+  ]
+}

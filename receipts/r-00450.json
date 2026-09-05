@@ -1,0 +1,20 @@
+{
+  "id": "r-00450",
+  "at": "2026-09-03T08:30:01.570Z",
+  "type": "owner-survivability-bounds-approved",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/closeout-revision-58-feasibility-f2-approved.json",
+    "itemId": "F2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approves the survivability bounds recorded in feasibility/survivability-bounds.json for requirements revision 58 as local closure bounds only; this authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication."
+  },
+  "inputHashes": {
+    "feasibility/cycle-control-survivability-bounds.json": "59bcd54c0873bb941ccd9e941419c0632a55fb28bf21320464e23cb87cc3562f",
+    "gates/feasibility.json": "b5e15577156d7ab88131bc1f948f7bce5fbad67cc77897b3508dd24ff5813d75",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "decisions/owner-approvals/closeout-revision-58-feasibility-f2-approved.json": "56993e131aa72f69246a00b9a6506f5e3f29624c34fd975449074d738719d7f0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "r-00532",
+  "at": "2026-09-03T11:06:41.402Z",
+  "type": "task-commit-integrity-verified",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "itemId": "B6",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "tasks.json": "9f5f55ce916514f8982ddf5295f007d14c1bdba218070af6b5e9d2f836cfd5d4"
+  }
+}

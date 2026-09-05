@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "feasibility",
+  "itemId": "F2",
+  "rationale": "Owner am 30.08.2026: S5, F2 und Merge von PR #1 wie beschrieben genehmigt. Genehmigt werden die in feasibility/survivability-bounds.json gebundenen F2-Grenzen: Null-Abweichungen, 0 Sekunden Runway, 1024 Positionen und 100 USDG Non-Gas-Principal-Loss.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "feasibility/survivability-bounds.json": "a1125fc0e00d623133925086f4e1a7f35e7d6d1123231c79dbd589a2b8644cd5",
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "policy/policy.json": "9c8a032c3067b0ce5027507f0328e77fe4ae46960e776e8e8c4685bb69dfe41d"
+  }
+}

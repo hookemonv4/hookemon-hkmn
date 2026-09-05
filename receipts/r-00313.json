@@ -1,0 +1,18 @@
+{
+  "id": "r-00313",
+  "at": "2026-08-31T20:27:24.915Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-008",
+    "commitSha": "27d6cc3a20ec23833be5b86b08b153e9327d5b7f",
+    "taskFingerprint": "0e062146091f63cb5138eba742b58d9e3345214999ca6bbc8e46d655a8f27350",
+    "requirementsRevision": 55,
+    "requirementsHash": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  },
+  "inputHashes": {
+    "packages/contracts/test/settlement/HolderSettlement.t.sol": "174c09b880620a629337f70af598c224c04bd035f0a4b2e072b4c7f88bcae50e",
+    "specs/requirements.json": "06f6b4e4f803732359718f07870d1f626c83837e5543dc81f1e22da770d00ac4"
+  }
+}

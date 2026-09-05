@@ -1,0 +1,20 @@
+{
+  "id": "r-00063",
+  "at": "2026-08-30T08:40:50.312Z",
+  "type": "owner-cleanroom-baseline-approved",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-operations-authority-baseline-approved.json",
+    "itemId": "I2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approved the operations-wallet and admin-authority clarification for the Phase 1 baseline."
+  },
+  "inputHashes": {
+    "gates/init.json": "7608952c8ced7acf461e7e2302f1e6ecd11302c10cec68312196caecf0fbf776",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "product/PRD.md": "9b162d28843781e23929bf1dfba3babf371b7197bdfbf2431f85a1fb6e4fe6e2",
+    "decisions/owner-approvals/phase-1-operations-authority-baseline-approved.json": "8e73a58b4a1ae55dce346dffd3d9bcb1d424f57ad84ebfcbeabfaa60c2886c44"
+  }
+}

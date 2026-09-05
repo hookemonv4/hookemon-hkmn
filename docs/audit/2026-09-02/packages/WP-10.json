@@ -1,0 +1,44 @@
+{
+  "id": "WP-10",
+  "title": "Robinhood/Solana RPC + contract-call adapters",
+  "goal": "viem-based EVM and raw-JSON-RPC Solana wrappers for every contract call and balance/receipt read the cycle needs.",
+  "deps": [
+    "WP-01",
+    "WP-03",
+    "WP-04",
+    "WP-05",
+    "WP-06"
+  ],
+  "parallelGroup": 4,
+  "writeSet": [
+    "packages/adapters/src/robinhood-rpc.mjs",
+    "packages/adapters/src/solana-rpc.mjs",
+    "packages/adapters/src/hook-contract-client.mjs",
+    "packages/adapters/test/robinhood-rpc.test.mjs",
+    "packages/adapters/test/solana-rpc.test.mjs",
+    "packages/adapters/test/hook-contract-client.test.mjs"
+  ],
+  "readSet": [
+    "scratchpad/w1/summaries/external-facts.json",
+    "packages/contracts/src/process/IPegCycleVault.sol"
+  ],
+  "steps": [
+    "Implement viem-based typed calls for openPegCycle/authorizeFunding/executeOutbound/authorizePayout/consumePayoutAuthorization/recordDegradedReturn against the finalized ABI from WP-01/03/04/05",
+    "Implement balance reads and finalized-block transaction/receipt fetches for both chains",
+    "Implement raw Solana JSON-RPC wrappers for transaction construction/signing/submission via @solana/web3.js",
+    "Add exact-parameter encoding tests for every contract call used by the cycle data flow"
+  ],
+  "tests": [
+    "node --test packages/adapters/test/robinhood-rpc.test.mjs",
+    "node --test packages/adapters/test/solana-rpc.test.mjs",
+    "node --test packages/adapters/test/hook-contract-client.test.mjs",
+    "forge test --match-path 'test/integration/anvil-fork/*.t.sol' (against a local anvil fork)"
+  ],
+  "acceptance": [
+    "Every contract call used by the cycle data flow has a typed adapter function with an exact-parameter encoding test",
+    "A local anvil fork of finalized Robinhood state confirms the encoded calls match the deployed ABI"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "The one place a real dependency (viem) is justified per the \u00a76 decision."
+}

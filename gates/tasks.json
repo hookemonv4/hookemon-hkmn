@@ -1,0 +1,18 @@
+{
+  "id": "tasks", "version": 2,
+  "items": [
+    { "id": "T1", "text": "Every active ledger task binds at least one known REQ id and names a verification command; every excluded task is explicitly owner-deferred", "receiptType": "task-requirements-bound", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json", "specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json", "specs/requirements.json"], "allowedPrefixes": [] } },
+    { "id": "T2", "text": "Dependencies form a DAG; shared interfaces are frozen as level-0 tasks before dependents parallelize", "receiptType": "task-dependency-dag-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json"], "allowedPrefixes": [] } },
+    { "id": "T3", "text": "High-risk work sits early in the order (fail fast), and every task has a risk class", "receiptType": "task-risk-ordering-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json"], "allowedPrefixes": [] } },
+    { "id": "T4", "text": "Each task is written as a self-contained context pack: task, relevant files, pattern to follow, constraint, acceptance criteria", "receiptType": "task-context-packs-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks/context-packs.json"], "requiredPrefixes": [], "allowedInputs": ["tasks/context-packs.json"], "allowedPrefixes": [] } },
+    { "id": "T5", "text": "tasks.json projection committed; v4 trace check passes (no uncovered requirements)", "receiptType": "task-projection-trace-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["tasks.json", "specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["tasks.json", "specs/requirements.json"], "allowedPrefixes": [] } }
+  ],
+  "redFlags": [
+    "A task titled with 'and'",
+    "A task whose acceptance criteria need more than 3 bullets (split it)",
+    "A parallel marker on tasks that share files or runtime resources"
+  ],
+  "rationalizations": [
+    { "id": "RZ-T1", "excuse": "Planning is slowing us down, the tasks are obvious", "reality": "Implementation without a plan is just typing. Written tasks survive session boundaries and context compaction." }
+  ]
+}

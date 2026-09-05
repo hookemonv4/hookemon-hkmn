@@ -1,0 +1,255 @@
+{
+  "unit": "skill-and-prs",
+  "root": "<repo>",
+  "generatedAgainst": {
+    "worktreeCommit": "5b365c8",
+    "branch": "claude/dynamic-workflow-token-097109"
+  },
+  "filesRead": [
+    { "path": "gacha/codex/add-uniswap-skill:.agents/AGENTS.md", "lines": 5, "note": "does not exist on main; PR#1-only" },
+    { "path": "gacha/codex/add-uniswap-skill:.agents/skills/swap-integration/SKILL.md", "lines": 1663, "note": "wc -l reports 1662 (no trailing newline); full content read to actual EOF" },
+    { "path": "gacha/codex/add-uniswap-skill:.agents/skills/swap-integration/references/advanced-patterns.md", "lines": 377, "note": "wc -l reports 376 (no trailing newline)" },
+    { "path": "gacha/codex/add-uniswap-skill:skills-lock.json", "lines": 11, "note": "does not exist on main; PR#1-only" },
+    { "path": "git diff main...codex/fix-foundry-version-check (receipts/ excluded)", "lines": 63, "note": "PR#2, touches 4 files" },
+    { "path": "git diff main...codex/refresh-v4-evidence (receipts/ excluded)", "lines": 861, "note": "PR#3, touches ~20 non-receipt files; stacked on PR#2 (merge-base == PR#2 tip affb19c)" },
+    { "path": "<builder-skill>/references/programmable-fee-policy.md", "lines": 217 },
+    { "path": "<builder-skill>/references/compatibility-standard.md", "lines": 541 },
+    { "path": "<builder-skill>/references/standard-fee-kernel.md", "lines": 156 },
+    { "path": "<builder-skill>/references/v4-protocol-mechanics.md", "lines": 130 },
+    { "path": "packages/contracts/src/HookemonHook.sol", "lines": 231 },
+    { "path": "packages/contracts/src/market/CanonicalMarket.sol", "lines": 314 },
+    { "path": "packages/contracts/src/accounting/FeeAccounting.sol", "lines": 223 },
+    { "path": "packages/contracts/src/settlement/HolderSettlement.sol", "lines": 99, "note": "supplementary, not in the required file list; read because it is directly imported by HookemonHook and defines the claim entry points central to Focus Question 2 (claim authority/destination). PayoutCommitment.sol (its own parent, holding _authorizeProgrammableClaim/_authorizeTreasuryClaim) was NOT read - out of scope." },
+    { "path": "bindings/robinhood-chain.json", "lines": 310, "note": "supplementary, read to cross-check hook fee constants, permission mask, and production-readiness blockers against the .sol files" }
+  ],
+
+  "focus1_swapIntegrationSkillForRobinhoodChain": {
+    "verdict": "The vendored skill is generically useful for Trading-API / plain Universal-Router integration on chains it knows about, but it is silent on Robinhood Chain (4663) specifically, silent on mandatory hookData for a hooked pool, and actively unsafe if applied naively to HookemonHook's canonical USDG/HKMN pool because that pool requires a fixed 128-byte hookData payload the skill never mentions.",
+    "chainSupportFacts": {
+      "tradingApiSupportedChains_fetched": "developers.uniswap.org/docs/trading/swapping-api (redirected) lists chain id 4663 = 'Robinhood Chain' as a Trading-API-supported chain, alongside 1,10,56,130,137,143,196,324,480,1868,4217,4326,8453,42161,42220,43114,57073,59144,7777777. Robinhood Chain is also flagged as supporting UniswapX V3 with Universal Router 2.1.1 default.",
+      "v4DeploymentsPage_fetched": "developers.uniswap.org/docs/protocols/v4/deployments lists a full 'Robinhood Chain (4663)' contract table: PoolManager 0x8366a39cc670b4001a1121b8f6a443a643e40951, PositionDescriptor 0x9639443158e8c5efa35bd45287bf2effd3d8dc06, PositionManager 0x58daec3116aae6d93017baaea7749052e8a04fa7, Quoter 0x8dc178efb8111bb0973dd9d722ebeff267c98f94, StateView 0xf3334192d15450cdd385c8b70e03f9a6bd9e673b, ReservesLens 0x0000001b173C3bbF3984D417d8614E3eed34865B, Universal Router 0x8876789976decbfcbbbe364623c63652db8c0904, Permit2 0x000000000022D473030F116dDEE9F6B43aC78BA3.",
+      "confidenceNote": "Fetched via WebFetch (small-model summarization). The two fetches of the deployments page were re-run with a 'quote verbatim' prompt and returned byte-identical markdown table rows including GitHub/blockscout links, which is strong evidence this is genuine page content, not a hallucination.",
+      "criticalDiscrepancy": "bindings/robinhood-chain.json's universalRouter address is 0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99 (with a recorded runtimeCodeHash, implying it was verified on-chain). Uniswap's own public v4 deployments page lists the Universal Router for chain 4663 as 0x8876789976decbfcbbbe364623c63652db8c0904 - a DIFFERENT address. PoolManager and PositionManager addresses match exactly between the repo binding and the fetched docs page. This Universal-Router mismatch is unresolved by anything in the read file set and is exactly the kind of ambiguity the vendored skill would walk a builder straight into (see next point)."
+    },
+    "skillContentFacts": {
+      "chain4663NeverMentioned": "The skill's own 'Key Contract Addresses > Universal Router (v4)' table (SKILL.md lines 1573-1595) lists 15 chains (1,130,10,8453,42161,137,81457,56,7777777,480,43114,42220,1868,57073,143) and explicitly says 'For testnet addresses, see [Uniswap v4 Deployments]'. Chain 4663/Robinhood Chain is absent from this table and from every other address table in the skill (Permit2 table only has 'All chains'). The skill's Trading API 'Supported Chains' section (line 335-337) just links out to the live docs page rather than hardcoding a list, so it does not itself claim non-support - but a builder following only the skill's embedded tables would not learn the Robinhood Universal Router address or discover chain 4663 exists.",
+      "noHookDataConcept": "grep-level review of the full SKILL.md and advanced-patterns.md text confirms the word 'hookData' never appears. The skill's mental model is Trading-API-mediated CLASSIC/V2/V3 swaps and manual Universal Router commands (V3_SWAP_EXACT_IN/OUT, V2_SWAP_EXACT_IN/OUT, WRAP_ETH, UNWRAP_WETH, SWEEP, TRANSFER, PAY_PORTION) plus a bare 'V4_SWAP' command-code row (0x10) in the Swap Commands table with no encoding detail, no PoolKey, and no mention that a v4 pool can carry an address hook requiring hookData. There is no V4Planner, no PathKey, no mention of a hook contract, and no discussion that a hooked pool can reject/misprice a swap sent without the correct hookData.",
+      "tradingApiIsOpaqueToHookData": "The Trading API's documented request/response shapes in the skill (quote/swap JSON bodies) expose no hookData field at all - the API is a black box that presumably threads v4 routing (including any hookData) internally, but the skill gives the integrator no lever to supply, inspect, or validate hookData through that path. For HookemonHook specifically this matters: CanonicalMarket.sol requires an exact 128-byte hookData payload (domain separator + operationId + sender + recipient, decoded in CanonicalSwapHookData.decode/_validate) where 'sender' inside the hookData must equal the router-call's msg.sender AND that sender must equal the hook's single immutable swapRouter address. A generic Trading-API-routed swap (which would route through Uniswap's own Universal Router, not through this pool's specific swapRouter binding, and would never construct this custom 128-byte payload) would revert with CanonicalMarketCallback.InvalidCanonicalPoolKey/CanonicalSwapHookData.InvalidHookData against this pool. The skill has no concept of a pool that authenticates a specific caller identity via hookData, so it cannot generate a working backend swap script for this pool as-is.",
+      "backendScriptShapeDescribedByTheSkill": "The 'Backend Swap Script (Node.js)' section (lines 1253-1404) is otherwise solid, generic engineering: viem walletClient + publicClient, /check_approval -> /quote -> /swap 3-step flow, response validation (non-empty hex data, valid addresses), agent-attribution header with a mandatory decision_origin:'autonomous'|'human_mediated' field (directly relevant to the owner's fully-autonomous 20-minute-cycle target - the skill explicitly requires a human to choose 'autonomous' by construction, there is no default, and getting the value wrong silently drops attribution with no runtime signal), and exponential-backoff/rate-limit handling. None of this is chain- or hook-specific and would need to be re-pointed at Robinhood Chain's own Trading API deployment (assuming one exists / is enabled for 4663 - not verified) or, more realistically for a custom-hookData pool like this one, replaced entirely with direct Universal Router 'execute()' calls carrying V4_SWAP actions with fully custom hookData construction - which the skill does not document at the byte level for v4.",
+      "permit2": "Permit2 address 0x000000000022D473030F116dDEE9F6B43aC78BA3 is chain-agnostic (CREATE2, listed as 'All chains' in the skill and confirmed identical in the fetched Robinhood Chain contract table), so this part of the skill transfers correctly to chain 4663 without modification.",
+      "whatTheSkillCannotDoForAHookedPool": [
+        "Cannot construct or validate the mandatory hookData byte layout HookemonHook requires (no hookData concept at all in the skill).",
+        "Cannot express the hook's caller-identity requirement (hookData.sender must equal msg.sender must equal the pool's one immutable swapRouter address) - the skill's swap patterns assume any router/caller can execute a swap.",
+        "Does not know Robinhood Chain (4663) exists in its own embedded address tables, so following the skill literally (rather than its live-doc links) would miss the chain entirely.",
+        "The Trading API path it recommends first is a black box for v4 hookData and would very likely revert against this specific canonical pool, which authenticates via custom hookData rather than accepting Uniswap's generic v4 routing.",
+        "No treatment of PoolManager unlock/settle mechanics, BeforeSwapDelta/afterSwapReturnDelta, or hook-owned fee accounting - i.e. nothing that would let a builder reason about what HookemonHook actually does to the swap (before-swap fee taken from specified currency vs after-swap fee taken from unspecified currency, full-fill-only enforcement)."
+      ]
+    },
+    "pr1Metadata": {
+      "skillVersion": "1.5.0 (SKILL.md frontmatter metadata.version, matches all AGENT_INFO version strings embedded in the code samples)",
+      "skillsLockJson": "{ version:1, skills.swap-integration: { source:'uniswap/uniswap-ai', sourceType:'github', skillPath:'packages/plugins/uniswap-trading/skills/swap-integration/SKILL.md', computedHash: '9d44bc3f...22cc16f' } } - this is a genuine hash-pinned vendoring record, not an ad hoc copy.",
+      "agentsMdGovernance": "The 5-line .agents/AGENTS.md added by PR#1 explicitly delegates to the repo-root AGENTS.md as 'the authoritative instruction source' and instructs treating skills/ as pinned third-party content to be updated only via skills-lock.json, never hand-edited - this is a sound vendoring governance pattern and does not conflict with anything in the root AGENTS.md as far as the read files show.",
+      "allowedToolsAndModel": "SKILL.md frontmatter grants allowed-tools including Bash(npm/npx/yarn/curl:*), WebFetch, AskUserQuestion, and Task(subagent_type:swap-integration-expert), and pins model: opus - broad but scoped to swap-integration work; the skill's own 'Input Validation Rules' section mandates AskUserQuestion confirmation before any gas-spending/token-transferring call, which is a safety-relevant control worth noting is present even though the owner wants full autonomy (the skill's default posture is human-confirmed, and 'autonomous' is an opt-in the integrator must explicitly choose per the Agent Attribution header)."
+    }
+  },
+
+  "focus2_hookemonHookPolicyConformance": {
+    "policySourcesCited": [
+      "programmable-fee-policy.md (policy programmable-volume-fee-v1, version 1.1.0)",
+      "compatibility-standard.md (version 1.5.0)",
+      "standard-fee-kernel.md (reference candidate for programmable-volume-fee-v1)"
+    ],
+    "architectureNote": "HookemonHook does not use the standard reference kernel (assets/reference-kernels/programmable-volume-fee-v1/); it is the policy's other permitted path - 'a project that already needs custom hook behavior' integrating the policy into its own single custom hook (programmable-fee-policy.md line 86-87: 'For a project that already needs custom hook behavior, integrate this policy into that single custom hook'). This is why HookemonHook's permission mask (0x00CC: beforeSwap+afterSwap+beforeSwapReturnDelta+afterSwapReturnDelta) omits beforeInitialize even though standard-fee-kernel.md's own reference profile uses a 5-bit mask including beforeInitialize for its atomic pool-registration flow - that specific difference is architecturally permitted, not itself a conformance gap.",
+    "conformanceGaps": [
+      {
+        "id": "GAP-1-NO-CUMULATIVE-REMAINDERS",
+        "severity": "HIGH - directly contradicts an explicit MUST in the mandatory policy",
+        "citation": "programmable-fee-policy.md lines 56-61: 'Policy 1.1.0 requires independent cumulative platform and project remainders for the lifetime of the canonical pool. Claims must not reset them. This closes the split-swap bypass in which per-swap flooring could suppress the platform entitlement.' Also standard-fee-kernel.md lines 71-84 (the 'Cumulative rounding and dust' section) gives the exact required formula: Programmable_n = floor(sum(G_i * 1000)/1e6), i.e. the floor is taken over the CUMULATIVE sum, not per-swap. Also compatibility-standard.md line 226-229: 'platform and project streams keep independent cumulative remainders for the canonical pool lifetime; claims never reset them... A per-swap floor... is changes-required, not an alternative implementation of the policy.'",
+        "codeEvidence": "FeeAccounting.sol:152-161 _splitLiability(executedUsdg) computes totalFee/programmableFee/treasuryFee each via _floorBasisPoints(amount, bps) (lines 201-204: amount/D*bps + amount%D*bps/D, algebraically exactly floor(amount*bps/D)) applied to THIS SWAP'S executedUsdg alone, with no persisted fractional-remainder state anywhere in the contract. grep across FeeAccounting.sol/HookemonHook.sol/CanonicalMarket.sol for 'remainder' finds zero hits related to fee rounding (the only 'remainder' hits in the whole src/ tree are in launch/HookemonIssuance.sol and concern token-supply issuance, an unrelated concept).",
+        "impact": "A party who splits volume into many small swaps, each individually small enough that floor(amount*10/10000) truncates to a smaller programmableFee than a mathematically fair pro-rata share, permanently and irrecoverably starves the Programmable owner's 10bps entitlement relative to a single combined swap of the same total volume - exactly the 'split-swap bypass' the policy names and says v1.1.0 exists specifically to close. The contract as read is on policy v1.1.0's own PRE-1.1.0 vulnerable behavior."
+      },
+      {
+        "id": "GAP-2-NO-MINIMUM-1000-UNIT-REVERT",
+        "severity": "HIGH - explicit numeric MUST, absent from code",
+        "citation": "programmable-fee-policy.md line 59-60: 'A positive gross quote amount below 1,000 smallest quote-asset units must revert atomically in the standard profile.' Also standard-fee-kernel.md lines 86-88 and compatibility-standard.md line 227 restate the same 1000-unit floor with the same 'reverts' language. The submission.json template (programmable-fee-policy.md lines 176-177) has a dedicated accounting.minimumGrossQuoteUnits:1000 field for this.",
+        "codeEvidence": "No occurrence of '1000', '1_000', or any minimum-amount guard exists anywhere in HookemonHook.sol, CanonicalMarket.sol, or FeeAccounting.sol (verified by grep across all three files plus the whole src/ tree for MINIMUM_GROSS). CanonicalMarket._fee() (line 272-277) only reverts on an UPPER overflow bound (x > maxAmount), never a lower one; a swap with executedUsdg of e.g. 1 to 999 smallest USDG units (USDG has 6 decimals per bindings/robinhood-chain.json, so this is a swap smaller than ~$0.001) proceeds normally through the whole fee path with a small-but-nonzero or zero-floored fee instead of reverting.",
+        "impact": "Combined with GAP-1, this doubles the split-swap griefing surface: an attacker/optimizer can execute an unbounded number of sub-1000-unit swaps that should be rejected outright by policy but instead silently pass with near-zero or zero fee extraction, since neither the per-swap minimum-revert nor the cross-swap cumulative-remainder backstop exists."
+      },
+      {
+        "id": "GAP-3-LIABILITY-KEYING-NOT-EXPLICIT-BY-POOLID-CURRENCY",
+        "severity": "MEDIUM - schema-literal gap, likely mitigated in practice by the singleton-pool architecture but not evidenced as such in code",
+        "citation": "programmable-fee-policy.md line 117: 'Key the liability at least by poolId, currency, and owner. Do not net liabilities across pools.' Also the submission.json template's accounting.liabilityKeyDimensions: ['poolId','currency','owner'] (line 172).",
+        "codeEvidence": "FeeAccounting.sol's liability storage is mapping(address beneficiary => uint256) for both programmableLiabilities and treasuryLiabilities, plus a single unkeyed processLiabilityAmount scalar (line 17) and mapping(bytes32 payoutId => uint256) for payoutLiabilities. None of these carry an explicit poolId or currency dimension in their key. This is only safe because CanonicalMarketCallback's constructor (CanonicalMarket.sol:128-141) binds usdg/hkmn/tickSpacing immutably at deploy time, and one hook address is architecturally restricted to exactly one PoolKey (confirmed by CanonicalMarket.sol:87 REQUIRED_PERMISSION_MASK usage and the compatibility-standard.md rule that one v4 PoolKey has one hook address) - so poolId and currency really are constants for the whole contract's lifetime, making the beneficiary-only key equivalent in practice. But the code does not evidence this reasoning (no comment, no assertion, no test referenced) and the schema's literal 3-dimension key requirement is not met as written.",
+        "impact": "Low practical risk given the single-pool design, but this is exactly the kind of implicit-invariant-instead-of-explicit-encoding pattern that the policy's explicit-keying requirement exists to avoid, and it would become a real bug if the hook were ever reused/cloned for a second pool without re-deriving fresh liability mappings."
+      },
+      {
+        "id": "GAP-4-CLAIM-OWNER-NOT-VERIFIABLE-FROM-READ-FILES-AND-REPO-SELF-FLAGS-IT-UNRESOLVED",
+        "severity": "MEDIUM/OPEN - cannot be confirmed or denied from the assigned file set; the repository's own binding file lists this exact item as an unresolved production blocker",
+        "citation": "programmable-fee-policy.md lines 98-119 ('Immutable ownership and claims'): the accrued Programmable liability MUST be bound to the exact address 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c as sole claim authority, immutable for the launch lifetime, with 'no stored mutable recipient' and 'the owner can claim at any time'.",
+        "codeEvidence": "HookemonHook.sol:24,56 stores programmableBeneficiary as an immutable set from constructor-supplied config.programmable (ConstructorConfig.programmable), not a hardcoded literal. FeeAccounting.sol's constructor(address programmableBeneficiary) similarly takes the address as a parameter (fixedProgrammableBeneficiary, lines 13,37-42), only rejecting address(0) and address(this) - it never checks equality against 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c. The actual claim-authorization logic (_authorizeProgrammableClaim/_authorizeTreasuryClaim, called from HookemonHook.claimProgrammable/claimTreasury) is NOT defined in HolderSettlement.sol (which only defines payEntitlement/entitlement-proof verification) - it must live in PayoutCommitment.sol, which HolderSettlement inherits but which was not in the assigned file set and was not read. So conformance of the exact owner-binding, 'no stored mutable recipient', and 'claim at any time' guarantees cannot be confirmed from the read files.",
+        "corroboration": "bindings/robinhood-chain.json's own productionReadiness.blockers list (line ~296) includes the literal entry 'PROGRAMMABLE_OWNER_AND_CLAIM_DESTINATION_POLICY_RESOLUTION' - the repository's own binding evidence independently flags this exact question as an open production blocker, corroborating that this is a genuinely unresolved item rather than a reviewer oversight."
+      },
+      {
+        "id": "GAP-5-SELF-CALL-POLICY-UNDECLARED",
+        "severity": "LOW/OPEN - no submission.json exists in this repository at all",
+        "citation": "programmable-fee-policy.md lines 76-80: 'a hook that can initiate a same-pool swap must therefore set selfCallPolicy to either same-pool-swap-forbidden or same-pool-swap-fee-enforced-internally.'",
+        "codeEvidence": "grep across the whole repository (excluding vendored lib/) for 'selfCallPolicy' or 'programmableFee' finds zero JSON/Markdown hits - there is no submission.json anywhere in this repo recording the required programmableFee policy-declaration object at all, so the formal declaration this policy mandates simply does not exist as a reviewable artifact. From the Solidity alone: none of HookemonHook.sol/CanonicalMarket.sol/FeeAccounting.sol contain a call from the hook back into poolManager.swap() on its own canonical pool, so no self-call path is currently exercised; but there is also no explicit test or comment asserting 'same-pool-swap-forbidden' as an intentional invariant, and HookemonIssuance.sol / IPegCycleVault.sol (imported, not read) were out of scope so a self-call path elsewhere in the composed contract cannot be fully ruled out."
+      }
+    ],
+    "conformingOrLikelyCorrectAreas": [
+      "Quadrant-dependent return-delta declaration IS implemented correctly at the mechanism level: CanonicalMarket._beforeSwap only returns a nonzero BeforeSwapDelta (toBeforeSwapDelta(f,0)) when USDG is the specified currency (s==true), and _afterSwap only returns a nonzero afterSwap delta (finalized.fee) when USDG is the UNSPECIFIED currency (!finalized.usdgSpecified) - this exactly matches the policy's before-when-specified / after-when-unspecified requirement (programmable-fee-policy.md lines 63-71, compatibility-standard.md lines 231-233), verified line-by-line including cross-checking the exact v4-core Hooks.sol sign convention (packages/contracts/lib/v4-core/src/libraries/Hooks.sol lines 247-280: amountToSwap = amountSpecified + hookDeltaSpecified, and the caller's final specified delta ends up algebraically equal to p.amountSpecified + fee, matching CanonicalMarket.sol:225-229's InvalidFinalizedSwap check).",
+      "Gross-basis-before-fee-deduction requirement is met: _fee()/_splitLiability() are always applied to the pre-fee executedUsdg (either abs(p.amountSpecified) or abs(rawUsdgDelta)), never to a net-of-fee amount, matching programmable-fee-policy.md line 53 ('measure the gross quote-side amount before deducting the Programmable and project portions').",
+      "Actual-executed-amount-after-partial-fill requirement is met in the strictest possible way: _validateFinalizedSwap reverts the whole transaction (InvalidFinalizedSwap) rather than accounting for a partial fill at all (confirmed by bindings/robinhood-chain.json's executedUsdgNormalization.partialFillPolicy:'REVERT_WHOLE_SWAP'). This satisfies 'never the requested amount' (programmable-fee-policy.md line 52) via a conservative full-fill-only design.",
+      "300/10000 total fee, 10/10000 Programmable, 40/10000 treasury constants exactly match the OWNER TARGET's repository-authoritative split (0.10% Programmable + 0.40% treasury + 2.50% process(=300-10-40) = 3.00%), and are cross-confirmed byte-for-byte against bindings/robinhood-chain.json's hookFee object.",
+      "LP fee and protocol fee are independently forced to zero and checked live from PoolManager slot0 on every swap (CanonicalMarket._matches: k.fee==0, protocolFee==0, liveLpFee==0) - satisfies 'LP fee is independent... and excluded' by construction rather than by convention (programmable-fee-policy.md lines 40-43).",
+      "Solvency-gated claim/debit pattern (FeeAccounting _requireSolvent/_requireSolventAt calls around every liability mutation and every claim) is a reasonable, conservative fail-closed design, though see the claim-liveness tension noted in suspicions below.",
+      "CREATE2 address self-check in HookemonHook's constructor (reverts InvalidHookAddress if the deployed address's low bits don't exactly equal REQUIRED_HOOK_PERMISSION_MASK) matches compatibility-standard.md's 'the deployed address must match the final permission mask' requirement (line 191)."
+    ],
+    "hardConflictCheck": "None of compatibility-standard.md's six 'Hard incompatibilities' (hidden/misleading economics, unauthenticated privileged entry point, tx.origin auth, user-controlled delegatecall, arbitrary target/calldata with protocol authority, unverifiable custody/solvency) are triggered by anything in the three read .sol files. All hook callbacks other than beforeSwap/afterSwap are guarded by onlyPoolManager and explicitly revert UnusedHookCallback (a safe, auditable 'we never intended to use this' pattern). No delegatecall, no tx.origin, appears in any of the three files."
+  },
+
+  "publicInterface": {
+    "HookemonHook.sol": [
+      "constructor(ConstructorConfig memory config) - wires HolderSettlement/CanonicalMarketCallback/HookemonIssuance and self-checks CREATE2 address vs REQUIRED_HOOK_PERMISSION_MASK(0x00CC)",
+      "getHookPermissions() public pure returns (Hooks.Permissions) - beforeSwap/afterSwap/beforeSwapReturnDelta/afterSwapReturnDelta = true, all else false",
+      "beforeSwap(address,PoolKey,SwapParams,bytes) external override - IHooks entry point, delegates to CanonicalMarketCallback._beforeSwap",
+      "afterSwap(...) external override moneyPath - delegates to _afterSwap, wrapped in the FeeAccounting.moneyPath reentrancy guard",
+      "beforeInitialize/afterInitialize/beforeAddLiquidity/afterAddLiquidity/beforeRemoveLiquidity/afterRemoveLiquidity/beforeDonate/afterDonate - all onlyPoolManager, all revert UnusedHookCallback() unconditionally",
+      "claimProgrammable(address beneficiary, address destination) external returns (uint256) - calls out-of-scope _authorizeProgrammableClaim then _claimProgrammableLiability",
+      "claimTreasury(address beneficiary, address destination) external returns (uint256) - symmetric treasury claim",
+      "readFeeLiabilities(address treasuryBeneficiary) external view returns (programmable,treasury,process)",
+      "processLiability()/payoutLiability(bytes32)/totalLiability()/hookUsdgBalance()/isSolvent() - view accessors",
+      "_collectFee(Currency,uint256) internal override - snapshots balance then poolManager.take(currency,address(this),feeAmount)",
+      "_usdgBalanceOf/_transferUsdg internal overrides - raw staticcall/call to USDG's balanceOf(0x70a08231)/transfer(0xa9059cbb) selectors with manual success+returndata validation (fail-closed on non-standard ERC20 return)"
+    ],
+    "CanonicalMarket.sol (CanonicalMarketCallback, abstract)": [
+      "constructor(IPoolManager,Currency usdg,Currency hkmn,int24 tickSpacing,address router) - validates non-zero/non-equal currencies and tick spacing>0",
+      "hookPermissionMask() external pure returns (uint160) - returns 0x00CC",
+      "beforeSwap/afterSwap external virtual override - thin IHooks wrappers around _beforeSwap/_afterSwap",
+      "_beforeSwap(...) internal - authenticates PoolManager+router+hookData.sender, computes before-path fee via _fee(), sets Pending phase + callbackContext commitment",
+      "_afterSwap(...) internal - re-authenticates context match, calls abstract _validateFinalizedSwap, then abstract _collectFee + _accrueAuthenticatedSwap, credits buyerHkmnCredit[recipient], emits CanonicalSwapObserved, resets phase to Idle",
+      "_validateFinalizedSwap - decides usdgSpecified from PoolKey/params, computes and cross-checks fee against the raw BalanceDelta",
+      "_matches(PoolKey) - checks sorted currencies, fee==0, tickSpacing, hooks==address(this), protocolFee==0, live LP fee==0 (read via StateLibrary.getSlot0)",
+      "_fee(uint256) private pure - flat 300/10000 (3%) with an upper-bound-only overflow revert",
+      "abstract _collectFee(Currency,uint256) / _accrueAuthenticatedSwap(uint256,uint256) - implemented by HookemonHook/FeeAccounting",
+      "library CanonicalSwapHookData - decode/decodeMemory/_validate: fixed 128-byte payload (domain keccak256('HOOKEMON_CANONICAL_SWAP_R54_A3_V1'), operationId, sender, recipient), strict length and zero/overflow checks"
+    ],
+    "FeeAccounting.sol (abstract)": [
+      "constructor(address programmableBeneficiary) - rejects address(0)/address(this) only",
+      "_accrueAuthenticatedSwap(uint256 executedUsdg, uint256 balanceBeforeCollection) internal virtual - splits and credits liabilities, verifies balance delta equals totalFee exactly, requires solvency after",
+      "_claimProgrammableLiability()/_claimTreasuryLiability() internal - thin wrappers over _claimLiability",
+      "_claimLiability(mapping storage, address) private moneyPath - zero-then-transfer-then-resolvency pattern (checks-effects-interactions honored: liabilities[beneficiary]=0 BEFORE _transferExactUsdg)",
+      "_debitProcessLiability/_creditPayoutLiability/_debitPayoutLiability internal - bounded ledger primitives for the (out-of-scope) process/vault money path",
+      "_transferExactUsdg - before/after balance-delta assertion on both source and destination around the raw ERC20 transfer",
+      "_splitLiability(uint256) internal pure returns (totalFee,programmableFee,treasuryFee,processFee) - three independent per-call _floorBasisPoints() calls, processFee = totalFee - programmableFee - treasuryFee (residual, not independently floored)",
+      "_floorBasisPoints(uint256 amount, uint256 bps) private pure - overflow-safe floor(amount*bps/10000) via split multiplication (verified algebraically exact)",
+      "abstract _currentTreasuryBeneficiary()/_usdgBalanceOf()/_transferUsdg() - implemented by descendants"
+    ],
+    "SKILL.md (PR#1)": [
+      "Not a code interface; documents a 3-step Trading API flow (POST /check_approval, /quote, /swap), a Universal Router execute(bytes commands, bytes[] inputs, uint256 deadline) ABI, and a RoutePlanner/CommandType SDK surface. See focus1 section for the chain/hookData gaps."
+    ]
+  },
+
+  "invariants": [
+    "HookemonHook: deployed address low 14 bits must equal 0x00CC exactly (else constructor reverts InvalidHookAddress) - CREATE2 mining precondition.",
+    "HookemonHook: config.usdg must equal the vault's pegCycleUsdg (else InvalidVaultUsdg) - cross-checks the swap-side USDG against the process-budget vault's USDG at construction time.",
+    "CanonicalMarketCallback: callbackPhase state machine Idle->Pending(_beforeSwap)->Finalizing(_afterSwap, mid-collection)->Idle, with a callbackContext commitment (keccak256 over sender/hookData/full PoolKey/swap params) that must match exactly between beforeSwap and afterSwap, guarding against a mismatched/replayed/reentrant pair of callbacks.",
+    "_matches(): the canonical pool's LP fee AND live protocol fee must both read as exactly zero on every swap, checked live via StateLibrary.getSlot0 (not just at construction) - the hook is the sole fee mechanism by construction, re-verified per swap.",
+    "hookData: exactly 128 bytes, decoded fields must satisfy domain==keccak256('HOOKEMON_CANONICAL_SWAP_R54_A3_V1'), operationId!=0, sender/recipient both nonzero addresses and both <2^160; hookData.sender must equal the swap's actual `sender` argument (from PoolManager) AND that sender must equal the single immutable swapRouter address bound at construction - i.e. only one specific router contract can ever successfully swap against this pool.",
+    "FinalizedSwap validation: exactly one of amount0/amount1 is negative and the other positive (a0==0||a1==0||(a0<0)==(a1<0) reverts) - enforces a genuine two-sided swap, not a degenerate zero-amount result (i.e. full-fill only, see partial-fill note above).",
+    "FeeAccounting: totalFee collected (balanceAfterCollection-balanceBeforeCollection) must exactly equal the independently-recomputed totalFee from _splitLiability(executedUsdg), else InvalidCollectionDelta - a strict double-entry cross-check between CanonicalMarket's fee computation and FeeAccounting's fee computation.",
+    "FeeAccounting: total USDG balance held by the hook must be >= sum of all outstanding liabilities (programmable+treasury+process+payout) at every accrual and every claim boundary (_requireSolventAt/_requireSolvent), else InsolventAccounting - global solvency invariant, but note GAP discussion: this can also BLOCK an otherwise-valid Programmable claim if OTHER liability streams (process/payout) have consumed balance, in tension with the policy's 'claim at any time' guarantee (see suspicions).",
+    "FeeAccounting.moneyPath: a single reentrancy-guard boolean (moneyPathEntered) shared across afterSwap, claim, and payout paths - only one money-moving call can be 'inside' the guarded region at a time for the whole contract."
+  ],
+
+  "stateTransitions": [
+    "Swap lifecycle: PoolManager.swap() -> HookemonHook.beforeSwap (Idle->Pending, computes/returns before-path fee delta if USDG specified) -> core AMM swap executes on the (possibly fee-adjusted) amount -> HookemonHook.afterSwap (Pending->Finalizing: validate+cross-check delta, _collectFee via poolManager.take, _accrueAuthenticatedSwap splits and credits 3 liability buckets, credits buyerHkmnCredit, emits CanonicalSwapObserved) -> Finalizing->Idle.",
+    "Liability accrual: every successful swap increases programmableLiabilities[fixedBeneficiary], treasuryLiabilities[currentTreasuryBeneficiary], and processLiabilityAmount, and increases totalLiabilityAmount by the sum - liabilities only ever grow via swaps (or via _creditPayoutLiability, out of scope) and only ever shrink via an explicit claim/debit call.",
+    "Claim: liabilities[beneficiary] snapshotted -> zeroed -> totalLiabilityAmount reduced -> USDG transferred with before/after balance-delta assertions on both source and destination -> solvency re-checked. Zero-liability claims revert (InvalidLiabilityAmount).",
+    "PR#2/PR#3 governance state: main's v4-gates.yml Foundry-version check ('${foundry_version}-stable') -> PR#2 rewrites it to accept the bare '${foundry_version}' string Foundry 1.7.1 actually prints, and re-pins the workflow's own SHA256 in 3 files (dependency-pins.json, dependency-verification.json, verify-control-dependencies.mjs) -> PR#3 (stacked on PR#2, same 4-file CI fix) additionally re-runs a full red-team review cycle at requirementsRevision 56/architectureRevision 4: 3 prior R55 findings carried open, 3 R55 findings previously marked RESOLVED are NOT reintroduced as findings but simply removed from the findings list (their disposition text is gone, only their ids survive in openFindingIds/termination.json as still-open carried items - i.e. PR#3 does not claim they regressed, it just stopped re-declaring them resolved in this cycle's own findings.json), and 5 brand-new RT-R56-01..05 findings are added, all OPEN_FAIL_CLOSED, zero resolved this cycle -> state.json/STATE.md: redteam phase flips from OVERRIDDEN to FAILED with no accompanying override entry, tasks/build/ship phases flip from PASSED/OVERRIDDEN/OVERRIDDEN to STALE/STALE/STALE."
+  ],
+
+  "externalDependencies": [
+    "@uniswap/v4-core (pinned at packages/contracts/lib/v4-core, checked out at commit 46c6834698... per bindings file) - IPoolManager, IHooks, Hooks library, BalanceDelta, BeforeSwapDelta, Currency, PoolKey, PoolOperation types/libraries.",
+    "@uniswap/v4-periphery (StateLibrary, PoolIdLibrary used via CanonicalMarket.sol) - not independently version-pinned in the 3 read files, inferred from imports.",
+    "Robinhood Chain USDG token (0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, UUPS proxy) - accessed only via raw staticcall/call to the balanceOf/transfer 4-byte selectors (0x70a08231/0xa9059cbb) rather than a Solidity interface import, with manual success+return-length+decode validation (defensive against non-standard ERC20 implementations).",
+    "PayoutCommitment.sol (imported by HolderSettlement, NOT read - out of assigned scope) - owns _authorizeProgrammableClaim/_authorizeTreasuryClaim, _readPayout, _consumePayoutEntitlement; this is where the actual owner==0x4957f49620AFf3Adbbe8195a4f633E49cc93376c binding (if it exists) would live.",
+    "IPegCycleVault.sol (imported by HookemonHook, NOT read in full - only its existence/line-count checked) - the process-budget vault referenced by the OWNER TARGET's autonomous buy-pack/sell-card/distribute cycle; PR#3's new red-team findings RT-R56-01/02 (vault-contamination) concern this module.",
+    "HookemonIssuance.sol (NOT read in full) - token issuance/remainder-allocation logic, unrelated to the fee-policy focus questions but co-inherited into HookemonHook.",
+    "CanonicalMerkleSum.sol (imported by HolderSettlement, not read) - Merkle-sum proof verification for entitlement payouts.",
+    "PR#1's vendored skill (.agents/skills/swap-integration/, hash-pinned via skills-lock.json to uniswap/uniswap-ai's packages/plugins/uniswap-trading/skills/swap-integration/SKILL.md, computedHash 9d44bc3f22f6ca9c67bcfd857438fa2a59c0c9ddf435ad2b0d51deedf22cc16f) depends at runtime on @uniswap/universal-router-sdk, @uniswap/router-sdk, @uniswap/sdk-core, @uniswap/v3-sdk, viem, wagmi/@wagmi/core, and the live Trading API at https://trade-api.gateway.uniswap.org/v1 (requires an x-api-key from developers.uniswap.org) - none of these are installed/pinned anywhere else in this repository as far as the read files show; the skill is purely a documentation/prompt asset, not wired into packages/contracts or any runner script."
+  ],
+
+  "testStatus": {
+    "solidityTests": "No test files were in the assigned read list and none were opened. bindings/robinhood-chain.json's localProof.artifacts references packages/contracts/test/bindings/RobinhoodBindings.t.sol and RobinhoodV4PoolManager.t.sol by path+sha256 (existence/hash-pinned, content not verified here), plus a verification command list (forge fmt --check, forge test --match-path 'test/bindings/*.t.sol', node feasibility/verify-robinhood-binding.mjs) - but running forge was explicitly forbidden for this task, so no test execution or pass/fail status can be reported.",
+    "prCiTests": "PR#2's own CI fix (Foundry version-string check) is a config/workflow correctness fix with no dedicated new test asserting the new string match beyond the workflow itself running in CI (not observed here). PR#3's stacked change is itself a red-team evidence-recording exercise, not code - the object under review there IS a review process (5 new OPEN_FAIL_CLOSED findings, 0 resolved), not a test suite.",
+    "swapIntegrationSkillTests": "The vendored skill is documentation/prompt content with inline example code, not an executable test suite; nothing in PR#1 is unit-tested."
+  },
+
+  "autonomyGaps": [
+    "Fee-policy cumulative remainder tracking (GAP-1) and the 1000-unit minimum revert (GAP-2) are both absent from the currently-read contracts. An unattended 20-minute-cycle bot buying/selling packs at potentially small, irregular USDG amounts is exactly the kind of high-frequency, variable-size, unsupervised traffic pattern that would silently erode the Programmable owner's fee entitlement over many cycles if these two policy-mandated protections are not added before automation goes live.",
+    "The claim path (claimProgrammable/claimTreasury) is a manual, explicitly-called external function with no autonomous trigger anywhere in the 3 read files - nothing in HookemonHook/CanonicalMarket/FeeAccounting periodically claims or forwards liabilities on a timer; a dashboard/scheduler component (Phase 2, explicitly deferred per AGENTS.md/repo facts) would need to be built to actually realize 'proceeds return to Robinhood USDG and are distributed pro rata to HKMN holders automatically' - none of that distribution logic exists in the 3 fee-policy files (HolderSettlement.payEntitlement is a pull-based Merkle-proof claim by a recipient, not a push/pro-rata distribution).",
+    "The Universal Router address the repo has bound and verified on-chain for Robinhood Chain (0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99) does not match the address Uniswap's own public v4-deployments documentation currently shows for chain 4663 (0x8876789976decbfcbbbe364623c63652db8c0904) - an autonomous swap script built by naively following the vendored skill's 'look up the official deployments page' guidance could target the wrong router entirely. This is exactly the kind of integration risk bindings/robinhood-chain.json's own productionReadiness.blockers list flags under ROUTER_AND_PROVIDER_ZERO_SURCHARGE_INTEGRATION_PROOF.",
+    "The swap-integration skill's Trading API path requires a builder to explicitly choose decision_origin:'autonomous' (no default) and, more importantly, cannot itself construct HookemonHook's required custom hookData or route through the pool's single fixed swapRouter identity - so the 'buy the pack / receive proceeds / swap USDG<->HKMN' leg of the owner's fully-autonomous loop cannot be built from this skill's documented patterns alone against this specific hooked pool; a bespoke Universal-Router-execute()-with-custom-hookData script (undocumented by the skill) would be needed instead.",
+    "No submission.json / programmableFee policy-declaration artifact exists anywhere in the repository (confirmed by repo-wide grep), so there is no machine-checkable conformance record for the hook builder skill's own validator to check against - conformance can currently only be established by manual source review (as done here), which does not scale to the owner's request for an eventually-automated, dashboard-driven, continuously-running system."
+  ],
+
+  "suspicions": [
+    {
+      "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+      "line": 152,
+      "note": "_splitLiability performs three independent per-swap floor divisions with no persisted cross-swap remainder state - directly contradicts programmable-fee-policy.md's 'cumulative-independent-platform-project-remainders' / 'claims never reset them' requirement (v1.1.0's headline fix over the split-swap bypass). See GAP-1."
+    },
+    {
+      "file": "packages/contracts/src/market/CanonicalMarket.sol",
+      "line": 272,
+      "note": "_fee() only reverts on an upper overflow bound; there is no lower-bound revert for gross amounts below 1000 smallest USDG units, contradicting the policy's explicit minimum-revert requirement. See GAP-2."
+    },
+    {
+      "file": "packages/contracts/src/market/CanonicalMarket.sol",
+      "line": 15,
+      "note": "CanonicalSwapHookData.DOMAIN is the fixed compile-time constant keccak256('HOOKEMON_CANONICAL_SWAP_R54_A3_V1'), i.e. the hookData domain separator is permanently tagged to requirements revision 54 / architecture revision 3. PR#3 (this same read set) shows the project's own gate evidence has since moved to requirementsRevision 56 / architectureRevision 4, and the project's own red-team process previously flagged (RT-R55-03, now resolved) exactly the risk pattern of stale revision tags being presented as current authority. Worth an explicit owner/maintainer confirmation that R54_A3 in the domain separator is an intentionally-frozen deployment tag (fine, since it need not track future spec revisions once deployed) rather than an oversight - the immutability itself is not a bug, but nothing in the read files documents which revision the deployed hookData domain is supposed to be pinned to going forward."
+    },
+    {
+      "file": "packages/contracts/src/accounting/FeeAccounting.sol",
+      "line": 92,
+      "note": "_claimLiability calls _requireSolvent() (a GLOBAL check: total USDG balance >= totalLiabilityAmount across programmable+treasury+process+payout) both before and after the transfer. This means the Programmable owner's 'can claim at any time' guarantee (programmable-fee-policy.md line 110) is contingent on the WHOLE contract's solvency, not just the programmable bucket's own liability. If the process/payout side (out of scope IPegCycleVault/HolderSettlement logic) ever overcommits or drains the shared USDG balance, a fully-funded, individually-correct Programmable claim could revert due to insolvency caused entirely by other liability streams - a design tension with the 'anytime' claim guarantee that is worth flagging even though it is also a defensible fail-closed choice (never pay out more than is actually held)."
+    },
+    {
+      "file": "packages/contracts/src/HookemonHook.sol",
+      "line": 56,
+      "note": "programmableBeneficiary (and, via config.programmable, FeeAccounting's fixedProgrammableBeneficiary) is a deployment-time constructor parameter, not a hardcoded literal equal to the policy's mandated 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c. The only on-chain validation is non-zero / not-self; nothing in the 3 read files asserts the deployed value actually equals the policy address. bindings/robinhood-chain.json's own productionReadiness.blockers list independently names this exact gap (PROGRAMMABLE_OWNER_AND_CLAIM_DESTINATION_POLICY_RESOLUTION) as unresolved, corroborating this is a real open item and not a misreading."
+    },
+    {
+      "file": "bindings/robinhood-chain.json",
+      "line": 88,
+      "note": "Repo-recorded universalRouter (0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99, with an on-chain-verified runtimeCodeHash) differs from the Universal Router address Uniswap's own public v4-deployments docs currently list for chain 4663 (0x8876789976decbfcbbbe364623c63652db8c0904), while PoolManager and PositionManager addresses match exactly between the two sources. Needs reconciliation before any swap script (skill-derived or custom) targets 'the' Robinhood Universal Router - see focus1 criticalDiscrepancy."
+    }
+  ],
+
+  "keyFacts": {
+    "feeConstantsInCode": { "TOTAL_FEE_BPS": 300, "PROGRAMMABLE_FEE_BPS": 10, "TREASURY_FEE_BPS": 40, "processFeeBps_implied": 250, "BPS_DENOMINATOR": 10000, "note": "300/10/40/250bps = 3.00%/0.10%/0.40%/2.50%, matching the repo-authoritative split stated in the owner target; cross-confirmed byte-identical in bindings/robinhood-chain.json.hookFee." },
+    "hookPermissionMask": "0x00CC (beforeSwap|afterSwap|beforeSwapReturnDelta|afterSwapReturnDelta), self-checked against the deployed CREATE2 address's low 14 bits in HookemonHook's constructor; independently confirmed in bindings/robinhood-chain.json.market.hookPermissions.mask=='0x00cc'.",
+    "hookDataLayout": "Fixed 128 bytes: [32B domain=keccak256('HOOKEMON_CANONICAL_SWAP_R54_A3_V1')][32B operationId, !=0][32B sender, <2^160, !=0, ==swapRouter][32B recipient, <2^160, !=0].",
+    "programmableFeePolicyOwnerAddress": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c (from programmable-fee-policy.md; NOT confirmed as the actual on-chain configured value from the read .sol files - see GAP-4).",
+    "policyVersions": { "programmable-fee-policy.md": "1.1.0 (builder release v0.4.0)", "compatibility-standard.md": "1.5.0" },
+    "prSha256Change_PR2_and_PR3_shared": { "workflowShaOld": "105cde8b08c10f237f78b3a9e84128ff4246683b0ff34f58dfec7a5d9397f544", "workflowShaNew": "65cc09efba7933d4e047d08391aff9932a48e03c2f3906b800de3aa0f1f1d0e3", "foundryVersionCheckOld": "*Version: ${foundry_version}-stable*", "foundryVersionCheckNew": "*Version: ${foundry_version}*" },
+    "pr3RedteamCounts": { "requirementsRevisionBefore": 55, "requirementsRevisionAfter": 56, "architectureRevision": 4, "newFindings": ["RT-R56-01 high","RT-R56-02 high","RT-R56-03 medium","RT-R56-04 medium","RT-R56-05 low"], "carriedOpenFromR55": ["RT-R55-02","RT-R55-05","RT-R55-06"], "resolvedThisCycle": 0, "totalOpenAfter": 8, "redteamGateResultAfter": "FAILED (no override recorded in state.json/STATE.md)" },
+    "swapIntegrationSkillVersion": "1.5.0 (matches skills-lock.json vendoring; also the version string embedded in every AGENT_INFO code sample)",
+    "skillsLockComputedHash": "9d44bc3f22f6ca9c67bcfd857438fa2a59c0c9ddf435ad2b0d51deedf22cc16f",
+    "robinhoodChainId": 4663,
+    "usdgDecimals": 6,
+    "fetchedUniswapUniversalRouterForChain4663": "0x8876789976decbfcbbbe364623c63652db8c0904 (per developers.uniswap.org/docs/protocols/v4/deployments, fetched twice with byte-identical results)",
+    "repoBoundUniversalRouterForChain4663": "0x06afBA43fd06227fA663b0dAeCF536F6eaA6BF99 (bindings/robinhood-chain.json, on-chain runtimeCodeHash recorded)"
+  },
+
+  "openQuestions": [
+    "Does PayoutCommitment.sol (out of assigned scope) hardcode the claim-authority address to exactly 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c, and does it forbid any stored/mutable recipient as the policy requires? bindings/robinhood-chain.json independently lists this exact question as an unresolved production blocker.",
+    "Which of the two Universal Router addresses for chain 4663 is actually correct/current - the repo's on-chain-verified 0x06afBA43... or Uniswap's publicly documented 0x8876789976...? (Possible explanations: a router redeployment after the repo's binding was recorded, a documentation error, or two coexisting router generations - none of which can be distinguished from the files read here.)",
+    "Is there a project-maintained submission.json anywhere outside this repository (e.g. in the Programmable launchpad application itself) that declares programmableFee.collection.selfCallPolicy and the other schema fields the policy mandates, given none exists in this repository?",
+    "Does HookemonIssuance.sol or IPegCycleVault.sol (both imported by HookemonHook but not read) ever cause the hook to self-initiate a PoolManager swap on its own canonical pool, which would require the selfCallPolicy declaration GAP-5 flags as currently undeclared?",
+    "Given GAP-1/GAP-2 (no cumulative remainders, no 1000-unit minimum), is there a separate/newer version of FeeAccounting.sol or a wrapping component elsewhere in the two unmerged Phase 2 branches (codex/phase2-revision-57, codex/complete-v4-hook) that already fixes these gaps? Those branches were out of scope for this unit's file list."
+  ],
+
+  "outputPath": "<scratch>/w1/summaries/skill-and-prs.json"
+}

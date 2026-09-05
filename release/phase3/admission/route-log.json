@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "hookemon.programmable-admission-route-log.v1",
+  "scope": "WP00b read-only admission research",
+  "credentialHandling": "The bearer credential was used only for the documented preflight route. It is absent from every URL, response, and this log.",
+  "routes": [
+    {"method": "GET", "url": "https://api.programmable.market/v4/chains/4663/capabilities", "httpStatus": 200},
+    {"method": "GET", "url": "https://api.programmable.market/v4/chains/4663/readiness", "httpStatus": 200},
+    {"method": "GET", "url": "https://api.programmable.market/readyz", "httpStatus": 200, "scopeNote": "Service-level response; not used as chain-specific admission evidence."},
+    {"method": "GET", "url": "https://programmable.market/openapi/custom-launch-v4.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://programmable.market/.well-known/programmable.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://programmable.market/policies/custom-launch-agent-remediation-v1.json", "httpStatus": 200, "scopeNote": "Not used for V4-specific conclusions."},
+    {"method": "GET", "url": "https://programmable.market/schemas/custom-launch/v4/pack-config.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://programmable.market/schemas/custom-launch/v4/source-verification-status.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://programmable.market/contracts/robinhood/ProgrammableLaunchStampRouterV1.abi.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/policy/custom-launch-admission-v4.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/policy/launch-policy.v1.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/policy/schemas/custom-launch-admission-v4.schema.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/Launch-Policy/987215867472229690e30e11000c626d58f46e16/.programmable/custom-launch-admission.v4.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://api.github.com/repos/programmablehq/PROGRAMMABLE/git/ref/heads/production", "httpStatus": 200},
+    {"method": "GET", "url": "https://api.github.com/repos/programmablehq/PROGRAMMABLE/git/trees/cbcabd3cfc166124485c6f7e7c3951810cf60dc1?recursive=1", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/src/ProgrammableCreate2GraphDeployerV1.sol", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/src/ProgrammableRouteGatedCreate2GraphFactoryV1.sol", "httpStatus": 200, "scopeNote": "Source was not used to establish the V4 deployed behavior."},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/src/robinhood-custom-launch/ProgrammableLaunchStampRouterV1.sol", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/src/robinhood-custom-launch/interfaces/IProgrammableCreate2GraphDeployerV1.sol", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/spec/robinhood-custom-launch/standard-json/ProgrammableCreate2GraphDeployerV1.standard-input.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/spec/robinhood-custom-launch/standard-json/ProgrammableLaunchStampRouterV1.standard-input.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/spec/robinhood-custom-launch/chain-4663.v1.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/packages/launch/package.json", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/packages/launch/examples/robinhood-v4-no-broadcast/README.md", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/scripts/finalize-robinhood-custom-launch-deployment.mjs", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/scripts/robinhood-custom-launch-postdeploy-core.mjs", "httpStatus": 200, "callCount": 3},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/contracts/scripts/robinhood-custom-launch-bindings-core.mjs", "httpStatus": 200},
+    {"method": "GET", "url": "https://raw.githubusercontent.com/programmablehq/PROGRAMMABLE/cbcabd3cfc166124485c6f7e7c3951810cf60dc1/release/robinhood-chain-4663/production-verify-coordinates.json", "httpStatus": 200},
+    {"method": "POST", "url": "https://api.programmable.market/v4/chains/4663/custom-launches/preflight", "httpStatus": 400, "scopeNote": "Documented non-persisting route. The intentionally incomplete evidence-only graph was rejected before any launch review."}
+  ],
+  "notCalled": [
+    {"method": "POST", "url": "https://api.programmable.market/v4/chains/4663/custom-launches", "reason": "Durable create route."},
+    {"method": "POST", "url": "submit routes", "reason": "Outside the read-only admission scope."}
+  ]
+}

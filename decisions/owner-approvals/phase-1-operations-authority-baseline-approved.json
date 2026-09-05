@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "Owner approved the operations-wallet and admin-authority clarification for the Phase 1 baseline.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "7608952c8ced7acf461e7e2302f1e6ecd11302c10cec68312196caecf0fbf776",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "product/PRD.md": "9b162d28843781e23929bf1dfba3babf371b7197bdfbf2431f85a1fb6e4fe6e2"
+  }
+}

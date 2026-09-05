@@ -1,0 +1,26 @@
+{
+  "id": "r-00281",
+  "at": "2026-08-31T17:55:45.057Z",
+  "type": "gate",
+  "phase": "tasks",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 2,
+    "problems": [
+      "T1: evidence r-00192 is STALE",
+      "T2: evidence r-00193 is STALE",
+      "T3: evidence r-00194 is STALE",
+      "T4: evidence r-00172 is STALE",
+      "T5: evidence r-00195 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/tasks.json": "53eba48fcab9ca3c2d95e9225dbd8137720d756f017448ca15b2974a4eba7275",
+    "gates/runs/tasks.json": "39adca0e50b00f1a6df7903add56cdecea0ec9598cc339965e8285668b545dee",
+    "receipts/r-00192.json": "6cac41f672e0d9d8ee413a57e98c0a0b2cba2d1eda55fa1d4fbd6b72d351c3ff",
+    "receipts/r-00193.json": "99507c4361082bc90c9a170e3e8b94674193f9f72f981e9495e54ca224b37856",
+    "receipts/r-00194.json": "9d07027aa8a1aec0bab13beffe69f8da87406834a402a622f985d92ff5e53199",
+    "receipts/r-00172.json": "ee614c863560a7899e5d10ae9998e745cd97471ff6f4c9ef690026e55c32e8a4",
+    "receipts/r-00195.json": "f95f8f8651934c853cfbd9e53b30c4d9e99d93e66098f87f397a3939603419c1"
+  }
+}

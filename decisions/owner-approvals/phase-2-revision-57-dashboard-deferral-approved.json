@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "TASK_DEFER",
+  "phase": "build",
+  "itemId": "P1-011",
+  "rationale": "Dashboard, scheduler, and unattended automation remain deferred by the owner-approved lean Phase 2 scope",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/task-deferrals/P1-011.json": "0d3b4eb7e93b19e3e0b757c95ef8ad0707743436a80839beda9c570fc4201150",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb"
+  }
+}

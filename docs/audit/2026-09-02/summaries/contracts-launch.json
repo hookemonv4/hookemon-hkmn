@@ -1,0 +1,153 @@
+{
+  "unit": "contracts-launch",
+  "root": "<repo>",
+  "files": [
+    {
+      "path": "packages/contracts/src/launch/HookemonIssuance.sol",
+      "lines": 262,
+      "role": "Abstract, fail-closed guard contract (inherited by HookemonHook) that records and cross-checks a caller-attested 'issuance plan' and a caller-attested 'observation' of what actually happened, purely as an internal-consistency check on calldata. It never deploys a token, never calls balanceOf/totalSupply on-chain, never authenticates that the observation reflects real chain state. Explicitly documented in its own header comment as provider-independent and incomplete pending a 'provider adapter'."
+    },
+    {
+      "path": "packages/contracts/script/release/PhaseOneReleasePlan.sol",
+      "lines": 151,
+      "role": "Non-deploying, read-only Foundry script/verifier contract. Bundles the full Phase-1 address/topology plan into one struct, cross-validates internal consistency (10 distinct identities, non-zero fields, chainId match), independently recomputes PegCycleVault's CREATE2 init-code hash from its real creationCode+constructor args and its resulting address, and (in verifyDeployedRuntime) checks four addresses' actual on-chain codehash against caller-supplied expected hashes. Exposes no transaction-sending entrypoint by design."
+    },
+    {
+      "path": "packages/contracts/foundry.toml",
+      "lines": 16,
+      "role": "Foundry profile: src/test/out/cache/lib layout, auto_detect_remappings=false (remappings.txt is authoritative), solc_version 0.8.26 pinned exactly, evm_version cancun, optimizer on with 20,000 runs, fmt line_length 100 / tab_width 4."
+    },
+    {
+      "path": "packages/contracts/remappings.txt",
+      "lines": 7,
+      "role": "Maps @uniswap/v4-core, @uniswap/v4-periphery, @uniswap/liquidity-launcher, @uniswap/uerc20-factory to lib/ submodules, plus @openzeppelin, permit2, solmate to their nested transitive locations inside those submodules."
+    },
+    {
+      "path": ".gitmodules",
+      "lines": 12,
+      "role": "Declares 4 git submodules under packages/contracts/lib: v4-core, v4-periphery, liquidity-launcher, uerc20-factory, all from github.com/Uniswap/*."
+    },
+    {
+      "path": "packages/contracts/test/blind/token-roles/FixedSupplyBlindSpec.sol",
+      "lines": 565,
+      "role": "Abstract 'blind spec' test base (provider-agnostic behavioral contract) defining ~15 tests + fuzz test for fixed-supply identity, 90/10 allocation, direct issuance trace, remainder custody, wallet ERC20 mechanics, runtime-authority evidence matching, forbidden-selector/opcode denylists, and permanent LP-custody immutability. It never runs on its own — it requires a concrete subclass supplying ~16 virtual hook methods (_deployThroughBoundLaunchPath, etc.)."
+    }
+  ],
+  "publicInterface": {
+    "HookemonIssuance.sol": [
+      "constructor(address issuanceAuthority, uint8 expectedDecimals, bytes32 bindingManifestDigest, bytes32 runtimeAuthorityDigest)",
+      "function prepareOfficialIssuance(IssuancePlan calldata plan) external returns (bytes32 planDigest) — authority-only, one-shot, freezes a plan digest",
+      "function verifyIssuance(IssuancePlan calldata plan, IssuanceObservation calldata observation, TransferRecord[] calldata trace) external — authority-only, one-shot, requires PREPARED state, requires trace.length==2 (exactly one market transfer + one remainder transfer, both from issuanceSource)",
+      "function readTokenState() external view returns (IssuanceGuardState memory)",
+      "enum GuardStatus { UNPREPARED, PREPARED_PROVIDER_CALL_UNAVAILABLE, OBSERVATION_VERIFIED_PROVIDER_BINDING_PENDING } — note: the terminal state name itself says 'PENDING', there is no COMPLETE/BOUND state",
+      "errors: InvalidAuthority, InvalidEvidence, InvalidIdentity, InvalidAllocation, InvalidTrace, GuardAlreadyPrepared, GuardNotPrepared, GuardAlreadyVerified",
+      "constants: WHOLE_HKMN_SUPPLY=420_690_000_000, HOOKEMON_NAME_HASH=keccak256(\"Hookemon\"), HKMN_SYMBOL_HASH=keccak256(\"HKMN\")"
+    ],
+    "PhaseOneReleasePlan.sol": [
+      "constant SCHEMA = keccak256(\"HOOKEMON_PHASE_ONE_RELEASE_PLAN_V2\")",
+      "function validate(Plan calldata plan) external view returns (bytes32 planDigest)",
+      "function verifyDeployedRuntime(Plan calldata plan) external view returns (bytes32 planDigest, bytes32 runtimeSetDigest) — checks codehash of usdg, positionManager, expectedVault, expectedHook",
+      "function computeCreate2Address(address deployer, bytes32 salt, bytes32 initCodeHash) public pure returns (address)",
+      "errors: InvalidPlan, WrongChain, HookAddressMismatch, VaultAddressMismatch, VaultInitCodeHashMismatch, MissingRuntimeCode, RuntimeCodeMismatch",
+      "struct Plan: 24 fields covering chainId, usdg/programmable/treasury/operationsTrigger/positionManager addresses, vault CREATE2 triple (deployer/salt/initCodeHash/expectedVault) plus its constructor args (vaultUsdg, vaultAuthorizer, vaultRouteExecutor, vaultBindingManifestDigest, vaultDeploymentAuthority), hook CREATE2 triple (hookDeployer/hookSalt/hookInitCodeHash/expectedHook), 4 runtime codehashes, candidateManifestSha256"
+    ],
+    "FixedSupplyBlindSpec.sol": [
+      "16 abstract hook methods a concrete fixture must implement (deployment, decimals, runtime binding/observation, issuance-source, duplicate/unauthorized-issue attempts, remainder treatment/control, wallet-balance acquisition, project-fee-liability, market-position commitment/withdraw/rescue/upgrade attempts)",
+      "public test entrypoints: test_BlindFixedSupplyHasExactIdentityAndSupply, test_BlindInitialAllocationIsExactlyNinetyTenWithNoOtherBalance, test_BlindIssuanceTraceDirectlyAllocatesMarketWithoutProjectWalletHop, test_BlindRemainderUsesApprovedNonProjectControlledTreatment, test_BlindIssuanceRejectsDuplicateCreation, test_BlindIssuanceRejectsUnauthorizedCreation, test_BlindWalletTransferCreditsTheCompleteAmount, test_BlindMaximumPracticalWalletTransferCreditsTheCompleteBalance, test_BlindZeroValueTransferHasNoSideEffects, test_BlindSelfTransferHasNoSideEffects, test_BlindAllowanceTransferCreditsTheCompleteAmount, testFuzz_BlindWalletTransferNeverChargesProjectFee, test_BlindTokenRuntimeMatchesExactBoundAuthorityEvidence, test_BlindTokenRuntimeHasNoKnownForbiddenSelectors (17-selector denylist incl. mint/burn/blacklist/pause/upgradeTo/owner), test_BlindTokenRuntimeHasNoReplacementOrDestructionOpcode (DELEGATECALL 0xf4, SELFDESTRUCT 0xff scan), test_BlindMarketPositionCustodyIsPermanentAndNotProjectControlled, test_BlindMarketPositionCustodyHasNoUpgradeOrRescueSelectors"
+    ]
+  },
+  "invariants": [
+    "WHOLE_HKMN_SUPPLY is a hardcoded literal (420,690,000,000) duplicated verbatim in HookemonIssuance.sol, FixedSupplyBlindSpec.sol, and FixedSupplyPrep.t.sol — not imported from one shared source.",
+    "Allocation is always exactly 90% market / 10% remainder of the decimals-scaled supply, with otherAllocation forced to 0 (HookemonIssuance._validatePlan, _validateObservation).",
+    "Decimals are NOT hardcoded to 18: HookemonIssuance takes expectedDecimals as a constructor immutable and rescales WHOLE_HKMN_SUPPLY by 10^decimals with overflow checks (_scaledSupply); tests exercise both 18 and 6 decimals successfully, so nothing in this file enforces which decimals HKMN actually launches with on Robinhood Chain.",
+    "prepareOfficialIssuance and verifyIssuance are each callable exactly once, only by the immutable issuanceAuthority (msg.sender check), and only in the correct GuardStatus order; any mismatch reverts without mutating state (tests confirm no partial state change on rejection).",
+    "The issuance trace must be exactly 2 TransferRecord entries, both with from==issuanceSource, one to canonicalMarket for exactly marketAllocation and one to remainderRepresentation for exactly remainderAllocation; any indirect hop, extra entry, or wrong amount is rejected.",
+    "canonicalMarket, remainderRepresentation, marketPositionCustody, projectWallet, and issuanceSource must all be pairwise distinct and non-zero (_requireDistinctDestinations, plus extra issuanceSource checks).",
+    "PhaseOneReleasePlan requires 10 named identities (usdg, programmable, treasury, operationsTrigger, positionManager, expectedVault, vaultAuthorizer, vaultRouteExecutor, vaultDeploymentAuthority, expectedHook) to be pairwise distinct and non-zero, and plan.vaultUsdg must equal plan.usdg.",
+    "PhaseOneReleasePlan recomputes the vault's CREATE2 init-code hash from the actual PegCycleVault.creationCode plus ABI-encoded constructor args and must match plan.vaultInitCodeHash and plan.expectedVault exactly — this is a real, on-chain-bytecode-anchored check.",
+    "By contrast, the hook's CREATE2 check only verifies that computeCreate2Address(hookDeployer, hookSalt, hookInitCodeHash) == expectedHook; hookInitCodeHash itself is taken as caller-supplied calldata and is never recomputed from HookemonHook's actual creationCode/constructor args inside this contract (see suspicions).",
+    "verifyDeployedRuntime requires target.codehash to be non-zero/non-empty and to equal the caller-supplied expected hash for usdg, positionManager, expectedVault, expectedHook — it reads real on-chain code, but the 'expected' hashes it compares against are themselves plan inputs, not independently derived inside the contract (except for the vault, whose full initcode is independently derived).",
+    "FixedSupplyBlindSpec's denylist tests assert the deployed token and market-position-custody bytecode never contains a PUSH4 loaded with any of ~17-23 forbidden 4-byte selectors (mint, burn, blacklist, pause, setFee, owner, upgradeTo, rescueToken, withdraw, etc.) and never contains a DELEGATECALL (0xf4) or SELFDESTRUCT (0xff) opcode outside push-immediate ranges."
+  ],
+  "stateTransitions": [
+    "HookemonIssuance.GuardStatus: UNPREPARED -> (prepareOfficialIssuance, authority-only) -> PREPARED_PROVIDER_CALL_UNAVAILABLE -> (verifyIssuance, authority-only, exact plan+observation+trace match) -> OBSERVATION_VERIFIED_PROVIDER_BINDING_PENDING. This is the FINAL state defined by the enum; the name itself declares the provider binding still pending, i.e. this guard's own state machine has no 'launch complete' terminus.",
+    "PhaseOneReleasePlan has no mutable state at all; it is a pure/view verifier invoked repeatedly against different candidate Plan structs off-chain or by other contracts/scripts."
+  ],
+  "externalDependencies": [
+    "packages/contracts/src/process/PegCycleVault.sol — imported by PhaseOneReleasePlan.sol for type(PegCycleVault).creationCode (out of this unit's read list but directly load-bearing for the vault CREATE2 check).",
+    "Uniswap v4-core (submodule pin 46c6834698c48bc4a463a86d8420f4eb1d7f3b75, tag-derived v4.0.0-21-g46c68346) — remapped @uniswap/v4-core/, also supplies transitive @openzeppelin and solmate remappings.",
+    "Uniswap v4-periphery (submodule pin dce236d4e2057422d0791d9a973a58765eb46f65) — pinned to 'heads/main' per `git submodule status`, i.e. a moving branch tip captured at a commit, not a release tag like the other three submodules; also supplies transitive permit2/.",
+    "Uniswap liquidity-launcher (submodule pin 1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a, tag v3.2.0-5-g1eda9f0) — vendored and remapped as @uniswap/liquidity-launcher/, but grep across src/, script/, test/ finds ZERO Solidity imports or references to it anywhere in the repository; it is unused by any contract in this codebase today.",
+    "Uniswap uerc20-factory (submodule pin a747318fcce114f56a3a21b8bcec83663a61208b, tag v2.0.0-2-ga747318) — same situation: remapped as @uniswap/uerc20-factory/ but never imported by any .sol file in src/, script/, or test/.",
+    "HookemonHook.sol (src/HookemonHook.sol) inherits HookemonIssuance directly and forwards issuanceAuthority/expectedDecimals/bindingDigest/runtimeDigest from its own ConstructorConfig struct into the HookemonIssuance constructor; nothing in HookemonHook.sol calls prepareOfficialIssuance or verifyIssuance internally, and no script/ file calls them either — they exist purely as externally-callable, authority-gated methods on the deployed hook, meant to be invoked manually post-deployment."
+  ],
+  "testStatus": "packages/contracts/test/launch/HookemonIssuance.t.sol (343 lines, one HookemonIssuanceHarness wrapping the abstract contract) is a real, concrete, presumably-runnable test suite covering: happy path prepare+verify, alternate decimals (6), rejection of unauthorized prepare/verify without state mutation, rejection of duplicate prepare/verify, rejection of wrong decimals/supply/allocation/otherAllocation, rejection of zero/overlapping/project-controlled destinations, rejection of stale/mismatched evidence digests, rejection of tampered observation fields, rejection of indirect/extra trace entries, and constructor rejection of missing authority/evidence/absurd decimals (uint8.max causes overflow revert in _scaledSupply). packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol (892 lines) concretely exercises PhaseOneReleasePlan, including test_releasePlanIsReadOnlyAndRejectsAnAccountWithoutRuntimeCode, by deploying a real PegCycleVault via CREATE2 and a generic 'ReleasePlanRuntimeFixture' contract standing in for the hook (its init-code hash is fabricated in the test, not derived from actual HookemonHook bytecode, mirroring the production-code gap noted above). By sharp contrast, FixedSupplyBlindSpec.sol (565 lines, ~17 test functions + 1 fuzz test) has NO live concrete implementation anywhere in the tree: the only subclass, test/blind/token-roles/FixedSupplyBinding.t.sol.disabled, carries the '.sol.disabled' extension (excluded from compilation/`forge build`/`forge test` entirely) and its own header says 'Quarantined until the provider-bound launch interface and fencing token are available' — every one of its 16 overridden hook methods simply calls `this.bindFixture()` which unconditionally `revert BlindFixtureNotBound()`. So none of the ~18 fixed-supply/allocation/permanent-custody/forbidden-selector/anti-rug behavioral assertions in FixedSupplyBlindSpec.sol currently run against any real deployment path; they are a dormant specification only. FixedSupplyPrep.t.sol (274 lines) is a separate, currently-live, real test file that exercises the shared FixedSupplyBlindEvidence library directly (catalog math, forbidden-selector dedup, runtime-authority evidence matching, issuance-trace validation) via a small concrete harness — this is real coverage of the evidence-matching *library logic*, but it is a synthetic-fixture unit test, not an end-to-end test of any actual HKMN deployment.",
+  "autonomyGaps": [
+    "No code path in this unit (or found via grep across src/script/test) actually calls the vendored Uniswap liquidity-launcher or uerc20-factory contracts to deploy HKMN, mint the fixed supply, or seed the canonical USDG/HKMN pool. These two submodules are pinned/remapped but entirely unreferenced by any Solidity source — the 'Launchpad/UERC20 factory binding' named in this unit's FOCUS does not exist as code yet; it matches the stated fact that the Programmable Robinhood launchpad and canonical PoolKey are INTEGRATION_PENDING.",
+    "HookemonIssuance is explicitly documented (file-header comment) as never calling a provider, never deploying a token, and never proving that a caller's 'observation' reflects real Robinhood-chain state. verifyIssuance only checks internal consistency between plan/observation/trace calldata supplied by the single, EOA-controlled issuanceAuthority — nothing in this contract queries balanceOf/totalSupply on the real token. A fully autonomous, unattended 20-minute-cycle system would need a trust-minimized, on-chain-verified binding here; today it is an attestation the authority key must supply by hand, once, and the guard's own terminal enum value is literally named '..._PROVIDER_BINDING_PENDING'.",
+    "prepareOfficialIssuance/verifyIssuance are never invoked by any script/ file — there is no deployment automation wiring the one-shot guard into an actual release process; a human (or an as-yet-unbuilt provider adapter) must call both functions by hand in the correct order with correct calldata.",
+    "PhaseOneReleasePlan.sol deliberately 'exposes no transaction execution entrypoint' (per its own doc comment) — it can only validate a Plan struct someone else assembles and never itself deploys the vault, the hook, or performs the CREATE2 calls. It also cannot be run today (per repository facts) without regenerating a fresh STATE.md, since the v4 control CLI's ledger is per-checkout and absent in this worktree.",
+    "PhaseOneReleasePlan's hook CREATE2 verification is asymmetric with its vault verification: for the vault it independently recomputes the init-code hash from real PegCycleVault.creationCode + constructor args; for the hook it only checks self-consistency of caller-supplied hookInitCodeHash/hookSalt/hookDeployer against expectedHook, with no on-chain-bytecode anchor inside this contract — so nothing here can catch a wrong or malicious hookInitCodeHash paired with a matching (but wrong) expectedHook, as long as they're internally consistent with each other.",
+    "The entire FixedSupplyBlindSpec anti-rug/permanent-custody/forbidden-selector specification (the strongest safety net for 'buyers can trust the fixed supply and permanent LP' promised to the community) is currently disconnected from any real or even mock deployment — it cannot protect against a regression in the real launch path because nothing wires it to that path.",
+    "Nothing in this unit enforces which decimals value HKMN actually launches with; expectedDecimals is a free constructor parameter to HookemonIssuance/HookemonHook, so getting this wrong (e.g., not matching whatever the eventual Launchpad/UERC20Factory actually mints with) would only be caught if a human supplies a self-consistent-but-wrong plan and nobody notices before calling verifyIssuance.",
+    "None of this maps onto the owner's dashboard requirements (pack selection, interval control, restart/kick stuck cycles, community status) — this unit is purely token-identity/supply/allocation plumbing for a one-time launch event, with no automation, no scheduling, and no operator-facing controls of any kind."
+  ],
+  "suspicions": [
+    {
+      "file": "packages/contracts/script/release/PhaseOneReleasePlan.sol",
+      "line": 134,
+      "note": "Hook CREATE2 address check only re-derives computeCreate2Address(hookDeployer, hookSalt, hookInitCodeHash) and compares to expectedHook — unlike the vault check just above (lines 113-127), hookInitCodeHash is never recomputed from HookemonHook's actual creationCode + constructor args. A wrong/stale hookInitCodeHash that happens to be self-consistent with a wrong expectedHook would pass validate() silently."
+    },
+    {
+      "file": "packages/contracts/test/invariant/PhaseOneReleaseInvariant.t.sol",
+      "line": 263,
+      "note": "The invariant test's own hook fixture (ReleasePlanRuntimeFixture) fabricates initCodeHash locally rather than deriving it from HookemonHook — meaning even this repository's tests never exercise a real HookemonHook-bytecode-anchored CREATE2 check, so the gap above is untested rather than merely theoretical."
+    },
+    {
+      "file": "packages/contracts/test/blind/token-roles/FixedSupplyBinding.t.sol.disabled",
+      "line": 1,
+      "note": "The only concrete implementation of FixedSupplyBlindSpec is disabled (.sol.disabled extension, excluded from compilation) and every hook reverts with BlindFixtureNotBound(). All 18 behavioral tests in FixedSupplyBlindSpec.sol are currently dead code from forge's perspective."
+    },
+    {
+      "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+      "line": 9,
+      "note": "WHOLE_HKMN_SUPPLY = 420_690_000_000 is redefined verbatim (not imported) in this file, in FixedSupplyBlindSpec.sol line 31, and in FixedSupplyPrep.t.sol line 32 — three independent copies of the same magic constant with no single source of truth; a future edit to one and not the others would silently desynchronize spec vs. implementation."
+    },
+    {
+      "file": ".gitmodules",
+      "line": 7,
+      "note": "liquidity-launcher and uerc20-factory submodules are pinned and remapped but have zero Solidity references anywhere in src/script/test — dead vendored dependencies as of this commit, consistent with the Programmable launchpad integration being not-yet-built, but worth confirming this isn't accidentally-orphaned code that used to be wired up."
+    },
+    {
+      "file": "packages/contracts/src/launch/HookemonIssuance.sol",
+      "line": 135,
+      "note": "GuardStatus.OBSERVATION_VERIFIED_PROVIDER_BINDING_PENDING is the terminal state of this state machine — its own name documents that this contract cannot express 'launch fully bound/complete'; readTokenState() will report 'PENDING' forever unless some other, not-present contract/process consumes this state and does something with it."
+    },
+    {
+      "file": "cross-reference (not in this unit's file list)",
+      "line": 16,
+      "note": "REQUIREMENTS_REVISION is 54 in src/bindings/RobinhoodBindings.sol but 56 in src/process/PegCycleVault.sol (grepped for context because PhaseOneReleasePlan.sol directly imports and hashes PegCycleVault's creationCode). bindings/robinhood-chain.json also states requirementsRevision:54. This is a lower-confidence, adjacent-file observation — flagging for reviewers to check whether PegCycleVault's revision 56 is intentionally ahead of the Robinhood binding evidence's revision 54, since PhaseOneReleasePlan's vault hash-check would faithfully reproduce whatever revision digest is baked into the deployed PegCycleVault regardless of this mismatch."
+    }
+  ],
+  "keyFacts": [
+    "WHOLE_HKMN_SUPPLY = 420,690,000,000 (whole tokens, pre-decimal-scaling)",
+    "90/10 split at 18 decimals: marketAllocation = 378,621,000,000 * 1e18, remainderAllocation = 42,069,000,000 * 1e18 (also independently confirmed at 6 decimals in tests)",
+    "HOOKEMON_NAME_HASH = keccak256(\"Hookemon\"); HKMN_SYMBOL_HASH = keccak256(\"HKMN\")",
+    "PhaseOneReleasePlan.SCHEMA = keccak256(\"HOOKEMON_PHASE_ONE_RELEASE_PLAN_V2\") (note: 'V2' suffix — an earlier schema version existed/was superseded)",
+    "solc_version pinned exactly to 0.8.26 in foundry.toml; evm_version = cancun; optimizer_runs = 20,000; auto_detect_remappings = false (remappings.txt is authoritative)",
+    "HookemonIssuance.sol and PhaseOneReleasePlan.sol both declare `pragma solidity 0.8.26;` (exact match); the blind-spec/evidence/prep test files declare `pragma solidity ^0.8.24;` (looser, but still compiles under the pinned 0.8.26 compiler)",
+    "Submodule pins (git submodule status): v4-core @ 46c6834698c48bc4a463a86d8420f4eb1d7f3b75 (tag v4.0.0-21-g46c68346); v4-periphery @ dce236d4e2057422d0791d9a973a58765eb46f65 (heads/main — a branch tip, not a release tag); liquidity-launcher @ 1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a (tag v3.2.0-5-g1eda9f0); uerc20-factory @ a747318fcce114f56a3a21b8bcec83663a61208b (tag v2.0.0-2-ga747318)",
+    "FixedSupplyBlindSpec's forbidden-token-selector denylist has 17 entries (mint, burn, burnFrom, blacklist, confiscate, pause, unpause, setTax, setFee, setFeeRecipient, owner, admin, transferOwnership, upgradeTo, upgradeToAndCall, rescueToken, recoverERC20); the market-position-custody denylist has 6 (withdraw, rescueToken, recoverERC20, upgradeTo, upgradeToAndCall, transferOwnership)",
+    "FixedSupplyBlindSpec requires the issuance trace to be exactly 2 TransferRecord entries (one market, one remainder), both originating from the single issuanceSource, with no project-wallet hop",
+    "bindings/robinhood-chain.json: chainId 4663, requirementsRevision 54, architectureRevision 3, bindingMode 'BUILD_ONLY_FAIL_CLOSED', observedAt 2026-08-30 — corroborates that this whole area is still evidence-gathering/fail-closed rather than a live launch integration"
+  ],
+  "openQuestions": [
+    "Where and how is HookemonIssuance.prepareOfficialIssuance/verifyIssuance actually meant to be invoked in a real release — by a human operator via cast, by a not-yet-written deployment script, or by a future 'provider adapter' contract? None of that wiring exists in this unit.",
+    "Given liquidity-launcher and uerc20-factory are vendored but never imported anywhere, is the intended integration path for the Programmable Robinhood launchpad going to build directly on these Uniswap contracts, or are they leftover from an earlier design that's since been superseded (their presence alongside PhaseOneReleasePlan's PoolKey-adjacent fields suggests they were planned for, at minimum)?",
+    "Is v4-periphery's pin to a 'heads/main' commit (rather than a tagged release like the other three submodules) intentional/tracked, or an oversight that should be re-pinned to a tag before mainnet use?",
+    "Should FixedSupplyBinding.t.sol.disabled be un-quarantined once the real launch path exists, and is there a tracked task/issue for doing so, given it currently provides zero live protection for the fixed-supply/permanent-custody guarantees the community is being promised?",
+    "Is the REQUIREMENTS_REVISION mismatch between RobinhoodBindings.sol (54) and PegCycleVault.sol (56) — both outside this unit's file list but adjacent to PhaseOneReleasePlan's vault hash check — intentional versioning drift or a sync bug reviewers should chase down in the relevant unit?",
+    "What determines expectedDecimals passed into HookemonHook's constructor for the real Robinhood-chain launch, and is there any code anywhere (outside this unit) that ties it to whatever the eventual Launchpad/UERC20Factory mints with, given HookemonIssuance itself treats decimals as a free, provider-supplied parameter?"
+  ],
+  "outputPath": "<scratch>/w1/summaries/contracts-launch.json"
+}

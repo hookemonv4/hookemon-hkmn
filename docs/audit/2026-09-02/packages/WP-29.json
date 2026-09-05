@@ -1,0 +1,60 @@
+{
+  "id": "WP-29",
+  "title": "Reducer production model: bridge legs, automated authorization provider, void path, revision pin",
+  "goal": "Turn the fixture-only cycle reducer into a production-capable state machine without breaking the fixture tests: model the two bridge legs explicitly, replace the per-step fixture owner signatures with a pluggable authorization provider (fixture mode for tests, standing-authority policy signer for production), add a void/terminal path for external mutations that never broadcast, replace exact-zero isolation invariants on publicly fundable accounts with exact-delta accounting, fix the buyback NFT/Circle USD unit conflation, and unpin the preflight from revision 56 (closes confirmed findings HK-019, HK-020, HK-023, HK-024, HK-025, HK-026, HK-027, HK-028, HK-030).",
+  "deps": [
+    "WP-01",
+    "WP-27"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/runner/src/cycle/reducer.mjs",
+    "packages/runner/src/cycle/schemas.mjs",
+    "packages/runner/src/cycle/authorization.mjs",
+    "packages/runner/src/cycle/execution-accounting.mjs",
+    "packages/runner/src/cycle/blockhash-validity.mjs",
+    "packages/runner/src/cycle/decoder.mjs",
+    "packages/runner/src/cycle/collector.mjs",
+    "packages/runner/src/cycle/bindings.mjs",
+    "packages/runner/src/cycle/preflight.mjs",
+    "packages/runner/src/cycle/authorization-provider.mjs",
+    "packages/runner/test/cycle/*.test.mjs",
+    "packages/runner/test/cycle/fixture-cycle.mjs",
+    "packages/runner/test/cycle/fixture-crypto.mjs",
+    "docs/modules/cycle-runner.md",
+    "docs/modules/index.json"
+  ],
+  "readSet": [
+    "scratchpad/w1/FINDINGS_REPORT.md (themes: fixture-only runner, autonomy/scheduling/persistence)",
+    "scratchpad/w2/DESIGN.md sections 2.3-2.5",
+    "packages/runner/src/cycle/cycle-runner.mjs (do not modify; WP-07 owns it)",
+    "codex/complete-v4-hook reducer.mjs delta (supersedeUnobservedIntent) as technique reference"
+  ],
+  "steps": [
+    "Introduce an AuthorizationProvider interface (verifyStepAuthorization(intent) -> verified record) with two implementations: FixtureAuthorizationProvider (current Ed25519 fixture keys, used by every existing test) and StandingAuthorityProvider (verifies a policy-signed step authorization bound to an owner-signed standing-authority document with per-cycle spend cap, cycles-per-day cap, allowed packs, allowed destinations, expiry; keys are injected, never read from files); the reducer must not know which one is active",
+    "Model the outbound leg (Robinhood USDG -> Solana Circle USD via Relay) and the return leg (Solana Circle USD -> Robinhood USDG) as explicit reducer stages with their own intents, request digests, chain identifiers (eip155:4663 and solana mainnet genesis), and receipt kinds; stop forcing every action onto Solana and stop comparing block heights across chains",
+    "Add a void path: an external-mutation-attempted record may be resolved as VOID when a signed observer proof shows the signed bytes were never broadcast before their last-valid height (or nonce/expiry), allowing a fresh intent with a new digest; keep supersedeUnobservedIntent semantics compatible with WP-07's port",
+    "Replace exact-zero balance invariants on publicly fundable accounts with exact expected-delta accounting (before/after, attributable amounts), so a stray donation cannot wedge the cycle",
+    "Fix the buyback accounting so the NFT unit (quantity 1) and the Circle USD refund amount are separate fields with separate checks",
+    "Enforce the vault-debit ordering: no purchase intent before the funding stage is finalized and the Collector generate response is verified",
+    "Make preflight accept the current interfaces.json product phase and revision (read them from architecture/interfaces.json, do not hardcode 56) while still failing closed on a missing or malformed freeze",
+    "Keep decoder.mjs's fixture envelope for tests and add a DecodedMessage schema that WP-10's real Solana/EVM decoders (in packages/adapters) can produce; the reducer validates the decoded schema, never raw bytes",
+    "Keep every existing fixture test green (adapt fixtures where the schema changes; do not delete tests) and add tests for the standing-authority provider (cap exceeded, wrong pack, expired document, wrong destination all reject), the void path, the two bridge legs, and the buyback unit split",
+    "Update docs/modules/cycle-runner.md and its index digest"
+  ],
+  "tests": [
+    "node --test packages/runner/test/cycle/*.test.mjs",
+    "node packages/runner/src/cycle/verify-fixtures.mjs",
+    "node --test packages/runner/test/distribution/*.test.mjs packages/runner/test/operator/*.test.mjs"
+  ],
+  "acceptance": [
+    "All existing runner tests pass (adapted, not deleted) and new provider/void/bridge-leg tests pass",
+    "No fixture Ed25519 key is required by the production authorization provider path",
+    "A never-broadcast mutation can be voided with observer proof and the cycle continues with a fresh intent",
+    "Preflight passes against the merged tree's interfaces.json without a hardcoded revision",
+    "packages/runner still imports only Node builtins"
+  ],
+  "risk": "R4",
+  "model": "sonnet",
+  "notes": "Highest-leverage runner change; fresh-context independent review required. Coordinate schema names with WP-07 (cycle-runner.mjs) which runs in the next group and will adapt to your exported API; document every exported function change in notes. RESUME NOTE: a previous agent started this package and was stopped after a few minutes (full disk); a few uncommitted edits may exist in the worktree (git status). Inspect them, keep what is correct, and complete the package; commit exactly once. Disk space is scarce: no npm installs, delete build artifacts, keep temp files small, stop and report on ENOSPC."
+}

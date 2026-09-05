@@ -1,0 +1,13 @@
+{
+  "id": "r-00001",
+  "at": "2026-08-29T23:26:50.086Z",
+  "type": "project-created",
+  "phase": null,
+  "result": null,
+  "data": {
+    "name": "Hookemon HKMN"
+  },
+  "inputHashes": {
+    "policy/policy.json": "fae21ca22f0a7f5224e8c37ae323c1edfede5abbf0e397750a272ca274863b8c"
+  }
+}

@@ -1,0 +1,357 @@
+{
+  "chains": [
+    {
+      "id": 4663,
+      "name": "robinhood",
+      "displayName": "Robinhood Chain",
+      "httpRpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+      "wsRpcUrl": "",
+      "explorerUrl": "https://8crv4vmq6tiu1yqr.blockscout.com",
+      "explorerName": "Robinhood Explorer",
+      "depositEnabled": true,
+      "tokenSupport": "All",
+      "disabled": false,
+      "partialDisableLimit": 0,
+      "blockProductionLagging": false,
+      "currency": {
+        "id": "eth",
+        "symbol": "ETH",
+        "name": "Ether",
+        "address": "0x0000000000000000000000000000000000000000",
+        "decimals": 18,
+        "supportsBridging": true
+      },
+      "withdrawalFee": 10,
+      "depositFee": 1,
+      "surgeEnabled": false,
+      "featuredTokens": [
+        {
+          "id": "eth",
+          "symbol": "ETH",
+          "name": "Ether",
+          "address": "0x0000000000000000000000000000000000000000",
+          "decimals": 18,
+          "supportsBridging": true,
+          "metadata": {
+            "logoURI": "https://assets.relay.link/icons/1/light.png"
+          }
+        },
+        {
+          "symbol": "WETH",
+          "name": "WETH",
+          "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+          "decimals": 18,
+          "supportsBridging": false,
+          "metadata": {
+            "logoURI": "https://coin-images.coingecko.com/coins/images/102174283/large/weth-robinhood.jpeg?1782924507"
+          }
+        },
+        {
+          "id": "usdg",
+          "symbol": "USDG",
+          "name": "Global Dollar",
+          "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "decimals": 6,
+          "supportsBridging": true,
+          "metadata": {
+            "logoURI": "https://assets.coingecko.com/coins/images/51281/standard/GDN_USDG_Token_200x200.png"
+          }
+        }
+      ],
+      "erc20Currencies": [
+        {
+          "id": "usdg",
+          "symbol": "USDG",
+          "name": "Global Dollar",
+          "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "decimals": 6,
+          "supportsBridging": true,
+          "supportsPermit": true,
+          "withdrawalFee": 2,
+          "depositFee": 0,
+          "surgeEnabled": false
+        }
+      ],
+      "solverCurrencies": [
+        {
+          "id": "usdg",
+          "symbol": "USDG",
+          "name": "Global Dollar",
+          "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+          "decimals": 6
+        },
+        {
+          "id": "eth",
+          "symbol": "ETH",
+          "name": "Ether",
+          "address": "0x0000000000000000000000000000000000000000",
+          "decimals": 18
+        }
+      ],
+      "iconUrl": "https://assets.relay.link/icons/4663/light.png",
+      "contracts": {
+        "multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
+        "multicaller": "",
+        "onlyOwnerMulticaller": "",
+        "relayReceiver": "",
+        "erc20Router": "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f",
+        "approvalProxy": "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be",
+        "v3": {
+          "erc20Router": "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f",
+          "approvalProxy": "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be"
+        }
+      },
+      "vmType": "evm",
+      "baseChainId": 1,
+      "solverAddresses": [
+        "0xf70da97812cb96acdf810712aa562db8dfa3dbef",
+        "0xabb2acd3be814a80e502575d6c1dc5f789e9cd10",
+        "0xa5a5491bca93dd4c076e4906e79e7673f4a5a142",
+        "0xca7ded7e4f4ba8ab3b10009236ae6d1b95094589",
+        "0x331d9a049d496385998067abf6cbb6371c8d2466",
+        "0x18dd3c14e34c1bc379f7538068c59160d9f68e25",
+        "0x2bb27b73c602643f42471d4751fe4fc4eebefbd1",
+        "0x0ec4e45f9ce3020024c0418a74cd31fbc487038f",
+        "0xe209e0047731aa494289e1af9a0d03da19c5ef08",
+        "0x344daadde53a81f95bcc46a99d39107a509251a1",
+        "0x698dd6c03b50c3d4af12932a0388338bcdd3aaed",
+        "0xcc4bc7882d5ec4a3716e589ab3d816b61ae47a1a",
+        "0x919968a4238a54b381f022a360260ef5d7e015ac",
+        "0xa67d7eb4dc68fa6ce8e34ef8cadaf075b9893fbb",
+        "0x56c262027e0de4aea31d2489529cb25d23e58a8b",
+        "0x728f51950ff096dc03a48f5e83f45ac8bb75f500",
+        "0xada5bb90d0de0bd1b6f3938708f49295a8d1f7cb",
+        "0x511808449be470efaf4131838b2d4998500a6f72",
+        "0x370a7e2d300c14d79d4a7ee07aaca46c4b3012cf",
+        "0xf42b73d2e4d3912eade2a5f7ab39b54064c2acec",
+        "0xd782268f600403843484b70710daee6846fc0db8",
+        "0xd9497b53abcd6972b6370cb195b6bfd6b280e607",
+        "0x69374f8233a4069d48f8994d84052ecae6277ef5",
+        "0x6085932878d587332419ac976fc13d98eba6fdab",
+        "0x9bc462bce2acd6fbe2ef5470d55b439453451083",
+        "0x059df16bdcf8a6bd20bb4814518ff6a2df3c7b11",
+        "0x4381045063b19a615a272733fa6b5f169b622646",
+        "0x81adf99fcc6073157008e25010967d307875c13c",
+        "0xd460b4182ed80992d498290bcbc6b60e95de181b",
+        "0x67d698a325f29e17a9477f28ba4fe50f1cec60e4",
+        "0x1cd9d560440aab96f7b0a007ced7c2191cac5baf"
+      ],
+      "tags": [
+        "New"
+      ],
+      "protocol": {
+        "v2": {
+          "chainId": "robinhood",
+          "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31"
+        }
+      }
+    },
+    {
+      "id": 792703809,
+      "name": "solana",
+      "displayName": "Solana",
+      "httpRpcUrl": "https://api.mainnet-beta.solana.com",
+      "wsRpcUrl": "",
+      "explorerUrl": "https://solscan.io",
+      "explorerName": "SolScan",
+      "depositEnabled": true,
+      "tokenSupport": "All",
+      "disabled": false,
+      "partialDisableLimit": 0,
+      "blockProductionLagging": false,
+      "currency": {
+        "id": "sol",
+        "symbol": "SOL",
+        "name": "Solana",
+        "address": "11111111111111111111111111111111",
+        "decimals": 9,
+        "supportsBridging": true
+      },
+      "withdrawalFee": 25,
+      "depositFee": 0,
+      "surgeEnabled": false,
+      "featuredTokens": [
+        {
+          "id": "sol",
+          "symbol": "SOL",
+          "name": "Solana",
+          "address": "11111111111111111111111111111111",
+          "decimals": 9,
+          "supportsBridging": true,
+          "metadata": {
+            "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png"
+          }
+        },
+        {
+          "id": "circle-usd",
+          "symbol": "CIRCLE_USD",
+          "name": "USD Coin",
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "decimals": 6,
+          "supportsBridging": true,
+          "metadata": {
+            "logoURI": "https://coin-images.coingecko.com/coins/images/6319/large/circle-usd.png?1696506694"
+          }
+        },
+        {
+          "id": "usdt",
+          "symbol": "USDT",
+          "name": "USDT",
+          "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+          "decimals": 6,
+          "supportsBridging": true,
+          "metadata": {
+            "logoURI": "https://coin-images.coingecko.com/coins/images/325/large/Tether.png?1696501661"
+          }
+        }
+      ],
+      "erc20Currencies": [
+        {
+          "id": "pengu",
+          "symbol": "PENGU",
+          "name": "Pudgy Penguins",
+          "address": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+          "decimals": 6,
+          "supportsBridging": true,
+          "withdrawalFee": 25,
+          "depositFee": 0,
+          "surgeEnabled": false
+        },
+        {
+          "id": "circle-usd",
+          "symbol": "CIRCLE_USD",
+          "name": "USD Coin",
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "decimals": 6,
+          "supportsBridging": true,
+          "supportsPermit": true,
+          "withdrawalFee": 2.25,
+          "depositFee": 2,
+          "surgeEnabled": false
+        },
+        {
+          "id": "usdt",
+          "symbol": "USDT",
+          "name": "USDT",
+          "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+          "decimals": 6,
+          "supportsBridging": true,
+          "withdrawalFee": 5,
+          "depositFee": 2,
+          "surgeEnabled": false
+        },
+        {
+          "id": "cash",
+          "symbol": "CASH",
+          "name": "CASH",
+          "address": "CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH",
+          "decimals": 6,
+          "supportsBridging": true,
+          "withdrawalFee": 25,
+          "depositFee": 0,
+          "surgeEnabled": false
+        },
+        {
+          "id": "pyusd",
+          "symbol": "PYUSD",
+          "name": "PayPal USD",
+          "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+          "decimals": 6,
+          "supportsBridging": true,
+          "withdrawalFee": 25,
+          "depositFee": 0,
+          "surgeEnabled": false
+        },
+        {
+          "id": "usdg",
+          "symbol": "USDG",
+          "name": "Global Dollar",
+          "address": "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+          "decimals": 6,
+          "supportsBridging": true,
+          "withdrawalFee": 2,
+          "depositFee": 0,
+          "surgeEnabled": false
+        }
+      ],
+      "solverCurrencies": [
+        {
+          "id": "pengu",
+          "symbol": "PENGU",
+          "name": "Pudgy Penguins",
+          "address": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+          "decimals": 6
+        },
+        {
+          "id": "circle-usd",
+          "symbol": "CIRCLE_USD",
+          "name": "USD Coin",
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "decimals": 6
+        },
+        {
+          "id": "usdt",
+          "symbol": "USDT",
+          "name": "USDT",
+          "address": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+          "decimals": 6
+        },
+        {
+          "id": "cash",
+          "symbol": "CASH",
+          "name": "CASH",
+          "address": "CASHx9KJUStyftLFWGvEVf59SGeG9sh5FfcnZMVPCASH",
+          "decimals": 6
+        },
+        {
+          "id": "pyusd",
+          "symbol": "PYUSD",
+          "name": "PayPal USD",
+          "address": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+          "decimals": 6
+        },
+        {
+          "id": "usdg",
+          "symbol": "USDG",
+          "name": "Global Dollar",
+          "address": "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+          "decimals": 6
+        },
+        {
+          "id": "sol",
+          "symbol": "SOL",
+          "name": "Solana",
+          "address": "11111111111111111111111111111111",
+          "decimals": 9
+        }
+      ],
+      "iconUrl": "https://assets.relay.link/icons/792703809/light.png",
+      "contracts": {
+        "multicall3": "",
+        "multicaller": "",
+        "onlyOwnerMulticaller": "",
+        "relayReceiver": "",
+        "erc20Router": "",
+        "approvalProxy": "",
+        "v3": {
+          "erc20Router": "",
+          "approvalProxy": ""
+        }
+      },
+      "vmType": "svm",
+      "baseChainId": 1,
+      "solverAddresses": [
+        "F7p3dFrjRTbtRp8FRF6qHLomXbKRBzpvBLjtQcfcgmNe",
+        "DNLbQ4t95LLPevvLdcFzN8RHNN83ntQJLt26E8VTnE7p"
+      ],
+      "tags": [],
+      "protocol": {
+        "v2": {
+          "chainId": "solana",
+          "depository": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+          "depositoryVault": "7uTT8Xi5RWXzy7h9XL244GRgEycDYDhLjr3ZyNdXi8pZ"
+        }
+      }
+    }
+  ]
+}

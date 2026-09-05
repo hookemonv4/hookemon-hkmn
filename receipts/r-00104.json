@@ -1,0 +1,17 @@
+{
+  "id": "r-00104",
+  "at": "2026-08-30T12:03:30.832Z",
+  "type": "capability-map-verified",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "itemId": "A1",
+    "producer": "v4-gate-evidence-v1",
+    "proofSchema": "sha256-input-manifest-v1"
+  },
+  "inputHashes": {
+    "gates/architecture.json": "f208f92bab9c252dc847e282e0fb12d4c7b7e2149aa3082db0b57381e2e3241e",
+    "architecture/capability-map.json": "ec4c04ce2b6f389111fcb254a29dfb8ec9268f2078731d7d690bd69464652f79",
+    "specs/requirements.json": "7af6388a863ac79bfcf4a0e3f41332f0ae8eac03465f8b2aac91adca44ee9d9f"
+  }
+}

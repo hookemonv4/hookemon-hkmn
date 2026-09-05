@@ -1,0 +1,887 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hookemon.example/schemas/phase3-address-manifest-v1.json",
+  "title": "Hookemon Phase 3 deterministic address manifest",
+  "oneOf": [
+    { "$ref": "#/$defs/materializedManifest" },
+    { "$ref": "#/$defs/addressDerivationDraft" }
+  ],
+  "$defs": {
+    "materializedManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "providerSource", "launchInputs", "preimages", "digestChain"],
+      "properties": {
+        "schemaVersion": { "const": "hookemon.phase3.address-manifest.v1" },
+        "providerSource": { "$ref": "#/$defs/providerSource" },
+        "launchInputs": { "$ref": "#/$defs/launchInputs" },
+        "preimages": { "$ref": "#/$defs/preimages" },
+        "digestChain": { "$ref": "#/$defs/digestChain" }
+      }
+    },
+    "addressDerivationDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "status", "launchInputsPath", "deployer", "compiler", "targets", "pool", "requiredGraphCalls", "postDeployAssertions", "openFacts"],
+      "properties": {
+        "schemaVersion": { "const": "hookemon.phase3.address-manifest-draft.v1" },
+        "status": { "const": "ADDRESS_DERIVATION_PENDING" },
+        "launchInputsPath": { "const": "release/phase3/launch-inputs.json" },
+        "deployer": { "$ref": "#/$defs/draftDeployer" },
+        "compiler": { "$ref": "#/$defs/draftCompiler" },
+        "targets": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {
+              "allOf": [{ "$ref": "#/$defs/draftTokenTarget" }],
+              "properties": { "targetId": { "const": "token" }, "targetIndex": { "const": 0 } }
+            },
+            {
+              "allOf": [{ "$ref": "#/$defs/draftCustodyTarget" }],
+              "properties": { "targetId": { "const": "custody" }, "targetIndex": { "const": 1 } }
+            },
+            {
+              "allOf": [{ "$ref": "#/$defs/draftHookTarget" }],
+              "properties": { "targetId": { "const": "hook" }, "targetIndex": { "const": 2 } }
+            }
+          ],
+          "items": false
+        },
+        "pool": { "$ref": "#/$defs/draftPool" },
+        "requiredGraphCalls": { "$ref": "#/$defs/draftGraphCalls" },
+        "postDeployAssertions": { "type": "array", "minItems": 6, "items": { "type": "string", "minLength": 1 } },
+        "openFacts": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
+    "address": { "type": "string", "pattern": "^0x[0-9a-fA-F]{40}$" },
+    "nonzeroAddress": {
+      "allOf": [
+        { "$ref": "#/$defs/address" },
+        { "not": { "const": "0x0000000000000000000000000000000000000000" } }
+      ]
+    },
+    "bytes32": { "type": "string", "pattern": "^0x[0-9a-fA-F]{64}$" },
+    "nonzeroBytes32": {
+      "allOf": [
+        { "$ref": "#/$defs/bytes32" },
+        { "not": { "const": "0x0000000000000000000000000000000000000000000000000000000000000000" } }
+      ]
+    },
+    "hex": { "type": "string", "pattern": "^0x([0-9a-fA-F]{2})*$" },
+    "nonemptyHex": {
+      "allOf": [
+        { "$ref": "#/$defs/hex" },
+        { "not": { "const": "0x" } }
+      ]
+    },
+    "tokenInitializer": {
+      "type": "string",
+      "pattern": "^0xffd7d983[0-9a-fA-F]{64}$"
+    },
+    "custodyInitializer": {
+      "type": "string",
+      "pattern": "^0xc81cbd43[0-9a-fA-F]{64}$"
+    },
+    "hookInitializer": {
+      "type": "string",
+      "pattern": "^0x726bb4ae[0-9a-fA-F]{128}$"
+    },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "amount": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "materializedPriceCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sqrtPriceX96"],
+      "properties": {
+        "sqrtPriceX96": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "selectedMaterializedPriceCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sqrtPriceX96"],
+      "properties": {
+        "id": { "enum": ["usdgCurrency0", "hkmnCurrency0"] },
+        "sqrtPriceX96": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "nativeValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chainId", "assetId", "decimals", "amountAtomic"],
+      "properties": {
+        "chainId": { "const": "4663" },
+        "assetId": { "const": "native" },
+        "decimals": { "const": 18 },
+        "amountAtomic": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "draftDeployer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factory", "entrypoint", "router", "routeNamespace", "routeNonce", "topologyHash"],
+      "properties": {
+        "factory": { "$ref": "#/$defs/nonzeroAddress" },
+        "entrypoint": { "const": "launchAndStampV1" },
+        "router": { "$ref": "#/$defs/nonzeroAddress" },
+        "routeNamespace": { "type": "null" },
+        "routeNonce": { "type": "null" },
+        "topologyHash": { "type": "null" }
+      }
+    },
+    "draftCompiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["solc", "solcLongVersion", "standardJson", "buildInfo"],
+      "properties": {
+        "solc": { "const": "0.8.26+commit.8a97fa7a" },
+        "solcLongVersion": { "const": "0.8.26+commit.8a97fa7a" },
+        "standardJson": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["optimizer", "viaIR", "evmVersion", "metadata"],
+          "properties": {
+            "optimizer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "runs"],
+              "properties": { "enabled": { "const": true }, "runs": { "const": 1000 } }
+            },
+            "viaIR": { "const": false },
+            "evmVersion": { "const": "cancun" },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["appendCBOR", "bytecodeHash", "useLiteralContent"],
+              "properties": {
+                "appendCBOR": { "const": false },
+                "bytecodeHash": { "const": "none" },
+                "useLiteralContent": { "const": false }
+              }
+            }
+          }
+        },
+        "buildInfo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "localBuildInfoCount", "sourceCount", "sourceContentSha256", "reason"],
+          "properties": {
+            "status": { "const": "OPEN_FACT" },
+            "localBuildInfoCount": { "const": 1 },
+            "sourceCount": { "type": "integer", "minimum": 1 },
+            "sourceContentSha256": { "$ref": "#/$defs/digest" },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "draftTokenTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetId", "targetIndex", "componentKind", "sourcePath", "contractName", "applicantSalt", "effectiveSalt", "address", "constructor", "initializerCalldata", "deploymentValue", "initializerValue", "creationBytecodeHash", "runtimeTemplateCodeHash", "runtimeCodeHash", "artifactSha256", "libraries"],
+      "properties": {
+        "targetId": { "const": "token" },
+        "targetIndex": { "const": 0 },
+        "componentKind": { "const": "token" },
+        "sourcePath": { "const": "packages/contracts/src/launch/HKMNToken.sol" },
+        "contractName": { "const": "HKMNToken" },
+        "applicantSalt": { "type": "null" },
+        "effectiveSalt": { "type": "null" },
+        "address": { "type": "null" },
+        "constructor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["issuanceAuthority", "expectedUsdg", "decimals", "launchSqrtPriceX96"],
+          "properties": {
+            "issuanceAuthority": { "$ref": "#/$defs/nonzeroAddress" },
+            "expectedUsdg": { "$ref": "#/$defs/nonzeroAddress" },
+            "decimals": { "const": 18 },
+            "launchSqrtPriceX96": { "type": "null" }
+          }
+        },
+        "initializerCalldata": { "type": "null" },
+        "deploymentValue": { "$ref": "#/$defs/nativeValue" },
+        "initializerValue": { "$ref": "#/$defs/nativeValue" },
+        "creationBytecodeHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "runtimeTemplateCodeHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "runtimeCodeHash": { "type": "null" },
+        "artifactSha256": { "$ref": "#/$defs/digest" },
+        "libraries": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "draftCustodyTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetId", "targetIndex", "componentKind", "sourcePath", "contractName", "applicantSalt", "effectiveSalt", "address", "constructor", "initializerCalldata", "deploymentValue", "initializerValue", "creationBytecodeHash", "runtimeTemplateCodeHash", "runtimeCodeHash", "artifactSha256", "libraries"],
+      "properties": {
+        "targetId": { "const": "custody" },
+        "targetIndex": { "const": 1 },
+        "componentKind": { "const": "other" },
+        "sourcePath": { "const": "packages/contracts/src/bindings/RobinhoodBindings.sol" },
+        "contractName": { "const": "PermanentPositionCustody" },
+        "applicantSalt": { "type": "null" },
+        "effectiveSalt": { "type": "null" },
+        "address": { "type": "null" },
+        "constructor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manager", "tokenId"],
+          "properties": { "manager": { "$ref": "#/$defs/nonzeroAddress" }, "tokenId": { "const": 0 } }
+        },
+        "initializerCalldata": { "type": "null" },
+        "deploymentValue": { "$ref": "#/$defs/nativeValue" },
+        "initializerValue": { "$ref": "#/$defs/nativeValue" },
+        "creationBytecodeHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "runtimeTemplateCodeHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "runtimeCodeHash": { "type": "null" },
+        "artifactSha256": { "$ref": "#/$defs/digest" },
+        "libraries": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "draftHookTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetId", "targetIndex", "componentKind", "sourcePath", "contractName", "applicantSalt", "effectiveSalt", "address", "declaredHookPermissions", "permissionMask", "constructor", "initializer", "deploymentValue", "initializerValue", "creationBytecodeHash", "runtimeTemplateCodeHash", "runtimeCodeHash", "artifactSha256", "libraries"],
+      "properties": {
+        "targetId": { "const": "hook" },
+        "targetIndex": { "const": 2 },
+        "componentKind": { "const": "hook" },
+        "sourcePath": { "const": "packages/contracts/src/HookemonHook.sol" },
+        "contractName": { "const": "HookemonHook" },
+        "applicantSalt": { "type": "null" },
+        "effectiveSalt": { "type": "null" },
+        "address": { "type": "null" },
+        "declaredHookPermissions": { "const": ["beforeInitialize", "beforeSwap", "beforeSwapReturnDelta", "afterSwap", "afterSwapReturnDelta"] },
+        "permissionMask": { "const": "0x20cc" },
+        "constructor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manager", "positionManager", "permit2", "usdg", "hkmn", "tickSpacing", "programmable", "treasury", "operations", "launchAuthority", "issuanceAuthority", "expectedDecimals", "bindingDigest", "runtimeDigest", "processClaimLimit6h", "processClaimLimitMax", "processClaimMaxCount", "operationsRotationDelay"],
+          "properties": {
+            "manager": { "$ref": "#/$defs/nonzeroAddress" },
+            "positionManager": { "$ref": "#/$defs/nonzeroAddress" },
+            "permit2": { "$ref": "#/$defs/nonzeroAddress" },
+            "usdg": { "$ref": "#/$defs/nonzeroAddress" },
+            "hkmn": { "type": "null" },
+            "tickSpacing": { "const": 60 },
+            "programmable": { "$ref": "#/$defs/nonzeroAddress" },
+            "treasury": { "$ref": "#/$defs/nonzeroAddress" },
+            "operations": { "$ref": "#/$defs/nonzeroAddress" },
+            "launchAuthority": { "$ref": "#/$defs/nonzeroAddress" },
+            "issuanceAuthority": { "$ref": "#/$defs/nonzeroAddress" },
+            "expectedDecimals": { "const": 18 },
+            "bindingDigest": { "type": "null" },
+            "runtimeDigest": { "type": "null" },
+            "processClaimLimit6h": { "$ref": "#/$defs/amount" },
+            "processClaimLimitMax": { "$ref": "#/$defs/amount" },
+            "processClaimMaxCount": { "const": 24 },
+            "operationsRotationDelay": { "$ref": "#/$defs/amount" }
+          }
+        },
+        "initializer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["function", "sqrtPriceX96", "calldata"],
+          "properties": {
+            "function": { "const": "initializeGraphLaunch(address,uint160)" },
+            "sqrtPriceX96": { "type": "null" },
+            "calldata": { "type": "null" }
+          }
+        },
+        "deploymentValue": { "$ref": "#/$defs/nativeValue" },
+        "initializerValue": { "$ref": "#/$defs/nativeValue" },
+        "creationBytecodeHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "runtimeTemplateCodeHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "runtimeCodeHash": { "type": "null" },
+        "artifactSha256": { "$ref": "#/$defs/digest" },
+        "libraries": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "draftPool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fee", "tickSpacing", "currency0", "currency1", "poolKey", "poolId"],
+      "properties": {
+        "fee": { "const": 0 },
+        "tickSpacing": { "const": 60 },
+        "currency0": { "type": "null" },
+        "currency1": { "type": "null" },
+        "poolKey": { "type": "null" },
+        "poolId": { "type": "null" }
+      }
+    },
+    "draftGraphCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["callId", "targetId", "function", "selector", "caller", "argumentBindings", "calldata", "reason"],
+      "properties": {
+        "callId": { "type": "string", "minLength": 1 },
+        "targetId": { "enum": ["token", "custody", "hook"] },
+        "function": { "type": "string", "minLength": 1 },
+        "selector": { "type": "string", "pattern": "^0x[0-9a-f]{8}$" },
+        "caller": { "type": "string", "minLength": 1 },
+        "argumentBindings": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "calldata": { "type": "null" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "draftGraphCalls": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {
+          "allOf": [{ "$ref": "#/$defs/draftGraphCall" }],
+          "properties": {
+            "callId": { "const": "token-allocate" },
+            "targetId": { "const": "token" },
+            "function": { "const": "allocate(address)" },
+            "selector": { "const": "0xffd7d983" },
+            "caller": { "const": "graph factory" },
+            "argumentBindings": { "const": ["resolved HookemonHook address"] },
+            "calldata": { "const": null },
+            "reason": { "const": "The graph factory allocates the fixed supply after all target addresses are resolved." }
+          }
+        },
+        {
+          "allOf": [{ "$ref": "#/$defs/draftGraphCall" }],
+          "properties": {
+            "callId": { "const": "custody-bind-hook" },
+            "targetId": { "const": "custody" },
+            "function": { "const": "configureBindingHook(address)" },
+            "selector": { "const": "0xc81cbd43" },
+            "caller": { "const": "graph factory" },
+            "argumentBindings": { "const": ["resolved HookemonHook address"] },
+            "calldata": { "const": null },
+            "reason": { "const": "The custody binds the resolved hook before the launch graph is initialized." }
+          }
+        },
+        {
+          "allOf": [{ "$ref": "#/$defs/draftGraphCall" }],
+          "properties": {
+            "callId": { "const": "hook-initialize-graph-launch" },
+            "targetId": { "const": "hook" },
+            "function": { "const": "initializeGraphLaunch(address,uint160)" },
+            "selector": { "const": "0x726bb4ae" },
+            "caller": { "const": "graph factory as graph initializer" },
+            "argumentBindings": { "const": ["resolved PermanentPositionCustody address", "selected address-order sqrtPriceX96 candidate"] },
+            "calldata": { "const": null },
+            "reason": { "const": "The graph initializer binds custody and initializes the canonical pool in one source-authorized call." }
+          }
+        }
+      ],
+      "items": false
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "path", "sha256"],
+      "properties": {
+        "repository": { "type": "string", "format": "uri" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "providerSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factory", "router"],
+      "properties": {
+        "factory": { "$ref": "#/$defs/source" },
+        "router": { "$ref": "#/$defs/source" }
+      }
+    },
+    "compilerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["solc", "optimizer", "viaIR", "evmVersion", "metadata"],
+      "properties": {
+        "solc": { "const": "0.8.26+commit.8a97fa7a" },
+        "optimizer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "runs"],
+          "properties": { "enabled": { "const": true }, "runs": { "const": 1000 } }
+        },
+        "viaIR": { "const": false },
+        "evmVersion": { "const": "cancun" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["appendCBOR", "bytecodeHash", "useLiteralContent"],
+          "properties": {
+            "appendCBOR": { "const": false },
+            "bytecodeHash": { "const": "none" },
+            "useLiteralContent": { "const": false }
+          }
+        }
+      }
+    },
+    "fixedApplicantSalt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "value"],
+      "properties": { "mode": { "const": "fixed" }, "value": { "$ref": "#/$defs/bytes32" } }
+    },
+    "minedApplicantSalt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "start", "maxAttempts"],
+      "properties": {
+        "mode": { "const": "mine" },
+        "start": { "$ref": "#/$defs/amount" },
+        "maxAttempts": { "type": "string", "pattern": "^(?:[1-9][0-9]{0,5}|1[0-9]{6}|2000000)$" }
+      }
+    },
+    "applicantSalt": {
+      "oneOf": [
+        { "$ref": "#/$defs/fixedApplicantSalt" },
+        { "$ref": "#/$defs/minedApplicantSalt" }
+      ]
+    },
+    "immutableReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "length"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "length": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "runtimeImmutablePatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["astId", "start", "length", "value"],
+      "properties": {
+        "astId": { "type": "string", "pattern": "^[0-9]+$" },
+        "start": { "type": "integer", "minimum": 0 },
+        "length": { "type": "integer", "minimum": 1 },
+        "value": { "$ref": "#/$defs/hex" }
+      }
+    },
+    "baseTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetIndex", "targetId", "targetIdHash", "applicantSalt", "contractName", "initializerCalldata",
+        "deploymentValue", "initializerValue", "runtimeImmutablePatches"
+      ],
+      "properties": {
+        "targetIndex": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "targetId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$" },
+        "targetIdHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "applicantSalt": { "$ref": "#/$defs/applicantSalt" },
+        "artifactPath": { "type": "string", "minLength": 1 },
+        "contractName": { "type": "string", "minLength": 1 },
+        "constructorArguments": { "type": "array" },
+        "initializerCalldata": { "$ref": "#/$defs/nonemptyHex" },
+        "deploymentValue": { "$ref": "#/$defs/nativeValue" },
+        "initializerValue": { "$ref": "#/$defs/nativeValue" },
+        "runtimeImmutablePatches": { "type": "array", "items": { "$ref": "#/$defs/runtimeImmutablePatch" } }
+      }
+    },
+    "ordinaryTarget": {
+      "allOf": [
+        { "$ref": "#/$defs/baseTarget" },
+        {
+          "type": "object",
+          "required": ["constructorArguments"],
+          "properties": {
+            "constructorArguments": { "type": "array" },
+            "applicantSalt": { "$ref": "#/$defs/fixedApplicantSalt" }
+          }
+        }
+      ]
+    },
+    "hookTarget": {
+      "allOf": [
+        { "$ref": "#/$defs/baseTarget" },
+        { "not": { "required": ["constructorArguments"] } },
+        { "properties": { "contractName": { "const": "HookemonHook" } } }
+      ]
+    },
+    "tokenTarget": {
+      "allOf": [
+        { "$ref": "#/$defs/ordinaryTarget" },
+        {
+          "properties": {
+            "targetIndex": { "const": 0 },
+            "contractName": { "const": "HKMNToken" },
+            "initializerCalldata": { "$ref": "#/$defs/tokenInitializer" }
+          }
+        }
+      ]
+    },
+    "custodyTarget": {
+      "allOf": [
+        { "$ref": "#/$defs/ordinaryTarget" },
+        {
+          "properties": {
+            "targetIndex": { "const": 1 },
+            "contractName": { "const": "PermanentPositionCustody" },
+            "initializerCalldata": { "$ref": "#/$defs/custodyInitializer" }
+          }
+        }
+      ]
+    },
+    "graphHookTarget": {
+      "allOf": [
+        { "$ref": "#/$defs/hookTarget" },
+        {
+          "properties": {
+            "targetIndex": { "const": 2 },
+            "initializerCalldata": { "$ref": "#/$defs/hookInitializer" }
+          }
+        }
+      ]
+    },
+    "graphAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topologyHash", "totalValue"],
+      "properties": {
+        "topologyHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "totalValue": { "$ref": "#/$defs/nativeValue" }
+      }
+    },
+    "launchInputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "chain", "graphAuthorization", "compilerProfile", "usdg", "roles", "pool",
+        "hookConstructorConfig", "targets"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "hookemon.phase3.launch-inputs.v1" },
+        "chain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["chainId", "factory", "authorizedLauncher", "routeNamespace", "routeNonce"],
+          "properties": {
+            "chainId": { "const": "4663" },
+            "factory": { "const": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd" },
+            "authorizedLauncher": { "const": "0x34965F2A2ee9254522232C32F02056E92BE0C98a" },
+            "routeNamespace": { "$ref": "#/$defs/nonzeroBytes32" },
+            "routeNonce": { "$ref": "#/$defs/nonzeroBytes32" }
+          }
+        },
+        "graphAuthorization": { "$ref": "#/$defs/graphAuthorization" },
+        "compilerProfile": { "$ref": "#/$defs/compilerProfile" },
+        "usdg": { "const": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168" },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manager", "positionManager", "permit2", "programmable", "treasury", "operations", "launchAuthority", "issuanceAuthority"],
+          "properties": {
+            "manager": { "$ref": "#/$defs/nonzeroAddress" },
+            "positionManager": { "$ref": "#/$defs/nonzeroAddress" },
+            "permit2": { "$ref": "#/$defs/nonzeroAddress" },
+            "programmable": { "$ref": "#/$defs/nonzeroAddress" },
+            "treasury": { "$ref": "#/$defs/nonzeroAddress" },
+            "operations": { "$ref": "#/$defs/nonzeroAddress" },
+            "launchAuthority": { "$ref": "#/$defs/nonzeroAddress" },
+            "issuanceAuthority": { "$ref": "#/$defs/nonzeroAddress" }
+          }
+        },
+        "pool": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fee", "tickSpacing", "priceCandidates"],
+          "properties": {
+            "fee": { "const": 0 },
+            "tickSpacing": { "type": "integer", "minimum": 1, "maximum": 32767 },
+            "priceCandidates": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["usdgCurrency0", "hkmnCurrency0"],
+              "properties": {
+                "usdgCurrency0": { "$ref": "#/$defs/materializedPriceCandidate" },
+                "hkmnCurrency0": { "$ref": "#/$defs/materializedPriceCandidate" }
+              }
+            }
+          }
+        },
+        "hookConstructorConfig": { "type": "object" },
+        "targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["token", "hook", "custody"],
+          "properties": {
+            "token": { "$ref": "#/$defs/tokenTarget" },
+            "hook": { "$ref": "#/$defs/graphHookTarget" },
+            "custody": { "$ref": "#/$defs/custodyTarget" }
+          }
+        }
+      }
+    },
+    "targetPreimage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetIndex", "targetId", "targetIdHash", "artifactPath", "artifactDigest", "compilerVersion", "creationBytecode",
+        "constructorArguments", "initCode", "initCodeHash", "initializerCalldata", "initializerCalldataHash", "deploymentValue",
+        "initializerValue", "runtimeTemplateCode", "runtimeTemplateCodeHash", "runtimeImmutableReferences", "runtimeImmutablePatches",
+        "runtimeCode", "runtimeCodeHash", "applicantSalt", "applicantSaltMode", "effectiveSalt", "address"
+      ],
+      "properties": {
+        "targetIndex": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "targetId": { "type": "string" },
+        "targetIdHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "artifactPath": { "type": "string", "minLength": 1 },
+        "artifactDigest": { "$ref": "#/$defs/digest" },
+        "compilerVersion": { "const": "0.8.26+commit.8a97fa7a" },
+        "creationBytecode": { "$ref": "#/$defs/hex" },
+        "constructorArguments": { "$ref": "#/$defs/hex" },
+        "initCode": { "$ref": "#/$defs/hex" },
+        "initCodeHash": { "$ref": "#/$defs/bytes32" },
+        "initializerCalldata": { "$ref": "#/$defs/nonemptyHex" },
+        "initializerCalldataHash": { "$ref": "#/$defs/bytes32" },
+        "deploymentValue": { "$ref": "#/$defs/amount" },
+        "initializerValue": { "$ref": "#/$defs/amount" },
+        "runtimeTemplateCode": { "$ref": "#/$defs/hex" },
+        "runtimeTemplateCodeHash": { "$ref": "#/$defs/bytes32" },
+        "runtimeImmutableReferences": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/immutableReference" } }
+        },
+        "runtimeImmutablePatches": { "type": "array", "items": { "$ref": "#/$defs/runtimeImmutablePatch" } },
+        "runtimeCode": { "$ref": "#/$defs/hex" },
+        "runtimeCodeHash": { "$ref": "#/$defs/bytes32" },
+        "applicantSalt": { "$ref": "#/$defs/bytes32" },
+        "applicantSaltMode": { "enum": ["fixed", "mined"] },
+        "effectiveSalt": { "$ref": "#/$defs/bytes32" },
+        "address": { "$ref": "#/$defs/address" }
+      }
+    },
+    "tokenTargetPreimage": {
+      "allOf": [
+        { "$ref": "#/$defs/targetPreimage" },
+        {
+          "properties": {
+            "targetIndex": { "const": 0 },
+            "initializerCalldata": { "$ref": "#/$defs/tokenInitializer" }
+          }
+        }
+      ]
+    },
+    "custodyTargetPreimage": {
+      "allOf": [
+        { "$ref": "#/$defs/targetPreimage" },
+        {
+          "properties": {
+            "targetIndex": { "const": 1 },
+            "initializerCalldata": { "$ref": "#/$defs/custodyInitializer" }
+          }
+        }
+      ]
+    },
+    "hookTargetPreimage": {
+      "allOf": [
+        { "$ref": "#/$defs/targetPreimage" },
+        {
+          "properties": {
+            "targetIndex": { "const": 2 },
+            "initializerCalldata": { "$ref": "#/$defs/hookInitializer" }
+          }
+        }
+      ]
+    },
+    "graphTargetCommitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetIndex", "targetId", "targetIdHash", "applicantSalt", "deploymentValue", "initializerValue", "initCodeHash", "initializerCalldataHash", "commitment"],
+      "properties": {
+        "targetIndex": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "targetId": { "type": "string" },
+        "targetIdHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "applicantSalt": { "$ref": "#/$defs/bytes32" },
+        "deploymentValue": { "$ref": "#/$defs/amount" },
+        "initializerValue": { "$ref": "#/$defs/amount" },
+        "initCodeHash": { "$ref": "#/$defs/bytes32" },
+        "initializerCalldataHash": { "$ref": "#/$defs/bytes32" },
+        "commitment": { "$ref": "#/$defs/bytes32" }
+      }
+    },
+    "expectedGraphOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetIndex", "targetIdHash", "account", "runtimeCodeHash"],
+      "properties": {
+        "targetIndex": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "targetIdHash": { "$ref": "#/$defs/nonzeroBytes32" },
+        "account": { "$ref": "#/$defs/nonzeroAddress" },
+        "runtimeCodeHash": { "$ref": "#/$defs/bytes32" }
+      }
+    },
+    "graphPreimage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "typeHashes", "orderedTargetIds", "authorization", "targetCommitments", "targetCommitmentsHash", "expectedOutputs",
+        "expectedOutputsHash", "deploymentAccumulator", "expectedGraphDeploymentHash", "expectedResultHash", "totalInputBytes"
+      ],
+      "properties": {
+        "typeHashes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetCommitment", "graphCommitment", "authorizationKey", "deploymentAccumulator", "expectedOutput", "expectedResult"],
+          "properties": {
+            "targetCommitment": { "$ref": "#/$defs/bytes32" },
+            "graphCommitment": { "$ref": "#/$defs/bytes32" },
+            "authorizationKey": { "$ref": "#/$defs/bytes32" },
+            "deploymentAccumulator": { "$ref": "#/$defs/bytes32" },
+            "expectedOutput": { "$ref": "#/$defs/bytes32" },
+            "expectedResult": { "$ref": "#/$defs/bytes32" }
+          }
+        },
+        "orderedTargetIds": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "string" } },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["routeNamespace", "routeNonce", "topologyHash", "graphCommitment", "authorizedLauncher", "totalValue", "authorizationKey"],
+          "properties": {
+            "routeNamespace": { "$ref": "#/$defs/nonzeroBytes32" },
+            "routeNonce": { "$ref": "#/$defs/nonzeroBytes32" },
+            "topologyHash": { "$ref": "#/$defs/nonzeroBytes32" },
+            "graphCommitment": { "$ref": "#/$defs/nonzeroBytes32" },
+            "authorizedLauncher": { "const": "0x34965F2A2ee9254522232C32F02056E92BE0C98a" },
+            "totalValue": { "$ref": "#/$defs/amount" },
+            "authorizationKey": { "$ref": "#/$defs/bytes32" }
+          }
+        },
+        "targetCommitments": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            { "allOf": [{ "$ref": "#/$defs/graphTargetCommitment" }, { "properties": { "targetIndex": { "const": 0 } } }] },
+            { "allOf": [{ "$ref": "#/$defs/graphTargetCommitment" }, { "properties": { "targetIndex": { "const": 1 } } }] },
+            { "allOf": [{ "$ref": "#/$defs/graphTargetCommitment" }, { "properties": { "targetIndex": { "const": 2 } } }] }
+          ],
+          "items": false
+        },
+        "targetCommitmentsHash": { "$ref": "#/$defs/bytes32" },
+        "expectedOutputs": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            { "allOf": [{ "$ref": "#/$defs/expectedGraphOutput" }, { "properties": { "targetIndex": { "const": 0 } } }] },
+            { "allOf": [{ "$ref": "#/$defs/expectedGraphOutput" }, { "properties": { "targetIndex": { "const": 1 } } }] },
+            { "allOf": [{ "$ref": "#/$defs/expectedGraphOutput" }, { "properties": { "targetIndex": { "const": 2 } } }] }
+          ],
+          "items": false
+        },
+        "expectedOutputsHash": { "$ref": "#/$defs/bytes32" },
+        "deploymentAccumulator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["initial", "steps", "final"],
+          "properties": {
+            "initial": { "$ref": "#/$defs/bytes32" },
+            "steps": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "prefixItems": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["targetIndex", "previous", "next"],
+                  "properties": {
+                    "targetIndex": { "const": 0 },
+                    "previous": { "$ref": "#/$defs/bytes32" },
+                    "next": { "$ref": "#/$defs/bytes32" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["targetIndex", "previous", "next"],
+                  "properties": {
+                    "targetIndex": { "const": 1 },
+                    "previous": { "$ref": "#/$defs/bytes32" },
+                    "next": { "$ref": "#/$defs/bytes32" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["targetIndex", "previous", "next"],
+                  "properties": {
+                    "targetIndex": { "const": 2 },
+                    "previous": { "$ref": "#/$defs/bytes32" },
+                    "next": { "$ref": "#/$defs/bytes32" }
+                  }
+                }
+              ],
+              "items": false
+            },
+            "final": { "$ref": "#/$defs/bytes32" }
+          }
+        },
+        "expectedGraphDeploymentHash": { "$ref": "#/$defs/bytes32" },
+        "expectedResultHash": { "$ref": "#/$defs/bytes32" },
+        "totalInputBytes": { "type": "integer", "minimum": 0, "maximum": 524288 }
+      }
+    },
+    "preimages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chainId", "factory", "authorizedLauncher", "routeNamespace", "routeNonce", "compilerProfileDigest", "targets", "pool", "graph"],
+      "properties": {
+        "chainId": { "const": "4663" },
+        "factory": { "const": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd" },
+        "authorizedLauncher": { "const": "0x34965F2A2ee9254522232C32F02056E92BE0C98a" },
+        "routeNamespace": { "$ref": "#/$defs/nonzeroBytes32" },
+        "routeNonce": { "$ref": "#/$defs/nonzeroBytes32" },
+        "compilerProfileDigest": { "$ref": "#/$defs/digest" },
+        "targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["token", "hook", "custody"],
+          "properties": {
+            "token": { "$ref": "#/$defs/tokenTargetPreimage" },
+            "hook": { "$ref": "#/$defs/hookTargetPreimage" },
+            "custody": { "$ref": "#/$defs/custodyTargetPreimage" }
+          }
+        },
+        "pool": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["currency0", "currency1", "fee", "tickSpacing", "hooks", "selectedOrdering", "priceCandidate", "sqrtPriceX96", "poolKeyEncoded", "poolId"],
+          "properties": {
+            "currency0": { "$ref": "#/$defs/address" },
+            "currency1": { "$ref": "#/$defs/address" },
+            "fee": { "const": 0 },
+            "tickSpacing": { "type": "integer", "minimum": 1, "maximum": 32767 },
+            "hooks": { "$ref": "#/$defs/nonzeroAddress" },
+            "selectedOrdering": { "enum": ["usdgCurrency0", "hkmnCurrency0"] },
+            "priceCandidate": { "$ref": "#/$defs/selectedMaterializedPriceCandidate" },
+            "sqrtPriceX96": { "$ref": "#/$defs/amount" },
+            "poolKeyEncoded": { "$ref": "#/$defs/hex" },
+            "poolId": { "$ref": "#/$defs/bytes32" }
+        }
+      },
+        "graph": { "$ref": "#/$defs/graphPreimage" }
+      }
+    },
+    "digestChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "token", "hook", "pool", "custody", "graph", "manifest"],
+      "properties": {
+        "input": { "$ref": "#/$defs/digest" },
+        "token": { "$ref": "#/$defs/digest" },
+        "hook": { "$ref": "#/$defs/digest" },
+        "pool": { "$ref": "#/$defs/digest" },
+        "custody": { "$ref": "#/$defs/digest" },
+        "graph": { "$ref": "#/$defs/digest" },
+        "manifest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}

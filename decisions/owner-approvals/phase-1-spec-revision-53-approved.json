@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "PHASE-1 PRD, REQUIREMENTS REVISION 53 UND ADR-0013 BIS ADR-0016 GENEHMIG",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "d16a65dad14c32697b04fbac3af8ba561bb699957983c86fd8d56f327ad76fb0",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "7af6388a863ac79bfcf4a0e3f41332f0ae8eac03465f8b2aac91adca44ee9d9f"
+  }
+}

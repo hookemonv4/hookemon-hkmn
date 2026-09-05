@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "REDTEAM_REVIEW_ATTESTATION",
+  "phase": "redteam",
+  "itemId": null,
+  "rationale": "DRAFT_UNSIGNED: the owner must attest to the exact current review bundle and reviewed tree after the redteam closeout artifacts are complete. This draft grants no release, deployment, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "subjectHashes": {
+    "reviewedTree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "qa/redteam/current-review-bundle.json": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "r-00265",
+  "at": "2026-08-31T17:24:14.940Z",
+  "type": "gate",
+  "phase": "feasibility",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 3,
+    "problems": [
+      "F2: evidence r-00199 owner approval invalid: owner approval subject hash for feasibility/survivability-bounds.json does not match current content",
+      "F3: evidence r-00180 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "gates/runs/feasibility.json": "eaca5415aa45216a711a66d27991202f93439f727a782903ab773371e1f87fd1",
+    "receipts/r-00259.json": "9cf3abcdbd067f90061159811bf83795fcac18a223b39842832afc190c344df7",
+    "receipts/r-00199.json": "de135edd570976daebb01982fba7fd478790fabc86e5840c87078a508cf44537",
+    "receipts/r-00180.json": "dfe555ad3dca56dfb00024430fb8b2e951eaaaf99676643d65d1b259d62b0a8f",
+    "receipts/r-00260.json": "083c248cf0715888081a4d1cb595d06beb0c43ec59322c373e67bf17fd488065",
+    "receipts/r-00261.json": "5c103e48f2752502a70d7cf36417024759e53b32198a92550996bf34b565c26e"
+  }
+}

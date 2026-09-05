@@ -1,0 +1,21 @@
+{
+  "id": "r-00120",
+  "at": "2026-08-30T13:13:57.726Z",
+  "type": "gate",
+  "phase": "feasibility",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 3,
+    "problems": [
+      "F2: no status recorded",
+      "F3: no status recorded",
+      "F4: no status recorded"
+    ]
+  },
+  "inputHashes": {
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "gates/runs/feasibility.json": "fc120851f0287cf6db6314245d831be7ccb972a50e811bb9b88e5bffe459b67f",
+    "receipts/r-00118.json": "acdcf77bd45fcdf2685cd293b39ae409f6397f8d03417c9e9b6fb3dbfeb66f92",
+    "receipts/r-00119.json": "ff9809d46c5fe9201801ba12f8aeb26342a561c117936d4972757d802f7f765b"
+  }
+}

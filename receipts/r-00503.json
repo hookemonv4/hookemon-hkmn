@@ -1,0 +1,21 @@
+{
+  "id": "r-00503",
+  "at": "2026-09-03T11:06:37.918Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-002",
+    "commitSha": "254ea93d5705518c96c5597f82d523b9a466f13f",
+    "taskFingerprint": "d74ad54d56da2da39f846a46f6911b23118736c1d58fb2c5fc9aa2f5de5bf175",
+    "requirementsRevision": 58,
+    "requirementsHash": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "inputHashes": {
+    "packages/contracts/src/market/CanonicalMarket.sol": "5bfb31cbd223d125b7130ed37e0447030e708c22e9de9658b29a01170c2c2be8",
+    "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol": "876e7b995f739084dd2cc14ef459e5df6a5aa1fa95113a38d380c76102ce8c94",
+    "packages/contracts/test/blind/market-fees/BlindCanonicalMarketAdapter.t.sol": "60ac171f0039f53671daf4855ba9e1bd96fd93b3383fd3434a17ea4c240ce9db",
+    ".superpowers/sdd/p1-002-integration-fix-report.md": "ea8078b315147408298882fdef8730d5a399215ef41be70c186621cc04079b45",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

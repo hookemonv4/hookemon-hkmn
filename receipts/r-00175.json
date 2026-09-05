@@ -1,0 +1,11 @@
+{
+  "id": "r-00175",
+  "at": "2026-08-30T16:20:49.124Z",
+  "type": "autonomy-grant",
+  "phase": "build",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/PHASE_1_SHARED_SCHEMA_COMPLETENESS_GRANT.md": "e7c9cc11fd0409f141aa1a3231aeae7ee3c24d55f84cea30b248d5489c58ec3c"
+  }
+}

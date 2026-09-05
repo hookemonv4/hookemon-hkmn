@@ -1,0 +1,18 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_OVERRIDE",
+  "phase": "ship",
+  "itemId": null,
+  "rationale": "Owner overrides the Phase 1 ship gate for local closure only after rechecking the failure first recorded in r-00426 with the build override authoritative. H1 remains open because no release reached operating state, H2 remains open because no alert was test-fired into a real channel, and H4 remains open because the advisory review was not recorded. This override does not claim release or operating readiness and authorizes no deployment, publication, credential access, signing, broadcast, asset movement, spending, or production use.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/runs/ship.json": "8952af9ba72cb1e7f103fc0d0e8e6cd01e4a6f661baace9eda6c19fc2cf639e5",
+    "gates/ship.json": "a557698898daa367daff240fe9f9a5826f43bb4c0ac2ad99d2125158f1f3a985",
+    "ops/HANDOFF.md": "8b64aa7d69d924f05a3287cfa675e5cf07361584ec76521eaedba230ce2daa4c",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "qa/drills/induced-failure.json": "b22e617825d9cdaf9999f77e1f896da80d7d71a9122a17d0234af64b901ec517",
+    "receipts/r-00333.json": "b2ddcf56dd6b3a214fae824c0baec38c1262f9142a8abed95833866eea61db2f",
+    "receipts/r-00334.json": "8f0df55592286904773767db1b0cbb1be86696013a4f1f46d004dfdb81bbb154"
+  }
+}

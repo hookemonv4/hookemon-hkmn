@@ -1,0 +1,18 @@
+{
+  "id": "feasibility", "version": 4,
+  "items": [
+    { "id": "F1", "text": "The runnable revision 57 cycle-control model proves sequential escrow isolation, reconciliation-first restart, and failure-bound fresh-cycle recovery", "receiptType": "scenario-model-run", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["feasibility/cycle-control-model.mjs", "feasibility/cycle-control-model-results.json", "specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["feasibility/cycle-control-model.mjs", "feasibility/cycle-control-model-results.json", "specs/requirements.json"], "allowedPrefixes": [] } },
+    { "id": "F2", "text": "The owner-approved per-cycle survivability bounds keep contamination and blind-retry mutation at zero, one active cycle, distinct escrows, and a 100 USDG authorized-loss cap without claiming a cumulative system cap", "receiptType": "owner-survivability-bounds-approved", "evidencePolicy": { "authority": "OWNER", "requiredInputs": ["feasibility/cycle-control-survivability-bounds.json"], "requiredPrefixes": [], "allowedInputs": ["feasibility/cycle-control-survivability-bounds.json"], "allowedPrefixes": [] } },
+    { "id": "F3", "text": "External-service spikes for unproven integrations ran (or the owner explicitly waived them)", "receiptType": "integration-spikes-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["feasibility/integration-spikes.json"], "requiredPrefixes": [], "allowedInputs": ["feasibility/integration-spikes.json"], "allowedPrefixes": [] } },
+    { "id": "F4", "text": "Interfaces frozen NOW: freeze receipt binds final interface hashes; architecture receipt re-checked against them", "receiptType": "interfaces-frozen", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/interfaces.json", "feasibility/interface-freeze.json"], "requiredPrefixes": [], "allowedInputs": ["architecture/interfaces.json", "feasibility/interface-freeze.json"], "allowedPrefixes": [] } },
+    { "id": "F5", "text": "Any unsupported delta from certified modules escalated the risk lane", "receiptType": "risk-lane-escalation-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["feasibility/risk-lanes.json"], "requiredPrefixes": [], "allowedInputs": ["feasibility/risk-lanes.json"], "allowedPrefixes": [] } }
+  ],
+  "redFlags": [
+    "A model whose inputs are all optimistic",
+    "Expected-value arithmetic used to prove solvency (EV cannot establish solvency)",
+    "Freeze receipt created before the model ran"
+  ],
+  "rationalizations": [
+    { "id": "RZ-F1", "excuse": "The worst case won't actually happen", "reality": "The worst case is the only scenario the model exists for. If it is unsurvivable, redesign now — it is cheap here and expensive live." }
+  ]
+}

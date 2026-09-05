@@ -1,0 +1,19 @@
+{
+  "id": "architecture", "version": 6,
+  "items": [
+    { "id": "A1", "text": "Capability map exists: module table with stable kebab-case ids, one line each, dependency direction; if two modules each need the other, they are one module", "receiptType": "capability-map-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/capability-map.json", "specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["architecture/capability-map.json", "specs/requirements.json"], "allowedPrefixes": [] } },
+    { "id": "A2", "text": "All interfaces are marked PROVISIONAL (freeze happens after feasibility); a post-feasibility recheck also binds the final interface and freeze artifacts", "receiptType": "provisional-interfaces-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/provisional-interfaces.json"], "requiredPrefixes": [], "allowedInputs": ["architecture/provisional-interfaces.json", "architecture/interfaces.json", "feasibility/interface-freeze.json"], "allowedPrefixes": [] } },
+    { "id": "A3", "text": "Every failure mode is phrased as an on-call question ('how do I know X is stuck?')", "receiptType": "failure-modes-operationalized", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/failure-modes.md"], "requiredPrefixes": [], "allowedInputs": ["architecture/failure-modes.md"], "allowedPrefixes": [] } },
+    { "id": "A4", "text": "Risk classes defined for this project: which task classes are 'high' (get blind tester + independent reviewer + doubt loop)", "receiptType": "risk-classes-defined", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/risk-classes.json"], "requiredPrefixes": [], "allowedInputs": ["architecture/risk-classes.json"], "allowedPrefixes": [] } },
+    { "id": "A5", "text": "Trust boundaries named; abuse cases written next to use cases for each boundary", "receiptType": "trust-boundaries-reviewed", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/trust-boundaries.md"], "requiredPrefixes": [], "allowedInputs": ["architecture/trust-boundaries.md"], "allowedPrefixes": [] } },
+    { "id": "A6", "text": "Module contract cards created in docs/modules/ (purpose, interface, invariants, state transitions, commands, recovery)", "receiptType": "module-contracts-created", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["architecture/capability-map.json", "docs/modules/index.json", "specs/requirements.json"], "requiredPrefixes": [], "allowedInputs": ["architecture/capability-map.json", "docs/modules/index.json", "specs/requirements.json"], "allowedPrefixes": ["docs/modules/"] } }
+  ],
+  "redFlags": [
+    "An interface frozen before the feasibility model ran",
+    "A module whose card cannot state its invariants",
+    "Failure modes listed as nouns ('bridge failure') instead of on-call questions"
+  ],
+  "rationalizations": [
+    { "id": "RZ-A1", "excuse": "The architecture is obvious for this size", "reality": "The map costs ten lines. Getting module boundaries wrong costs every later phase." }
+  ]
+}

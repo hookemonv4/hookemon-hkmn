@@ -1,0 +1,9 @@
+@uniswap/v4-core/=packages/contracts/lib/v4-core/
+@uniswap/v4-periphery/=packages/contracts/lib/v4-periphery/
+@uniswap/liquidity-launcher/=packages/contracts/lib/liquidity-launcher/
+@uniswap/uerc20-factory/=packages/contracts/lib/uerc20-factory/
+@openzeppelin/=packages/contracts/lib/v4-core/lib/openzeppelin-contracts/
+@solady/=packages/contracts/lib/uerc20-factory/lib/solady/
+forge-std/=packages/contracts/lib/v4-core/lib/forge-std/src/
+permit2/=packages/contracts/lib/v4-periphery/lib/permit2/
+solmate/=packages/contracts/lib/v4-core/lib/solmate/

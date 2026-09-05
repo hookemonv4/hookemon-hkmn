@@ -1,0 +1,18 @@
+{
+  "id": "ship", "version": 2,
+  "items": [
+    { "id": "H1", "text": "Release states from active packs recorded as receipts up to 'operating' (or the pack's terminal state)", "receiptType": "release-state-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["ops/release/state.json"], "requiredPrefixes": [], "allowedInputs": ["ops/release/state.json"], "allowedPrefixes": [] } },
+    { "id": "H2", "text": "Every alert was test-fired into the real channel once; each links a runbook of at least three lines", "receiptType": "alert-runbooks-test-fired", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["ops/runbooks/alerts.json"], "requiredPrefixes": [], "allowedInputs": ["ops/runbooks/alerts.json"], "allowedPrefixes": [] } },
+    { "id": "H3", "text": "Induced-failure drill: one failure was caused on purpose and diagnosed from telemetry alone (or the owner waived it)", "receiptType": "induced-failure-drill-verified", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["qa/drills/induced-failure.json"], "requiredPrefixes": [], "allowedInputs": ["qa/drills/induced-failure.json"], "allowedPrefixes": [] } },
+    { "id": "H4", "text": "Advisory checklists from active packs were shown to the owner (advisory only — the owner's decision is final either way)", "receiptType": "owner-advisories-reviewed", "evidencePolicy": { "authority": "OWNER", "requiredInputs": ["ops/advisories/index.json"], "requiredPrefixes": [], "allowedInputs": ["ops/advisories/index.json"], "allowedPrefixes": [] } },
+    { "id": "H5", "text": "Ops handoff doc exists: how to see status, how to stop it, who is paged, where receipts live", "receiptType": "operations-handoff-complete", "evidencePolicy": { "authority": "SYSTEM", "requiredInputs": ["ops/HANDOFF.md"], "requiredPrefixes": [], "allowedInputs": ["ops/HANDOFF.md"], "allowedPrefixes": [] } }
+  ],
+  "redFlags": [
+    "An alert nobody test-fired",
+    "A runbook that says 'investigate' without a first command",
+    "Ship declared while release-state receipts stop before the terminal state"
+  ],
+  "rationalizations": [
+    { "id": "RZ-H1", "excuse": "We can wire monitoring after launch", "reality": "The first incident happens before monitoring exists in every project that says this. Alerts are part of the deliverable." }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "r-00505",
+  "at": "2026-09-03T11:06:38.154Z",
+  "type": "evidence",
+  "phase": "build",
+  "result": "PASSED",
+  "data": {
+    "taskId": "P1-004",
+    "commitSha": "939c79ff69d94266da24534c1b0612fa6f8354d0",
+    "taskFingerprint": "a85ef07f1942d04bde62942e2cf44cc8b5da9387202ea85a1cbcbdf7e3fc170f",
+    "requirementsRevision": 58,
+    "requirementsHash": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  },
+  "inputHashes": {
+    "packages/contracts/src/accounting/FeeAccounting.sol": "62fc03ee957109df2606aa95709d4675363aa1947e8ed752ceae1a761e8a0797",
+    "packages/contracts/test/accounting/FeeAccounting.t.sol": "efec3de78732aa4561798db953a068ecb45af1f5dc301e858c703ce0bd981d9c",
+    "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol": "ddbad31db4c3f92b48a2f9328e8876f9c2f4cc54760bea35ce9dd8f2582f0d7a",
+    "release/phase1/local-evidence.json": "80e697ab5a83d45786f40cba2624a04535102fc188006a146edc49ccb3d63b08",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

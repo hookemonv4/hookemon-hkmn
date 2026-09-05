@@ -1,0 +1,34 @@
+{
+  "id": "WP-15",
+  "title": "Payout submitter / settlement worker",
+  "goal": "Actually pay every committed holder leaf, once, with crash-safe resume.",
+  "deps": [
+    "WP-04",
+    "WP-10",
+    "WP-12",
+    "WP-13"
+  ],
+  "parallelGroup": 5,
+  "writeSet": [
+    "packages/runner/src/distribution/settlement-worker.mjs",
+    "packages/runner/test/distribution/settlement-worker.test.mjs"
+  ],
+  "readSet": [
+    "packages/contracts/src/settlement/HolderSettlement.sol (payEntitlement ABI, from WP-04)"
+  ],
+  "steps": [
+    "After a distribution is verified, funded, and both distribution-signer/verifier signatures are present (WP-13), call HolderSettlement.payEntitlement once per leaf (per chunk if chunked)",
+    "Add retry/backoff and track paid/unpaid per leaf in the durable journal",
+    "Add a crash-mid-distribution resume test: kill the worker after N of M leaves are paid, restart, confirm it resumes without double-payment attempts (or safely no-ops on retry since payEntitlement itself reverts EntitlementAlreadyPaid)"
+  ],
+  "tests": [
+    "node --test packages/runner/test/distribution/settlement-worker.test.mjs"
+  ],
+  "acceptance": [
+    "Every committed leaf/chunk gets paid exactly once",
+    "A crash resumes without a double-payment attempt succeeding (protected both by the worker's own journal and the contract's own revert)"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Idempotent by construction at the contract layer; the journal-level idempotency is a defense-in-depth, not the only guard."
+}

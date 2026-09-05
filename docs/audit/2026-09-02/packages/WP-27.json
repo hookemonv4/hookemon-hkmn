@@ -1,0 +1,39 @@
+{
+  "id": "WP-27",
+  "title": "Durable production cycle store: close the ~16-cycle in-memory recovery ceiling",
+  "goal": "Replace the all-in-memory FixtureCycleStore (RECOVERY_LIMITS.storeCycles=16, no disk persistence, no archiving) with a disk-backed store suitable for a scheduler that creates a new cycle every 20 minutes indefinitely, so the live cycle-count ceiling applies only to active cycles and a process restart recovers from disk rather than losing everything.",
+  "deps": [
+    "WP-01"
+  ],
+  "parallelGroup": 2,
+  "writeSet": [
+    "packages/runner/src/cycle/cycle-store.mjs",
+    "packages/runner/src/cycle/durable-store.mjs",
+    "packages/runner/src/cycle/journal.mjs",
+    "packages/runner/test/cycle/durable-store.test.mjs"
+  ],
+  "readSet": [
+    "packages/runner/src/cycle/cycle-runner.mjs",
+    "scratchpad/w2/DESIGN.md section 2.5"
+  ],
+  "steps": [
+    "Read packages/runner/src/cycle/journal.mjs's RECOVERY_LIMITS and cycle-store.mjs's FixtureCycleStore to confirm the exact current ceiling (storeCycles=16, journalEvents=512 per cycle) before changing anything",
+    "Add a new durable-store.mjs: an append-only, disk-backed store keyed by cycleId that persists every committed journal entry to a file (or file-per-cycle directory), reloadable on process restart without depending on in-memory state surviving",
+    "Add an archiving policy: once a cycle reaches a terminal state (closed/FAILED/DEGRADED and settled), move it out of the 'active' working set the storeCycles-style ceiling applies to, into an append-only archive directory that is never re-loaded into the hot path \u2014 so the ceiling bounds concurrent/recent active cycles, not lifetime history",
+    "Keep FixtureCycleStore itself unchanged and in use for existing fixture/unit tests (it is fine as a bounded test double); wire production callers (WP-07's AutomatedCycleService, WP-14's scheduler) to the new durable-store.mjs instead",
+    "Add a test proving cycle #17 through #40 (beyond the old 16-cycle ceiling) all create, run, and recover correctly against the durable store",
+    "Add a crash-and-restart test: kill the process mid-cycle after 20+ prior cycles have completed, restart, and confirm the active cycle resumes correctly from disk"
+  ],
+  "tests": [
+    "node --test packages/runner/test/cycle/durable-store.test.mjs"
+  ],
+  "acceptance": [
+    "Creating and completing more than 16 cycles in sequence never throws a cycle-count-limit error against the durable store",
+    "A process restart after 20+ completed cycles recovers the active cycle correctly by reading from disk, not from in-memory state",
+    "Terminal (closed/FAILED/DEGRADED) cycles are archived out of the hot working set and are not re-loaded on every recovery pass",
+    "FixtureCycleStore's existing bounded behavior is unchanged for tests that still use it directly"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Closes a real gap the first draft of this plan left unaddressed: an always-on scheduler running every 20 minutes would otherwise hit a hard store-cycle-count-exceeded error within about 5.3 hours of continuous operation. WP-07 and WP-14 both depend on this landing first. COORDINATOR NOTE after WP-01: base now includes the rev57 operator state-file (packages/runner/src/operator/state-file.mjs) with lock/CAS/atomic-replace; reuse its patterns for the durable store; do not modify operator/* (WP-01 owned it) except through new files."
+}

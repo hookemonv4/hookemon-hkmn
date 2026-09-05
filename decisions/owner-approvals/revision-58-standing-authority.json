@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes a standing signing authority for the autonomous scheduler under REQ-cycle-control-2 and decisions/ADR-0021-autonomous-cycle-authority.md. Names the first live cap: one $25 pack purchase plus bridge fees per cycle, a maximum of 72 cycles per day, both dashboard-editable within this ceiling but never past it. Confirms the two-layer kill switch (immediate off-chain pause flag; on-chain revocation of the vault-authorizer and policy-wallet keys, checked fresh on every signing request, never cached) as the actual stop mechanism, and confirms no new on-chain pause role is added (ADR-0021 cites architecture/trust-boundaries.md TB-07 by name). This draft grants no deployment, credential, signing, broadcast, asset-movement, spending, or publication authority by itself — it is the specific grant the signer service must see signed before it will produce any live autonomous signature.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/ADR-0021-autonomous-cycle-authority.md": "631ec53bd91869c9fd4b6ef91cc61937e489468bcf4e51caaec119b5561c5fc4",
+    "specs/requirements.json": "cc394cc7ef2cf8e2463c742d3e7cf8d56ddf4e4413f46c767782b24207bf3380"
+  }
+}

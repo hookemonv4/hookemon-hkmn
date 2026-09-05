@@ -1,0 +1,15 @@
+{
+  "id": "r-00061",
+  "at": "2026-08-30T08:40:50.150Z",
+  "type": "owner-decision",
+  "phase": "spec",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/OWNER_DECISIONS.md": "09459100c172244c65c37f2ceb1ad3eed757d7b9000382f2e4337021cd6838d2",
+    "product/PRD.md": "9b162d28843781e23929bf1dfba3babf371b7197bdfbf2431f85a1fb6e4fe6e2",
+    "specs/requirements.json": "75b1228eee91c36915f8142635d246817493c6774f3909e131563e0e2881732a",
+    "decisions/ADR-0011-operations-wallet-cycle-authority.md": "2d575f60b390867e40e47560247d50b73abc86d7e68873e8be21eba9397ed242",
+    "decisions/ADR-0012-admin-only-entitlement-replacement.md": "7f9a3882e41f11ccaf06a687ecff85c316704de49257d20dbea3ca129dd15318"
+  }
+}

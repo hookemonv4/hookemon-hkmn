@@ -1,0 +1,21 @@
+{
+  "id": "r-00188",
+  "at": "2026-08-30T20:31:37.111Z",
+  "type": "gate",
+  "phase": "init",
+  "result": "PASSED",
+  "data": {
+    "gateVersion": 4,
+    "problems": []
+  },
+  "inputHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "gates/runs/init.json": "403cd2fbbb291c650da3e1c84f7f1215a44b270717836dff3679002e45a3767e",
+    "receipts/r-00184.json": "1abebd7adf645ae99643464c90d132e59eb64df014b70e10c5e8638ffbcc9d4d",
+    "receipts/r-00176.json": "828acfbd503d8627021a7934292450494e9f59319e9ff301208da349bd548dfb",
+    "receipts/r-00185.json": "b2648aaaa1f8e3b93a2db5aeace76ec80237302c5666e10cb9209f6f255203e4",
+    "receipts/r-00113.json": "93fa1d632b4d8e65a3ce48aac3000a480febdbc697450596251a2081db690839",
+    "receipts/r-00186.json": "ca502613ef4833fdaac9251c68d12b4ffbcad94e10ece85cb21c4d63a7ab994a",
+    "receipts/r-00187.json": "f98741f6aff691d0ff0696d83f84782d6c5fd4bbac0decdb4685b42588a8f24b"
+  }
+}

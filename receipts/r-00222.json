@@ -1,0 +1,27 @@
+{
+  "id": "r-00222",
+  "at": "2026-08-31T17:01:20.448Z",
+  "type": "gate",
+  "phase": "init",
+  "result": "FAILED",
+  "data": {
+    "gateVersion": 4,
+    "problems": [
+      "I1: evidence r-00184 is STALE",
+      "I2: evidence r-00176 owner approval invalid: owner approval subject hash for policy/policy.json does not match current content",
+      "I3: evidence r-00185 is STALE",
+      "I5: evidence r-00214 is STALE",
+      "I6: evidence r-00220 is STALE"
+    ]
+  },
+  "inputHashes": {
+    "gates/init.json": "d23e869213922306cdb336b6c15a23f785fce1c5e610e1788c4f0e42dc6619e8",
+    "gates/runs/init.json": "18fa51e0b3ff1bb630c09fd5332d8d299af123db0de1da544ab7f274007f12b4",
+    "receipts/r-00184.json": "1abebd7adf645ae99643464c90d132e59eb64df014b70e10c5e8638ffbcc9d4d",
+    "receipts/r-00176.json": "828acfbd503d8627021a7934292450494e9f59319e9ff301208da349bd548dfb",
+    "receipts/r-00185.json": "b2648aaaa1f8e3b93a2db5aeace76ec80237302c5666e10cb9209f6f255203e4",
+    "receipts/r-00113.json": "93fa1d632b4d8e65a3ce48aac3000a480febdbc697450596251a2081db690839",
+    "receipts/r-00214.json": "11aad1911c78d443b64ddf7173ff7f032cd2861d690a01aff1e4be5a91581177",
+    "receipts/r-00220.json": "01eb969921732017c9110a85b1b0b3c46a3401e4e536e38305135e1638f08a57"
+  }
+}

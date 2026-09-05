@@ -1,0 +1,20 @@
+{
+  "id": "r-00129",
+  "at": "2026-08-30T14:14:03.255Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-revision-54-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "90 % HKMN dauerhaft und nicht entziehbar im USDG/HKMN-Pool, LP-Fee 0 %, ausschließlich die genehmigte 3 %-Hook-Fee? arbeite weiter lass die agenten jetzt alle laufen ohne fragen"
+  },
+  "inputHashes": {
+    "gates/spec.json": "9f683e2dd6aa37ef2f461cedc2025ac9a8a6a1ee0fcc58a72b9989185be5e7a2",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "341c8cb68c1ef0ef85c57141a7dbcabd04315573a32bf4e60cf4bd391c0e3cf6",
+    "decisions/owner-approvals/phase-1-spec-revision-54-approved.json": "e65495e6418fcad81dfe2916101c968554060935f3475be4539d8246b7eaaa62"
+  }
+}

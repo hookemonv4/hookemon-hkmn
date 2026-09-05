@@ -1,0 +1,21 @@
+{
+  "id": "r-00256",
+  "at": "2026-08-31T17:16:26.968Z",
+  "type": "gate",
+  "phase": "architecture",
+  "result": "PASSED",
+  "data": {
+    "gateVersion": 4,
+    "problems": []
+  },
+  "inputHashes": {
+    "gates/architecture.json": "ebcf20fd9a6589d431e94f042f14afa7f1fad89073bd98294c2f79e454fac470",
+    "gates/runs/architecture.json": "c036fdfc3f183d5698df2c68c1a00639f6257db052e201a3f950eb7d15073e06",
+    "receipts/r-00250.json": "7d7f19791f0dfbaec8f7d0193c44de8e7981c232e8b242127475f28b55cffd77",
+    "receipts/r-00251.json": "1117f3f7c0d614b812db50a712534332aae257b6ea6d9eb1e9f6726390156b0f",
+    "receipts/r-00252.json": "31afdb60e8aa4a8541c650fe296535d6e7ff6307a7d91c4aef53ee6f6f68866c",
+    "receipts/r-00253.json": "30925222062525411909204ec9c7a754db96c9498721110fc5365b69217ddf7a",
+    "receipts/r-00254.json": "0eb2614a9322fffc5091ab257a3415cf09fbf0b880e11823e258e63483fc6145",
+    "receipts/r-00255.json": "f896309d901ab75ad912f8b07dc4f5a64a4d1ae9db45bbbf2b4b7614f1146135"
+  }
+}

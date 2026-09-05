@@ -1,0 +1,1884 @@
+{
+  "$schema": "urn:programmable:v4-hook-submission:1.5.0",
+  "schemaVersion": 1,
+  "standardVersion": "1.5.0",
+  "stage": "proposal",
+  "model": {
+    "id": "hookemon-phase-three",
+    "name": "Hookemon",
+    "summary": "A fixed-supply HKMN launch uses one custom v4 hook to form a canonical USDG market and account for a disclosed gross quote-side fee.",
+    "userOutcome": "The launch owner receives a reviewable, non-authoritative two-transaction handoff proposal for a canonical HKMN and USDG pool with disclosed fee behavior.",
+    "category": "custom-hook-project",
+    "whyV4": "Uniswap v4 callbacks and return deltas let the canonical hook collect its non-additive fee inside the authenticated pool lifecycle instead of adding a separate transfer tax."
+  },
+  "builder": {
+    "github": null,
+    "contact": null,
+    "beneficiary": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "licenseDeclaration": "MIT; Solidity source declares SPDX-License-Identifier: MIT."
+  },
+  "builderTemplate": {
+    "schemaVersion": "1.0.0",
+    "source": "catalog",
+    "templateSelection": {
+      "catalogDigest": "a7875ce817fafd7ca4e0655e2937fa5a49b602283aa846e804732d18e6c1478e",
+      "selectionDigest": "46c0b7392b58d13b988639e0c75a11cbadebf1993bea408ea2bb3e091710fbd8",
+      "starterId": "custom-hook",
+      "requestedPackIds": [
+        "programmable-volume-fee"
+      ],
+      "defaultPackIds": [
+        "custom-hook-behavior",
+        "metadata-disclosures",
+        "programmable-volume-fee",
+        "test-evidence-threat-model"
+      ],
+      "autoIncludedPackIds": [],
+      "selectedPackIds": [
+        "custom-hook-behavior",
+        "metadata-disclosures",
+        "programmable-volume-fee",
+        "test-evidence-threat-model"
+      ],
+      "selectedCapabilityIds": [
+        "canonical-v4-pool",
+        "claimable-platform-fee",
+        "custom-hook-behavior",
+        "evidence-plan",
+        "provider-disclosures",
+        "public-metadata",
+        "quote-side-volume-accounting",
+        "security-properties"
+      ],
+      "customCapabilities": [
+        {
+          "id": "phase-three-launch-graph",
+          "label": "Phase three launch graph",
+          "catalogStatus": "unlisted",
+          "automaticDecision": "none",
+          "reviewRoute": "architecture-review-required",
+          "eligibilityEffect": "none"
+        }
+      ],
+      "ownerProvidedLocalTags": [
+        "hkmn",
+        "hookemon"
+      ],
+      "localProjectTags": [
+        "canonical-v4-pool",
+        "claimable-platform-fee",
+        "custom-hook",
+        "custom-hook-behavior",
+        "evidence-plan",
+        "hkmn",
+        "hookemon",
+        "metadata-disclosures",
+        "phase-three-launch-graph",
+        "programmable-volume-fee",
+        "provider-disclosures",
+        "public-metadata",
+        "quote-side-volume-accounting",
+        "security-properties",
+        "test-evidence-threat-model"
+      ]
+    }
+  },
+  "publicMetadata": {
+    "project": {
+      "name": "Hookemon",
+      "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
+      "projectUri": "https://hookemon.com",
+      "logoUri": null,
+      "logoContentHash": null,
+      "metadataMutable": true,
+      "metadataOwner": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729"
+    },
+    "token": {
+      "name": "Hookemon",
+      "symbol": "HKMN",
+      "metadataUri": "https://hookemon.com",
+      "metadataContentHash": null,
+      "logoUri": null,
+      "logoContentHash": null,
+      "metadataMutable": true,
+      "metadataOwner": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729"
+    },
+    "localDiscoveryTags": [
+      "hkmn",
+      "hookemon"
+    ],
+    "claimedAffiliations": [],
+    "providerPresentations": []
+  },
+  "target": {
+    "chainId": 4663,
+    "network": "robinhood-chain",
+    "solidityVersion": "0.8.26",
+    "evmVersion": "cancun",
+    "dependencyBaseline": "model-specific-pinned",
+    "officialLaunchProfileId": null
+  },
+  "assets": [
+    {
+      "id": "usdg",
+      "role": "quote",
+      "origin": "existing-erc20",
+      "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "decimals": 6,
+      "decimalsSource": "token-contract-observation",
+      "supplyPolicy": "externally-managed",
+      "initialSupply": null,
+      "behaviors": [
+        "standard"
+      ],
+      "controls": []
+    },
+    {
+      "id": "hkmn",
+      "role": "launched",
+      "origin": "new-fixed-supply",
+      "address": null,
+      "decimals": 18,
+      "decimalsSource": "implementation-constant",
+      "supplyPolicy": "fixed-at-creation",
+      "initialSupply": "1000000000000000000000000000",
+      "behaviors": [
+        "standard"
+      ],
+      "controls": []
+    }
+  ],
+  "launchLifecycle": {
+    "tokenCreation": {
+      "applicable": true,
+      "actor": "Launch wallet through graphFactory",
+      "valueFlow": "The proposed graph creates the HKMN target and allocates the complete supply to the resolved canonical-market hook before the owner seed.",
+      "custody": "The hook receives the complete HKMN supply for exact full-range seeding; permanent custody receives only the minted v4 position.",
+      "failure": "A source-supply or graph mismatch stops the seed path; no signing occurs from this package.",
+      "event": "Graph target deployment and token allocation events.",
+      "notApplicableReason": null
+    },
+    "poolInitialization": {
+      "applicable": true,
+      "actor": "Resolved HookemonHook",
+      "valueFlow": "The proposed hook call would initialize the one canonical PoolKey with zero LP fee and the address-order-selected price candidate.",
+      "custody": "The hook owns the unseeded canonical pool binding until the owner seed succeeds.",
+      "failure": "A wrong hook mask, pool key or price candidate reverts initialization and leaves no seed.",
+      "event": "Canonical pool initialization event.",
+      "notApplicableReason": null
+    },
+    "liquidityFormation": {
+      "applicable": true,
+      "actor": "Launch wallet after Permit2 approval",
+      "valueFlow": "Only after provider preimage and preflight facts are resolved, the owner would supply 240000000 USDG atomic units after the graph allocates 1000000000000000000000000000 HKMN atomic units to the resolved hook. No other HKMN allocation exists.",
+      "custody": "The permanent custody target receives the initial v4 position after the seed call.",
+      "failure": "An expired or non-exact Permit2 allowance, wrong range or failed mint reverts the seed atomically.",
+      "event": "Seed and custody binding events.",
+      "notApplicableReason": null
+    },
+    "initialTransaction": {
+      "applicable": true,
+      "actor": "Launch wallet in Rabby",
+      "valueFlow": "Only after provider preimage and preflight facts are resolved would the wallet sign the zero-value graph call and, after assertions, the owner seed call. Requirements revision 65 is not transaction authorization for either transaction.",
+      "custody": "The wallet keeps USDG until the seed settlement and receives unused USDG back from the hook.",
+      "failure": "A graph mismatch stops before the seed; a deployed but unseeded graph is not retried with widened allowances.",
+      "event": "Wallet transaction receipts and post-deploy assertions.",
+      "notApplicableReason": null
+    },
+    "trading": {
+      "applicable": true,
+      "actor": "Authenticated PoolManager callback",
+      "valueFlow": "Each supported swap executes against the canonical HKMN/USDG pool and applies the quote-side fee path for its quadrant.",
+      "custody": "The PoolManager handles swap settlement while the hook records only fee liability.",
+      "failure": "An invalid PoolKey, currency mapping or delta reverts the entire swap without persistent accounting.",
+      "event": "Swap and hook fee-accounting events.",
+      "notApplicableReason": null
+    },
+    "feesAndClaims": {
+      "applicable": true,
+      "actor": "Immutable programmable platform recipient, treasury beneficiary and bounded process claim route",
+      "valueFlow": "The hook splits the selected 300 bps gross quote-side fee into 10 bps programmable, 40 bps treasury and 250 bps process liabilities.",
+      "custody": "The hook holds accrued USDG liability until the authorized recipient claims to a selected destination.",
+      "failure": "A failed claim leaves the liability intact and cannot redirect another beneficiary balance.",
+      "event": "Liability accrual and claim events.",
+      "notApplicableReason": null
+    },
+    "dependencyFailure": {
+      "applicable": true,
+      "actor": "Launch wallet and hook",
+      "valueFlow": "No transfer proceeds after a failed provider route, Permit2 allowance, PoolManager callback or token settlement.",
+      "custody": "The owner wallet or hook retains the pre-action asset state because the transaction reverts atomically.",
+      "failure": "Record the mismatch and prepare a new reviewed graph rather than fabricating a route or retrying with broader permissions.",
+      "event": "Revert receipt or failed preflight record.",
+      "notApplicableReason": null
+    },
+    "retirement": {
+      "applicable": true,
+      "actor": "Project governance outside the immutable launch graph",
+      "valueFlow": "This proposal creates no automatic retirement transfer or buyback path.",
+      "custody": "The initial custody position remains under its immutable custody rule unless a separately reviewed lifecycle is introduced.",
+      "failure": "No retirement action is permitted by this launch package; future changes require a new review.",
+      "event": "No retirement event is emitted by the Phase 3 graph.",
+      "notApplicableReason": null
+    }
+  },
+  "pool": {
+    "currency0": "usdg",
+    "currency1": "hkmn",
+    "orderingRule": "This schema instance validates the USDG-currency0 candidate. release/phase3/launch-inputs.json records all eight order-dependent gross-basis paths; the authoritative address manifest compares the resolved HKMN CREATE2 address with USDG and requires a regenerated submission if HKMN is lower.",
+    "tickSpacing": 60,
+    "lpFee": {
+      "classification": "lp-fee",
+      "mode": "static",
+      "hundredthsOfBip": 0,
+      "initialHundredthsOfBip": null,
+      "initializationPath": null,
+      "applicationMode": null,
+      "overrideFlagPolicy": null,
+      "persistentUpdateActor": null,
+      "persistentUpdateCallSites": [],
+      "rateLimit": null,
+      "updatePath": null,
+      "minimum": null,
+      "maximum": null,
+      "inputMetric": null,
+      "referenceAsset": null,
+      "measurementUnit": null,
+      "observationMode": null,
+      "observationWindow": null,
+      "curve": null,
+      "updateCadence": null,
+      "liquidityDecreaseBehavior": null,
+      "manipulationResistance": null,
+      "failureRule": null,
+      "recipient": "pool-liquidity-providers"
+    },
+    "canonical": true,
+    "alternativePools": "Alternative pools may exist but do not inherit the canonical hook fee, custody, launch allocation or claim accounting."
+  },
+  "programmableFee": {
+    "policyId": "programmable-volume-fee-v1",
+    "policyVersion": "1.1.0",
+    "poolScope": "canonical-launch-pool-key",
+    "rates": {
+      "unit": "hundredths-of-bip",
+      "selectedHundredthsOfBip": 30000,
+      "minimumEffectiveHundredthsOfBip": 1000,
+      "effectiveHundredthsOfBip": 30000,
+      "platformHundredthsOfBip": 1000,
+      "projectHundredthsOfBip": 29000,
+      "formula": "effective=max(selected,1000);platform=1000;project=effective-1000",
+      "lpFeeExcluded": true
+    },
+    "basis": {
+      "volume": "gross-quote-side-swap-volume",
+      "quoteAsset": "canonical-pool-quote-asset"
+    },
+    "ownership": {
+      "owner": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+      "immutable": true,
+      "claimAuthority": "owner-only",
+      "claimAvailability": "anytime",
+      "claimDestinationPolicy": "owner-or-owner-selected-per-claim",
+      "storedMutableRecipient": false,
+      "builderCanMutate": false,
+      "projectCanMutate": false,
+      "administratorCanMutate": false
+    },
+    "collection": {
+      "status": "implemented",
+      "integration": "canonical-pool-hook",
+      "enforcement": "non-bypassable",
+      "hookFeeMechanismBinding": "hook.feeMechanism",
+      "supportedSwapModes": [
+        "zeroForOne-exactInput",
+        "zeroForOne-exactOutput",
+        "oneForZero-exactInput",
+        "oneForZero-exactOutput"
+      ],
+      "swapModePaths": {
+        "zeroForOneExactInput": "before-swap-return-delta",
+        "zeroForOneExactOutput": "after-swap-return-delta",
+        "oneForZeroExactInput": "after-swap-return-delta",
+        "oneForZeroExactOutput": "before-swap-return-delta"
+      },
+      "selfCallPolicy": "same-pool-swap-forbidden"
+    },
+    "accounting": {
+      "accrualMode": "claimable-liability",
+      "liabilityKeyDimensions": [
+        "poolId",
+        "currency",
+        "owner"
+      ],
+      "crossPoolNetting": false,
+      "roundingPolicy": "cumulative-independent-platform-project-remainders",
+      "remainderScope": "canonical-pool-lifetime",
+      "claimResetsRemainders": false,
+      "minimumGrossQuoteUnits": 1000,
+      "fragmentationResistant": true,
+      "valueFlowId": "swap-fee-accrual",
+      "collectionEvent": "SwapLiabilitiesAccrued",
+      "claimEvent": "ProgrammableClaimed"
+    },
+    "evidence": {
+      "sourcePaths": [
+        "packages/contracts/src/HookemonHook.sol",
+        "packages/contracts/src/accounting/FeeAccounting.sol"
+      ],
+      "testPaths": [
+        "packages/contracts/test/accounting/FeeAccounting.t.sol",
+        "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol"
+      ]
+    }
+  },
+  "hook": {
+    "used": true,
+    "base": "BaseHook",
+    "upgradeable": false,
+    "sharedAcrossPools": false,
+    "poolNamespace": "One resolved canonical HKMN/USDG PoolKey on chain 4663.",
+    "poolAdmission": {
+      "enforcement": "The hook authenticates the configured PoolManager and the one resolved canonical PoolKey.",
+      "factoryOrRegistry": "The graphFactory creates the hook; the final PoolKey is recorded only after CREATE2 address derivation.",
+      "alternativePoolBehavior": "Alternative pools do not receive hook fee collection, seed custody or claim accounting.",
+      "rejectionRule": "Reject callbacks whose PoolManager, currencies, fee, tick spacing or hook do not equal the resolved canonical pool."
+    },
+    "permissions": {
+      "beforeInitialize": true,
+      "afterInitialize": false,
+      "beforeAddLiquidity": false,
+      "afterAddLiquidity": false,
+      "beforeRemoveLiquidity": false,
+      "afterRemoveLiquidity": false,
+      "beforeSwap": true,
+      "afterSwap": true,
+      "beforeDonate": false,
+      "afterDonate": false,
+      "beforeSwapReturnDelta": true,
+      "afterSwapReturnDelta": true,
+      "afterAddLiquidityReturnDelta": false,
+      "afterRemoveLiquidityReturnDelta": false
+    },
+    "callbackPolicies": [
+      {
+        "callback": "beforeInitialize",
+        "necessity": "The externally called beforeInitialize hook unconditionally reverts; only the authorized initializeCanonicalPool self-call route may initialize the canonical pool after graph checks.",
+        "allowedReverts": "Every direct PoolManager beforeInitialize callback reverts with InitializationNotAuthorized. The authorized hook route rejects an invalid graph configuration before it reaches PoolManager initialization.",
+        "userExitImpact": "No user asset is held before initialization; a rejected direct initialization leaves no canonical pool state.",
+        "noSelfCallImpact": "The one authorized initialization uses the v4 hook self-call suppression route. Same-pool swap self-calls remain forbidden."
+      },
+      {
+        "callback": "beforeSwap",
+        "necessity": "Validate the canonical pool and prepare the required before-swap return delta only for the relevant gross quote-side quadrant.",
+        "allowedReverts": "The callback reverts on an unsupported currency, invalid sign, missing cap or noncanonical pool.",
+        "userExitImpact": "A rejected swap leaves caller balances unchanged and does not prevent a later valid swap.",
+        "noSelfCallImpact": "Same-pool self-call swaps are forbidden, so no callback suppression path can bypass this policy."
+      },
+      {
+        "callback": "afterSwap",
+        "necessity": "Return the post-swap unspecified-currency delta when USDG is unspecified and finalize the liability update.",
+        "allowedReverts": "The callback reverts if the returned delta, settlement or ledger conservation check is invalid.",
+        "userExitImpact": "A failed callback reverts the complete swap before settlement and leaves no partial user debit.",
+        "noSelfCallImpact": "The hook never initiates same-pool nested swaps, so this callback cannot be bypassed by self-call behavior."
+      }
+    ],
+    "hookData": {
+      "used": false,
+      "schema": null,
+      "identitySource": null,
+      "trustedRouterDeploymentRecordId": null,
+      "callbackSenderRule": null,
+      "validation": null
+    },
+    "feeMechanism": {
+      "used": true,
+      "classification": "hook-owned-fee",
+      "chargedCurrency": "Gross USDG quote-side volume in the canonical pool.",
+      "swapQuadrants": {
+        "zeroForOneExactInput": {
+          "currency": "currency0",
+          "basis": "gross-input",
+          "formula": "Charge the selected inclusive fee from gross USDG input before the AMM leg.",
+          "rounding": "down",
+          "maximumHundredthsOfBip": 30000
+        },
+        "zeroForOneExactOutput": {
+          "currency": "currency0",
+          "basis": "gross-input",
+          "formula": "Calculate the gross USDG input required for the requested HKMN output, then collect the selected inclusive fee through the after-swap return delta.",
+          "rounding": "up",
+          "maximumHundredthsOfBip": 30000
+        },
+        "oneForZeroExactInput": {
+          "currency": "currency0",
+          "basis": "gross-output",
+          "formula": "Collect USDG as unspecified output through the after-swap return delta.",
+          "rounding": "down",
+          "maximumHundredthsOfBip": 30000
+        },
+        "oneForZeroExactOutput": {
+          "currency": "currency0",
+          "basis": "gross-output",
+          "formula": "Apply the selected inclusive fee to gross USDG output before the AMM leg so the caller receives the requested net output.",
+          "rounding": "up",
+          "maximumHundredthsOfBip": 30000
+        }
+      },
+      "maximumHundredthsOfBip": 30000,
+      "collectionPath": "quadrant-dependent-swap-return-delta",
+      "collectionValueFlowId": "swap-fee-accrual",
+      "liabilityKeyDimensions": [
+        "poolId",
+        "currency",
+        "beneficiary"
+      ],
+      "collectionEvent": "Swap fee settlement and liability accrual",
+      "recipients": [
+        {
+          "role": "programmable-platform",
+          "sharePpm": 33333,
+          "addressSource": "fixed-address",
+          "address": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+          "binding": "exact-address",
+          "derivationRule": null,
+          "mutable": false,
+          "mutationController": "none",
+          "newAddressValidation": "none",
+          "mutationEvent": null
+        },
+        {
+          "role": "treasury",
+          "sharePpm": 133333,
+          "addressSource": "launch-wallet",
+          "address": null,
+          "binding": "launch-transaction-sender",
+          "derivationRule": null,
+          "mutable": true,
+          "mutationController": "current-beneficiary-only",
+          "newAddressValidation": "nonzero-evm-address",
+          "mutationEvent": "RoleAccepted"
+        },
+        {
+          "role": "process",
+          "sharePpm": 833334,
+          "addressSource": "fixed-address",
+          "address": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+          "binding": "exact-address",
+          "derivationRule": null,
+          "mutable": true,
+          "mutationController": "current-beneficiary-only",
+          "newAddressValidation": "nonzero-evm-address",
+          "mutationEvent": "OperationsRotationExecuted"
+        }
+      ],
+      "ownership": "The platform recipient is immutable. The displayed ppm values normalize the three 10/40/250 bps source streams; exact accrual uses independent cumulative bps remainders. Treasury and operations roles may rotate only through their source-controlled role paths.",
+      "claimPolicy": "Programmable and treasury claims debit only the caller beneficiary liability for the canonical PoolId and may select a nonzero destination per claim. A process claim is callable only by current operations, must pay that same operations address, and remains subject to its 6-hour cap, maximum and cycle-id rule."
+    },
+    "customAccounting": {
+      "used": true,
+      "backingSource": "The hook takes the disclosed USDG fee from the authenticated PoolManager settlement path before crediting liabilities.",
+      "conservationEquation": "hook USDG balance equals unpaid programmable liability plus unpaid treasury liability plus unpaid process liability plus explicitly reconciled seed residuals.",
+      "settlement": "Take the positive quote-side component, update PoolId-scoped liabilities, then return the requested delta before hook return.",
+      "partialFillBehavior": "Calculate from executed gross quote-side volume only and revert any unsupported partial-fill or invalid final delta.",
+      "liabilityNamespace": "canonical PoolId and currency, with programmable and treasury beneficiary ledgers plus one bounded process-liability ledger for current operations",
+      "liabilityKeyDimensions": [
+        "poolId",
+        "currency",
+        "beneficiary"
+      ],
+      "crossPoolNetting": false,
+      "duplicateCurrencyPolicy": "The canonical pool uses distinct currencies and rejects any PoolKey with duplicate or mismatched currency identity.",
+      "failureIsolation": "A failed swap or claim reverts its own state transition and cannot debit another pool or beneficiary liability.",
+      "withdrawalOrdering": "Claims update the beneficiary liability before transferring the exact accrued USDG amount."
+    },
+    "returnDeltaAccounting": {
+      "used": true,
+      "quadrants": {
+        "zeroForOneExactInput": {
+          "supported": true,
+          "specifiedCurrency": "currency0",
+          "unspecifiedCurrency": "currency1",
+          "amountSign": "negative-exact-input",
+          "specifiedComponent": {
+            "mode": "positive-only",
+            "formula": "zeroForOne exact input specified component is positive only when USDG is the affected swap currency; otherwise it is zero.",
+            "minimum": "Zero USDG atomic units when no fee is due; otherwise a positive integer fee after cumulative rounding.",
+            "maximum": "bounded by the selected 300 bps gross quote-side fee and the executed swap amount",
+            "minimumSign": "zero",
+            "maximumSign": "positive",
+            "positiveSettlementActions": [
+              {
+                "order": 1,
+                "actor": "hook",
+                "operation": "take",
+                "currency": "specified",
+                "assetKind": "erc20",
+                "deltaOwner": "hook",
+                "deltaEffect": "negative",
+                "counterparty": "PoolManager",
+                "authorizationRule": "Only the authenticated canonical PoolManager callback may settle the hook fee.",
+                "msgValueRule": null,
+                "amountRule": "Take the positive quote-side fee component after validating the exact swap quadrant.",
+                "completionDeadline": "before-hook-return"
+              },
+              {
+                "order": 2,
+                "actor": "hook",
+                "operation": "internal-ledger-update",
+                "currency": "specified",
+                "assetKind": "erc20",
+                "deltaOwner": "hook",
+                "deltaEffect": "none",
+                "counterparty": "not-applicable",
+                "authorizationRule": "The hook updates only its PoolId, currency and beneficiary liability ledger.",
+                "msgValueRule": null,
+                "amountRule": "Credit the programmable, treasury and process liabilities from the settled positive component.",
+                "completionDeadline": "before-hook-return"
+              }
+            ],
+            "negativeSettlementActions": []
+          },
+          "unspecifiedComponent": {
+            "mode": "zero-only",
+            "formula": null,
+            "minimum": "0",
+            "maximum": "0",
+            "minimumSign": "zero",
+            "maximumSign": "zero",
+            "positiveSettlementActions": [],
+            "negativeSettlementActions": []
+          },
+          "residualAmmEquation": "amountSpecified-plus-specifiedDelta",
+          "finalCallerDeltaEquation": "pool-manager-swap-delta-minus-hook-delta",
+          "specifiedDeltaCanConsumeEntireAmount": false,
+          "rounding": "Round the fee against gross quote-side volume according to the hook accounting rule; reject any amount that exceeds the selected cap.",
+          "zeroAmmLeg": "forbidden",
+          "partialFillRule": "The hook computes from the executed amount only. A partial fill must preserve the caller limit and does not permit a full specified-delta consumption.",
+          "slippageInvariant": "Router and caller slippage checks apply to the final caller delta after the hook delta; the hook never widens a user limit.",
+          "failureRule": "Any invalid sign, currency, cap, PoolKey or settlement result reverts the complete swap atomically before a liability credit persists."
+        },
+        "zeroForOneExactOutput": {
+          "supported": true,
+          "specifiedCurrency": "currency1",
+          "unspecifiedCurrency": "currency0",
+          "amountSign": "positive-exact-output",
+          "specifiedComponent": {
+            "mode": "zero-only",
+            "formula": null,
+            "minimum": "0",
+            "maximum": "0",
+            "minimumSign": "zero",
+            "maximumSign": "zero",
+            "positiveSettlementActions": [],
+            "negativeSettlementActions": []
+          },
+          "unspecifiedComponent": {
+            "mode": "zero-only",
+            "formula": null,
+            "minimum": "0",
+            "maximum": "0",
+            "minimumSign": "zero",
+            "maximumSign": "zero",
+            "positiveSettlementActions": [],
+            "negativeSettlementActions": []
+          },
+          "residualAmmEquation": "amountSpecified-plus-specifiedDelta",
+          "finalCallerDeltaEquation": "pool-manager-swap-delta-minus-hook-delta",
+          "specifiedDeltaCanConsumeEntireAmount": false,
+          "rounding": "Round the fee against gross quote-side volume according to the hook accounting rule; reject any amount that exceeds the selected cap.",
+          "zeroAmmLeg": "forbidden",
+          "partialFillRule": "The hook computes from the executed amount only. A partial fill must preserve the caller limit and does not permit a full specified-delta consumption.",
+          "slippageInvariant": "Router and caller slippage checks apply to the final caller delta after the hook delta; the hook never widens a user limit.",
+          "failureRule": "Any invalid sign, currency, cap, PoolKey or settlement result reverts the complete swap atomically before a liability credit persists."
+        },
+        "oneForZeroExactInput": {
+          "supported": true,
+          "specifiedCurrency": "currency1",
+          "unspecifiedCurrency": "currency0",
+          "amountSign": "negative-exact-input",
+          "specifiedComponent": {
+            "mode": "zero-only",
+            "formula": null,
+            "minimum": "0",
+            "maximum": "0",
+            "minimumSign": "zero",
+            "maximumSign": "zero",
+            "positiveSettlementActions": [],
+            "negativeSettlementActions": []
+          },
+          "unspecifiedComponent": {
+            "mode": "zero-only",
+            "formula": null,
+            "minimum": "0",
+            "maximum": "0",
+            "minimumSign": "zero",
+            "maximumSign": "zero",
+            "positiveSettlementActions": [],
+            "negativeSettlementActions": []
+          },
+          "residualAmmEquation": "amountSpecified-plus-specifiedDelta",
+          "finalCallerDeltaEquation": "pool-manager-swap-delta-minus-hook-delta",
+          "specifiedDeltaCanConsumeEntireAmount": false,
+          "rounding": "Round the fee against gross quote-side volume according to the hook accounting rule; reject any amount that exceeds the selected cap.",
+          "zeroAmmLeg": "forbidden",
+          "partialFillRule": "The hook computes from the executed amount only. A partial fill must preserve the caller limit and does not permit a full specified-delta consumption.",
+          "slippageInvariant": "Router and caller slippage checks apply to the final caller delta after the hook delta; the hook never widens a user limit.",
+          "failureRule": "Any invalid sign, currency, cap, PoolKey or settlement result reverts the complete swap atomically before a liability credit persists."
+        },
+        "oneForZeroExactOutput": {
+          "supported": true,
+          "specifiedCurrency": "currency0",
+          "unspecifiedCurrency": "currency1",
+          "amountSign": "positive-exact-output",
+          "specifiedComponent": {
+            "mode": "positive-only",
+            "formula": "oneForZero exact output specified component is positive only when USDG is the affected swap currency; otherwise it is zero.",
+            "minimum": "Zero USDG atomic units when no fee is due; otherwise a positive integer fee after cumulative rounding.",
+            "maximum": "bounded by the selected 300 bps gross quote-side fee and the executed swap amount",
+            "minimumSign": "zero",
+            "maximumSign": "positive",
+            "positiveSettlementActions": [
+              {
+                "order": 1,
+                "actor": "hook",
+                "operation": "take",
+                "currency": "specified",
+                "assetKind": "erc20",
+                "deltaOwner": "hook",
+                "deltaEffect": "negative",
+                "counterparty": "PoolManager",
+                "authorizationRule": "Only the authenticated canonical PoolManager callback may settle the hook fee.",
+                "msgValueRule": null,
+                "amountRule": "Take the positive quote-side fee component after validating the exact swap quadrant.",
+                "completionDeadline": "before-hook-return"
+              },
+              {
+                "order": 2,
+                "actor": "hook",
+                "operation": "internal-ledger-update",
+                "currency": "specified",
+                "assetKind": "erc20",
+                "deltaOwner": "hook",
+                "deltaEffect": "none",
+                "counterparty": "not-applicable",
+                "authorizationRule": "The hook updates only its PoolId, currency and beneficiary liability ledger.",
+                "msgValueRule": null,
+                "amountRule": "Credit the programmable, treasury and process liabilities from the settled positive component.",
+                "completionDeadline": "before-hook-return"
+              }
+            ],
+            "negativeSettlementActions": []
+          },
+          "unspecifiedComponent": {
+            "mode": "zero-only",
+            "formula": null,
+            "minimum": "0",
+            "maximum": "0",
+            "minimumSign": "zero",
+            "maximumSign": "zero",
+            "positiveSettlementActions": [],
+            "negativeSettlementActions": []
+          },
+          "residualAmmEquation": "amountSpecified-plus-specifiedDelta",
+          "finalCallerDeltaEquation": "pool-manager-swap-delta-minus-hook-delta",
+          "specifiedDeltaCanConsumeEntireAmount": false,
+          "rounding": "Round the fee against gross quote-side volume according to the hook accounting rule; reject any amount that exceeds the selected cap.",
+          "zeroAmmLeg": "forbidden",
+          "partialFillRule": "The hook computes from the executed amount only. A partial fill must preserve the caller limit and does not permit a full specified-delta consumption.",
+          "slippageInvariant": "Router and caller slippage checks apply to the final caller delta after the hook delta; the hook never widens a user limit.",
+          "failureRule": "Any invalid sign, currency, cap, PoolKey or settlement result reverts the complete swap atomically before a liability credit persists."
+        }
+      },
+      "executionEvent": "Before-swap return-delta settlement and liability accrual."
+    },
+    "postReturnDeltaAccounting": {
+      "afterSwap": {
+        "used": true,
+        "returnedDeltaShape": "unspecified-currency-int128",
+        "positiveMeaning": "hook-credit-caller-debit",
+        "negativeMeaning": "hook-debt-caller-credit",
+        "backingSource": "The hook takes the gross USDG quote-side fee and credits the programmable, treasury and process liability ledgers before returning.",
+        "callerDeltaEquation": "protocol-delta-minus-hook-delta",
+        "componentPolicies": {
+          "unspecified": {
+            "mode": "positive-only",
+            "formula": "afterSwap unspecified component is positive only when USDG is the affected swap currency; otherwise it is zero.",
+            "minimum": "Zero USDG atomic units when no fee is due; otherwise a positive integer fee after cumulative rounding.",
+            "maximum": "bounded by the selected 300 bps gross quote-side fee and the executed swap amount",
+            "minimumSign": "zero",
+            "maximumSign": "positive",
+            "positiveSettlementActions": [
+              {
+                "order": 1,
+                "actor": "hook",
+                "operation": "take",
+                "currency": "unspecified",
+                "assetKind": "erc20",
+                "deltaOwner": "hook",
+                "deltaEffect": "negative",
+                "counterparty": "PoolManager",
+                "authorizationRule": "Only the authenticated canonical PoolManager callback may settle the hook fee.",
+                "msgValueRule": null,
+                "amountRule": "Take the positive quote-side fee component after validating the exact swap quadrant.",
+                "completionDeadline": "before-hook-return"
+              },
+              {
+                "order": 2,
+                "actor": "hook",
+                "operation": "internal-ledger-update",
+                "currency": "unspecified",
+                "assetKind": "erc20",
+                "deltaOwner": "hook",
+                "deltaEffect": "none",
+                "counterparty": "not-applicable",
+                "authorizationRule": "The hook updates only its PoolId, currency and beneficiary liability ledger.",
+                "msgValueRule": null,
+                "amountRule": "Credit the programmable, treasury and process liabilities from the settled positive component.",
+                "completionDeadline": "before-hook-return"
+              }
+            ],
+            "negativeSettlementActions": []
+          },
+          "currency0": null,
+          "currency1": null
+        },
+        "bounds": "Positive only when USDG is the unspecified currency; otherwise zero. The amount is capped at 30000 hundredths of a bip of executed gross USDG volume.",
+        "rounding": "Use the hook cumulative accounting rule and preserve exact final caller-delta semantics.",
+        "slippageOrMinimums": "The route must enforce the user limit on the final caller delta; no separate hook minimum is introduced.",
+        "failureRule": "Any mismatch between the post-return delta, settlement and liability ledger reverts the complete swap.",
+        "executionEvent": "Swap fee settlement and liability update occur before afterSwap returns its delta."
+      },
+      "afterAddLiquidity": {
+        "used": false,
+        "returnedDeltaShape": null,
+        "positiveMeaning": null,
+        "negativeMeaning": null,
+        "backingSource": null,
+        "callerDeltaEquation": null,
+        "componentPolicies": {
+          "unspecified": null,
+          "currency0": null,
+          "currency1": null
+        },
+        "bounds": null,
+        "rounding": null,
+        "slippageOrMinimums": null,
+        "failureRule": null,
+        "executionEvent": null
+      },
+      "afterRemoveLiquidity": {
+        "used": false,
+        "returnedDeltaShape": null,
+        "positiveMeaning": null,
+        "negativeMeaning": null,
+        "backingSource": null,
+        "callerDeltaEquation": null,
+        "componentPolicies": {
+          "unspecified": null,
+          "currency0": null,
+          "currency1": null
+        },
+        "bounds": null,
+        "rounding": null,
+        "slippageOrMinimums": null,
+        "failureRule": null,
+        "executionEvent": null
+      }
+    },
+    "erc6909Claims": {
+      "used": false,
+      "currencyIdDerivation": null,
+      "claimBalanceScope": null,
+      "poolIdIncludedInClaimId": null,
+      "owner": null,
+      "operatorPolicy": null,
+      "mintFlow": null,
+      "burnFlow": null,
+      "takeSettleFlow": null,
+      "liabilityKeys": null,
+      "liabilityKeyDimensions": [],
+      "crossPoolNetting": null,
+      "transferPolicy": null,
+      "redemption": null,
+      "roundingDust": null,
+      "aggregateSolvencyEquation": null
+    },
+    "nestedActions": {
+      "used": false,
+      "directPoolManagerCalls": false,
+      "routerCalls": false,
+      "allowedActions": [],
+      "samePoolPolicy": null,
+      "crossPoolPolicy": null,
+      "callbackSuppression": null,
+      "directCallbackBehavior": null,
+      "routerCallbackBehavior": null,
+      "maximumDepth": null,
+      "stateCommitOrder": null,
+      "transientDeltaOwner": null,
+      "syncInterleaving": null,
+      "slippageAggregation": null,
+      "failureAtomicity": null
+    }
+  },
+  "noHookArchitecture": null,
+  "tokenMechanics": null,
+  "valueFlows": [
+    {
+      "id": "graph-deployment",
+      "action": "deploy canonical launch graph",
+      "asset": "native",
+      "from": "launch-wallet",
+      "to": "graph-factory",
+      "amountRule": "The graph call carries exactly 0 native atomic units.",
+      "settlement": "The factory creates the three declared targets only after its exact route and graph commitment are bound.",
+      "failure": "A missing route field, salt, code hash or source allocation mismatch stops before signing."
+    },
+    {
+      "id": "owner-seed",
+      "action": "seed canonical full-range liquidity",
+      "asset": "usdg and hkmn",
+      "from": "launch-wallet",
+      "to": "resolved canonical hook and custody",
+      "amountRule": "USDG maximum is 240000000 atomic units; HKMN maximum is the selected 1000000000000000000000000000 candidate.",
+      "settlement": "Permit2 transfers the exact USDG allowance to the hook, which forms the permanent custody position, returns unused USDG to the payer, and rejects any graph-mode HKMN residual.",
+      "failure": "An invalid allowance, deadline, range, price, allocation or post-deploy assertion reverts the seed."
+    },
+    {
+      "id": "swap-fee-accrual",
+      "action": "collect gross quote-side hook fee",
+      "asset": "usdg",
+      "from": "canonical-pool swap settlement",
+      "to": "hook liability ledger",
+      "amountRule": "The selected 30000 hundredths-of-bip fee uses the applicable before or after return-delta path and never exceeds the cap.",
+      "settlement": "The hook takes the settled USDG component and credits programmable, treasury and process liabilities before callback return.",
+      "failure": "A sign, currency, PoolKey or settlement mismatch reverts the complete swap atomically."
+    }
+  ],
+  "authorities": [
+    {
+      "role": "programmable-platform-recipient",
+      "controller": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+      "capabilities": [
+        "claim its own accrued platform liability to a selected destination"
+      ],
+      "mutable": false,
+      "delay": "none",
+      "userExitImpact": "The recipient cannot change pool rules, token supply, swap accounting or another beneficiary balance."
+    },
+    {
+      "role": "operations",
+      "controller": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+      "capabilities": [
+        "execute bounded project process actions defined by the hook configuration"
+      ],
+      "mutable": true,
+      "delay": "43200 seconds before rotation",
+      "userExitImpact": "Operations cannot redirect the immutable platform fee or bypass canonical pool validation."
+    },
+    {
+      "role": "treasury-beneficiary",
+      "controller": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "capabilities": [
+        "claim its own accrued treasury liability to a selected destination",
+        "propose treasury and operations role successors",
+        "pause bounded process claims"
+      ],
+      "mutable": true,
+      "delay": "two-step treasury acceptance; 43200 seconds before an operations rotation executes",
+      "userExitImpact": "The treasury cannot redirect the immutable programmable fee or alter canonical swap accounting."
+    }
+  ],
+  "dependencies": {
+    "onchain": [],
+    "offchain": []
+  },
+  "operations": {
+    "keeper": {
+      "required": false,
+      "actor": null,
+      "action": null,
+      "cadence": null,
+      "authentication": null,
+      "funding": null,
+      "failure": null,
+      "fallback": null
+    },
+    "oracle": {
+      "required": false,
+      "actor": null,
+      "action": null,
+      "cadence": null,
+      "authentication": null,
+      "funding": null,
+      "failure": null,
+      "fallback": null
+    },
+    "monitoring": "Monitor graph runtime hashes, hook mask, PoolKey, PoolId, Permit2 allowance and custody position before and after the owner seed.",
+    "incidentResponse": "Stop before the seed on any graph, source, fee-policy, allowance or code-hash mismatch. Preserve the unseeded graph and prepare a new reviewed package; do not broaden approvals or send compensating transfers."
+  },
+  "integration": {
+    "routerGeneration": null,
+    "routerDependencyId": null,
+    "permit2DependencyId": null,
+    "stateViewDependencyId": null,
+    "quoterDependencyId": null,
+    "sdkDependencies": [],
+    "routerActionProfile": {
+      "routerVersionExplicit": null,
+      "universalRouterCommand": null,
+      "v4Actions": [],
+      "settlementMode": null,
+      "permit2Mode": null,
+      "finalSwapDeltaValidated": null
+    },
+    "sdkSafetyProfile": {
+      "packageRootImportsOnly": null,
+      "hookedQuoteSource": null,
+      "localHookedPoolMathDisabled": null,
+      "hookDataParity": null,
+      "multiHopHookDataMode": null,
+      "perHopPriceBounds": null,
+      "slippageSemantics": null,
+      "deprecatedLiquidityActionsDisabled": null
+    },
+    "appSourcePaths": [],
+    "integrationTestPaths": [],
+    "quoteExecutionParity": null,
+    "swapModes": [
+      "zeroForOne-exactInput",
+      "zeroForOne-exactOutput",
+      "oneForZero-exactInput",
+      "oneForZero-exactOutput"
+    ],
+    "partialFills": "The hook calculates from executed amounts and rejects an unsupported final delta before any liability update persists.",
+    "slippage": "Caller limits apply to the final caller delta after the hook return delta; the hook does not widen a user limit.",
+    "deadline": "The seed deadline is chosen at signing and is no more than 900 seconds after final wallet confirmation.",
+    "permit2": "The owner seed requires an exact Permit2 allowance from the launch wallet to the resolved hook; user swap routing is not declared here.",
+    "stateReads": "The hook validates its configured PoolManager and canonical PoolKey on every callback.",
+    "events": [
+      "Swap",
+      "SwapLiabilitiesAccrued",
+      "ProgrammableClaimed",
+      "TreasuryClaimed",
+      "ProcessClaimed"
+    ],
+    "routingAndDiscoverability": {
+      "routingMode": "uniswap-interface-api",
+      "allowlistTriggers": {
+        "usesDeltaFlag": true,
+        "addressStartsWith91": false,
+        "targetsMajorPair": false,
+        "permissionedPool": false
+      },
+      "uniswapRoutingStatus": "required-not-submitted",
+      "hookRegistryStatus": "not-submitted",
+      "customHookDataRequired": false,
+      "standardRouterCompatible": true,
+      "permissionedRouting": {
+        "required": false,
+        "minimumRouterGeneration": null,
+        "adapterCurrencyUsed": null,
+        "allowedWrapperBindings": null,
+        "positionManagerBinding": null,
+        "routingAllowlistRequiredPerChain": null
+      },
+      "sourcePaths": [],
+      "testPaths": []
+    },
+    "dataReconstruction": {
+      "mode": "events-with-confirmed-reads",
+      "eventCoverage": "Index canonical PoolManager swap events together with hook liability and claim events after the final PoolId is known.",
+      "cursor": "block-number-transaction-index-log-index",
+      "startBlockPolicy": "Use the graph deployment block after the owner records the final transaction hash.",
+      "finalityDepth": 12,
+      "reorgPolicy": "Store checkpoint block hashes, roll derived rows back to the last common canonical ancestor, then replay ordered logs and confirmed reads for the affected PoolId.",
+      "backfillPolicy": "Replay from the graph deployment block through bounded finalized ranges, persist the full cursor after each range, retry failed ranges without advancing it, and never skip a log.",
+      "checkpointPolicy": "Store the finalized block number, hash, transaction index and log index; rebuild the affected projection when a stored hash no longer matches the canonical chain.",
+      "freshnessTargetSeconds": 120,
+      "staleAfterSeconds": 600,
+      "freshnessMeasurement": "Measure lag from the latest finalized block timestamp to the indexed cursor timestamp.",
+      "reconciliation": "Compare indexed hook liabilities with confirmed hook balances, PoolManager deltas and claim events for the resolved PoolId.",
+      "reserveReconstruction": {
+        "used": true,
+        "balanceSources": [
+          "Read the raw USDG balance held by the resolved hook at the same confirmed block as each PoolManager state read.",
+          "Read attributable PoolManager credit or claim state for the resolved hook and canonical PoolId at that confirmed block."
+        ],
+        "liabilitySources": [
+          "Replay SwapLiabilitiesAccrued, ProgrammableClaimed, TreasuryClaimed and ProcessClaimed, then confirm readFeeLiabilities(treasury) and processLiability for the resolved PoolId and USDG currency."
+        ],
+        "attributionKeys": [
+          "chainId",
+          "modelVersion",
+          "poolId",
+          "currency",
+          "beneficiary"
+        ],
+        "solvencyEquation": "For USDG, confirmed hook balance plus attributable PoolManager credit must cover reconstructed programmable, treasury and process liabilities for the same PoolId; the three independent remainders are not beneficiary balances.",
+        "poolLiquidityTreatment": "excluded-from-hook-reserves",
+        "donationAndDustPolicy": "Unattributed donations and rounding dust remain separate from beneficiary liabilities and cannot repair or conceal a reported deficit.",
+        "reconciliation": "After every finalized accounting event, compare reconstructed liabilities and attributed balances; suppress reserve reporting and require investigation when the equality does not hold."
+      },
+      "sourcePaths": [],
+      "testPaths": []
+    },
+    "platformHandoff": {
+      "intended": true,
+      "websiteRegistryPath": null,
+      "uiSourcePaths": [],
+      "apiSourcePaths": [],
+      "indexerSourcePaths": [],
+      "testPaths": [],
+      "reviewStatus": "not-requested",
+      "maintainerReviewRequired": true,
+      "selfApproval": false,
+      "availabilityClaimed": false,
+      "handoffNotes": "This proposal requires independent Programmable maintainer review of the custom hook, return deltas, provider chain support, fee policy and seed funding route."
+    }
+  },
+  "projectSurfaces": [
+    {
+      "id": "canonical-pool-hook",
+      "kind": "onchain-contract",
+      "name": "Hookemon canonical pool hook and launch graph",
+      "summary": "The token, custom hook and permanent custody targets form one reviewed canonical v4 launch boundary with quote-side fee accounting.",
+      "executionBoundary": "onchain",
+      "capabilityIds": [
+        "canonical-pool-fee-accounting",
+        "phase-three-launch-graph",
+        "canonical-v4-pool",
+        "claimable-platform-fee",
+        "custom-hook-behavior",
+        "evidence-plan",
+        "provider-disclosures",
+        "public-metadata",
+        "quote-side-volume-accounting",
+        "security-properties"
+      ],
+      "authorityRefs": [
+        "programmable-platform-recipient",
+        "treasury-beneficiary",
+        "operations"
+      ],
+      "valueFlowRefs": [
+        "graph-deployment",
+        "owner-seed",
+        "swap-fee-accrual"
+      ],
+      "assetRefs": [
+        "usdg",
+        "hkmn"
+      ],
+      "sourcePaths": [
+        "packages/contracts/src/HookemonHook.sol",
+        "packages/contracts/src/accounting/FeeAccounting.sol",
+        "packages/contracts/src/market/CanonicalMarket.sol",
+        "packages/contracts/src/access/MoneyRoles.sol",
+        "packages/contracts/src/launch/HookemonIssuance.sol",
+        "packages/contracts/src/bindings/RobinhoodBindings.sol",
+        "packages/contracts/script/release/PhaseThreeReleasePlan.sol"
+      ],
+      "testPaths": [
+        "packages/contracts/test/integration/HookemonHook.t.sol",
+        "packages/contracts/test/accounting/FeeAccounting.t.sol",
+        "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+        "packages/contracts/test/market/CanonicalMarket.t.sol",
+        "packages/contracts/test/launch/LaunchLeg.t.sol",
+        "packages/contracts/test/launch/LaunchComposition.t.sol",
+        "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol"
+      ],
+      "schemaPaths": [],
+      "evidencePaths": [
+        "release/phase3/launch-inputs.json",
+        "release/phase3/address-manifest.json",
+        "release/phase3/launch-plan.md"
+      ],
+      "exposure": {
+        "movesValue": true,
+        "usesSignatures": false,
+        "makesExternalCalls": true,
+        "holdsCustody": true,
+        "handlesPii": false,
+        "usesGeolocation": false,
+        "usesSecrets": false
+      },
+      "profiles": {
+        "authority": {
+          "status": "applicable",
+          "summary": "The configured PoolManager, immutable platform recipient and recorded operations address govern the canonical launch boundary.",
+          "controls": [
+            "Authenticate every callback against the configured PoolManager and canonical PoolKey."
+          ],
+          "evidenceRefs": []
+        },
+        "valueFlow": {
+          "status": "applicable",
+          "summary": "The graph and owner seed form the initial position; swaps collect USDG fee liability through return deltas.",
+          "controls": [
+            "Record every fee liability by PoolId, currency and beneficiary."
+          ],
+          "evidenceRefs": []
+        },
+        "sourceOfTruth": {
+          "status": "applicable",
+          "summary": "The resolved PoolManager, canonical PoolKey and hook liability ledger are authoritative after deployment.",
+          "controls": [
+            "Reject any source that does not match the final PoolId and runtime hashes."
+          ],
+          "evidenceRefs": []
+        },
+        "signaturesReplay": {
+          "status": "not-applicable",
+          "summary": "The hook consumes no offchain signature or signed payload; Rabby signing occurs outside the contract boundary.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "externalCalls": {
+          "status": "applicable",
+          "summary": "The hook calls pinned protocol and token contracts as part of authenticated settlement.",
+          "controls": [
+            "Reject failed or malformed settlement before ledger mutation."
+          ],
+          "evidenceRefs": []
+        },
+        "custody": {
+          "status": "applicable",
+          "summary": "The hook retains fee liability and the custody target retains the permanent initial position.",
+          "controls": [
+            "Keep claims scoped to the exact PoolId and beneficiary."
+          ],
+          "evidenceRefs": []
+        },
+        "piiGeolocation": {
+          "status": "not-applicable",
+          "summary": "The onchain launch graph stores addresses and amounts but no personal data or geolocation.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "secretBoundary": {
+          "status": "not-applicable",
+          "summary": "The launch graph stores no secret and this package contains no credential material.",
+          "controls": [],
+          "evidenceRefs": []
+        },
+        "sourceTestSchema": {
+          "status": "applicable",
+          "summary": "The proposal declares exact source and test paths for the custom hook and draft-policy release-plan guard.",
+          "controls": [
+            "Rebuild from frozen source and bind final compiler inputs before a signing decision."
+          ],
+          "evidenceRefs": []
+        },
+        "failureRecovery": {
+          "status": "applicable",
+          "summary": "A failed graph or seed stops before value movement or reverts atomically; a deployed unseeded graph requires a new reviewed package.",
+          "controls": [
+            "Never broaden Permit2 approval or create a compensating transfer after a mismatch."
+          ],
+          "evidenceRefs": []
+        }
+      },
+      "signedDataSource": {
+        "used": false,
+        "signerAuthorityRefs": [],
+        "signatureScheme": null,
+        "payloadSchemaPath": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "onchainVerifierSurfaceId": null
+      },
+      "onchainOracleVerifier": {
+        "used": false,
+        "verifiedSourceSurfaceIds": [],
+        "verificationRule": null,
+        "freshnessRule": null,
+        "replayProtection": null,
+        "failureRule": null
+      }
+    }
+  ],
+  "projectCapabilities": [
+    {
+      "id": "canonical-pool-fee-accounting",
+      "kind": "fee-accounting",
+      "summary": "Collect the gross quote-side fee through the canonical hook and retain PoolId-scoped programmable, treasury and process liabilities.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "value-flow",
+        "source-of-truth",
+        "external-calls",
+        "custody",
+        "source-test-schema",
+        "failure-recovery"
+      ]
+    },
+    {
+      "id": "phase-three-launch-graph",
+      "kind": "deterministic-launch-graph",
+      "summary": "Bind the three target templates, address derivation, two seed price candidates and post-deployment assertions without inventing provider inputs.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "value-flow",
+        "source-of-truth",
+        "external-calls",
+        "custody",
+        "source-test-schema",
+        "failure-recovery"
+      ]
+    },
+    {
+      "id": "canonical-v4-pool",
+      "kind": "pool-interaction",
+      "summary": "Bind the canonical PoolKey, hook permission mask, currency ordering and post-deployment pool assertions.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "claimable-platform-fee",
+      "kind": "claim",
+      "summary": "Accrue the immutable platform fee as a PoolId-scoped liability and allow its owner to choose a destination per claim.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "custom-hook-behavior",
+      "kind": "pool-interaction",
+      "summary": "Authenticate the canonical v4 callback surface and enforce the quadrant-dependent fee path without hookData.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "evidence-plan",
+      "kind": "state-observation",
+      "summary": "Bind source, test, compiler, graph and handoff evidence before the proposal can become a materialized launch package.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "provider-disclosures",
+      "kind": "state-observation",
+      "summary": "Preserve provider-dependent route, fee, funding and chain facts as explicit review inputs without treating them as launch approval.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "public-metadata",
+      "kind": "state-observation",
+      "summary": "Bind the owner-selected project and token metadata only after the final media bytes and content hashes are available.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "quote-side-volume-accounting",
+      "kind": "pool-interaction",
+      "summary": "Calculate inclusive fees from gross USDG quote-side volume in all four canonical swap quadrants.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    },
+    {
+      "id": "security-properties",
+      "kind": "state-observation",
+      "summary": "Record callback authentication, return-delta cancellation, solvency, failure atomicity and recovery controls for independent review.",
+      "surfaceIds": [
+        "canonical-pool-hook"
+      ],
+      "securityTriggers": {
+        "authority": true,
+        "valueFlow": true,
+        "sourceOfTruth": true,
+        "signaturesReplay": false,
+        "externalCalls": true,
+        "custody": true,
+        "piiGeolocation": false,
+        "secretBoundary": false,
+        "sourceTestSchema": true,
+        "failureRecovery": true
+      },
+      "requiredProfiles": [
+        "authority",
+        "custody",
+        "external-calls",
+        "failure-recovery",
+        "source-of-truth",
+        "source-test-schema",
+        "value-flow"
+      ]
+    }
+  ],
+  "capabilities": {
+    "externalCalls": {
+      "used": true,
+      "targets": [
+        "configured PoolManager",
+        "USDG token",
+        "Permit2"
+      ],
+      "callSites": [
+        "HookemonHook canonical settlement and seed path"
+      ],
+      "reentrancyPolicy": "The hook authenticates its PoolManager callback and commits liability only after settlement checks.",
+      "stateDriftPolicy": "The hook rejects a changed canonical PoolKey or token binding.",
+      "returnValuePolicy": "Token and Permit2 calls require exact success semantics before state mutation.",
+      "failureAtomicity": "Any failed external settlement reverts the complete transaction."
+    },
+    "permissionedAsset": {
+      "used": false,
+      "officialUniswapPermissionedPool": false,
+      "issuer": null,
+      "jurisdiction": null,
+      "legalDocuments": [],
+      "underlyingClaim": null,
+      "custodian": null,
+      "adapter": null,
+      "hooks": null,
+      "positionManager": null,
+      "swapEligibility": null,
+      "liquidityEligibility": null,
+      "positionTransferability": null,
+      "pauseFreezeUnwind": null,
+      "redemption": null,
+      "routingLimitations": null
+    },
+    "oracle": {
+      "used": false,
+      "source": null,
+      "value": null,
+      "deployment": null,
+      "runtimeHash": null,
+      "decimals": null,
+      "heartbeatSeconds": null,
+      "maxAgeSeconds": null,
+      "observationType": null,
+      "windowSeconds": null,
+      "minimumAnswer": null,
+      "maximumAnswer": null,
+      "maximumDeviation": null,
+      "roundChecks": null,
+      "manipulationResistance": null,
+      "governance": null,
+      "fallback": null,
+      "maxFallbackAgeSeconds": null,
+      "failureRule": null
+    },
+    "keeper": {
+      "used": false,
+      "executionMode": null,
+      "minIntervalSeconds": null,
+      "maxDelaySeconds": null,
+      "permissionlessFallbackAfterSeconds": null,
+      "idempotencyKey": null,
+      "duplicateBehavior": null,
+      "lastProcessedState": null,
+      "boundedWork": null,
+      "maxItems": null,
+      "retryPolicy": null,
+      "zeroWorkBehavior": null,
+      "fundingSource": null,
+      "minimumGasRunway": null,
+      "alertThreshold": null,
+      "maximumGas": null,
+      "failureImpact": null,
+      "userExitIndependent": null,
+      "poolBinding": null,
+      "slippage": null,
+      "deadline": null,
+      "mevPolicy": null
+    },
+    "proof": {
+      "used": false,
+      "proofSystem": null,
+      "circuitRevision": null,
+      "verifyingKeyHash": null,
+      "verifierAddress": null,
+      "runtimeHash": null,
+      "setupType": null,
+      "setupProvenance": null,
+      "publicInputs": [],
+      "domainBindings": {
+        "chainId": null,
+        "verifyingContract": null,
+        "modelVersion": null,
+        "pool": null,
+        "action": null,
+        "actorOrRecipient": null,
+        "amountBounds": null,
+        "epochOrDeadline": null
+      },
+      "replayMode": null,
+      "nullifierScope": null,
+      "nullifierDerivation": null,
+      "nullifierStorage": null,
+      "atomicSpentCheck": null,
+      "resetPolicy": null,
+      "maximumProofBytes": null,
+      "maximumVerificationGas": null,
+      "verifierAuthority": null,
+      "failureRule": null,
+      "privacyClaim": null,
+      "metadataLeakage": null
+    },
+    "crossChain": {
+      "used": false,
+      "bridgeDependencyId": null,
+      "source": {
+        "network": {
+          "namespace": null,
+          "reference": null
+        },
+        "domain": null,
+        "authenticatedSender": {
+          "encoding": null,
+          "value": null,
+          "canonicalizationRule": null
+        }
+      },
+      "destination": {
+        "chainId": null,
+        "domain": null,
+        "receiver": null,
+        "receiverDependencyId": null,
+        "authenticatedBridgeCaller": null
+      },
+      "message": {
+        "identifierDerivation": null,
+        "nonceDerivation": null,
+        "nonceScope": null,
+        "customNonceRule": null,
+        "payloadHashRule": null,
+        "idempotencyKeyRule": null,
+        "idempotencyStorage": null,
+        "atomicConsumption": null,
+        "duplicateBehavior": null,
+        "domainBindings": {
+          "bridgeDependencyId": null,
+          "sourceNetwork": null,
+          "sourceDomain": null,
+          "sourceSender": null,
+          "destinationChainId": null,
+          "destinationDomain": null,
+          "receiver": null,
+          "receiverDependencyId": null,
+          "modelId": null,
+          "poolId": null,
+          "action": null,
+          "payloadHash": null,
+          "timestampOrExpiry": null,
+          "messageId": null,
+          "nonce": null
+        }
+      },
+      "finality": {
+        "mode": null,
+        "minimumSourceConfirmations": null,
+        "challengePeriodSeconds": null,
+        "attestationRule": null,
+        "reorgBehavior": null,
+        "customFinalityRule": null
+      },
+      "ordering": {
+        "mode": null,
+        "sequenceKey": null,
+        "outOfOrderBehavior": null,
+        "maximumPendingMessages": null,
+        "queueOverflowBehavior": null,
+        "pendingMessageExpirySeconds": null,
+        "cleanupRule": null,
+        "releaseRule": null
+      },
+      "staleness": {
+        "timestampSource": null,
+        "customTimestampRule": null,
+        "maximumMessageAgeSeconds": null,
+        "maximumFutureSkewSeconds": null,
+        "staleMessageBehavior": null
+      },
+      "failureBehavior": null,
+      "failureRule": null,
+      "fallback": {
+        "mode": null,
+        "authority": null,
+        "rule": null
+      },
+      "quarantine": {
+        "used": null,
+        "storageRule": null,
+        "maximumEntries": null,
+        "entryExpirySeconds": null,
+        "overflowBehavior": null,
+        "cleanupRule": null,
+        "releaseMode": null,
+        "releaseRule": null,
+        "releaseAuthority": null,
+        "atomicRelease": null
+      }
+    },
+    "externalLiquidity": {
+      "used": false,
+      "custody": null,
+      "ownership": null,
+      "shareAccounting": null,
+      "solvencyEquation": null,
+      "lossAllocation": null,
+      "donationPolicy": null,
+      "exitPath": null,
+      "dependencyFailure": null
+    },
+    "asyncSwap": {
+      "used": false,
+      "supportedExactness": null,
+      "custody": null,
+      "fillRule": null,
+      "partialFillRule": null,
+      "cancellation": null,
+      "expiry": null,
+      "refund": null,
+      "queueBound": null,
+      "liveness": null,
+      "failureRule": null
+    },
+    "customCurve": {
+      "used": false,
+      "invariant": null,
+      "domain": null,
+      "rounding": null,
+      "monotonicity": null,
+      "discontinuities": null,
+      "inverse": null,
+      "differentialReference": null,
+      "failureRule": null
+    }
+  },
+  "capabilityExtensions": [
+    {
+      "capabilityId": "phase-three-launch-graph",
+      "summary": "Requirements revision 65 records the owner's 2026-09-05 full-pool allocation decision and the accepted 10 bps platform share. Provider preimage fields, salts, and materialized constructor values remain unresolved in the address-derivation-pending three-call graph.",
+      "interactionRefs": [
+        "release/phase3/launch-inputs.json",
+        "release/phase3/address-manifest.json",
+        "release/phase3/launch-plan.md"
+      ],
+      "trustBoundary": "The package binds local facts and the recorded provider acceptance, but does not establish deployment authorization or a signing-ready calldata payload.",
+      "failureMode": "A missing provider encoding, route field, or source-configuration match must stop the proposed seed path and require a new reviewed graph.",
+      "schemaPath": null,
+      "sourcePaths": [
+        "packages/contracts/script/release/PhaseThreeReleasePlan.sol"
+      ],
+      "testPaths": [
+        "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
+        "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+        "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol"
+      ],
+      "evidencePaths": [
+        "release/phase3/launch-inputs.json",
+        "release/phase3/address-manifest.json",
+        "release/phase3/address-manifest.schema.json",
+        "release/phase3/address-manifest-draft.schema.json",
+        "release/phase3/admission/preflight-probe.json",
+        "release/phase3/admission/provider-documents.json",
+        "release/phase3/admission/route-log.json",
+        "release/phase3/fork-pin.json",
+        "release/phase3/genesis-evidence.json",
+        "release/phase3/graph-gas-evidence.json",
+        "release/phase3/launch-inputs.example.json",
+        "release/phase3/launch-plan.md",
+        "release/phase3/artifacts/token.json",
+        "release/phase3/artifacts/custody.json",
+        "release/phase3/artifacts/hook.json",
+        "release/phase3/build-info/launch.json",
+        "release/phase3/package/graph-draft.json",
+        "release/phase3/package/package-manifest.json",
+        "release/phase3/deployment-manifest.json",
+        "release/phase3/tickmath-vectors.json"
+      ]
+    }
+  ],
+  "tokenBehaviorExtensions": [],
+  "security": {
+    "usesTxOrigin": false,
+    "userControlledDelegatecall": false,
+    "arbitraryExecution": false,
+    "unboundedCriticalLoop": false,
+    "ignoredCallResults": false,
+    "hiddenControls": false,
+    "assumesOnchainSecrecy": false,
+    "bypassesHookAddressValidation": false,
+    "signatureScheme": {
+      "used": false,
+      "standard": null,
+      "nonce": null,
+      "deadline": null,
+      "chain": null,
+      "verifyingContract": null,
+      "action": null,
+      "parameters": null,
+      "erc1271": null
+    }
+  },
+  "implementation": {
+    "sourcePaths": [
+      "packages/contracts/src/HookemonHook.sol",
+      "packages/contracts/src/accounting/FeeAccounting.sol",
+      "packages/contracts/src/market/CanonicalMarket.sol",
+      "packages/contracts/src/access/MoneyRoles.sol",
+      "packages/contracts/src/launch/HookemonIssuance.sol",
+      "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "packages/contracts/script/release/PhaseThreeReleasePlan.sol"
+    ],
+    "testPaths": [
+      "packages/contracts/test/integration/HookemonHook.t.sol",
+      "packages/contracts/test/accounting/FeeAccounting.t.sol",
+      "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+      "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol"
+    ],
+    "compilerBuildInfoPaths": null,
+    "specificationPath": "specs/requirements.json",
+    "testEvidencePath": "release/phase3/launch-inputs.json",
+    "dependencyLockPath": "product/dependency-pins.json",
+    "gateStatusPath": null,
+    "reviewTargetPath": "release/phase3/review-target.json",
+    "runtimeAssetManifestPath": null
+  },
+  "risk": {
+    "dimensions": {
+      "complexity": 5,
+      "customMath": 5,
+      "externalDependencies": 3,
+      "externalLiquidity": 0,
+      "valueAtRisk": 5,
+      "teamMaturity": 3,
+      "upgradeability": 0,
+      "autonomy": 1,
+      "priceImpact": 3
+    },
+    "rationales": {
+      "complexity": "The hook combines canonical pool admission, launch seeding, a custody target and four return-delta swap quadrants.",
+      "customMath": "Return-delta accounting and gross quote-side fee rounding require specialist review and four-quadrant invariant tests.",
+      "externalDependencies": "The graph depends on provider route facts, PoolManager, Permit2 and USDG behavior that are not all locally verified.",
+      "externalLiquidity": "The initial position is owner-provided liquidity and does not source external liquidity.",
+      "valueAtRisk": "The owner seed and all future canonical swaps rely on correct PoolKey, delta and liability accounting.",
+      "teamMaturity": "The implementation has not completed a provider-bound preflight, a materialized compiler closure, or independent return-delta review.",
+      "upgradeability": "The hook and platform recipient are declared immutable; no proxy upgrade path is part of the proposal.",
+      "autonomy": "No keeper, oracle or autonomous swap action is enabled by this release package.",
+      "priceImpact": "The initial full-range liquidity and hook fee affect trading execution and require final price candidate validation."
+    },
+    "declaredTotal": 25,
+    "declaredTier": "high",
+    "featureTriggers": [
+      "autonomous",
+      "custom-accounting",
+      "custom-math",
+      "external-calls",
+      "price-impact",
+      "project-custody",
+      "project-external-calls",
+      "project-value-flow",
+      "return-delta"
+    ]
+  },
+  "disclosures": [
+    "FEE-01 records the accepted 10 bps platform share confirmed with the owner on 2026-09-04.",
+    "The retained provider material does not establish an ERC-20 Permit2 funding route for the 240 USDG owner seed.",
+    "Requirements revision 65 records the owner's 2026-09-05 decision: the complete 1,000,000,000 HKMN supply is allocated to the canonical market, with zero other allocations. The DRAFT_UNSIGNED baseline records subject hashes and is not transaction authorization.",
+    "The executable graph requires exactly three ABI-derived calls in token, custody, hook order: token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Provider-supplied encoding must bind their selectors, targets, arguments, and order before graph calldata can exist.",
+    "Requirements revision 65 describes separate graph deployment and owner seed transactions; it does not authorize either. Provider preimage fields, graph calldata, and preflight evidence remain required before either transaction is signed.",
+    "The checked-in launch profile binds one bare Standard JSON input and the full 0.8.26+commit.8a97fa7a compiler version. It remains template evidence until provider route fields materialize the graph.",
+    "The provider route namespace, route nonce, topology, salts and expected CREATE2 addresses are bound only at the address-manifest checkpoint; this proposal contains no signing calldata.",
+    "The resolved HKMN address selects the currency order, PoolKey, PoolId and seed price candidate. If USDG is currency0, before-swap collection is zeroForOne exact input and oneForZero exact output; if USDG is currency1, it is zeroForOne exact output and oneForZero exact input. The package must be rebuilt before wallet handoff.",
+    "The source splits the combined 290 bps project policy share into 40 bps treasury and 250 bps process liabilities. The complete HKMN supply is allocated to the canonical market; permanent custody holds only the v4 position.",
+    "The quote asset is an external upgradeable dependency. Its current implementation, pause and freeze behavior require provider-bound verification before launch.",
+    "The metadata icon and banner bytes, content hashes and immutable publication locations must be supplied before a public metadata artifact is bound.",
+    "The 12-block reconstruction threshold is a conservative proposal policy and needs target-chain finality confirmation before indexer integration."
+  ],
+  "unresolved": [
+    "Provider graph preimage: route namespace, route nonce, topology hash, target-id hashes, and serialized calls for token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96)."
+  ]
+}

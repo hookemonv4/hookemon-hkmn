@@ -1,0 +1,20 @@
+{
+  "id": "r-00199",
+  "at": "2026-08-30T20:45:02.969Z",
+  "type": "owner-survivability-bounds-approved",
+  "phase": "feasibility",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-survivability-bounds-revision-54-approved.json",
+    "itemId": "F2",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner am 30.08.2026: S5, F2 und Merge von PR #1 wie beschrieben genehmigt. Genehmigt werden die in feasibility/survivability-bounds.json gebundenen F2-Grenzen: Null-Abweichungen, 0 Sekunden Runway, 1024 Positionen und 100 USDG Non-Gas-Principal-Loss."
+  },
+  "inputHashes": {
+    "feasibility/survivability-bounds.json": "a1125fc0e00d623133925086f4e1a7f35e7d6d1123231c79dbd589a2b8644cd5",
+    "gates/feasibility.json": "c78403595604344e72fe30fcdb64190ad63b9f7f99c30d2eca6824a0acaa1f14",
+    "policy/policy.json": "9c8a032c3067b0ce5027507f0328e77fe4ae46960e776e8e8c4685bb69dfe41d",
+    "decisions/owner-approvals/phase-1-survivability-bounds-revision-54-approved.json": "f0ae145dfc37016764f41f1a55edf905c172f472435144d82b4783d4ade98cce"
+  }
+}

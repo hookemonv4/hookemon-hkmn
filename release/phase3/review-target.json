@@ -1,0 +1,2335 @@
+{
+  "closure": {
+    "diagnostics": [],
+    "status": "complete"
+  },
+  "closureMethod": "declared-bytes-and-resolved-solidity-and-javascript-imports-v10",
+  "externalImports": [
+    "@openzeppelin/contracts/token/ERC20/IERC20.sol",
+    "@uniswap/v4-core/lib/forge-std/src/Test.sol",
+    "@uniswap/v4-core/lib/forge-std/src/Vm.sol",
+    "@uniswap/v4-core/src/PoolManager.sol",
+    "@uniswap/v4-core/src/interfaces/IHooks.sol",
+    "@uniswap/v4-core/src/interfaces/IPoolManager.sol",
+    "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol",
+    "@uniswap/v4-core/src/libraries/CustomRevert.sol",
+    "@uniswap/v4-core/src/libraries/FixedPoint96.sol",
+    "@uniswap/v4-core/src/libraries/FullMath.sol",
+    "@uniswap/v4-core/src/libraries/Hooks.sol",
+    "@uniswap/v4-core/src/libraries/Position.sol",
+    "@uniswap/v4-core/src/libraries/SafeCast.sol",
+    "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol",
+    "@uniswap/v4-core/src/libraries/StateLibrary.sol",
+    "@uniswap/v4-core/src/libraries/TickMath.sol",
+    "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol",
+    "@uniswap/v4-core/src/test/BaseTestHooks.sol",
+    "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol",
+    "@uniswap/v4-core/src/test/PoolSwapTest.sol",
+    "@uniswap/v4-core/src/types/BalanceDelta.sol",
+    "@uniswap/v4-core/src/types/BeforeSwapDelta.sol",
+    "@uniswap/v4-core/src/types/Currency.sol",
+    "@uniswap/v4-core/src/types/PoolId.sol",
+    "@uniswap/v4-core/src/types/PoolKey.sol",
+    "@uniswap/v4-core/src/types/PoolOperation.sol",
+    "@uniswap/v4-core/test/utils/CurrencySettler.sol",
+    "@uniswap/v4-periphery/src/PositionManager.sol",
+    "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol",
+    "@uniswap/v4-periphery/src/interfaces/IStateView.sol",
+    "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol",
+    "@uniswap/v4-periphery/src/interfaces/IV4Router.sol",
+    "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol",
+    "@uniswap/v4-periphery/src/libraries/Actions.sol",
+    "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol",
+    "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol",
+    "forge-std/Script.sol",
+    "forge-std/Test.sol",
+    "permit2/src/interfaces/IAllowanceTransfer.sol",
+    "permit2/src/libraries/SignatureVerification.sol",
+    "permit2/test/utils/DeployPermit2.sol",
+    "solmate/src/auth/Owned.sol",
+    "solmate/src/tokens/ERC721.sol"
+  ],
+  "files": [
+    {
+      "bytes": 306,
+      "kind": "compiler-config",
+      "path": "foundry.toml",
+      "sha256": "9729ee2146e4a322a90e0590d68cfa2e81b60492b0529d72a70336d30cd4fcf4"
+    },
+    {
+      "bytes": 1793,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/Base.sol",
+      "sha256": "d5a2918c9ba38629bcf1c8b5206a0b779eb92576bbebec2024ec6438562ecf74"
+    },
+    {
+      "bytes": 832,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/Script.sol",
+      "sha256": "c4de2ae936fa7bb4f4250a3908c6bce7acdc84034156cb252fdc2d9a1c020012"
+    },
+    {
+      "bytes": 23360,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdAssertions.sol",
+      "sha256": "d4c89eec70d267dec6188461fbc74d3dc8c47e518d176a23417533a232ed9780"
+    },
+    {
+      "bytes": 12796,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdChains.sol",
+      "sha256": "ea677f924a6cecdaa4e28002cc8a013698e35813072ae79e4dcb9330f4f32928"
+    },
+    {
+      "bytes": 31489,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdCheats.sol",
+      "sha256": "cbdfdadacf12e0b6cab311420fb8543ce8105fe794ecdb73d905e46ec09d027c"
+    },
+    {
+      "bytes": 1013,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdError.sol",
+      "sha256": "82ca17e33a03775e95b4612bd604a8732c73b2982a0278d214e06c68a886dc11"
+    },
+    {
+      "bytes": 3977,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdInvariant.sol",
+      "sha256": "f572e991cfe874844b3b75a540e38e2161c29b5d9ab1635a3c4f1a16c548f987"
+    },
+    {
+      "bytes": 9703,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdJson.sol",
+      "sha256": "0211b47e93dbeb6a7de6112470a77137038ed73b79b015847f013e49fcd7511f"
+    },
+    {
+      "bytes": 1360,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdMath.sol",
+      "sha256": "f04fc0616741563eb32d66c11af7fdca55a7202221e14282268c7be851fc63ab"
+    },
+    {
+      "bytes": 17841,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdStorage.sol",
+      "sha256": "c6dbb05b29be5bcbfabf06ea46b64fe9fbdb7542681795614ca3dee248214215"
+    },
+    {
+      "bytes": 10462,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdStyle.sol",
+      "sha256": "324c2b0e100e88edbdb75f60f8a4c42f056f8d618ae5f56b1c404df64e8280a7"
+    },
+    {
+      "bytes": 9703,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdToml.sol",
+      "sha256": "de3fb35af79a1fd2a2de9bc4ca7866e4102f9d3fbf11f66f3fe82696412d47e2"
+    },
+    {
+      "bytes": 10656,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/StdUtils.sol",
+      "sha256": "8bb419a63d92061cf943160bf35e164a425910f46efd8516869e07d2ab71d534"
+    },
+    {
+      "bytes": 1046,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/Test.sol",
+      "sha256": "242f2494d264bf00515b7bfcb5a3e6cbc3e737d03795105cbf19f68d8b640dd9"
+    },
+    {
+      "bytes": 108076,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/Vm.sol",
+      "sha256": "9ed10705966cec6d7e92a705659039aa8859c8d34bf2e6ba83de7165e984ea91"
+    },
+    {
+      "bytes": 69270,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/console.sol",
+      "sha256": "896c5a5a5c235cb11a39876d430e1fc2c621e7950c4637ca58251b84b053f178"
+    },
+    {
+      "bytes": 117,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/console2.sol",
+      "sha256": "3bbe2e07ec53d8cf9c091667fe10234fcb3e2b45eab2c711002188806f46e779"
+    },
+    {
+      "bytes": 537,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/interfaces/IERC165.sol",
+      "sha256": "9bdab733bba2df028853aef1f5e06871fb4157d15c3c6a670be13f9b614c193b"
+    },
+    {
+      "bytes": 2067,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/interfaces/IERC20.sol",
+      "sha256": "283cedb0cf82640370b77b8a42175bc417c69a02d8989ac6d6a99be2157acd4d"
+    },
+    {
+      "bytes": 9026,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/interfaces/IERC721.sol",
+      "sha256": "f44e47686226be0889c4a21f782d653c2ebba509c0c13197edf6a5f1567c52a6"
+    },
+    {
+      "bytes": 2185,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/interfaces/IMulticall3.sol",
+      "sha256": "6620d9c5ea2e2291440e1dcce5072f948b7ec4d65075876a0d0ac9267d3342e3"
+    },
+    {
+      "bytes": 8320,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/mocks/MockERC20.sol",
+      "sha256": "6d200d98f43e9090138c66589f2c65e5e30ffc150b48547ebf6de93bcdc00183"
+    },
+    {
+      "bytes": 7902,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/mocks/MockERC721.sol",
+      "sha256": "f66d07f09db8532278c9d4a3c63feafc86a38ea0e0d94b761e9aba3326433e81"
+    },
+    {
+      "bytes": 427535,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/lib/forge-std/src/safeconsole.sol",
+      "sha256": "ed11aa2efc83fa8e575215a11dd7a9be385cf49dacbc379630168d7334899e46"
+    },
+    {
+      "bytes": 2779,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+      "sha256": "6f2faae462e286e24e091d7718575179644dc60e79936ef0c92e2d1ab3ca3cee"
+    },
+    {
+      "bytes": 1476,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/lib/solmate/src/auth/Owned.sol",
+      "sha256": "8ac2f2dc41ab8012e93adb3791326ffa1e4059a20c306a777109dd81816b9125"
+    },
+    {
+      "bytes": 7365,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/lib/solmate/src/tokens/ERC721.sol",
+      "sha256": "2da0cca384448208e25d43eeb5953a237de0e6712942a07d0f2674e895b0d3d3"
+    },
+    {
+      "bytes": 3497,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/ERC6909.sol",
+      "sha256": "0f1bf94844851b561ae53d57263366d18f4c4431eb47096871e8715837c6ec9d"
+    },
+    {
+      "bytes": 958,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/ERC6909Claims.sol",
+      "sha256": "6fa9989899398646fd7c33f837254a69e7c75b77af120970ede397c3d0fbdc37"
+    },
+    {
+      "bytes": 2609,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/Extsload.sol",
+      "sha256": "ac157c05d62562eed212cdf290046a85d192e7b1f8aba69c3ce358b0ebac4279"
+    },
+    {
+      "bytes": 1603,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/Exttload.sol",
+      "sha256": "386b5618307a20144a44308b81188c7755a6c279db6c5824cf63a910864324d4"
+    },
+    {
+      "bytes": 1248,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/NoDelegateCall.sol",
+      "sha256": "525bf4df92c4ac0fd582e1b6ac18fdfb5d147d410f38f19231e4c9a469187415"
+    },
+    {
+      "bytes": 17613,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/PoolManager.sol",
+      "sha256": "3b6ab111dadf613e3cfd617e4b1c6ab75b5445cd15cbe52d7c6207fc02449717"
+    },
+    {
+      "bytes": 3036,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/ProtocolFees.sol",
+      "sha256": "bdabfbdfa0d8692ee187ffab948c295c2c6ebcc2dcf86e552fba3491309843c6"
+    },
+    {
+      "bytes": 1023,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/IExtsload.sol",
+      "sha256": "9421ef4ba198d94058cd9a4c9fd2d663c61fc682f7dafa449a873456853f0025"
+    },
+    {
+      "bytes": 699,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/IExttload.sol",
+      "sha256": "c21643d2c7f48d2d2407438a64a3ff0f376324cf6a0c62608977713652308c9e"
+    },
+    {
+      "bytes": 8229,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "sha256": "6eb35c9c598eb932e963219f1ff180748bc4c30ac6a02d924893b3c29abb1d73"
+    },
+    {
+      "bytes": 12835,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "sha256": "a98405333567e4ab344489728014795721cf0071c151536377d2fcc986e0600c"
+    },
+    {
+      "bytes": 2489,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/IProtocolFees.sol",
+      "sha256": "807d68adea106ec2aa51a8009155de09ebfe09e1ee7053d5a5ae448d7e840654"
+    },
+    {
+      "bytes": 488,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/callback/IUnlockCallback.sol",
+      "sha256": "2e4a514730654da2e08a82eff5b3eabae12dc1c6198951396e1d466d4c0e223e"
+    },
+    {
+      "bytes": 3041,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/external/IERC20Minimal.sol",
+      "sha256": "5e966a2d22b3b234a56af4b17e36bf7be90f9b29b1ddb6a15bfefc0b6dab4282"
+    },
+    {
+      "bytes": 3162,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/interfaces/external/IERC6909Claims.sol",
+      "sha256": "1cd65496c829036bc6aee67bc71363ab5fb6989c65e793087d0e1e2379f7d7d8"
+    },
+    {
+      "bytes": 2609,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/BitMath.sol",
+      "sha256": "e8a45eb3d57f9427fc47bbb2543c1a6a5f394113b378123ac7ca9f113a7502b4"
+    },
+    {
+      "bytes": 1606,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/CurrencyDelta.sol",
+      "sha256": "dfbb3d232c2d52bb09c8dcbb38b4a8fd16c616b8e6bf49e6f4ee948760530f7b"
+    },
+    {
+      "bytes": 1289,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/CurrencyReserves.sol",
+      "sha256": "b38f1d3807d90bbccb865c0d96caf1ef92d6df9b69adbbe43b1d12e1241523c9"
+    },
+    {
+      "bytes": 5174,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/CustomRevert.sol",
+      "sha256": "9d3dbe6b742cb1ac30f57df89d879ade9649389de1165fc637114bd062d39fca"
+    },
+    {
+      "bytes": 297,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/FixedPoint128.sol",
+      "sha256": "1ca2f55160697b73bd66fd27c8724d79a57108121ce1e8a0ab8b79f38bb58fbb"
+    },
+    {
+      "bytes": 366,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/FixedPoint96.sol",
+      "sha256": "66ee26d4fb3ac639124bdfa27d3256d196970997fa127c09e9bf7154e30d4590"
+    },
+    {
+      "bytes": 5463,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/FullMath.sol",
+      "sha256": "a9607255a6fd604d9c92f6b7416811c38b9d86e5dfdb0c345a494ebd35f7a4a3"
+    },
+    {
+      "bytes": 16511,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/Hooks.sol",
+      "sha256": "297d577998cdede64d48b47b12f15e4f442eea032fbb9676bb3c2f89da89b83c"
+    },
+    {
+      "bytes": 3596,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/LPFeeLibrary.sol",
+      "sha256": "e96c3fa7deac991dc09b6c5e560a340d01d6c68ccba483d4b29f8a66e5aa44e0"
+    },
+    {
+      "bytes": 742,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/LiquidityMath.sol",
+      "sha256": "67a39e58732340af4870342ba9230691f35501d89ed8725ca1b338deaa0eb26a"
+    },
+    {
+      "bytes": 930,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/Lock.sol",
+      "sha256": "29cd41a53de22514164e638e7bc965ccf4d9f34b455b43a1a15e06a8cb86e7f1"
+    },
+    {
+      "bytes": 1460,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/NonzeroDeltaCount.sol",
+      "sha256": "0ae35ca64da2527b4e1f7afa4ca10c4b65af952dc473c33b6663101e8d199f40"
+    },
+    {
+      "bytes": 1200,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/ParseBytes.sol",
+      "sha256": "6a6f3d1cec0143fd70ea68c34e6dce3bde72f368b213f1a225ada23dbfd99bb8"
+    },
+    {
+      "bytes": 30035,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/Pool.sol",
+      "sha256": "59c493035ad25d56f24a457e8b40d9d1e3784504b8ff13d171db1eb25c6f128e"
+    },
+    {
+      "bytes": 4813,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/Position.sol",
+      "sha256": "3dc4e2ad1564fa94eddf3ff06ce9ac592c9d578ea64ca194050382da454c8fcb"
+    },
+    {
+      "bytes": 2113,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/ProtocolFeeLibrary.sol",
+      "sha256": "f8d96d9c8b5d12ab927b34551699bd7086750475f70254c9505e636f2cafe56a"
+    },
+    {
+      "bytes": 2269,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/SafeCast.sol",
+      "sha256": "c1a815a41607be5b4c86ca588a951f368156da8ee21bdfc18b5d51b58a0f27be"
+    },
+    {
+      "bytes": 14076,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/SqrtPriceMath.sol",
+      "sha256": "42440c21bbab86c7eed4716b281ed5ca281cf14af8b5e06dc6dc3bc6864bcfdf"
+    },
+    {
+      "bytes": 16027,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "sha256": "eebdbc1b6e431072ce5521b9e1b603d43831e3b6e062743e6665e070d5cf8a1a"
+    },
+    {
+      "bytes": 6968,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/SwapMath.sol",
+      "sha256": "eb3971ea0ba84ff0a01f2fbe43f62f9c393121ef1724774ed3f3ab7760780e4a"
+    },
+    {
+      "bytes": 6266,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/TickBitmap.sol",
+      "sha256": "19b25dccfac8bd90f9d615fb182547eb7b5908a5cbf21a1c5920b92c47383cb6"
+    },
+    {
+      "bytes": 12382,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "sha256": "272d4f6d3ff9ae33596ebcdb84a71a3c2d4542ae8fb5c88ddf1aca8043f5d06b"
+    },
+    {
+      "bytes": 2361,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/TransientStateLibrary.sol",
+      "sha256": "9835fca9df8b3f649def66835c5d7ee68de6a6cbe92bf255eb5d8b92a6a8d60e"
+    },
+    {
+      "bytes": 1165,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/libraries/UnsafeMath.sol",
+      "sha256": "2de236e7ca0b9572a6b0184557565b6fd54e177224e202c727fe248785ede427"
+    },
+    {
+      "bytes": 3408,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/test/BaseTestHooks.sol",
+      "sha256": "ac535ee6301586f36b6240e2f496fb299915c1c54dfcc3eb90fb57f76432abf4"
+    },
+    {
+      "bytes": 3796,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/test/PoolModifyLiquidityTest.sol",
+      "sha256": "43be2141b83cae264fa9d5278c8a061d4074698458822358a7c09a9748741e9a"
+    },
+    {
+      "bytes": 5002,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/test/PoolSwapTest.sol",
+      "sha256": "1bfd112087ec3abc30ea92cef6e39c9fd502502c9f28dac3d4df9fee7155e6d2"
+    },
+    {
+      "bytes": 1024,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/test/PoolTestBase.sol",
+      "sha256": "e3ab1cd908af2302b1abfdfa327ea344c297fb879312164392d7020321943833"
+    },
+    {
+      "bytes": 2339,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "sha256": "320d9c13dec135c3903729e66d3a1040fe86d537a7ee53728915012ca183af32"
+    },
+    {
+      "bytes": 1466,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/types/BeforeSwapDelta.sol",
+      "sha256": "6aee06f1553e879f5909e8f4c0eac26ec23dd4821a7e56e4d5077db39a227e12"
+    },
+    {
+      "bytes": 5458,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "sha256": "ba6726fd24fbc66848208dfbb2899116c10729c505e6e5552316ac2444f1dfc3"
+    },
+    {
+      "bytes": 539,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "sha256": "548424ac50ad58212545da70207283fb8990731578c115c85d5acbcb0e1d3c9f"
+    },
+    {
+      "bytes": 805,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "sha256": "99e1afe285b5c614ebc9586ab5196db9d24a63fd924a449f5d99f490a6a6d6a9"
+    },
+    {
+      "bytes": 907,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "sha256": "cf72ad0c3e5e91662029e862acd841fabce8753040b0d4e802dee64ef1157232"
+    },
+    {
+      "bytes": 3404,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/src/types/Slot0.sol",
+      "sha256": "378b45486644dc7e49726358e83d0e2fffdaee088d18cac1a3df00d02c3635b4"
+    },
+    {
+      "bytes": 2406,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-core/test/utils/CurrencySettler.sol",
+      "sha256": "afe4d7de04f55f35f25bae046a96baa4137709b9df13d90b76c643a1317df6b8"
+    },
+    {
+      "bytes": 7703,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol",
+      "sha256": "a31c712c5cc8d171818a4225c09011f9ba86b2d5edf6045ac812bab93b6bbb87"
+    },
+    {
+      "bytes": 144,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IEIP712.sol",
+      "sha256": "e386407da496dbe874c10a81801c55744fb2922a51389a51c79001422e81e0cd"
+    },
+    {
+      "bytes": 464,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IERC1271.sol",
+      "sha256": "ec69c9c80939d613cda408fd05424e0dfa7b1fd76168a1fb6593f4b26b3b3d7b"
+    },
+    {
+      "bytes": 1812,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/lib/permit2/src/libraries/SignatureVerification.sol",
+      "sha256": "1804b3d7b1183225419ec8ee45daf89174ff3668315d71d28111d5fcc179f8e4"
+    },
+    {
+      "bytes": 18986,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/lib/permit2/test/utils/DeployPermit2.sol",
+      "sha256": "c1a8b89e6c39377490c3c6f7290e9cd40e59c2156333261955feee34a84d4d41"
+    },
+    {
+      "bytes": 29251,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "sha256": "2e3c0043654fea263377c5e09c31344946751c8b8ace60580f5090385d3b4428"
+    },
+    {
+      "bytes": 3550,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/BaseActionsRouter.sol",
+      "sha256": "e3ceda8c5bb24d3e439aef94d004fdce7956439bc74c5c5bcd86e2cb9455e813"
+    },
+    {
+      "bytes": 5831,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/DeltaResolver.sol",
+      "sha256": "f72fc92131cf8fe0d6797ffe50290dbd6f12338a5773ba61847211652527f5f5"
+    },
+    {
+      "bytes": 2695,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/EIP712_v4.sol",
+      "sha256": "5468276540ebe52a5e84dd9b0f45e7af833a0ec17c83a87b8a80c9dde1ea70cb"
+    },
+    {
+      "bytes": 4185,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/ERC721Permit_v4.sol",
+      "sha256": "20ea450546f8904fc2325ecfc096144a46ab946b2543b8f91e9f16ca688e74c8"
+    },
+    {
+      "bytes": 818,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/ImmutableState.sol",
+      "sha256": "d3ef34f9c00fae08ec1eb24aa341d5d916c4d6d62e6c2118ef4afe9c7470fde5"
+    },
+    {
+      "bytes": 836,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/Multicall_v4.sol",
+      "sha256": "4abf8420610db70687e200ff315db4d9093a79fe640a3a7c457ce427100ea4e4"
+    },
+    {
+      "bytes": 1137,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/NativeWrapper.sol",
+      "sha256": "8ca41a32e3c8e42866e6486fccd2e805b702cb583bf222c2d2da4bd429a23aa2"
+    },
+    {
+      "bytes": 4891,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/Notifier.sol",
+      "sha256": "71d667d5abb48c1767f177ad781196fccc74e75082021df3630df7574e4a44a8"
+    },
+    {
+      "bytes": 1511,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/Permit2Forwarder.sol",
+      "sha256": "be0db7277904908724b64b31e9a1ed266f96d8e98914b1c5ae43930121708935"
+    },
+    {
+      "bytes": 804,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/PoolInitializer_v4.sol",
+      "sha256": "142555120536369dcdd8e9ea363945f0babb256048054c9318091c7cb2d80461"
+    },
+    {
+      "bytes": 521,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/ReentrancyLock.sol",
+      "sha256": "a30c768301d6a3fb9befefd9efeecca7ba22b8bfac5e5e2c891410e14775fb10"
+    },
+    {
+      "bytes": 1055,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/SafeCallback.sol",
+      "sha256": "0c25eef89a860e579d6e26f53e32240da787bd75827d7833b6f29e63af87b571"
+    },
+    {
+      "bytes": 1116,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/base/UnorderedNonce.sol",
+      "sha256": "c64fa82d222e7ab25b37c21660b888a1843a5ed57996f5f010f28ad3a7960bf3"
+    },
+    {
+      "bytes": 328,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IEIP712_v4.sol",
+      "sha256": "ee4cc46349cc7f1f894197f368ddea0f71f2564c2962822eead755714f3ba57d"
+    },
+    {
+      "bytes": 2137,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IERC721Permit_v4.sol",
+      "sha256": "80680771bccd7bf47641417d5a656f950746072766e24703f354e58c2ee0875c"
+    },
+    {
+      "bytes": 365,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IImmutableState.sol",
+      "sha256": "86f06a1f388f91ee0185495cb5d2912d564f73fabb163b3767e9c292c5069276"
+    },
+    {
+      "bytes": 605,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IMsgSender.sol",
+      "sha256": "cb96ee72c46755a67f9ca304df192365ae7c3923eaab9539f0ce74a88de10cf7"
+    },
+    {
+      "bytes": 774,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IMulticall_v4.sol",
+      "sha256": "0c0f4f1cccb7cf63c1ee3dc53e8d48cf867cbff08f5a8f85dd820873277e9481"
+    },
+    {
+      "bytes": 3200,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/INotifier.sol",
+      "sha256": "7fadc8550f73d9ae57925bb27f5ab3a134d4c020972a13683e1121fc11691249"
+    },
+    {
+      "bytes": 1435,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IPermit2Forwarder.sol",
+      "sha256": "3b28167d65673e7de2bbed1e6f3508350cf889f8439e8680da23ad7586f4cc57"
+    },
+    {
+      "bytes": 782,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IPoolInitializer_v4.sol",
+      "sha256": "ca6ecf95cfbc647d49b774801d84c49c8213010771b44555b056118102d644fc"
+    },
+    {
+      "bytes": 2006,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionDescriptor.sol",
+      "sha256": "ea68397628ff5d386fdfbea48af0556acb537f8d63edccb22d2fa61ac4175cdd"
+    },
+    {
+      "bytes": 3926,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionManager.sol",
+      "sha256": "439bcd1310f47092a15fa1cc98971898a536eaaff91ac397d8b12eee3c7d79c1"
+    },
+    {
+      "bytes": 7565,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "sha256": "28bb7523693dd487f3fe0c4ea44f1aeb4c1bed6371c6bc74d76bd625003e62f2"
+    },
+    {
+      "bytes": 2270,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/ISubscriber.sol",
+      "sha256": "9672e03c964da7cd484df290ad3395b6beacd90adcdd8ea2236f835407fb8e2e"
+    },
+    {
+      "bytes": 799,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IUnorderedNonce.sol",
+      "sha256": "12e02d4e7e03a668fc1d493840315b4f2aaee2f366ca677574d37d3811d45701"
+    },
+    {
+      "bytes": 3339,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Quoter.sol",
+      "sha256": "93041b7c8ef2587b52c4e0aea6183924b26079f9d822c451cc01f7f2efab99c5"
+    },
+    {
+      "bytes": 2951,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Router.sol",
+      "sha256": "a577e593bd1948ffcf9ce26964ae1e47bafcf6dffcd40baeb700bcb902367a53"
+    },
+    {
+      "bytes": 364,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/interfaces/external/IWETH9.sol",
+      "sha256": "d6b24fe796517f53292d6679adf173e1f3c1fc0dc5efedfc69fa4955c1a9c058"
+    },
+    {
+      "bytes": 1040,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/ActionConstants.sol",
+      "sha256": "8e88393dd8b50b25b818e2f6c246aae5cfe63106b56b6e0609869e599c81ec79"
+    },
+    {
+      "bytes": 2972,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/Actions.sol",
+      "sha256": "c5f2579951a1d7ca38b6f417db330965875f02efa812a5a487773a51b116e33d"
+    },
+    {
+      "bytes": 16585,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/CalldataDecoder.sol",
+      "sha256": "93ee8bc3b166407c3f66227713849ba6560297a0ba4abed8ad6235ec02fc2ed3"
+    },
+    {
+      "bytes": 3732,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/ERC721PermitHash.sol",
+      "sha256": "0d692bf7c7806644db1dbea2b2b4dd11151a16090a4bcc2ffcd904e61bcd7c2f"
+    },
+    {
+      "bytes": 3798,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/LiquidityAmounts.sol",
+      "sha256": "02d6eaaa62d45ac8170b3668e92a31808d2003b0f8eb821581cb4a028b175b45"
+    },
+    {
+      "bytes": 734,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/Locker.sol",
+      "sha256": "aa0481cc66c87ab579438728dbeaee5bf351eac37e4876f0ab899d8c7f7bdbeb"
+    },
+    {
+      "bytes": 1365,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/PathKey.sol",
+      "sha256": "0c00bae5a64829334a0b5d5541807faf7d18dff5a667cd74cadf9effaf5f0885"
+    },
+    {
+      "bytes": 3917,
+      "kind": "solidity-remapped-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/PositionInfoLibrary.sol",
+      "sha256": "6abfa1c06d62753d177df1a4ce7af8028ea3724943ca8673f7083c1cf09bc4d9"
+    },
+    {
+      "bytes": 3420,
+      "kind": "solidity-import",
+      "path": "packages/contracts/lib/v4-periphery/src/libraries/SlippageCheck.sol",
+      "sha256": "2f106f2f4773b8d7ef8c2364a95074ceb07ec2c80d38a7751e80fdfc9996ec02"
+    },
+    {
+      "bytes": 8245,
+      "kind": "source-entry",
+      "path": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
+      "sha256": "888405921131a03277b7c40b87307fc9a43cd7b0c04dac1927572b0175fda632"
+    },
+    {
+      "bytes": 2740,
+      "kind": "solidity-import",
+      "path": "packages/contracts/script/release/PhaseThreeTickMathVectors.s.sol",
+      "sha256": "d28572c4c8f902741be65be60ff67582916dfced092a3e2f0f0a938de21e29a3"
+    },
+    {
+      "bytes": 36427,
+      "kind": "source-entry",
+      "path": "packages/contracts/src/HookemonHook.sol",
+      "sha256": "7bb49163908f732e81834594ffd456a5f4dda30471f325eb2a7d2be31e0dd463"
+    },
+    {
+      "bytes": 7907,
+      "kind": "source-entry",
+      "path": "packages/contracts/src/access/MoneyRoles.sol",
+      "sha256": "041efbfa3b26a7db221065dd8ab12373cc83b110601a9729c5762d18dc0bfdf0"
+    },
+    {
+      "bytes": 15641,
+      "kind": "source-entry",
+      "path": "packages/contracts/src/accounting/FeeAccounting.sol",
+      "sha256": "dc1fbfa2151ec74887a6e7695c636d970bef034d5598f9f263d69549a6d6a86d"
+    },
+    {
+      "bytes": 14389,
+      "kind": "source-entry",
+      "path": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "sha256": "e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18"
+    },
+    {
+      "bytes": 6040,
+      "kind": "solidity-import",
+      "path": "packages/contracts/src/launch/HKMNToken.sol",
+      "sha256": "4266a5dab2984c027b5642f7720735f197e00f271d1e2553351a7e794c2455d7"
+    },
+    {
+      "bytes": 18067,
+      "kind": "source-entry",
+      "path": "packages/contracts/src/launch/HookemonIssuance.sol",
+      "sha256": "25232ae1f730dd447547f11876603d3913e3a65df84a3793754653d0823ab2fb"
+    },
+    {
+      "bytes": 12444,
+      "kind": "source-entry",
+      "path": "packages/contracts/src/market/CanonicalMarket.sol",
+      "sha256": "4be2cddc821c2b9acfc09e510b4faab8ac562fbe4d918275b1435921d079f4bf"
+    },
+    {
+      "bytes": 55355,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/accounting/FeeAccounting.t.sol",
+      "sha256": "3cae4a00035dfc68582c72b73d83d4dca7b90f79cc77f221c832a80f0c984f68"
+    },
+    {
+      "bytes": 8458,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/accounting/FeeAccountingInvariant.t.sol",
+      "sha256": "d80b54b93da1c7dd9ffbae4f26449e34e6ffaa1e00c08456b53315cd1f5f0db6"
+    },
+    {
+      "bytes": 50938,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "sha256": "24ff791a88a34568d4f55acf000e69f1e6c01adff17490e0750cb82164a59a6d"
+    },
+    {
+      "bytes": 115750,
+      "kind": "capability-test:phase-three-launch-graph",
+      "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "sha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8"
+    },
+    {
+      "bytes": 32334,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "sha256": "f43a4e4432141c8584587bb2a33160992a2819cf512cfc3abf761e710203d8d8"
+    },
+    {
+      "bytes": 20673,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "sha256": "25bfab713245c9c8ed013d924336fb57f4b30e09cf157b944300809285a0b202"
+    },
+    {
+      "bytes": 22401,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "sha256": "999cad2298575b59415cf51c8d67a4b664e9f34c8f60d08904e0b934de181127"
+    },
+    {
+      "bytes": 43232,
+      "kind": "solidity-import",
+      "path": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "sha256": "96aaef4e73b68d55788772dd445693035dd350b61aa8fe1ed850b4814ee29b8e"
+    },
+    {
+      "bytes": 4730,
+      "kind": "capability-test:phase-three-launch-graph",
+      "path": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "sha256": "5c8215c096bb8921e5d4da2186127d69876f65a395d5c154ac892e477b0c809a"
+    },
+    {
+      "bytes": 7218,
+      "kind": "test-entry",
+      "path": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
+      "sha256": "bd52535ecc0e92f7da66c1162f139859618835d870068f96118f155994dd4815"
+    },
+    {
+      "bytes": 10318,
+      "kind": "dependency-lock",
+      "path": "product/dependency-pins.json",
+      "sha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7"
+    },
+    {
+      "bytes": 2842,
+      "kind": "package:EVIDENCE.md",
+      "path": "release/phase3/EVIDENCE.md",
+      "sha256": "8eb37f8ae86f9c5b7c548538f030135141d37e7b58c76b7fc75003a2888ed739"
+    },
+    {
+      "bytes": 2499,
+      "kind": "package:PROPOSAL.md",
+      "path": "release/phase3/PROPOSAL.md",
+      "sha256": "84b1ad4dcf6d438ab84af8b6d822f276e4bb31cf90108a8e2a65afb3600a3925"
+    },
+    {
+      "bytes": 1642,
+      "kind": "package:TEST_PLAN.md",
+      "path": "release/phase3/TEST_PLAN.md",
+      "sha256": "dc6cc9aaf5e9a415a7b242af07b1a86fd900bf98863ebea4dbd16943f52e4087"
+    },
+    {
+      "bytes": 1820,
+      "kind": "package:THREAT_MODEL.md",
+      "path": "release/phase3/THREAT_MODEL.md",
+      "sha256": "dc4a0f78ec5c3ab7b526a1fb1bb1bb5a3a24717db129353167aa5dbe4f8657a4"
+    },
+    {
+      "bytes": 13682,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/address-manifest-draft.schema.json",
+      "sha256": "c8c7c034c066b5fc9a1afedc45491eaee8f74848d4c7f387e1dc8da8ed4fbe30"
+    },
+    {
+      "bytes": 9633,
+      "kind": "project-surface-evidence:canonical-pool-hook",
+      "path": "release/phase3/address-manifest.json",
+      "sha256": "8b3230a4b3f23270d53a83d05088c1db9c515173255f2a689ff4f19c543d4321"
+    },
+    {
+      "bytes": 38176,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/address-manifest.schema.json",
+      "sha256": "5fc247e451ef39e3efd1864d5248b652435a55401d714ab4aec7e7310f36f1f5"
+    },
+    {
+      "bytes": 4387,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/admission/preflight-probe.json",
+      "sha256": "5dda08b88578c39d6dacc51d089b54f5831393dd31c00110b7289aa0b0cc7507"
+    },
+    {
+      "bytes": 12053,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/admission/provider-documents.json",
+      "sha256": "7c8db3b773a41c060d8323f53825993f9f16b90f232f8dfbbdd673249ce4812a"
+    },
+    {
+      "bytes": 6102,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/admission/route-log.json",
+      "sha256": "5c5b3dc39827bbe77af2099a0f86a2a3a45c8888dbfb7ace23228894817bd120"
+    },
+    {
+      "bytes": 304210,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/artifacts/custody.json",
+      "sha256": "08043ea6d688242703d972040bb476b4d5da3ef4a5e9c04db1e0636a1ff86ae5"
+    },
+    {
+      "bytes": 1096529,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/artifacts/hook.json",
+      "sha256": "389f63c267cbb76cd703101fd22d00f1221656cd7ea3adcb082d2719dd41aa66"
+    },
+    {
+      "bytes": 175402,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/artifacts/token.json",
+      "sha256": "8a134aa16b09ca267055c976d05c5760ccc865c35ab608ceed20248a0e54ac68"
+    },
+    {
+      "bytes": 221818,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/build-info/launch.json",
+      "sha256": "47f78c439d508b1cbd07a4496629d89af4000b8155947602dfdbcb7fb33651b5"
+    },
+    {
+      "bytes": 16196,
+      "kind": "package:compatibility-report.json",
+      "path": "release/phase3/compatibility-report.json",
+      "sha256": "8b6cec4d0dac35c4d7c2588a48fa24427814c14efbe95f3b8a5f6e7df10c95b7"
+    },
+    {
+      "bytes": 3943,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/deployment-manifest.json",
+      "sha256": "46b716bab8f9e9813a75025fa7317bfceffe6f0349fdad3de0370b6e893e026f"
+    },
+    {
+      "bytes": 1705,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/fork-pin.json",
+      "sha256": "486112478b13713da7c2c45b8254e67f5f65d9d6a9db0f7379ccf9069e756418"
+    },
+    {
+      "bytes": 408,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/genesis-evidence.json",
+      "sha256": "ada1a735dbe347f58e4c2ae95f38c7e7740c7988540f5f4d487685ab06c738bd"
+    },
+    {
+      "bytes": 4669,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/graph-gas-evidence.json",
+      "sha256": "d674e4e316ad3c9092f78a1ba70706824566a3b299514dd9d89b1479d9c03787"
+    },
+    {
+      "bytes": 5149,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/launch-inputs.example.json",
+      "sha256": "1cfcef4a5fbd32e1190b8a0fd425b5ba53ad3eb8b4f60f5de9e8ff3df4d45736"
+    },
+    {
+      "bytes": 8794,
+      "kind": "project-surface-evidence:canonical-pool-hook",
+      "path": "release/phase3/launch-inputs.json",
+      "sha256": "e915b6079e3c22fca17ac5eda6fae8dfbff2c5add13b45b78d1058637ae3097a"
+    },
+    {
+      "bytes": 3751,
+      "kind": "project-surface-evidence:canonical-pool-hook",
+      "path": "release/phase3/launch-plan.md",
+      "sha256": "f0b8c484c80365c107f837e1ea7a0dc2abd9b896da1879c292a6850d54be892d"
+    },
+    {
+      "bytes": 13773,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/package/graph-draft.json",
+      "sha256": "3e7f6e61fd485c175b38e95300aa717ec59e8ed72669f4e89982f2389457c5d1"
+    },
+    {
+      "bytes": 1611,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/package/package-manifest.json",
+      "sha256": "ceca27cf6ebc609a240bd1cf70d53128c2a7cc49c7a988248f599095b9109bef"
+    },
+    {
+      "bytes": 78585,
+      "kind": "package:submission.json",
+      "path": "release/phase3/submission.json",
+      "sha256": "8962b70805a9a9fd416f45cc348bfa3fc67c9fc6c783f0039f745d2afa0fd1a6"
+    },
+    {
+      "bytes": 3619,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/tickmath-vectors.json",
+      "sha256": "91ea25a9cc0f691c7d5efc9b9dd8cdff24e7fcb771b2370733f0d1697843fbf0"
+    },
+    {
+      "bytes": 551,
+      "kind": "compiler-remappings",
+      "path": "remappings.txt",
+      "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
+    },
+    {
+      "bytes": 93193,
+      "kind": "specification",
+      "path": "specs/requirements.json",
+      "sha256": "927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
+    }
+  ],
+  "importResolutions": [
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/external/IWETH9.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@openzeppelin/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/openzeppelin-contracts/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol",
+      "specifier": "@openzeppelin/contracts/token/ERC20/IERC20.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/forge-std/src/Test.sol",
+      "specifier": "@uniswap/v4-core/lib/forge-std/src/Test.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/forge-std/src/Vm.sol",
+      "specifier": "@uniswap/v4-core/lib/forge-std/src/Vm.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/PoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/PoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/PoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/PoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/PoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/PoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/PoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/PoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/PoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/PoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/PathKey.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IHooks.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/BaseActionsRouter.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/DeltaResolver.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/ImmutableState.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/SafeCallback.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IImmutableState.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionDescriptor.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/IPoolManager.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/IPoolManager.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/SafeCallback.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/interfaces/callback/IUnlockCallback.sol",
+      "specifier": "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/Notifier.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/CustomRevert.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/CustomRevert.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/CustomRevert.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/CustomRevert.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/CustomRevert.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/CustomRevert.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/LiquidityAmounts.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/FixedPoint96.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/FixedPoint96.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/LiquidityAmounts.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/FullMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/FullMath.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/FullMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/FullMath.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Hooks.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Hooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Hooks.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Hooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Hooks.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Hooks.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Position.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Position.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/Position.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/Position.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SafeCast.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SafeCast.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/LiquidityAmounts.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SafeCast.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SafeCast.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/SlippageCheck.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SafeCast.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SafeCast.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SqrtPriceMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/StateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/StateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/StateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/StateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/StateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/script/release/PhaseThreeTickMathVectors.s.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TransientStateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/DeltaResolver.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TransientStateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/BaseTestHooks.sol",
+      "specifier": "@uniswap/v4-core/src/test/BaseTestHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/BaseTestHooks.sol",
+      "specifier": "@uniswap/v4-core/src/test/BaseTestHooks.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/PoolModifyLiquidityTest.sol",
+      "specifier": "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/PoolModifyLiquidityTest.sol",
+      "specifier": "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/PoolModifyLiquidityTest.sol",
+      "specifier": "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/PoolSwapTest.sol",
+      "specifier": "@uniswap/v4-core/src/test/PoolSwapTest.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/test/PoolSwapTest.sol",
+      "specifier": "@uniswap/v4-core/src/test/PoolSwapTest.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/Notifier.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/ISubscriber.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/SlippageCheck.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BalanceDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BalanceDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BeforeSwapDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BeforeSwapDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BeforeSwapDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BeforeSwapDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BeforeSwapDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BeforeSwapDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/BeforeSwapDelta.sol",
+      "specifier": "@uniswap/v4-core/src/types/BeforeSwapDelta.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/DeltaResolver.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Quoter.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Router.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/CalldataDecoder.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/PathKey.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/Currency.sol",
+      "specifier": "@uniswap/v4-core/src/types/Currency.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/PositionInfoLibrary.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/PoolInitializer_v4.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IPoolInitializer_v4.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Quoter.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Router.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/CalldataDecoder.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/PathKey.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/libraries/PositionInfoLibrary.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolKey.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolKey.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolOperation.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolOperation.sol"
+    },
+    {
+      "importer": "packages/contracts/src/market/CanonicalMarket.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolOperation.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/HookemonHook.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolOperation.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarket.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolOperation.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolOperation.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolOperation.sol"
+    },
+    {
+      "importer": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/test/utils/CurrencySettler.sol",
+      "specifier": "@uniswap/v4-core/test/utils/CurrencySettler.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "specifier": "@uniswap/v4-periphery/src/PositionManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "specifier": "@uniswap/v4-periphery/src/PositionManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "specifier": "@uniswap/v4-periphery/src/PositionManager.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionDescriptor.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/IPositionDescriptor.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/IPositionDescriptor.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/IStateView.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Quoter.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/IV4Quoter.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/IV4Router.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/IV4Router.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/external/IWETH9.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/interfaces/external/IWETH9.sol",
+      "specifier": "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/libraries/Actions.sol",
+      "specifier": "@uniswap/v4-periphery/src/libraries/Actions.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/libraries/Actions.sol",
+      "specifier": "@uniswap/v4-periphery/src/libraries/Actions.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/libraries/LiquidityAmounts.sol",
+      "specifier": "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-periphery/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/src/libraries/PositionInfoLibrary.sol",
+      "specifier": "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/lib/permit2/test/utils/DeployPermit2.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "forge-std/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/forge-std/src/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/forge-std/src/Script.sol",
+      "specifier": "forge-std/Script.sol"
+    },
+    {
+      "importer": "packages/contracts/script/release/PhaseThreeTickMathVectors.s.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "forge-std/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/forge-std/src/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/forge-std/src/Script.sol",
+      "specifier": "forge-std/Script.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "forge-std/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/forge-std/src/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/forge-std/src/Test.sol",
+      "specifier": "forge-std/Test.sol"
+    },
+    {
+      "importer": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "forge-std/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/forge-std/src/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/forge-std/src/Test.sol",
+      "specifier": "forge-std/Test.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/PositionManager.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol",
+      "specifier": "permit2/src/interfaces/IAllowanceTransfer.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IPermit2Forwarder.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol",
+      "specifier": "permit2/src/interfaces/IAllowanceTransfer.sol"
+    },
+    {
+      "importer": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol",
+      "specifier": "permit2/src/interfaces/IAllowanceTransfer.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol",
+      "specifier": "permit2/src/interfaces/IAllowanceTransfer.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/src/interfaces/IAllowanceTransfer.sol",
+      "specifier": "permit2/src/interfaces/IAllowanceTransfer.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/ERC721Permit_v4.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/src/libraries/SignatureVerification.sol",
+      "specifier": "permit2/src/libraries/SignatureVerification.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchComposition.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/test/utils/DeployPermit2.sol",
+      "specifier": "permit2/test/utils/DeployPermit2.sol"
+    },
+    {
+      "importer": "packages/contracts/test/launch/LaunchLeg.t.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "permit2/",
+      "remappingTarget": "packages/contracts/lib/v4-periphery/lib/permit2/",
+      "resolvedPath": "packages/contracts/lib/v4-periphery/lib/permit2/test/utils/DeployPermit2.sol",
+      "specifier": "permit2/test/utils/DeployPermit2.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-core/src/ProtocolFees.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "solmate/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/solmate/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/solmate/src/auth/Owned.sol",
+      "specifier": "solmate/src/auth/Owned.sol"
+    },
+    {
+      "importer": "packages/contracts/lib/v4-periphery/src/base/ERC721Permit_v4.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "solmate/",
+      "remappingTarget": "packages/contracts/lib/v4-core/lib/solmate/",
+      "resolvedPath": "packages/contracts/lib/v4-core/lib/solmate/src/tokens/ERC721.sol",
+      "specifier": "solmate/src/tokens/ERC721.sol"
+    }
+  ],
+  "javascriptImportResolutions": [],
+  "reviewTargetHash": "sha256:5e85fdd14a1756ec263759210939d4bf74930b6f151937aa9d87ad23963f0c21",
+  "schemaVersion": 1,
+  "standardVersion": "1.5.0",
+  "submissionHash": "sha256:85a21dd27552b2c36964cbd8c03948c3259e021c0fadcf9b4ac93d9064e2700a"
+}

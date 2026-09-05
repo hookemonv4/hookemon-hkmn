@@ -1,0 +1,36 @@
+{
+  "id": "WP-23",
+  "title": "End-to-end fixture regression: chunking + degraded-return + dust fast path",
+  "goal": "Prove WP-03/WP-04's new contract states behave correctly through the full existing fixture cycle pipeline.",
+  "deps": [
+    "WP-01",
+    "WP-03",
+    "WP-04"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/runner/test/integration/chunked-payout.test.mjs",
+    "packages/runner/test/integration/degraded-return.test.mjs",
+    "packages/runner/test/integration/dust-fast-path.test.mjs"
+  ],
+  "readSet": [
+    "packages/runner/test/cycle/*",
+    "packages/runner/test/distribution/*"
+  ],
+  "steps": [
+    "Simulate a >1024-holder cycle through the existing fixture harness and prove it completes via the chunked-payout path",
+    "Simulate a degraded-return cycle (short/ambiguous return) and prove it reaches DEGRADED, quarantines correctly, and a successor cycle can start",
+    "Simulate a trivial-excess return and prove the dust fast path pays exactly rootSum and leaves the excess untouched"
+  ],
+  "tests": [
+    "node --test packages/runner/test/**"
+  ],
+  "acceptance": [
+    "A simulated >1024-holder cycle completes through the existing fixture pipeline",
+    "A simulated degraded-return cycle completes through recovery to a successor cycle",
+    "A simulated dust-excess cycle pays exactly rootSum"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "Keep the existing dual-copy/dual-signature Merkle verification intact throughout. RESUME NOTE: a previous agent started this package and was stopped after a few minutes (full disk); a few uncommitted edits may exist in the worktree (git status). Inspect them, keep what is correct, and complete the package; commit exactly once. Disk space is scarce: no npm installs, delete build artifacts, keep temp files small, stop and report on ENOSPC."
+}

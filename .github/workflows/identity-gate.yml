@@ -1,0 +1,67 @@
+name: identity-gate
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: identity-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  GIT_NO_REPLACE_OBJECTS: '1'
+jobs:
+  pull-request:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify pull-request commit identity from the base revision
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          range_base="$PR_BASE_SHA"
+          git cat-file -e "${range_base}^{commit}"
+          [[ "$(git rev-parse HEAD)" == "$range_base" ]]
+          git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/origin/pull/${PR_NUMBER}/head"
+          range_head="$(git rev-parse "refs/remotes/origin/pull/${PR_NUMBER}/head")"
+          [[ "$range_head" == "$PR_HEAD_SHA" ]]
+          git cat-file -e "${range_head}^{commit}"
+          git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
+          node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"
+  push:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.before }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify push commit identity from the merge base
+        shell: bash
+        env:
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$PUSH_HEAD_SHA"
+          range_head="$PUSH_HEAD_SHA"
+          range_base="$(git merge-base "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA")"
+          git cat-file -e "${range_base}^{commit}"
+          git cat-file -e "${range_head}^{commit}"
+          git checkout --detach "$range_base"
+          [[ "$(git rev-parse HEAD)" == "$range_base" ]]
+          git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
+          node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"

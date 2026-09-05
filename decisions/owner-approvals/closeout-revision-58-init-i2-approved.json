@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "Owner confirmed the assumptions block for the Phase 2 autonomous rebuild in chat on 2026-09-02: community token on Robinhood Chain 4663 through Programmable, 3.00 percent inclusive swap fee split 2.50 process budget, 0.40 treasury, 0.10 Programmable, autonomous pack cycles every 20 minutes with the Collector Crypt buyback, pro-rata USDG payouts, dashboard control, any-router swaps with optional hookData. This approval records that confirmation against the current PRD and authorizes no deployment, credentials, signing, broadcast, asset movement, spending, or publication.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "ab227534842f4c462c8024661597d5d01c4e2024bf2f46a309f797dede806373",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "product/PRD.md": "501b3f067241db00d475d1441be76abe2e77a356426720fedb47ebaed228f997"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "r-00373",
+  "at": "2026-09-01T16:43:54.130Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-revision-56-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Owner approves requirements revision 56 as the authoritative Phase 1 specification for local implementation and verification only."
+  },
+  "inputHashes": {
+    "gates/spec.json": "ae874d461d1051d941331eb4961cf1adc2f1731b520c91cfcea6686fa7ce4b9f",
+    "policy/policy.json": "d7d9806fc8137dc2fbee590a0fff313bec2bad1667ad85c2216db90708ca7bfb",
+    "specs/requirements.json": "cc44df566bd32bb0fb6706705c2797384eab6f7c2f83a4426fea6f77701b1dd0",
+    "decisions/owner-approvals/phase-1-spec-revision-56-approved.json": "1f8fd23812ab07420fa3f61e222b9cb917a575369ceb1b01a5ea2a18a7d6a799"
+  }
+}

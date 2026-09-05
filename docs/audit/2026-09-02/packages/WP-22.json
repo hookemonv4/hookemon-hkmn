@@ -1,0 +1,59 @@
+{
+  "id": "WP-22",
+  "title": "Module cards + README/PRD docs",
+  "goal": "Document every new/changed module and update top-level project docs to describe the Phase 2 loop.",
+  "deps": [
+    "WP-01",
+    "WP-02",
+    "WP-03",
+    "WP-04",
+    "WP-05",
+    "WP-06",
+    "WP-07",
+    "WP-08",
+    "WP-09",
+    "WP-10",
+    "WP-11",
+    "WP-12",
+    "WP-13",
+    "WP-14",
+    "WP-15",
+    "WP-16",
+    "WP-17"
+  ],
+  "parallelGroup": 8,
+  "writeSet": [
+    "docs/modules/peg-cycle-escrow.md",
+    "docs/modules/automated-cycle-service.md",
+    "docs/modules/pro-rata-distribution.md",
+    "docs/modules/holder-snapshot-indexer.md",
+    "docs/modules/distribution-signer.md",
+    "docs/modules/dashboard.md",
+    "docs/modules/adapters.md",
+    "docs/modules/index.json",
+    "README.md",
+    "PRD.md",
+    "architecture/capability-map.json",
+    "architecture/capability-map.md",
+    "architecture/interfaces.json",
+    "gates/init.json"
+  ],
+  "readSet": [
+    "every module written by WP-01..17"
+  ],
+  "steps": [
+    "Write or update a docs/modules card for every new/changed module listed in the write set, matching the R1 doc-duty format",
+    "Update docs/modules/index.json's digest registry for all of them",
+    "Update README.md and PRD.md to describe the actual Phase 2 autonomous loop, dashboard, and distribution-signer custody model"
+  ],
+  "tests": [
+    "node --test scripts/tests/gates.test.mjs"
+  ],
+  "acceptance": [
+    "Every new/changed module has a current, digest-matching card",
+    "architecture A6 gate check passes with no stale digest"
+  ],
+  "risk": "R1",
+  "model": "sonnet",
+  "notes": "Doc duty (R1); trails the functional work packages it describes. COORDINATOR NOTE (A6 coupling): register every module card added by groups 3-8 in docs/modules/index.json AND architecture/capability-map.json (modules + topologicalOrder, same order) so gate A6 passes; recompute every digest. COORDINATOR NOTE (I6 coupling): gates/init.json item I6 lists every docs/modules/*.md card in its requiredInputs/allowedInputs (the evidence policy walks the directory), so every new card must also be added there in sorted position; register all currently unregistered cards (adapters.md, holder-snapshot-indexer.md is already listed, plus any card added by group-3 packages) and keep scripts/tests/final-review.test.mjs and gates.test.mjs green."
+}

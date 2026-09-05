@@ -1,0 +1,39 @@
+{
+  "id": "WP-16",
+  "title": "Observability",
+  "goal": "Structured cycle-status logging, a minimal alert webhook so a stuck or degraded cycle actually pages someone, and protocol-fee-brick detection on the canonical pool.",
+  "deps": [
+    "WP-14"
+  ],
+  "parallelGroup": 6,
+  "writeSet": [
+    "packages/runner/src/observability/logger.mjs",
+    "packages/runner/src/observability/status-projection.mjs",
+    "packages/runner/src/observability/alert-webhook.mjs",
+    "packages/runner/src/observability/protocol-fee-monitor.mjs",
+    "packages/runner/test/observability/*.test.mjs"
+  ],
+  "readSet": [
+    "ops/HANDOFF.md",
+    "scratchpad/w2/DESIGN.md section 3.7"
+  ],
+  "steps": [
+    "Add structured JSON logging per stage transition (console.error/console.log with a fixed schema, no dependency)",
+    "Add a cycle-status projection consumed by the dashboard",
+    "Add a minimal alert webhook fired on DEGRADED/FAILED/lease-contention transitions",
+    "Add one integration test that actually fires the webhook against a mock endpoint (closing the 'no alert channel has ever been test-fired' gap noted in ops/HANDOFF.md)",
+    "Add protocol-fee-monitor.mjs: poll StateLibrary.getSlot0's protocol-fee field for the canonical pool on every scheduler tick (piggybacking on the existing budget-gate pool-state read, no extra RPC call) and fire the same alert-webhook path the instant it goes nonzero \u2014 before the next swap even hits the hook's revert, per design.md section 3.7's governance-brick risk",
+    "Add a test simulating a nonzero protocol fee appearing on a fixture pool-state read and asserting the alert fires exactly once, not once per subsequent tick"
+  ],
+  "tests": [
+    "node --test packages/runner/test/observability/*.test.mjs"
+  ],
+  "acceptance": [
+    "Status projection reflects live journal state",
+    "A DEGRADED/FAILED transition fires a webhook, proven by an integration test, not just code inspection",
+    "A simulated nonzero protocol-fee reading fires the alert webhook on the first tick it appears, deduplicated on subsequent ticks"
+  ],
+  "risk": "R2",
+  "model": "sonnet",
+  "notes": "Intentionally not a full alerting stack; the simplest thing that actually pages someone. Protocol-fee monitoring answers owner decision D11's monitoring-only baseline (option a) regardless of which further option the owner later picks; it does not block on D11's answer."
+}

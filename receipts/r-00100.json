@@ -1,0 +1,20 @@
+{
+  "id": "r-00100",
+  "at": "2026-08-30T11:45:26.306Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/phase-1-spec-revision-53-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "PHASE-1 PRD, REQUIREMENTS REVISION 53 UND ADR-0013 BIS ADR-0016 GENEHMIG"
+  },
+  "inputHashes": {
+    "gates/spec.json": "d16a65dad14c32697b04fbac3af8ba561bb699957983c86fd8d56f327ad76fb0",
+    "policy/policy.json": "471c86581d83a65eee5f91eb94b963da36530bb9e6c1f096a402f1f29e50ef9c",
+    "specs/requirements.json": "7af6388a863ac79bfcf4a0e3f41332f0ae8eac03465f8b2aac91adca44ee9d9f",
+    "decisions/owner-approvals/phase-1-spec-revision-53-approved.json": "7122ffa8e32f0ff72445f9541853f7c3e9dff7a4c22cb89c0f67132214494752"
+  }
+}

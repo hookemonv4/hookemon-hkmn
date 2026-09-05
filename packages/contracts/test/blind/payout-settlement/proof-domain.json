@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "requirementsRevision": 55,
+  "interfaceBinding": "deferred-until-frozen",
+  "tags": {
+    "manifest": "deferred-until-frozen",
+    "nonemptyLeaf": "deferred-until-frozen",
+    "emptyLeaf": "deferred-until-frozen",
+    "internalNode": "deferred-until-frozen"
+  },
+  "manifest": {
+    "solidityAbiFields": [
+      "manifestTag",
+      "schemaVersion",
+      "chainId",
+      "hook",
+      "cycleId",
+      "payoutId",
+      "snapshotNumber",
+      "snapshotHash",
+      "entries"
+    ],
+    "entryFields": [
+      "index:uint16",
+      "recipient:address",
+      "amount:uint256",
+      "directHkmnBalance:uint256"
+    ],
+    "entriesOrdering": "strictly-ascending-unique-index",
+    "digest": "keccak256(canonicalManifestBytes)"
+  },
+  "nonemptyLeaf": {
+    "solidityAbiFields": [
+      "leafTag",
+      "chainId",
+      "hook",
+      "cycleId",
+      "payoutId",
+      "manifestDigest",
+      "index:uint16",
+      "recipient:address",
+      "amount:uint256"
+    ],
+    "sum": "amount"
+  },
+  "emptyLeaf": {
+    "solidityAbiFields": [
+      "emptyLeafTag",
+      "chainId",
+      "hook",
+      "cycleId",
+      "payoutId",
+      "manifestDigest",
+      "index:uint16"
+    ],
+    "tagRule": "distinct-from-nonempty-leaf-tag",
+    "sum": "0",
+    "domainIncludesIndex": true
+  },
+  "internalNode": {
+    "childOrder": "ordered-left-right",
+    "sumRule": "checked-uint256-addition",
+    "domainFields": ["nodeTag", "level", "leftHash", "leftSum", "rightHash", "rightSum"]
+  },
+  "tree": {
+    "depth": 10,
+    "positions": 1024,
+    "firstIndex": 0,
+    "lastIndex": 1023,
+    "pathRule": "bit-i-of-index-selects-left-or-right-at-level-i",
+    "requiredValidProofCount": 1024,
+    "siblingHashesPerProof": 10,
+    "siblingSumsPerProof": 10
+  },
+  "paidKey": "payoutId+uint16-index",
+  "mutations": [
+    {
+      "id": "manifest-tag",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "schema-version",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "manifest-encoding",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "chain-id",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "hook",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "cycle-id",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "payout-id",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "snapshot-number",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "snapshot-hash",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "entry-order",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "duplicate-index",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "out-of-range-index",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "zero-recipient",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "zero-amount",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "zero-direct-hkmn-balance",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "manifest-digest",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "leaf-tag",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-tag",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-chain-id",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-hook",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-cycle-id",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-payout-id",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-manifest-digest",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "empty-leaf-index",
+      "scope": "empty-leaf-domain",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "node-tag",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "index-bit",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "sibling-order",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "sibling-hash",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "sibling-sum",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "node-level",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "recipient",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "amount",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "tree-depth",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "padding-rule",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "child-sum-overflow",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    },
+    {
+      "id": "root-sum-funding-mismatch",
+      "expected": { "outcome": "revert", "stateMutation": "none" }
+    }
+  ]
+}

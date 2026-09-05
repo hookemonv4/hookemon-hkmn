@@ -1,0 +1,11 @@
+{
+  "id": "r-00060",
+  "at": "2026-08-30T08:10:49.937Z",
+  "type": "autonomy-grant",
+  "phase": "architecture",
+  "result": "APPROVED",
+  "data": {},
+  "inputHashes": {
+    "product/PHASE_1_ARCHITECTURE_AUTONOMY_GRANT.md": "902cb6c7c2591cad12acdca7ab1cb5b9cf565c9c6aed30501407d78fb6ec0659"
+  }
+}

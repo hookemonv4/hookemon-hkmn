@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "init",
+  "itemId": "I2",
+  "rationale": "Policy synced to the v4-framework template: team dispatch by default, verify once (narrow tests locally, CI is the one full net, one review for ordinary tasks), hand-offs are push not poll, no standing blockers, worktrees inside the workspace, standing merge grant wording, R4 asks only on money paths; R5-R9 folded into one git rule without report forms. Owner on 2026-09-01: Schau sie bitte einmal alles an, dass er schneller zum Ziel kommt und vollkommen autonomer arbeitet; er hat wieder versucht dreimal zu testen, was unnoetig war; er hat dieses autonome Arbeiten nicht gemacht mit mehreren Chats.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/init.json": "cdcf3eeb87f0870ac886ab5af69af15cc29063237eaecb6f9d4d832263347012",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "product/PRD.md": "d4fe76c6b8a8846b92c7248594bb0e329b996b0882270c96e0e8ee478abbc952"
+  }
+}

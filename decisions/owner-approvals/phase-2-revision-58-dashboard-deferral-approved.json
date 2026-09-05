@@ -1,0 +1,13 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "TASK_DEFER",
+  "phase": "build",
+  "itemId": "P1-011",
+  "rationale": "Dashboard deferred to Phase 2 by the owner-approved manual one-cycle scope, rebound to requirements revision 58 after specs/requirements.json advanced from revision 56 to 58. This record is copied over decisions/task-deferrals/P1-011.json (its own revision-56 content otherwise stays the historical record) immediately before node scripts/v4.mjs task P1-011 defer --record decisions/task-deferrals/P1-011.json --approval decisions/owner-approvals/phase-2-revision-58-dashboard-deferral-approved.json is run against the promoted file, once the paired owner approval carries an explicit OWNER APPROVED token.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "decisions/task-deferrals/P1-011.json": "cfdf1a837e817ceb346cccf72e1a21c88bb45e07d1d2279717a8dd694dc81205",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8"
+  }
+}

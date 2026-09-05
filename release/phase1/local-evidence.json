@@ -1,0 +1,47 @@
+{
+  "schema": "hookemon.phase1-local-evidence.v1",
+  "authority": "LOCAL_FIXTURE_AND_OFFLINE_TESTS_ONLY",
+  "checks": [
+    {
+      "id": "holder-settlement-solidity",
+      "expectedPasses": 7
+    },
+    {
+      "id": "canonical-merkle-cross-language",
+      "expectedPasses": 4
+    },
+    {
+      "id": "distribution-runner",
+      "expectedPasses": 16
+    },
+    {
+      "id": "phase-one-local-loop",
+      "expectedPasses": 1
+    },
+    {
+      "id": "phase-one-release-invariants",
+      "expectedPasses": 10
+    },
+    {
+      "id": "cycle-custody-security",
+      "expectedPasses": 52
+    }
+  ],
+  "reproducibility": {
+    "report": "release/phase1/local-reproducibility.json",
+    "expectedBuilds": 2,
+    "expectedArtifacts": 32,
+    "expectedLocalGasTests": 7,
+    "productionLimits": "INTEGRATION_PENDING",
+    "officialHeadroom": "NOT_CLAIMED"
+  },
+  "unresolvedProductionEvidence": [
+    "official Robinhood provider ABI and deployed runtime",
+    "final hook, token, PoolManager, PoolKey, custody, Treasury, Operations, and Programmable identities",
+    "production USDG transfer and exact-output gross/net semantics",
+    "production gas and bytecode headroom",
+    "independent durable publication and long-horizon recovery",
+    "owner-authorized live cycle, deployment, signing, broadcast, spend, and receipts",
+    "GitHub CI and merge while the account is flagged"
+  ]
+}

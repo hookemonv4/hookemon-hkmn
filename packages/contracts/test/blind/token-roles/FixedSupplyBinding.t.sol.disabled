@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+// Quarantined until the provider-bound launch interface and fencing token are available.
+
+import {FixedSupplyBlindSpec} from "./FixedSupplyBlindSpec.sol";
+import {FixedSupplyBlindEvidence} from "./FixedSupplyBlindEvidence.sol";
+
+contract FixedSupplyBindingTest is FixedSupplyBlindSpec {
+    error BlindFixtureNotBound();
+
+    function bindFixture() external pure returns (Deployment memory) {
+        revert BlindFixtureNotBound();
+    }
+
+    function _deployThroughBoundLaunchPath() internal view override returns (Deployment memory deployment) {
+        return this.bindFixture();
+    }
+
+    function _expectedBoundDecimals(Deployment memory) internal view override returns (uint8) {
+        this.bindFixture();
+        return 0;
+    }
+
+    function _boundRuntimeAuthority(Deployment memory)
+        internal
+        view
+        override
+        returns (FixedSupplyBlindEvidence.RuntimeBinding memory binding)
+    {
+        this.bindFixture();
+        return binding;
+    }
+
+    function _observedRuntimeAuthority(Deployment memory)
+        internal
+        view
+        override
+        returns (FixedSupplyBlindEvidence.RuntimeObservation memory observation)
+    {
+        this.bindFixture();
+        return observation;
+    }
+
+    function _boundIssuanceSource(Deployment memory) internal view override returns (address) {
+        this.bindFixture();
+        return address(0);
+    }
+
+    function _attemptDuplicateIssue(Deployment memory, address) internal view override returns (bool) {
+        this.bindFixture();
+        return false;
+    }
+
+    function _attemptUnauthorizedInitialIssue(address) internal view override returns (bool) {
+        this.bindFixture();
+        return false;
+    }
+
+    function _isProjectControlled(Deployment memory, address) internal view override returns (bool) {
+        this.bindFixture();
+        return false;
+    }
+
+    function _acquireWalletBalance(Deployment memory, address) internal view override returns (uint256) {
+        this.bindFixture();
+        return 0;
+    }
+
+    function _projectFeeLiability(Deployment memory) internal view override returns (uint256) {
+        this.bindFixture();
+        return 0;
+    }
+
+    function _marketPositionCommitment(Deployment memory) internal view override returns (bytes32) {
+        this.bindFixture();
+        return bytes32(0);
+    }
+
+    function _attemptMarketPositionWithdraw(Deployment memory, address) internal view override returns (bool) {
+        this.bindFixture();
+        return false;
+    }
+
+    function _attemptMarketPositionRescue(Deployment memory, address) internal view override returns (bool) {
+        this.bindFixture();
+        return false;
+    }
+
+    function _attemptMarketPositionUpgrade(Deployment memory, address) internal view override returns (bool) {
+        this.bindFixture();
+        return false;
+    }
+}

@@ -1,0 +1,54 @@
+{
+  "priorBundle": {
+    "schemaVersion": "hookemon.redteam-review-bundle.v1",
+    "phase": "redteam"
+  },
+  "priorStatusById": {
+    "RT-R55-01": "OPEN_FAIL_CLOSED",
+    "RT-R55-03": "OPEN_FAIL_CLOSED",
+    "RT-R55-04": "OPEN_FAIL_CLOSED",
+    "RT-R58-01": "OPEN_FAIL_CLOSED",
+    "RT-R58-02": "OPEN_FAIL_CLOSED",
+    "RT-R58-03": "OPEN_FAIL_CLOSED",
+    "RT-R58-04": "OPEN_FAIL_CLOSED",
+    "RT-R58-05": "OPEN_FAIL_CLOSED",
+    "RT-R58-06": "OPEN_FAIL_CLOSED",
+    "RT-R58-07": "OPEN_FAIL_CLOSED",
+    "RT-R58-08": "OPEN_FAIL_CLOSED"
+  },
+  "doubtLoop": {
+    "schemaVersion": "hookemon.redteam-doubt-loop.v3",
+    "phase": "redteam",
+    "reviewContract": {
+      "artifactOnly": true,
+      "authorReasoningIncluded": false,
+      "issuesOnly": true
+    }
+  },
+  "threatModel": {
+    "schemaVersion": "hookemon.redteam-threat-model.v2",
+    "phase": "redteam",
+    "method": "STRIDE",
+    "categories": [
+      "Spoofing",
+      "Tampering",
+      "Repudiation",
+      "Information Disclosure",
+      "Denial of Service",
+      "Elevation of Privilege"
+    ]
+  },
+  "attestation": {
+    "schema": "v4-owner-approval-v2",
+    "authority": "OWNER",
+    "action": "REDTEAM_REVIEW_ATTESTATION",
+    "phase": "redteam",
+    "itemId": null,
+    "rationale": "The owner reviewed the independently authored redteam bundle for the exact release tree.",
+    "approvalToken": "OWNER APPROVED",
+    "subjectHashes": {
+      "reviewedTree": "0000000000000000000000000000000000000000000000000000000000000000",
+      "qa/redteam/current-review-bundle.json": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

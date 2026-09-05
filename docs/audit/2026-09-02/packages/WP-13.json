@@ -1,0 +1,36 @@
+{
+  "id": "WP-13",
+  "title": "Distribution-signer / verifier service",
+  "goal": "Stand up the owner-held, non-worker signing service that independently approves and verifies each cycle's payout manifest before authorizePayout can be produced.",
+  "deps": [
+    "WP-01",
+    "WP-04"
+  ],
+  "parallelGroup": 3,
+  "writeSet": [
+    "packages/runner/src/distribution/distribution-signer.mjs",
+    "packages/runner/test/distribution/distribution-signer.test.mjs",
+    "docs/modules/distribution-signer.md"
+  ],
+  "readSet": [
+    "scratchpad/w2/DESIGN.md sections 2.3 and 4.8",
+    "packages/runner/src/distribution/manifest.mjs"
+  ],
+  "steps": [
+    "Implement a CLI/service, separate from the scheduler process, with two invocation modes: distribution-signer (reads the compiled manifest + finalized return amount, independently recomputes the root hash/root sum, signs an approval) and verifier (repeats the recomputation from the same finalized snapshot with a second independent key, signs a matching receipt)",
+    "Enforce that both signatures reference the exact same rootHash/rootSum before either is considered valid",
+    "Add an explicit test asserting the service never reads or holds the scheduler's policy-wallet key material (structural separation, not just convention)",
+    "Wire the output into a schema the vault authorizer's PayoutAuthorization step (WP-07) can consume"
+  ],
+  "tests": [
+    "node --test packages/runner/test/distribution/distribution-signer.test.mjs"
+  ],
+  "acceptance": [
+    "A payout manifest is only usable in a PayoutAuthorization once both the distribution-signer and verifier signatures are present and agree on the same rootHash/rootSum",
+    "The service process never has access to the policy-wallet or vault-authorizer key material",
+    "A mismatched verifier reconstruction is rejected, not silently accepted"
+  ],
+  "risk": "R3",
+  "model": "sonnet",
+  "notes": "This is the graft from product-first's custody idea (decision D7) closing the tournament's sharpest identified gap: no single compromised worker host can both compute and self-approve a fraudulent manifest. R3, controls payout authorization: per AGENTS.md, use a fresh-context independent reviewer before merge. RESUME NOTE: a previous agent started this package and was stopped after a few minutes (full disk); a few uncommitted edits may exist in the worktree (git status). Inspect them, keep what is correct, and complete the package; commit exactly once. Disk space is scarce: no npm installs, delete build artifacts, keep temp files small, stop and report on ENOSPC."
+}
