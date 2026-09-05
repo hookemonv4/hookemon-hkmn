@@ -29,8 +29,10 @@ import {
   buildAddressManifest,
   verifyAddressManifest,
 } from '../launch/build-address-manifest.mjs';
+import { verifyPhaseThreeMaterializedSeedManifest } from '../programmable/lib/package.mjs';
 import { isEip55Address, toEip55Address } from '../programmable/lib/eip55.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
+import { deriveSeedIntent } from '../programmable/lib/seed-intent.mjs';
 
 const USDG = toEip55Address('0x5fc5360d0400a0fd4f2af552add042d716f1d168');
 const ROUTER = toEip55Address(PROGRAMMABLE_LAUNCH_STAMP_ROUTER);
@@ -39,8 +41,18 @@ const TOKEN_CREATION_BYTECODE = '0x600a600c600039600a6000f3602a60005260206000f3'
 const HOOK_CREATION_BYTECODE = '0x600b600c600039600b6000f3602b60005260206000f3';
 const CUSTODY_CREATION_BYTECODE = '0x600c600c600039600c6000f3602c60005260206000f3';
 const PRICE_CANDIDATES = Object.freeze({
-  usdgCurrency0: '161723809515207654588927258648643645224',
-  hkmnCurrency0: '38813714284914462669',
+  usdgCurrency0: {
+    sqrtPriceX96: '161723809515207654588927258648643645224',
+    liquidity: '489897948556635619',
+    amount0Max: '240000000',
+    amount1Max: '1000000000000000000000000000',
+  },
+  hkmnCurrency0: {
+    sqrtPriceX96: '38813714284914462669',
+    liquidity: '489897948572597439',
+    amount0Max: '1000000000000000000000000000',
+    amount1Max: '240000000',
+  },
 });
 
 function address(digit) {
@@ -84,7 +96,19 @@ function initializer(signature, words) {
   return `0x${selector(signature)}${words.join('')}`;
 }
 
-function fixtureHookConfig(input, token) {
+function fixtureSeedIntent(input, candidate) {
+  return deriveSeedIntent({
+    payer: input.seedIntent.payer,
+    tickLower: input.seedIntent.tickLower,
+    tickUpper: input.seedIntent.tickUpper,
+    liquidity: candidate.liquidity,
+    amount0Max: candidate.amount0Max,
+    amount1Max: candidate.amount1Max,
+    maxDeadlineSeconds: input.seedIntent.maxDeadlineSeconds,
+  });
+}
+
+function fixtureHookConfig(input, token, candidate) {
   return {
     manager: input.roles.manager,
     positionManager: input.roles.positionManager,
@@ -100,10 +124,54 @@ function fixtureHookConfig(input, token) {
     expectedDecimals: input.hookConstructorConfig.expectedDecimals,
     bindingDigest: input.hookConstructorConfig.bindingDigest,
     runtimeDigest: input.hookConstructorConfig.runtimeDigest,
+    seedIntentDigest: fixtureSeedIntent(input, candidate).digest,
     processClaimLimit6h: input.hookConstructorConfig.processClaimLimit6h,
     processClaimLimitMax: input.hookConstructorConfig.processClaimLimitMax,
     processClaimMaxCount: input.hookConstructorConfig.processClaimMaxCount,
     operationsRotationDelay: input.hookConstructorConfig.operationsRotationDelay,
+  };
+}
+
+function frozenSeedPolicy(input, manifest) {
+  return {
+    chain: {
+      chainId: input.chain.chainId,
+      factory: input.chain.factory,
+      authorizedLauncher: input.chain.authorizedLauncher,
+      totalValue: input.graphAuthorization.totalValue.amountAtomic,
+    },
+    roles: {
+      manager: input.roles.manager,
+      positionManager: input.roles.positionManager,
+      permit2: input.roles.permit2,
+      programmable: input.roles.programmable,
+      treasury: input.roles.treasury,
+      operations: input.roles.operations,
+      launchAuthority: input.roles.launchAuthority,
+      issuanceAuthority: input.roles.issuanceAuthority,
+      usdg: input.usdg,
+    },
+    pool: {
+      fee: input.pool.fee,
+      tickSpacing: input.pool.tickSpacing,
+      priceCandidates: input.pool.priceCandidates,
+    },
+    seedIntent: input.seedIntent,
+    hook: {
+      expectedDecimals: input.hookConstructorConfig.expectedDecimals,
+      processClaimLimit6h: input.hookConstructorConfig.processClaimLimit6h,
+      processClaimLimitMax: input.hookConstructorConfig.processClaimLimitMax,
+      processClaimMaxCount: input.hookConstructorConfig.processClaimMaxCount,
+      operationsRotationDelay: input.hookConstructorConfig.operationsRotationDelay,
+    },
+    ...(manifest
+      ? {
+        artifacts: Object.fromEntries(['token', 'hook', 'custody'].map((targetId) => [
+          targetId,
+          manifest.preimages.targets[targetId].artifactDigest,
+        ])),
+      }
+      : {}),
   };
 }
 
@@ -131,7 +199,7 @@ function selectFixturePriceCandidate(input) {
     ].join('');
     const tokenInitCodeHash = keccakHex(`${TOKEN_CREATION_BYTECODE}${tokenConstructorArguments}`);
     const token = toEip55Address(computeCreate2Address(input.chain.factory, tokenEffectiveSalt, tokenInitCodeHash));
-    return { id, sqrtPriceX96: candidate.sqrtPriceX96, token };
+    return { id, ...candidate, token };
   });
   if (candidates.length === 1 && candidates[0].id === 'scalar') return candidates[0];
   const selected = candidates.filter(({ id, token }) => (
@@ -147,7 +215,7 @@ function withPriceCandidates(input) {
     fee: candidateInput.pool.fee,
     tickSpacing: candidateInput.pool.tickSpacing,
     priceCandidates: Object.fromEntries(
-      Object.entries(PRICE_CANDIDATES).map(([id, sqrtPriceX96]) => [id, { sqrtPriceX96 }]),
+      Object.entries(PRICE_CANDIDATES).map(([id, candidate]) => [id, { ...candidate }]),
     ),
   };
   candidateInput.targets.token.constructorArguments[3] = { ref: 'pool.selectedPriceCandidate.sqrtPriceX96' };
@@ -159,7 +227,7 @@ function setCanonicalInitializerCalldata(input) {
   const token = selectedPrice.token;
 
   const hookInitCodeHash = keccakHex(
-    `${HOOK_CREATION_BYTECODE}${encodeConstructorConfig(fixtureHookConfig(input, token)).slice(2)}`,
+    `${HOOK_CREATION_BYTECODE}${encodeConstructorConfig(fixtureHookConfig(input, token, selectedPrice)).slice(2)}`,
   );
   const minedHook = mineProgrammableSalt({
     chainId: input.chain.chainId,
@@ -251,6 +319,7 @@ function hookConstructorComponents() {
     { name: 'expectedDecimals', type: 'uint8' },
     { name: 'bindingDigest', type: 'bytes32' },
     { name: 'runtimeDigest', type: 'bytes32' },
+    { name: 'seedIntentDigest', type: 'bytes32' },
     { name: 'processClaimLimit6h', type: 'uint256' },
     { name: 'processClaimLimitMax', type: 'uint256' },
     { name: 'processClaimMaxCount', type: 'uint256' },
@@ -344,8 +413,14 @@ function makeFixture() {
         fee: 0,
         tickSpacing: 60,
         priceCandidates: Object.fromEntries(
-          Object.entries(PRICE_CANDIDATES).map(([id, sqrtPriceX96]) => [id, { sqrtPriceX96 }]),
+          Object.entries(PRICE_CANDIDATES).map(([id, candidate]) => [id, { ...candidate }]),
         ),
+      },
+      seedIntent: {
+        payer: address('7'),
+        tickLower: -887220,
+        tickUpper: 887220,
+        maxDeadlineSeconds: 900,
       },
       hookConstructorConfig: {
         manager: { ref: 'roles.manager' },
@@ -362,6 +437,7 @@ function makeFixture() {
         expectedDecimals: 18,
         bindingDigest: bytes32('c'),
         runtimeDigest: bytes32('d'),
+        seedIntentDigest: { ref: 'seedIntent.digest' },
         processClaimLimit6h: '1000000',
         processClaimLimitMax: '2000000',
         processClaimMaxCount: '8',
@@ -545,6 +621,31 @@ test('derives a deterministic three-target graph and mines a provider-effective 
   }
 });
 
+test('derives and injects the selected seed intent digest into the hook constructor', () => {
+  const fixture = makeFixture();
+  try {
+    const derived = deriveAddresses({ launchInputs: fixture.input, inputDirectory: fixture.directory });
+    const candidate = fixture.input.pool.priceCandidates[derived.pool.priceCandidate.id];
+    const expected = fixtureSeedIntent(fixture.input, candidate).digest;
+    const seedIntentDigestWordOffset = 2 + 14 * 64;
+
+    assert.equal(
+      derived.targets.hook.constructorArguments.slice(seedIntentDigestWordOffset, seedIntentDigestWordOffset + 64),
+      expected.slice(2),
+    );
+
+    const detached = structuredClone(fixture.input);
+    detached.hookConstructorConfig.seedIntentDigest = bytes32('f');
+    setCanonicalInitializerCalldata(detached);
+    assert.throws(
+      () => deriveAddresses({ launchInputs: detached, inputDirectory: fixture.directory }),
+      /seedIntentDigest does not bind the selected seed intent/i,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test('derives target identity from a sole Foundry compilation target', () => {
   const fixture = makeFixture();
   try {
@@ -585,10 +686,10 @@ test('selects exactly one address-order price candidate for the token preimage',
     const derived = deriveAddresses({ launchInputs: input, inputDirectory: fixture.directory });
     assert.deepEqual(derived.pool.priceCandidate, {
       id: 'usdgCurrency0',
-      sqrtPriceX96: PRICE_CANDIDATES.usdgCurrency0,
+      sqrtPriceX96: PRICE_CANDIDATES.usdgCurrency0.sqrtPriceX96,
     });
     assert.equal(derived.pool.selectedOrdering, 'usdgCurrency0');
-    assert.equal(derived.pool.sqrtPriceX96, PRICE_CANDIDATES.usdgCurrency0);
+    assert.equal(derived.pool.sqrtPriceX96, PRICE_CANDIDATES.usdgCurrency0.sqrtPriceX96);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -746,7 +847,7 @@ test('builds a chained manifest and rejects a changed downstream preimage', () =
     assert.equal(manifest.preimages.factory, PROGRAMMABLE_GRAPH_FACTORY);
     assert.deepEqual(manifest.preimages.pool.priceCandidate, {
       id: 'usdgCurrency0',
-      sqrtPriceX96: PRICE_CANDIDATES.usdgCurrency0,
+      sqrtPriceX96: PRICE_CANDIDATES.usdgCurrency0.sqrtPriceX96,
     });
     assert.equal(manifest.preimages.pool.selectedOrdering, 'usdgCurrency0');
     assert.equal(manifest.preimages.compilerProfileDigest.length, 71);
@@ -783,6 +884,125 @@ test('builds a chained manifest and rejects a changed downstream preimage', () =
         assert.match(error.stderr, /launch inputs mismatch/i);
         return true;
       },
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('package seed verification requires a rederivable materialized hook manifest', () => {
+  const fixture = makeFixture();
+  try {
+    const manifest = buildAddressManifest({
+      launchInputs: fixture.input,
+      inputDirectory: fixture.directory,
+    });
+    const selected = fixture.input.pool.priceCandidates[manifest.preimages.pool.selectedOrdering];
+    const expectedSeedIntentDigest = fixtureSeedIntent(fixture.input, selected).digest;
+    assert.equal(verifyPhaseThreeMaterializedSeedManifest({
+      materializedManifest: manifest,
+      inputDirectory: fixture.directory,
+      expectedSeedIntentDigest,
+    }), true);
+
+    assert.throws(
+      () => verifyPhaseThreeMaterializedSeedManifest({
+        materializedManifest: manifest,
+        inputDirectory: fixture.directory,
+        expectedSeedIntentDigest: bytes32('f'),
+      }),
+      /INVALID_VALUE at \/phaseThreeMaterialization\/materializedManifest/,
+    );
+
+    const changed = structuredClone(manifest);
+    changed.preimages.targets.hook.constructorArguments = `${
+      changed.preimages.targets.hook.constructorArguments.slice(0, -1)
+    }${changed.preimages.targets.hook.constructorArguments.endsWith('0') ? '1' : '0'}`;
+    assert.throws(
+      () => verifyPhaseThreeMaterializedSeedManifest({
+        materializedManifest: changed,
+        inputDirectory: fixture.directory,
+      }),
+      /INVALID_VALUE at \/phaseThreeMaterialization\/materializedManifest/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('package seed verification rejects a rederivable manifest with changed frozen policy', () => {
+  const fixture = makeFixture();
+  try {
+    const manifest = buildAddressManifest({
+      launchInputs: fixture.input,
+      inputDirectory: fixture.directory,
+    });
+    const selected = fixture.input.pool.priceCandidates[manifest.preimages.pool.selectedOrdering];
+    const expectedSeedIntentDigest = fixtureSeedIntent(fixture.input, selected).digest;
+    const policy = frozenSeedPolicy(fixture.input, manifest);
+
+    assert.equal(verifyPhaseThreeMaterializedSeedManifest({
+      materializedManifest: manifest,
+      inputDirectory: fixture.directory,
+      expectedSeedIntentDigest,
+      frozenSeedPolicy: policy,
+    }), true);
+
+    const changedInput = structuredClone(fixture.input);
+    changedInput.roles.positionManager = address('8');
+    setCanonicalInitializerCalldata(changedInput);
+    const changedManifest = buildAddressManifest({
+      launchInputs: changedInput,
+      inputDirectory: fixture.directory,
+    });
+    assert.throws(
+      () => verifyPhaseThreeMaterializedSeedManifest({
+        materializedManifest: changedManifest,
+        inputDirectory: fixture.directory,
+        expectedSeedIntentDigest,
+        frozenSeedPolicy: policy,
+      }),
+      /INVALID_VALUE at \/phaseThreeMaterialization\/materializedManifest/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('package seed verification rejects a rederivable manifest with substituted artifacts', () => {
+  const fixture = makeFixture();
+  try {
+    const manifest = buildAddressManifest({
+      launchInputs: fixture.input,
+      inputDirectory: fixture.directory,
+    });
+    const selected = fixture.input.pool.priceCandidates[manifest.preimages.pool.selectedOrdering];
+    const expectedSeedIntentDigest = fixtureSeedIntent(fixture.input, selected).digest;
+    const policy = frozenSeedPolicy(fixture.input, manifest);
+
+    const substitutedInput = structuredClone(fixture.input);
+    substitutedInput.targets.hook.artifactPath = 'substituted-hook.json';
+    writeFileSync(
+      resolve(fixture.directory, 'substituted-hook.json'),
+      `\n${readFileSync(resolve(fixture.directory, 'hook.json'), 'utf8')}`,
+    );
+    setCanonicalInitializerCalldata(substitutedInput);
+    const substitutedManifest = buildAddressManifest({
+      launchInputs: substitutedInput,
+      inputDirectory: fixture.directory,
+    });
+    assert.notEqual(
+      substitutedManifest.preimages.targets.hook.artifactDigest,
+      manifest.preimages.targets.hook.artifactDigest,
+    );
+    assert.throws(
+      () => verifyPhaseThreeMaterializedSeedManifest({
+        materializedManifest: substitutedManifest,
+        inputDirectory: fixture.directory,
+        expectedSeedIntentDigest,
+        frozenSeedPolicy: policy,
+      }),
+      /INVALID_VALUE at \/phaseThreeMaterialization\/materializedManifest/,
     );
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });

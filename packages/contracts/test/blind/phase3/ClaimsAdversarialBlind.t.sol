@@ -519,6 +519,7 @@ contract ClaimsAdversarialBlindTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: keccak256("blind-claims-binding"),
                 runtimeDigest: keccak256("blind-claims-runtime"),
+                seedIntentDigest: keccak256("blind-claims-seed-intent"),
                 processClaimLimit6h: limit,
                 processClaimLimitMax: maximum,
                 processClaimMaxCount: maxCount,

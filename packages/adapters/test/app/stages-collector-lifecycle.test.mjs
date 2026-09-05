@@ -36,6 +36,7 @@ import {
   reconcileLiveEpicGate,
 } from '../../src/app/stages/epic-gate.mjs';
 import {
+  buildCollectorBuybackRequest,
   mutateBuyback,
   prepareBuybackRequest,
   reconcileLiveBuyback,
@@ -206,13 +207,31 @@ function buybackResponseEvidence(amountAtomic = '85') {
 
 function repository({ stages = {}, attempts = {} } = {}) {
   const held = [];
+  const heldPositions = [];
   const ledgers = [];
   return {
     held,
+    heldPositions,
     ledgers,
     async readStage(_cycleId, stage) { return stages[stage] ?? { status: 'PENDING' }; },
     async readOperationalStageAttempt(_cycleId, stage) { return attempts[stage] ?? null; },
+    async describeCycle() { return { releaseAmount: '40', heldPositions: new Map(heldPositions.map(position => [position.positionId, position])) }; },
     async holdCycle(cycleId, terminalState, evidence) { held.push({ cycleId, terminalState, evidence }); },
+    async recordHeldPosition(cycleId, input) {
+      const position = {
+        positionId: `held:test:${heldPositions.length + 1}`,
+        cycleId,
+        ...input,
+        evidenceDigest: `sha256:${'a'.repeat(64)}`,
+        openedAtMs: 1,
+        positionRevision: 0,
+        ownerDecision: null,
+        resolution: null,
+      };
+      heldPositions.push(position);
+      held.push({ cycleId, terminalState: input.terminalState, evidence: input.evidence });
+      return position;
+    },
     async recordCustodyLedger(cycleId, ledger) { ledgers.push({ cycleId, ledger }); },
   };
 }
@@ -272,6 +291,22 @@ function sentUnknownAttempt(requestDigest) {
     responseEvidence: null,
     reconciliationEvidence: null,
   };
+}
+
+async function prepareSentUnknownBuybackAttempt(cycleRepository, cycleId, request = null) {
+  const prepared = request ?? await prepareBuybackRequest({ cycleRepository, context: { cycleId } });
+  await cycleRepository.prepareStageAttempt(cycleId, 'buyback', createPreparedProviderMutationAttempt({
+    cycleId,
+    stage: 'buyback',
+    requestDigest: digest({
+      schema: 'hookemon.operational-stage-request.v1',
+      cycleId,
+      stage: 'buyback',
+      request: prepared,
+    }),
+  }));
+  await cycleRepository.markStageAttemptSentUnknown(cycleId, 'buyback');
+  return prepared;
 }
 
 test('purchase plans an expected card count from an integer or numeric-string machine contains value', async () => {
@@ -508,11 +543,12 @@ test('open refuses the provisional authority before a provider mutation and reco
   }), { memo: MEMO, signature: OPEN_SIGNATURE, mint: CARD_ASSET, assetKind: 'spl' });
 
   collectorCrypt.getPackStatus = async () => ({ memo: MEMO, pack: null, send: null, buyback: [] });
-  assert.equal(await reconcileLiveOpen({
+  const heldEvidence = await reconcileLiveOpen({
     adapters: { collectorCrypt, solana: { client: rpc } }, config, cycleRepository, context: { cycleId: CYCLE_ID, stage: 'open' },
-  }), null);
-  assert.equal(cycleRepository.held.length, 1);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
+  });
+  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(heldEvidence.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.heldPositions.length, 1);
 });
 
 test('open requires memo-bound status evidence for the signature, card asset, and destination wallet', async () => {
@@ -545,15 +581,72 @@ test('open requires memo-bound status evidence for the signature, card asset, an
       },
     };
 
-    assert.equal(await reconcileLiveOpen({
+    const heldEvidence = await reconcileLiveOpen({
       adapters: { collectorCrypt, solana: { client: rpc } },
       config: baseConfig(),
       cycleRepository,
       context: { cycleId: CYCLE_ID, stage: 'open' },
-    }), null, entry.label);
+    });
+    if (entry.expectedHold) {
+      assert.equal(heldEvidence?.decision, 'held', entry.label);
+      assert.equal(heldEvidence?.terminalState, 'HELD_DATA_UNVERIFIED', entry.label);
+    } else {
+      assert.equal(heldEvidence, null, entry.label);
+    }
     assert.equal(cycleRepository.held.length > 0, entry.expectedHold, entry.label);
     if (entry.expectedHold) assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
   }
+});
+
+test('carves an unverified opened card into a held position without terminalizing its cycle', async () => {
+  const cycleRepository = repository({
+    attempts: { open: responseAttempt({ memo: MEMO, expectedCardCount: 1, opened: { success: true } }) },
+  });
+
+  const result = await reconcileLiveOpen({
+    adapters: {
+      collectorCrypt: {
+        async getPackStatus() {
+          return { memo: MEMO, pack: {}, send: null, buyback: [] };
+        },
+      },
+      solana: { client: rpcClient() },
+    },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'open' },
+  });
+
+  assert.equal(result?.decision, 'held');
+  assert.equal(result?.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(result?.mint, null);
+  assert.equal(cycleRepository.heldPositions.length, 1);
+  assert.deepEqual(cycleRepository.heldPositions[0], {
+    positionId: 'held:test:1',
+    cycleId: CYCLE_ID,
+    packId: 'pokemon_50',
+    memo: MEMO,
+    mint: null,
+    cardRef: MEMO,
+    costMicroUsdg: '40',
+    valueMicroUsdg: '40',
+    ledgerAsset: { ...collectorMoneyConfiguration().assets.usdg },
+    insuredValue: null,
+    reason: 'DATA_UNVERIFIED',
+    terminalState: 'HELD_DATA_UNVERIFIED',
+    evidence: {
+      stage: 'open',
+      memo: MEMO,
+      opened: { success: true },
+      send: null,
+      reason: 'response-recorded open is missing memo-bound mint evidence',
+    },
+    evidenceDigest: `sha256:${'a'.repeat(64)}`,
+    openedAtMs: 1,
+    positionRevision: 0,
+    ownerDecision: null,
+    resolution: null,
+  });
 });
 
 test('open response missing its memo-bound mint holds durably without a retry', async t => {
@@ -576,7 +669,7 @@ test('open response missing its memo-bound mint holds durably without a retry', 
   });
   let statusReads = 0;
 
-  assert.equal(await reconcileLiveOpen({
+  const heldEvidence = await reconcileLiveOpen({
     adapters: {
       collectorCrypt: {
         async getPackStatus() {
@@ -589,17 +682,19 @@ test('open response missing its memo-bound mint holds durably without a retry', 
     config: baseConfig(),
     cycleRepository: repository,
     context: { cycleId, stage: 'open' },
-  }), null);
+  });
+  assert.equal(heldEvidence.decision, 'held');
   assert.equal(statusReads, 1);
 
   const reopened = await CycleRepository.open(directory);
   const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(state.terminalState, null);
+  assert.equal(state.heldPositions.size, 1);
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'open')).attempt.state, 'RESPONSE_RECORDED');
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'open'), /terminal as HELD_DATA_UNVERIFIED/);
+  await assert.doesNotReject(() => reopened.prepareStage(cycleId, 'open'));
 });
 
-test('open retries a SENT_UNKNOWN attempt only through a memo-bound award that agrees with pack status', async () => {
+test('open reconciles a SENT_UNKNOWN attempt from finalized memo-bound status without resubmitting', async () => {
   const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
   const requestDigest = digest({
     schema: 'hookemon.operational-stage-request.v1',
@@ -614,11 +709,9 @@ test('open retries a SENT_UNKNOWN attempt only through a memo-bound award that a
   const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
   let statusReads = 0;
   let openCalls = 0;
-  const guards = [];
   const collectorCrypt = {
     async getPackStatus() {
       statusReads += 1;
-      if (statusReads === 1) return { memo: MEMO, pack: null, send: null, buyback: [] };
       return {
         memo: MEMO,
         pack: { transaction_signature: PURCHASE_SIGNATURE },
@@ -628,7 +721,7 @@ test('open retries a SENT_UNKNOWN attempt only through a memo-bound award that a
     },
     async openPack() {
       openCalls += 1;
-      return { success: true, nft_address: CARD_ASSET, transactionSignature: OPEN_SIGNATURE };
+      throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
     },
   };
   const result = await reconcileLiveOpen({
@@ -638,15 +731,37 @@ test('open retries a SENT_UNKNOWN attempt only through a memo-bound award that a
     context: {
       cycleId: CYCLE_ID,
       stage: 'open',
-      fencingToken: 'fence-1',
-      assertLease() {},
-      async assertMutationAllowed(value) { guards.push(value); },
     },
   });
 
   assert.deepEqual(result, { memo: MEMO, signature: OPEN_SIGNATURE, mint: CARD_ASSET, assetKind: 'spl' });
-  assert.equal(openCalls, 1);
-  assert.deepEqual(guards, [{ boundary: 'mutation', cycleId: CYCLE_ID, stage: 'open', requestDigest, fencingToken: 'fence-1' }]);
+  assert.equal(statusReads, 1);
+  assert.equal(openCalls, 0);
+});
+
+test('carves an overdue SENT_UNKNOWN open without adapter access', async () => {
+  const requestDigest = digest({
+    schema: 'hookemon.operational-stage-request.v1',
+    cycleId: CYCLE_ID,
+    stage: 'open',
+    request: { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 },
+  });
+  const cycleRepository = repository({
+    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
+    attempts: { open: { ...sentUnknownAttempt(requestDigest), sentAtMs: 0 } },
+  });
+
+  const result = await reconcileLiveOpen({
+    adapters: {},
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'open', nowMs: 30 * 60 * 1000 },
+  });
+
+  assert.equal(result.decision, 'held');
+  assert.equal(result.terminalState, 'HELD_UNRESOLVED');
+  assert.equal(result.reason, 'SENT_UNKNOWN_DEADLINE');
+  assert.equal(cycleRepository.heldPositions.length, 1);
 });
 
 test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t => {
@@ -671,14 +786,26 @@ test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t 
       return repository.readStage(requestCycleId, stage);
     },
     readOperationalStageAttempt: repository.readOperationalStageAttempt.bind(repository),
+    describeCycle: repository.describeCycle.bind(repository),
+    recordHeldPosition: repository.recordHeldPosition.bind(repository),
     holdCycle: repository.holdCycle.bind(repository),
   };
 
-  assert.equal(await reconcileLiveOpen({
+  const heldEvidence = await reconcileLiveOpen({
     adapters: {
       collectorCrypt: {
-        async getPackStatus() { return { memo: MEMO, pack: {}, send: null, buyback: [] }; },
-        async openPack() { openCalls += 1; return { success: true }; },
+        async getPackStatus() {
+          return {
+            memo: MEMO,
+            pack: {},
+            send: { transaction_signature: 'open-sig', to_wallet: OPERATOR },
+            buyback: [],
+          };
+        },
+        async openPack() {
+          openCalls += 1;
+          throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
+        },
       },
       solana: { client: rpcClient() },
     },
@@ -691,16 +818,19 @@ test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t 
       assertLease() {},
       async assertMutationAllowed() {},
     },
-  }), null);
-  assert.equal(openCalls, 1);
+  });
+  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(openCalls, 0);
 
   const reopened = await CycleRepository.open(directory);
-  assert.equal((await reopened.describeCycle(cycleId)).terminalState, 'HELD_DATA_UNVERIFIED');
+  const state = await reopened.describeCycle(cycleId);
+  assert.equal(state.terminalState, null);
+  assert.equal(state.heldPositions.size, 1);
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'open')).attempt.state, 'SENT_UNKNOWN');
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'open'), /terminal as HELD_DATA_UNVERIFIED/);
+  await assert.doesNotReject(() => reopened.prepareStage(cycleId, 'open'));
 });
 
-test('open refuses a SENT_UNKNOWN retry when the award response and memo-bound status name different cards', async () => {
+test('open holds a SENT_UNKNOWN attempt when a memo-bound send targets another wallet', async () => {
   const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
   const requestDigest = digest({
     schema: 'hookemon.operational-stage-request.v1',
@@ -712,42 +842,37 @@ test('open refuses a SENT_UNKNOWN retry when the award response and memo-bound s
     stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
     attempts: { open: sentUnknownAttempt(requestDigest) },
   });
-  let statusReads = 0;
   let openCalls = 0;
   const collectorCrypt = {
     async getPackStatus() {
-      statusReads += 1;
-      if (statusReads === 1) return { memo: MEMO, pack: null, send: null, buyback: [] };
       return {
         memo: MEMO,
         pack: {},
-        send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: OPERATOR },
+        send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: COLLECTOR_RECIPIENT },
         buyback: [],
       };
     },
     async openPack() {
       openCalls += 1;
-      return { success: true, nft_address: PACK_ASSET, transactionSignature: OPEN_SIGNATURE };
+      throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
     },
   };
 
-  assert.equal(await reconcileLiveOpen({
+  const heldEvidence = await reconcileLiveOpen({
     adapters: { collectorCrypt, solana: { client: rpcClient() } },
     config: baseConfig(),
     cycleRepository,
     context: {
       cycleId: CYCLE_ID,
       stage: 'open',
-      fencingToken: 'fence-1',
-      assertLease() {},
-      async assertMutationAllowed() {},
     },
-  }), null);
-  assert.equal(openCalls, 1);
+  });
+  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(openCalls, 0);
   assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
 });
 
-test('open keeps a SENT_UNKNOWN attempt pending when its mutation guards are unavailable', async () => {
+test('open leaves a SENT_UNKNOWN attempt unresolved while its memo-bound status cannot be read', async () => {
   const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
   const requestDigest = digest({
     schema: 'hookemon.operational-stage-request.v1',
@@ -761,8 +886,11 @@ test('open keeps a SENT_UNKNOWN attempt pending when its mutation guards are una
   });
   let openCalls = 0;
   const collectorCrypt = {
-    async getPackStatus() { return { memo: MEMO, pack: null, send: null, buyback: [] }; },
-    async openPack() { openCalls += 1; throw new Error('open must not be retried without mutation guards'); },
+    async getPackStatus() { throw new Error('collector status temporarily unavailable'); },
+    async openPack() {
+      openCalls += 1;
+      throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
+    },
   };
 
   assert.equal(await reconcileLiveOpen({
@@ -785,6 +913,50 @@ test('open refuses a purchase whose documented card count needs an unsupported f
   );
 });
 
+test('passes a held open position through epic gate and buyback without a second card write', async () => {
+  const heldOpen = {
+    memo: MEMO,
+    expectedCardCount: 1,
+    mint: null,
+    decision: 'held',
+    terminalState: 'HELD_DATA_UNVERIFIED',
+    reason: 'DATA_UNVERIFIED',
+    heldPosition: {
+      positionId: 'held:test:open',
+      evidenceDigest: `sha256:${'c'.repeat(64)}`,
+      terminalState: 'HELD_DATA_UNVERIFIED',
+      reason: 'DATA_UNVERIFIED',
+    },
+  };
+  const cycleRepository = repository({
+    stages: { open: { status: 'COMPLETE', evidence: heldOpen } },
+  });
+
+  const epicRequest = await prepareEpicGateRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
+  const epicEvidence = await mutateEpicGate({
+    liveMode: true,
+    adapters: {},
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'epic-gate' },
+    request: epicRequest,
+  });
+  const buybackRequest = await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
+  const buybackEvidence = await mutateBuyback({
+    liveMode: true,
+    adapters: {},
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'buyback' },
+    request: buybackRequest,
+  });
+
+  assert.deepEqual(epicEvidence, heldOpen);
+  assert.deepEqual(buybackEvidence, heldOpen);
+  assert.equal(cycleRepository.heldPositions.length, 0);
+  assert.equal(cycleRepository.ledgers.length, 0);
+});
+
 test('keeps a forty-percent epic equality sellable after a real repository reopen', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   const offer = { ...settlementAsset(), amountAtomic: '40' };
@@ -805,6 +977,44 @@ test('keeps a forty-percent epic equality sellable after a real repository reope
     evidence: { memo: MEMO, mint: CARD_ASSET, offer, insuredValue },
   });
   assert.equal((await reopened.prepareStage(cycleId, 'epic-gate')).status, 'PREPARED');
+});
+
+test('carves a below-threshold epic card into a held position without terminalizing its cycle', async () => {
+  const cycleRepository = repository({
+    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
+    attempts: {
+      'epic-gate': responseAttempt({
+        ...reconciledSellDecision({ offerAtomic: '39' }),
+        decision: 'hold',
+      }),
+    },
+  });
+
+  const evidence = await reconcileLiveEpicGate({
+    adapters: {},
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'epic-gate' },
+  });
+
+  assert.deepEqual(evidence, {
+    memo: MEMO,
+    expectedCardCount: 1,
+    mint: CARD_ASSET,
+    decision: 'held',
+    terminalState: 'HELD_OWNER_DECISION',
+    reason: 'EPIC_THRESHOLD',
+    heldPosition: {
+      positionId: 'held:test:1',
+      evidenceDigest: `sha256:${'a'.repeat(64)}`,
+      terminalState: 'HELD_OWNER_DECISION',
+      reason: 'EPIC_THRESHOLD',
+    },
+  });
+  assert.equal(cycleRepository.held.length, 1);
+  assert.equal(cycleRepository.heldPositions[0].costMicroUsdg, '40');
+  assert.equal(cycleRepository.heldPositions[0].valueMicroUsdg, '40');
+  assert.deepEqual(cycleRepository.heldPositions[0].insuredValue, { ...settlementAsset(), amountAtomic: '100' });
 });
 
 test('epic gate uses configured field names, reconciles an atomic insured value, and holds a changed quote', async () => {
@@ -839,10 +1049,12 @@ test('epic gate uses configured field names, reconciles an atomic insured value,
   assert.equal(evidence.insuredValueUnit, 'atomic');
   cycleRepository.readOperationalStageAttempt = async () => responseAttempt(evidence);
   quoteAmount = { ...settlementAsset(), amountAtomic: '40' };
-  assert.equal(await reconcileLiveEpicGate({
+  const heldEvidence = await reconcileLiveEpicGate({
     adapters: { collectorCrypt }, config, cycleRepository, context: { cycleId: CYCLE_ID, stage: 'epic-gate' },
-  }), null);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
+  });
+  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(heldEvidence.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.heldPositions.at(-1).reason, 'DATA_UNVERIFIED');
 });
 
 test('epic gate reconciles a whole-dollar insured value against the machine buyback percentage before selling', async () => {
@@ -1331,17 +1543,17 @@ test('buyback holds as unavailable before it can request or sign a provider tran
     context: { cycleId: CYCLE_ID },
   });
 
-  assert.deepEqual(result, {
-    memo: MEMO,
-    mint: CARD_ASSET,
-    decision: 'held',
-    terminalState: 'HELD_UNAVAILABLE',
-  });
+  assert.equal(result.memo, MEMO);
+  assert.equal(result.mint, CARD_ASSET);
+  assert.equal(result.decision, 'held');
+  assert.equal(result.terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(result.reason, 'BUYBACK_UNAVAILABLE');
+  assert.equal(result.heldPosition.positionId, 'held:test:1');
   assert.equal(buybackCalls, 0);
   assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_UNAVAILABLE');
 });
 
-test('holds unavailable buyback durably after reopen before its sole owner decision', async t => {
+test('records unavailable buyback as a durable held position without terminalizing the cycle', async t => {
   const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
   await completeThroughEpicGate(cycleRepository, cycleId);
   let buybackCalls = 0;
@@ -1365,9 +1577,56 @@ test('holds unavailable buyback durably after reopen before its sole owner decis
   assert.equal(buybackCalls, 0);
   assert.equal(signCalls, 0);
   const reopened = await CycleRepository.open(directory);
-  assert.equal((await reopened.describeCycle(cycleId)).terminalState, 'HELD_UNAVAILABLE');
+  const state = await reopened.describeCycle(cycleId);
+  assert.equal(state.terminalState, null);
+  assert.equal(state.heldPositions.size, 1);
+  assert.equal([...state.heldPositions.values()][0].terminalState, 'HELD_UNAVAILABLE');
   assert.equal(await reopened.readOperationalStageAttempt(cycleId, 'buyback'), null);
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'buyback'), /terminal as HELD_UNAVAILABLE/);
+  assert.equal((await reopened.prepareStage(cycleId, 'buyback')).status, 'PREPARED');
+});
+
+test('skips buyback for a held epic position and records zero main proceeds', async () => {
+  const heldEpic = {
+    memo: MEMO,
+    expectedCardCount: 1,
+    mint: CARD_ASSET,
+    decision: 'held',
+    terminalState: 'HELD_OWNER_DECISION',
+    reason: 'EPIC_THRESHOLD',
+    heldPosition: {
+      positionId: 'held:test:epic',
+      evidenceDigest: `sha256:${'b'.repeat(64)}`,
+      terminalState: 'HELD_OWNER_DECISION',
+      reason: 'EPIC_THRESHOLD',
+    },
+  };
+  const cycleRepository = repository({
+    stages: {
+      open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } },
+      'epic-gate': { status: 'COMPLETE', evidence: heldEpic },
+    },
+  });
+  let providerCalls = 0;
+  const prepared = await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
+
+  assert.equal(prepared.decision, 'held');
+  const result = await mutateBuyback({
+    liveMode: true,
+    adapters: {
+      collectorCrypt: {
+        async getBuybackAvailable() { providerCalls += 1; throw new Error('held card must not request a buyback'); },
+      },
+    },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'buyback' },
+  });
+
+  assert.equal(result.decision, 'held');
+  assert.equal(result.heldPosition.positionId, heldEpic.heldPosition.positionId);
+  assert.equal(providerCalls, 0);
+  assert.equal(cycleRepository.heldPositions.length, 0);
+  assert.equal(cycleRepository.ledgers.length, 0);
 });
 
 test('buyback binds the completed sell decision into its prepared request', async () => {
@@ -1478,7 +1737,7 @@ test('buyback rechecks the completed sell decision immediately before signing', 
   const decisionRead = source.indexOf('readCompletedSellDecision', beforeSign);
   const preparedCheck = source.indexOf('assertPreparedBuybackRequest(prepared, currentDecision);', decisionRead);
   const beforeSignInvocation = source.indexOf('if (beforeSign !== null) await beforeSign();');
-  const authorityCheck = source.indexOf('requireLiveMutationAuthority();', beforeSignInvocation);
+  const authorityCheck = source.indexOf('requireCollectorOnlyMutationAuthority(config);', beforeSignInvocation);
   const signerCall = source.indexOf('return signerClient.solana.sign(request);', authorityCheck);
 
   assert.notEqual(beforeSign, -1);
@@ -1528,7 +1787,7 @@ test('buyback rechecks the unit-bound quote after provider construction and befo
   const preparedCheck = source.indexOf('assertPreparedBuybackRequest(prepared, currentDecision);', decisionRead);
   const quoteCheck = source.indexOf('if (!sameAmount(quote, currentDecision.offer))', preparedCheck);
   const beforeSignInvocation = source.indexOf('if (beforeSign !== null) await beforeSign();');
-  const authorityCheck = source.indexOf('requireLiveMutationAuthority();', beforeSignInvocation);
+  const authorityCheck = source.indexOf('requireCollectorOnlyMutationAuthority(config);', beforeSignInvocation);
   const signerCall = source.indexOf('return signerClient.solana.sign(request);', authorityCheck);
 
   assert.notEqual(providerBuild, -1);
@@ -1590,6 +1849,297 @@ test('buyback reconciles a completed memo check even after sale eligibility beco
   });
 });
 
+test('buyback recovers a matching SENT_UNKNOWN attempt from durable purchase, open, and sell decision evidence without mutations', async t => {
+  const { repository: cycleRepository, cycleId } = await durableCycle(t);
+  await completeThroughEpicGate(cycleRepository, cycleId);
+  const request = await prepareSentUnknownBuybackAttempt(cycleRepository, cycleId);
+  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
+  const settlementTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  let checkReads = 0;
+  let availabilityReads = 0;
+  let buybackCalls = 0;
+  let submitCalls = 0;
+  const collectorCrypt = {
+    async getBuybackCheck() {
+      checkReads += 1;
+      return {
+        exists: true,
+        playerWallet: OPERATOR,
+        nft: CARD_ASSET,
+        transactionSignature: BUYBACK_SIGNATURE,
+        buybackAmount: '85',
+        createdAt: '2025-05-26T17:32:33.588Z',
+        status: 'complete',
+      };
+    },
+    async getBuybackAvailable() { availabilityReads += 1; throw new Error('SENT_UNKNOWN reconciliation must not read buyback availability'); },
+    async buyback() { buybackCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not retry buyback'); },
+    async submitTransaction() { submitCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not submit a transaction'); },
+  };
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: settlementTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '0', postAmount: '85', decimals: CIRCLE_USD_DECIMALS },
+    ],
+  });
+
+  assert.deepEqual(await reconcileLiveBuyback({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId, stage: 'buyback' },
+  }), {
+    memo: MEMO,
+    mint: CARD_ASSET,
+    signature: BUYBACK_SIGNATURE,
+    quote: request.epicDecision.offer,
+    refundAmount: request.epicDecision.offer,
+    proceeds: request.epicDecision.offer,
+  });
+  assert.equal(checkReads, 1);
+  assert.equal(availabilityReads, 0);
+  assert.equal(buybackCalls, 0);
+  assert.equal(submitCalls, 0);
+});
+
+test('buyback holds a mismatched SENT_UNKNOWN request before any provider or RPC read', async t => {
+  const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
+  await completeThroughEpicGate(cycleRepository, cycleId);
+  await prepareSentUnknownBuybackAttempt(cycleRepository, cycleId, {
+    provider: 'collector-crypt',
+    operation: 'buyback',
+    memo: MEMO,
+    mint: CARD_ASSET,
+    epicDecision: null,
+  });
+  let checkReads = 0;
+  let availabilityReads = 0;
+  let buybackCalls = 0;
+  let submitCalls = 0;
+  let rpcReads = 0;
+  const rpc = createSolanaRpcClient({
+    fetchImpl: async () => {
+      rpcReads += 1;
+      throw new Error('mismatched SENT_UNKNOWN request must not reach Solana RPC');
+    },
+  });
+
+  const heldEvidence = await reconcileLiveBuyback({
+    adapters: {
+      collectorCrypt: {
+        async getBuybackCheck() { checkReads += 1; throw new Error('mismatched SENT_UNKNOWN request must not read a buyback check'); },
+        async getBuybackAvailable() { availabilityReads += 1; throw new Error('mismatched SENT_UNKNOWN request must not read buyback availability'); },
+        async buyback() { buybackCalls += 1; throw new Error('mismatched SENT_UNKNOWN request must not retry buyback'); },
+        async submitTransaction() { submitCalls += 1; throw new Error('mismatched SENT_UNKNOWN request must not submit a transaction'); },
+      },
+      solana: { client: rpc },
+    },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId, stage: 'buyback' },
+  });
+  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(heldEvidence.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(checkReads, 0);
+  assert.equal(availabilityReads, 0);
+  assert.equal(buybackCalls, 0);
+  assert.equal(submitCalls, 0);
+  assert.equal(rpcReads, 0);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
+  assert.equal((await reopened.describeCycle(cycleId)).heldPositions.size, 1);
+});
+
+test('buyback leaves absent or pending SENT_UNKNOWN checks unresolved without mutations', async () => {
+  const stages = {
+    purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } },
+    open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
+    'epic-gate': { status: 'COMPLETE', evidence: reconciledSellDecision() },
+  };
+  for (const check of [
+    { label: 'absent', value: { exists: false } },
+    { label: 'pending', value: { exists: true, status: '' } },
+  ]) {
+    const request = await prepareBuybackRequest({
+      cycleRepository: repository({ stages }),
+      context: { cycleId: CYCLE_ID },
+    });
+    const cycleRepository = repository({
+      stages,
+      attempts: {
+        buyback: sentUnknownAttempt(digest({
+          schema: 'hookemon.operational-stage-request.v1',
+          cycleId: CYCLE_ID,
+          stage: 'buyback',
+          request,
+        })),
+      },
+    });
+    let checkReads = 0;
+    let availabilityReads = 0;
+    let buybackCalls = 0;
+    let submitCalls = 0;
+
+    const reconciliation = await reconcileLiveBuyback({
+      adapters: {
+        collectorCrypt: {
+          async getBuybackCheck() { checkReads += 1; return check.value; },
+          async getBuybackAvailable() { availabilityReads += 1; throw new Error('SENT_UNKNOWN reconciliation must not read buyback availability'); },
+          async buyback() { buybackCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not retry buyback'); },
+          async submitTransaction() { submitCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not submit a transaction'); },
+        },
+        solana: { client: rpcClient() },
+      },
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID, stage: 'buyback' },
+    });
+    if (check.expectedHold) {
+      assert.equal(reconciliation.decision, 'held', check.label);
+      assert.equal(reconciliation.terminalState, 'HELD_DATA_UNVERIFIED', check.label);
+    } else {
+      assert.equal(reconciliation, null, check.label);
+    }
+    assert.equal(checkReads, 1, check.label);
+    assert.equal(availabilityReads, 0, check.label);
+    assert.equal(buybackCalls, 0, check.label);
+    assert.equal(submitCalls, 0, check.label);
+    assert.equal(cycleRepository.held.length, 0, check.label);
+  }
+});
+
+test('carves an overdue SENT_UNKNOWN buyback into a held position without another provider call', async () => {
+  const cycleRepository = repository({
+    stages: {
+      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
+    },
+    attempts: {
+      buyback: {
+        ...sentUnknownAttempt(`sha256:${'e'.repeat(64)}`),
+        sentAtMs: 1_700_000_000_000,
+      },
+    },
+  });
+
+  const evidence = await reconcileLiveBuyback({
+    adapters: {},
+    config: baseConfig({ unresolvedCardDeadlineMinutes: 30 }),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'buyback', nowMs: 1_700_001_800_000 },
+  });
+
+  assert.deepEqual(evidence, {
+    memo: MEMO,
+    expectedCardCount: 1,
+    mint: CARD_ASSET,
+    decision: 'held',
+    terminalState: 'HELD_UNRESOLVED',
+    reason: 'SENT_UNKNOWN_DEADLINE',
+    heldPosition: {
+      positionId: 'held:test:1',
+      evidenceDigest: `sha256:${'a'.repeat(64)}`,
+      terminalState: 'HELD_UNRESOLVED',
+      reason: 'SENT_UNKNOWN_DEADLINE',
+    },
+  });
+  assert.equal(cycleRepository.held.length, 1);
+  assert.equal(cycleRepository.heldPositions[0].costMicroUsdg, '40');
+});
+
+test('live collector-only buyback omits an unverified token-account alternate recipient', () => {
+  const proceedsAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const selected = baseConfig({
+    execution: { profile: 'rehearsal', providerMode: 'live' },
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount,
+      payoutRecipients: [COLLECTOR_RECIPIENT],
+      split: 'equal',
+    },
+  });
+  assert.deepEqual(buildCollectorBuybackRequest({ config: selected, mint: CARD_ASSET }), {
+    playerAddress: OPERATOR,
+    nftAddress: CARD_ASSET,
+  });
+
+  assert.throws(
+    () => buildCollectorBuybackRequest({
+      config: {
+        ...selected,
+        rehearsal: { ...selected.rehearsal, proceedsAccount: PACK_ASSET },
+      },
+      mint: CARD_ASSET,
+    }),
+    /canonical Circle token account/,
+  );
+
+  assert.throws(
+    () => buildCollectorBuybackRequest({
+      config: {
+        ...selected,
+        rehearsal: { ...selected.rehearsal, payoutRecipients: [OPERATOR] },
+      },
+      mint: CARD_ASSET,
+    }),
+    /distinct from the operator wallet and every recipient/,
+  );
+});
+
+test('live collector-only buyback reconciles only the finalized dedicated proceeds account delta', async () => {
+  const proceedsAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
+  const evidence = { ...buybackResponseEvidence(), proceedsAccount };
+  const cycleRepository = repository({
+    stages: { open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } } },
+    attempts: { buyback: responseAttempt(evidence) },
+  });
+  const collectorCrypt = {
+    async getBuybackCheck() {
+      return {
+        exists: true,
+        playerWallet: OPERATOR,
+        nft: CARD_ASSET,
+        transactionSignature: BUYBACK_SIGNATURE,
+        buybackAmount: '85',
+        createdAt: '2025-05-26T17:32:33.588Z',
+        status: 'complete',
+      };
+    },
+  };
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92', decimals: CIRCLE_USD_DECIMALS },
+    ],
+  });
+  const selected = baseConfig({
+    execution: { profile: 'rehearsal', providerMode: 'live' },
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount,
+      payoutRecipients: [COLLECTOR_RECIPIENT],
+      split: 'equal',
+    },
+  });
+
+  assert.deepEqual(await reconcileLiveBuyback({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    config: selected,
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'buyback' },
+  }), {
+    ...evidence,
+    proceeds: { ...settlementAsset(), amountAtomic: '85' },
+    proceedsProjection: {
+      account: proceedsAccount,
+      beforeAtomic: '7',
+      afterAtomic: '92',
+      delta: { ...settlementAsset(), amountAtomic: '85' },
+    },
+  });
+});
+
 test('buyback leaves absent or pending checks unresolved and holds a conflicting completed check', async () => {
   const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
   const settlementTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
@@ -1639,12 +2189,18 @@ test('buyback leaves absent or pending checks unresolved and holds a conflicting
       async getBuybackCheck() { return check.value; },
     };
 
-    assert.equal(await reconcileLiveBuyback({
+    const reconciliation = await reconcileLiveBuyback({
       adapters: { collectorCrypt, solana: { client: rpc } },
       config: baseConfig(),
       cycleRepository,
       context: { cycleId: CYCLE_ID, stage: 'buyback' },
-    }), null, check.label);
+    });
+    if (check.expectedHold) {
+      assert.equal(reconciliation?.decision, 'held', check.label);
+      assert.equal(reconciliation?.terminalState, 'HELD_DATA_UNVERIFIED', check.label);
+    } else {
+      assert.equal(reconciliation, null, check.label);
+    }
     assert.equal(cycleRepository.held.length > 0, check.expectedHold, check.label);
     if (check.expectedHold) assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
   }

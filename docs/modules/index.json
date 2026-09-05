@@ -51,12 +51,12 @@
     {
       "id": "operations-wallet",
       "path": "docs/modules/operations-wallet.md",
-      "sha256": "b89e5cf31a1e07b1cf3b4261a31f1d44a5281cb1d174118d715a074d3d1bcc89"
+      "sha256": "8bcab64498034d33c4c1b371c17172ea9783682e3d1b1034ef1dce04c5c1d794"
     },
     {
       "id": "launch-orchestration",
       "path": "docs/modules/launch-orchestration.md",
-      "sha256": "7b9022b4f9454acf3d8217c669bc4a38733d5f73dba3b3f80fe17d88ea05786d"
+      "sha256": "02a8828b0ef3eaa76fe03e378a52fcc6c540ede789b234d92a3e2952ea1b37f4"
     },
     {
       "id": "legacy-custody-family",
@@ -91,12 +91,12 @@
     {
       "id": "collector-crypt-adapter",
       "path": "docs/modules/collector-crypt-adapter.md",
-      "sha256": "ad0012e02b880eecadda583d7ad99e7065156f8261fb32820aebb0ca28eef01d"
+      "sha256": "1c87910f7dc33669a4d0acd86e2df29193bc170e8c4ecae4c6588de6f4e48931"
     },
     {
       "id": "transaction-policy",
       "path": "docs/modules/transaction-policy.md",
-      "sha256": "ab877f335a086ef36592a05cc0114a466b475926d807009559684164b6627b94"
+      "sha256": "b364289e3a42547f7474d8cc0eb76b1e5e6c6eed7740bfc397fd506f156b541b"
     },
     {
       "id": "signing",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "af6f3b083424c8256e90a0b8cee20201728b9a8497e7d36808ccaacf52cb8e95"
+      "sha256": "c5923fb658eef0e4afb7365f7c9304dc4a0c1ccbee3723198a8b639b15da8e61"
     },
     {
       "id": "dashboard",
@@ -156,7 +156,7 @@
     {
       "id": "release-evidence",
       "path": "docs/modules/release-evidence.md",
-      "sha256": "1b41304621ca6421f909bc983d3a21b45650625e7ca0a963f29237cb7c69ad6e"
+      "sha256": "75d51d6ae15c8c3dfed9cad5f627442000209cb573456cec889f329c3b98035a"
     },
     {
       "id": "website",

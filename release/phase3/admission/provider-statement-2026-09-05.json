@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "hookemon.programmable-provider-statement.v1",
+  "date": "2026-09-05",
+  "channel": "Programmable answer relayed by the owner in chat",
+  "germanStatement": "Für V4 auf Chain 4663 berechnest du sourceDescriptor.sourceBundleDigest als Keccak256(UTF8(\"programmable.source-bundle.v2\") 0x00 UTF8(JCS(sourceBundleManifest))), wobei das Manifest schemaVersion: \"2.0.0\" verwendet und die Einträge aus source.paths einschließlich Unterverzeichnissen, Standard-JSON-Inputs, Compiler-Artefakten, Attestation-Evidenzen und Metadatenbild eindeutig nach UTF-8-Pfadbytes sortiert enthält; nonce wählst du einmal pro neuem Launch als kryptografisch zufälligen, nicht vollständig nullen 32-Byte-Wert im Format 0x plus 64 kleine Hexzeichen und behältst ihn bei Retries zusammen mit dem Idempotency-Key und den vollständigen Request-Bytes unverändert bei.",
+  "englishReading": "sourceDescriptor.sourceBundleDigest = keccak256(utf8(\"programmable.source-bundle.v2\") || 0x00 || utf8(JCS(sourceBundleManifest))). The manifest uses schemaVersion \"2.0.0\" and includes every file below source.paths recursively, Standard JSON inputs, compiler artifacts, attestation evidence files, and the metadata image. Entries are de-duplicated and sorted by the UTF-8 bytes of path. A nonce is generated once for a new launch attempt as 32 cryptographically random, nonzero bytes formatted as 0x plus 64 lowercase hexadecimal characters. Retries retain that nonce, the Idempotency-Key, and the complete request bytes unchanged.",
+  "settledFields": [
+    "sourceDescriptor.sourceBundleDigest",
+    "sourceBundleManifest.schemaVersion",
+    "sourceBundleManifest.entries",
+    "nonce",
+    "launchAttempt.idempotency",
+    "launchAttempt.requestBytes"
+  ]
+}

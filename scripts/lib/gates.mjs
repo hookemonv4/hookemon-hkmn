@@ -25,6 +25,20 @@ export const OWNER_ACTIONS = Object.freeze({
   NOT_APPLICABLE: 'NOT_APPLICABLE',
   TASK_DEFER: 'TASK_DEFER',
 });
+export const EXPECTED_REDTEAM_FINDING_IDS = Object.freeze([
+  'RT-R55-01',
+  'RT-R55-03',
+  'RT-R55-04',
+  'RT-R58-01',
+  'RT-R58-02',
+  'RT-R58-03',
+  'RT-R58-04',
+  'RT-R58-05',
+  'RT-R58-06',
+  'RT-R58-07',
+  'RT-R58-08',
+  'RT-R65-01',
+]);
 const POLICY_INPUT = 'policy/policy.json';
 const OWNER_APPROVAL_PREFIX = 'decisions/owner-approvals/';
 const OWNER_APPROVAL_PATH = /^decisions\/owner-approvals\/[a-z0-9][a-z0-9._-]*\.json$/;
@@ -66,6 +80,7 @@ const OWNER_APPROVAL_TOKENS = new Set([
   'SPEC C APPROVED',
 ]);
 const TASK_DEFERRAL_AUTHORITIES = new WeakMap();
+const REDTEAM_FINDINGS_INPUT = 'decisions/redteam/findings.json';
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -471,6 +486,24 @@ function expandSystemEvidenceInputs(root, phase, itemId, inputs) {
   return inputs;
 }
 
+function validateRedteamFindingSet(root) {
+  const record = readJson(join(root, REDTEAM_FINDINGS_INPUT));
+  const ids = Array.isArray(record?.findings)
+    ? record.findings.map(finding => (typeof finding?.id === 'string' ? finding.id : '(invalid)'))
+    : [];
+  const counts = new Map();
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  const missing = EXPECTED_REDTEAM_FINDING_IDS.filter(id => !counts.has(id));
+  const duplicate = [...counts].filter(([, count]) => count > 1).map(([id]) => id);
+  const extra = [...counts.keys()].filter(id => !EXPECTED_REDTEAM_FINDING_IDS.includes(id));
+  if (missing.length > 0 || duplicate.length > 0 || extra.length > 0) {
+    throw new Error(
+      'redteam/R2 findings must contain exactly the current required finding ids '
+      + `(missing: ${missing.join(', ') || 'none'}; duplicate: ${duplicate.join(', ') || 'none'}; extra: ${extra.join(', ') || 'none'})`,
+    );
+  }
+}
+
 function validateSystemEvidenceSemantics(root, phase, itemId, inputs) {
   if (phase === 'architecture' && itemId === 'A6') {
     const expected = validateModuleIndex(root);
@@ -480,6 +513,7 @@ function validateSystemEvidenceSemantics(root, phase, itemId, inputs) {
   }
   if (phase === 'feasibility' && itemId === 'F3') validateIntegrationSpikes(root);
   if (phase === 'feasibility' && itemId === 'F4') validateFrozenInterfaces(root);
+  if (phase === 'redteam' && itemId === 'R2') validateRedteamFindingSet(root);
   if (phase === 'ship' && itemId === 'H3') validateInducedFailureDrill(root);
   if (phase === 'ship' && itemId === 'H5') validateOperationsHandoff(root);
 }

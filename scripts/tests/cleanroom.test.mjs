@@ -11,7 +11,7 @@ import { DEFAULT_DIGEST_RULES, scanDigestMarkers, scanTree } from '../check-clea
 const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const scanner = join(repoRoot, 'scripts', 'check-cleanroom.mjs');
 const retiredMarker = 'retired-widget';
-const RETAINED_DIGEST_RULES_SHA256 = 'eb88bbca96eaeebad4f3b68db0de5e01539130279ca87e05104c041adc61fc61';
+const RETAINED_DIGEST_RULES_SHA256 = '533d3ce640b1172e450acd264104e5dfc19b4cb8afbfbb7beb43c7b1a0666ed4';
 const retiredRule = {
   id: 'retired-test-marker',
   length: retiredMarker.length,
@@ -89,7 +89,7 @@ test('clean-room scanner permits the approved X handle while still detecting a r
       sha256: createHash('sha256').update(retiredTicker).digest('hex'),
       boundary: false,
     };
-    assert.equal(DEFAULT_DIGEST_RULES.length, 24);
+    assert.equal(DEFAULT_DIGEST_RULES.length, 23);
     assert.equal(
       createHash('sha256').update(JSON.stringify(DEFAULT_DIGEST_RULES)).digest('hex'),
       RETAINED_DIGEST_RULES_SHA256,
@@ -532,13 +532,15 @@ test('identity gate checks commit identity from base-defined workflow code', () 
   assert.match(identityWorkflow, /PUSH_HEAD_SHA:\s*\$\{\{ github\.sha \}\}/);
   assert.match(identityWorkflow, /GIT_NO_REPLACE_OBJECTS:\s*'1'/);
   assert.match(identityWorkflow, /git fetch --no-tags origin "\$PUSH_HEAD_SHA"/);
-  assert.match(identityWorkflow, /git merge-base "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA"/);
-  assert.match(identityWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs" > "\$RUNNER_TEMP\/check-commit-identity\.mjs"/);
+  assert.match(identityWorkflow, /"\$RUNNER_TEMP\/push-range\.mjs" resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(identityWorkflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs" > "\$RUNNER_TEMP\/check-commit-identity\.mjs"/);
   assert.match(identityWorkflow, /node "\$RUNNER_TEMP\/check-commit-identity\.mjs" "\$range_base" "\$range_head"/);
   assert.doesNotMatch(identityWorkflow, /node scripts\/check-commit-identity\.mjs/);
   assert.doesNotMatch(gatesWorkflow, /PR_BASE_REF|protected_identity_ref/);
   assert.match(gatesWorkflow, /name: Transitional base commit identity check/);
-  assert.match(gatesWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(gatesWorkflow, /node scripts\/ci\/push-range\.mjs resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(gatesWorkflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
   assert.match(gatesWorkflow, /Remove this step only after the owner registers identity-gate and control-gate as required statuses on main\./);
   assert.match(gatesWorkflow, /append_only_options=\(--require-ancestor\)/);
+  assert.match(gatesWorkflow, /node scripts\/ci\/push-range\.mjs append-only "\$range_base" "\$range_head"/);
 });

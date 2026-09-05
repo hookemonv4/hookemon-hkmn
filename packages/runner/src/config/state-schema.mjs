@@ -5,7 +5,7 @@
 // plain JSON document and rejects anything that carries a secret-material field.
 import { canonicalJson } from '../cycle/journal.mjs';
 
-export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v2';
+export const OPERATOR_CONFIGURATION_SCHEMA = 'hookemon.operator-configuration.v3';
 
 const configurationFields = [
   'schema',
@@ -22,6 +22,9 @@ const configurationFields = [
   'perCycleCapMicroUsdg',
   'lossCapMicroUsdg',
   'maxOutstandingCustodyMicroUsdg',
+  'maxHeldPositions',
+  'maxHeldValueMicroUsdg',
+  'unresolvedCardDeadlineMinutes',
   'executionPaused',
   'killSwitch',
   'manualApprovalCycles',
@@ -32,6 +35,10 @@ const configurationFields = [
   'configurationRevision',
 ];
 const unversionedConfigurationFields = configurationFields.filter(field => field !== 'schema');
+const preDeadlineConfigurationFields = configurationFields.filter(field => field !== 'unresolvedCardDeadlineMinutes');
+const unversionedPreDeadlineConfigurationFields = preDeadlineConfigurationFields.filter(field => field !== 'schema');
+const versionTwoConfigurationFields = configurationFields.filter(field => !['maxHeldPositions', 'maxHeldValueMicroUsdg', 'unresolvedCardDeadlineMinutes'].includes(field));
+const unversionedVersionTwoConfigurationFields = versionTwoConfigurationFields.filter(field => field !== 'schema');
 const legacyConfigurationFields = [
   'intervalMinutes',
   'allowedPackIds',
@@ -58,10 +65,16 @@ const maxSafeMicroUsdg = BigInt(Number.MAX_SAFE_INTEGER);
 
 const minimumIntervalMinutes = 5;
 const maximumIntervalMinutes = 1440;
+const minimumUnresolvedCardDeadlineMinutes = 5;
+const maximumUnresolvedCardDeadlineMinutes = 1440;
 const maximumBoostersPerCycle = 1000;
+const maximumHeldPositions = 1000;
 
 export const DEFAULT_INTERVAL_MINUTES = 20;
 export const DEFAULT_LIVE_MODE = false;
+export const DEFAULT_MAX_HELD_POSITIONS = 10;
+export const DEFAULT_MAX_HELD_VALUE_MICRO_USDG = '5000000000';
+export const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
 
 function assertExactPlainObject(value, fields, label) {
   canonicalJson(value);
@@ -255,6 +268,16 @@ export function assertOperatorConfiguration(value) {
   }
   const lossCapMicroUsdg = assertMicroUsdgAmount(value.lossCapMicroUsdg, 'operator configuration lossCapMicroUsdg');
   const maxOutstandingCustodyMicroUsdg = assertMicroUsdgAmount(value.maxOutstandingCustodyMicroUsdg, 'operator configuration maxOutstandingCustodyMicroUsdg');
+  const maxHeldPositions = assertIntegerInRange(value.maxHeldPositions, 'operator configuration maxHeldPositions', {
+    min: 0,
+    max: maximumHeldPositions,
+  });
+  const maxHeldValueMicroUsdg = assertMicroUsdgAmount(value.maxHeldValueMicroUsdg, 'operator configuration maxHeldValueMicroUsdg');
+  const unresolvedCardDeadlineMinutes = assertIntegerInRange(
+    value.unresolvedCardDeadlineMinutes,
+    'operator configuration unresolvedCardDeadlineMinutes',
+    { min: minimumUnresolvedCardDeadlineMinutes, max: maximumUnresolvedCardDeadlineMinutes },
+  );
   const executionPaused = assertBoolean(value.executionPaused, 'operator configuration executionPaused');
   const killSwitch = assertBoolean(value.killSwitch, 'operator configuration killSwitch');
   const manualApprovalCycles = assertIntegerInRange(value.manualApprovalCycles, 'operator configuration manualApprovalCycles', {
@@ -285,6 +308,9 @@ export function assertOperatorConfiguration(value) {
     perCycleCapMicroUsdg: value.perCycleCapMicroUsdg,
     lossCapMicroUsdg: value.lossCapMicroUsdg,
     maxOutstandingCustodyMicroUsdg: value.maxOutstandingCustodyMicroUsdg,
+    maxHeldPositions,
+    maxHeldValueMicroUsdg: value.maxHeldValueMicroUsdg,
+    unresolvedCardDeadlineMinutes,
     executionPaused,
     killSwitch,
     manualApprovalCycles,
@@ -317,6 +343,9 @@ export function createDefaultOperatorConfiguration() {
     perCycleCapMicroUsdg: '0',
     lossCapMicroUsdg: '0',
     maxOutstandingCustodyMicroUsdg: '0',
+    maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
+    maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
+    unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
     executionPaused: false,
     killSwitch: false,
     manualApprovalCycles: 0,
@@ -347,9 +376,52 @@ export function migrateOperatorConfiguration(value) {
   if (hasExactFields(value, configurationFields) && value.schema === OPERATOR_CONFIGURATION_SCHEMA) {
     return Object.freeze({ configuration: assertOperatorConfiguration(value), migrated: false });
   }
+  if (hasExactFields(value, preDeadlineConfigurationFields) && value.schema === OPERATOR_CONFIGURATION_SCHEMA) {
+    return Object.freeze({
+      configuration: assertOperatorConfiguration({
+        ...value,
+        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
+      }),
+      migrated: true,
+    });
+  }
+  if (hasExactFields(value, versionTwoConfigurationFields) && value.schema === 'hookemon.operator-configuration.v2') {
+    return Object.freeze({
+      configuration: assertOperatorConfiguration({
+        ...value,
+        schema: OPERATOR_CONFIGURATION_SCHEMA,
+        maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
+        maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
+        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
+      }),
+      migrated: true,
+    });
+  }
   if (hasExactFields(value, unversionedConfigurationFields)) {
     return Object.freeze({
       configuration: assertOperatorConfiguration({ schema: OPERATOR_CONFIGURATION_SCHEMA, ...value }),
+      migrated: true,
+    });
+  }
+  if (hasExactFields(value, unversionedPreDeadlineConfigurationFields)) {
+    return Object.freeze({
+      configuration: assertOperatorConfiguration({
+        schema: OPERATOR_CONFIGURATION_SCHEMA,
+        ...value,
+        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
+      }),
+      migrated: true,
+    });
+  }
+  if (hasExactFields(value, unversionedVersionTwoConfigurationFields)) {
+    return Object.freeze({
+      configuration: assertOperatorConfiguration({
+        ...value,
+        schema: OPERATOR_CONFIGURATION_SCHEMA,
+        maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
+        maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
+        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
+      }),
       migrated: true,
     });
   }
@@ -362,6 +434,9 @@ export function migrateOperatorConfiguration(value) {
         perCycleCapMicroUsdg: value.maxCycleBudgetMicroUsdg,
         lossCapMicroUsdg: '0',
         maxOutstandingCustodyMicroUsdg: '0',
+        maxHeldPositions: DEFAULT_MAX_HELD_POSITIONS,
+        maxHeldValueMicroUsdg: DEFAULT_MAX_HELD_VALUE_MICRO_USDG,
+        unresolvedCardDeadlineMinutes: DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES,
         executionPaused: true,
         killSwitch: false,
         manualApprovalCycles: 0,

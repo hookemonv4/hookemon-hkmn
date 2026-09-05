@@ -43,6 +43,36 @@ test('accepts a well-formed empty snapshot', () => {
   assert.equal(result.badge, 'MAINNET');
 });
 
+test('keeps a schema version 5 snapshot free of version 6 held-position fields', () => {
+  const result = normalizePublicCommunitySnapshot(baseSnapshot(), 'mainnet');
+  assert.equal(Object.hasOwn(result, 'heldPositionCount'), false);
+  assert.equal(Object.hasOwn(result, 'heldPositions'), false);
+});
+
+test('keeps identifier-bearing held positions in schema version 6 while schema version 7 exposes only public status fields', () => {
+  const legacyHeld = {
+    ...baseSnapshot(),
+    schemaVersion: 6,
+    heldPositionCount: 1,
+    heldPositions: [{
+      positionId: 'position-1', cycleId: 'cycle-1', reason: 'EPIC_THRESHOLD', ageSeconds: 60, cycleState: 'COMPLETE',
+    }],
+  };
+  const publicHeld = {
+    ...baseSnapshot(),
+    schemaVersion: 7,
+    heldPositionCount: 1,
+    heldPositions: [{ reason: 'EPIC_THRESHOLD', ageSeconds: 60, cycleState: 'COMPLETE' }],
+  };
+
+  assert.equal(normalizePublicCommunitySnapshot(legacyHeld, 'mainnet').heldPositions[0].positionId, 'position-1');
+  assert.deepEqual(normalizePublicCommunitySnapshot(publicHeld, 'mainnet').heldPositions, publicHeld.heldPositions);
+  assert.throws(() => normalizePublicCommunitySnapshot({
+    ...publicHeld,
+    heldPositions: [{ ...publicHeld.heldPositions[0], cycleId: 'cycle-1' }],
+  }, 'mainnet'));
+});
+
 test('rejects a mismatched badge for the profile', () => {
   const input = { ...baseSnapshot(), badge: 'TESTNET' };
   assert.throws(() => normalizePublicCommunitySnapshot(input, 'mainnet'));

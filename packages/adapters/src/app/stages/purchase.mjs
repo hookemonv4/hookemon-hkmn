@@ -10,8 +10,9 @@ import {
   decodeProviderTransaction,
   evaluate as evaluateTransactionPolicy,
 } from '../../signing/transaction-policy.mjs';
+import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
 import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../signing/signer-client.mjs';
-import { requireLiveMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
+import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { parseCollectorMachineContains } from '../../collector-crypt.mjs';
 import {
   assertSolanaSignerFeeEnvelope,
@@ -48,6 +49,8 @@ function typedAmount(asset, value, label) {
 }
 
 function requirePolicy(config, stage) {
+  const bundlePolicy = collectorPolicyForStage(config, stage);
+  if (bundlePolicy !== null) return bundlePolicy;
   const policy = config?.collectorCrypt?.[stage]?.policy;
   if (!plainObject(policy)) throw new Error(`Collector ${stage} requires a pinned transaction policy`);
   return policy;
@@ -94,7 +97,7 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
     client: {
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(request) {
-        requireLiveMutationAuthority();
+        requireCollectorOnlyMutationAuthority(config);
         return signerClient.solana.sign(request);
       },
     },
@@ -104,7 +107,7 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
         throw new Error(`Collector ${stage} transaction blockhash expired before submission`);
       }
-      requireLiveMutationAuthority();
+      requireCollectorOnlyMutationAuthority(config);
       return adapters.collectorCrypt.submitTransaction({ signedTransaction: signed.signedTxBase64 });
     },
   });
@@ -191,7 +194,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   if (!account.exists) throw new Error('purchase mutate requires the operator settlement token account to exist');
   if (account.decimals !== asset.decimals) throw new Error('purchase mutate settlement token account decimals do not match configured settlementAsset');
 
-  requireLiveMutationAuthority();
+  requireCollectorOnlyMutationAuthority(config);
   const generated = await adapters.collectorCrypt.generatePack({
     playerAddress: prepared.playerAddress,
     ...(prepared.packType ? { packType: prepared.packType } : {}),

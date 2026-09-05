@@ -59,7 +59,7 @@
     },
     {
       "path": "docs/modules/index.json",
-      "sha256": "9943a6bdcce3104d2ca2bcbb96481afcc3ece32466ed68b255aef4aca4aec7ff"
+      "sha256": "007fa2df837289bde2c0fa6461df0f5a25ea2d325022830748d31fae4bbb98f6"
     },
     {
       "path": "docs/modules/payout-commitment.md",
@@ -75,7 +75,7 @@
     },
     {
       "path": "docs/modules/release-evidence.md",
-      "sha256": "f089d2a4b040c772c6bccc2bb8cee997c150b6575a03157b2942f73efabee11b"
+      "sha256": "75d51d6ae15c8c3dfed9cad5f627442000209cb573456cec889f329c3b98035a"
     },
     {
       "path": "feasibility/integration-spikes.json",
@@ -83,7 +83,7 @@
     },
     {
       "path": "feasibility/interface-freeze.json",
-      "sha256": "170a7a22e7540ca35dc9397f4ed0bafd5b74c0af7b325ca330ba294c79023c81"
+      "sha256": "017f8898c673f6c50f40b6af91a5ce12a01dca7e72916dfeb6f316bba6f1a38f"
     },
     {
       "path": "feasibility/model-results.json",
@@ -123,7 +123,7 @@
     },
     {
       "path": "packages/contracts/src/HookemonHook.sol",
-      "sha256": "7bb49163908f732e81834594ffd456a5f4dda30471f325eb2a7d2be31e0dd463"
+      "sha256": "35489fda757aef2d35392d164101394aef4270592e4d447efcca3c82661f4be1"
     },
     {
       "path": "packages/contracts/src/access/MoneyRoles.sol",
@@ -355,7 +355,7 @@
     },
     {
       "path": "product/dependency-pins.json",
-      "sha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7"
+      "sha256": "564427f1019189f1c9be665793b2773a250aa9a02fe39df3787cc3ecf7a834cd"
     },
     {
       "path": "qa/reviews/phase1-local-risk-review.md",

@@ -28,7 +28,19 @@ canonical micro-USDG integer strings.
   repeat the checks, so a persisted or direct over-cap configuration cannot expand spending
   authority.
 - A production claim checks the allowlist, order request, cycle and trailing-24-hour offchain spend limits,
-  per-cycle cap, loss cap, custody cap, held assets, unattributed deposits, and unvalued custody.
+  per-cycle cap, loss cap, custody cap, held-position limits, unattributed deposits, and unvalued custody.
+  It returns `HELD_LIMIT` when the open position count is greater than or equal to
+  `maxHeldPositions`, or their persisted USDG control value is greater than
+  `maxHeldValueMicroUsdg`. A position uses a verified insured value only when it is already typed
+  as the configured USDG asset; otherwise it uses its attributed purchase cost.
+- `pendingEpicDecisions` and the legacy `heldAssets` signal do not independently refuse a new
+  claim. Per-card positions are assessed only through the held-position limits. The automation
+  join gate retains unattributed custody and unresolved obligations as the separate fail-closed
+  conditions.
+- Operator configuration sets `maxHeldPositions` from 0 through 1,000,
+  `maxHeldValueMicroUsdg` as a canonical micro-USDG string, and
+  `unresolvedCardDeadlineMinutes` from 5 through 1,440. Their defaults are 10,
+  `5000000000`, and 30 respectively.
 - `admit` repeats the custody and configuration check inside the supplied durable mutation before
   recording a new production cycle and its spend reservation.
 - A reservation at or beyond the trailing-24-hour boundary is refused. A current reservation counts
@@ -38,8 +50,10 @@ canonical micro-USDG integer strings.
   typed unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string
   quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share one
   asset identity, and the reservation covers totalAtomic plus boundedOverheadAtomic.
-- The current digest excludes the generic configuration revision. It continues to bind every
-  economic-policy field, so a pause or resume does not invalidate an admitted cycle.
+- The current digest excludes the generic configuration revision and binds every economic-policy
+  field, including held-position limits and the unresolved-card deadline, so a pause or resume does
+  not invalidate an admitted cycle. Existing version-3, version-2, and version-1 digests remain
+  recognizable for their recorded policy material.
 - Cycle mode is persisted at creation and immutable. Production services refuse rehearsal cycles
   and rehearsal services refuse production cycles.
 - `executionPaused` and `killSwitch` refuse cycle starts and every signature, broadcast, or generic
@@ -68,7 +82,8 @@ node --test packages/runner/test/automation/policy-engine.test.mjs \
 ```
 
 - Record a manual approval with the digest produced for the intended cycle before retrying its claim.
-- Investigate held, unattributed, or unvalued custody before clearing the underlying condition.
+- Investigate a held-position limit, unattributed custody, or unvalued custody before clearing the
+  underlying condition.
 
 ## Recovery pointers
 
@@ -92,6 +107,18 @@ node --test packages/runner/test/automation/policy-engine.test.mjs \
 - The cycle record's release cap is not a final provider-validated purchase price. Until the
   purchase stage persists the atomic price, the service passes the release cap to the purchase
   check and refuses a release above the configured unit-price cap.
+- OPEN FACT: No frozen conversion quote binds a Collector Solana stablecoin insured amount to USDG.
+  Resolve it by adding a quoted, digest-bound USDG conversion to the held-position contract and
+  tests that reject a substituted quote. Verified safe alternative: use the cycle-attributed USDG
+  purchase cost unless `insuredValue` is already the configured USDG asset; do not price a foreign
+  insured amount.
+- OPEN FACT: A completed cycle with open held positions remains an active DurableCycleStore record,
+  whose capacity is 16. The default `maxHeldPositions: 10` is safe when positions span completed
+  cycles, but values above 10 have no verified capacity guarantee and values at or above 16 can
+  exhaust the store before `HELD_LIMIT` protects a future cycle. Resolve this by adding
+  post-completion position archival with recoverable supplementary evidence, or a store-capacity
+  exemption, and test admission across the configured position cap. Verified safe alternative:
+  keep `maxHeldPositions` at 10 or lower.
 - OPEN FACT: The configuration schema has no durable, projected pending-manual-approval pair for a
   refused cycle. Resolve it through an owner-approved requirements and interface revision that
   defines the pair, its lifecycle, and its status projection, then regenerate the frozen interface

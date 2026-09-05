@@ -40,23 +40,23 @@ test('reads a digest-bound manual approval', () => {
   });
 });
 
-test('reads a held owner decision bound to the held evidence and cycle revision', () => {
+test('reads a held owner decision bound to one position evidence digest and revision', () => {
   const result = readDecisionRequest({
     requestId: 'held-decision-1',
     expectedVersion: 3,
     command: {
       type: 'held-owner-decision',
-      cycleId: 'cycle-42',
+      positionId: 'position-42',
       heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
-      expectedCycleRevision: 9,
+      expectedPositionRevision: 9,
       choice: 'keep-holding',
     },
   });
   assert.deepEqual(result.command, {
     type: 'held-owner-decision',
-    cycleId: 'cycle-42',
+    positionId: 'position-42',
     heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
-    expectedCycleRevision: 9,
+    expectedPositionRevision: 9,
     choice: 'keep-holding',
   });
 });
@@ -67,10 +67,24 @@ test('reads an update-configuration patch without granting pause or kill fields'
     expectedVersion: 3,
     command: {
       type: 'update-configuration',
-      configuration: { intervalMinutes: 30, maxCyclesPerDay: 2, lossCapMicroUsdg: '200' },
+      configuration: {
+        intervalMinutes: 30,
+        maxCyclesPerDay: 2,
+        lossCapMicroUsdg: '200',
+        maxHeldPositions: 10,
+        maxHeldValueMicroUsdg: '5000000000',
+        unresolvedCardDeadlineMinutes: 30,
+      },
     },
   });
-  assert.deepEqual(result.command.configuration, { intervalMinutes: 30, maxCyclesPerDay: 2, lossCapMicroUsdg: '200' });
+  assert.deepEqual(result.command.configuration, {
+    intervalMinutes: 30,
+    maxCyclesPerDay: 2,
+    lossCapMicroUsdg: '200',
+    maxHeldPositions: 10,
+    maxHeldValueMicroUsdg: '5000000000',
+    unresolvedCardDeadlineMinutes: 30,
+  });
   assert.throws(() => readDecisionRequest({
     requestId: 'config-kill', expectedVersion: 3,
     command: { type: 'update-configuration', configuration: { killSwitch: false } },

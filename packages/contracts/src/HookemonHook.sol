@@ -62,12 +62,14 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
     uint256 private constant PROCESS_CLAIM_WINDOW = 21_600;
     uint256 private constant MAX_PROCESS_CLAIM_WINDOW_ENTRIES = 64;
     uint256 private constant MAX_OPERATIONS_ROTATION_DELAY = 30 days;
+    uint256 public constant MAX_SEED_DEADLINE_SECONDS = 900;
 
     address private immutable programmableBeneficiary;
     address public immutable positionManager;
     address public immutable permit2;
     address public immutable launchAuthority;
     address public immutable graphInitializer;
+    bytes32 public immutable seedIntentDigest;
     bool public immutable graphMode;
     uint8 public immutable graphExpectedDecimals;
     uint256 public immutable processClaimLimit6h;
@@ -116,6 +118,8 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
     error CanonicalPoolNotInitialized();
     error CanonicalLiquidityAlreadySeeded();
     error InvalidSeedParams();
+    error SeedDeadlineExceedsMaximum();
+    error SeedIntentMismatch();
     error InvalidSeedCustody();
     error InvalidPositionManagerPermit2();
     error InvalidPositionManagerPoolManager();
@@ -177,6 +181,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         uint8 expectedDecimals;
         bytes32 bindingDigest;
         bytes32 runtimeDigest;
+        bytes32 seedIntentDigest;
         uint256 processClaimLimit6h;
         uint256 processClaimLimitMax;
         uint256 processClaimMaxCount;
@@ -214,7 +219,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         Hooks.validateHookPermissions(IHooks(address(this)), getHookPermissions());
         if (
             config.positionManager == address(0) || config.permit2 == address(0)
-                || config.launchAuthority == address(0)
+                || config.launchAuthority == address(0) || config.seedIntentDigest == bytes32(0)
         ) revert InvalidConstructorConfig();
         bool knownProviderFactory = msg.sender == RobinhoodBindings.PROGRAMMABLE_GRAPH_FACTORY;
         if (knownProviderFactory && config.issuanceAuthority != msg.sender) {
@@ -240,6 +245,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         permit2 = config.permit2;
         launchAuthority = config.launchAuthority;
         graphInitializer = config.issuanceAuthority;
+        seedIntentDigest = config.seedIntentDigest;
         graphMode = graphMode_;
         graphExpectedDecimals = config.expectedDecimals;
         processClaimLimit6h = config.processClaimLimit6h;
@@ -344,6 +350,10 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
                 || params.tickLower >= params.tickUpper || params.tickLower % tickSpacing != 0
                 || params.tickUpper % tickSpacing != 0 || params.deadline < block.timestamp
         ) revert InvalidSeedParams();
+        if (params.deadline - block.timestamp > MAX_SEED_DEADLINE_SECONDS) {
+            revert SeedDeadlineExceedsMaximum();
+        }
+        if (_seedIntentDigest(params) != seedIntentDigest) revert SeedIntentMismatch();
 
         PoolKey memory key = _canonicalPoolKey();
         (uint256 usdgMax, uint256 hkmnMax) = _seedMaximums(key, params);
@@ -757,6 +767,20 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         bool usdgIsCurrency0 = Currency.unwrap(key.currency0) == Currency.unwrap(usdg);
         usdgMax = usdgIsCurrency0 ? params.amount0Max : params.amount1Max;
         hkmnMax = usdgIsCurrency0 ? params.amount1Max : params.amount0Max;
+    }
+
+    function _seedIntentDigest(SeedParams calldata params) private pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                params.payer,
+                params.tickLower,
+                params.tickUpper,
+                params.liquidity,
+                params.amount0Max,
+                params.amount1Max,
+                MAX_SEED_DEADLINE_SECONDS
+            )
+        );
     }
 
     function _requireExactPayerAllowance(address payer, uint256 usdgMax) private view {

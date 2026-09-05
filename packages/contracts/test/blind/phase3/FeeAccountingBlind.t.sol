@@ -330,6 +330,7 @@ contract FeeAccountingBlindTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: keccak256("blind-fee-binding"),
                 runtimeDigest: keccak256("blind-fee-runtime"),
+                seedIntentDigest: keccak256("blind-fee-seed-intent"),
                 processClaimLimit6h: 1_000_000_000_000,
                 processClaimLimitMax: 1_000_000_000_000,
                 processClaimMaxCount: 8,

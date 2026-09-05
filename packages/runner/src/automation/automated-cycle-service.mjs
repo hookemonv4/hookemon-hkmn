@@ -53,7 +53,6 @@ async function assertJoinPreconditions(cycleRepository, cycleId, stage) {
     const custody = await cycleRepository.readClaimPreconditions(cycleId);
     if (!custody || typeof custody !== 'object') throw new Error('claim-process custody preconditions are invalid');
     const reasons = [
-      custody.heldAssets === true ? 'held assets' : null,
       custody.unattributed === true ? 'unattributed assets' : null,
       custody.unresolvedObligations === true ? 'unresolved obligations' : null,
     ].filter(Boolean);
@@ -192,6 +191,48 @@ export class AutomatedCycleService {
     return this.#run({ signal, requireActive: true });
   }
 
+  async #runOneSupplementarySettlement({ signal, lease, assertLease }) {
+    if (typeof this.#stageDriver.runSupplementarySettlement !== 'function'
+      || typeof this.#cycleRepository.listHeldPositions !== 'function'
+      || typeof this.#cycleRepository.readSupplementarySettlement !== 'function') {
+      return null;
+    }
+    const positions = await this.#cycleRepository.listHeldPositions();
+    if (!Array.isArray(positions)) throw new Error('supplementary settlement held-position list is invalid');
+    for (const position of positions) {
+      assertNotAborted(signal);
+      if (!position || typeof position !== 'object' || position.ownerDecision?.choice !== 'sell' || position.resolution !== null) {
+        continue;
+      }
+      const settlement = await this.#cycleRepository.readSupplementarySettlement(position.positionId);
+      if (settlement === null || settlement?.state === 'COMPLETE') continue;
+      assertLease();
+      const result = await this.#stageDriver.runSupplementarySettlement({
+        position,
+        settlement,
+        nowMs: this.#now(),
+        fencingToken: lease.fencingToken,
+        assertLease,
+      });
+      assertLease();
+      if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        throw new Error('supplementary settlement stage driver result is invalid');
+      }
+      if (result.status === 'PENDING') continue;
+      if (result.status !== 'ADVANCED') {
+        throw new Error('supplementary settlement stage driver result status is invalid');
+      }
+      return {
+        cycleId: settlement.cycleId,
+        positionId: position.positionId,
+        manifestId: settlement.manifestId,
+        stage: result.stage ?? null,
+        settlementState: result.state ?? settlement.state,
+      };
+    }
+    return null;
+  }
+
   async #run({ signal, requireActive }) {
     let lease;
     let heartbeatTimer;
@@ -213,10 +254,39 @@ export class AutomatedCycleService {
 
     try {
       assertNotAborted(signal);
+      const assertLease = () => {
+        if (heartbeatError) throw heartbeatError;
+        assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
+      };
+      const scheduleHeartbeat = () => {
+        heartbeatTimer = setTimeout(() => {
+          if (heartbeatError) return;
+          try {
+            lease = renewLease({
+              store: this.#leaseStore,
+              lease,
+              now: this.#now(),
+              ttlMs: this.#leaseTtlMs,
+            });
+            if (activeContext) Object.assign(activeContext.lease, lease);
+            scheduleHeartbeat();
+          } catch (error) {
+            heartbeatError = error;
+          }
+        }, Math.max(1, Math.floor(this.#leaseTtlMs / 2)));
+        heartbeatTimer.unref?.();
+      };
+      scheduleHeartbeat();
+      const supplementary = await this.#runOneSupplementarySettlement({ signal, lease, assertLease });
       let cycle = await this.#cycleRepository.readActiveCycle();
       let createdCycle = false;
       if (cycle === null) {
-        if (requireActive) return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
+        if (requireActive) {
+          if (supplementary !== null) {
+            return { status: 'SUPPLEMENTARY_SETTLEMENT', ...supplementary };
+          }
+          return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
+        }
         const budget = await this.#budgetReader.read();
         if (budget?.packPriceUsdg === '0') {
           return {
@@ -306,10 +376,6 @@ export class AutomatedCycleService {
         }
       }
       const runner = this.#runnerFactory(cycle.cycleId);
-      const assertLease = () => {
-        if (heartbeatError) throw heartbeatError;
-        assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
-      };
       const assertMutationAllowed = async ({
         boundary = 'mutation',
         cycleId = cycle.cycleId,
@@ -346,25 +412,6 @@ export class AutomatedCycleService {
         assertLease();
         return lease.fencingToken;
       };
-      const scheduleHeartbeat = () => {
-        heartbeatTimer = setTimeout(() => {
-          if (heartbeatError) return;
-          try {
-            lease = renewLease({
-              store: this.#leaseStore,
-              lease,
-              now: this.#now(),
-              ttlMs: this.#leaseTtlMs,
-            });
-            if (activeContext) Object.assign(activeContext.lease, lease);
-            scheduleHeartbeat();
-          } catch (error) {
-            heartbeatError = error;
-          }
-        }, Math.max(1, Math.floor(this.#leaseTtlMs / 2)));
-        heartbeatTimer.unref?.();
-      };
-      scheduleHeartbeat();
 
       for (const stage of AUTOMATED_CYCLE_STAGES) {
         assertNotAborted(signal);
@@ -380,6 +427,7 @@ export class AutomatedCycleService {
           fencingToken: lease.fencingToken,
           releaseAmountMicroUsdg: cycle.releaseAmount,
           packId: this.#packId,
+          nowMs: this.#now(),
           assertLease,
           assertMutationAllowed,
         };

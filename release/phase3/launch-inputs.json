@@ -171,7 +171,7 @@
       "kind": "relative",
       "maximumSecondsAfterWalletConfirmation": 900,
       "actualDeadline": null,
-      "reason": "The contract only requires a future deadline; the signed value must be created after the final preflight response."
+      "reason": "The contract requires a future deadline no more than 900 seconds after the current block timestamp; the signed value must be created after the final preflight response."
     },
     "refundAndDust": {
       "intendedDestination": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",

@@ -58,6 +58,7 @@ function custodyLedger(overrides = {}) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -93,7 +94,7 @@ test('validates atomic amounts and a per-cycle custody ledger with every require
   assert.deepEqual(assertCustodyLedger(ledger), ledger);
   assert.deepEqual(CUSTODY_LEDGER_BUCKETS, [
     'claimed', 'bridgeOut', 'bridgeIn', 'packCost', 'buybackProceeds', 'returnInput',
-    'returnReceived', 'refunds', 'residual', 'heldAssets', 'payoutLiability', 'dust', 'unattributed',
+    'returnReceived', 'refunds', 'residual', 'heldAssets', 'heldPositions', 'payoutLiability', 'dust', 'unattributed',
   ]);
   assert.throws(() => assertCustodyLedger({ ...ledger, unexpected: '0' }), /exact schema/);
   assert.throws(() => assertCustodyLedger({ ...ledger, dust: '-1' }), /dust/);

@@ -35,18 +35,20 @@ const PERMITTED_WORKFLOW_PATHS = new Set([
   CONTROL_GATE_WORKFLOW_PATH,
 ]);
 const COMMIT_IDENTITY_ALLOWLIST_PATH = 'scripts/check-commit-identity.mjs';
+const PUSH_RANGE_RESOLVER_PATH = 'scripts/ci/push-range.mjs';
 const FORK_PIN_VERIFIER_PATH = 'scripts/verify-fork-pin.mjs';
 const RELEASE_CLOSURE_BUILDER_MANIFEST_PATH = 'scripts/programmable/vendor/programmable-v4-hook-builder/manifest.json';
 const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '91f1be89863be27b0db808cbbf2b95051e4a2ae204d5fc350471bf400bf8d513';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'db27a283abf64f616664d9c26bfe55912fec79dedd780c97e89acbec2141dd7e';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
-const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = 'd917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019';
-const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = '08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50';
+const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '896a8df85ab356c84649bb942a9fd171b5dcd6883047cbe40c03a074cfe1e994';
+const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = '45b7339b63b4b334620ab8eac8b873b08788c42af6e8159490baca00ed6916bb';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
+const SUPPORTED_PUSH_RANGE_RESOLVER_SHA256 = '4e7acdb6d7e15b2721fcb35ac8bd2467ac75f3e2188c40458422ce8bc7ddd987';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_MANIFEST_SHA256 = 'd3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_SOURCE_TREE_SHA256 = '4795ee279dec6ae22e047e6fe6c032b85f242cc96797f40d4560f70b6e8559ae';
@@ -597,6 +599,34 @@ function verifyCommitIdentityAllowlistIntegrity(root, pins, errors) {
   };
 }
 
+function verifyPushRangeResolverIntegrity(root, pins, errors) {
+  const pin = pins.controlScripts?.pushRangeResolver ?? {};
+
+  if (pin.path !== PUSH_RANGE_RESOLVER_PATH) {
+    errors.push(`push range resolver path must be ${PUSH_RANGE_RESOLVER_PATH}`);
+  }
+  if (!SHA256_PATTERN.test(pin.sha256 ?? '')) {
+    errors.push('push range resolver digest must be a SHA-256');
+  }
+  if (pin.sha256 !== SUPPORTED_PUSH_RANGE_RESOLVER_SHA256) {
+    errors.push('push range resolver digest must match the supported release');
+  }
+
+  const actualSha256 = regularRepositoryFileHash(root, PUSH_RANGE_RESOLVER_PATH, 'push range resolver', errors);
+  if (actualSha256 !== null && pin.sha256 && actualSha256 !== pin.sha256) {
+    errors.push(`push range resolver digest mismatch: expected ${pin.sha256}, got ${actualSha256}`);
+  }
+  if (actualSha256 !== null && actualSha256 !== SUPPORTED_PUSH_RANGE_RESOLVER_SHA256) {
+    errors.push('push range resolver content mismatch: the resolver must match the supported release');
+  }
+
+  return {
+    path: PUSH_RANGE_RESOLVER_PATH,
+    expectedSha256: pin.sha256 ?? null,
+    actualSha256,
+  };
+}
+
 function forkPinVerifierClosureEntries(pin, errors) {
   const expected = [
     { path: FORK_PIN_VERIFIER_PATH, sha256: SUPPORTED_FORK_PIN_VERIFIER_SHA256 },
@@ -1128,6 +1158,7 @@ function controlSurfaceDescriptors(pins, errors, source) {
   add('fork-pin canary workflow', FORK_PIN_CANARY_WORKFLOW_PATH, pins.contentAddresses?.forkPinCanary);
   add('identity-gate workflow', IDENTITY_GATE_WORKFLOW_PATH, pins.contentAddresses?.identityGate);
   add('control-gate workflow', CONTROL_GATE_WORKFLOW_PATH, pins.contentAddresses?.controlGate);
+  add('push range resolver', PUSH_RANGE_RESOLVER_PATH, pins.controlScripts?.pushRangeResolver);
   const forkPinVerifier = pins.controlScripts?.forkPinVerifier ?? {};
   const closure = forkPinVerifier.closure;
   if (!Array.isArray(closure) || closure.length !== 2) {
@@ -1322,6 +1353,7 @@ function controlSurfacePaths() {
     FORK_PIN_CANARY_WORKFLOW_PATH,
     IDENTITY_GATE_WORKFLOW_PATH,
     CONTROL_GATE_WORKFLOW_PATH,
+    PUSH_RANGE_RESOLVER_PATH,
     FORK_PIN_VERIFIER_PATH,
     FORK_PIN_VERIFIER_IMPORT_PATH,
     CONTROL_DEPENDENCY_VERIFIER_PATH,
@@ -1706,6 +1738,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const identityGate = verifyIdentityGateIntegrity(root, pins, errors);
   const controlGate = verifyControlGateIntegrity(root, pins, errors);
   const commitIdentityAllowlist = verifyCommitIdentityAllowlistIntegrity(root, pins, errors);
+  const pushRangeResolver = verifyPushRangeResolverIntegrity(root, pins, errors);
   const forkPinVerifier = verifyForkPinVerifierIntegrity(root, pins, errors);
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
   const controlDependencyVerifier = verifyControlDependencyVerifierIntegrity(root, pins, errors);
@@ -1805,6 +1838,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
     controlGate,
     controlScripts: {
       commitIdentityAllowlist,
+      pushRangeResolver,
       forkPinVerifier,
       releaseClosureBuilder,
       controlDependencyVerifier,

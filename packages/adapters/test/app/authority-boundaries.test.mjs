@@ -28,33 +28,33 @@ function assertAuthorityCheckBefore(source, effectMarker, authorityMarker, label
   assert.match(source.slice(0, effect), authorityMarker, `${label}: authority is not checked before the effect`);
 }
 
-test('revalidates the live authority immediately before signing and before every direct transport submission', () => {
+test('revalidates the applicable live mutation authority immediately before signing and before every direct transport submission', () => {
   assertAuthorityCheckInCallback(
     stageSource('purchase'),
     'async sign(request) {',
     'return signerClient.solana.sign(request);',
-    /requireLiveMutationAuthority\(\);/,
+    /requireCollectorOnlyMutationAuthority\(config\);/,
     'purchase signing',
   );
   assertAuthorityCheckInCallback(
     stageSource('purchase'),
     'broadcast: async signed => {',
     'return adapters.collectorCrypt.submitTransaction',
-    /requireLiveMutationAuthority\(\);/,
+    /requireCollectorOnlyMutationAuthority\(config\);/,
     'purchase submission',
   );
   assertAuthorityCheckInCallback(
     stageSource('buyback'),
     'async sign(request) {',
     'return signerClient.solana.sign(request);',
-    /requireLiveMutationAuthority\(\);/,
+    /requireCollectorOnlyMutationAuthority\(config\);/,
     'buyback signing',
   );
   assertAuthorityCheckInCallback(
     stageSource('buyback'),
     'broadcast: async signed => {',
     'return adapters.collectorCrypt.submitTransaction',
-    /requireLiveMutationAuthority\(\);/,
+    /requireCollectorOnlyMutationAuthority\(config\);/,
     'buyback submission',
   );
   const payout = stageSource('payout');
@@ -104,14 +104,14 @@ test('revalidates the live authority immediately before signing and before every
     stageSource('rehearsal'),
     'async sign(request) {',
     'return signerClient.solana.sign(request);',
-    /requireLiveMutationAuthority\(\);/,
+    /requireCollectorOnlyMutationAuthority\(config\);/,
     'rehearsal payout signing',
   );
   assertAuthorityCheckInCallback(
     stageSource('rehearsal'),
     'broadcast: async signed => {',
     'return { signature: await submitSignedTransaction',
-    /requireLiveMutationAuthority\(\);/,
+    /requireCollectorOnlyMutationAuthority\(config\);/,
     'rehearsal payout submission',
   );
   assertAuthorityCheckBefore(

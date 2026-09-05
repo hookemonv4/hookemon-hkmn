@@ -563,6 +563,33 @@ test('loadOperatorSignerClient(keychain backend): constructs a live client only 
   assert.equal(calls.length, 0);
 });
 
+test('loadOperatorSignerClient constructs only the selected Solana Operations role for a live collector-only rehearsal', async () => {
+  const calls = [];
+  const client = await loadOperatorSignerClient({
+    execution: { profile: 'rehearsal', providerMode: 'live' },
+    rehearsal: { mode: 'collector-only' },
+    signer: {
+      backend: 'keychain',
+      liveMode: true,
+      roles: ['operator-solana'],
+      keychain: { command: '/opt/hookemon/bin/keychain-sign', evmAccount: null, solanaAccount: 'operator-solana' },
+    },
+  }, {
+    ...fixtureSignerOptions,
+    exec: async call => {
+      calls.push(call);
+      return { code: 0, stdout: JSON.stringify({ signedTxBase64: 'AQ==' }), stderr: '' };
+    },
+  });
+
+  assert.equal(client.evm, null);
+  assert.equal(typeof client.solana.sign, 'function');
+  await client.solana.sign('AQ==');
+  assert.deepEqual(calls[0].args, [
+    'sign', '--role', 'operator-solana', '--account', 'operator-solana', '--parent-policy-evaluated',
+  ]);
+});
+
 test('loadOperatorSignerClient(keychain backend) requires an injected exec function', async () => {
   const config = readEnvironment(baseEnv({
     HOOKEMON_SIGNER_BACKEND: 'keychain',
@@ -592,6 +619,30 @@ test('probeKeychainOperations checks both configured Operations identities befor
     ['probe', '--role', 'operator-solana', '--account', 'operator-solana'],
   ]);
   assert.deepEqual(result, { 'operator-evm': { ready: true }, 'operator-solana': { ready: true } });
+});
+
+test('probeKeychainOperations uses only the configured Solana role and binds its public key for live collector-only rehearsal', async () => {
+  const calls = [];
+  const publicKey = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const result = await probeKeychainOperations({
+    execution: { profile: 'rehearsal', providerMode: 'live' },
+    accounts: { solana: publicKey },
+    signer: {
+      backend: 'keychain',
+      roles: ['operator-solana'],
+      keychain: { command: '/opt/hookemon/bin/keychain-sign', evmAccount: null, solanaAccount: 'operator-solana' },
+    },
+  }, {
+    exec: async call => {
+      calls.push(call);
+      return { code: 0, stdout: JSON.stringify({ ready: true, publicKey }), stderr: '' };
+    },
+  });
+
+  assert.deepEqual(calls.map(call => call.args), [
+    ['probe', '--role', 'operator-solana', '--account', 'operator-solana'],
+  ]);
+  assert.deepEqual(result, { 'operator-solana': { ready: true, publicKey } });
 });
 
 test('loadStandingAuthority returns null when no document path is configured, and the real verified document otherwise', async t => {

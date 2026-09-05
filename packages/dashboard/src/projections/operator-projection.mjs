@@ -37,6 +37,9 @@ function mapOperatorState(configuration, revision) {
     maxUnitPriceMicroUsdg: effective.maxUnitPriceMicroUsdg,
     maxCycleBudgetMicroUsdg: effective.maxCycleBudgetMicroUsdg,
     max24HourBudgetMicroUsdg: effective.max24HourBudgetMicroUsdg,
+    maxHeldPositions: effective.maxHeldPositions ?? 10,
+    maxHeldValueMicroUsdg: effective.maxHeldValueMicroUsdg ?? '5000000000',
+    unresolvedCardDeadlineMinutes: effective.unresolvedCardDeadlineMinutes ?? 30,
     configurationComplete: configuration !== null && configuration !== undefined && configuration.allowedPackIds.length > 0,
     executionConnected: false,
     liveMode: effective.liveMode === true,
@@ -76,7 +79,60 @@ function capProjection(authorityStatus) {
     loss: cap.loss ?? null,
     outstandingCustody: cap.outstandingCustody ?? null,
     onChainRemainingCapacity: cap.onChainRemainingCapacity ?? null,
+    heldPositions: cap.heldPositions ?? null,
   };
+}
+
+function projectInsuredValue(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.chainId !== 'string' || typeof value.assetId !== 'string'
+    || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255
+    || typeof value.amountAtomic !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value.amountAtomic)) {
+    throw new Error('authority held position insured value is invalid');
+  }
+  return { chainId: value.chainId, assetId: value.assetId, decimals: value.decimals, amountAtomic: value.amountAtomic };
+}
+
+function projectHeldOwnerDecision(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || (value.choice !== 'sell' && value.choice !== 'keep-holding')) {
+    throw new Error('authority held position owner decision is invalid');
+  }
+  return { choice: value.choice };
+}
+
+function projectHeldPositions(authorityStatus, generatedAtMs) {
+  const source = authorityStatus?.heldPositions ?? authorityStatus?.custody?.heldPositions ?? [];
+  if (!Array.isArray(source)) throw new Error('authority held positions are invalid');
+  return source.map(position => {
+    if (!position || typeof position !== 'object' || Array.isArray(position)
+      || typeof position.positionId !== 'string' || typeof position.cycleId !== 'string'
+      || typeof position.reason !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(position.reason)
+      || !Number.isSafeInteger(position.openedAtMs) || position.openedAtMs < 0
+      || typeof position.costMicroUsdg !== 'string' || !/^(0|[1-9][0-9]*)$/.test(position.costMicroUsdg)
+      || typeof position.valueMicroUsdg !== 'string' || !/^(0|[1-9][0-9]*)$/.test(position.valueMicroUsdg)
+      || typeof position.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(position.evidenceDigest)
+      || typeof position.terminalState !== 'string'
+      || !Number.isSafeInteger(position.positionRevision) || position.positionRevision < 0) {
+      throw new Error('authority held position is invalid');
+    }
+    return {
+      positionId: position.positionId,
+      cycleId: position.cycleId,
+      reason: position.reason,
+      openedAtMs: position.openedAtMs,
+      ageSeconds: Math.max(0, Math.floor((generatedAtMs - position.openedAtMs) / 1_000)),
+      insuredValue: projectInsuredValue(position.insuredValue),
+      costMicroUsdg: position.costMicroUsdg,
+      valueMicroUsdg: position.valueMicroUsdg,
+      evidenceDigest: position.evidenceDigest,
+      ownerDecision: projectHeldOwnerDecision(position.ownerDecision),
+      terminalState: position.terminalState,
+      positionRevision: position.positionRevision,
+    };
+  });
 }
 
 function alertSources(authorityStatus) {
@@ -104,13 +160,15 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
   const configuration = authorityStatus?.configuration ?? null;
   const current = activeCycle(authorityStatus);
   const cycles = Array.isArray(authorityStatus?.cycles) ? authorityStatus.cycles : [];
-  const completedCycles = cycles.filter(cycle => cycle?.terminalState === 'COMPLETED').length;
+  const generatedAtMs = now();
+  const completedCycles = cycles.filter(cycle => cycle?.terminalState === 'COMPLETE' || cycle?.terminalState === 'COMPLETED').length;
+  const heldPositions = projectHeldPositions(authorityStatus, generatedAtMs);
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     historyComplete: true,
     cardHistoryComplete: true,
-    generatedAt: new Date(now()).toISOString(),
+    generatedAt: new Date(generatedAtMs).toISOString(),
     nextCycleAt: nextCycleAt(configuration, lastTick),
     cycleIntervalMinutes: configuration ? configuration.intervalMinutes : DEFAULT_INTERVAL_MINUTES,
     execution: { connected: false, lastHeartbeatAt: null },
@@ -154,6 +212,7 @@ export function buildDashboardReadModel({ authorityStatus, now = Date.now, lastT
     latestCycle: null,
     cycles,
     cap: capProjection(authorityStatus),
+    heldPositions,
     custody: authorityStatus?.custody ?? { buckets: [] },
     alertSources: alertSources(authorityStatus),
     alerts: Array.isArray(authorityStatus?.alerts) ? authorityStatus.alerts : [],

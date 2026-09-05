@@ -13,12 +13,17 @@ creates a local cycle store, signer, or provider effect.
   functions.
 - `status()` returns the configuration revision, active and known repository cycles, canonical
   lifecycle stages, provider requests, typed chain transaction evidence, custody buckets, cap
-  usage, telemetry-source availability, alerts, and payout state.
+  usage, open held positions, telemetry-source availability, alerts, and payout state.
+- `status().cap.heldPositions` is `{ count, maxCount, valueMicroUsdg, maxValueMicroUsdg }` and
+  `status().heldPositions` is the repository's flattened open position list.
 - Each cycle exposes its repository `version`, `heldEvidenceDigest`, and `ownerDecision` exactly
   when the repository supplies them.
 - `execute({ expectedRevision, requestId, command })` accepts `pause`, `resume`, `kill`,
   `update-configuration`, `manual-approval`, `held-owner-decision`, `reconcile`, `resume-cycle`,
   and `run-cycle-now`.
+- A `resume-cycle` receipt carries the exact injected recovery result. A recovered sell position
+  returns `resultCode: RECOVERY_SUPPLEMENTARY_SETTLEMENT` with its original cycle, position,
+  manifest, stage, and settlement state; it is not reported as a resumed main cycle.
 
 ## Invariants
 
@@ -44,8 +49,12 @@ creates a local cycle store, signer, or provider effect.
   read-only `reconcile` remain available for safe-stop and inspection.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
-- A held-owner decision binds cycle ID, held-evidence digest, request ID, expected cycle revision,
-  and owner choice before it reaches the repository authority.
+- A held-owner decision binds position ID, held-evidence digest, request ID, expected position
+  revision, and the `sell` or `keep-holding` choice before it reaches the repository authority.
+  A `sell` decision creates only the durable supplementary-settlement intent; it does not invoke a
+  provider mutation or recipient transfer through this control service.
+- Increasing `maxHeldPositions`, `maxHeldValueMicroUsdg`, or
+  `unresolvedCardDeadlineMinutes` is exposure-increasing and requires available safety telemetry.
 - The service does not append audit records or deduplicate request IDs. Its caller persists the
   dispatch receipt before an effect and returns the stored receipt for a duplicate request.
 
@@ -54,7 +63,10 @@ creates a local cycle store, signer, or provider effect.
 - Configuration commands use the operator-state revision as their compare-and-swap value.
 - Pause, resume, kill, and configuration updates persist the next configuration before returning.
 - Manual approval persists through the policy engine. A held-owner decision persists through the
-  repository. Recovery and tick commands return the result of their one injected authority call.
+  repository for one position and either retains its limit exposure or starts that position's
+  supplementary settlement. `resume-cycle` can recover that durable settlement after its main
+  cycle is `COMPLETED`, while tick commands and normal recovery leave the main stage sequence
+  closed. Recovery and tick commands return the result of their one injected authority call.
 - Reconcile reads repository state only. It never invokes a tick, recovery callback, signer, or
   provider mutation.
 
@@ -76,6 +88,11 @@ node --test --test-timeout=120000 packages/runner/test/operator/control.test.mjs
   and verify its status before resuming an exposure-increasing action.
 - Reconcile an interrupted provider or chain attempt from the repository before requesting
   `resume-cycle`.
+- For a held position, submit the exact displayed evidence digest and position revision. Reuse the
+  request ID after an uncertain response; `keep-holding` remains counted, while `sell` must resume
+  the durable supplementary settlement instead of issuing a manual transfer. Read a
+  `RECOVERY_SUPPLEMENTARY_SETTLEMENT` receipt as recovery of that immutable position, snapshot,
+  and manifest binding, not permission to reopen or alter the main cycle.
 - Treat null cap, payout, and transaction data as unavailable, never as a zero balance or a pending
   effect.
 

@@ -4,14 +4,29 @@
 
 The direct-payout module distributes a finalized Operations-wallet USDG return to the frozen
 pre-claim holder set. It keeps the immutable plan, recipient lifecycle, dust carry, and quarantine
-liabilities in durable cycle storage so a restart never invents a payment, nonce, or allocation. It
-implements the payout durability contract in `REQ-direct-payout-1`.
+liabilities in durable cycle storage so a restart never invents a payment, nonce, or allocation.
+It also compiles an immutable supplementary plan and records its position-scoped durability
+boundaries without changing the original cycle's holder set.
 
 ## Public interface
 
 - `compileDirectPayoutPlan()` in `packages/runner/src/distribution/payout-plan.mjs` creates a
   floor-and-carry plan from the full frozen eligibility manifest, a finalized return delta and
   evidence binding, and one provenance-bound prior dust record.
+- `compileSupplementaryDirectPayoutPlan()` creates a pure, frozen wrapper for one held-position
+  settlement. Its `manifestId` is `<cycleId>:supplementary:<n>`, its wrapper digest binds that id,
+  ordinal, and nested direct plan, and the nested plan reuses the original cycle's frozen
+  eligibility manifest. The compiler itself has no side effect.
+- `prepareSupplementaryPayoutRequest()` in
+  `packages/adapters/src/app/stages/supplementary-payout.mjs` accepts only
+  `{settlement, eligibilityManifest, returnBoundary}` for a `RETURN_BROADCAST` settlement. It
+  hashes the supplied eligibility manifest and requires the settlement's stored
+  `eligibilitySnapshotEvidenceDigest`; it derives the return, binding, and zero-amount dust setting
+  from the full-repository return boundary and requires its stored `payoutSourceDigest`.
+  `supplementaryPayoutStageId()` gives that position a separate paged-state namespace.
+  `createSupplementaryPayoutStore()` wraps the existing recipient-state store and rejects a
+  position, cycle, snapshot digest, return-source digest, boundary evidence, or manifest mismatch.
+  `assertSupplementaryPayoutManifestUnchanged()` rejects a changed frozen plan.
 - `createDirectPayoutState()` and `initializeDirectPayout()` create or recover the durable payout
   state; initialization returns an existing matching journal instead of overwriting it.
   `advanceDirectPayout()` advances the first unresolved recipient. A dropped broadcast can use only
@@ -29,6 +44,16 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   It derives an exact one-recipient policy from the persisted payout attempt around the guarded
   Operations signer facade for every signature. A supplied branded signer is not reused as the
   payout authorization.
+- `preparePayoutRequest()` also snapshots unresolved held positions from the same cycle into a
+  sorted `heldPositionExclusions` record. Its digest is persisted with the main payout state and
+  terminal payout evidence lists the excluded position ID, reason, terminal state, and position
+  evidence digest.
+- The repository records one position's supplementary boundary sequence:
+  `PREPARED -> BUYBACK_SENT_UNKNOWN -> RETURN_BROADCAST -> PAYOUT_BROADCAST -> COMPLETE`. The
+  settlement's manifest id, original frozen eligibility-snapshot evidence digest, and later
+  repository-derived payout-source digest remain distinct from the main payout manifest.
+  `readSupplementarySettlementEvidence(positionId)` is available only on the full repository while
+  recovery needs its provider or transaction facts; the narrow read client omits it.
 - `createCycleRepositoryPayoutStore()` reads and writes recipient state through
   `readPagedPayoutState()` and `persistPagedPayoutState()`. Each retained recipient record contains
   its nonce, signed bytes, transaction hash, policy approval context, and finality or refusal
@@ -56,9 +81,23 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   initialization protocol rather than one raw storage write: a restart repairs an unbound matching
   page state with the same predecessor source and plan, never with zero dust. Positive successor
   dust is recorded after terminal conservation.
+- Held positions never enter the main return delta or distributable pool. The request and durable
+  payout state bind their exclusion list to the original cycle; a changed list before initialization
+  or recovery is refused instead of changing the frozen main settlement.
+- A supplementary plan binds exactly one held position and the original cycle's frozen eligibility
+  set by the stored eligibility-snapshot evidence digest. It cannot change the main manifest,
+  substitute another cycle's attribution, use a later same-cycle snapshot, or accept a different
+  manifest ordinal after the settlement is prepared.
 - `DIRECT_PAYOUT_RECIPIENT_LIMIT` bounds plan compilation and the feasibility gate at 1,025.
   Recipient-keyed durable pages retain the full manifest outside bounded journal payload arrays;
   journal entries retain only compact state metadata and page roots.
+- A supplementary wrapper is deterministic for identical frozen inputs and is deeply immutable in
+  memory. Its digest detects a changed ordinal, return evidence, allocation, zero-amount dust
+  setting, or eligibility proof before an execution layer can bind it. `RETURN_BROADCAST` is the
+  only point that freezes its USDG return, Operations return binding, and zero/null supplementary
+  dust setting; recovery verifies that full-repository boundary before it persists recipient state.
+  The existing implementation preserves the wrapper identity through durable boundary records and
+  a separate paged recipient-state namespace.
 - The stage driver uses direct payout by default even if unrelated historical contract identities
   remain configured. The old vault flow is selected only by explicit `payout.legacyVault: true`.
 - Before a payout reads a nonce, it reserves `WalletNonceReservationV1` for the Operations wallet
@@ -113,12 +152,19 @@ implements the payout durability contract in `REQ-direct-payout-1`.
 - Zero-atomic allocations remain in the immutable plan but create no transfer attempt. Completion
   requires every payable recipient to be `FINALIZED` or backed by exactly one quarantined
   `REFUSED` liability and requires `paid + quarantined + dust == distributablePool`.
+- A supplementary sell records its independent settlement through `PREPARED`,
+  `BUYBACK_SENT_UNKNOWN`, `RETURN_BROADCAST`, `PAYOUT_BROADCAST`, and `COMPLETE`. A restart
+  preserves the same manifest id, original eligibility-snapshot digest, payout-source digest, and
+  boundary evidence; it never replaces the manifest. A supplementary payout request can be
+  prepared only at `RETURN_BROADCAST` and persists only its matching manifest-scoped recipient
+  state.
 
 ## Operational commands
 
 ```sh
 node --test --test-timeout=120000 packages/adapters/test/app/stages-payout.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/stage-driver.test.mjs
+node --test --test-timeout=120000 packages/adapters/test/app/supplementary-payout.test.mjs
 node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.test.mjs
 ```
 
@@ -154,3 +200,23 @@ node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.
   that finalizes reverted is quarantined before later recipients advance.
 - A missing recovery context, changed digest, stale wallet reservation, or changed signed bytes
   keeps the recipient attempt unresolved. It does not create a replacement signature.
+- For a supplementary settlement, recover the held position and its manifest-scoped boundary
+  record first. Read boundary facts from the full repository's
+  `readSupplementarySettlementEvidence(positionId)` only while reconciling the position; the
+  dashboard client intentionally cannot read those provider or transaction facts. The same position
+  digest, manifest id, state, original eligibility-snapshot digest, and evidence must remain valid
+  before advancing it. A payout request also requires the same repository-derived return source,
+  zero/null dust setting, and return-boundary evidence. A changed position, snapshot, source, or
+  manifest keeps that settlement unresolved rather than creating a replacement transfer.
+- OPEN FACT: The supplementary plan and repository boundaries do not yet drive live provider
+  buyback, return, or recipient transfers. Current supplementary dispatcher handlers are
+  Node-test-only, observation-only, and receive no provider or signer capability. Resolve this by
+  wiring manifest-scoped production stage adapters to the existing write-ahead mutation and
+  recipient-journal contracts, then add restart tests through finality. Verified safe alternative:
+  retain the held position and inspect its immutable plan; do not send a manual provider request or
+  transfer.
+- OPEN FACT: Supplementary payout has no atomic position-aware transition that consumes a nonzero
+  original-cycle dust record. Resolve it by adding a manifest- and position-bound consumption and
+  recovery contract, with tests for concurrent main and supplementary settlement. Verified safe
+  alternative: persist zero supplementary dust with a null source and never reuse a normal-cycle
+  dust record.

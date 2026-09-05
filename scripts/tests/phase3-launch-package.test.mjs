@@ -29,6 +29,7 @@ const expectedPhaseThreeJsonPaths = [
   'release/phase3/graph-gas-evidence.json',
   'release/phase3/launch-inputs.example.json',
   'release/phase3/launch-inputs.json',
+  'release/phase3/package/create-request.json',
   'release/phase3/package/graph-draft.json',
   'release/phase3/package/package-manifest.json',
   'release/phase3/submission.json',
@@ -125,6 +126,21 @@ test('the committed launch package retains only the current owner and provider i
     'OWNER_WALLET_FUNDING_PENDING',
     'BUILDER_IDENTITY_PENDING',
   ]);
+});
+
+test('the launch-package verifier retains the request template for explicit Phase 3 paths', () => {
+  const result = spawnSync(node, [
+    'scripts/programmable/verify-launch-package.mjs',
+    '--allow-unverified',
+    '--artifacts', resolve(root, 'release/phase3/artifacts'),
+    '--standard-json-inputs', resolve(root, 'release/phase3/build-info'),
+    '--launch-inputs', resolve(root, 'release/phase3/launch-inputs.json'),
+    '--address-manifest', resolve(root, 'release/phase3/address-manifest.json'),
+    '--package', resolve(root, 'release/phase3/package'),
+  ], { cwd: root, encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(JSON.parse(result.stdout).createRequestSha256, /^sha256:[0-9a-f]{64}$/);
 });
 
 test('the unsigned revision 65 baseline pins its current approval subjects', () => {

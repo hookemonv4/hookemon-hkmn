@@ -7,6 +7,24 @@ import { HKMNToken } from "../../src/launch/HKMNToken.sol";
 import { PhaseThreeReleasePlan } from "../../script/release/PhaseThreeReleasePlan.sol";
 import { Test } from "forge-std/Test.sol";
 
+contract SeedIntentDigestTarget {
+    bytes32 private immutable intentDigest;
+    address private immutable launchCustody;
+
+    constructor(bytes32 intentDigest_, address launchCustody_) {
+        intentDigest = intentDigest_;
+        launchCustody = launchCustody_;
+    }
+
+    function seedIntentDigest() external view returns (bytes32) {
+        return intentDigest;
+    }
+
+    function canonicalLaunchCustody() external view returns (address) {
+        return launchCustody;
+    }
+}
+
 contract PhaseThreeReleasePlanTest is Test {
     function test_creationCodeHashesBindThePinnedLaunchProfile() external {
         if (!vm.envOr("HOOKEMON_ASSERT_LAUNCH_BYTECODE", false)) return;
@@ -103,6 +121,368 @@ contract PhaseThreeReleasePlanTest is Test {
         (bool succeeded,) = address(subject).call(abi.encodeCall(subject.validateDraft, (draft)));
 
         require(!succeeded, "missing graph issuance authority was accepted");
+    }
+
+    function test_validateMaterializedSeedCallAcceptsTheBoundSeed() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        SeedIntentDigestTarget target = new SeedIntentDigestTarget(expectedDigest, address(0x1002));
+
+        (bool succeeded, bytes memory result) = _validateMaterializedSeedCall(
+            subject,
+            address(target),
+            0,
+            seedCalldata,
+            address(target),
+            address(0x1002),
+            expectedDigest
+        );
+
+        require(succeeded, "bound seed call was rejected");
+        require(abi.decode(result, (bytes32)) == expectedDigest, "seed digest mismatch");
+    }
+
+    function test_validateMaterializedSeedCallAcceptsTheHkmnCurrency0BoundSeed() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        params.liquidity = 489897948572597439;
+        params.amount0Max = uint128(1_000_000_000e18);
+        params.amount1Max = 240000000;
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        SeedIntentDigestTarget target = new SeedIntentDigestTarget(expectedDigest, address(0x1002));
+
+        (bool succeeded, bytes memory result) = _validateMaterializedSeedCall(
+            subject,
+            address(target),
+            0,
+            seedCalldata,
+            address(target),
+            address(0x1002),
+            expectedDigest
+        );
+
+        require(succeeded, "HKMN-currency0 seed call was rejected");
+        require(abi.decode(result, (bytes32)) == expectedDigest, "HKMN-currency0 digest mismatch");
+    }
+
+    function test_validateMaterializedSeedCallRejectsChangedPayer() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.payer = address(0xCAFE);
+
+        _assertSeedRejected(subject, params, expectedDigest, "changed payer was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsChangedLowerTick() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.tickLower = -887160;
+
+        _assertSeedRejected(subject, params, expectedDigest, "changed lower tick was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsChangedUpperTick() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.tickUpper = 887160;
+
+        _assertSeedRejected(subject, params, expectedDigest, "changed upper tick was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsChangedLiquidity() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.liquidity += 1;
+
+        _assertSeedRejected(subject, params, expectedDigest, "changed liquidity was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsChangedAmount0Maximum() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.amount0Max -= 1;
+
+        _assertSeedRejected(subject, params, expectedDigest, "changed amount0 maximum was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsChangedAmount1Maximum() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.amount1Max -= 1;
+
+        _assertSeedRejected(subject, params, expectedDigest, "changed amount1 maximum was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsUnexpectedDigest() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+
+        _assertSeedRejected(
+            subject, params, bytes32(uint256(expectedDigest) ^ 1), "unexpected digest was accepted"
+        );
+    }
+
+    function test_validateMaterializedSeedCallRejectsWrongTarget() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+
+        (bool succeeded,) = _validateMaterializedSeedCall(
+            subject,
+            address(0x1003),
+            0,
+            seedCalldata,
+            address(0x1001),
+            address(0x1002),
+            _seedIntentDigest(params)
+        );
+
+        require(!succeeded, "wrong target was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsTargetWithoutBoundImmutable() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+
+        (bool succeeded,) = _validateMaterializedSeedCall(
+            subject,
+            address(0x1001),
+            0,
+            seedCalldata,
+            address(0x1001),
+            address(0x1002),
+            _seedIntentDigest(params)
+        );
+
+        require(!succeeded, "target without immutable seed intent was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsTargetWithDifferentImmutable() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        SeedIntentDigestTarget target =
+            new SeedIntentDigestTarget(bytes32(uint256(expectedDigest) ^ 1), address(0x1002));
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+
+        (bool succeeded,) = _validateMaterializedSeedCall(
+            subject,
+            address(target),
+            0,
+            seedCalldata,
+            address(target),
+            address(0x1002),
+            expectedDigest
+        );
+
+        require(!succeeded, "target with a different immutable seed intent was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsTargetWithDifferentCanonicalCustody()
+        external
+    {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        SeedIntentDigestTarget target = new SeedIntentDigestTarget(expectedDigest, address(0x1003));
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+
+        (bool succeeded,) = _validateMaterializedSeedCall(
+            subject,
+            address(target),
+            0,
+            seedCalldata,
+            address(target),
+            address(0x1002),
+            expectedDigest
+        );
+
+        require(!succeeded, "target with a different canonical custody was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsNativeValue() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+
+        (bool succeeded,) = _validateMaterializedSeedCall(
+            subject,
+            address(0x1001),
+            1,
+            seedCalldata,
+            address(0x1001),
+            address(0x1002),
+            _seedIntentDigest(params)
+        );
+
+        require(!succeeded, "native value was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsWrongCustody() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.custody = address(0x1003);
+
+        _assertSeedRejected(subject, params, expectedDigest, "wrong custody was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsLateDeadline() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes32 expectedDigest = _seedIntentDigest(params);
+        params.deadline = block.timestamp + 901;
+
+        _assertSeedRejected(subject, params, expectedDigest, "late deadline was accepted");
+    }
+
+    function test_validateMaterializedSeedCallRejectsWrongSelector() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+        seedCalldata[0] = 0xff;
+
+        _assertCalldataRejected(
+            subject, seedCalldata, _seedIntentDigest(params), "wrong selector was accepted"
+        );
+    }
+
+    function test_validateMaterializedSeedCallRejectsMalformedCalldata() external {
+        vm.warp(1_000_000);
+        PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
+        HookemonHook.SeedParams memory params = _seedParams();
+        bytes memory seedCalldata =
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params);
+
+        _assertCalldataRejected(
+            subject,
+            abi.encodePacked(seedCalldata, bytes1(0)),
+            _seedIntentDigest(params),
+            "malformed calldata was accepted"
+        );
+    }
+
+    function _seedParams() private view returns (HookemonHook.SeedParams memory) {
+        return HookemonHook.SeedParams({
+            tickLower: -887220,
+            tickUpper: 887220,
+            liquidity: 489897948556635619,
+            amount0Max: 240000000,
+            amount1Max: 1_000_000_000e18,
+            deadline: block.timestamp + 900,
+            payer: 0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729,
+            custody: address(0x1002)
+        });
+    }
+
+    function _seedIntentDigest(HookemonHook.SeedParams memory params)
+        private
+        pure
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                params.payer,
+                params.tickLower,
+                params.tickUpper,
+                params.liquidity,
+                params.amount0Max,
+                params.amount1Max,
+                uint256(900)
+            )
+        );
+    }
+
+    function _assertSeedRejected(
+        PhaseThreeReleasePlan subject,
+        HookemonHook.SeedParams memory params,
+        bytes32 expectedDigest,
+        string memory message
+    ) private {
+        _assertCalldataRejected(
+            subject,
+            abi.encodeWithSelector(HookemonHook.seedCanonicalLiquidity.selector, params),
+            expectedDigest,
+            message
+        );
+    }
+
+    function _assertCalldataRejected(
+        PhaseThreeReleasePlan subject,
+        bytes memory seedCalldata,
+        bytes32 expectedDigest,
+        string memory message
+    ) private {
+        SeedIntentDigestTarget target = new SeedIntentDigestTarget(expectedDigest, address(0x1002));
+        (bool succeeded,) = _validateMaterializedSeedCall(
+            subject,
+            address(target),
+            0,
+            seedCalldata,
+            address(target),
+            address(0x1002),
+            expectedDigest
+        );
+        require(!succeeded, message);
+    }
+
+    function _validateMaterializedSeedCall(
+        PhaseThreeReleasePlan subject,
+        address target,
+        uint256 value,
+        bytes memory seedCalldata,
+        address expectedTarget,
+        address expectedCustody,
+        bytes32 expectedDigest
+    ) private returns (bool succeeded, bytes memory result) {
+        return address(subject)
+            .call(
+                abi.encodeWithSignature(
+                    "validateMaterializedSeedCall(address,uint256,bytes,address,address,bytes32)",
+                    target,
+                    value,
+                    seedCalldata,
+                    expectedTarget,
+                    expectedCustody,
+                    expectedDigest
+                )
+            );
     }
 
     function _draft(PhaseThreeReleasePlan subject)

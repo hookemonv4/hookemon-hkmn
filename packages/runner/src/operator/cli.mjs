@@ -179,9 +179,9 @@ function commandFromInput(command, input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('held owner decision input is invalid');
     return {
       type: command,
-      cycleId: input.cycleId,
+      positionId: input.positionId,
       heldEvidenceDigest: input.heldEvidenceDigest,
-      expectedCycleRevision: input.expectedCycleRevision,
+      expectedPositionRevision: input.expectedPositionRevision,
       choice: input.choice,
     };
   }

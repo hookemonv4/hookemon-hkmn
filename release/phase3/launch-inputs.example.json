@@ -44,12 +44,24 @@
     "tickSpacing": 60,
     "priceCandidates": {
       "usdgCurrency0": {
-        "sqrtPriceX96": "PLACEHOLDER_USDG_CURRENCY0_SQRT_PRICE_X96"
+        "sqrtPriceX96": "PLACEHOLDER_USDG_CURRENCY0_SQRT_PRICE_X96",
+        "liquidity": "PLACEHOLDER_USDG_CURRENCY0_LIQUIDITY",
+        "amount0Max": "PLACEHOLDER_USDG_CURRENCY0_AMOUNT0_MAX",
+        "amount1Max": "PLACEHOLDER_USDG_CURRENCY0_AMOUNT1_MAX"
       },
       "hkmnCurrency0": {
-        "sqrtPriceX96": "PLACEHOLDER_HKMN_CURRENCY0_SQRT_PRICE_X96"
+        "sqrtPriceX96": "PLACEHOLDER_HKMN_CURRENCY0_SQRT_PRICE_X96",
+        "liquidity": "PLACEHOLDER_HKMN_CURRENCY0_LIQUIDITY",
+        "amount0Max": "PLACEHOLDER_HKMN_CURRENCY0_AMOUNT0_MAX",
+        "amount1Max": "PLACEHOLDER_HKMN_CURRENCY0_AMOUNT1_MAX"
       }
     }
+  },
+  "seedIntent": {
+    "payer": "0xPLACEHOLDER_LAUNCH_AUTHORITY",
+    "tickLower": -887220,
+    "tickUpper": 887220,
+    "maxDeadlineSeconds": 900
   },
   "hookConstructorConfig": {
     "manager": { "ref": "roles.manager" },
@@ -66,6 +78,7 @@
     "expectedDecimals": 18,
     "bindingDigest": "0xPLACEHOLDER_BINDING_DIGEST",
     "runtimeDigest": "0xPLACEHOLDER_RUNTIME_DIGEST",
+    "seedIntentDigest": { "ref": "seedIntent.digest" },
     "processClaimLimit6h": "PLACEHOLDER_CLAIM_LIMIT",
     "processClaimLimitMax": "PLACEHOLDER_CLAIM_LIMIT_MAX",
     "processClaimMaxCount": "PLACEHOLDER_CLAIM_MAX_COUNT",

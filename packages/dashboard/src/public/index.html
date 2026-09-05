@@ -67,7 +67,7 @@
       <section><h2>Claim capacity</h2><div id="claimCapacity" class="cards"></div></section>
       <section><h2>Custody by cycle</h2><div id="custodyBuckets" class="cards"></div></section>
       <section><h2>Manual approval</h2><p>Approve only a cycle digest supplied by the authority.</p><div id="approvalQueue" class="cards"></div><div class="grid two"><label>Cycle ID<input id="approvalCycleId" autocomplete="off" /></label><label>Cycle digest<input id="approvalCycleDigest" autocomplete="off" placeholder="sha256:..." /></label></div><button id="manualApprovalBtn" class="approve" type="button">Approve this cycle</button></section>
-      <section><h2>Held Epic cards</h2><p>Record a durable owner choice only from the held evidence supplied by the authority. Recording <code>sell</code> does not sell a card; it only records the choice for an authorized recovery operation.</p><div id="epicHeld" class="cards"></div><div class="grid two"><label>Cycle ID<input id="heldDecisionCycleId" autocomplete="off" /></label><label>Held evidence digest<input id="heldDecisionEvidenceDigest" autocomplete="off" placeholder="sha256:..." /></label><label>Cycle revision<input id="heldDecisionRevision" inputmode="numeric" autocomplete="off" /></label></div><div class="controls"><button id="recordSellDecisionBtn" class="approve" type="button">Record sell choice</button><button id="recordKeepHoldingDecisionBtn" type="button">Record keep-holding choice</button></div></section>
+      <section><h2>Held positions</h2><p>A held card remains in its own position while the attributed cycle completes. Each position has its own evidence-bound decision controls. Selling starts a supplementary settlement for that position and distributes only its attributable proceeds through the original frozen holder snapshot. Keep holding leaves the position against the configured limits.</p><div id="heldPositionLimits" class="cards"></div><div id="heldPositions" class="cards"></div></section>
       <section><h2>Alerts</h2><div id="alertFeed" class="cards"></div></section>
       <section><h2>Payouts</h2><div id="payoutStatus" class="cards"></div></section>
       <section><h2>Wallets</h2><p>Public identities only. Balances appear when the authority provides them.</p><div id="walletIdentities" class="cards"></div></section>
@@ -112,7 +112,7 @@
       var card = document.createElement('article'); card.className = 'card';
       var heading = document.createElement('h3'); heading.textContent = title; card.appendChild(heading);
       Object.keys(values).forEach(function (label) { var row = document.createElement('div'); row.className = 'meta'; var key = document.createElement('span'); key.className = 'label'; key.textContent = label; var value = document.createElement('span'); value.className = 'value'; value.textContent = values[label] === null || values[label] === undefined ? 'Not available' : String(values[label]); row.append(key, value); card.appendChild(row); });
-      target.appendChild(card);
+      target.appendChild(card); return card;
     };
     var amount = function (value) { return value && typeof value === 'object' ? value.amountAtomic + ' atomic units (' + value.assetId + ')' : value === null || value === undefined ? 'Not available' : String(value); };
     var custodyLabel = { claimed: 'Claimed', bridgeOut: 'Bridged out', bridgeIn: 'Bridged in', packCost: 'Pack cost', buybackProceeds: 'Buyback proceeds', returnInput: 'Return sent', returnReceived: 'Returned', refunds: 'Refunds', residual: 'Residual', heldAssets: 'Held cards', payoutLiability: 'Payout waiting', dust: 'Dust', unattributed: 'Unattributed' };
@@ -151,16 +151,30 @@
       if (!items.length) return empty(target, 'No authority-supplied cycle digests are waiting.');
       items.forEach(function (item) { add(target, item.cycleId, { Stage: item.stage, 'Cycle digest': item.digest }); });
     }
-    function renderHeld(cycles) {
-      var target = $('epicHeld'); target.replaceChildren(); var held = cycles.filter(function (cycle) { return /^HELD_/.test(cycle.terminalState || ''); });
-      if (!held.length) return empty(target, 'No held Epic cards are reported.');
-      held.forEach(function (cycle) {
-        add(target, cycle.cycleId, { Status: cycle.terminalState, 'Held evidence digest': cycle.heldEvidenceDigest, 'Cycle revision': cycle.version, 'Recorded choice': cycle.ownerDecision && cycle.ownerDecision.choice, Card: 'Not supplied by authority', Offer: 'Not supplied by authority', 'Insured value': 'Not supplied by authority', 'Matched unit': 'Not supplied by authority' });
-        if (cycle.terminalState === 'HELD_OWNER_DECISION' && cycle.heldEvidenceDigest && Number.isSafeInteger(cycle.version) && !$('heldDecisionCycleId').value && !$('heldDecisionEvidenceDigest').value && !$('heldDecisionRevision').value) {
-          $('heldDecisionCycleId').value = cycle.cycleId;
-          $('heldDecisionEvidenceDigest').value = cycle.heldEvidenceDigest;
-          $('heldDecisionRevision').value = String(cycle.version);
-        }
+    function renderHeldPositionLimits(limit, configuration) {
+      var target = $('heldPositionLimits'); target.replaceChildren();
+      if (!limit) return add(target, 'Held-position limits', { Count: 'Not available', Value: 'Not available', 'Unresolved-card deadline': configuration && configuration.unresolvedCardDeadlineMinutes + ' minutes' });
+      add(target, 'Held-position limits', { Count: limit.count + ' of ' + limit.maxCount, 'Limit value': limit.valueMicroUsdg + ' of ' + limit.maxValueMicroUsdg + ' micro-USDG', 'Unresolved-card deadline': configuration && configuration.unresolvedCardDeadlineMinutes + ' minutes' });
+    }
+    function appendHeldPositionControls(card, position) {
+      if (!position.evidenceDigest || !Number.isSafeInteger(position.positionRevision)) return;
+      if (position.ownerDecision && position.ownerDecision.choice === 'sell') {
+        var settled = document.createElement('p'); settled.className = 'control-note'; settled.textContent = 'Sell decision recorded; supplementary settlement is in progress.'; card.appendChild(settled); return;
+      }
+      var controls = document.createElement('div'); controls.className = 'controls';
+      var sell = document.createElement('button'); sell.className = 'approve'; sell.type = 'button'; sell.textContent = 'Sell and start supplementary settlement';
+      sell.addEventListener('click', function () { dispatchHeldOwnerDecision(position, 'sell'); });
+      var keepHolding = document.createElement('button'); keepHolding.type = 'button'; keepHolding.textContent = 'Keep holding';
+      keepHolding.addEventListener('click', function () { dispatchHeldOwnerDecision(position, 'keep-holding'); });
+      controls.append(sell, keepHolding); card.appendChild(controls);
+    }
+    function renderHeld(positions, heldPositionsAvailable) {
+      var target = $('heldPositions'); target.replaceChildren();
+      if (!heldPositionsAvailable) return empty(target, 'Held-position custody is unavailable; limit usage cannot be verified.');
+      if (!positions.length) return empty(target, 'No held positions are reported.');
+      positions.forEach(function (position) {
+        var card = add(target, position.positionId, { Cycle: position.cycleId, Reason: position.reason, Age: position.ageSeconds + ' seconds', 'Limit value': position.valueMicroUsdg + ' micro-USDG', State: position.terminalState, 'Held evidence digest': position.evidenceDigest, 'Position revision': position.positionRevision, 'Recorded choice': position.ownerDecision && position.ownerDecision.choice });
+        appendHeldPositionControls(card, position);
       });
     }
     function renderAlerts(alerts) { var target = $('alertFeed'); target.replaceChildren(); if (!alerts.length) return empty(target, 'No alerts are reported.'); alerts.forEach(function (alert, index) { add(target, 'Alert ' + (index + 1), alert); }); }
@@ -171,7 +185,7 @@
       try {
         var bootstrap = await api('/operator/api/bootstrap'); var dashboard = await api('/operator/api/dashboard'); var identities = await api('/operator/api/identities'); var network = await api('/operator/api/network');
         revision = bootstrap.state.version; $('networkBadge').textContent = network.profile === 'mainnet' ? 'Mainnet' : 'Testnet';
-        renderCycles(dashboard.cycles || []); renderCapacity(dashboard.cap || {}); renderCustody((dashboard.custody && dashboard.custody.buckets) || []); renderApproval(dashboard.cycles || []); renderHeld(dashboard.cycles || []); renderAlerts(dashboard.alerts || []); renderPayouts(dashboard.cycles || []); renderWallets(identities.identities);
+        renderCycles(dashboard.cycles || []); renderCapacity(dashboard.cap || {}); renderCustody((dashboard.custody && dashboard.custody.buckets) || []); renderApproval(dashboard.cycles || []); renderHeldPositionLimits(dashboard.cap && dashboard.cap.heldPositions, bootstrap.state); renderHeld(dashboard.heldPositions || [], !(dashboard.alertSources && dashboard.alertSources.safetyTelemetry === false)); renderAlerts(dashboard.alerts || []); renderPayouts(dashboard.cycles || []); renderWallets(identities.identities);
         $('dashboard').hidden = false; message('Dashboard loaded.');
       } catch (error) { message(error.message); }
     }
@@ -192,9 +206,7 @@
     $('resumeBtn').addEventListener('click', function () { dispatch({ type: 'resume' }); });
     $('killBtn').addEventListener('click', function () { dispatch({ type: 'kill' }); });
     $('manualApprovalBtn').addEventListener('click', function () { dispatch({ type: 'manual-approval', cycleId: $('approvalCycleId').value.trim(), cycleDigest: $('approvalCycleDigest').value.trim() }); });
-    var dispatchHeldOwnerDecision = function (choice) { dispatch({ type: 'held-owner-decision', cycleId: $('heldDecisionCycleId').value.trim(), heldEvidenceDigest: $('heldDecisionEvidenceDigest').value.trim(), expectedCycleRevision: Number($('heldDecisionRevision').value), choice: choice }); };
-    $('recordSellDecisionBtn').addEventListener('click', function () { dispatchHeldOwnerDecision('sell'); });
-    $('recordKeepHoldingDecisionBtn').addEventListener('click', function () { dispatchHeldOwnerDecision('keep-holding'); });
+    function dispatchHeldOwnerDecision(position, choice) { dispatch({ type: 'held-owner-decision', positionId: position.positionId, heldEvidenceDigest: position.evidenceDigest, expectedPositionRevision: position.positionRevision, choice: choice }); }
   }());
   </script>
 </body>

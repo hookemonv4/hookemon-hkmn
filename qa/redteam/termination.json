@@ -1,22 +1,21 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": "hookemon.redteam-termination.v3",
   "phase": "redteam",
-  "requirementsRevision": 55,
-  "architectureRevision": 4,
-  "maximumCycles": 3,
-  "cyclesCompleted": 1,
-  "outcome": "FAILED_OPEN_FINDINGS",
-  "terminationBasis": {
-    "finalCycleStatus": "SUBSTANTIVE_OPEN_FINDINGS",
-    "unresolvedCriticalCount": 0,
-    "unresolvedHighCount": 3,
-    "openFindingIds": ["RT-R55-02", "RT-R55-05", "RT-R55-06"],
-    "reviewerContext": "fresh",
-    "reviewerWriteAccess": false,
-    "authorReasoningProvided": false,
-    "issuesOnlyPrompt": true,
-    "ownerOverrideReceipt": null
-  },
-  "productionAuthorizationGranted": false,
-  "externalActionAuthorizationGranted": false
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "findingStates": [
+    { "id": "RT-R55-01", "status": "RESOLVED" },
+    { "id": "RT-R55-03", "status": "RESOLVED" },
+    { "id": "RT-R55-04", "status": "RESOLVED" },
+    { "id": "RT-R58-01", "status": "OPEN_FAIL_CLOSED" },
+    { "id": "RT-R58-02", "status": "OPEN_FAIL_CLOSED" },
+    { "id": "RT-R58-03", "status": "RESOLVED" },
+    { "id": "RT-R58-04", "status": "OPEN_FAIL_CLOSED" },
+    { "id": "RT-R58-05", "status": "RESOLVED" },
+    { "id": "RT-R58-06", "status": "RESOLVED" },
+    { "id": "RT-R58-07", "status": "RESOLVED" },
+    { "id": "RT-R58-08", "status": "RESOLVED" },
+    { "id": "RT-R65-01", "status": "RESOLVED" }
+  ]
 }

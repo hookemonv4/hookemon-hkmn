@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 
 import { canonicalJson, sha256CanonicalJson, sha256Bytes } from '../programmable/lib/canonical-json.mjs';
 import { requireEip55Address, toEip55Address } from '../programmable/lib/eip55.mjs';
+import { deriveSeedIntent, MAX_SEED_DEADLINE_SECONDS } from '../programmable/lib/seed-intent.mjs';
 import {
   ALL_HOOK_PERMISSION_MASK,
   PROGRAMMABLE_GRAPH_FACTORY,
@@ -41,6 +42,20 @@ const APPROVED_PRICE_CANDIDATES = Object.freeze({
   usdgCurrency0: '161723809515207654588927258648643645224',
   hkmnCurrency0: '38813714284914462669',
 });
+const APPROVED_SEED_CANDIDATES = Object.freeze({
+  usdgCurrency0: Object.freeze({
+    liquidity: '489897948556635619',
+    amount0Max: '240000000',
+    amount1Max: '1000000000000000000000000000',
+  }),
+  hkmnCurrency0: Object.freeze({
+    liquidity: '489897948572597439',
+    amount0Max: '1000000000000000000000000000',
+    amount1Max: '240000000',
+  }),
+});
+const SEED_INTENT_TICK_LOWER = -887220;
+const SEED_INTENT_TICK_UPPER = 887220;
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '../..');
 const DEFAULT_DEPLOYMENT_MANIFEST_PATH = resolve(REPOSITORY_ROOT, 'release/phase3/deployment-manifest.json');
 const DEPLOYMENT_TARGET_NAMES = Object.freeze({
@@ -759,19 +774,49 @@ function validateTarget(value, targetName) {
 }
 
 function validatePriceCandidate(value, id, label) {
-  expectExactKeys(value, ['sqrtPriceX96'], label);
+  expectExactKeys(value, ['sqrtPriceX96', 'liquidity', 'amount0Max', 'amount1Max'], label);
   const sqrtPriceX96 = normalizeDecimal(value.sqrtPriceX96, `${label}.sqrtPriceX96`, { positive: true });
   if (BigInt(sqrtPriceX96) > UINT160_MAX) fail(`${label}.sqrtPriceX96 is outside uint160`);
   if (sqrtPriceX96 !== APPROVED_PRICE_CANDIDATES[id]) {
     fail(`${label}.sqrtPriceX96 is not the approved ${id} price`);
   }
-  return { sqrtPriceX96 };
+  const approvedSeedCandidate = APPROVED_SEED_CANDIDATES[id];
+  const liquidity = normalizeUint256(value.liquidity, `${label}.liquidity`, { positive: true });
+  const amount0Max = normalizeUint256(value.amount0Max, `${label}.amount0Max`, { positive: true });
+  const amount1Max = normalizeUint256(value.amount1Max, `${label}.amount1Max`, { positive: true });
+  if (
+    liquidity !== approvedSeedCandidate.liquidity
+    || amount0Max !== approvedSeedCandidate.amount0Max
+    || amount1Max !== approvedSeedCandidate.amount1Max
+  ) {
+    fail(`${label} does not match the frozen seed candidate`);
+  }
+  if (BigInt(amount0Max) >= (1n << 128n) || BigInt(amount1Max) >= (1n << 128n)) {
+    fail(`${label} maximum is outside uint128`);
+  }
+  return { sqrtPriceX96, liquidity, amount0Max, amount1Max };
+}
+
+function validateSeedIntent(value, roles) {
+  expectExactKeys(value, ['payer', 'tickLower', 'tickUpper', 'maxDeadlineSeconds'], 'seedIntent');
+  const payer = normalizeAddress(value.payer, 'seedIntent.payer', { nonzero: true });
+  if (payer !== roles.launchAuthority) fail('seedIntent.payer must match roles.launchAuthority');
+  const tickLower = asSafeInteger(value.tickLower, 'seedIntent.tickLower');
+  const tickUpper = asSafeInteger(value.tickUpper, 'seedIntent.tickUpper');
+  if (tickLower !== SEED_INTENT_TICK_LOWER || tickUpper !== SEED_INTENT_TICK_UPPER) {
+    fail('seedIntent ticks do not match the frozen full range');
+  }
+  const maxDeadlineSeconds = asSafeInteger(value.maxDeadlineSeconds, 'seedIntent.maxDeadlineSeconds');
+  if (maxDeadlineSeconds !== MAX_SEED_DEADLINE_SECONDS) {
+    fail(`seedIntent.maxDeadlineSeconds must be ${MAX_SEED_DEADLINE_SECONDS}`);
+  }
+  return { payer, tickLower, tickUpper, maxDeadlineSeconds };
 }
 
 function validateLaunchInputs(value) {
   expectExactKeys(value, [
     'schemaVersion', 'chain', 'graphAuthorization', 'compilerProfile', 'usdg', 'roles', 'pool',
-    'hookConstructorConfig', 'targets',
+    'seedIntent', 'hookConstructorConfig', 'targets',
   ], 'launchInputs');
   if (value.schemaVersion !== 'hookemon.phase3.launch-inputs.v1') fail('launchInputs.schemaVersion is unsupported');
   expectExactKeys(value.chain, ['chainId', 'factory', 'authorizedLauncher', 'routeNamespace', 'routeNonce'], 'chain');
@@ -812,6 +857,7 @@ function validateLaunchInputs(value) {
     id,
     validatePriceCandidate(value.pool.priceCandidates[id], id, `pool.priceCandidates.${id}`),
   ]));
+  const seedIntent = validateSeedIntent(value.seedIntent, roles);
   expectObject(value.hookConstructorConfig, 'hookConstructorConfig');
   if (value.hookConstructorConfig.expectedDecimals !== 18) {
     fail('hookConstructorConfig.expectedDecimals must be 18 for HKMNToken');
@@ -860,6 +906,7 @@ function validateLaunchInputs(value) {
       tickSpacing: value.pool.tickSpacing,
       priceCandidates,
     },
+    seedIntent,
     targets,
   };
 }
@@ -1222,10 +1269,10 @@ function verifyArtifactCompiler(targetName, artifact, inputs) {
   }
 }
 
-function requireHookConfig(config, inputs, tokenAddress) {
+function requireHookConfig(config, inputs, tokenAddress, selectedSeedIntent) {
   const expectedKeys = [
     'manager', 'positionManager', 'permit2', 'usdg', 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations',
-    'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'processClaimLimit6h',
+    'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'seedIntentDigest', 'processClaimLimit6h',
     'processClaimLimitMax', 'processClaimMaxCount', 'operationsRotationDelay',
   ];
   expectExactKeys(config, expectedKeys, 'hookConstructorConfig');
@@ -1253,6 +1300,10 @@ function requireHookConfig(config, inputs, tokenAddress) {
   asSafeInteger(config.expectedDecimals, 'hookConstructorConfig.expectedDecimals', { minimum: 0, maximum: 255 });
   normalizeBytes32(config.bindingDigest, 'hookConstructorConfig.bindingDigest', { nonzero: true });
   normalizeBytes32(config.runtimeDigest, 'hookConstructorConfig.runtimeDigest', { nonzero: true });
+  const seedIntentDigest = normalizeBytes32(config.seedIntentDigest, 'hookConstructorConfig.seedIntentDigest', { nonzero: true });
+  if (seedIntentDigest !== selectedSeedIntent.digest) {
+    fail('hookConstructorConfig.seedIntentDigest does not bind the selected seed intent');
+  }
   normalizeDecimal(String(config.processClaimLimit6h), 'hookConstructorConfig.processClaimLimit6h');
   normalizeDecimal(String(config.processClaimLimitMax), 'hookConstructorConfig.processClaimLimitMax');
   normalizeDecimal(String(config.processClaimMaxCount), 'hookConstructorConfig.processClaimMaxCount', { positive: true });
@@ -1265,7 +1316,24 @@ function requireHookConfig(config, inputs, tokenAddress) {
     ...normalizedAddresses,
     bindingDigest: config.bindingDigest.toLowerCase(),
     runtimeDigest: config.runtimeDigest.toLowerCase(),
+    seedIntentDigest,
   };
+}
+
+function deriveSelectedSeedIntent(inputs, priceCandidate) {
+  try {
+    return deriveSeedIntent({
+      payer: inputs.seedIntent.payer,
+      tickLower: inputs.seedIntent.tickLower,
+      tickUpper: inputs.seedIntent.tickUpper,
+      liquidity: priceCandidate.liquidity,
+      amount0Max: priceCandidate.amount0Max,
+      amount1Max: priceCandidate.amount1Max,
+      maxDeadlineSeconds: inputs.seedIntent.maxDeadlineSeconds,
+    });
+  } catch (error) {
+    fail(`selected seed intent is invalid: ${error.message}`);
+  }
 }
 
 function requireConstructorShape(artifact, expectedInputs, label) {
@@ -1423,14 +1491,21 @@ export function deriveAddresses({
   const tokenArtifact = readArtifact('token', inputs.targets.token, options);
   verifyArtifactCompiler('token', tokenArtifact, inputs);
   const { priceCandidate, token } = deriveTokenFromPriceCandidates(inputs, tokenArtifact);
+  const selectedSeedIntent = deriveSelectedSeedIntent(inputs, priceCandidate);
   const context = structuredClone(inputs);
   context.pool.selectedPriceCandidate = priceCandidate;
+  context.seedIntent = selectedSeedIntent;
   context.addresses = {};
   context.addresses.token = token.address;
 
   const hookArtifact = readArtifact('hook', inputs.targets.hook, options);
   verifyArtifactCompiler('hook', hookArtifact, inputs);
-  const hookConfig = requireHookConfig(resolveReferences(inputs.hookConstructorConfig, context), inputs, token.address);
+  const hookConfig = requireHookConfig(
+    resolveReferences(inputs.hookConstructorConfig, context),
+    inputs,
+    token.address,
+    selectedSeedIntent,
+  );
   const hook = deriveHookTarget({ target: inputs.targets.hook, artifact: hookArtifact, config: hookConfig, inputs });
   context.addresses.hook = hook.address;
 

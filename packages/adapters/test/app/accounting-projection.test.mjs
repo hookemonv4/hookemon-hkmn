@@ -58,6 +58,7 @@ function custodyLedger({ cycleId, chainId, assetId, decimals = 6, ...buckets }) 
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -111,6 +112,105 @@ test('policy custody keeps each cycle partitioned and never converts a foreign s
     ['active', '34'],
     ['archived', '14'],
   ]);
+});
+
+test('policy custody carries open held positions at their recorded USDG values', async () => {
+  const position = ({ positionId, cycleId, valueMicroUsdg, resolution = null }) => ({
+    positionId,
+    cycleId,
+    costMicroUsdg: valueMicroUsdg,
+    valueMicroUsdg,
+    insuredValue: null,
+    reason: 'HELD_UNRESOLVED',
+    terminalState: 'HELD_UNRESOLVED',
+    evidenceDigest: `sha256:${'a'.repeat(64)}`,
+    openedAtMs: 1_000,
+    positionRevision: 0,
+    ownerDecision: null,
+    resolution,
+  });
+  const repository = custodyRepository({
+    'cycle-alpha': {
+      cycleId: 'cycle-alpha',
+      terminalState: 'COMPLETED',
+      custodyLedgers: new Map(),
+      heldPositions: new Map([
+        ['held-alpha', position({ positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsdg: '19' })],
+        ['held-resolved', position({
+          positionId: 'held-resolved',
+          cycleId: 'cycle-alpha',
+          valueMicroUsdg: '23',
+          resolution: { state: 'SOLD' },
+        })],
+      ]),
+    },
+    'cycle-beta': {
+      cycleId: 'cycle-beta',
+      terminalState: 'COMPLETED',
+      custodyLedgers: new Map(),
+      heldPositions: new Map([
+        ['held-beta', position({ positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsdg: '31' })],
+      ]),
+    },
+  });
+
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.heldPositions.count, 2);
+  assert.equal(custody.heldPositions.valueMicroUsdg, '50');
+  assert.deepEqual(
+    custody.heldPositions.positions.map(({ positionId, cycleId, valueMicroUsdg }) => ({ positionId, cycleId, valueMicroUsdg })),
+    [
+      { positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsdg: '19' },
+      { positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsdg: '31' },
+    ],
+  );
+  assert.deepEqual(custody.heldPositions.positions[0], {
+    positionId: 'held-alpha',
+    cycleId: 'cycle-alpha',
+    costMicroUsdg: '19',
+    valueMicroUsdg: '19',
+    insuredValue: null,
+    reason: 'HELD_UNRESOLVED',
+    terminalState: 'HELD_UNRESOLVED',
+    evidenceDigest: `sha256:${'a'.repeat(64)}`,
+    openedAtMs: 1_000,
+    positionRevision: 0,
+    ownerDecision: null,
+  });
+});
+
+test('does not classify a separately valued foreign held-position bucket as unvalued custody', async () => {
+  const repository = custodyRepository({
+    held: {
+      cycleId: 'held',
+      terminalState: 'COMPLETED',
+      custodyLedgers: new Map([['solana', custodyLedger({
+        cycleId: 'held',
+        chainId: 'solana:mainnet',
+        assetId: 'spl:card-custody',
+        heldPositions: '40',
+      })]]),
+      heldPositions: new Map([['held-card', {
+        positionId: 'held-card',
+        cycleId: 'held',
+        costMicroUsdg: '40',
+        valueMicroUsdg: '40',
+        insuredValue: null,
+        reason: 'EPIC_THRESHOLD',
+        terminalState: 'HELD_OWNER_DECISION',
+        evidenceDigest: `sha256:${'b'.repeat(64)}`,
+        openedAtMs: 1_000,
+        positionRevision: 0,
+        ownerDecision: null,
+        resolution: null,
+      }]]),
+    },
+  });
+
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.heldPositions.count, 1);
+  assert.equal(custody.heldPositions.valueMicroUsdg, '40');
 });
 
 test('policy custody partition property never offsets one cycle against another', async () => {

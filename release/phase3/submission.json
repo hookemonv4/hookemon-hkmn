@@ -1771,6 +1771,7 @@
         "release/phase3/artifacts/custody.json",
         "release/phase3/artifacts/hook.json",
         "release/phase3/build-info/launch.json",
+        "release/phase3/package/create-request.json",
         "release/phase3/package/graph-draft.json",
         "release/phase3/package/package-manifest.json",
         "release/phase3/deployment-manifest.json",

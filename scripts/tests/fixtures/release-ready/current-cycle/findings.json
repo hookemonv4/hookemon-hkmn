@@ -18,7 +18,7 @@
   ],
   "reviewBundle": {
     "path": "qa/redteam/current-review-bundle.json",
-    "sha256": "5b02c26d40ffbfe4c5dacbcb29c6feca5f20ed1810d125991f1298b7b83ccc06"
+    "sha256": "0efd4135f31e56bf9b365a6f030d003342b2f246e048cac09ae11b582cc011cb"
   },
   "findings": [
     {
@@ -130,14 +130,26 @@
       "status": "RESOLVED",
       "evidence": ["qa/redteam/current-cycle-evidence.json"],
       "disposition": "The reviewed control is resolved in the current cycle."
+    },
+    {
+      "id": "RT-R65-01",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "seed-intent-not-bound-onchain",
+      "summary": "The canonical-liquidity seed call must match the owner-bound payer, ticks, liquidity, maxima, and a deadline within the 900-second execution window.",
+      "status": "RESOLVED",
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "The hook, release plan, and launch-package verifier bind the materialized seed call to the immutable intent digest and separately enforce deadline <= block.timestamp + 900. The content-addressed QA record cites the unit, release-plan, and archive-fork mutation tests."
     }
   ],
   "counts": {
     "contract-misread": 0,
-    "valid-actionable": 10,
+    "valid-actionable": 11,
     "valid-tradeoff": 1,
     "noise": 0,
-    "resolved": 11,
+    "resolved": 12,
     "open": 0,
     "inProgress": 0
   }

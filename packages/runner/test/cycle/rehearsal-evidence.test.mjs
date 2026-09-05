@@ -14,6 +14,14 @@ const settlementAmount = Object.freeze({
   amountAtomic: '30',
 });
 
+const purchaseAmount = Object.freeze({ ...settlementAmount, amountAtomic: '25000000' });
+const proceedsAmount = Object.freeze({ ...settlementAmount, amountAtomic: '15000000' });
+const proceedsAccount = '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t';
+const recipientTokenAccounts = Object.freeze([
+  'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm',
+  'H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA',
+]);
+
 function stageEvidence(stage) {
   return {
     schema: 'hookemon.rehearsal-stage-evidence.v1',
@@ -38,6 +46,79 @@ function completedDescription() {
     terminalState: 'COMPLETED',
     stages: new Map(OPERATIONAL_CYCLE_STAGES.map(stage => [stage, { status: 'COMPLETE', evidence: stageEvidence(stage) }])),
     operationalAttempts: new Map(OPERATIONAL_CYCLE_STAGES.map(stage => [stage, { attempt: { state: 'RECONCILED' } }])),
+    chainAttempts: new Map(),
+  };
+}
+
+function liveStageEvidence(stage) {
+  if (['eligibility-snapshot', 'claim-process', 'outbound', 'return'].includes(stage)) {
+    return {
+      skipped: true,
+      rehearsalMode: 'collector-only',
+      stage,
+      reason: 'stage is outside the collector-only rehearsal boundary',
+    };
+  }
+  if (stage === 'purchase') {
+    return { memo: 'memo-live', signature: 'signature-purchase', expectedCardCount: 1, packCost: purchaseAmount };
+  }
+  if (stage === 'open') {
+    return { memo: 'memo-live', signature: 'signature-open', mint: 'mint-live', assetKind: 'spl' };
+  }
+  if (stage === 'epic-gate') {
+    return {
+      memo: 'memo-live',
+      mint: 'mint-live',
+      decision: 'sell',
+      offer: proceedsAmount,
+      insuredValue: purchaseAmount,
+    };
+  }
+  if (stage === 'buyback') {
+    return {
+      memo: 'memo-live',
+      mint: 'mint-live',
+      signature: 'signature-buyback',
+      quote: proceedsAmount,
+      refundAmount: proceedsAmount,
+      proceeds: proceedsAmount,
+      proceedsProjection: {
+        account: proceedsAccount,
+        beforeAtomic: '1000000',
+        afterAtomic: '16000000',
+        delta: proceedsAmount,
+      },
+    };
+  }
+  if (stage === 'payout') {
+    return {
+      signature: 'signature-payout',
+      buybackSignature: 'signature-buyback',
+      sourceTokenAccount: proceedsAccount,
+      proceedsAccount,
+      proceeds: proceedsAmount,
+      allocated: proceedsAmount,
+      recipients: [
+        { recipient: 'recipient-one', tokenAccount: recipientTokenAccounts[0], amount: { ...proceedsAmount, amountAtomic: '7500000' } },
+        { recipient: 'recipient-two', tokenAccount: recipientTokenAccounts[1], amount: { ...proceedsAmount, amountAtomic: '7500000' } },
+      ],
+    };
+  }
+  throw new Error(`unexpected live stage ${stage}`);
+}
+
+function completedLiveDescription() {
+  return {
+    cycleId: 'cycle-live-evidence',
+    mode: 'rehearsal',
+    providerMode: 'live',
+    releaseAmount: '25000000',
+    completed: true,
+    terminalState: 'COMPLETED',
+    stages: new Map(OPERATIONAL_CYCLE_STAGES.map(stage => [stage, { status: 'COMPLETE', evidence: liveStageEvidence(stage) }])),
+    operationalAttempts: new Map(OPERATIONAL_CYCLE_STAGES
+      .filter(stage => stage !== 'eligibility-snapshot')
+      .map(stage => [stage, { attempt: { state: 'RECONCILED' } }])),
     chainAttempts: new Map(),
   };
 }
@@ -72,9 +153,18 @@ test('rehearsal evidence refuses a completed cycle that omits any operational st
   assert.throws(() => collectRehearsalEvidence(unresolvedAttempt), /stage return provider attempt is not reconciled/);
 });
 
+test('rehearsal evidence records a finalized live collector-only flow with an exact dedicated-proceeds payout', () => {
+  const evidence = collectRehearsalEvidence(completedLiveDescription());
+  assert.equal(evidence.providerMode, 'live');
+  assert.equal(evidence.purchase.packCost.amountAtomic, '25000000');
+  assert.equal(evidence.proceeds.account, proceedsAccount);
+  assert.equal(evidence.proceeds.delta.amountAtomic, '15000000');
+  assert.deepEqual(evidence.payout.recipients.map(entry => entry.amount.amountAtomic), ['7500000', '7500000']);
+});
+
 test('rehearsal evidence refuses a live provider journal without a dedicated proceeds projection', () => {
-  const description = completedDescription();
-  description.providerMode = 'live';
+  const description = completedLiveDescription();
+  delete description.stages.get('buyback').evidence.proceedsProjection;
   assert.throws(
     () => collectRehearsalEvidence(description),
     /live rehearsal evidence requires a dedicated Solana proceeds projection/,
