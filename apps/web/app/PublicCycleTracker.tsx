@@ -33,7 +33,8 @@ import {
 } from "../lib/public-dashboard-view";
 import styles from "./PublicCycleTracker.module.css";
 
-const POLL_INTERVAL_MS = 10_000;
+const POLL_INTERVAL_MS = 5_000;
+const MAX_POLL_BACKOFF_TICKS = 5;
 const LIVE_WINDOW_MS = 30_000;
 const INITIAL_CARD_COUNT = 12;
 const CARD_PAGE_SIZE = 24;
@@ -44,7 +45,7 @@ const PROCESS_LABELS: Record<PublicProcessStepId, string> = {
   packs: "Packs purchased",
   cards: "Cards revealed",
   sales: "Cards sold",
-  return: "USDC returned",
+  return: "USDG returned",
   holders: "Holders paid",
 };
 
@@ -85,8 +86,8 @@ export function PublicCycleProvider({ children }: { children: ReactNode }) {
   const [communityPollFailed, setCommunityPollFailed] = useState(false);
   const [nowMs, setNowMs] = useState(0);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    await Promise.all([
+  const refresh = useCallback(async (signal: AbortSignal): Promise<boolean> => {
+    const [statusResult, communityResult] = await Promise.all([
       (async () => {
         try {
           const response = await fetch("/api/cycle-status", {
@@ -96,11 +97,12 @@ export function PublicCycleProvider({ children }: { children: ReactNode }) {
           });
           if (!response.ok) throw new Error("PUBLIC_CYCLE_STATUS_UNAVAILABLE");
           setStatus(normalizePublicCycleStatus(await response.json()));
-          setLastSuccessfulPoll(Date.now());
           setPollFailed(false);
+          return false;
         } catch (error) {
-          if (isAbortError(error)) return;
+          if (isAbortError(error)) return false;
           setPollFailed(true);
+          return true;
         }
       })(),
       (async () => {
@@ -113,21 +115,51 @@ export function PublicCycleProvider({ children }: { children: ReactNode }) {
           if (!response.ok) throw new Error("PUBLIC_COMMUNITY_UNAVAILABLE");
           setCommunity(normalizePublicCommunitySnapshot(await response.json()));
           setCommunityPollFailed(false);
+          return false;
         } catch (error) {
-          if (isAbortError(error)) return;
+          if (isAbortError(error)) return false;
           setCommunityPollFailed(true);
+          return true;
         }
       })(),
     ]);
+    const failed = statusResult || communityResult;
+    if (!failed) setLastSuccessfulPoll(Date.now());
+    return failed;
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    let requestInFlight = false;
+    let consecutiveFailures = 0;
+    let skipTicks = 0;
+
     const pollIfVisible = () => {
-      if (document.visibilityState === "visible") {
-        setNowMs(Date.now());
-        void refresh(controller.signal);
+      if (document.visibilityState !== "visible") return;
+      // Backoff after failures by skipping ticks of the fixed base interval, rather than
+      // changing it, so recovery always re-aligns with the regular 5s cadence.
+      if (skipTicks > 0) {
+        skipTicks -= 1;
+        return;
       }
+      // Never start a second request while one is still in flight: responses can then never
+      // arrive out of order and overwrite fresher state with stale data.
+      if (requestInFlight) return;
+      requestInFlight = true;
+      setNowMs(Date.now());
+      void refresh(controller.signal)
+        .then((failed) => {
+          if (failed) {
+            consecutiveFailures += 1;
+            skipTicks = pollBackoffTicks(consecutiveFailures);
+          } else {
+            consecutiveFailures = 0;
+            skipTicks = 0;
+          }
+        })
+        .finally(() => {
+          requestInFlight = false;
+        });
     };
     const updateVisibleClock = () => {
       if (document.visibilityState === "visible") setNowMs(Date.now());
@@ -296,7 +328,7 @@ export default function PublicCycleTracker() {
             {profileMismatch
               ? "Configured network data does not match."
               : environment.state === "verified"
-                ? `${status?.network.ethereum.label ?? "Network"} · ${status?.network.solana.label ?? "Network"}`
+                ? `${status?.network.evm.label ?? "Network"} · ${status?.network.solana.label ?? "Network"}`
                 : feedState === "unavailable"
                   ? "Verified network data unavailable."
                   : "Awaiting validated network data"}
@@ -336,18 +368,18 @@ export default function PublicCycleTracker() {
         <dl className={styles.primaryMetrics} aria-label="Public dashboard summary">
           <Metric
             label="Latest observed pool"
-            value={formatMicroUsdc(dashboardCommunity?.metrics.latestObservedProjectPoolMicroUsdc)}
+            value={formatMicroUsdg(dashboardCommunity?.metrics.latestObservedProjectPoolMicroUsdg)}
             detail={formatObservationAge(dashboardCommunity?.poolObservedAt, dashboard.nowMs)}
           />
           <Metric
             label="Latest round actually paid"
             value={roundAccounting
               ? pendingMoney(
-                roundAccounting.paidHolderRewardsMicroUsdc,
+                roundAccounting.paidHolderRewardsMicroUsdg,
                 humanize(roundAccounting.distributionStatus),
               )
               : latestCycle
-                ? pendingMoney(latestCycle.paidMicroUsdc, "Not executed")
+                ? pendingMoney(latestCycle.paidMicroUsdg, "Not executed")
                 : "Unavailable"}
             detail={latestCycle ? `Cycle ${latestCycle.cycleId}` : "No verified settlement"}
           />
@@ -386,8 +418,8 @@ export default function PublicCycleTracker() {
 
         {hasLatestPayoutFacts(latestCycle) && roundAccounting === null ? (
           <dl className={styles.payoutFacts} aria-label="Latest verified payout">
-            {latestCycle?.paidMicroUsdc !== null && latestCycle?.paidMicroUsdc !== undefined ? (
-              <Metric label="Latest payout" value={formatMicroUsdc(latestCycle.paidMicroUsdc)} />
+            {latestCycle?.paidMicroUsdg !== null && latestCycle?.paidMicroUsdg !== undefined ? (
+              <Metric label="Latest payout" value={formatMicroUsdg(latestCycle.paidMicroUsdg)} />
             ) : null}
             {latestCycle?.payoutRecipientCount !== undefined ? (
               <Metric label="Eligible allocations" value={formatCount(latestCycle.payoutRecipientCount)} />
@@ -398,30 +430,30 @@ export default function PublicCycleTracker() {
         {roundAccounting ? (
           <div className={styles.accountingGroups} aria-label="Latest Holder Rewards round">
             <AccountingGroup title="Pack result">
-              <Metric label="Pack spend" value={formatMicroUsdc(roundAccounting.packSpendMicroUsdc)} />
-              <Metric label="Buyback" value={formatMicroUsdc(roundAccounting.buybackMicroUsdc)} />
-              <Metric label="Pack gain" value={formatMicroUsdc(roundAccounting.packGainMicroUsdc)} />
-              <Metric label="Pack loss" value={formatMicroUsdc(roundAccounting.packLossMicroUsdc)} />
+              <Metric label="Pack spend" value={formatMicroUsdg(roundAccounting.packSpendMicroUsdg)} />
+              <Metric label="Buyback" value={formatMicroUsdg(roundAccounting.buybackMicroUsdg)} />
+              <Metric label="Pack gain" value={formatMicroUsdg(roundAccounting.packGainMicroUsdg)} />
+              <Metric label="Pack loss" value={formatMicroUsdg(roundAccounting.packLossMicroUsdg)} />
               <Metric
                 label="Wallet before"
-                value={pendingMoney(roundAccounting.walletBalanceBeforeMicroUsdc, "Balance not supplied")}
+                value={pendingMoney(roundAccounting.walletBalanceBeforeMicroUsdg, "Balance not supplied")}
               />
               <Metric
                 label="Wallet after"
-                value={pendingMoney(roundAccounting.walletBalanceAfterMicroUsdc, "Balance not supplied")}
+                value={pendingMoney(roundAccounting.walletBalanceAfterMicroUsdg, "Balance not supplied")}
               />
             </AccountingGroup>
             <AccountingGroup title="Quoted and confirmed costs">
-              <Metric label="Quoted outbound bridge" value={quotedMoney(roundAccounting.quotedCosts.outboundBridgeMicroUsdc)} />
-              <Metric label="Quoted inbound bridge" value={quotedMoney(roundAccounting.quotedCosts.inboundBridgeMicroUsdc)} />
-              <Metric label="Quoted Collector API" value={quotedMoney(roundAccounting.quotedCosts.collectorApiMicroUsdc)} />
-              <Metric label="Quoted Ethereum network" value={quotedMoney(roundAccounting.quotedCosts.ethereumNetworkMicroUsdc)} />
-              <Metric label="Quoted Solana network" value={quotedMoney(roundAccounting.quotedCosts.solanaNetworkMicroUsdc)} />
-              <Metric label="Quoted slippage" value={quotedMoney(roundAccounting.quotedCosts.slippageMicroUsdc)} />
-              <Metric label="Protected cost forecast" value={pendingMoney(roundAccounting.protectedCostsMicroUsdc, "Not executed in this pack check")} />
+              <Metric label="Quoted outbound bridge" value={quotedMoney(roundAccounting.quotedCosts.outboundBridgeMicroUsdg)} />
+              <Metric label="Quoted inbound bridge" value={quotedMoney(roundAccounting.quotedCosts.inboundBridgeMicroUsdg)} />
+              <Metric label="Quoted Collector API" value={quotedMoney(roundAccounting.quotedCosts.collectorApiMicroUsdg)} />
+              <Metric label="Quoted EVM network" value={quotedMoney(roundAccounting.quotedCosts.evmNetworkMicroUsdg)} />
+              <Metric label="Quoted Solana network" value={quotedMoney(roundAccounting.quotedCosts.solanaNetworkMicroUsdg)} />
+              <Metric label="Quoted slippage" value={quotedMoney(roundAccounting.quotedCosts.slippageMicroUsdg)} />
+              <Metric label="Protected cost forecast" value={pendingMoney(roundAccounting.protectedCostsMicroUsdg, "Not executed in this pack check")} />
               <Metric
                 label="Confirmed costs"
-                value={pendingMoney(roundAccounting.confirmedCostsMicroUsdc, "Awaiting confirmed receipts")}
+                value={pendingMoney(roundAccounting.confirmedCostsMicroUsdg, "Awaiting confirmed receipts")}
               />
               <Metric
                 label="Purchase transaction fee"
@@ -441,23 +473,23 @@ export default function PublicCycleTracker() {
               />
             </AccountingGroup>
             <AccountingGroup title="Fee reserve">
-              <Metric label="Reserve before" value={pendingMoney(roundAccounting.feeReserveBeforeMicroUsdc, "Not executed in this pack check")} />
-              <Metric label="Reserve target (50%)" value={pendingMoney(roundAccounting.feeReserveTargetMicroUsdc, "Not executed in this pack check")} />
-              <Metric label="Reserve top-up" value={pendingMoney(roundAccounting.feeReserveTopUpMicroUsdc, "Not executed in this pack check")} />
-              <Metric label="Reserve after" value={pendingMoney(roundAccounting.feeReserveAfterMicroUsdc, "Not executed in this pack check")} />
+              <Metric label="Reserve before" value={pendingMoney(roundAccounting.feeReserveBeforeMicroUsdg, "Not executed in this pack check")} />
+              <Metric label="Reserve target (50%)" value={pendingMoney(roundAccounting.feeReserveTargetMicroUsdg, "Not executed in this pack check")} />
+              <Metric label="Reserve top-up" value={pendingMoney(roundAccounting.feeReserveTopUpMicroUsdg, "Not executed in this pack check")} />
+              <Metric label="Reserve after" value={pendingMoney(roundAccounting.feeReserveAfterMicroUsdg, "Not executed in this pack check")} />
             </AccountingGroup>
             <AccountingGroup title="Holder settlement">
               <Metric
                 label="Planned Holder Rewards"
                 value={pendingMoney(
-                  roundAccounting.plannedHolderRewardsMicroUsdc,
+                  roundAccounting.plannedHolderRewardsMicroUsdg,
                   humanize(roundAccounting.holderRewardsStatus),
                 )}
               />
               <Metric
                 label="Actually paid"
                 value={pendingMoney(
-                  roundAccounting.paidHolderRewardsMicroUsdc,
+                  roundAccounting.paidHolderRewardsMicroUsdg,
                   humanize(roundAccounting.distributionStatus),
                 )}
               />
@@ -467,11 +499,11 @@ export default function PublicCycleTracker() {
               />
               <Metric
                 label="Complete cycle gain"
-                value={pendingMoney(roundAccounting.cycleGainMicroUsdc, "Awaiting confirmed receipts")}
+                value={pendingMoney(roundAccounting.cycleGainMicroUsdg, "Awaiting confirmed receipts")}
               />
               <Metric
                 label="Complete cycle loss"
-                value={pendingMoney(roundAccounting.cycleLossMicroUsdc, "Awaiting confirmed receipts")}
+                value={pendingMoney(roundAccounting.cycleLossMicroUsdg, "Awaiting confirmed receipts")}
               />
             </AccountingGroup>
           </div>
@@ -496,40 +528,40 @@ export default function PublicCycleTracker() {
         <dl className={styles.communityMetrics} aria-label="Public dashboard totals">
           <Metric
             label="Cycle funding"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalCycleFundingMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalCycleFundingMicroUsdg)}
           />
           <Metric
             label="Collector spend"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalCollectorSpendMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalCollectorSpendMicroUsdg)}
           />
           <Metric
             label="Buybacks returned"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalBuybacksReturnedMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalBuybacksReturnedMicroUsdg)}
           />
           <Metric
             label="Bridged back"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalBridgedBackMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalBridgedBackMicroUsdg)}
           />
           <Metric
             label="Retained reserve"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.latestRetainedReserveMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.latestRetainedReserveMicroUsdg)}
           />
           <Metric
             label="Deferred rewards"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalRewardsDeferredMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalRewardsDeferredMicroUsdg)}
           />
           <Metric
             label="Quoted operating costs"
-            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalQuotedOperatingCostsMicroUsdc)}
+            value={historyMoney(dashboardCommunity, dashboardCommunity?.metrics.totalQuotedOperatingCostsMicroUsdg)}
           />
           <Metric
             label="Cycle reserve target"
             value={roundAccounting
               ? pendingMoney(
-                roundAccounting.feeReserveTargetMicroUsdc,
+                roundAccounting.feeReserveTargetMicroUsdg,
                 "Not executed in this pack check",
               )
-              : formatMicroUsdc(dashboardCommunity?.metrics.latestCycleReserveTargetMicroUsdc)}
+              : formatMicroUsdg(dashboardCommunity?.metrics.latestCycleReserveTargetMicroUsdg)}
           />
           <Metric label="Completed cycles" value={historyCount(dashboardCommunity, dashboardCommunity?.metrics.completedCycles)} />
           <Metric label="Skipped cycles" value={historyCount(dashboardCommunity, dashboardCommunity?.metrics.skippedCycles)} />
@@ -630,12 +662,12 @@ export default function PublicCycleTracker() {
           <strong>
             {roundAccounting
               ? pendingMoney(
-                roundAccounting.paidHolderRewardsMicroUsdc,
+                roundAccounting.paidHolderRewardsMicroUsdg,
                 humanize(roundAccounting.distributionStatus),
               )
-              : cycle?.paidMicroUsdc === null || cycle?.paidMicroUsdc === undefined
+              : cycle?.paidMicroUsdg === null || cycle?.paidMicroUsdg === undefined
                 ? "Not executed"
-                : formatMicroUsdc(cycle.paidMicroUsdc)}
+                : formatMicroUsdg(cycle.paidMicroUsdg)}
           </strong>
           <span>Booster limit</span>
           <strong>
@@ -716,8 +748,8 @@ function CycleCard({ card }: { card: PublicCycleCard }) {
         <small>Set: {card.setName ?? "pending"}</small>
         <small>Card number: {card.cardNumber ?? "pending"}</small>
         <small>NFT: {card.nftAddress ?? "pending"}</small>
-        <small>Pack price: {pendingMoney(card.packPriceMicroUsdc, "pending")}</small>
-        <small>Buyback: {pendingMoney(card.buybackMicroUsdc, "pending")}</small>
+        <small>Pack price: {pendingMoney(card.packPriceMicroUsdg, "pending")}</small>
+        <small>Buyback: {pendingMoney(card.buybackMicroUsdg, "pending")}</small>
       </div>
     </div>
   );
@@ -758,8 +790,8 @@ function cycleScheduleLabel(status: PublicCycleStatus | null): string {
 }
 
 function processStepDetail(amountText: string, timestamp: string | null): string {
-  const amountMatch = /^(\d+) micro-USDC$/.exec(amountText);
-  const amount = amountMatch ? formatMicroUsdc(amountMatch[1]) : amountText;
+  const amountMatch = /^(\d+) micro-USDG$/.exec(amountText);
+  const amount = amountMatch ? formatMicroUsdg(amountMatch[1]) : amountText;
   return timestamp ? `${amount} · ${formatTimestamp(timestamp)}` : amount;
 }
 
@@ -785,7 +817,7 @@ export function cardAltText(card: PublicCycleCard): string {
 }
 
 function pendingMoney(value: string | null, pending: string): string {
-  return value === null ? pending : formatMicroUsdc(value);
+  return value === null ? pending : formatMicroUsdg(value);
 }
 
 function historyMoney(
@@ -793,7 +825,7 @@ function historyMoney(
   value: string | null | undefined,
 ): string {
   if (!snapshot) return "—";
-  return snapshot.historyComplete ? formatMicroUsdc(value) : "History incomplete";
+  return snapshot.historyComplete ? formatMicroUsdg(value) : "History incomplete";
 }
 
 function historyCount(
@@ -805,7 +837,7 @@ function historyCount(
 }
 
 function quotedMoney(value: string | null): string {
-  return value === null ? "Quote unavailable" : `${formatMicroUsdc(value)} quoted`;
+  return value === null ? "Quote unavailable" : `${formatMicroUsdg(value)} quoted`;
 }
 
 function nativeFeeText(value: { lamports: string; paidBy: string } | null): string {
@@ -830,13 +862,13 @@ export function formatCountdown(milliseconds: number): string {
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-export function formatMicroUsdc(value: string | null | undefined): string {
+export function formatMicroUsdg(value: string | null | undefined): string {
   if (value === null || value === undefined) return "—";
   const padded = value.padStart(7, "0");
   const whole = padded.slice(0, -6);
   const fraction = padded.slice(-6).replace(/0+$/, "");
   const grouped = BigInt(whole).toLocaleString("en-US");
-  return `${grouped}${fraction ? `.${fraction}` : ""} USDC`;
+  return `${grouped}${fraction ? `.${fraction}` : ""} USDG`;
 }
 
 export function formatCount(value: number | undefined): string {
@@ -853,6 +885,10 @@ function formatTimestamp(value: string | null | undefined): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function pollBackoffTicks(consecutiveFailures: number): number {
+  return Math.min(consecutiveFailures, MAX_POLL_BACKOFF_TICKS);
 }
 
 function formatTime(value: string): string {

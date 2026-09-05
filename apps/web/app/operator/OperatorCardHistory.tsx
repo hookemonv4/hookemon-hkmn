@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import {
-  cardResultMicroUsdc,
+  cardResultMicroUsdg,
   formatGermanDate,
-  formatGermanUsdc,
-  parseGermanUsdc,
+  formatGermanUsdg,
+  parseGermanUsdg,
 } from "./operator-locale";
 import type {
   CardHistoryCard,
@@ -39,8 +39,8 @@ const CARD_KEYS = new Set([
   "setName",
   "cardNumber",
   "imageUrl",
-  "packPriceMicroUsdc",
-  "buybackMicroUsdc",
+  "packPriceMicroUsdg",
+  "buybackMicroUsdg",
 ]);
 
 export default function OperatorCardHistory({
@@ -128,7 +128,7 @@ export default function OperatorCardHistory({
     try {
       cardHistoryParameters(filters, sort, null);
     } catch {
-      setError("Bitte Buyback-Werte als deutsche USDC-Beträge eingeben, zum Beispiel 12,50.");
+      setError("Bitte Buyback-Werte als deutsche USDG-Beträge eingeben, zum Beispiel 12,50.");
       return;
     }
     const selectedFilters = { ...filters };
@@ -310,8 +310,8 @@ function CardFacts({ card, packIndex }: { card: DashboardCard; packIndex?: numbe
       <div><dt>Kartennummer</dt><dd>{card.cardNumber ?? pending}</dd></div>
       <div><dt>Seltenheit</dt><dd>{card.rarity || pending}</dd></div>
       <div><dt>Produkt-ID</dt><dd>{card.productId}</dd></div>
-      <div><dt>Packpreis</dt><dd>{moneyOrPending(card.packPriceMicroUsdc)}</dd></div>
-      <div><dt>Buyback</dt><dd>{moneyOrPending(card.buybackMicroUsdc)}</dd></div>
+      <div><dt>Packpreis</dt><dd>{moneyOrPending(card.packPriceMicroUsdg)}</dd></div>
+      <div><dt>Buyback</dt><dd>{moneyOrPending(card.buybackMicroUsdg)}</dd></div>
       <div><dt>Ergebnis</dt><dd><CardResult card={card} /></dd></div>
       <div><dt>NFT-Adresse</dt><dd>{card.nftAddress ?? pending}</dd></div>
       <div><dt>Zyklus-ID</dt><dd>{card.cycleId}</dd></div>
@@ -321,10 +321,10 @@ function CardFacts({ card, packIndex }: { card: DashboardCard; packIndex?: numbe
 }
 
 function CardResult({ card }: { card: DashboardCard }) {
-  const result = cardResultMicroUsdc(card.packPriceMicroUsdc, card.buybackMicroUsdc);
+  const result = cardResultMicroUsdg(card.packPriceMicroUsdg, card.buybackMicroUsdg);
   if (result === null) return <span>Noch nicht bestätigt</span>;
   const tone = BigInt(result) > 0n ? "positive" : BigInt(result) < 0n ? "negative" : "neutral";
-  return <span className={styles.cardResultBadge} data-tone={tone}>{formatGermanUsdc(result)}</span>;
+  return <span className={styles.cardResultBadge} data-tone={tone}>{formatGermanUsdg(result)}</span>;
 }
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -345,10 +345,10 @@ function cardHistoryParameters(
   if (filters.from) parameters.set("from", new Date(filters.from).toISOString());
   if (filters.to) parameters.set("to", new Date(filters.to).toISOString());
   if (filters.minBuyback) {
-    parameters.set("minBuybackMicroUsdc", parseGermanUsdc(filters.minBuyback));
+    parameters.set("minBuybackMicroUsdg", parseGermanUsdg(filters.minBuyback));
   }
   if (filters.maxBuyback) {
-    parameters.set("maxBuybackMicroUsdc", parseGermanUsdc(filters.maxBuyback));
+    parameters.set("maxBuybackMicroUsdg", parseGermanUsdg(filters.maxBuyback));
   }
   return parameters;
 }
@@ -382,8 +382,8 @@ function decodeHistoryCard(value: unknown): CardHistoryCard {
     setName: nullableText(value.setName),
     cardNumber: nullableText(value.cardNumber),
     imageUrl: nullableImage(value.imageUrl),
-    packPriceMicroUsdc: nullableMoney(value.packPriceMicroUsdc),
-    buybackMicroUsdc: nullableMoney(value.buybackMicroUsdc),
+    packPriceMicroUsdg: nullableMoney(value.packPriceMicroUsdg),
+    buybackMicroUsdg: nullableMoney(value.buybackMicroUsdg),
   };
   if (!Number.isSafeInteger(card.packIndex) || card.packIndex < 0 || card.packIndex > 9_999) {
     invalidCardResponse();
@@ -402,7 +402,7 @@ function deduplicatedCards(cards: CardHistoryCard[]) {
 }
 
 function moneyOrPending(value: string | null) {
-  return value === null ? "Noch nicht bestätigt" : formatGermanUsdc(value);
+  return value === null ? "Noch nicht bestätigt" : formatGermanUsdg(value);
 }
 
 function nullableMoney(value: unknown): string | null {

@@ -1,7 +1,8 @@
 const UNAVAILABLE = '—';
 const MISSING_VALUE = '—';
 const FRESH_MS = 90_000;
-const POLL_MS = 15_000;
+const POLL_MS = 5_000;
+const MAX_POLL_BACKOFF_MS = 30_000;
 const money = (value) => typeof value === 'string' && /^(0|[1-9]\d{0,77})$/.test(value);
 const text = (value) => typeof value === 'string' && value.length > 0 && value.length <= 512;
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
@@ -30,46 +31,46 @@ const cardShape = {
   productId: text, rarity: text,
   ...fields('nftAddress cardName setName cardNumber', nullable(text)),
   imageUrl: nullable((value) => safeCardImage(value) !== null),
-  ...fields('packPriceMicroUsdc buybackMicroUsdc', nullable(money)),
+  ...fields('packPriceMicroUsdg buybackMicroUsdg', nullable(money)),
 };
 const nativeFee = nullable(record({ lamports: money, paidBy: text }));
 const roundShape = record({
-  ...fields('packSpendMicroUsdc buybackMicroUsdc packGainMicroUsdc packLossMicroUsdc', money),
-  quotedCosts: record(fields('outboundBridgeMicroUsdc inboundBridgeMicroUsdc collectorApiMicroUsdc ethereumNetworkMicroUsdc solanaNetworkMicroUsdc slippageMicroUsdc', nullable(money))),
-  ...fields('protectedCostsMicroUsdc cycleGainMicroUsdc cycleLossMicroUsdc walletBalanceBeforeMicroUsdc walletBalanceAfterMicroUsdc feeReserveBeforeMicroUsdc feeReserveTargetMicroUsdc feeReserveTopUpMicroUsdc feeReserveAfterMicroUsdc plannedHolderRewardsMicroUsdc paidHolderRewardsMicroUsdc', nullable(money)),
-  confirmedCostsMicroUsdc: nullable((value) => typeof value === 'string' && /^(0|-?[1-9]\d{0,77})$/.test(value)),
+  ...fields('packSpendMicroUsdg buybackMicroUsdg packGainMicroUsdg packLossMicroUsdg', money),
+  quotedCosts: record(fields('outboundBridgeMicroUsdg inboundBridgeMicroUsdg collectorApiMicroUsdg evmNetworkMicroUsdg solanaNetworkMicroUsdg slippageMicroUsdg', nullable(money))),
+  ...fields('protectedCostsMicroUsdg cycleGainMicroUsdg cycleLossMicroUsdg walletBalanceBeforeMicroUsdg walletBalanceAfterMicroUsdg feeReserveBeforeMicroUsdg feeReserveTargetMicroUsdg feeReserveTopUpMicroUsdg feeReserveAfterMicroUsdg plannedHolderRewardsMicroUsdg paidHolderRewardsMicroUsdg', nullable(money)),
+  confirmedCostsMicroUsdg: nullable((value) => typeof value === 'string' && /^(0|-?[1-9]\d{0,77})$/.test(value)),
   networkFees: record({ walletLamportsCharged: nullable(money), purchase: nativeFee, buyback: nativeFee }),
   holderRewardsStatus: text, distributionStatus: text,
 });
 const exclusive = (gain, loss) => (gain === null && loss === null)
   || (gain !== null && loss !== null && (gain === '0' || loss === '0'));
 const accounting = nullable((value) => roundShape(value)
-  && exclusive(value.packGainMicroUsdc, value.packLossMicroUsdc)
-  && exclusive(value.cycleGainMicroUsdc, value.cycleLossMicroUsdc));
+  && exclusive(value.packGainMicroUsdg, value.packLossMicroUsdg)
+  && exclusive(value.cycleGainMicroUsdg, value.cycleLossMicroUsdg));
 const action = record({ type: text, status: oneOf('pending', 'complete', 'failed'), at: timestamp });
 const cycleShape = record({
   cycleId: text, status: text, selectedPackId: nullable(text),
   maxBoostersPerCycle: nullable((value) => count(value) && value > 0),
   plannedBoosters: count, openedBoosters: count, actions: list(action, 128), cards: list(record(cardShape), 60),
-  returnedMicroUsdc: nullable(money), rewardStatus: nullable(text), roundAccounting: accounting,
+  returnedMicroUsdg: nullable(money), rewardStatus: nullable(text), roundAccounting: accounting,
   startedAt: optional(timestamp), updatedAt: optional(timestamp),
-  spentMicroUsdc: optional(nullable(money)), paidMicroUsdc: optional(nullable(money)),
+  spentMicroUsdg: optional(nullable(money)), paidMicroUsdg: optional(nullable(money)),
   reason: optional((value) => typeof value === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value)),
 });
 const cycle = nullable((value) => cycleShape(value) && value.cards.length === Math.min(value.openedBoosters, 60));
 const network = record({
-  ethereum: record({ name: text, chainId: count, label: text }),
+  evm: record({ name: text, chainId: count, label: text }),
   solana: record({ name: text, genesisHash: text, label: text }),
 });
-const transactionShape = record({ chain: oneOf('ethereum', 'solana'), purpose: text, id: text });
-const transaction = (value) => transactionShape(value) && (value.chain === 'ethereum'
+const transactionShape = record({ chain: oneOf('evm', 'solana'), purpose: text, id: text });
+const transaction = (value) => transactionShape(value) && (value.chain === 'evm'
   ? ['outbound-burn', 'inbound-finalization', 'reward-settlement'].includes(value.purpose) && /^0x[0-9a-fA-F]{64}$/.test(value.id)
   : ['outbound-mint', 'inbound-burn', 'collector-purchase', 'collector-buyback'].includes(value.purpose) && /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(value.id));
 const transactions = (value) => list(transaction, 24)(value)
-  && new Set(value.map(({ chain, id }) => `${chain}:${chain === 'ethereum' ? id.toLowerCase() : id}`)).size === value.length;
+  && new Set(value.map(({ chain, id }) => `${chain}:${chain === 'evm' ? id.toLowerCase() : id}`)).size === value.length;
 const latestCycleShape = {
   cycleId: text, status: text, reason: nullable(text), updatedAt: nullable(timestamp),
-  paidMicroUsdc: nullable(money), payoutRecipientCount: count, roundAccounting: accounting, transactions,
+  paidMicroUsdg: nullable(money), payoutRecipientCount: count, roundAccounting: accounting, transactions,
 };
 const recipientLimit = (value) => count(value) && (value === 50 || (value >= 100 && value <= 1000 && value % 100 === 0));
 const statusShape = record({
@@ -78,8 +79,8 @@ const statusShape = record({
   generatedAt: timestamp, nextCycleAt: timestamp, countdownSeconds: count, cycle,
 });
 const metricsShape = record({
-  latestObservedProjectPoolMicroUsdc: nullable(money),
-  ...fields('totalCycleFundingMicroUsdc totalCollectorSpendMicroUsdc totalBuybacksReturnedMicroUsdc totalBridgedBackMicroUsdc totalRewardsPaidMicroUsdc totalRewardsDeferredMicroUsdc totalQuotedOperatingCostsMicroUsdc latestRetainedReserveMicroUsdc latestCycleReserveTargetMicroUsdc', money),
+  latestObservedProjectPoolMicroUsdg: nullable(money),
+  ...fields('totalCycleFundingMicroUsdg totalCollectorSpendMicroUsdg totalBuybacksReturnedMicroUsdg totalBridgedBackMicroUsdg totalRewardsPaidMicroUsdg totalRewardsDeferredMicroUsdg totalQuotedOperatingCostsMicroUsdg latestRetainedReserveMicroUsdg latestCycleReserveTargetMicroUsdg', money),
   ...fields('completedCycles skippedCycles openedPacks', count),
 });
 const communityShape = record({
@@ -90,11 +91,11 @@ const communityShape = record({
     || record({ ...latestCycleShape, rewardRecipientLimit: recipientLimit })(value),
   cards: list(record({ cycleId: text, ...cardShape }), 12),
 });
-const networkIdentity = (value) => [value.ethereum.name, value.ethereum.chainId, value.ethereum.label,
+const networkIdentity = (value) => [value.evm.name, value.evm.chainId, value.evm.label,
   value.solana.name, value.solana.genesisHash, value.solana.label].join('|');
 const identities = {
   testnet: 'sepolia|11155111|Sepolia|devnet|EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG|Solana Devnet',
-  mainnet: 'mainnet|1|Ethereum|mainnet-beta|5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d|Solana',
+  mainnet: 'robinhood|4663|Robinhood Chain|mainnet-beta|5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d|Solana',
 };
 
 export function validateDashboardPair(status, community) {
@@ -105,7 +106,7 @@ export function validateDashboardPair(status, community) {
     || status.executionReason !== (status.executionState === 'paused' ? 'operator-paused' : null)
     || status.countdownSeconds !== Math.ceil(Math.max(0, Date.parse(status.nextCycleAt) - Date.parse(status.generatedAt)) / 1000)
     || (community.latestCycle !== null && Object.hasOwn(community.latestCycle, 'rewardRecipientLimit') !== (community.schemaVersion === 5))
-    || (community.poolObservedAt === null) !== (community.metrics.latestObservedProjectPoolMicroUsdc === null)
+    || (community.poolObservedAt === null) !== (community.metrics.latestObservedProjectPoolMicroUsdg === null)
     || (community.poolObservedAt !== null && (Date.parse(community.poolObservedAt) > Date.parse(community.generatedAt)
       || (Date.parse(community.generatedAt) - Date.parse(community.poolObservedAt) > FRESH_MS && !community.delayed)))) {
     throw new TypeError('PUBLIC_DASHBOARD_INVALID');
@@ -113,21 +114,21 @@ export function validateDashboardPair(status, community) {
   return { status, community };
 }
 
-export function formatMicroUsdc(value) {
+export function formatMicroUsdg(value) {
   if (!money(value)) return MISSING_VALUE;
   const digits = value.padStart(7, '0');
   const whole = BigInt(digits.slice(0, -6)).toLocaleString('en-US');
   const fraction = digits.slice(-6).replace(/0+$/, '');
-  return `${whole}${fraction ? `.${fraction}` : ''} USDC`;
+  return `${whole}${fraction ? `.${fraction}` : ''} USDG`;
 }
 
 export function latestPayout(cycle) {
   if (!cycle || !text(cycle.status) || cycle.status.toLowerCase() !== 'complete') return null;
   const accounting = cycle.roundAccounting;
   if (accounting && !['reconciled', 'complete', 'paid', 'settled', 'legacy-settlement-recorded'].includes(accounting.distributionStatus.toLowerCase())) return null;
-  const paid = accounting?.paidHolderRewardsMicroUsdc ?? cycle.paidMicroUsdc;
+  const paid = accounting?.paidHolderRewardsMicroUsdg ?? cycle.paidMicroUsdg;
   if (!money(paid) || !count(cycle.payoutRecipientCount) || cycle.payoutRecipientCount <= 0) return null;
-  if (money(accounting?.paidHolderRewardsMicroUsdc) && money(cycle.paidMicroUsdc) && accounting.paidHolderRewardsMicroUsdc !== cycle.paidMicroUsdc) return null;
+  if (money(accounting?.paidHolderRewardsMicroUsdg) && money(cycle.paidMicroUsdg) && accounting.paidHolderRewardsMicroUsdg !== cycle.paidMicroUsdg) return null;
   return { paid, recipients: cycle.payoutRecipientCount, average: (BigInt(paid) / BigInt(cycle.payoutRecipientCount)).toString() };
 }
 
@@ -136,7 +137,7 @@ export function historyPresentation(community) {
   const metrics = community?.metrics;
   const formatCount = (value) => complete && count(value) ? value.toLocaleString('en-US') : MISSING_VALUE;
   return {
-    totalPaid: formatMicroUsdc(complete ? metrics?.totalRewardsPaidMicroUsdc : null),
+    totalPaid: formatMicroUsdg(complete ? metrics?.totalRewardsPaidMicroUsdg : null),
     completedCycles: formatCount(metrics?.completedCycles),
     skippedCycles: formatCount(metrics?.skippedCycles),
     openedPacks: formatCount(metrics?.openedPacks),
@@ -171,7 +172,7 @@ export function dashboardTiming(pair, now = Date.now(), failed = false) {
 }
 
 const stepActions = { fees: ['fees-collected'], budget: ['pack-plan-ready'], packs: ['packs-bought'], cards: ['packs-bought'],
-  sales: ['buybacks-settled'], return: ['return-bridge-finalized', 'ethereum-funded'], holders: ['rewards-complete', 'rewards-paid', 'payouts-settled'] };
+  sales: ['buybacks-settled'], return: ['return-bridge-finalized', 'evm-funded'], holders: ['rewards-complete', 'rewards-paid', 'payouts-settled'] };
 const stateLabels = { waiting: 'Waiting for this step', active: 'In progress', complete: 'Complete', paused: 'Paused', skipped: 'Skipped', failed: 'Action needs attention', deferred: 'Distribution pending' };
 export function processStep(id, status) {
   const cycle = status?.cycle;
@@ -180,15 +181,15 @@ export function processStep(id, status) {
   const done = actions.some((action) => action.status === 'complete');
   const complete = id === 'budget' ? cycle.selectedPackId !== null || cycle.plannedBoosters > 0 || done
     : id === 'cards' ? cycle.openedBoosters > 0
-      : id === 'holders' ? money(cycle.paidMicroUsdc) || ['complete', 'paid', 'settled'].includes(cycle.rewardStatus) || done : done;
+      : id === 'holders' ? money(cycle.paidMicroUsdg) || ['complete', 'paid', 'settled'].includes(cycle.rewardStatus) || done : done;
   const state = actions.some((action) => action.status === 'failed') ? 'failed'
     : id === 'holders' && /deferred|pending|not-executed/i.test(cycle.rewardStatus ?? '') ? 'deferred'
       : complete ? 'complete' : cycle.status === 'skipped' ? 'skipped'
         : status.executionState === 'paused' ? 'paused'
           : actions.some((action) => action.status === 'pending') || (id === 'cards' && done) ? 'active' : 'waiting';
-  const amounts = { packs: cycle.spentMicroUsdc, sales: cycle.roundAccounting?.buybackMicroUsdc, return: cycle.returnedMicroUsdc, holders: cycle.paidMicroUsdc };
+  const amounts = { packs: cycle.spentMicroUsdg, sales: cycle.roundAccounting?.buybackMicroUsdg, return: cycle.returnedMicroUsdg, holders: cycle.paidMicroUsdg };
   const amount = id === 'budget' ? cycle.plannedBoosters > 0 ? `${cycle.plannedBoosters} planned` : cycle.selectedPackId ? 'Pack selected' : UNAVAILABLE
-    : id === 'cards' ? cycle.openedBoosters > 0 ? `${cycle.openedBoosters} opened` : UNAVAILABLE : formatMicroUsdc(amounts[id]);
+    : id === 'cards' ? cycle.openedBoosters > 0 ? `${cycle.openedBoosters} opened` : UNAVAILABLE : formatMicroUsdg(amounts[id]);
   return { state, amount };
 }
 
@@ -198,7 +199,7 @@ function formatTime(value) {
 
 export function startDashboard(doc = document) {
   const setText = (id, value) => { const node = doc.getElementById(id); if (node) node.textContent = value; };
-  let pair = null, failed = false, controller = null, version = 0, pollTimer, tickTimer, stopped = false;
+  let pair = null, failed = false, controller = null, version = 0, pollTimer, tickTimer, stopped = false, consecutiveFailures = 0;
   const visible = () => doc.visibilityState === 'visible';
   const renderTiming = () => {
     const timing = dashboardTiming(pair, Date.now(), failed);
@@ -216,7 +217,7 @@ export function startDashboard(doc = document) {
     const banner = doc.getElementById('dashboardStatus');
     if (banner) {
       banner.dataset.state = feedState;
-      banner.textContent = pair ? `${pair.community.badge} · ${pair.status.network.ethereum.label} · ${timing.delayed ? 'Updates delayed · showing last verified data' : 'Verified public observations'}`
+      banner.textContent = pair ? `${pair.community.badge} · ${pair.status.network.evm.label} · ${timing.delayed ? 'Updates delayed · showing last verified data' : 'Verified public observations'}`
         : failed ? 'Live cycle data is temporarily unavailable' : 'Connecting to cycle data…';
     }
     setText('headerCycleState', pair ? timing.delayed ? 'DELAYED' : pair.status.executionState === 'paused' ? 'PAUSED' : pair.community.badge : failed ? 'UNAVAILABLE' : 'CONNECTING');
@@ -227,12 +228,12 @@ export function startDashboard(doc = document) {
     const { payout, note: payoutNote } = payoutPresentation(community);
     const history = historyPresentation(community);
     const cards = status?.cycle?.cards.length ? [...status.cycle.cards].reverse() : community?.cards ?? [];
-    setText('metricPool', formatMicroUsdc(community?.metrics.latestObservedProjectPoolMicroUsdc));
+    setText('metricPool', formatMicroUsdg(community?.metrics.latestObservedProjectPoolMicroUsdg));
     setText('metricPoolNote', community?.poolObservedAt ? `Observed ${formatTime(community.poolObservedAt)}` : 'Awaiting a verified pool observation');
-    setText('metricPaid', formatMicroUsdc(payout?.paid));
-    setText('metricAverage', formatMicroUsdc(payout?.average));
+    setText('metricPaid', formatMicroUsdg(payout?.paid));
+    setText('metricAverage', formatMicroUsdg(payout?.average));
     setText('metricPaidNote', payoutNote);
-    setText('metricAverageNote', payout ? 'Per actual recipient · rounded down to 0.000001 USDC' : payoutNote);
+    setText('metricAverageNote', payout ? 'Per actual recipient · rounded down to 0.000001 USDG' : payoutNote);
     setText('metricRecipients', payout ? payout.recipients.toLocaleString('en-US') : MISSING_VALUE);
     setText('metricPacks', history.openedPacks);
     setText('metricTotalPaid', history.totalPaid);
@@ -261,7 +262,7 @@ export function startDashboard(doc = document) {
       const copy = doc.createElement('div'); copy.className = 'card-copy';
       for (const [tag, value] of [['span', card.rarity], ['strong', card.cardName ?? card.productId],
         ['small', [card.setName, card.cardNumber].filter(Boolean).join(' · ') || card.productId],
-        ['small', `Buyback: ${formatMicroUsdc(card.buybackMicroUsdc)}`]]) {
+        ['small', `Buyback: ${formatMicroUsdg(card.buybackMicroUsdg)}`]]) {
         const node = doc.createElement(tag); node.textContent = value; copy.append(node);
       }
       article.append(copy); cardList.append(article);
@@ -284,12 +285,21 @@ export function startDashboard(doc = document) {
       try { pair = validateDashboardPair(status, community); }
       catch (error) { pair = null; throw error; }
       failed = false;
-    } catch { if (requestVersion === version && visible() && !stopped) failed = true; }
+      consecutiveFailures = 0;
+    } catch {
+      if (requestVersion === version && visible() && !stopped) { failed = true; consecutiveFailures += 1; }
+    }
     finally {
       clearTimeout(timeout);
       if (requestVersion === version) {
         controller?.abort(); controller = null;
-        if (!stopped && visible()) { render(); pollTimer = setTimeout(poll, POLL_MS); }
+        if (!stopped && visible()) {
+          render();
+          const delay = consecutiveFailures > 0
+            ? Math.min(POLL_MS * 2 ** consecutiveFailures, MAX_POLL_BACKOFF_MS)
+            : POLL_MS;
+          pollTimer = setTimeout(poll, delay);
+        }
       }
     }
   };

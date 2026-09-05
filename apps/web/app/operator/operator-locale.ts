@@ -1,4 +1,4 @@
-const GERMAN_USDC_PATTERN = /^(0|[1-9]\d*)(?:,(\d{1,6}))?$/;
+const GERMAN_USDG_PATTERN = /^(0|[1-9]\d*)(?:,(\d{1,6}))?$/;
 const CANONICAL_MONEY_PATTERN = /^(0|[1-9]\d*)$/;
 const SIGNED_MONEY_PATTERN = /^-?(0|[1-9]\d*)$/;
 
@@ -105,16 +105,16 @@ const GERMAN_STATUS_LABELS: Readonly<Record<string, string>> = Object.freeze({
   ACCESS_ASSERTION_INVALID: "Cloudflare-Access-Anmeldung ist ungültig",
 });
 
-export function parseGermanUsdc(value: string): string {
-  const match = GERMAN_USDC_PATTERN.exec(value);
-  if (!match) throw new Error("USDC_BETRAG_UNGUELTIG");
+export function parseGermanUsdg(value: string): string {
+  const match = GERMAN_USDG_PATTERN.exec(value);
+  if (!match) throw new Error("USDG_BETRAG_UNGUELTIG");
   const fractional = (match[2] ?? "").padEnd(6, "0");
   return (BigInt(match[1]) * 1_000_000n + BigInt(fractional || "0")).toString();
 }
 
-export function formatGermanUsdc(value: string): string {
+export function formatGermanUsdg(value: string): string {
   if (!SIGNED_MONEY_PATTERN.test(value) || value === "-0") {
-    throw new Error("USDC_WERT_UNGUELTIG");
+    throw new Error("USDG_WERT_UNGUELTIG");
   }
   const negative = value.startsWith("-");
   const digits = negative ? value.slice(1) : value;
@@ -123,19 +123,19 @@ export function formatGermanUsdc(value: string): string {
   const rawFraction = (amount % 1_000_000n).toString().padStart(6, "0");
   const fraction = rawFraction.replace(/0+$/, "").padEnd(2, "0");
   const wholeLabel = new Intl.NumberFormat("de-DE", { useGrouping: true }).format(whole);
-  return `${negative ? "−" : ""}${wholeLabel},${fraction} USDC`;
+  return `${negative ? "−" : ""}${wholeLabel},${fraction} USDG`;
 }
 
-export function cardResultMicroUsdc(
-  packPriceMicroUsdc: string | null,
-  buybackMicroUsdc: string | null,
+export function cardResultMicroUsdg(
+  packPriceMicroUsdg: string | null,
+  buybackMicroUsdg: string | null,
 ): string | null {
-  if (packPriceMicroUsdc === null || buybackMicroUsdc === null) return null;
+  if (packPriceMicroUsdg === null || buybackMicroUsdg === null) return null;
   if (
-    !CANONICAL_MONEY_PATTERN.test(packPriceMicroUsdc) ||
-    !CANONICAL_MONEY_PATTERN.test(buybackMicroUsdc)
-  ) throw new Error("USDC_WERT_UNGUELTIG");
-  return (BigInt(buybackMicroUsdc) - BigInt(packPriceMicroUsdc)).toString();
+    !CANONICAL_MONEY_PATTERN.test(packPriceMicroUsdg) ||
+    !CANONICAL_MONEY_PATTERN.test(buybackMicroUsdg)
+  ) throw new Error("USDG_WERT_UNGUELTIG");
+  return (BigInt(buybackMicroUsdg) - BigInt(packPriceMicroUsdg)).toString();
 }
 
 export function formatGermanDate(value: string): string {

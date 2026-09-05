@@ -10,9 +10,9 @@ import type { PublicRoundAccounting } from "../../lib/public-cycle-status";
 import OperatorCardHistory from "./OperatorCardHistory";
 import {
   formatGermanDate,
-  formatGermanUsdc,
+  formatGermanUsdg,
   germanStatus,
-  parseGermanUsdc,
+  parseGermanUsdg,
 } from "./operator-locale";
 import type { ActiveCycle, DashboardCard } from "./operator-types";
 import styles from "./operator.module.css";
@@ -31,9 +31,9 @@ type OperatorState = {
   cycleIntervalMinutes: number;
   skipNextCycleSequence: number;
   runNowSequence: number;
-  maxUnitPriceMicroUsdc: string | null;
-  maxCycleBudgetMicroUsdc: string | null;
-  max24HourBudgetMicroUsdc: string | null;
+  maxUnitPriceMicroUsdg: string | null;
+  maxCycleBudgetMicroUsdg: string | null;
+  max24HourBudgetMicroUsdg: string | null;
   configurationComplete: boolean;
   executionConnected: boolean;
 };
@@ -41,10 +41,10 @@ type OperatorState = {
 type Pack = {
   id: string;
   name: string;
-  priceMicroUsdc: string;
-  instantBuybackFloorMicroUsdc?: string;
-  expectedBuybackMicroUsdc?: string;
-  collectorEconomicCostMicroUsdc?: string;
+  priceMicroUsdg: string;
+  instantBuybackFloorMicroUsdg?: string;
+  expectedBuybackMicroUsdg?: string;
+  collectorEconomicCostMicroUsdg?: string;
   available: number;
 };
 
@@ -53,9 +53,9 @@ type Bootstrap = {
   state: OperatorState;
   hardCaps: {
     maxBoostersPerCycle: string;
-    maxUnitPriceMicroUsdc: string;
-    maxCycleBudgetMicroUsdc: string;
-    max24HourBudgetMicroUsdc: string;
+    maxUnitPriceMicroUsdg: string;
+    maxCycleBudgetMicroUsdg: string;
+    max24HourBudgetMicroUsdg: string;
   };
   catalog: { status: string; fetchedAtMs: number; packs: Pack[] } | null;
   readiness: { ready: boolean; reasons: string[] };
@@ -75,16 +75,16 @@ type Dashboard = {
   cycleStartProjectPoolObservedAt: string | null;
   latestCompletedAllocationCycleId: string | null;
   metrics: {
-    cycleStartProjectPoolMicroUsdc: string | null;
-    totalCycleFundingMicroUsdc: string;
-    totalCollectorSpendMicroUsdc: string;
-    totalBuybacksReturnedMicroUsdc: string;
-    totalBridgedBackMicroUsdc: string;
-    totalRewardsPaidMicroUsdc: string;
-    totalRewardsDeferredMicroUsdc: string;
-    totalQuotedOperatingCostsMicroUsdc: string;
-    latestRetainedReserveMicroUsdc: string;
-    latestCycleReserveTargetMicroUsdc: string;
+    cycleStartProjectPoolMicroUsdg: string | null;
+    totalCycleFundingMicroUsdg: string;
+    totalCollectorSpendMicroUsdg: string;
+    totalBuybacksReturnedMicroUsdg: string;
+    totalBridgedBackMicroUsdg: string;
+    totalRewardsPaidMicroUsdg: string;
+    totalRewardsDeferredMicroUsdg: string;
+    totalQuotedOperatingCostsMicroUsdg: string;
+    latestRetainedReserveMicroUsdg: string;
+    latestCycleReserveTargetMicroUsdg: string;
     completedCycles: number;
     skippedCycles: number;
     openedPacks: number;
@@ -92,7 +92,7 @@ type Dashboard = {
   latestCycleTopAllocations: Array<{
     rank: number;
     address: string;
-    allocatedMicroUsdc: string;
+    allocatedMicroUsdg: string;
   }>;
   cards: DashboardCard[];
   activeCycle: ActiveCycle | null;
@@ -101,52 +101,52 @@ type Dashboard = {
     status: string;
     reason: string | null;
     updatedAt: string | null;
-    paidMicroUsdc: string | null;
+    paidMicroUsdg: string | null;
     payoutRecipientCount: number;
     roundAccounting: DashboardRoundAccounting | null;
-    transactions: Array<{ chain: "ethereum" | "solana"; purpose: string; id: string }>;
+    transactions: Array<{ chain: "evm" | "solana"; purpose: string; id: string }>;
   } | null;
 };
 
 const DASHBOARD_RESPONSE_INVALID = "Dashboard-Daten sind ungültig oder nicht verfügbar.";
 const DASHBOARD_RESPONSE_UNSUPPORTED = "Dashboard-Daten verwenden eine nicht unterstützte Version.";
 const DASHBOARD_MONEY_FIELDS = [
-  "totalCycleFundingMicroUsdc",
-  "totalCollectorSpendMicroUsdc",
-  "totalBuybacksReturnedMicroUsdc",
-  "totalBridgedBackMicroUsdc",
-  "totalRewardsPaidMicroUsdc",
-  "totalRewardsDeferredMicroUsdc",
-  "totalQuotedOperatingCostsMicroUsdc",
-  "latestRetainedReserveMicroUsdc",
-  "latestCycleReserveTargetMicroUsdc",
+  "totalCycleFundingMicroUsdg",
+  "totalCollectorSpendMicroUsdg",
+  "totalBuybacksReturnedMicroUsdg",
+  "totalBridgedBackMicroUsdg",
+  "totalRewardsPaidMicroUsdg",
+  "totalRewardsDeferredMicroUsdg",
+  "totalQuotedOperatingCostsMicroUsdg",
+  "latestRetainedReserveMicroUsdg",
+  "latestCycleReserveTargetMicroUsdg",
 ] as const;
 const DASHBOARD_CARD_KEYS = new Set([
   "cycleId", "productId", "rarity", "nftAddress", "cardName", "setName", "cardNumber",
-  "imageUrl", "packPriceMicroUsdc", "buybackMicroUsdc",
+  "imageUrl", "packPriceMicroUsdg", "buybackMicroUsdg",
 ]);
 const DASHBOARD_ROUND_KEYS = new Set([
-  "packSpendMicroUsdc", "buybackMicroUsdc", "packGainMicroUsdc", "packLossMicroUsdc",
-  "quotedCosts", "protectedCostsMicroUsdc", "confirmedCostsMicroUsdc",
-  "cycleGainMicroUsdc", "cycleLossMicroUsdc", "walletBalanceBeforeMicroUsdc",
-  "walletBalanceAfterMicroUsdc", "networkFees", "feeReserveBeforeMicroUsdc",
-  "feeReserveTargetMicroUsdc", "feeReserveTopUpMicroUsdc", "feeReserveAfterMicroUsdc",
-  "plannedHolderRewardsMicroUsdc", "paidHolderRewardsMicroUsdc", "holderRewardsStatus",
+  "packSpendMicroUsdg", "buybackMicroUsdg", "packGainMicroUsdg", "packLossMicroUsdg",
+  "quotedCosts", "protectedCostsMicroUsdg", "confirmedCostsMicroUsdg",
+  "cycleGainMicroUsdg", "cycleLossMicroUsdg", "walletBalanceBeforeMicroUsdg",
+  "walletBalanceAfterMicroUsdg", "networkFees", "feeReserveBeforeMicroUsdg",
+  "feeReserveTargetMicroUsdg", "feeReserveTopUpMicroUsdg", "feeReserveAfterMicroUsdg",
+  "plannedHolderRewardsMicroUsdg", "paidHolderRewardsMicroUsdg", "holderRewardsStatus",
   "distributionStatus",
 ]);
 const DASHBOARD_QUOTED_COST_KEYS = new Set([
-  "outboundBridgeMicroUsdc", "inboundBridgeMicroUsdc", "collectorApiMicroUsdc",
-  "ethereumNetworkMicroUsdc", "solanaNetworkMicroUsdc", "slippageMicroUsdc",
+  "outboundBridgeMicroUsdg", "inboundBridgeMicroUsdg", "collectorApiMicroUsdg",
+  "evmNetworkMicroUsdg", "solanaNetworkMicroUsdg", "slippageMicroUsdg",
 ]);
 const DASHBOARD_NETWORK_FEE_KEYS = new Set(["walletLamportsCharged", "purchase", "buyback"]);
 const DASHBOARD_TRANSACTION_PURPOSES = {
-  ethereum: new Set(["outbound-burn", "inbound-finalization", "reward-settlement"]),
+  evm: new Set(["outbound-burn", "inbound-finalization", "reward-settlement"]),
   solana: new Set(["outbound-mint", "inbound-burn", "collector-purchase", "collector-buyback"]),
 } as const;
 const ACTIVE_CYCLE_KEYS = new Set([
   "cycleId", "status", "updatedAt", "configurationRevision", "allowedPackIds",
-  "requestedOrders", "maxBoostersPerCycle", "maxUnitPriceMicroUsdc",
-  "maxCycleBudgetMicroUsdc", "max24HourBudgetMicroUsdc", "revealedCards",
+  "requestedOrders", "maxBoostersPerCycle", "maxUnitPriceMicroUsdg",
+  "maxCycleBudgetMicroUsdg", "max24HourBudgetMicroUsdg", "revealedCards", "rewardRecipientLimit",
 ]);
 
 type Decision = {
@@ -185,9 +185,9 @@ type Command =
         manualPackOrders: ManualPackOrder[];
         maxBoostersPerCycle: number;
         cycleIntervalMinutes: number;
-        maxUnitPriceMicroUsdc: string;
-        maxCycleBudgetMicroUsdc: string;
-        max24HourBudgetMicroUsdc: string;
+        maxUnitPriceMicroUsdg: string;
+        maxCycleBudgetMicroUsdg: string;
+        max24HourBudgetMicroUsdg: string;
       };
     };
 
@@ -197,9 +197,9 @@ type FormState = {
   packQuantities: Record<string, string>;
   maxBoostersPerCycle: string;
   cycleIntervalMinutes: string;
-  maxUnitPriceMicroUsdc: string;
-  maxCycleBudgetMicroUsdc: string;
-  max24HourBudgetMicroUsdc: string;
+  maxUnitPriceMicroUsdg: string;
+  maxCycleBudgetMicroUsdg: string;
+  max24HourBudgetMicroUsdg: string;
   note: string;
 };
 
@@ -209,9 +209,9 @@ const EMPTY_FORM: FormState = {
   packQuantities: {},
   maxBoostersPerCycle: "100",
   cycleIntervalMinutes: "20",
-  maxUnitPriceMicroUsdc: "",
-  maxCycleBudgetMicroUsdc: "",
-  max24HourBudgetMicroUsdc: "",
+  maxUnitPriceMicroUsdg: "",
+  maxCycleBudgetMicroUsdg: "",
+  max24HourBudgetMicroUsdg: "",
   note: "",
 };
 
@@ -352,15 +352,15 @@ export default function OperatorControlPanel() {
           return quantity > 0 ? [{ productId: pack.id, quantity }] : [];
         })
       : [];
-    let maxUnitPriceMicroUsdc;
-    let maxCycleBudgetMicroUsdc;
-    let max24HourBudgetMicroUsdc;
+    let maxUnitPriceMicroUsdg;
+    let maxCycleBudgetMicroUsdg;
+    let max24HourBudgetMicroUsdg;
     try {
-      maxUnitPriceMicroUsdc = parseGermanUsdc(form.maxUnitPriceMicroUsdc);
-      maxCycleBudgetMicroUsdc = parseGermanUsdc(form.maxCycleBudgetMicroUsdc);
-      max24HourBudgetMicroUsdc = parseGermanUsdc(form.max24HourBudgetMicroUsdc);
+      maxUnitPriceMicroUsdg = parseGermanUsdg(form.maxUnitPriceMicroUsdg);
+      maxCycleBudgetMicroUsdg = parseGermanUsdg(form.maxCycleBudgetMicroUsdg);
+      max24HourBudgetMicroUsdg = parseGermanUsdg(form.max24HourBudgetMicroUsdg);
     } catch {
-      setError("Bitte alle USDC-Grenzen im deutschen Format eingeben, zum Beispiel 12,50.");
+      setError("Bitte alle USDG-Grenzen im deutschen Format eingeben, zum Beispiel 12,50.");
       return;
     }
     void submitCommand(
@@ -372,9 +372,9 @@ export default function OperatorControlPanel() {
           manualPackOrders,
           maxBoostersPerCycle: Number(form.maxBoostersPerCycle),
           cycleIntervalMinutes: Number(form.cycleIntervalMinutes),
-          maxUnitPriceMicroUsdc,
-          maxCycleBudgetMicroUsdc,
-          max24HourBudgetMicroUsdc,
+          maxUnitPriceMicroUsdg,
+          maxCycleBudgetMicroUsdg,
+          max24HourBudgetMicroUsdg,
         },
       },
       "Konfiguration wurde gespeichert und protokolliert.",
@@ -521,9 +521,9 @@ export default function OperatorControlPanel() {
                   : "Automatische Auswahl"}
               />
               <CurrentValue label="Maximale Booster" value={nullableInteger(dashboard.activeCycle.maxBoostersPerCycle)} />
-              <CurrentValue label="Maximaler Packpreis" value={nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdc)} />
-              <CurrentValue label="Zyklusbudget" value={nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdc)} />
-              <CurrentValue label="24-Stunden-Budget" value={nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdc)} />
+              <CurrentValue label="Maximaler Packpreis" value={nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
+              <CurrentValue label="Zyklusbudget" value={nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
+              <CurrentValue label="24-Stunden-Budget" value={nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
               <CurrentValue label="Bestätigte Karten" value={String(dashboard.activeCycle.revealedCards)} />
             </dl>
             <details className={styles.technicalDetails}>
@@ -567,34 +567,34 @@ export default function OperatorControlPanel() {
             label="Pool beim letzten Zyklusstart"
             value={dashboard ? formatCycleStartProjectPool(dashboard) : dashboardPlaceholder}
           />
-          <Metric label="Packkäufe" value={dashboard ? historicalMicroUsdc(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdc) : dashboardPlaceholder} />
-          <Metric label="Bestätigte Buybacks" value={dashboard ? historicalMicroUsdc(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdc) : dashboardPlaceholder} />
-          <Metric label="Zurück transferiert" value={dashboard ? historicalMicroUsdc(dashboard, dashboard.metrics.totalBridgedBackMicroUsdc) : dashboardPlaceholder} />
+          <Metric label="Packkäufe" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg) : dashboardPlaceholder} />
+          <Metric label="Bestätigte Buybacks" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg) : dashboardPlaceholder} />
+          <Metric label="Zurück transferiert" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg) : dashboardPlaceholder} />
           <Metric label="Letzte tatsächliche Ausschüttung" value={dashboard ? latestActuallyPaid(dashboard) : dashboardPlaceholder} />
           <Metric label="Nächste Gebührenreserve (50 %)" value={dashboard ? latestReserveTarget(dashboard) : dashboardPlaceholder} />
-          <Metric label="Angebotene Betriebskosten" value={dashboard ? historicalMicroUsdc(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdc) : dashboardPlaceholder} />
+          <Metric label="Angebotene Betriebskosten" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg) : dashboardPlaceholder} />
           <Metric label="Abgeschlossene Zyklen" value={dashboard ? historicalCount(dashboard, dashboard.metrics.completedCycles) : dashboardPlaceholder} />
           <Metric label="Geöffnete Packs" value={dashboard ? historicalCount(dashboard, dashboard.metrics.openedPacks) : dashboardPlaceholder} />
         </div>
         {dashboard?.latestCycle?.roundAccounting ? (
           <div className={styles.accountingGroups} aria-label="Letzte Holder-Rewards-Runde">
             <OperatorAccountingGroup title="Pack-Ergebnis">
-              <RoundMetric label="Packausgaben" value={formatMicroUsdc(dashboard.latestCycle.roundAccounting.packSpendMicroUsdc)} />
-              <RoundMetric label="Buyback" value={formatMicroUsdc(dashboard.latestCycle.roundAccounting.buybackMicroUsdc)} />
-              <RoundMetric label="Packgewinn" value={formatMicroUsdc(dashboard.latestCycle.roundAccounting.packGainMicroUsdc)} />
-              <RoundMetric label="Packverlust" value={formatMicroUsdc(dashboard.latestCycle.roundAccounting.packLossMicroUsdc)} />
-              <RoundMetric label="Wallet vorher" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.walletBalanceBeforeMicroUsdc, "Guthaben nicht bestätigt")} />
-              <RoundMetric label="Wallet nachher" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.walletBalanceAfterMicroUsdc, "Guthaben nicht bestätigt")} />
+              <RoundMetric label="Packausgaben" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.packSpendMicroUsdg)} />
+              <RoundMetric label="Buyback" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.buybackMicroUsdg)} />
+              <RoundMetric label="Packgewinn" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.packGainMicroUsdg)} />
+              <RoundMetric label="Packverlust" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.packLossMicroUsdg)} />
+              <RoundMetric label="Wallet vorher" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.walletBalanceBeforeMicroUsdg, "Guthaben nicht bestätigt")} />
+              <RoundMetric label="Wallet nachher" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.walletBalanceAfterMicroUsdg, "Guthaben nicht bestätigt")} />
             </OperatorAccountingGroup>
             <OperatorAccountingGroup title="Angebotene und bestätigte Kosten">
-              <RoundMetric label="Angebot ausgehender Transfer" value={quotedMicroUsdc(dashboard.latestCycle.roundAccounting.quotedCosts.outboundBridgeMicroUsdc)} />
-              <RoundMetric label="Angebot Rücktransfer" value={quotedMicroUsdc(dashboard.latestCycle.roundAccounting.quotedCosts.inboundBridgeMicroUsdc)} />
-              <RoundMetric label="Angebot Collector-API" value={quotedMicroUsdc(dashboard.latestCycle.roundAccounting.quotedCosts.collectorApiMicroUsdc)} />
-              <RoundMetric label="Angebot Ethereum-Netzwerk" value={quotedMicroUsdc(dashboard.latestCycle.roundAccounting.quotedCosts.ethereumNetworkMicroUsdc)} />
-              <RoundMetric label="Angebot Solana-Netzwerk" value={quotedMicroUsdc(dashboard.latestCycle.roundAccounting.quotedCosts.solanaNetworkMicroUsdc)} />
-              <RoundMetric label="Angebot Slippage" value={quotedMicroUsdc(dashboard.latestCycle.roundAccounting.quotedCosts.slippageMicroUsdc)} />
-              <RoundMetric label="Geschützte Kostenprognose" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.protectedCostsMicroUsdc, "In dieser Prüfung nicht ausgeführt")} />
-              <RoundMetric label="Bestätigte Kosten" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.confirmedCostsMicroUsdc, "Bestätigte Belege stehen aus")} />
+              <RoundMetric label="Angebot ausgehender Transfer" value={quotedMicroUsdg(dashboard.latestCycle.roundAccounting.quotedCosts.outboundBridgeMicroUsdg)} />
+              <RoundMetric label="Angebot Rücktransfer" value={quotedMicroUsdg(dashboard.latestCycle.roundAccounting.quotedCosts.inboundBridgeMicroUsdg)} />
+              <RoundMetric label="Angebot Collector-API" value={quotedMicroUsdg(dashboard.latestCycle.roundAccounting.quotedCosts.collectorApiMicroUsdg)} />
+              <RoundMetric label="Angebot EVM-Netzwerk" value={quotedMicroUsdg(dashboard.latestCycle.roundAccounting.quotedCosts.evmNetworkMicroUsdg)} />
+              <RoundMetric label="Angebot Solana-Netzwerk" value={quotedMicroUsdg(dashboard.latestCycle.roundAccounting.quotedCosts.solanaNetworkMicroUsdg)} />
+              <RoundMetric label="Angebot Slippage" value={quotedMicroUsdg(dashboard.latestCycle.roundAccounting.quotedCosts.slippageMicroUsdg)} />
+              <RoundMetric label="Geschützte Kostenprognose" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.protectedCostsMicroUsdg, "In dieser Prüfung nicht ausgeführt")} />
+              <RoundMetric label="Bestätigte Kosten" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.confirmedCostsMicroUsdg, "Bestätigte Belege stehen aus")} />
               <RoundMetric
                 label="Transaktionsgebühr Kauf"
                 value={nativeFeeText(dashboard.latestCycle.roundAccounting.networkFees.purchase)}
@@ -613,29 +613,29 @@ export default function OperatorControlPanel() {
               />
             </OperatorAccountingGroup>
             <OperatorAccountingGroup title="Gebührenreserve">
-              <RoundMetric label="Reserve vorher" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.feeReserveBeforeMicroUsdc, "In dieser Prüfung nicht ausgeführt")} />
-              <RoundMetric label="Reserveziel (50 %)" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.feeReserveTargetMicroUsdc, "In dieser Prüfung nicht ausgeführt")} />
-              <RoundMetric label="Reserveauffüllung" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.feeReserveTopUpMicroUsdc, "In dieser Prüfung nicht ausgeführt")} />
-              <RoundMetric label="Reserve nachher" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.feeReserveAfterMicroUsdc, "In dieser Prüfung nicht ausgeführt")} />
+              <RoundMetric label="Reserve vorher" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.feeReserveBeforeMicroUsdg, "In dieser Prüfung nicht ausgeführt")} />
+              <RoundMetric label="Reserveziel (50 %)" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.feeReserveTargetMicroUsdg, "In dieser Prüfung nicht ausgeführt")} />
+              <RoundMetric label="Reserveauffüllung" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.feeReserveTopUpMicroUsdg, "In dieser Prüfung nicht ausgeführt")} />
+              <RoundMetric label="Reserve nachher" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.feeReserveAfterMicroUsdg, "In dieser Prüfung nicht ausgeführt")} />
             </OperatorAccountingGroup>
             <OperatorAccountingGroup title="Holder-Ausschüttung">
               <RoundMetric
                 label="Geplante Holder Rewards"
-                value={pendingMicroUsdc(
-                  dashboard.latestCycle.roundAccounting.plannedHolderRewardsMicroUsdc,
+                value={pendingMicroUsdg(
+                  dashboard.latestCycle.roundAccounting.plannedHolderRewardsMicroUsdg,
                   germanStatus(dashboard.latestCycle.roundAccounting.holderRewardsStatus),
                 )}
               />
               <RoundMetric
                 label="Tatsächlich ausgezahlt"
-                value={pendingMicroUsdc(
-                  dashboard.latestCycle.roundAccounting.paidHolderRewardsMicroUsdc,
+                value={pendingMicroUsdg(
+                  dashboard.latestCycle.roundAccounting.paidHolderRewardsMicroUsdg,
                   germanStatus(dashboard.latestCycle.roundAccounting.distributionStatus),
                 )}
               />
               <RoundMetric label="Berechtigte Zuteilungen" value={String(dashboard.latestCycle.payoutRecipientCount)} />
-              <RoundMetric label="Vollständiger Zyklusgewinn" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.cycleGainMicroUsdc, "Bestätigte Belege stehen aus")} />
-              <RoundMetric label="Vollständiger Zyklusverlust" value={pendingMicroUsdc(dashboard.latestCycle.roundAccounting.cycleLossMicroUsdc, "Bestätigte Belege stehen aus")} />
+              <RoundMetric label="Vollständiger Zyklusgewinn" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.cycleGainMicroUsdg, "Bestätigte Belege stehen aus")} />
+              <RoundMetric label="Vollständiger Zyklusverlust" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.cycleLossMicroUsdg, "Bestätigte Belege stehen aus")} />
             </OperatorAccountingGroup>
           </div>
         ) : null}
@@ -687,9 +687,9 @@ export default function OperatorControlPanel() {
                       <span>
                         <strong>{pack.name}</strong>
                         <small>
-                          {formatMicroUsdc(pack.priceMicroUsdc)} · {pack.available} verfügbar
-                          {pack.collectorEconomicCostMicroUsdc
-                            ? ` · ${formatMicroUsdc(pack.collectorEconomicCostMicroUsdc)} konservative Collector-Kosten`
+                          {formatMicroUsdg(pack.priceMicroUsdg)} · {pack.available} verfügbar
+                          {pack.collectorEconomicCostMicroUsdg
+                            ? ` · ${formatMicroUsdg(pack.collectorEconomicCostMicroUsdg)} konservative Collector-Kosten`
                             : ""}
                         </small>
                       </span>
@@ -726,10 +726,10 @@ export default function OperatorControlPanel() {
             <LimitField
               id="max-unit-price"
               label="Maximaler Packpreis"
-              value={form.maxUnitPriceMicroUsdc}
-              hardCap={bootstrap?.hardCaps.maxUnitPriceMicroUsdc}
+              value={form.maxUnitPriceMicroUsdg}
+              hardCap={bootstrap?.hardCaps.maxUnitPriceMicroUsdg}
               disabled={controlsDisabled}
-              onChange={(value) => setForm((current) => ({ ...current, maxUnitPriceMicroUsdc: value }))}
+              onChange={(value) => setForm((current) => ({ ...current, maxUnitPriceMicroUsdg: value }))}
             />
             <label className={styles.textField} htmlFor="cycle-interval-minutes">
               <span>Zyklusintervall</span>
@@ -753,18 +753,18 @@ export default function OperatorControlPanel() {
             <LimitField
               id="max-cycle-budget"
               label="Zyklusbudget"
-              value={form.maxCycleBudgetMicroUsdc}
-              hardCap={bootstrap?.hardCaps.maxCycleBudgetMicroUsdc}
+              value={form.maxCycleBudgetMicroUsdg}
+              hardCap={bootstrap?.hardCaps.maxCycleBudgetMicroUsdg}
               disabled={controlsDisabled}
-              onChange={(value) => setForm((current) => ({ ...current, maxCycleBudgetMicroUsdc: value }))}
+              onChange={(value) => setForm((current) => ({ ...current, maxCycleBudgetMicroUsdg: value }))}
             />
             <LimitField
               id="max-daily-budget"
               label="24-Stunden-Budget"
-              value={form.max24HourBudgetMicroUsdc}
-              hardCap={bootstrap?.hardCaps.max24HourBudgetMicroUsdc}
+              value={form.max24HourBudgetMicroUsdg}
+              hardCap={bootstrap?.hardCaps.max24HourBudgetMicroUsdg}
               disabled={controlsDisabled}
-              onChange={(value) => setForm((current) => ({ ...current, max24HourBudgetMicroUsdc: value }))}
+              onChange={(value) => setForm((current) => ({ ...current, max24HourBudgetMicroUsdg: value }))}
             />
           </div>
 
@@ -775,13 +775,13 @@ export default function OperatorControlPanel() {
             </div>
             <div>
               <span>Collector-Bruttobelastung</span>
-              <strong>{formatMicroUsdc(reservePreview.grossCollectorDebitMicroUsdc.toString())}</strong>
+              <strong>{formatMicroUsdg(reservePreview.grossCollectorDebitMicroUsdg.toString())}</strong>
             </div>
             <div>
               <span>Packspezifische Collector-Kosten</span>
               <strong>
                 {reservePreview.economicsComplete
-                  ? formatMicroUsdc(reservePreview.collectorEconomicCostMicroUsdc.toString())
+                  ? formatMicroUsdg(reservePreview.collectorEconomicCostMicroUsdg.toString())
                   : "Aktualisierung erforderlich"}
               </strong>
             </div>
@@ -893,7 +893,7 @@ export default function OperatorControlPanel() {
                 <li key={entry.address}>
                   <span>#{entry.rank}</span>
                   <code>{shortAddress(entry.address)}</code>
-                  <strong>{formatMicroUsdc(entry.allocatedMicroUsdc)}</strong>
+                  <strong>{formatMicroUsdg(entry.allocatedMicroUsdg)}</strong>
                 </li>
               ))}
             </ol>
@@ -1025,7 +1025,7 @@ function LimitField({
         onChange={(event) => onChange(germanMoneyInput(event.target.value))}
       />
       <small>
-        USDC · Obergrenze {hardCap ? formatMicroUsdc(hardCap) : "wird geladen…"}
+        USDG · Obergrenze {hardCap ? formatMicroUsdg(hardCap) : "wird geladen…"}
       </small>
     </label>
   );
@@ -1078,9 +1078,9 @@ function formFromState(state: OperatorState): FormState {
     ),
     maxBoostersPerCycle: String(state.maxBoostersPerCycle ?? 100),
     cycleIntervalMinutes: String(state.cycleIntervalMinutes ?? 20),
-    maxUnitPriceMicroUsdc: germanMoneyFormValue(state.maxUnitPriceMicroUsdc),
-    maxCycleBudgetMicroUsdc: germanMoneyFormValue(state.maxCycleBudgetMicroUsdc),
-    max24HourBudgetMicroUsdc: germanMoneyFormValue(state.max24HourBudgetMicroUsdc),
+    maxUnitPriceMicroUsdg: germanMoneyFormValue(state.maxUnitPriceMicroUsdg),
+    maxCycleBudgetMicroUsdg: germanMoneyFormValue(state.maxCycleBudgetMicroUsdg),
+    max24HourBudgetMicroUsdg: germanMoneyFormValue(state.max24HourBudgetMicroUsdg),
     note: "",
   };
 }
@@ -1115,9 +1115,9 @@ function configurationSnapshotFromForm(form: FormState, packs: Pack[]) {
       orders: normalizedOrders(orders),
       maxBoostersPerCycle: Number(form.maxBoostersPerCycle),
       cycleIntervalMinutes: Number(form.cycleIntervalMinutes),
-      maxUnitPriceMicroUsdc: parseGermanUsdc(form.maxUnitPriceMicroUsdc),
-      maxCycleBudgetMicroUsdc: parseGermanUsdc(form.maxCycleBudgetMicroUsdc),
-      max24HourBudgetMicroUsdc: parseGermanUsdc(form.max24HourBudgetMicroUsdc),
+      maxUnitPriceMicroUsdg: parseGermanUsdg(form.maxUnitPriceMicroUsdg),
+      maxCycleBudgetMicroUsdg: parseGermanUsdg(form.maxCycleBudgetMicroUsdg),
+      max24HourBudgetMicroUsdg: parseGermanUsdg(form.max24HourBudgetMicroUsdg),
     });
   } catch {
     return JSON.stringify({ invalid: true, form });
@@ -1130,9 +1130,9 @@ function configurationSnapshotFromState(state: OperatorState) {
     orders: normalizedOrders(state.mode === "community" ? state.manualPackOrders : []),
     maxBoostersPerCycle: state.maxBoostersPerCycle,
     cycleIntervalMinutes: state.cycleIntervalMinutes,
-    maxUnitPriceMicroUsdc: state.maxUnitPriceMicroUsdc,
-    maxCycleBudgetMicroUsdc: state.maxCycleBudgetMicroUsdc,
-    max24HourBudgetMicroUsdc: state.max24HourBudgetMicroUsdc,
+    maxUnitPriceMicroUsdg: state.maxUnitPriceMicroUsdg,
+    maxCycleBudgetMicroUsdg: state.maxCycleBudgetMicroUsdg,
+    max24HourBudgetMicroUsdg: state.max24HourBudgetMicroUsdg,
   });
 }
 
@@ -1151,9 +1151,9 @@ function commandConfirmation(question: string, state: OperatorState, unsaved: bo
     "",
     "Gespeicherte Konfiguration:",
     `Packs: ${packs}`,
-    `Maximaler Packpreis: ${nullableMoney(state.maxUnitPriceMicroUsdc)}`,
-    `Zyklusbudget: ${nullableMoney(state.maxCycleBudgetMicroUsdc)}`,
-    `24-Stunden-Budget: ${nullableMoney(state.max24HourBudgetMicroUsdc)}`,
+    `Maximaler Packpreis: ${nullableMoney(state.maxUnitPriceMicroUsdg)}`,
+    `Zyklusbudget: ${nullableMoney(state.maxCycleBudgetMicroUsdg)}`,
+    `24-Stunden-Budget: ${nullableMoney(state.max24HourBudgetMicroUsdg)}`,
     `Zyklusintervall: ${state.cycleIntervalMinutes} Minuten`,
     ...(unsaved ? ["", "Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet."] : []),
   ].join("\n");
@@ -1161,26 +1161,26 @@ function commandConfirmation(question: string, state: OperatorState, unsaved: bo
 
 function computeReservePreview(packs: Pack[], form: FormState) {
   let totalQuantity = 0;
-  let grossCollectorDebitMicroUsdc = BigInt(0);
-  let collectorEconomicCostMicroUsdc = BigInt(0);
+  let grossCollectorDebitMicroUsdg = BigInt(0);
+  let collectorEconomicCostMicroUsdg = BigInt(0);
   let economicsComplete = true;
   if (form.mode === "community") {
     for (const pack of packs) {
       const quantity = BigInt(Math.max(0, Number(form.packQuantities[pack.id] ?? "0") || 0));
       if (quantity === BigInt(0)) continue;
       totalQuantity += Number(quantity);
-      grossCollectorDebitMicroUsdc += BigInt(pack.priceMicroUsdc) * quantity;
-      if (!/^\d+$/.test(pack.collectorEconomicCostMicroUsdc ?? "")) {
+      grossCollectorDebitMicroUsdg += BigInt(pack.priceMicroUsdg) * quantity;
+      if (!/^\d+$/.test(pack.collectorEconomicCostMicroUsdg ?? "")) {
         economicsComplete = false;
       } else {
-        collectorEconomicCostMicroUsdc += BigInt(pack.collectorEconomicCostMicroUsdc ?? "0") * quantity;
+        collectorEconomicCostMicroUsdg += BigInt(pack.collectorEconomicCostMicroUsdg ?? "0") * quantity;
       }
     }
   }
   return {
     totalQuantity,
-    grossCollectorDebitMicroUsdc,
-    collectorEconomicCostMicroUsdc,
+    grossCollectorDebitMicroUsdg,
+    collectorEconomicCostMicroUsdg,
     economicsComplete,
   };
 }
@@ -1202,21 +1202,21 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Die private Steuerungsanfrage ist fehlgeschlagen.";
 }
 
-function formatMicroUsdc(value: string) {
+function formatMicroUsdg(value: string) {
   try {
-    return formatGermanUsdc(value);
+    return formatGermanUsdg(value);
   } catch {
     return "Nicht bestätigt";
   }
 }
 
-function formatOptionalMicroUsdc(value: string | undefined) {
-  return value === undefined ? "Noch nicht bestätigt" : formatMicroUsdc(value);
+function formatOptionalMicroUsdg(value: string | undefined) {
+  return value === undefined ? "Noch nicht bestätigt" : formatMicroUsdg(value);
 }
 
-function historicalMicroUsdc(dashboard: Dashboard | null, value: string | undefined) {
+function historicalMicroUsdg(dashboard: Dashboard | null, value: string | undefined) {
   if (!dashboard) return "Wird geladen…";
-  return dashboard.historyComplete ? formatOptionalMicroUsdc(value) : "Historie unvollständig";
+  return dashboard.historyComplete ? formatOptionalMicroUsdg(value) : "Historie unvollständig";
 }
 
 function historicalCount(dashboard: Dashboard | null, value: number | undefined) {
@@ -1229,12 +1229,12 @@ function latestActuallyPaid(dashboard: Dashboard | null) {
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
   if (accounting) {
-    return pendingMicroUsdc(
-      accounting.paidHolderRewardsMicroUsdc,
+    return pendingMicroUsdg(
+      accounting.paidHolderRewardsMicroUsdg,
       humanizeStatus(accounting.distributionStatus),
     );
   }
-  return pendingMicroUsdc(dashboard.latestCycle.paidMicroUsdc, "Nicht ausgeführt");
+  return pendingMicroUsdg(dashboard.latestCycle.paidMicroUsdg, "Nicht ausgeführt");
 }
 
 function latestReserveTarget(dashboard: Dashboard | null) {
@@ -1242,19 +1242,19 @@ function latestReserveTarget(dashboard: Dashboard | null) {
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
   return accounting
-    ? pendingMicroUsdc(
-      accounting.feeReserveTargetMicroUsdc,
+    ? pendingMicroUsdg(
+      accounting.feeReserveTargetMicroUsdg,
       "In dieser Prüfung nicht ausgeführt",
     )
-    : formatOptionalMicroUsdc(dashboard?.metrics.latestCycleReserveTargetMicroUsdc);
+    : formatOptionalMicroUsdg(dashboard?.metrics.latestCycleReserveTargetMicroUsdg);
 }
 
-function pendingMicroUsdc(value: string | null, pending: string) {
-  return value === null ? pending : formatMicroUsdc(value);
+function pendingMicroUsdg(value: string | null, pending: string) {
+  return value === null ? pending : formatMicroUsdg(value);
 }
 
-function quotedMicroUsdc(value: string | null) {
-  return value === null ? "Angebot nicht verfügbar" : `${formatMicroUsdc(value)} angeboten`;
+function quotedMicroUsdg(value: string | null) {
+  return value === null ? "Angebot nicht verfügbar" : `${formatMicroUsdg(value)} angeboten`;
 }
 
 function nativeFeeText(value: { lamports: string; paidBy: string } | null) {
@@ -1274,7 +1274,7 @@ function formatNumber(value: number) {
 }
 
 function nullableMoney(value: string | null) {
-  return value === null ? "Noch nicht bestätigt" : formatMicroUsdc(value);
+  return value === null ? "Noch nicht bestätigt" : formatMicroUsdg(value);
 }
 
 function nullableInteger(value: number | null) {
@@ -1284,13 +1284,13 @@ function nullableInteger(value: number | null) {
 function formatCycleStartProjectPool(dashboard: Dashboard | null) {
   if (!dashboard) return "Nicht beobachtet";
   const pool = decodeCycleStartProjectPool({
-    cycleStartProjectPoolMicroUsdc: dashboard.metrics.cycleStartProjectPoolMicroUsdc,
+    cycleStartProjectPoolMicroUsdg: dashboard.metrics.cycleStartProjectPoolMicroUsdg,
     cycleStartProjectPoolObservedAt: dashboard.cycleStartProjectPoolObservedAt,
   });
-  if (pool.cycleStartProjectPoolMicroUsdc === null || pool.cycleStartProjectPoolObservedAt === null) {
+  if (pool.cycleStartProjectPoolMicroUsdg === null || pool.cycleStartProjectPoolObservedAt === null) {
     return "Nicht beobachtet";
   }
-  return `${formatMicroUsdc(pool.cycleStartProjectPoolMicroUsdc)} · Stand ${formatDate(pool.cycleStartProjectPoolObservedAt)}`;
+  return `${formatMicroUsdg(pool.cycleStartProjectPoolMicroUsdg)} · Stand ${formatDate(pool.cycleStartProjectPoolObservedAt)}`;
 }
 
 function formatDate(value: string) {
@@ -1330,8 +1330,8 @@ function downloadCommunityCard(dashboard: Dashboard) {
   context.fillText(`${dashboard.metrics.openedPacks} PACKS GEÖFFNET`, 72, 220);
   const lines = [
     ["Pool beim letzten Zyklusstart", formatCycleStartProjectPool(dashboard)],
-    ["Bestätigte Buybacks", formatMicroUsdc(dashboard.metrics.totalBuybacksReturnedMicroUsdc)],
-    ["Zurück transferiert", formatMicroUsdc(dashboard.metrics.totalBridgedBackMicroUsdc)],
+    ["Bestätigte Buybacks", formatMicroUsdg(dashboard.metrics.totalBuybacksReturnedMicroUsdg)],
+    ["Zurück transferiert", formatMicroUsdg(dashboard.metrics.totalBridgedBackMicroUsdg)],
     ["Letzte tatsächliche Ausschüttung", latestActuallyPaid(dashboard)],
     ["Abgeschlossene Zyklen", String(dashboard.metrics.completedCycles)],
     ["Nächster Zyklus", dashboard.nextCycleAt ? formatDate(dashboard.nextCycleAt) : "Wartet auf Deckung"],
@@ -1369,19 +1369,23 @@ function decodeDashboard(value: unknown): Dashboard {
     raw.schemaVersion !== 1 &&
     raw.schemaVersion !== 2 &&
     raw.schemaVersion !== 3 &&
-    raw.schemaVersion !== 4
+    raw.schemaVersion !== 4 &&
+    raw.schemaVersion !== 5 &&
+    raw.schemaVersion !== 6
   ) {
     throw new Error(DASHBOARD_RESPONSE_UNSUPPORTED);
   }
-  const schemaVersion = raw.schemaVersion;
+  // Schema versions 4-6 add fields this narrower view does not read (reward recipient limits,
+  // loss/custody caps, alert sources); they share the same money/card/round-accounting shapes.
+  const schemaVersion = raw.schemaVersion === 5 || raw.schemaVersion === 6 ? 4 : raw.schemaVersion;
   const metrics = dashboardRecord(raw.metrics);
   const legacyPoolHasNoObservation = schemaVersion === 1 &&
     raw.cycleStartProjectPoolObservedAt === undefined;
   const poolValue = legacyPoolHasNoObservation
     ? null
     : schemaVersion === 1
-      ? metrics.cycleStartProjectPoolMicroUsdc ?? metrics.currentProjectPoolMicroUsdc
-      : metrics.cycleStartProjectPoolMicroUsdc;
+      ? metrics.cycleStartProjectPoolMicroUsdg ?? metrics.currentProjectPoolMicroUsdg
+      : metrics.cycleStartProjectPoolMicroUsdg;
   const decodedMetrics = Object.fromEntries(
     DASHBOARD_MONEY_FIELDS.map((field) => [field, dashboardMoney(metrics[field])]),
   ) as Pick<Dashboard["metrics"], (typeof DASHBOARD_MONEY_FIELDS)[number]>;
@@ -1417,7 +1421,7 @@ function decodeDashboard(value: unknown): Dashboard {
     cycleStartProjectPoolObservedAt: pool.cycleStartProjectPoolObservedAt,
     latestCompletedAllocationCycleId: latestAllocationCycleId,
     metrics: {
-      cycleStartProjectPoolMicroUsdc: pool.cycleStartProjectPoolMicroUsdc,
+      cycleStartProjectPoolMicroUsdg: pool.cycleStartProjectPoolMicroUsdg,
       ...decodedMetrics,
       completedCycles: dashboardInteger(metrics.completedCycles, 0),
       skippedCycles: dashboardInteger(metrics.skippedCycles, 0),
@@ -1430,7 +1434,7 @@ function decodeDashboard(value: unknown): Dashboard {
       return {
         rank: dashboardInteger(allocation.rank, 1, 200),
         address,
-        allocatedMicroUsdc: dashboardMoney(allocation.allocatedMicroUsdc),
+        allocatedMicroUsdg: dashboardMoney(allocation.allocatedMicroUsdg),
       };
     }),
     cards: dashboardArray(raw.cards, 60).map((card) =>
@@ -1474,10 +1478,13 @@ function decodeActiveCycle(value: unknown): ActiveCycle {
     allowedPackIds,
     requestedOrders,
     maxBoostersPerCycle,
-    maxUnitPriceMicroUsdc: dashboardOptionalMoney(raw.maxUnitPriceMicroUsdc),
-    maxCycleBudgetMicroUsdc: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdc),
-    max24HourBudgetMicroUsdc: dashboardOptionalMoney(raw.max24HourBudgetMicroUsdc),
+    maxUnitPriceMicroUsdg: dashboardOptionalMoney(raw.maxUnitPriceMicroUsdg),
+    maxCycleBudgetMicroUsdg: dashboardOptionalMoney(raw.maxCycleBudgetMicroUsdg),
+    max24HourBudgetMicroUsdg: dashboardOptionalMoney(raw.max24HourBudgetMicroUsdg),
     revealedCards: dashboardInteger(raw.revealedCards, 0, 10_000),
+    rewardRecipientLimit: raw.rewardRecipientLimit === undefined
+      ? undefined
+      : dashboardInteger(raw.rewardRecipientLimit, 50, 1_000),
   };
 }
 
@@ -1493,8 +1500,8 @@ function decodeDashboardCard(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dash
     setName: dashboardOptionalText(raw.setName),
     cardNumber: dashboardOptionalText(raw.cardNumber),
     imageUrl: dashboardOptionalText(raw.imageUrl),
-    packPriceMicroUsdc: dashboardOptionalMoney(raw.packPriceMicroUsdc),
-    buybackMicroUsdc: dashboardOptionalMoney(raw.buybackMicroUsdc),
+    packPriceMicroUsdg: dashboardOptionalMoney(raw.packPriceMicroUsdg),
+    buybackMicroUsdg: dashboardOptionalMoney(raw.buybackMicroUsdg),
   };
   if (card.imageUrl !== null) {
     let url;
@@ -1516,12 +1523,12 @@ function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashbo
     status: dashboardText(raw.status),
     reason: dashboardNullableText(raw.reason),
     updatedAt: dashboardNullableTimestamp(raw.updatedAt),
-    paidMicroUsdc: schemaVersion >= 3 ? dashboardOptionalMoney(raw.paidMicroUsdc) : null,
+    paidMicroUsdg: schemaVersion >= 3 ? dashboardOptionalMoney(raw.paidMicroUsdg) : null,
     payoutRecipientCount: schemaVersion >= 3
       ? dashboardInteger(raw.payoutRecipientCount, 0)
       : 0,
     roundAccounting: schemaVersion === 3 || schemaVersion === 4
-      ? decodeRoundAccounting(raw.roundAccounting, schemaVersion, raw.paidMicroUsdc)
+      ? decodeRoundAccounting(raw.roundAccounting, schemaVersion, raw.paidMicroUsdg)
       : null,
     transactions: schemaVersion >= 3
       ? dashboardArray(raw.transactions, 24).map(decodeDashboardTransaction)
@@ -1532,79 +1539,79 @@ function decodeLatestCycle(value: unknown, schemaVersion: 1 | 2 | 3 | 4): Dashbo
 function decodeRoundAccounting(
   value: unknown,
   schemaVersion: 3 | 4,
-  paidMicroUsdc: unknown,
+  paidMicroUsdg: unknown,
 ): DashboardRoundAccounting | null {
   if (value === null) return null;
   const raw = dashboardRecord(value);
-  if (schemaVersion === 3) return decodeLegacyRoundAccounting(raw, paidMicroUsdc);
+  if (schemaVersion === 3) return decodeLegacyRoundAccounting(raw, paidMicroUsdg);
   dashboardExactKeys(raw, DASHBOARD_ROUND_KEYS);
   const accounting: DashboardRoundAccounting = {
-    packSpendMicroUsdc: dashboardMoney(raw.packSpendMicroUsdc),
-    buybackMicroUsdc: dashboardMoney(raw.buybackMicroUsdc),
-    packGainMicroUsdc: dashboardMoney(raw.packGainMicroUsdc),
-    packLossMicroUsdc: dashboardMoney(raw.packLossMicroUsdc),
+    packSpendMicroUsdg: dashboardMoney(raw.packSpendMicroUsdg),
+    buybackMicroUsdg: dashboardMoney(raw.buybackMicroUsdg),
+    packGainMicroUsdg: dashboardMoney(raw.packGainMicroUsdg),
+    packLossMicroUsdg: dashboardMoney(raw.packLossMicroUsdg),
     quotedCosts: decodeQuotedCosts(raw.quotedCosts),
-    protectedCostsMicroUsdc: dashboardOptionalMoney(raw.protectedCostsMicroUsdc),
-    confirmedCostsMicroUsdc: dashboardOptionalMoney(raw.confirmedCostsMicroUsdc),
-    cycleGainMicroUsdc: dashboardOptionalMoney(raw.cycleGainMicroUsdc),
-    cycleLossMicroUsdc: dashboardOptionalMoney(raw.cycleLossMicroUsdc),
-    walletBalanceBeforeMicroUsdc: dashboardOptionalMoney(raw.walletBalanceBeforeMicroUsdc),
-    walletBalanceAfterMicroUsdc: dashboardOptionalMoney(raw.walletBalanceAfterMicroUsdc),
+    protectedCostsMicroUsdg: dashboardOptionalMoney(raw.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: dashboardOptionalSignedMoney(raw.confirmedCostsMicroUsdg),
+    cycleGainMicroUsdg: dashboardOptionalMoney(raw.cycleGainMicroUsdg),
+    cycleLossMicroUsdg: dashboardOptionalMoney(raw.cycleLossMicroUsdg),
+    walletBalanceBeforeMicroUsdg: dashboardOptionalMoney(raw.walletBalanceBeforeMicroUsdg),
+    walletBalanceAfterMicroUsdg: dashboardOptionalMoney(raw.walletBalanceAfterMicroUsdg),
     networkFees: decodeNetworkFees(raw.networkFees),
-    feeReserveBeforeMicroUsdc: dashboardOptionalMoney(raw.feeReserveBeforeMicroUsdc),
-    feeReserveTargetMicroUsdc: dashboardOptionalMoney(raw.feeReserveTargetMicroUsdc),
-    feeReserveTopUpMicroUsdc: dashboardOptionalMoney(raw.feeReserveTopUpMicroUsdc),
-    feeReserveAfterMicroUsdc: dashboardOptionalMoney(raw.feeReserveAfterMicroUsdc),
-    plannedHolderRewardsMicroUsdc: dashboardOptionalMoney(raw.plannedHolderRewardsMicroUsdc),
-    paidHolderRewardsMicroUsdc: dashboardOptionalMoney(raw.paidHolderRewardsMicroUsdc),
+    feeReserveBeforeMicroUsdg: dashboardOptionalMoney(raw.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: dashboardOptionalMoney(raw.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: dashboardOptionalMoney(raw.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: dashboardOptionalMoney(raw.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: dashboardOptionalMoney(raw.plannedHolderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: dashboardOptionalMoney(raw.paidHolderRewardsMicroUsdg),
     holderRewardsStatus: dashboardText(raw.holderRewardsStatus),
     distributionStatus: dashboardText(raw.distributionStatus),
   };
-  assertDashboardExclusive(accounting.packGainMicroUsdc, accounting.packLossMicroUsdc);
-  assertDashboardNullableExclusive(accounting.cycleGainMicroUsdc, accounting.cycleLossMicroUsdc);
+  assertDashboardExclusive(accounting.packGainMicroUsdg, accounting.packLossMicroUsdg);
+  assertDashboardNullableExclusive(accounting.cycleGainMicroUsdg, accounting.cycleLossMicroUsdg);
   return accounting;
 }
 
 function decodeLegacyRoundAccounting(
   raw: Record<string, unknown>,
-  paidMicroUsdc: unknown,
+  paidMicroUsdg: unknown,
 ): DashboardRoundAccounting {
-  const packSpend = BigInt(dashboardMoney(raw.packSpendMicroUsdc));
-  const buyback = BigInt(dashboardMoney(raw.buybackMicroUsdc));
-  const confirmedCosts = dashboardOptionalMoney(raw.confirmedCostsMicroUsdc);
+  const packSpend = BigInt(dashboardMoney(raw.packSpendMicroUsdg));
+  const buyback = BigInt(dashboardMoney(raw.buybackMicroUsdg));
+  const confirmedCosts = dashboardOptionalMoney(raw.confirmedCostsMicroUsdg);
   const completeCost = confirmedCosts === null ? null : packSpend + BigInt(confirmedCosts);
   return {
-    packSpendMicroUsdc: packSpend.toString(),
-    buybackMicroUsdc: buyback.toString(),
-    packGainMicroUsdc: subtractAtZero(packSpend, buyback, true),
-    packLossMicroUsdc: subtractAtZero(packSpend, buyback, false),
+    packSpendMicroUsdg: packSpend.toString(),
+    buybackMicroUsdg: buyback.toString(),
+    packGainMicroUsdg: subtractAtZero(packSpend, buyback, true),
+    packLossMicroUsdg: subtractAtZero(packSpend, buyback, false),
     quotedCosts: {
-      outboundBridgeMicroUsdc: null,
-      inboundBridgeMicroUsdc: null,
-      collectorApiMicroUsdc: null,
-      ethereumNetworkMicroUsdc: null,
-      solanaNetworkMicroUsdc: null,
-      slippageMicroUsdc: null,
+      outboundBridgeMicroUsdg: null,
+      inboundBridgeMicroUsdg: null,
+      collectorApiMicroUsdg: null,
+      evmNetworkMicroUsdg: null,
+      solanaNetworkMicroUsdg: null,
+      slippageMicroUsdg: null,
     },
-    protectedCostsMicroUsdc: dashboardMoney(raw.protectedCostsMicroUsdc),
-    confirmedCostsMicroUsdc: confirmedCosts,
-    cycleGainMicroUsdc: completeCost === null
+    protectedCostsMicroUsdg: dashboardMoney(raw.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: confirmedCosts,
+    cycleGainMicroUsdg: completeCost === null
       ? null
       : (buyback > completeCost ? buyback - completeCost : BigInt(0)).toString(),
-    cycleLossMicroUsdc: completeCost === null
+    cycleLossMicroUsdg: completeCost === null
       ? null
       : (completeCost > buyback ? completeCost - buyback : BigInt(0)).toString(),
-    walletBalanceBeforeMicroUsdc: null,
-    walletBalanceAfterMicroUsdc: null,
+    walletBalanceBeforeMicroUsdg: null,
+    walletBalanceAfterMicroUsdg: null,
     networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
-    feeReserveBeforeMicroUsdc: dashboardMoney(raw.feeReserveBeforeMicroUsdc),
-    feeReserveTargetMicroUsdc: dashboardMoney(raw.feeReserveTargetMicroUsdc),
-    feeReserveTopUpMicroUsdc: dashboardMoney(raw.feeReserveTopUpMicroUsdc),
-    feeReserveAfterMicroUsdc: dashboardMoney(raw.feeReserveAfterMicroUsdc),
-    plannedHolderRewardsMicroUsdc: dashboardMoney(raw.holderRewardsMicroUsdc),
-    paidHolderRewardsMicroUsdc: dashboardOptionalMoney(paidMicroUsdc),
+    feeReserveBeforeMicroUsdg: dashboardMoney(raw.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: dashboardMoney(raw.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: dashboardMoney(raw.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: dashboardMoney(raw.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: dashboardMoney(raw.holderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: dashboardOptionalMoney(paidMicroUsdg),
     holderRewardsStatus: "computed",
-    distributionStatus: paidMicroUsdc === null ? "pending" : "legacy-settlement-recorded",
+    distributionStatus: paidMicroUsdg === null ? "pending" : "legacy-settlement-recorded",
   };
 }
 
@@ -1612,12 +1619,12 @@ function decodeQuotedCosts(value: unknown): DashboardRoundAccounting["quotedCost
   const raw = dashboardRecord(value);
   dashboardExactKeys(raw, DASHBOARD_QUOTED_COST_KEYS);
   return {
-    outboundBridgeMicroUsdc: dashboardOptionalMoney(raw.outboundBridgeMicroUsdc),
-    inboundBridgeMicroUsdc: dashboardOptionalMoney(raw.inboundBridgeMicroUsdc),
-    collectorApiMicroUsdc: dashboardOptionalMoney(raw.collectorApiMicroUsdc),
-    ethereumNetworkMicroUsdc: dashboardOptionalMoney(raw.ethereumNetworkMicroUsdc),
-    solanaNetworkMicroUsdc: dashboardOptionalMoney(raw.solanaNetworkMicroUsdc),
-    slippageMicroUsdc: dashboardOptionalMoney(raw.slippageMicroUsdc),
+    outboundBridgeMicroUsdg: dashboardOptionalMoney(raw.outboundBridgeMicroUsdg),
+    inboundBridgeMicroUsdg: dashboardOptionalMoney(raw.inboundBridgeMicroUsdg),
+    collectorApiMicroUsdg: dashboardOptionalMoney(raw.collectorApiMicroUsdg),
+    evmNetworkMicroUsdg: dashboardOptionalMoney(raw.evmNetworkMicroUsdg),
+    solanaNetworkMicroUsdg: dashboardOptionalMoney(raw.solanaNetworkMicroUsdg),
+    slippageMicroUsdg: dashboardOptionalMoney(raw.slippageMicroUsdg),
   };
 }
 
@@ -1646,15 +1653,15 @@ function decodeDashboardTransaction(value: unknown) {
   const id = dashboardText(raw.id);
   if (
     !(
-      (chain === "ethereum" &&
-        DASHBOARD_TRANSACTION_PURPOSES.ethereum.has(purpose) &&
+      (chain === "evm" &&
+        DASHBOARD_TRANSACTION_PURPOSES.evm.has(purpose) &&
         /^0x[0-9a-fA-F]{64}$/.test(id)) ||
       (chain === "solana" &&
         DASHBOARD_TRANSACTION_PURPOSES.solana.has(purpose) &&
         /^[1-9A-HJ-NP-Za-km-z]{32,88}$/.test(id))
     )
   ) throw new Error(DASHBOARD_RESPONSE_INVALID);
-  return { chain: chain as "ethereum" | "solana", purpose, id };
+  return { chain: chain as "evm" | "solana", purpose, id };
 }
 
 function assertDashboardExclusive(gain: string, loss: string) {
@@ -1725,6 +1732,14 @@ function dashboardMoney(value: unknown): string {
 
 function dashboardOptionalMoney(value: unknown): string | null {
   return value === undefined || value === null ? null : dashboardMoney(value);
+}
+
+function dashboardOptionalSignedMoney(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !/^(0|-?[1-9]\d{0,77})$/.test(value)) {
+    throw new Error(DASHBOARD_RESPONSE_INVALID);
+  }
+  return value;
 }
 
 function dashboardInteger(value: unknown, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {

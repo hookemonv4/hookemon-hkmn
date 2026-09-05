@@ -1,4 +1,4 @@
-import { validateDashboardPair, formatMicroUsdc, latestPayout, historyPresentation, dashboardTiming } from './dashboard.mjs';
+import { validateDashboardPair, formatMicroUsdg, latestPayout, historyPresentation, dashboardTiming } from './dashboard.mjs';
 
 export function cycleRecord(status, community, now = Date.now()) {
   const pair = validateDashboardPair(status, community);
@@ -8,23 +8,23 @@ export function cycleRecord(status, community, now = Date.now()) {
   const timing = dashboardTiming(pair, now);
   const history = historyPresentation(community);
   return {
-    feed: `${community.badge} · ${status.network.ethereum.label} / ${status.network.solana.label} · ${timing.delayed ? 'Delayed observations' : 'Validated public observations'} · ${community.generatedAt}`,
-    pool: formatMicroUsdc(community.metrics.latestObservedProjectPoolMicroUsdc),
-    paid: formatMicroUsdc(payout?.paid),
+    feed: `${community.badge} · ${status.network.evm.label} / ${status.network.solana.label} · ${timing.delayed ? 'Delayed observations' : 'Validated public observations'} · ${community.generatedAt}`,
+    pool: formatMicroUsdg(community.metrics.latestObservedProjectPoolMicroUsdg),
+    paid: formatMicroUsdg(payout?.paid),
     count: history.completedCycles,
     history: history.note,
     title: cycle ? `Cycle ${cycle.cycleId}` : 'Latest cycle · unavailable',
     status: cycle ? `${cycle.status} · ${cycle.updatedAt ?? 'Update time not reported'}` : 'No verified cycle record is available.',
     breakdown: [
-      ['Pack spend', formatMicroUsdc(round?.packSpendMicroUsdc)],
-      ['Card sale / buyback proceeds', formatMicroUsdc(round?.buybackMicroUsdc)],
-      ['Reported operating costs', formatMicroUsdc(round?.protectedCostsMicroUsdc)],
-      ['Reserve after the cycle', formatMicroUsdc(round?.feeReserveAfterMicroUsdc)],
-      ['Completed holder payout', formatMicroUsdc(payout?.paid)],
+      ['Pack spend', formatMicroUsdg(round?.packSpendMicroUsdg)],
+      ['Card sale / buyback proceeds', formatMicroUsdg(round?.buybackMicroUsdg)],
+      ['Reported operating costs', formatMicroUsdg(round?.protectedCostsMicroUsdg)],
+      ['Reserve after the cycle', formatMicroUsdg(round?.feeReserveAfterMicroUsdg)],
+      ['Completed holder payout', formatMicroUsdg(payout?.paid)],
     ],
     transactions: (cycle?.transactions ?? []).map((tx) => ({
       label: `${tx.purpose} · ${tx.chain} · ${tx.id}`,
-      url: tx.chain === 'ethereum'
+      url: tx.chain === 'evm'
         ? `https://${pair.status.profile === 'testnet' ? 'sepolia.' : ''}etherscan.io/tx/${tx.id}`
         : `https://explorer.solana.com/tx/${tx.id}${pair.status.profile === 'testnet' ? '?cluster=devnet' : ''}`,
     })),

@@ -7,8 +7,8 @@ export type DashboardCard = {
   setName: string | null;
   cardNumber: string | null;
   imageUrl: string | null;
-  packPriceMicroUsdc: string | null;
-  buybackMicroUsdc: string | null;
+  packPriceMicroUsdg: string | null;
+  buybackMicroUsdg: string | null;
 };
 
 export type CardHistoryCard = DashboardCard & {
@@ -24,10 +24,11 @@ export type ActiveCycle = {
   allowedPackIds: string[];
   requestedOrders: Array<{ productId: string; quantity: number }>;
   maxBoostersPerCycle: number | null;
-  maxUnitPriceMicroUsdc: string | null;
-  maxCycleBudgetMicroUsdc: string | null;
-  max24HourBudgetMicroUsdc: string | null;
+  maxUnitPriceMicroUsdg: string | null;
+  maxCycleBudgetMicroUsdg: string | null;
+  max24HourBudgetMicroUsdg: string | null;
   revealedCards: number;
+  rewardRecipientLimit?: number;
 };
 
 export type CardHistorySort = "recent" | "buyback-desc" | "buyback-asc";

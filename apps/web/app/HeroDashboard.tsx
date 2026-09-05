@@ -5,7 +5,7 @@ import {
   cardAltText,
   formatCount,
   formatCountdown,
-  formatMicroUsdc,
+  formatMicroUsdg,
   usePublicCycle,
 } from "./PublicCycleTracker";
 import styles from "./PublicCycleTracker.module.css";
@@ -32,7 +32,7 @@ export default function HeroDashboard() {
       <dl className={styles.heroDashboardMetrics}>
         <div>
           <dt>Rewards paid</dt>
-          <dd>{formatMicroUsdc(community?.metrics.totalRewardsPaidMicroUsdc)}</dd>
+          <dd>{formatMicroUsdg(community?.metrics.totalRewardsPaidMicroUsdg)}</dd>
         </div>
         <div>
           <dt>Packs opened</dt>
