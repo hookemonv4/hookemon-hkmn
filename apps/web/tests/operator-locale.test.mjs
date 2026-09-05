@@ -2,34 +2,34 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  cardResultMicroUsdc,
+  cardResultMicroUsdg,
   formatGermanDate,
-  formatGermanUsdc,
+  formatGermanUsdg,
   germanStatus,
-  parseGermanUsdc,
+  parseGermanUsdg,
 } from "../app/operator/operator-locale.ts";
 
-test("converts German USDC without floating point", () => {
-  assert.equal(parseGermanUsdc("12,50"), "12500000");
-  assert.equal(parseGermanUsdc("0,000001"), "1");
-  assert.equal(parseGermanUsdc("42"), "42000000");
-  assert.equal(formatGermanUsdc("12500000"), "12,50 USDC");
-  assert.equal(formatGermanUsdc("1"), "0,000001 USDC");
-  assert.equal(formatGermanUsdc("-2500000"), "−2,50 USDC");
+test("converts German USDG without floating point", () => {
+  assert.equal(parseGermanUsdg("12,50"), "12500000");
+  assert.equal(parseGermanUsdg("0,000001"), "1");
+  assert.equal(parseGermanUsdg("42"), "42000000");
+  assert.equal(formatGermanUsdg("12500000"), "12,50 USDG");
+  assert.equal(formatGermanUsdg("1"), "0,000001 USDG");
+  assert.equal(formatGermanUsdg("-2500000"), "−2,50 USDG");
 
   for (const value of ["", "-1", "1.000,00", "1e3", "1,0000001", "NaN"]) {
-    assert.throws(() => parseGermanUsdc(value), { message: "USDC_BETRAG_UNGUELTIG" });
+    assert.throws(() => parseGermanUsdg(value), { message: "USDG_BETRAG_UNGUELTIG" });
   }
   for (const value of ["", "01", "1.5", "NaN"]) {
-    assert.throws(() => formatGermanUsdc(value), { message: "USDC_WERT_UNGUELTIG" });
+    assert.throws(() => formatGermanUsdg(value), { message: "USDG_WERT_UNGUELTIG" });
   }
 });
 
 test("calculates confirmed per-card gain or loss exactly", () => {
-  assert.equal(cardResultMicroUsdc("10000000", "12500000"), "2500000");
-  assert.equal(cardResultMicroUsdc("12500000", "10000000"), "-2500000");
-  assert.equal(cardResultMicroUsdc(null, "12500000"), null);
-  assert.equal(cardResultMicroUsdc("10000000", null), null);
+  assert.equal(cardResultMicroUsdg("10000000", "12500000"), "2500000");
+  assert.equal(cardResultMicroUsdg("12500000", "10000000"), "-2500000");
+  assert.equal(cardResultMicroUsdg(null, "12500000"), null);
+  assert.equal(cardResultMicroUsdg("10000000", null), null);
 });
 
 test("formats timestamps and every operator code family in German", () => {

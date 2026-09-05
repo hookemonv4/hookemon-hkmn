@@ -22,8 +22,8 @@ test("keeps German next-cycle form values separate from canonical decision paylo
     "utf8",
   );
 
-  assert.match(source, /germanMoneyFormValue\(state\.maxUnitPriceMicroUsdc\)/);
-  assert.match(source, /parseGermanUsdc\(form\.maxUnitPriceMicroUsdc\)/);
+  assert.match(source, /germanMoneyFormValue\(state\.maxUnitPriceMicroUsdg\)/);
+  assert.match(source, /parseGermanUsdg\(form\.maxUnitPriceMicroUsdg\)/);
   assert.match(source, /manualPackOrders = form\.mode === "community"/);
   assert.match(source, /catalogPacks\.flatMap/);
   assert.match(source, /quantity > 0 \? \[\{ productId: pack\.id, quantity \}\] : \[\]/);

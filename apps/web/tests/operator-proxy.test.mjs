@@ -153,7 +153,7 @@ test("rejects unauthenticated, malformed and excessive requests before external 
     [operatorRequest("/operator/api/cards?limit=1&limit=2"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?limit=51"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?sort=popular"), 400, "OPERATOR_QUERY_INVALID"],
-    [operatorRequest("/operator/api/cards?minBuybackMicroUsdc=1.5"), 400, "OPERATOR_QUERY_INVALID"],
+    [operatorRequest("/operator/api/cards?minBuybackMicroUsdg=1.5"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/cards?from=2026-08-25"), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest(`/operator/api/cards?cursor=${"x".repeat(513)}`), 400, "OPERATOR_QUERY_INVALID"],
     [operatorRequest("/operator/api/audit?cursor=0"), 400, "OPERATOR_QUERY_INVALID"],

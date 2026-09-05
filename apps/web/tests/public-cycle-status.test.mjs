@@ -4,7 +4,7 @@ import test from "node:test";
 import { normalizePublicCycleStatus } from "../lib/public-cycle-status.ts";
 
 const TESTNET_NETWORK = {
-  ethereum: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
+  evm: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
   solana: {
     name: "devnet",
     genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -40,16 +40,16 @@ const validStatus = {
       setName: "Base Set",
       cardNumber: "58/102",
       imageUrl: "https://images.example/pikachu.png",
-      packPriceMicroUsdc: "100000000",
-      buybackMicroUsdc: "90000000",
+      packPriceMicroUsdg: "100000000",
+      buybackMicroUsdg: "90000000",
     }],
-    returnedMicroUsdc: "90000000",
+    returnedMicroUsdg: "90000000",
     rewardStatus: "pending",
     roundAccounting: null,
     startedAt: "2026-08-09T11:55:00.000Z",
     updatedAt: "2026-08-09T12:00:00.000Z",
-    spentMicroUsdc: "100000000",
-    paidMicroUsdc: "0",
+    spentMicroUsdg: "100000000",
+    paidMicroUsdg: "0",
   },
 };
 
@@ -115,7 +115,7 @@ test("rejects unknown fields instead of forwarding private cycle data", () => {
 
 test("rejects malformed money, counts, timestamps, actions and card images", () => {
   const invalidCycles = [
-    { ...validStatus.cycle, returnedMicroUsdc: "-1" },
+    { ...validStatus.cycle, returnedMicroUsdg: "-1" },
     { ...validStatus.cycle, maxBoostersPerCycle: 0 },
     {
       ...validStatus.cycle,
@@ -138,7 +138,7 @@ test("rejects malformed money, counts, timestamps, actions and card images", () 
     /PUBLIC_CYCLE_STATUS_INVALID/,
   );
 
-  for (const paidMicroUsdc of [
+  for (const paidMicroUsdg of [
     "01",
     "",
     1,
@@ -152,7 +152,7 @@ test("rejects malformed money, counts, timestamps, actions and card images", () 
     assert.throws(
       () => normalizePublicCycleStatus({
         ...validStatus,
-        cycle: { ...validStatus.cycle, paidMicroUsdc },
+        cycle: { ...validStatus.cycle, paidMicroUsdg },
       }),
       /PUBLIC_CYCLE_STATUS_INVALID/,
     );
@@ -179,15 +179,15 @@ test("normalizes one legacy cycle schema to explicit pending fields", () => {
   const legacy = structuredClone(validStatus);
   legacy.schemaVersion = 2;
   delete legacy.cycle.roundAccounting;
-  delete legacy.cycle.cards[0].packPriceMicroUsdc;
-  delete legacy.cycle.cards[0].buybackMicroUsdc;
+  delete legacy.cycle.cards[0].packPriceMicroUsdg;
+  delete legacy.cycle.cards[0].buybackMicroUsdg;
 
   const result = normalizePublicCycleStatus(legacy, "testnet");
 
   assert.equal(result.schemaVersion, 3);
   assert.equal(result.cycle.roundAccounting, null);
-  assert.equal(result.cycle.cards[0].packPriceMicroUsdc, null);
-  assert.equal(result.cycle.cards[0].buybackMicroUsdc, null);
+  assert.equal(result.cycle.cards[0].packPriceMicroUsdg, null);
+  assert.equal(result.cycle.cards[0].buybackMicroUsdg, null);
 });
 
 test("binds only an empty schema-1 tracker response to the expected profile", () => {
@@ -276,7 +276,7 @@ function card(productId) {
     setName: null,
     cardNumber: null,
     imageUrl: null,
-    packPriceMicroUsdc: null,
-    buybackMicroUsdc: null,
+    packPriceMicroUsdg: null,
+    buybackMicroUsdg: null,
   };
 }

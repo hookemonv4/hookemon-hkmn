@@ -9,7 +9,7 @@ import {
 test("renders cycle-start pool observations in German", () => {
   const unobserved = decodeCycleStartProjectPool(null, null);
   assert.deepEqual(unobserved, {
-    cycleStartProjectPoolMicroUsdc: null,
+    cycleStartProjectPoolMicroUsdg: null,
     cycleStartProjectPoolObservedAt: null,
   });
   assert.equal(formatCycleStartProjectPool(unobserved), "Nicht beobachtet");
@@ -19,19 +19,19 @@ test("renders cycle-start pool observations in German", () => {
     "2026-08-10T00:00:00.000Z",
   );
   assert.deepEqual(observed, {
-    cycleStartProjectPoolMicroUsdc: "70000000",
+    cycleStartProjectPoolMicroUsdg: "70000000",
     cycleStartProjectPoolObservedAt: "2026-08-10T00:00:00.000Z",
   });
-  assert.match(formatCycleStartProjectPool(observed), /^70 USDC · Stand /);
+  assert.match(formatCycleStartProjectPool(observed), /^70 USDG · Stand /);
 });
 
 test("rejects malformed or partially observed cycle-start pool pairs", () => {
-  for (const [poolMicroUsdc, poolObservedAt] of [
+  for (const [poolMicroUsdg, poolObservedAt] of [
     [null, "2026-08-10T00:00:00.000Z"],
     ["70000000", null],
   ]) {
     assert.throws(
-      () => decodeCycleStartProjectPool(poolMicroUsdc, poolObservedAt),
+      () => decodeCycleStartProjectPool(poolMicroUsdg, poolObservedAt),
       { message: "Dashboard-Daten sind ungültig oder nicht verfügbar." },
     );
   }

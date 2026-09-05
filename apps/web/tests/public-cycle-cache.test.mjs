@@ -7,7 +7,7 @@ const publicStatus = {
   schemaVersion: 3,
   profile: "testnet",
   network: {
-    ethereum: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
+    evm: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
     solana: {
       name: "devnet",
       genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -111,7 +111,7 @@ test("isolates cache and in-flight loads by protected profile", async () => {
     ...publicStatus,
     profile: "mainnet",
     network: {
-      ethereum: { name: "mainnet", chainId: 1, label: "Ethereum" },
+      evm: { name: "robinhood", chainId: 4663, label: "Robinhood Chain" },
       solana: {
         name: "mainnet-beta",
         genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",

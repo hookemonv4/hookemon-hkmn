@@ -73,13 +73,13 @@ test("keeps operator commands auditable, concurrency-safe and execution-free", a
   assert.match(source, /type:\s*["']skip-next-cycle["']/);
   assert.match(source, /\/operator\/api\/dashboard/);
   assert.match(source, /downloadCommunityCard/);
-  assert.match(source, /cycleStartProjectPoolMicroUsdc/);
+  assert.match(source, /cycleStartProjectPoolMicroUsdg/);
   assert.match(source, /latestCycleTopAllocations/);
   assert.match(source, /historyComplete/);
   assert.doesNotMatch(source, />Cumulative</);
   assert.match(source, /manualPackOrders:/);
   assert.match(source, /quantityFor\(pack\.id\)/);
-  assert.match(source, /parseGermanUsdc\(form\.maxUnitPriceMicroUsdc\)/);
+  assert.match(source, /parseGermanUsdg\(form\.maxUnitPriceMicroUsdg\)/);
   assert.match(source, /configurationSnapshotFromForm/);
   assert.match(source, /commandConfirmation/);
   assert.match(source, /Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet/);
@@ -119,7 +119,7 @@ test("renders complete and truthful German Holder Rewards accounting from dashbo
     "Angebot ausgehender Transfer",
     "Angebot Rücktransfer",
     "Angebot Collector-API",
-    "Angebot Ethereum-Netzwerk",
+    "Angebot EVM-Netzwerk",
     "Angebot Solana-Netzwerk",
     "Angebot Slippage",
     "Geschützte Kostenprognose",
@@ -140,12 +140,12 @@ test("renders complete and truthful German Holder Rewards accounting from dashbo
   assert.match(source, /Bestätigte Belege stehen aus/);
   assert.match(source, /In dieser Prüfung nicht ausgeführt/);
   assert.doesNotMatch(source, /label="Rewards paid"/);
-  assert.match(source, /historicalMicroUsdc/);
+  assert.match(source, /historicalMicroUsdg/);
   assert.match(source, /Historie unvollständig/);
   assert.match(source, /Gebührenbeleg nicht verfügbar/);
   assert.match(source, /Lamports/);
   assert.match(source, /Bezahlt von/);
-  assert.match(source, /decodeLegacyRoundAccounting\(raw, paidMicroUsdc\)/);
+  assert.match(source, /decodeLegacyRoundAccounting\(raw, paidMicroUsdg\)/);
   assert.match(source, /decodeRoundAccounting/);
   assert.doesNotMatch(source, /label="(?:Donation|Spende|Guaranteed profit|Holder Rewards)"/i);
 });
@@ -172,7 +172,7 @@ test("shows the cycle-start pool only with an observation timestamp", async () =
   assert.match(poolSource, /\(decodedPool === null\) !== \(decodedObservedAt === null\)/);
   assert.doesNotMatch(
     source,
-    /cycleStartProjectPoolMicroUsdc \?\? ["']0["']/,
+    /cycleStartProjectPoolMicroUsdg \?\? ["']0["']/,
   );
 });
 
@@ -211,7 +211,7 @@ test("provides live cards and a German filterable card history", async () => {
   ]) assert.match(source, new RegExp(text));
   assert.match(source, /\/operator\/api\/cards/);
   assert.match(source, /encodeURIComponent/);
-  assert.match(source, /cardResultMicroUsdc/);
+  assert.match(source, /cardResultMicroUsdg/);
   assert.match(source, /alt=""/);
   assert.match(source, /card\.cardName/);
   assert.match(source, /AbortController/);

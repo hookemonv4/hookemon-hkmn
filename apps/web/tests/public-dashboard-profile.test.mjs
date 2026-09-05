@@ -9,7 +9,7 @@ import {
 test("constructs only canonical explorer transaction URLs", () => {
   assert.equal(
     dashboardExplorerHref("testnet", {
-      chain: "ethereum",
+      chain: "evm",
       purpose: "reward-settlement",
       id: `0x${"ab".repeat(32)}`,
     }),
@@ -39,7 +39,7 @@ test("rejects profile and transaction injection", () => {
   }
   assert.throws(
     () => dashboardExplorerHref("testnet", {
-      chain: "ethereum",
+      chain: "evm",
       purpose: "reward-settlement",
       id: "https://evil.example",
     }),

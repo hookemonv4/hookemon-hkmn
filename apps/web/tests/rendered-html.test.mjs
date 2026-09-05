@@ -331,7 +331,7 @@ test("renders a complete and truthful latest Holder Rewards round", async () => 
     "Quoted outbound bridge",
     "Quoted inbound bridge",
     "Quoted Collector API",
-    "Quoted Ethereum network",
+    "Quoted EVM network",
     "Quoted Solana network",
     "Quoted slippage",
     "Protected cost forecast",
@@ -360,7 +360,7 @@ test("renders a complete and truthful latest Holder Rewards round", async () => 
   assert.match(source, /Image pending/);
   assert.match(
     source,
-    /<span>Paid<\/span>[\s\S]*roundAccounting\s*\?[\s\S]*roundAccounting\.paidHolderRewardsMicroUsdc[\s\S]*roundAccounting\.distributionStatus/,
+    /<span>Paid<\/span>[\s\S]*roundAccounting\s*\?[\s\S]*roundAccounting\.paidHolderRewardsMicroUsdg[\s\S]*roundAccounting\.distributionStatus/,
   );
   assert.doesNotMatch(source, /label="(?:Donation|Spende|Guaranteed profit|Holder Rewards)"/i);
 });

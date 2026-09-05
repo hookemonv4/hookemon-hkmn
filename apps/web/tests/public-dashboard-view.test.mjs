@@ -11,7 +11,7 @@ import * as dashboardView from "../lib/public-dashboard-view.ts";
 import { projectPublicCycle } from "../../../packages/domain/src/cycle-status.js";
 
 const TESTNET_NETWORK = {
-  ethereum: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
+  evm: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
   solana: {
     name: "devnet",
     genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -64,12 +64,12 @@ const validCycleStatus = {
       productId: `pokemon-${index}`,
       rarity: "rare",
     })),
-    returnedMicroUsdc: "500000",
+    returnedMicroUsdg: "500000",
     rewardStatus: "complete",
     startedAt: "2026-08-19T10:49:00.000Z",
     updatedAt: "2026-08-19T11:00:00.000Z",
-    spentMicroUsdc: "700000",
-    paidMicroUsdc: "500000",
+    spentMicroUsdg: "700000",
+    paidMicroUsdg: "500000",
   },
 };
 
@@ -84,16 +84,16 @@ const validCommunitySnapshot = {
   delayed: false,
   poolObservedAt: "2026-08-19T10:59:00.000Z",
   metrics: {
-    latestObservedProjectPoolMicroUsdc: "1000000",
-    totalCycleFundingMicroUsdc: "900000",
-    totalCollectorSpendMicroUsdc: "700000",
-    totalBuybacksReturnedMicroUsdc: "500000",
-    totalBridgedBackMicroUsdc: "500000",
-    totalRewardsPaidMicroUsdc: "500000",
-    totalRewardsDeferredMicroUsdc: "0",
-    totalQuotedOperatingCostsMicroUsdc: "10000",
-    latestRetainedReserveMicroUsdc: "40000",
-    latestCycleReserveTargetMicroUsdc: "50000",
+    latestObservedProjectPoolMicroUsdg: "1000000",
+    totalCycleFundingMicroUsdg: "900000",
+    totalCollectorSpendMicroUsdg: "700000",
+    totalBuybacksReturnedMicroUsdg: "500000",
+    totalBridgedBackMicroUsdg: "500000",
+    totalRewardsPaidMicroUsdg: "500000",
+    totalRewardsDeferredMicroUsdg: "0",
+    totalQuotedOperatingCostsMicroUsdg: "10000",
+    latestRetainedReserveMicroUsdg: "40000",
+    latestCycleReserveTargetMicroUsdg: "50000",
     completedCycles: 3,
     skippedCycles: 1,
     openedPacks: 4,
@@ -103,7 +103,7 @@ const validCommunitySnapshot = {
     status: "complete",
     reason: null,
     updatedAt: "2026-08-19T11:00:00.000Z",
-    paidMicroUsdc: "500000",
+    paidMicroUsdg: "500000",
     payoutRecipientCount: 2,
     transactions: [],
   },
@@ -170,10 +170,10 @@ test("makes pause, skip, deferred reward, mismatch, and stale data explicit", ()
         openedBoosters: 0,
         actions: [],
         cards: [],
-        returnedMicroUsdc: null,
+        returnedMicroUsdg: null,
         rewardStatus: null,
-        spentMicroUsdc: null,
-        paidMicroUsdc: null,
+        spentMicroUsdg: null,
+        paidMicroUsdg: null,
       },
     },
     community: validCommunitySnapshot,
@@ -192,10 +192,10 @@ test("makes pause, skip, deferred reward, mismatch, and stale data explicit", ()
         plannedBoosters: 0,
         openedBoosters: 0,
         cards: [],
-        returnedMicroUsdc: null,
+        returnedMicroUsdg: null,
         rewardStatus: null,
-        spentMicroUsdc: null,
-        paidMicroUsdc: null,
+        spentMicroUsdg: null,
+        paidMicroUsdg: null,
       },
     },
     community: validCommunitySnapshot,
@@ -208,7 +208,7 @@ test("makes pause, skip, deferred reward, mismatch, and stale data explicit", ()
   const deferred = buildPublicCycleProcess({
     status: {
       ...validCycleStatus,
-      cycle: { ...validCycleStatus.cycle, rewardStatus: "payout-deferred", paidMicroUsdc: null },
+      cycle: { ...validCycleStatus.cycle, rewardStatus: "payout-deferred", paidMicroUsdg: null },
     },
     community: validCommunitySnapshot,
   });
@@ -330,17 +330,17 @@ test("requires a real payout amount and never treats allocations as payments", (
   assert.equal(dashboardView.hasLatestPayoutFacts(null), false);
   assert.equal(dashboardView.hasLatestPayoutFacts({
     ...validCommunitySnapshot.latestCycle,
-    paidMicroUsdc: null,
+    paidMicroUsdg: null,
     payoutRecipientCount: 0,
   }), false);
   assert.equal(dashboardView.hasLatestPayoutFacts({
     ...validCommunitySnapshot.latestCycle,
-    paidMicroUsdc: "0",
+    paidMicroUsdg: "0",
     payoutRecipientCount: 0,
   }), true);
   assert.equal(dashboardView.hasLatestPayoutFacts({
     ...validCommunitySnapshot.latestCycle,
-    paidMicroUsdc: null,
+    paidMicroUsdg: null,
     payoutRecipientCount: 2,
   }), false);
 });
@@ -356,8 +356,8 @@ test("renders the real publisher holder payout as an available completed step", 
       status: "complete",
       settlement: {
         status: "reconciled",
-        paidThisCycleMicroUsdc: "70000000",
-        deferredThisCycleMicroUsdc: "0",
+        paidThisCycleMicroUsdg: "70000000",
+        deferredThisCycleMicroUsdg: "0",
       },
     },
   });
@@ -367,6 +367,6 @@ test("renders the real publisher holder payout as an available completed step", 
     community: validCommunitySnapshot,
   }).find(({ id }) => id === "holders");
   assert.equal(holderStep.state, "complete");
-  assert.equal(holderStep.amountText, "70000000 micro-USDC");
+  assert.equal(holderStep.amountText, "70000000 micro-USDG");
   assert.notEqual(holderStep.amountText, "Unavailable");
 });

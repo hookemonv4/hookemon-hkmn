@@ -13,10 +13,10 @@ function fixture() {
       generatedAt, nextCycleAt, countdownSeconds: 1200, cycle: null },
     community: { schemaVersion: 4, profile: 'testnet', badge: 'TESTNET', network, historyComplete: false,
       generatedAt, nextCycleAt, delayed: false, poolObservedAt: null,
-      metrics: { latestObservedProjectPoolMicroUsdc: null, totalCycleFundingMicroUsdc: '0',
-        totalCollectorSpendMicroUsdc: '0', totalBuybacksReturnedMicroUsdc: '0', totalBridgedBackMicroUsdc: '0',
-        totalRewardsPaidMicroUsdc: '0', totalRewardsDeferredMicroUsdc: '0', totalQuotedOperatingCostsMicroUsdc: '0',
-        latestRetainedReserveMicroUsdc: '0', latestCycleReserveTargetMicroUsdc: '0',
+      metrics: { latestObservedProjectPoolMicroUsdg: null, totalCycleFundingMicroUsdg: '0',
+        totalCollectorSpendMicroUsdg: '0', totalBuybacksReturnedMicroUsdg: '0', totalBridgedBackMicroUsdg: '0',
+        totalRewardsPaidMicroUsdg: '0', totalRewardsDeferredMicroUsdg: '0', totalQuotedOperatingCostsMicroUsdg: '0',
+        latestRetainedReserveMicroUsdg: '0', latestCycleReserveTargetMicroUsdg: '0',
         completedCycles: 0, skippedCycles: 0, openedPacks: 0 }, latestCycle: null, cards: [] },
   };
 }
@@ -31,24 +31,24 @@ test('incomplete history and missing accounting stay unavailable', () => {
 test('partial payout is never presented as a completed payment', () => {
   const { status, community } = fixture();
   community.latestCycle = { cycleId: 'cycle-1', status: 'pending', reason: null, updatedAt: community.generatedAt,
-    paidMicroUsdc: '500000', payoutRecipientCount: 2, roundAccounting: null, transactions: [] };
+    paidMicroUsdg: '500000', payoutRecipientCount: 2, roundAccounting: null, transactions: [] };
   assert.equal(cycleRecord(status, community).paid, '—');
   community.latestCycle.status = 'complete';
-  assert.equal(cycleRecord(status, community).paid, '0.5 USDC');
+  assert.equal(cycleRecord(status, community).paid, '0.5 USDG');
 });
 test('transaction links use the validated chain and profile', () => {
   const { status, community } = fixture();
   const id = '0x' + 'ab'.repeat(32);
   community.latestCycle = { cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: community.generatedAt,
-    paidMicroUsdc: null, payoutRecipientCount: 0, roundAccounting: null,
-    transactions: [{ chain: 'ethereum', purpose: 'reward-settlement', id }] };
+    paidMicroUsdg: null, payoutRecipientCount: 0, roundAccounting: null,
+    transactions: [{ chain: 'evm', purpose: 'reward-settlement', id }] };
   assert.equal(cycleRecord(status, community).transactions[0].url, 'https://sepolia.etherscan.io/tx/' + id);
   community.latestCycle.transactions[0].id = 'javascript:alert(1)';
   assert.throws(() => cycleRecord(status, community), /PUBLIC_DASHBOARD_INVALID/);
 });
 test('cross-network observations are rejected before presentation', () => {
   const { status, community } = fixture();
-  community.network = { ...community.network, ethereum: { ...community.network.ethereum, chainId: 4663 } };
+  community.network = { ...community.network, evm: { ...community.network.evm, chainId: 4663 } };
   assert.throws(() => cycleRecord(status, community), /PUBLIC_DASHBOARD_INVALID/);
 });
 test('information page import does not start the homepage dashboard poller', async () => {
