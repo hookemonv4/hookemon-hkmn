@@ -407,23 +407,41 @@ test('requires source-bundle bytes to match the claimed source commit', () => {
   );
 });
 
-test('builds directory coverage from the claimed Git tree instead of dirty worktree bytes', () => {
-  const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const metadataPath = 'release/phase3/preflight/README.md';
+test('builds directory coverage from the claimed Git tree instead of dirty worktree bytes', (t) => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'programmable-source-bundle-git-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const gitIdentity = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+  const git = (...args) => execFileSync('git', ['-C', directory, ...args], { encoding: 'utf8', env: { ...process.env, ...gitIdentity } });
+
+  mkdirSync(resolve(directory, 'source'), { recursive: true });
+  const metadataPath = 'metadata/mark.png';
+  mkdirSync(resolve(directory, dirname(metadataPath)), { recursive: true });
+  writeFileSync(resolve(directory, 'source', 'a.sol'), 'root');
+  writeFileSync(resolve(directory, metadataPath), 'committed-image-bytes');
+
+  git('init', '--quiet', '--initial-branch=main');
+  git('add', '-A');
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'base');
+  const commit = git('rev-parse', 'HEAD').trim();
+
+  // Dirty the tracked metadata file on disk without committing: the manifest must still bind to
+  // the committed blob, since a locally edited file must not be able to change a claimed digest.
+  writeFileSync(resolve(directory, metadataPath), 'dirty-uncommitted-bytes');
+
   const manifest = buildSourceBundleManifest({
-    root,
+    root: directory,
     sourceCommit: commit,
-    sourcePaths: ['packages/contracts/src/access'],
-    standardJsonInputPaths: ['release/phase3/build-info/launch.json'],
-    compilerArtifactPaths: ['release/phase3/artifacts/hook.json'],
-    attestationEvidencePaths: ['release/phase3/admission/provider-documents.json'],
+    sourcePaths: ['source'],
+    standardJsonInputPaths: [],
+    compilerArtifactPaths: [],
+    attestationEvidencePaths: [],
     metadataImagePath: metadataPath,
   });
   const metadata = manifest.entries.find(({ path }) => path === metadataPath);
-  const committedBytes = execFileSync('git', ['-C', root, 'show', `${commit}:${metadataPath}`], { encoding: 'buffer' });
-  const worktreeBytes = readFileSync(resolve(root, metadataPath));
+  const committedBytes = Buffer.from('committed-image-bytes');
+  const worktreeBytes = readFileSync(resolve(directory, metadataPath));
 
-  assert.ok(manifest.entries.some(({ path }) => path === 'packages/contracts/src/access/MoneyRoles.sol'));
+  assert.ok(manifest.entries.some(({ path }) => path === 'source/a.sol'));
   assert.equal(metadata.contentSha256, sha256(committedBytes));
   assert.notEqual(metadata.contentSha256, sha256(worktreeBytes));
 });
