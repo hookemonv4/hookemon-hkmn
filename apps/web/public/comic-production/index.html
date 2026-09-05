@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#fff9ef" />
+    <title>Hookemon — Every pack. A new adventure.</title>
+    <meta
+      name="description"
+      content="Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs."
+    />
+    <link rel="icon" type="image/svg+xml" href="/hookemon-symbol.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Lilita+One&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/comic-production/adventure.css" />
+    <link rel="preload" href="/comic/landscape.png" as="image" />
+    <link rel="preload" href="/hookemon-symbol.svg" as="image" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary navigation">
+        <a class="brand" href="#top" aria-label="Hookemon home"
+          ><img src="/hookemon-logo.svg" width="185" height="43" alt="Hookemon"
+        /></a>
+        <div class="nav-links">
+          <a href="#machine">Dashboard</a><a href="#journey">The loop</a
+          ><a href="#cards">Cards</a><a href="/packs">Packs</a><a href="#faq">FAQ</a>
+        </div>
+        <div class="nav-actions">
+          <a
+            class="social-link"
+            href="https://x.com/hookemon4"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Hookemon on X"
+            ><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path
+                d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
+              /></svg
+          ></a>
+          <a class="social-link partner-link" href="https://www.fomoapp.net/" target="_blank" rel="noopener noreferrer" aria-label="Open Fomo" title="Fomo · platform homepage">
+            <img src="/partners/fomo.svg" width="42" height="24" alt="" />
+          </a>
+          <a class="social-link partner-link" href="https://dexscreener.com/" target="_blank" rel="noopener noreferrer" aria-label="Open DEX Screener" title="DEX Screener · platform homepage">
+            <img class="dex-mark" src="/partners/dexscreener.png" width="30" height="30" alt="" />
+          </a>
+          <a class="nav-cycle" href="#machine" aria-label="Next cycle: schedule not reported. Open dashboard." id="navCycle" title="Schedule not reported">
+            <span class="nav-cycle-label">Next cycle <span aria-hidden="true">◷</span></span>
+            <span id="navCountdown" class="nav-cycle-value">--:--</span>
+          </a>
+        </div>
+      </nav>
+    </header>
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-landscape" aria-hidden="true"></div>
+        <div class="shell hero-layout">
+          <div class="hero-copy">
+            <p class="eyebrow">
+              <span class="little-star" aria-hidden="true">✦</span> A new kind
+              of card adventure
+            </p>
+            <h1 id="hero-title">
+              Every pack.<br /><span>A new<br />adventure.</span>
+            </h1>
+            <p class="hero-description">
+              Hookemon buys gacha card packs, opens them, sells the cards and
+              pays the proceeds to HKMN holders. Trading fees fund the packs.
+            </p>
+            <div class="hero-actions">
+              <a class="text-link" href="#journey"
+                >See how it works <span aria-hidden="true">↓</span></a
+              >
+            </div>
+          </div>
+          <div
+            class="hero-art"
+            aria-label="A gold Hookemon coin floating over an illustrated landscape"
+          >
+            <div class="coin-orbit" aria-hidden="true">
+              <span></span><span></span>
+            </div>
+            <span class="art-star art-star-one" aria-hidden="true">✦</span
+            ><span class="art-star art-star-two" aria-hidden="true">✧</span>
+            <button class="hero-coin" type="button" aria-label="Pause coin rotation. Drag to spin, or use left and right arrow keys." aria-pressed="false">
+              <span class="coin-spinner">
+                <span class="coin-face coin-front"><img src="/hookemon-symbol.svg" width="347" height="347" alt="Gold HKMN coin with the original Hookemon mark" draggable="false" /></span>
+                <span class="coin-face coin-back" aria-hidden="true"><img src="/hookemon-symbol.svg" width="347" height="347" alt="" draggable="false" /></span>
+              </span>
+            </button>
+            <div class="coin-shadow" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="hero-bottom shell">
+          <a href="#machine"
+            ><span class="scroll-circle" aria-hidden="true">↓</span> The
+            adventure is just below</a
+          ><span class="hero-edition"
+            >HKMN <span aria-hidden="true">✦</span> THE CARD COLLECTOR'S
+            COIN</span
+          >
+        </div>
+      </section>
+
+      <section
+        class="dashboard section shell"
+        id="machine"
+        aria-labelledby="dashboard-title"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">01 / The dashboard</p>
+            <h2 id="dashboard-title">Keep an eye on<br />the adventure.</h2>
+          </div>
+          <p class="section-intro">
+            The pot, the pulls, the payouts.<br /> Follow every chapter in one
+            place. <a class="section-detail-link" href="/cycles">Explore cycle records →</a>
+          </p>
+        </div>
+        <div class="dashboard-console">
+          <div class="console-top">
+            <div class="console-label">
+              <img
+                src="/hookemon-symbol.svg"
+                alt=""
+                width="28"
+                height="28"
+              /><span>Cycle overview</span>
+            </div>
+            <div class="status-pill">
+              <span aria-hidden="true"></span
+              ><span id="dashboardStatus" role="status"
+                >Connecting to cycle data…</span
+              >
+            </div>
+          </div>
+          <div class="metrics-grid">
+            <article class="metric metric-pot">
+              <span class="metric-label"
+                >Current pot <span aria-hidden="true">✦</span></span
+              ><strong id="metricPool">—</strong>
+              <p id="metricPoolNote">Awaiting a verified pool observation</p>
+            </article>
+            <article class="metric">
+              <span class="metric-label"
+                >Next cycle <span aria-hidden="true">◷</span></span
+              ><strong id="metricCountdown">--:--</strong>
+              <p id="metricCountdownNote">Schedule not reported</p>
+            </article>
+            <article class="metric">
+              <span class="metric-label"
+                >Latest cycle payout <span aria-hidden="true">↗</span></span
+              ><strong id="metricPaid">—</strong>
+              <p id="metricPaidNote">Awaiting verified payout data</p>
+            </article>
+            <article class="metric">
+              <span class="metric-label"
+                >Average per recipient <span aria-hidden="true">◎</span></span
+              ><strong id="metricAverage">—</strong>
+              <p id="metricAverageNote">Awaiting verified payout data</p>
+            </article>
+          </div>
+          <div
+            class="metrics-grid history-metrics"
+            aria-label="Verified cycle totals"
+          >
+            <article class="metric">
+              <span class="metric-label">Total actually paid</span>
+              <strong id="metricTotalPaid">—</strong>
+              <p data-history-note>Awaiting verified history</p>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Completed cycles</span>
+              <strong id="metricCompletedCycles">—</strong>
+              <p data-history-note>Awaiting verified history</p>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Skipped cycles</span>
+              <strong id="metricSkippedCycles">—</strong>
+              <p data-history-note>Awaiting verified history</p>
+            </article>
+            <article class="metric">
+              <span class="metric-label">Packs opened</span>
+              <strong id="metricPacks">—</strong>
+              <p data-history-note>Awaiting verified history</p>
+            </article>
+          </div>
+          <div class="cycle-track" aria-label="Current cycle progress">
+            <div class="cycle-step" data-step="fees" data-state="waiting">
+              <span class="step-dot">1</span>
+              <div>
+                <strong>Fees collected</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+            <div class="cycle-step" data-step="budget" data-state="waiting">
+              <span class="step-dot">2</span>
+              <div>
+                <strong>Pack budget</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+            <div class="cycle-step" data-step="packs" data-state="waiting">
+              <span class="step-dot">3</span>
+              <div>
+                <strong>Packs bought</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+            <div class="cycle-step" data-step="cards" data-state="waiting">
+              <span class="step-dot">4</span>
+              <div>
+                <strong>Cards revealed</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+            <div class="cycle-step" data-step="sales" data-state="waiting">
+              <span class="step-dot">5</span>
+              <div>
+                <strong>Cards sold</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+            <div class="cycle-step" data-step="return" data-state="waiting">
+              <span class="step-dot">6</span>
+              <div>
+                <strong>Proceeds back</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+            <div class="cycle-step" data-step="holders" data-state="waiting">
+              <span class="step-dot">7</span>
+              <div>
+                <strong>Holders paid</strong><span class="s">—</span
+                ><span class="w">Waiting</span>
+              </div>
+            </div>
+          </div>
+          <div class="console-bottom">
+            <span><strong id="metricCards">—</strong> recent cards</span
+            ><span
+              ><strong id="metricRecipients">—</strong> payout recipients</span
+            ><span class="console-cycle"
+              ><span id="headerCycleState">Schedule not reported</span
+              ><strong id="headerCountdown">--:--</strong></span
+            >
+          </div>
+        </div>
+        <div class="recent-pulls">
+          <div class="recent-heading">
+            <h3>The latest pulls</h3>
+            <span>Verified cycle history</span>
+          </div>
+          <div id="latestCards" class="latest-cards">
+            <p class="empty-pulls">
+              <span class="empty-card" aria-hidden="true">✦</span> No verified
+              card results reported. Observed pulls will appear here.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="journey-intro shell" aria-labelledby="journey-heading">
+        <p class="eyebrow">02 / Follow the loop</p>
+        <h2 id="journey-heading">
+          Small beginnings.<br /><span class="heading-accent"
+            >Big card energy.</span
+          >
+        </h2>
+        <p>
+          From a trading fee to the next reveal.<br /> Scroll to follow one
+          illustrated cycle.
+        </p>
+        <a
+          href="#journey"
+          class="round-arrow"
+          aria-label="Begin the illustrated cycle"
+          >↓</a
+        >
+      </section>
+      <section
+        class="journey"
+        id="journey"
+        aria-label="Interactive explanation of a Hookemon cycle"
+      >
+        <div class="scene-sticky" id="journey-scene" data-phase="0">
+          <div class="scene-landscape" aria-hidden="true"></div>
+          <div class="scene-wash" aria-hidden="true"></div>
+          <div class="scene-top shell">
+            <span class="scene-label"
+              ><span aria-hidden="true">✦</span> The Hookemon loop</span
+            ><span class="example-label"
+              >Illustrative cycle · example cards</span
+            >
+          </div>
+          <div class="scene-layout shell">
+            <div class="story-panel">
+              <span class="story-counter"
+                ><span id="story-index">01</span><span>/ 05</span></span
+              >
+              <h2 id="story-title">Fees fund<br />the adventure.</h2>
+              <p id="story-copy">
+                Each eligible swap contributes to the next chapter. Of the 3,00
+                % auf Brutto‑Volumen fee, 2,50 % funds card packs.
+              </p>
+              <div class="story-footnote">
+                <span aria-hidden="true">↳</span> Scroll to see what happens
+                next
+              </div>
+            </div>
+            <div class="story-stage">
+              <div class="stage-halo" aria-hidden="true"></div>
+              <div
+                class="story-object story-coin"
+                id="story-coin"
+                aria-hidden="true"
+              >
+                <span class="coin-display"><span class="coin-face"><img src="/hookemon-symbol.svg" width="347" height="347" alt="" draggable="false" /></span></span>
+                <span class="floating-label">Trading fees → pack budget</span>
+              </div>
+              <div
+                class="story-object story-pack"
+                id="story-pack"
+                aria-hidden="true"
+              >
+                <div class="pack-seal pack-seal-top"></div>
+                <div class="pack-front">
+                  <img class="pack-logo" src="/hookemon-logo.svg" alt="" /><span
+                    class="pack-subtitle"
+                    >THE CARD ADVENTURE</span
+                  ><img
+                    class="pack-mark"
+                    src="/hookemon-symbol.svg"
+                    alt=""
+                  /><span class="pack-name">A little<br />mystery.</span
+                  ><span class="pack-footer"
+                    >GACHA CARD PACK <span>✦</span></span
+                  >
+                </div>
+                <div class="pack-seal pack-seal-bottom"></div>
+              </div>
+              <div class="story-object story-cards" id="story-cards">
+                <figure class="scene-card scene-card-left js-tilt">
+                  <div data-tilt-surface>
+                    <img
+                      src="https://d1xpxki1g4htqu.cloudfront.net/G7-UpVecMsF9fyxKMoVun6yRqahg-2fDLtHvwS9Lt34"
+                      alt="Example Rayquaza Gold Star card, EX Deoxys, graded BGS 8"
+                      width="250"
+                      height="350"
+                      loading="lazy"
+                    />
+                    <div class="foil" aria-hidden="true"></div>
+                  </div>
+                </figure>
+                <figure class="scene-card scene-card-right js-tilt">
+                  <div data-tilt-surface>
+                    <img
+                      src="https://d1xpxki1g4htqu.cloudfront.net/-bohVu_T0vqivMHLHBvJq46JcuPFl0N3g-QWI2uIBHY"
+                      alt="Example Poncho-Wearing Pikachu card, Japanese XY Promo, graded PSA 10"
+                      width="250"
+                      height="350"
+                      loading="lazy"
+                    />
+                    <div class="foil" aria-hidden="true"></div>
+                  </div>
+                </figure>
+                <figure class="scene-card scene-card-center js-tilt">
+                  <div data-tilt-surface>
+                    <img
+                      src="https://d1xpxki1g4htqu.cloudfront.net/A7Vvp6B8ov3_jFmjR-gFmW2wf3J93_oL67PgCYK8Sn4"
+                      alt="Example Lugia-Holo SL7 card, Call of Legends, graded PSA 10"
+                      width="250"
+                      height="350"
+                      loading="lazy"
+                    />
+                    <div class="foil" aria-hidden="true"></div>
+                  </div>
+                  <figcaption>
+                    THE REVEAL <span aria-hidden="true">✦</span>
+                  </figcaption>
+                </figure>
+              </div>
+              <div
+                class="story-object story-payout"
+                id="story-payout"
+                aria-hidden="true"
+              >
+                <div class="payout-coin">
+                  <span class="coin-display"><span class="coin-face"><img src="/hookemon-symbol.svg" width="347" height="347" alt="" draggable="false" /></span></span>
+                </div>
+                <div class="payout-lines"><i></i><i></i><i></i></div>
+                <div class="holder-row">
+                  <div>
+                    <img src="/hookemon-symbol.svg" alt="" /><span
+                      >HKMN holder</span
+                    >
+                  </div>
+                  <div>
+                    <img src="/hookemon-symbol.svg" alt="" /><span
+                      >HKMN holder</span
+                    >
+                  </div>
+                  <div>
+                    <img src="/hookemon-symbol.svg" alt="" /><span
+                      >HKMN holder</span
+                    >
+                  </div>
+                </div>
+                <span class="floating-label">Proceeds → eligible holders</span>
+              </div>
+              <span class="stage-spark stage-spark-a" aria-hidden="true">✦</span
+              ><span class="stage-spark stage-spark-b" aria-hidden="true"
+                >✧</span
+              >
+              <div class="buyback-label" aria-hidden="true">
+                Cards sold <span>→</span> Proceeds returned
+              </div>
+            </div>
+          </div>
+          <div class="scene-bottom shell">
+            <div class="scene-controls" aria-label="Choose a chapter">
+              <button type="button" data-scene-stage="0" aria-pressed="true">
+                <span>01</span> Fees</button
+              ><button type="button" data-scene-stage="1" aria-pressed="false">
+                <span>02</span> Packs</button
+              ><button type="button" data-scene-stage="2" aria-pressed="false">
+                <span>03</span> Cards</button
+              ><button type="button" data-scene-stage="3" aria-pressed="false">
+                <span>04</span> Buyback</button
+              ><button type="button" data-scene-stage="4" aria-pressed="false">
+                <span>05</span> Holders
+              </button>
+            </div>
+            <button
+              type="button"
+              class="replay-button"
+              data-replay
+              aria-label="Replay the illustrated cycle"
+            >
+              ↺ <span>Replay</span>
+            </button>
+          </div>
+          <div class="journey-progress-track" aria-hidden="true">
+            <div id="journey-progress"></div>
+          </div>
+        </div>
+      </section>
+
+      <details class="story-transcript shell">
+        <summary>Read the full cycle <span aria-hidden="true">+</span></summary>
+        <ol>
+          <li>
+            <strong>Fees fund the adventure.</strong> Eligible trades contribute
+            a 3,00 % auf Brutto‑Volumen fee. The 2,50 % pack allocation funds
+            card packs.
+          </li>
+          <li>
+            <strong>A pack is opened.</strong> Available funding is used to buy
+            gacha card packs, which are then opened.
+          </li>
+          <li>
+            <strong>The cards are revealed.</strong> Each reveal enters the
+            cycle history. The cards in this illustration are examples.
+          </li>
+          <li>
+            <strong>The cards are sold.</strong> Sale proceeds return to the
+            cycle. Actual proceeds depend on the cards and available sale terms.
+          </li>
+          <li>
+            <strong>Proceeds reach eligible holders.</strong> After costs and
+            reserves, available proceeds can be distributed to eligible HKMN
+            holders. Amounts and timing vary.
+          </li>
+        </ol>
+      </details>
+
+      <section
+        class="collection section shell"
+        id="cards"
+        aria-labelledby="cards-title"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">03 / It's all about the cards</p>
+            <h2 id="cards-title">
+              That “what's inside?”<br />kind of feeling.
+            </h2>
+          </div>
+          <div class="section-intro">
+            <span class="outline-label">A peek inside the card universe</span>
+            <p>
+              Familiar faces. Collectible cards.<br /> Every reveal has a story.
+            </p>
+          </div>
+        </div>
+        <div class="card-collection">
+          <figure class="collectible-card js-tilt card-lugia">
+            <div class="card-display">
+              <span class="card-corner">✦</span
+              ><span class="collector-star" aria-hidden="true">✦</span
+              ><span class="chase-ribbon">Chase card <span aria-hidden="true">✦</span></span>
+              <div class="card-image" data-tilt-surface>
+                <img
+                  src="https://d1xpxki1g4htqu.cloudfront.net/A7Vvp6B8ov3_jFmjR-gFmW2wf3J93_oL67PgCYK8Sn4"
+                  alt="Lugia-Holo SL7 Pokémon card in a PSA 10 case"
+                  width="250"
+                  height="350"
+                  loading="lazy"
+                />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">LUGIA-HOLO · #SL7</span>
+            </div>
+            <figcaption>
+              <p class="chase-kicker">The collection’s centerpiece</p>
+              <div>
+                <h3>
+                  Lugia <span class="tiny-star" aria-hidden="true">✦</span>
+                </h3>
+                <p>Call of Legends · 2011</p>
+              </div>
+              <span class="grade">PSA 10</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/H1sSmJcCVdepcPQTVgD8JkjiMzn1AMRJ8i5HqawssH47" target="_blank" rel="noopener noreferrer" aria-label="View 2011 #SL7 Lugia-Holo PSA 10 Call of Legends valuation on Collector Crypt">
+                <strong>$250,000 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+              <p class="chase-detail">Highest insured value among the cards shown here. An illustrative example; pack contents vary.</p>
+            </figcaption>
+          </figure>
+          <figure class="collectible-card js-tilt card-rayquaza">
+            <div class="card-display">
+              <span class="card-corner">01</span>
+              <div class="card-image" data-tilt-surface>
+                <img
+                  src="https://d1xpxki1g4htqu.cloudfront.net/G7-UpVecMsF9fyxKMoVun6yRqahg-2fDLtHvwS9Lt34"
+                  alt="Rayquaza Gold Star Pokémon card in a BGS 8 case"
+                  width="250"
+                  height="350"
+                  loading="lazy"
+                />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">GOLD STAR · #107</span>
+            </div>
+            <figcaption>
+              <div>
+                <h3>Rayquaza</h3>
+                <p>EX Deoxys · 2005</p>
+              </div>
+              <span class="grade">BGS 8</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/3A5unBCuL8hKrmqM8cpWH4C7Ly9MkGF8briwpxdCwTdM" target="_blank" rel="noopener noreferrer" aria-label="View 2005 #107 Rayquaza Gold Star HOLO R BGS 8 EX Deoxys valuation on Collector Crypt">
+                <strong>$40,000 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+            </figcaption>
+          </figure>
+          <figure class="collectible-card js-tilt card-poncho">
+            <div class="card-display">
+              <span class="card-corner">02</span>
+              <div class="card-image" data-tilt-surface>
+                <img
+                  src="https://d1xpxki1g4htqu.cloudfront.net/-bohVu_T0vqivMHLHBvJq46JcuPFl0N3g-QWI2uIBHY"
+                  alt="Poncho-Wearing Pikachu Pokémon card in a PSA 10 case"
+                  width="250"
+                  height="350"
+                  loading="lazy"
+                />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">RAYQUAZA PONCHO · #231</span>
+            </div>
+            <figcaption>
+              <div>
+                <h3>Poncho Pikachu</h3>
+                <p>Japanese XY Promo · 2016</p>
+              </div>
+              <span class="grade">PSA 10</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/6aSSRLz6eNppavyKSygZqrL3PfQU5WT5FarjwMegE14E" target="_blank" rel="noopener noreferrer" aria-label="View 2016 #231 PONCHO-WEARING PIKACHU PSA 10 POKEMON JAPANESE XY PROMO | RAYQUAZA PONCHO-WEARING PIKACHU BOX valuation on Collector Crypt">
+                <strong>$17,500 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+            </figcaption>
+          </figure>
+          <figure class="collectible-card js-tilt card-charizard">
+            <div class="card-display">
+              <span class="card-corner">03</span>
+              <div class="card-image" data-tilt-surface>
+                <img src="https://d1xpxki1g4htqu.cloudfront.net/k-xZqCMa5kCE2IxBvf682ssG8BpLTT-qp03D3wpkCFo" alt="Charizard, Skyridge · 2003, in a PSA 10 case" width="250" height="350" loading="lazy" />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">CRYSTAL HOLO · #146</span>
+            </div>
+            <figcaption>
+              <div><h3>Charizard</h3><p>Skyridge · 2003</p></div>
+              <span class="grade">PSA 10</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3" target="_blank" rel="noopener noreferrer" aria-label="View 2003 #146 Charizard-Holo PSA 10 Skyridge valuation on Collector Crypt">
+                <strong>$135,000 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+            </figcaption>
+          </figure>
+          <figure class="collectible-card js-tilt card-umbreon">
+            <div class="card-display">
+              <span class="card-corner">04</span>
+              <div class="card-image" data-tilt-surface>
+                <img src="https://d1xpxki1g4htqu.cloudfront.net/DpcxDIltAT6DxRXoxe5hxa2N1hRec_hCh7cHZC3KFFY" alt="Umbreon VMAX, Japanese Eevee Heroes · 2021, in a PSA 10 case" width="250" height="350" loading="lazy" />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">ALTERNATE ART · #095</span>
+            </div>
+            <figcaption>
+              <div><h3>Umbreon VMAX</h3><p>Japanese Eevee Heroes · 2021</p></div>
+              <span class="grade">PSA 10</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/4ERfJkc6xoh1Codq7Zo7TdeCdznYua1q15HtmBmTf6Uq" target="_blank" rel="noopener noreferrer" aria-label="View 2021 #095 Full Art/Umbreon Vmax-Hyper PSA 10 Japanese Sword &amp; Shield Eevee Heroes valuation on Collector Crypt">
+                <strong>$5,400 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+            </figcaption>
+          </figure>
+          <figure class="collectible-card js-tilt card-mewtwo">
+            <div class="card-display">
+              <span class="card-corner">05</span>
+              <div class="card-image" data-tilt-surface>
+                <img src="https://d1xpxki1g4htqu.cloudfront.net/bSiRn8DaTiIF8wOhkfyUy6b2bmMgTBlRFpUmK6aHS_s" alt="Shining Mewtwo, Neo Destiny · 2002, in a PSA 10 case" width="250" height="350" loading="lazy" />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">1ST EDITION · #109</span>
+            </div>
+            <figcaption>
+              <div><h3>Shining Mewtwo</h3><p>Neo Destiny · 2002</p></div>
+              <span class="grade">PSA 10</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/CKj6vBnWppVChNCN17F8UjQSLjmRVhxaVyVGFsbyxQDC" target="_blank" rel="noopener noreferrer" aria-label="View 2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny valuation on Collector Crypt">
+                <strong>$45,000 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+            </figcaption>
+          </figure>
+          <figure class="collectible-card js-tilt card-mew">
+            <div class="card-display">
+              <span class="card-corner">06</span>
+              <div class="card-image" data-tilt-surface>
+                <img src="https://d1xpxki1g4htqu.cloudfront.net/9weuzxf7QdOYDfRw91Ysn9UMvwCL0aE1dwgXJxwNY9M" alt="Mew Gold Star, EX Dragon Frontiers · 2006, in a PSA 9 case" width="250" height="350" loading="lazy" />
+                <div class="foil" aria-hidden="true"></div>
+              </div>
+              <span class="card-note">GOLD STAR · #101</span>
+            </div>
+            <figcaption>
+              <div><h3>Mew Gold Star</h3><p>EX Dragon Frontiers · 2006</p></div>
+              <span class="grade">PSA 9</span>
+              <a class="card-valuation" href="https://collectorcrypt.com/assets/solana/CqGUW13AarrctjQvehYAQkFE2xhYwZEG1Ti7Kxw8m237" target="_blank" rel="noopener noreferrer" aria-label="View 2006 #101 Mew-Holo Gold Star PSA 9 EX Dragon Frontiers valuation on Collector Crypt">
+                <strong>$11,500 <span>USD</span></strong>
+                <span>Collector Crypt insured value ↗</span>
+              </a>
+            </figcaption>
+          </figure>
+        </div>
+        <p class="collection-disclosure">
+          <span aria-hidden="true">✦</span> Example cards from Collector Crypt
+          inventory. These are not completed Hookemon pulls or a promise of
+          future pack contents. Values are Collector Crypt insurance valuations in USD, checked September 5, 2026, not sale prices.
+        </p>
+      </section>
+
+      <section
+        class="economics section"
+        id="economics"
+        aria-labelledby="economics-title"
+      >
+        <div class="shell economics-layout">
+          <div>
+            <p class="eyebrow">04 / The little details</p>
+            <h2 id="economics-title">The fee behind<br />the next pack.</h2>
+            <p class="economics-copy">
+              Trading fees fund the card cycle. Here is how the fee is divided,
+              before a pack is opened.
+            </p>
+            <a class="section-detail-link" href="/transparency">Sources &amp; transparency →</a>
+          </div>
+          <div class="fee-card">
+            <span class="fee-total">3,00 %</span>
+            <p lang="de" class="fee-title">3,00 % auf Brutto‑Volumen</p>
+            <div class="fee-bar" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <dl class="fee-breakdown">
+              <div>
+                <dt><span class="fee-dot programmable"></span>Programmable</dt>
+                <dd>0,10 %</dd>
+              </div>
+              <div>
+                <dt><span class="fee-dot treasury"></span>Treasury</dt>
+                <dd>0,40 %</dd>
+              </div>
+              <div>
+                <dt><span class="fee-dot packs"></span>Card packs</dt>
+                <dd>2,50 %</dd>
+              </div>
+            </dl>
+            <p class="fee-note">
+              Pack contents, sale proceeds and the timing of distributions vary.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="faq section shell" id="faq" aria-labelledby="faq-title">
+        <div class="faq-intro">
+          <p class="eyebrow">05 / Quick answers</p>
+          <h2 id="faq-title">A few things<br />before you go.</h2>
+          <p>Get to know the loop.</p>
+          <a class="section-detail-link" href="/holders">Read the holder guide →</a>
+        </div>
+        <div class="faq-list">
+          <details>
+            <summary>
+              What is Hookemon?<span aria-hidden="true">+</span>
+            </summary>
+            <p>
+              Hookemon buys gacha card packs, opens them, sells the cards and
+              pays the proceeds to HKMN holders. Trading fees fund the packs.
+            </p>
+          </details>
+          <details>
+            <summary>
+              Do I receive the cards myself?<span aria-hidden="true">+</span>
+            </summary>
+            <p>
+              The cards are part of the shared cycle. Hookemon opens the packs
+              and sells the cards; proceeds can then be distributed to eligible
+              HKMN holders. Holding HKMN does not assign a specific card to you.
+            </p>
+          </details>
+          <details>
+            <summary>
+              When does the next cycle begin?<span aria-hidden="true">+</span>
+            </summary>
+            <p>
+              The dashboard shows the next cycle time when a verified schedule
+              is available. A cycle depends on available funding and the
+              completion of its required steps. If no schedule is available, the
+              dashboard says so.
+            </p>
+          </details>
+          <details>
+            <summary>
+              How much do holders receive?<span aria-hidden="true">+</span>
+            </summary>
+            <p>
+              Distributions depend on actual card sale proceeds, costs, reserves
+              and holder eligibility. Amounts can vary, and a cycle may have no
+              distributable proceeds. The dashboard shows the latest cycle's
+              payout and average per actual recipient only when its distribution
+              is complete. Earlier payouts are included in the total when the
+              verified history is complete.
+            </p>
+          </details>
+          <details>
+            <summary>
+              Are the cards shown here real pulls?<span aria-hidden="true"
+                >+</span
+              >
+            </summary>
+            <p>
+              The cards in the illustrated loop and collection section are
+              examples from Collector Crypt inventory. Verified Hookemon pulls
+              appear separately in the dashboard when cycle data is available.
+            </p>
+          </details>
+          <details>
+            <summary>
+              How are the packs funded?<span aria-hidden="true">+</span>
+            </summary>
+            <p>
+              The trading fee is 3,00 % auf Brutto‑Volumen: 0,10 % for
+              Programmable, 0,40 % for Treasury and 2,50 % for card packs.
+              Available trading fees determine the pack budget. Card sale
+              proceeds, operating costs and reserves determine what can be
+              distributed to eligible holders.
+            </p>
+          </details>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <div class="shell">
+        <div class="footer-banner">
+          <img
+            src="/hookemon-logo.svg"
+            alt="Hookemon"
+            width="2159"
+            height="499"
+            loading="lazy"
+          />
+        </div>
+        <div class="footer-bottom">
+          <a class="brand" href="#top" aria-label="Hookemon home"
+            ><img
+              src="/hookemon-logo.svg"
+              width="160"
+              height="37"
+              alt="Hookemon"
+          /></a>
+          <p>A little curiosity goes a long way.</p>
+          <div class="footer-page-links">
+            <a href="/packs">Packs</a><a href="/cycles">Cycles</a><a href="/holders">Holders</a><a href="/transparency">Transparency</a>
+            <a href="#faq">Quick answers</a
+            ><a href="https://x.com/hookemon4" target="_blank" rel="noreferrer"
+              >Follow on X <span aria-hidden="true">↗</span></a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+    <script type="module" src="/comic-production/dashboard.mjs"></script>
+    <script type="module" src="/comic-production/motion.mjs"></script>
+  </body>
+</html>

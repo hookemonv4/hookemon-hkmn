@@ -1,0 +1,33 @@
+# Public website
+
+## Informational pages
+
+The canonical repository is `hookemonv4/hookemon-hkmn`. The website assets, configuration and provenance records live in this repository alongside the project; the previous website repository is not a deployment input.
+
+`/packs`, `/cycles`, `/holders` and `/transparency` serve the corresponding fixed HTML assets in `public/comic-production/`. GET and HEAD are supported; a trailing slash redirects to the canonical route with the query intact. Other methods return 405. Unknown paths remain with the application router. `worker/public-page-routes.ts` owns this allowlist and never constructs an asset filename from request input.
+
+The pack explorer reads `/api/packs` and `/api/packs/inventory` through `worker/pack-catalog.ts`. Pack inventory describes a provider's observed catalogue, not a guaranteed pull or a completed Hookemon cycle. Category, rarity, valuation and provenance must retain their source meaning. Missing data stays explicitly unavailable. No displayed insurance valuation is a realized sale price.
+
+The cycle page explains recorded stages and public observations; the holder page describes participation without inventing eligibility rules; the transparency page collects sources and the disclosed fee split. Public pages cannot sign transactions, connect wallets or expose operator credentials. Homepage navigation and contextual links connect these pages; footer links remain accessible on narrow screens.
+
+`.github/workflows/web-ci.yml` runs website installation, `npm test` and lint on pull requests and main pushes. The production workflow deploys only the exact successful main-push CI revision. The production environment and its Cloudflare and dashboard secrets must be configured separately in the canonical GitHub repository; migrating source files does not migrate secrets. Recovery uses a previous verified Worker version and committed website source. Existing project workflows remain independent.
+
+OPEN FACT: The repository control-dependency policy does not yet permit the two website workflows or their pinned `actions/setup-node` action. Integrating them requires a reviewed control-policy revision with explicit workflow and dependency pins. The verified alternative is the green website-only CI and local preview; do not merge or deploy while the required repository gate fails.
+
+The legacy operator regression dependencies are isolated in `tests/fixtures/legacy-control` and never imported by the Worker. The retired Durable Object implementation is not part of the website runtime; operator authority remains in the canonical backend.
+
+The hero coin uses `coin-spin.mjs` for a full rotation with two circular gold faces carrying the approved H symbol. A closed cylindrical rim uses tangent gold surfaces; its radius and thickness track the responsive face size. Horizontal mouse or touch drags set its angle and release with decaying momentum. Vertical gestures remain native scrolling. Clicking pauses or resumes automatic rotation; arrow keys rotate in discrete steps. Reduced motion disables automatic rotation and inertia. Offscreen coins and hidden tabs stop animation frames.
+
+The public dashboard uses the existing production USDC and Ethereum/Sepolia response contract. This presentation release does not migrate the server schema, network profile or private operator controls.
+
+The homepage explains the Hookemon card cycle and presents observed public cycle data. `apps/web/worker/index.ts` serves `apps/web/public/comic-production/index.html` at `/`. The public website has no internal trading interface, wallet connection, quote request, or transaction submission. `/swap` returns 404. Operator routes retain their own implementations.
+
+The header links to X, Fomo and DEX Screener. Market links open the platform homepages until token-specific destinations are supplied. Its compact next-cycle timer shares the dashboard schedule and stale/paused handling; missing schedules show `--:--`. The timer links to the dashboard and wraps below the social icons on phones.
+
+The static page loads `adventure.css`, `motion.mjs`, and `dashboard.mjs`. Motion controls an illustrated five-stage journey and pointer tilt. The public dashboard reads `/api/cycle-status` and `/api/community-dashboard`; it never signs transactions or holds credentials. The approved symbol is `hookemon-symbol.svg`; original brand files remain unchanged. The seven collector card examples are labelled separately from observed cycle history. Gallery amounts are dated Collector Crypt insurance valuations with exact-asset source links, not sale prices; config/collector-showcase.json records their provenance.
+
+Unknown numeric values display an em dash with an explanatory status; stale observations are labelled delayed. The latest-cycle payout and average require a completed distribution and actual recipient count. An unfinished latest cycle does not stand in for an earlier payout. Total actually paid, completed and skipped cycles, and packs opened require complete verified history. Recent cards count the displayed feed, not lifetime unique cards. A scheduled cycle time is not a promise that a cycle will execute. Financial addresses come only from the existing configuration or manifest. The address resolver and external indexer configuration remain available independently of the website's informational presentation. Fees are disclosed as 3.00% of gross volume, split into 0.10% Programmable, 0.40% Treasury, and 2.50% pack funding.
+
+Scrolling and the stage buttons select the same five journey states. Windows up to 700px tall use normal document flow and manual chapters; selecting a chapter does not change the scroll position. The footer uses the transparent wordmark at its original aspect ratio; the original banner asset is preserved. Reduced-motion preferences remove decorative movement while keeping the explanation accessible. Hidden tabs suspend work. The page remains readable without JavaScript; dynamic metrics start with honest empty states.
+
+Run `npm test` and `npm run lint` from `apps/web`. `npm run dev` is the standard local server; it requires a workerd runtime supporting the configured compatibility date. The checked-in runtime may reject that date on some installations, so a static preview can serve `public/` with `/` mapped to `comic-production/index.html` for visual review. Missing public endpoint bindings produce empty dashboard states. Restore the last committed page or the original brand files to recover the presentation; no financial state is stored by the homepage.
