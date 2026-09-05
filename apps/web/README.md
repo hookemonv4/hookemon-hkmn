@@ -1,15 +1,17 @@
 # Hookemon web
 
-Public Hookemon prototype landing page and dashboard. Holding, reward accounting, and automatic payment do not depend on a website login.
+Public Hookemon website and dashboard in the canonical [hookemon-hkmn repository](https://github.com/hookemonv4/hookemon-hkmn). Holding, reward accounting, and automatic payment do not depend on a website login.
 
 ## Local development
 
 Requires Node.js 22.13 or newer.
 
 ```bash
-npm install
+cd apps/web
+npm ci
 npm run dev
 npm test
+npm run lint
 ```
 
 The public version uses no D1 database or R2 bucket.
@@ -44,12 +46,16 @@ cycle commands are visible to execution without giving the public Worker any sig
 wallet, RPC, or transaction capability. Each decision includes the normalized Access
 identity and a hash-chain link.
 
-The built Worker declaration is generated at `dist/server/wrangler.json`. Deploy it
-locally from this worktree with Wrangler after the required Worker secrets have been
-configured:
+The built Worker declaration is generated at `dist/server/wrangler.json` by
+`npm run build`. GitHub Actions deploys the exact successful main-push website CI
+revision through the `production` environment. Repository environment settings and
+secrets must be configured in the canonical repository; source migration does not
+copy them. For an explicitly authorized manual deployment from the repository root:
 
 ```bash
 cd apps/web
+npm run build
+node scripts/verify-cloudflare-deploy.mjs config dist/server/wrangler.json
 ./node_modules/.bin/wrangler deploy --config dist/server/wrangler.json
 ```
 

@@ -1,5 +1,5 @@
 const X_PROFILE_URL = "https://x.com/hookemon4";
-const GITHUB_REPO_URL = "https://github.com/hookemonv4/hookemon4";
+const GITHUB_REPO_URL = "https://github.com/hookemonv4/hookemon-hkmn";
 
 function XGlyph() {
   return (

@@ -744,7 +744,7 @@ test("removes the disposable starter and freezes Hookemon metadata", async () =>
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /@media \(max-width:\s*760px\)/);
   const socialLinks = await readFile(new URL("../app/SocialLinks.tsx", import.meta.url), "utf8");
-  assert.match(socialLinks, /https:\/\/github\.com\/hookemonv4\/hookemon4/);
+  assert.match(socialLinks, /https:\/\/github\.com\/hookemonv4\/hookemon-hkmn/);
   assert.match(page, /GITHUB_REPO_URL/);
   assert.match(page, /HookemonJourney/);
   assert.match(page, /Pay holders automatically/);
