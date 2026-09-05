@@ -1,5 +1,17 @@
 # Public website
 
+## Informational pages
+
+The canonical repository is `hookemonv4/hookemon-hkmn`. The website assets, configuration and provenance records live in this repository alongside the project; the previous website repository is not a deployment input.
+
+`/packs`, `/cycles`, `/holders` and `/transparency` serve the corresponding fixed HTML assets in `public/comic-production/`. GET and HEAD are supported; a trailing slash redirects to the canonical route with the query intact. Other methods return 405. Unknown paths remain with the application router. `worker/public-page-routes.ts` owns this allowlist and never constructs an asset filename from request input.
+
+The pack explorer reads `/api/packs` and `/api/packs/inventory` through `worker/pack-catalog.ts`. Pack inventory describes a provider's observed catalogue, not a guaranteed pull or a completed Hookemon cycle. Category, rarity, valuation and provenance must retain their source meaning. Missing data stays explicitly unavailable. No displayed insurance valuation is a realized sale price.
+
+The cycle page explains recorded stages and public observations; the holder page describes participation without inventing eligibility rules; the transparency page collects sources and the disclosed fee split. Public pages cannot sign transactions, connect wallets or expose operator credentials. Homepage navigation and contextual links connect these pages; footer links remain accessible on narrow screens.
+
+`.github/workflows/web-ci.yml` runs website installation, `npm test` and lint on pull requests and main pushes. The production workflow deploys only the exact successful main-push CI revision. The production environment and its Cloudflare and dashboard secrets must be configured separately in the canonical GitHub repository; migrating source files does not migrate secrets. Recovery uses a previous verified Worker version and committed website source. Existing project workflows remain independent.
+
 The hero coin uses `coin-spin.mjs` for a full rotation with two circular gold faces carrying the approved H symbol. A closed cylindrical rim uses tangent gold surfaces; its radius and thickness track the responsive face size. Horizontal mouse or touch drags set its angle and release with decaying momentum. Vertical gestures remain native scrolling. Clicking pauses or resumes automatic rotation; arrow keys rotate in discrete steps. Reduced motion disables automatic rotation and inertia. Offscreen coins and hidden tabs stop animation frames.
 
 The public dashboard uses the existing production USDC and Ethereum/Sepolia response contract. This presentation release does not migrate the server schema, network profile or private operator controls.

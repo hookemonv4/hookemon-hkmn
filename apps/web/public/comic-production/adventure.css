@@ -1969,6 +1969,28 @@ summary:focus-visible {
   align-items: center;
   gap: 6px;
 }
+.section-detail-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 700;
+  color: var(--navy);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.footer-bottom > .footer-page-links {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 18px;
+  max-width: 470px;
+}
+@media (max-width: 800px) {
+  .footer-bottom > .footer-page-links {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
 @keyframes coin-float {
   0%,
   100% {

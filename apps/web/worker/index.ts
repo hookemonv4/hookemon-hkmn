@@ -9,6 +9,8 @@ import {
 } from "./operator-proxy";
 import { proxyPublicCommunitySnapshot } from "./public-community-proxy";
 import { proxyPublicCycleStatus } from "./public-cycle-proxy";
+import { publicPageResponse } from "./public-page-routes";
+import { handlePackCatalog } from "./pack-catalog";
 
 interface WorkerEnv extends Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -179,6 +181,13 @@ const worker = {
     if (request.method === "GET" && url.pathname === "/api/collector-cards") {
       return collectorCardsResponse(env);
     }
+
+    if (url.pathname === "/api/packs" || url.pathname === "/api/packs/inventory") {
+      return handlePackCatalog(request);
+    }
+
+    const publicPage = await publicPageResponse(request, env.ASSETS);
+    if (publicPage) return publicPage;
 
     if (url.pathname === "/api/cycle-status") {
       const cache = (globalThis.caches as (CacheStorage & { default?: Cache }) | undefined)?.default;
