@@ -1680,8 +1680,8 @@ summary:focus-visible {
   text-transform: uppercase;
 }
 .collectible-card.card-lugia h3 {
-  font-family: var(--display);
-  font-weight: 400;
+  font-family: var(--body);
+  font-weight: 600;
   font-synthesis: none;
   font-size: clamp(48px, 5vw, 72px);
   line-height: 1;
