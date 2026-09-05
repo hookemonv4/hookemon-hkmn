@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 400" role="img" aria-label="Hookemon">
+  <defs>
+    <g id="letters">
+      <path vector-effect="non-scaling-stroke" d="M1238 0 738 -24 734 438H504L490 0H42L80 1406L556 1384L526 666H748L750 1438L1206 1426Z" transform="rotate(-7 185 252) translate(122.40234375 252) scale(0.09765625 -0.09765625)" />
+      <path vector-effect="non-scaling-stroke" d="M1319 1432 837 766 1243 58 779 -24 475 408 459 -44 43 -60 75 1472 541 1446 505 994 815 1472Z" transform="rotate(-1 500 222.7) translate(443.18115234375 222.7) scale(0.09033203125 -0.09033203125)" />
+      <path vector-effect="non-scaling-stroke" d="M998 1442Q992 1348 987.0 1256.0Q982 1164 974 1070L550 1048L540 922H838L816 612L516 602L506 456H754H930Q924 346 917.5 237.5Q911 129 906 20L44 0L76 1442Z" transform="rotate(1 598 222.7) translate(562.07470703125 222.7) scale(0.0732421875 -0.0732421875)" />
+      <path vector-effect="non-scaling-stroke" d="M1597 1458 1505 -10 1049 -30 1053 744 847 120H671L513 678L511 30L49 16L69 1398L583 1418L787 756L1059 1458Z" transform="rotate(3 709 228.5) translate(633.89990234375 228.5) scale(0.0927734375 -0.0927734375)" />
+      <path vector-effect="non-scaling-stroke" d="M1411 1434 1339 78 815 30 535 756 491 16H41L77 1434L577 1458L923 738L939 1418Z" transform="rotate(7 938 252) translate(869.397705078125 252) scale(0.09521484375 -0.09521484375)" />
+    </g>
+    <g id="odiscs">
+      <path vector-effect="non-scaling-stroke" d="M-6,-104 C-14,-96 -30,-98 -38,-88 C-48,-76 -52,-64 -52,-50 C-52,-21 -32,0 0,0 C32,0 52,-21 52,-50 C52,-72 42,-90 24,-98 C16,-102 4,-110 -6,-104 Z" transform="rotate(-5 297 239) translate(297 239)" />
+      <path vector-effect="non-scaling-stroke" d="M-6,-104 C-14,-96 -30,-98 -38,-88 C-48,-76 -52,-64 -52,-50 C-52,-21 -32,0 0,0 C32,0 52,-21 52,-50 C52,-72 42,-90 24,-98 C16,-102 4,-110 -6,-104 Z" transform="rotate(-3 395 228.5) translate(395 228.5)" />
+      <path vector-effect="non-scaling-stroke" d="M-6,-104 C-14,-96 -30,-98 -38,-88 C-48,-76 -52,-64 -52,-50 C-52,-21 -32,0 0,0 C32,0 52,-21 52,-50 C52,-72 42,-90 24,-98 C16,-102 4,-110 -6,-104 Z" transform="rotate(5 827 239) translate(827 239)" />
+    </g>
+  </defs>
+  <g transform="skewX(-6)" transform-origin="560 200">
+    <!-- 3D-Extrusion -->
+    <use href="#letters" transform="translate(14 16)" fill="#1b4e8f" stroke="#1b4e8f" stroke-width="30" stroke-linejoin="round" />
+    <use href="#odiscs" transform="translate(14 16)" fill="#1b4e8f" stroke="#1b4e8f" stroke-width="26" stroke-linejoin="round" />
+    <!-- Blaue Kontur -->
+    <use href="#letters" fill="#2a75bb" stroke="#2a75bb" stroke-width="30" stroke-linejoin="round" />
+    <use href="#odiscs" fill="#2a75bb" stroke="#2a75bb" stroke-width="26" stroke-linejoin="round" />
+    <!-- Fuellungen -->
+    <use href="#letters" fill="#ffd400" stroke="#ffe45c" stroke-width="2" />
+    <use href="#odiscs" fill="#f4508c" stroke="#ff7cab" stroke-width="2" />
+    <!-- O-Dekor: Counter, Welle, gestreiftes Horn -->
+      <g transform="rotate(-5 297 239) translate(297 239)">
+        <circle cx="3" cy="-46" r="21" fill="#15467e" />
+        <circle cx="-4" cy="-53" r="10" fill="#f4508c" />
+        <path d="M-38,-88 C-24,-100 -6,-102 8,-96 C0,-84 -20,-80 -38,-88 Z" fill="#d8347a" />
+        <g transform="rotate(-16 0 -100)">
+          <path d="M-13,-96 C-19,-124 -18,-146 -10,-170 C-8,-176 -2,-176 0,-170 C8,-144 9,-120 13,-94 C4,-88 -5,-88 -13,-96 Z"
+                fill="#ffe3ee" stroke="#15345f" stroke-width="5" stroke-linejoin="round" />
+          <path d="M-17,-118 L15,-112 L13,-124 L-18,-130 Z" fill="#f4508c" />
+          <path d="M-16,-142 L11,-136 L10,-148 L-16,-152 Z" fill="#f4508c" />
+          <path d="M-12,-162 L6,-158 L5,-166 L-11,-169 Z" fill="#f4508c" />
+        </g>
+      </g>
+      <g transform="rotate(-3 395 228.5) translate(395 228.5)">
+        <circle cx="3" cy="-46" r="21" fill="#15467e" />
+        <circle cx="-4" cy="-53" r="10" fill="#f4508c" />
+        <path d="M-38,-88 C-24,-100 -6,-102 8,-96 C0,-84 -20,-80 -38,-88 Z" fill="#d8347a" />
+        <g transform="rotate(-16 0 -100)">
+          <path d="M-13,-96 C-19,-124 -18,-146 -10,-170 C-8,-176 -2,-176 0,-170 C8,-144 9,-120 13,-94 C4,-88 -5,-88 -13,-96 Z"
+                fill="#ffe3ee" stroke="#15345f" stroke-width="5" stroke-linejoin="round" />
+          <path d="M-17,-118 L15,-112 L13,-124 L-18,-130 Z" fill="#f4508c" />
+          <path d="M-16,-142 L11,-136 L10,-148 L-16,-152 Z" fill="#f4508c" />
+          <path d="M-12,-162 L6,-158 L5,-166 L-11,-169 Z" fill="#f4508c" />
+        </g>
+      </g>
+      <g transform="rotate(5 827 239) translate(827 239)">
+        <circle cx="3" cy="-46" r="21" fill="#15467e" />
+        <circle cx="-4" cy="-53" r="10" fill="#f4508c" />
+        <path d="M-38,-88 C-24,-100 -6,-102 8,-96 C0,-84 -20,-80 -38,-88 Z" fill="#d8347a" />
+        <g transform="rotate(-16 0 -100)">
+          <path d="M-13,-96 C-19,-124 -18,-146 -10,-170 C-8,-176 -2,-176 0,-170 C8,-144 9,-120 13,-94 C4,-88 -5,-88 -13,-96 Z"
+                fill="#ffe3ee" stroke="#15345f" stroke-width="5" stroke-linejoin="round" />
+          <path d="M-17,-118 L15,-112 L13,-124 L-18,-130 Z" fill="#f4508c" />
+          <path d="M-16,-142 L11,-136 L10,-148 L-16,-152 Z" fill="#f4508c" />
+          <path d="M-12,-162 L6,-158 L5,-166 L-11,-169 Z" fill="#f4508c" />
+        </g>
+      </g>
+  </g>
+</svg>
