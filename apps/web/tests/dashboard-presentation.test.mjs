@@ -48,10 +48,25 @@ test('browser dashboard accepts canonical server output and keeps nullable obser
   };
   assert.deepEqual(validateDashboardPair(canonical.status, canonical.community), canonical);
   assert.equal(formatMicroUsdg(canonical.community.metrics.latestObservedProjectPoolMicroUsdg), '—');
+});
+
+test('browser dashboard accepts the current backend schemaVersion 5 with a reward recipient limit', () => {
+  const pair = fixture();
+  pair.status.cycle = completeCycle();
+  pair.community.cards = [{ cycleId: 'cycle-1', ...pair.status.cycle.cards[0] }];
   pair.community.schemaVersion = 5;
-  pair.community.latestCycle = { cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
-    paidMicroUsdg: '1000000', payoutRecipientCount: 2, rewardRecipientLimit: 50, roundAccounting: null, transactions: [] };
-  assert.throws(() => validateDashboardPair(pair.status, pair.community), /PUBLIC_DASHBOARD_INVALID/);
+  pair.community.latestCycle = {
+    cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
+    paidMicroUsdg: '1000000', payoutRecipientCount: 2, rewardRecipientLimit: 50,
+    roundAccounting: null, transactions: [],
+  };
+  const canonical = {
+    status: normalizePublicCycleStatus(pair.status),
+    community: normalizePublicCommunitySnapshot(pair.community),
+  };
+  assert.deepEqual(validateDashboardPair(canonical.status, canonical.community), canonical);
+  assert.equal(canonical.community.schemaVersion, 5);
+  assert.equal(canonical.community.latestCycle.rewardRecipientLimit, 50);
 });
 
 test('malformed, unknown, mixed-network, and legacy payloads never become dashboard facts', () => {
@@ -70,6 +85,30 @@ test('malformed, unknown, mixed-network, and legacy payloads never become dashbo
     (pair) => { pair.community.poolObservedAt = generatedAt; },
     (pair) => { pair.community.generatedAt = 'September 4, 2026'; },
     (pair) => { pair.community.cards = [null]; },
+    (pair) => { pair.community.schemaVersion = 6; },
+    (pair) => {
+      pair.community.schemaVersion = 5;
+      pair.community.latestCycle = {
+        cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
+        paidMicroUsdg: '1000000', payoutRecipientCount: 2,
+        roundAccounting: null, transactions: [],
+      };
+    },
+    (pair) => {
+      pair.community.latestCycle = {
+        cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
+        paidMicroUsdg: '1000000', payoutRecipientCount: 2, rewardRecipientLimit: 50,
+        roundAccounting: null, transactions: [],
+      };
+    },
+    (pair) => {
+      pair.community.schemaVersion = 5;
+      pair.community.latestCycle = {
+        cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
+        paidMicroUsdg: '1000000', payoutRecipientCount: 2, rewardRecipientLimit: 75,
+        roundAccounting: null, transactions: [],
+      };
+    },
   ];
   for (const mutate of mutations) {
     const pair = fixture(); mutate(pair);

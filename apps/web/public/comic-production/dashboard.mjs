@@ -84,7 +84,7 @@ const metricsShape = record({
   ...fields('completedCycles skippedCycles openedPacks', count),
 });
 const communityShape = record({
-  schemaVersion: oneOf(4), profile: oneOf('testnet', 'mainnet'), badge: oneOf('TESTNET', 'MAINNET'), network,
+  schemaVersion: oneOf(4, 5), profile: oneOf('testnet', 'mainnet'), badge: oneOf('TESTNET', 'MAINNET'), network,
   historyComplete: oneOf(true, false), generatedAt: timestamp, nextCycleAt: nullable(timestamp),
   delayed: oneOf(true, false), poolObservedAt: nullable(timestamp), metrics: metricsShape,
   latestCycle: (value) => value === null || record(latestCycleShape)(value)
