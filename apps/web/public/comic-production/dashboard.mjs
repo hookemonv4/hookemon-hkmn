@@ -305,4 +305,4 @@ export function startDashboard(doc = document) {
   return () => { stopped = true; visibilityChanged(); doc.removeEventListener('visibilitychange', visibilityChanged); };
 }
 
-if (typeof document !== 'undefined') startDashboard();
+if (typeof document !== 'undefined' && !document.body?.hasAttribute('data-information-page')) startDashboard();
