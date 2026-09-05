@@ -1,9 +1,11 @@
+// Network/profile shape mirrors the authoritative packages/dashboard/src/contracts/dashboard-profile.mjs:
+// "mainnet" targets the Robinhood Chain / USDG product, not EVM mainnet / Circle USDC.
 const PROFILES = Object.freeze({
   testnet: Object.freeze({
     id: "testnet",
     badge: "TESTNET",
     network: Object.freeze({
-      ethereum: Object.freeze({ name: "sepolia", chainId: 11155111, label: "Sepolia" }),
+      evm: Object.freeze({ name: "sepolia", chainId: 11155111, label: "Sepolia" }),
       solana: Object.freeze({
         name: "devnet",
         genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -15,7 +17,7 @@ const PROFILES = Object.freeze({
     id: "mainnet",
     badge: "MAINNET",
     network: Object.freeze({
-      ethereum: Object.freeze({ name: "mainnet", chainId: 1, label: "Ethereum" }),
+      evm: Object.freeze({ name: "robinhood", chainId: 4663, label: "Robinhood Chain" }),
       solana: Object.freeze({
         name: "mainnet-beta",
         genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
