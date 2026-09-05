@@ -26,7 +26,12 @@ function cardView(card) {
 
 function packView(pack) {
   const accordion = element("details", "pack-accordion"); const summary = element("summary");
-  const glyph = element("span", "pack-glyph"); glyph.setAttribute("aria-hidden", "true"); const mark = element("img"); mark.src = "/hookemon-symbol.svg"; mark.alt = ""; glyph.append(mark);
+  const glyph = element("span", "pack-glyph"); glyph.setAttribute("aria-hidden", "true"); const mark = element("img"); mark.src = pack.image || "/hookemon-symbol.svg"; mark.alt = ""; mark.loading = "lazy";
+  if (pack.image) {
+    glyph.classList.add("pack-cover");
+    mark.addEventListener("error", () => { glyph.classList.remove("pack-cover"); mark.src = "/hookemon-symbol.svg"; }, { once: true });
+  }
+  glyph.append(mark);
   const main = element("div", "pack-summary-main"); main.append(element("h3", "", pack.name), element("p", "", `${pack.contains} card${pack.contains === 1 ? "" : "s"} per pack · ${availability(pack.availability)}`));
   const plus = element("span", "pack-chevron", "+"); plus.setAttribute("aria-hidden", "true");
   summary.append(glyph, main, element("span", "pack-price", currency.format(pack.price)), plus); accordion.append(summary);

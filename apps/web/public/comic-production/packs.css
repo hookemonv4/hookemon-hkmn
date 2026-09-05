@@ -31,3 +31,5 @@
 @media(max-width:480px){.pack-page .shell{width:calc(100% - 32px)}.pack-intro h1{font-size:47px}.pack-intro>p:not(.pack-eyebrow){font-size:16px}.pack-glyph{width:38px;height:50px}.pack-glyph img{width:26px;height:32px}.pack-accordion>summary{flex-wrap:wrap;gap:13px;padding:18px}.pack-summary-main{flex-basis:calc(100% - 60px)}.pack-price{margin-left:51px}.pack-chevron{margin-left:auto}.pack-body{padding:16px}.inventory-grid{grid-template-columns:1fr}.inventory-image{height:275px}.pack-filters button{min-width:95px}.pack-disclosure{padding:15px}.pack-header nav>div{font-size:12px;gap:10px 16px}}
 
 #refresh-packs{display:inline-flex;align-items:center;gap:10px}.refresh-icon{flex:none}
+
+.pack-glyph.pack-cover{background:transparent;border:0;box-shadow:none;transform:none;border-radius:0}.pack-glyph.pack-cover img{width:100%;height:100%;object-fit:contain}

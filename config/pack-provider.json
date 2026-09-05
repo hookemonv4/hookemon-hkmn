@@ -4,7 +4,7 @@
   "category": "Pokemon",
   "currency": "USD",
   "pageSize": 24,
-  "imageHosts": ["d1xpxki1g4htqu.cloudfront.net", "arweave.net"],
+  "imageHosts": ["d1xpxki1g4htqu.cloudfront.net", "arweave.net", "degwuxynwtb2zaso.public.blob.vercel-storage.com"],
   "source": "https://gacha.collectorcrypt.com/",
   "schemaVerifiedAt": "2026-09-05"
 }

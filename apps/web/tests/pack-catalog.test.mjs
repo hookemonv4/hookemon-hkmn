@@ -60,3 +60,11 @@ test("oversized streamed provider response is cancelled and rejected", async () 
   const response = await handlePackCatalog(request("/api/packs"), fetcher);
   assert.equal(response.status, 503); assert.equal(cancelled, true);
 });
+
+test("pack covers accept provider artwork and fall back past unsafe or missing URLs", () => {
+  const thumbnailUrl = "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_100/thumb.png";
+  assert.equal(normalizePacks([{ ...pack, thumbnailUrl }], state)[0].image, thumbnailUrl);
+  assert.equal(normalizePacks([{ ...pack, image: "javascript:alert(1)", thumbnailUrl }], state)[0].image, thumbnailUrl);
+  assert.equal(normalizePacks([{ ...pack, thumbnailUrl: "https://degwuxynwtb2zaso.public.blob.vercel-storage.com.evil.test/cover" }], state)[0].image, null);
+  assert.equal(normalizePacks([pack], state)[0].image, null);
+});

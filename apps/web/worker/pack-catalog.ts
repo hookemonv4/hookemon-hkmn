@@ -41,6 +41,7 @@ export function normalizePacks(value: unknown, statusValue: unknown) {
         code, name: text(pack.name), category: "Pokémon", price, currency: provider.currency, contains,
         availability: state.machineStatus === "running" && status?.isOpen === true ? "open" : status?.isOpen === false || state.machineStatus === "stopped" ? "closed" : "unknown",
         sourceUrl: provider.source,
+        image: imageUrl(pack.imageNobgUrl) ?? imageUrl(pack.image) ?? imageUrl(pack.thumbnailUrl),
         tiers: rarities.map(rarity => {
           const range = object(object(pack.tierRanges)[rarity]);
           return { rarity, minimum: number(range.start), maximum: number(range.end) };
