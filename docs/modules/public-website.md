@@ -35,3 +35,5 @@ Run `npm test` and `npm run lint` from `apps/web`. `npm run dev` is the standard
 Shared public links expose server-rendered Open Graph and large-image Twitter card metadata using the original 1500×500 `hookemon-banner.jpeg`. The social description is concise; the full product description remains in page content. Image and page URLs are absolute production URLs. Metadata follows https://ogp.me/.
 
 Public copy distinguishes the legacy USDC dashboard feed from the current USDG payout policy. It describes finalized returned proceeds as the payout basis without implying an additional discretionary reserve deduction. The FAQ discloses the verified 40% buyback hold threshold and paused new cycles pending an owner decision, as specified by REQ-epic-gate-1.
+
+Held-card copy describes community consultation followed by an individual owner decision between Collector Crypt buyback and another marketplace. Automatic payout resumption after verified settlement is a planned extension; the website does not claim an external-marketplace settlement adapter exists. The original cycle snapshot remains fixed.
