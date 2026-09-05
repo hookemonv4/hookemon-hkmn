@@ -3,9 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { createBindingOperatorControlHandler } from "../../operator/src/operator-control-api.js";
-import { DurableOperatorControlStore } from "../../operator/src/operator-control-durable-store.js";
-import { verifyDecisionChain } from "../../operator/src/operator-control-store.js";
+import { createBindingOperatorControlHandler } from "./fixtures/legacy-control/apps/operator/src/operator-control-api.js";
+import { DurableOperatorControlStore } from "./fixtures/legacy-control/apps/operator/src/operator-control-durable-store.js";
+import { verifyDecisionChain } from "./fixtures/legacy-control/apps/operator/src/operator-control-store.js";
 
 const ORIGIN = "https://hookemon.example";
 const NOW_MS = 1_010_000;
