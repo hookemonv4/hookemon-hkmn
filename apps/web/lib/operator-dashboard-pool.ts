@@ -1,30 +1,30 @@
 export type CycleStartProjectPool = {
-  cycleStartProjectPoolMicroUsdc: string | null;
+  cycleStartProjectPoolMicroUsdg: string | null;
   cycleStartProjectPoolObservedAt: string | null;
 };
 
 const DASHBOARD_RESPONSE_INVALID = "Dashboard-Daten sind ungültig oder nicht verfügbar.";
 
 export function decodeCycleStartProjectPool(
-  poolMicroUsdc: unknown,
+  poolMicroUsdg: unknown,
   poolObservedAt: unknown,
 ): CycleStartProjectPool {
-  const decodedPool = poolMicroUsdc === null ? null : dashboardMoney(poolMicroUsdc);
+  const decodedPool = poolMicroUsdg === null ? null : dashboardMoney(poolMicroUsdg);
   const decodedObservedAt = poolObservedAt === null ? null : dashboardTimestamp(poolObservedAt);
   if ((decodedPool === null) !== (decodedObservedAt === null)) {
     throw new Error(DASHBOARD_RESPONSE_INVALID);
   }
   return {
-    cycleStartProjectPoolMicroUsdc: decodedPool,
+    cycleStartProjectPoolMicroUsdg: decodedPool,
     cycleStartProjectPoolObservedAt: decodedObservedAt,
   };
 }
 
 export function formatCycleStartProjectPool(pool: CycleStartProjectPool): string {
-  if (pool.cycleStartProjectPoolMicroUsdc === null || pool.cycleStartProjectPoolObservedAt === null) {
+  if (pool.cycleStartProjectPoolMicroUsdg === null || pool.cycleStartProjectPoolObservedAt === null) {
     return "Nicht beobachtet";
   }
-  return `${formatMicroUsdc(pool.cycleStartProjectPoolMicroUsdc)} · Stand ${formatDate(pool.cycleStartProjectPoolObservedAt)}`;
+  return `${formatMicroUsdg(pool.cycleStartProjectPoolMicroUsdg)} · Stand ${formatDate(pool.cycleStartProjectPoolObservedAt)}`;
 }
 
 function dashboardMoney(value: unknown): string {
@@ -41,9 +41,9 @@ function dashboardTimestamp(value: unknown): string {
   return value;
 }
 
-function formatMicroUsdc(value: string): string {
+function formatMicroUsdg(value: string): string {
   const amount = Number(value) / 1_000_000;
-  return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 6 }).format(amount)} USDC`;
+  return `${new Intl.NumberFormat("de-DE", { maximumFractionDigits: 6 }).format(amount)} USDG`;
 }
 
 function formatDate(value: string): string {

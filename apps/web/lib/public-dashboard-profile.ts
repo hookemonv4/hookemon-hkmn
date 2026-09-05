@@ -1,10 +1,10 @@
 export type DashboardProfileId = "testnet" | "mainnet";
 
 export type DashboardNetwork = {
-  ethereum: {
-    name: "sepolia" | "mainnet";
-    chainId: 11155111 | 1;
-    label: "Sepolia" | "Ethereum";
+  evm: {
+    name: "sepolia" | "robinhood";
+    chainId: 11155111 | 4663;
+    label: "Sepolia" | "Robinhood Chain";
   };
   solana: {
     name: "devnet" | "mainnet-beta";
@@ -17,7 +17,7 @@ export type DashboardNetwork = {
 
 export type PublicTransactionReference =
   | {
-      chain: "ethereum";
+      chain: "evm";
       purpose: "outbound-burn" | "inbound-finalization" | "reward-settlement";
       id: string;
     }
@@ -32,7 +32,7 @@ const PROFILES = {
     id: "testnet",
     badge: "TESTNET",
     network: {
-      ethereum: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
+      evm: { name: "sepolia", chainId: 11155111, label: "Sepolia" },
       solana: {
         name: "devnet",
         genesisHash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -40,7 +40,7 @@ const PROFILES = {
       },
     },
     explorers: {
-      ethereum: "https://sepolia.etherscan.io",
+      evm: "https://sepolia.etherscan.io",
       solana: "https://explorer.solana.com",
       solanaCluster: "devnet",
     },
@@ -49,7 +49,7 @@ const PROFILES = {
     id: "mainnet",
     badge: "MAINNET",
     network: {
-      ethereum: { name: "mainnet", chainId: 1, label: "Ethereum" },
+      evm: { name: "robinhood", chainId: 4663, label: "Robinhood Chain" },
       solana: {
         name: "mainnet-beta",
         genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
@@ -57,7 +57,9 @@ const PROFILES = {
       },
     },
     explorers: {
-      ethereum: "https://etherscan.io",
+      // No public block-explorer origin for Robinhood Chain is confirmed yet. Never sent in an
+      // API response (see dashboardExplorerHref below), so it never reaches a validator.
+      evm: "https://explorer.robinhood.com",
       solana: "https://explorer.solana.com",
       solanaCluster: null,
     },
@@ -98,7 +100,7 @@ function validTransactionReference(value: unknown): value is PublicTransactionRe
     !("id" in source)
   ) return false;
 
-  if (source.chain === "ethereum") {
+  if (source.chain === "evm") {
     return (
       new Set(["outbound-burn", "inbound-finalization", "reward-settlement"]).has(String(source.purpose)) &&
       typeof source.id === "string" &&

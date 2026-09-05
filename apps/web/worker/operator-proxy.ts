@@ -135,8 +135,8 @@ const CARD_QUERY_KEYS = new Set([
   "rarity",
   "from",
   "to",
-  "minBuybackMicroUsdc",
-  "maxBuybackMicroUsdc",
+  "minBuybackMicroUsdg",
+  "maxBuybackMicroUsdg",
 ]);
 const CARD_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 const CARD_MONEY_PATTERN = /^(0|[1-9]\d{0,77})$/;
@@ -177,7 +177,7 @@ function cardQueryValid(searchParams: URLSearchParams): boolean {
     const value = searchParams.get(key);
     if (value !== null && !validCardTimestamp(value)) return false;
   }
-  for (const key of ["minBuybackMicroUsdc", "maxBuybackMicroUsdc"]) {
+  for (const key of ["minBuybackMicroUsdg", "maxBuybackMicroUsdg"]) {
     const value = searchParams.get(key);
     if (value !== null && !CARD_MONEY_PATTERN.test(value)) return false;
   }

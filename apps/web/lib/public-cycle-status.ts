@@ -18,44 +18,44 @@ export type PublicCycleCard = {
   setName: string | null;
   cardNumber: string | null;
   imageUrl: string | null;
-  packPriceMicroUsdc: string | null;
-  buybackMicroUsdc: string | null;
+  packPriceMicroUsdg: string | null;
+  buybackMicroUsdg: string | null;
 };
 
 export type PublicQuotedCosts = {
-  outboundBridgeMicroUsdc: string | null;
-  inboundBridgeMicroUsdc: string | null;
-  collectorApiMicroUsdc: string | null;
-  ethereumNetworkMicroUsdc: string | null;
-  solanaNetworkMicroUsdc: string | null;
-  slippageMicroUsdc: string | null;
+  outboundBridgeMicroUsdg: string | null;
+  inboundBridgeMicroUsdg: string | null;
+  collectorApiMicroUsdg: string | null;
+  evmNetworkMicroUsdg: string | null;
+  solanaNetworkMicroUsdg: string | null;
+  slippageMicroUsdg: string | null;
 };
 
 export type PublicNativeFee = { lamports: string; paidBy: string };
 
 export type PublicRoundAccounting = {
-  packSpendMicroUsdc: string;
-  buybackMicroUsdc: string;
-  packGainMicroUsdc: string;
-  packLossMicroUsdc: string;
+  packSpendMicroUsdg: string;
+  buybackMicroUsdg: string;
+  packGainMicroUsdg: string;
+  packLossMicroUsdg: string;
   quotedCosts: PublicQuotedCosts;
-  protectedCostsMicroUsdc: string | null;
-  confirmedCostsMicroUsdc: string | null;
-  cycleGainMicroUsdc: string | null;
-  cycleLossMicroUsdc: string | null;
-  walletBalanceBeforeMicroUsdc: string | null;
-  walletBalanceAfterMicroUsdc: string | null;
+  protectedCostsMicroUsdg: string | null;
+  confirmedCostsMicroUsdg: string | null;
+  cycleGainMicroUsdg: string | null;
+  cycleLossMicroUsdg: string | null;
+  walletBalanceBeforeMicroUsdg: string | null;
+  walletBalanceAfterMicroUsdg: string | null;
   networkFees: {
     walletLamportsCharged: string | null;
     purchase: PublicNativeFee | null;
     buyback: PublicNativeFee | null;
   };
-  feeReserveBeforeMicroUsdc: string | null;
-  feeReserveTargetMicroUsdc: string | null;
-  feeReserveTopUpMicroUsdc: string | null;
-  feeReserveAfterMicroUsdc: string | null;
-  plannedHolderRewardsMicroUsdc: string | null;
-  paidHolderRewardsMicroUsdc: string | null;
+  feeReserveBeforeMicroUsdg: string | null;
+  feeReserveTargetMicroUsdg: string | null;
+  feeReserveTopUpMicroUsdg: string | null;
+  feeReserveAfterMicroUsdg: string | null;
+  plannedHolderRewardsMicroUsdg: string | null;
+  paidHolderRewardsMicroUsdg: string | null;
   holderRewardsStatus: string;
   distributionStatus: string;
 };
@@ -69,14 +69,14 @@ export type PublicCycle = {
   openedBoosters: number;
   actions: PublicCycleAction[];
   cards: PublicCycleCard[];
-  returnedMicroUsdc: string | null;
+  returnedMicroUsdg: string | null;
   rewardStatus: string | null;
   roundAccounting: PublicRoundAccounting | null;
   reason?: string;
   startedAt?: string;
   updatedAt?: string;
-  spentMicroUsdc?: string | null;
-  paidMicroUsdc?: string | null;
+  spentMicroUsdg?: string | null;
+  paidMicroUsdg?: string | null;
 };
 
 export type PublicCycleStatus = {
@@ -109,8 +109,8 @@ const LEGACY_IDLE_STATUS_KEYS = new Set([
   "countdownSeconds",
   "cycle",
 ]);
-const NETWORK_KEYS = new Set(["ethereum", "solana"]);
-const ETHEREUM_NETWORK_KEYS = new Set(["name", "chainId", "label"]);
+const NETWORK_KEYS = new Set(["evm", "solana"]);
+const EVM_NETWORK_KEYS = new Set(["name", "chainId", "label"]);
 const SOLANA_NETWORK_KEYS = new Set(["name", "genesisHash", "label"]);
 const CYCLE_REQUIRED_KEYS = [
   "cycleId",
@@ -121,7 +121,7 @@ const CYCLE_REQUIRED_KEYS = [
   "openedBoosters",
   "actions",
   "cards",
-  "returnedMicroUsdc",
+  "returnedMicroUsdg",
   "rewardStatus",
   "roundAccounting",
 ] as const;
@@ -129,8 +129,8 @@ const CYCLE_KEYS = new Set([
   ...CYCLE_REQUIRED_KEYS,
   "startedAt",
   "updatedAt",
-  "spentMicroUsdc",
-  "paidMicroUsdc",
+  "spentMicroUsdg",
+  "paidMicroUsdg",
   "reason",
 ]);
 const LEGACY_CYCLE_REQUIRED_KEYS = CYCLE_REQUIRED_KEYS.filter(
@@ -140,8 +140,8 @@ const LEGACY_CYCLE_KEYS = new Set([
   ...LEGACY_CYCLE_REQUIRED_KEYS,
   "startedAt",
   "updatedAt",
-  "spentMicroUsdc",
-  "paidMicroUsdc",
+  "spentMicroUsdg",
+  "paidMicroUsdg",
   "reason",
 ]);
 const ACTION_KEYS = new Set(["type", "status", "at"]);
@@ -153,8 +153,8 @@ const CARD_KEYS = new Set([
   "setName",
   "cardNumber",
   "imageUrl",
-  "packPriceMicroUsdc",
-  "buybackMicroUsdc",
+  "packPriceMicroUsdg",
+  "buybackMicroUsdg",
 ]);
 const LEGACY_CARD_KEYS = new Set([
   "productId",
@@ -166,34 +166,34 @@ const LEGACY_CARD_KEYS = new Set([
   "imageUrl",
 ]);
 const ROUND_ACCOUNTING_KEYS = new Set([
-  "packSpendMicroUsdc",
-  "buybackMicroUsdc",
-  "packGainMicroUsdc",
-  "packLossMicroUsdc",
+  "packSpendMicroUsdg",
+  "buybackMicroUsdg",
+  "packGainMicroUsdg",
+  "packLossMicroUsdg",
   "quotedCosts",
-  "protectedCostsMicroUsdc",
-  "confirmedCostsMicroUsdc",
-  "cycleGainMicroUsdc",
-  "cycleLossMicroUsdc",
-  "walletBalanceBeforeMicroUsdc",
-  "walletBalanceAfterMicroUsdc",
+  "protectedCostsMicroUsdg",
+  "confirmedCostsMicroUsdg",
+  "cycleGainMicroUsdg",
+  "cycleLossMicroUsdg",
+  "walletBalanceBeforeMicroUsdg",
+  "walletBalanceAfterMicroUsdg",
   "networkFees",
-  "feeReserveBeforeMicroUsdc",
-  "feeReserveTargetMicroUsdc",
-  "feeReserveTopUpMicroUsdc",
-  "feeReserveAfterMicroUsdc",
-  "plannedHolderRewardsMicroUsdc",
-  "paidHolderRewardsMicroUsdc",
+  "feeReserveBeforeMicroUsdg",
+  "feeReserveTargetMicroUsdg",
+  "feeReserveTopUpMicroUsdg",
+  "feeReserveAfterMicroUsdg",
+  "plannedHolderRewardsMicroUsdg",
+  "paidHolderRewardsMicroUsdg",
   "holderRewardsStatus",
   "distributionStatus",
 ]);
 const QUOTED_COST_KEYS = new Set([
-  "outboundBridgeMicroUsdc",
-  "inboundBridgeMicroUsdc",
-  "collectorApiMicroUsdc",
-  "ethereumNetworkMicroUsdc",
-  "solanaNetworkMicroUsdc",
-  "slippageMicroUsdc",
+  "outboundBridgeMicroUsdg",
+  "inboundBridgeMicroUsdg",
+  "collectorApiMicroUsdg",
+  "evmNetworkMicroUsdg",
+  "solanaNetworkMicroUsdg",
+  "slippageMicroUsdg",
 ]);
 const NETWORK_FEE_KEYS = new Set(["walletLamportsCharged", "purchase", "buyback"]);
 const NATIVE_FEE_KEYS = new Set(["lamports", "paidBy"]);
@@ -286,16 +286,16 @@ function readNetwork(value: unknown, expected: DashboardNetwork): DashboardNetwo
   const source = requiredRecord(value);
   exactKeys(source, NETWORK_KEYS);
   requiredKeys(source, NETWORK_KEYS);
-  const ethereum = requiredRecord(source.ethereum);
+  const evm = requiredRecord(source.evm);
   const solana = requiredRecord(source.solana);
-  exactKeys(ethereum, ETHEREUM_NETWORK_KEYS);
+  exactKeys(evm, EVM_NETWORK_KEYS);
   exactKeys(solana, SOLANA_NETWORK_KEYS);
-  requiredKeys(ethereum, ETHEREUM_NETWORK_KEYS);
+  requiredKeys(evm, EVM_NETWORK_KEYS);
   requiredKeys(solana, SOLANA_NETWORK_KEYS);
   if (
-    ethereum.name !== expected.ethereum.name ||
-    ethereum.chainId !== expected.ethereum.chainId ||
-    ethereum.label !== expected.ethereum.label ||
+    evm.name !== expected.evm.name ||
+    evm.chainId !== expected.evm.chainId ||
+    evm.label !== expected.evm.label ||
     solana.name !== expected.solana.name ||
     solana.genesisHash !== expected.solana.genesisHash ||
     solana.label !== expected.solana.label
@@ -328,14 +328,14 @@ function readCycle(value: unknown, schemaVersion: unknown): PublicCycle {
     openedBoosters,
     actions,
     cards,
-    returnedMicroUsdc: optionalMoney(source.returnedMicroUsdc),
+    returnedMicroUsdg: optionalMoney(source.returnedMicroUsdg),
     rewardStatus: optionalText(source.rewardStatus),
     roundAccounting: schemaVersion === 3 ? readRoundAccounting(source.roundAccounting) : null,
   };
   if (source.startedAt !== undefined) cycle.startedAt = isoTimestamp(source.startedAt);
   if (source.updatedAt !== undefined) cycle.updatedAt = isoTimestamp(source.updatedAt);
-  if (source.spentMicroUsdc !== undefined) cycle.spentMicroUsdc = optionalMoney(source.spentMicroUsdc);
-  if (source.paidMicroUsdc !== undefined) cycle.paidMicroUsdc = optionalMoney(source.paidMicroUsdc);
+  if (source.spentMicroUsdg !== undefined) cycle.spentMicroUsdg = optionalMoney(source.spentMicroUsdg);
+  if (source.paidMicroUsdg !== undefined) cycle.paidMicroUsdg = optionalMoney(source.paidMicroUsdg);
   if (source.reason !== undefined) cycle.reason = stableReason(source.reason);
   return cycle;
 }
@@ -369,8 +369,8 @@ function readCard(value: unknown, schemaVersion: unknown): PublicCycleCard {
     setName: nullableText(source.setName),
     cardNumber: nullableText(source.cardNumber),
     imageUrl: null,
-    packPriceMicroUsdc: optionalMoney(source.packPriceMicroUsdc ?? null),
-    buybackMicroUsdc: optionalMoney(source.buybackMicroUsdc ?? null),
+    packPriceMicroUsdg: optionalMoney(source.packPriceMicroUsdg ?? null),
+    buybackMicroUsdg: optionalMoney(source.buybackMicroUsdg ?? null),
   };
   if (source.imageUrl !== undefined && source.imageUrl !== null) {
     const imageUrl = new URL(boundedText(source.imageUrl));
@@ -386,29 +386,29 @@ function readRoundAccounting(value: unknown): PublicRoundAccounting | null {
   exactKeys(source, ROUND_ACCOUNTING_KEYS);
   requiredKeys(source, ROUND_ACCOUNTING_KEYS);
   const result: PublicRoundAccounting = {
-    packSpendMicroUsdc: money(source.packSpendMicroUsdc),
-    buybackMicroUsdc: money(source.buybackMicroUsdc),
-    packGainMicroUsdc: money(source.packGainMicroUsdc),
-    packLossMicroUsdc: money(source.packLossMicroUsdc),
+    packSpendMicroUsdg: money(source.packSpendMicroUsdg),
+    buybackMicroUsdg: money(source.buybackMicroUsdg),
+    packGainMicroUsdg: money(source.packGainMicroUsdg),
+    packLossMicroUsdg: money(source.packLossMicroUsdg),
     quotedCosts: readQuotedCosts(source.quotedCosts),
-    protectedCostsMicroUsdc: optionalMoney(source.protectedCostsMicroUsdc),
-    confirmedCostsMicroUsdc: optionalMoney(source.confirmedCostsMicroUsdc),
-    cycleGainMicroUsdc: optionalMoney(source.cycleGainMicroUsdc),
-    cycleLossMicroUsdc: optionalMoney(source.cycleLossMicroUsdc),
-    walletBalanceBeforeMicroUsdc: optionalMoney(source.walletBalanceBeforeMicroUsdc),
-    walletBalanceAfterMicroUsdc: optionalMoney(source.walletBalanceAfterMicroUsdc),
+    protectedCostsMicroUsdg: optionalMoney(source.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: optionalSignedMoney(source.confirmedCostsMicroUsdg),
+    cycleGainMicroUsdg: optionalMoney(source.cycleGainMicroUsdg),
+    cycleLossMicroUsdg: optionalMoney(source.cycleLossMicroUsdg),
+    walletBalanceBeforeMicroUsdg: optionalMoney(source.walletBalanceBeforeMicroUsdg),
+    walletBalanceAfterMicroUsdg: optionalMoney(source.walletBalanceAfterMicroUsdg),
     networkFees: readNetworkFees(source.networkFees),
-    feeReserveBeforeMicroUsdc: optionalMoney(source.feeReserveBeforeMicroUsdc),
-    feeReserveTargetMicroUsdc: optionalMoney(source.feeReserveTargetMicroUsdc),
-    feeReserveTopUpMicroUsdc: optionalMoney(source.feeReserveTopUpMicroUsdc),
-    feeReserveAfterMicroUsdc: optionalMoney(source.feeReserveAfterMicroUsdc),
-    plannedHolderRewardsMicroUsdc: optionalMoney(source.plannedHolderRewardsMicroUsdc),
-    paidHolderRewardsMicroUsdc: optionalMoney(source.paidHolderRewardsMicroUsdc),
+    feeReserveBeforeMicroUsdg: optionalMoney(source.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: optionalMoney(source.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: optionalMoney(source.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: optionalMoney(source.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: optionalMoney(source.plannedHolderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: optionalMoney(source.paidHolderRewardsMicroUsdg),
     holderRewardsStatus: boundedText(source.holderRewardsStatus),
     distributionStatus: boundedText(source.distributionStatus),
   };
-  assertExclusive(result.packGainMicroUsdc, result.packLossMicroUsdc);
-  assertNullableExclusive(result.cycleGainMicroUsdc, result.cycleLossMicroUsdc);
+  assertExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
   return result;
 }
 
@@ -417,12 +417,12 @@ function readQuotedCosts(value: unknown): PublicQuotedCosts {
   exactKeys(source, QUOTED_COST_KEYS);
   requiredKeys(source, QUOTED_COST_KEYS);
   return {
-    outboundBridgeMicroUsdc: optionalMoney(source.outboundBridgeMicroUsdc),
-    inboundBridgeMicroUsdc: optionalMoney(source.inboundBridgeMicroUsdc),
-    collectorApiMicroUsdc: optionalMoney(source.collectorApiMicroUsdc),
-    ethereumNetworkMicroUsdc: optionalMoney(source.ethereumNetworkMicroUsdc),
-    solanaNetworkMicroUsdc: optionalMoney(source.solanaNetworkMicroUsdc),
-    slippageMicroUsdc: optionalMoney(source.slippageMicroUsdc),
+    outboundBridgeMicroUsdg: optionalMoney(source.outboundBridgeMicroUsdg),
+    inboundBridgeMicroUsdg: optionalMoney(source.inboundBridgeMicroUsdg),
+    collectorApiMicroUsdg: optionalMoney(source.collectorApiMicroUsdg),
+    evmNetworkMicroUsdg: optionalMoney(source.evmNetworkMicroUsdg),
+    solanaNetworkMicroUsdg: optionalMoney(source.solanaNetworkMicroUsdg),
+    slippageMicroUsdg: optionalMoney(source.slippageMicroUsdg),
   };
 }
 
@@ -510,6 +510,12 @@ function isoTimestamp(value: unknown): string {
 function optionalMoney(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || !/^(0|[1-9]\d{0,77})$/.test(value)) invalid();
+  return value;
+}
+
+function optionalSignedMoney(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !/^(0|-?[1-9]\d{0,77})$/.test(value)) invalid();
   return value;
 }
 

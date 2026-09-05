@@ -49,7 +49,7 @@ export const ACTIONS_BY_STEP = {
   packs: ["packs-bought"],
   cards: ["packs-bought"],
   sales: ["buybacks-settled"],
-  return: ["return-bridge-finalized", "ethereum-funded"],
+  return: ["return-bridge-finalized", "evm-funded"],
   holders: ["rewards-complete", "rewards-paid", "payouts-settled"],
 } as const satisfies Record<PublicProcessStepId, readonly string[]>;
 
@@ -75,8 +75,8 @@ export function resolveDashboardEnvironment(
 
   if (
     status.profile !== community.profile ||
-    status.network.ethereum.name !== community.network.ethereum.name ||
-    status.network.ethereum.chainId !== community.network.ethereum.chainId ||
+    status.network.evm.name !== community.network.evm.name ||
+    status.network.evm.chainId !== community.network.evm.chainId ||
     status.network.solana.name !== community.network.solana.name ||
     status.network.solana.genesisHash !== community.network.solana.genesisHash
   ) {
@@ -132,9 +132,9 @@ export function hasLatestPayoutFacts(
   cycle: PublicCommunityCycle | null | undefined,
 ): boolean {
   if (cycle === null || cycle === undefined) return false;
-  const paidHolderRewards = cycle.roundAccounting?.paidHolderRewardsMicroUsdc;
+  const paidHolderRewards = cycle.roundAccounting?.paidHolderRewardsMicroUsdg;
   return (paidHolderRewards !== null && paidHolderRewards !== undefined) ||
-    cycle.paidMicroUsdc !== null;
+    cycle.paidMicroUsdg !== null;
 }
 
 export function latestDashboardCards(
@@ -225,7 +225,7 @@ function isComplete(
   if (id === "budget") return cycle.selectedPackId !== null || cycle.plannedBoosters > 0 || hasComplete(actions);
   if (id === "cards") return cycle.openedBoosters > 0;
   if (id === "holders") {
-    return cycle.paidMicroUsdc !== null ||
+    return cycle.paidMicroUsdg !== null ||
       /complete|paid|settled/i.test(cycle.rewardStatus ?? "") ||
       hasComplete(actions);
   }
@@ -257,14 +257,14 @@ function amountText(
     return cycle.selectedPackId === null ? "Unavailable" : "Pack selected";
   }
   if (id === "cards") return cycle.openedBoosters > 0 ? `${cycle.openedBoosters} opened` : "Unavailable";
-  if (id === "return") return moneyText(cycle.returnedMicroUsdc);
-  if (id === "holders") return moneyText(cycle.paidMicroUsdc ?? null);
-  if (id === "packs") return moneyText(cycle.spentMicroUsdc ?? null);
+  if (id === "return") return moneyText(cycle.returnedMicroUsdg);
+  if (id === "holders") return moneyText(cycle.paidMicroUsdg ?? null);
+  if (id === "packs") return moneyText(cycle.spentMicroUsdg ?? null);
   return "Unavailable";
 }
 
 function moneyText(value: string | null): string {
-  return value === null ? "Unavailable" : `${value} micro-USDC`;
+  return value === null ? "Unavailable" : `${value} micro-USDG`;
 }
 
 function timestampForStep(

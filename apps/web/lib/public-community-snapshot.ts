@@ -11,16 +11,16 @@ import type {
 } from "./public-cycle-status.ts";
 
 export type PublicCommunityMetrics = {
-  latestObservedProjectPoolMicroUsdc: string | null;
-  totalCycleFundingMicroUsdc: string;
-  totalCollectorSpendMicroUsdc: string;
-  totalBuybacksReturnedMicroUsdc: string;
-  totalBridgedBackMicroUsdc: string;
-  totalRewardsPaidMicroUsdc: string;
-  totalRewardsDeferredMicroUsdc: string;
-  totalQuotedOperatingCostsMicroUsdc: string;
-  latestRetainedReserveMicroUsdc: string;
-  latestCycleReserveTargetMicroUsdc: string;
+  latestObservedProjectPoolMicroUsdg: string | null;
+  totalCycleFundingMicroUsdg: string;
+  totalCollectorSpendMicroUsdg: string;
+  totalBuybacksReturnedMicroUsdg: string;
+  totalBridgedBackMicroUsdg: string;
+  totalRewardsPaidMicroUsdg: string;
+  totalRewardsDeferredMicroUsdg: string;
+  totalQuotedOperatingCostsMicroUsdg: string;
+  latestRetainedReserveMicroUsdg: string;
+  latestCycleReserveTargetMicroUsdg: string;
   completedCycles: number;
   skippedCycles: number;
   openedPacks: number;
@@ -31,10 +31,11 @@ export type PublicCommunityCycle = {
   status: string;
   reason: string | null;
   updatedAt: string | null;
-  paidMicroUsdc: string | null;
+  paidMicroUsdg: string | null;
   payoutRecipientCount: number;
   roundAccounting: PublicCommunityRoundAccounting | null;
   transactions: PublicTransactionReference[];
+  rewardRecipientLimit?: number;
 };
 
 export type PublicCommunityRoundAccounting = PublicRoundAccounting;
@@ -48,12 +49,12 @@ export type PublicCommunityCard = {
   setName: string | null;
   cardNumber: string | null;
   imageUrl: string | null;
-  packPriceMicroUsdc: string | null;
-  buybackMicroUsdc: string | null;
+  packPriceMicroUsdg: string | null;
+  buybackMicroUsdg: string | null;
 };
 
 export type PublicCommunitySnapshot = {
-  schemaVersion: 4;
+  schemaVersion: 4 | 5;
   profile: DashboardProfileId;
   badge: "TESTNET" | "MAINNET";
   network: DashboardNetwork;
@@ -68,16 +69,16 @@ export type PublicCommunitySnapshot = {
 };
 
 const MONEY_KEYS = [
-  "latestObservedProjectPoolMicroUsdc",
-  "totalCycleFundingMicroUsdc",
-  "totalCollectorSpendMicroUsdc",
-  "totalBuybacksReturnedMicroUsdc",
-  "totalBridgedBackMicroUsdc",
-  "totalRewardsPaidMicroUsdc",
-  "totalRewardsDeferredMicroUsdc",
-  "totalQuotedOperatingCostsMicroUsdc",
-  "latestRetainedReserveMicroUsdc",
-  "latestCycleReserveTargetMicroUsdc",
+  "latestObservedProjectPoolMicroUsdg",
+  "totalCycleFundingMicroUsdg",
+  "totalCollectorSpendMicroUsdg",
+  "totalBuybacksReturnedMicroUsdg",
+  "totalBridgedBackMicroUsdg",
+  "totalRewardsPaidMicroUsdg",
+  "totalRewardsDeferredMicroUsdg",
+  "totalQuotedOperatingCostsMicroUsdg",
+  "latestRetainedReserveMicroUsdg",
+  "latestCycleReserveTargetMicroUsdg",
 ] as const;
 const COUNT_KEYS = ["completedCycles", "skippedCycles", "openedPacks"] as const;
 const SNAPSHOT_KEYS = new Set([
@@ -94,8 +95,8 @@ const SNAPSHOT_KEYS = new Set([
   "latestCycle",
   "cards",
 ]);
-const NETWORK_KEYS = new Set(["ethereum", "solana"]);
-const ETHEREUM_NETWORK_KEYS = new Set(["name", "chainId", "label"]);
+const NETWORK_KEYS = new Set(["evm", "solana"]);
+const EVM_NETWORK_KEYS = new Set(["name", "chainId", "label"]);
 const SOLANA_NETWORK_KEYS = new Set(["name", "genesisHash", "label"]);
 const METRIC_KEYS = new Set([...MONEY_KEYS, ...COUNT_KEYS]);
 const LATEST_CYCLE_KEYS = new Set([
@@ -103,53 +104,54 @@ const LATEST_CYCLE_KEYS = new Set([
   "status",
   "reason",
   "updatedAt",
-  "paidMicroUsdc",
+  "paidMicroUsdg",
   "payoutRecipientCount",
   "roundAccounting",
   "transactions",
 ]);
+const LATEST_CYCLE_V5_KEYS = new Set([...LATEST_CYCLE_KEYS, "rewardRecipientLimit"]);
 const ROUND_ACCOUNTING_KEYS = new Set([
-  "packSpendMicroUsdc",
-  "buybackMicroUsdc",
-  "packGainMicroUsdc",
-  "packLossMicroUsdc",
+  "packSpendMicroUsdg",
+  "buybackMicroUsdg",
+  "packGainMicroUsdg",
+  "packLossMicroUsdg",
   "quotedCosts",
-  "protectedCostsMicroUsdc",
-  "confirmedCostsMicroUsdc",
-  "cycleGainMicroUsdc",
-  "cycleLossMicroUsdc",
-  "walletBalanceBeforeMicroUsdc",
-  "walletBalanceAfterMicroUsdc",
+  "protectedCostsMicroUsdg",
+  "confirmedCostsMicroUsdg",
+  "cycleGainMicroUsdg",
+  "cycleLossMicroUsdg",
+  "walletBalanceBeforeMicroUsdg",
+  "walletBalanceAfterMicroUsdg",
   "networkFees",
-  "feeReserveBeforeMicroUsdc",
-  "feeReserveTargetMicroUsdc",
-  "feeReserveTopUpMicroUsdc",
-  "feeReserveAfterMicroUsdc",
-  "plannedHolderRewardsMicroUsdc",
-  "paidHolderRewardsMicroUsdc",
+  "feeReserveBeforeMicroUsdg",
+  "feeReserveTargetMicroUsdg",
+  "feeReserveTopUpMicroUsdg",
+  "feeReserveAfterMicroUsdg",
+  "plannedHolderRewardsMicroUsdg",
+  "paidHolderRewardsMicroUsdg",
   "holderRewardsStatus",
   "distributionStatus",
 ]);
 const LEGACY_ROUND_ACCOUNTING_KEYS = new Set([
-  "packSpendMicroUsdc",
-  "buybackMicroUsdc",
-  "protectedCostsMicroUsdc",
-  "confirmedCostsMicroUsdc",
-  "feeReserveBeforeMicroUsdc",
-  "feeReserveTargetMicroUsdc",
-  "feeReserveTopUpMicroUsdc",
-  "feeReserveAfterMicroUsdc",
-  "holderRewardsMicroUsdc",
-  "gainMicroUsdc",
-  "lossMicroUsdc",
+  "packSpendMicroUsdg",
+  "buybackMicroUsdg",
+  "protectedCostsMicroUsdg",
+  "confirmedCostsMicroUsdg",
+  "feeReserveBeforeMicroUsdg",
+  "feeReserveTargetMicroUsdg",
+  "feeReserveTopUpMicroUsdg",
+  "feeReserveAfterMicroUsdg",
+  "holderRewardsMicroUsdg",
+  "gainMicroUsdg",
+  "lossMicroUsdg",
 ]);
 const QUOTED_COST_KEYS = new Set([
-  "outboundBridgeMicroUsdc",
-  "inboundBridgeMicroUsdc",
-  "collectorApiMicroUsdc",
-  "ethereumNetworkMicroUsdc",
-  "solanaNetworkMicroUsdc",
-  "slippageMicroUsdc",
+  "outboundBridgeMicroUsdg",
+  "inboundBridgeMicroUsdg",
+  "collectorApiMicroUsdg",
+  "evmNetworkMicroUsdg",
+  "solanaNetworkMicroUsdg",
+  "slippageMicroUsdg",
 ]);
 const NETWORK_FEE_KEYS = new Set(["walletLamportsCharged", "purchase", "buyback"]);
 const NATIVE_FEE_KEYS = new Set(["lamports", "paidBy"]);
@@ -163,8 +165,8 @@ const CARD_KEYS = new Set([
   "setName",
   "cardNumber",
   "imageUrl",
-  "packPriceMicroUsdc",
-  "buybackMicroUsdc",
+  "packPriceMicroUsdg",
+  "buybackMicroUsdg",
 ]);
 const LEGACY_CARD_KEYS = new Set([
   "cycleId",
@@ -189,8 +191,10 @@ export function normalizePublicCommunitySnapshot(
     const source = requiredRecord(value);
     exactKeys(source, SNAPSHOT_KEYS);
     requiredKeys(source, SNAPSHOT_KEYS);
-    if (!(source.schemaVersion === 3 || source.schemaVersion === 4) ||
-      typeof source.historyComplete !== "boolean") invalid();
+    if (
+      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5) ||
+      typeof source.historyComplete !== "boolean"
+    ) invalid();
     const sourceSchemaVersion = source.schemaVersion;
     const selected = readDashboardProfile(source.profile);
     if (expectedProfile !== undefined && readDashboardProfile(expectedProfile).id !== selected.id) {
@@ -209,18 +213,18 @@ export function normalizePublicCommunitySnapshot(
     ) invalid();
     if (
       (poolObservedAt === null) !==
-      (metricsSource.latestObservedProjectPoolMicroUsdc === null)
+      (metricsSource.latestObservedProjectPoolMicroUsdg === null)
     ) invalid();
     const metrics = {} as PublicCommunityMetrics;
-    metrics.latestObservedProjectPoolMicroUsdc =
-      metricsSource.latestObservedProjectPoolMicroUsdc === null
+    metrics.latestObservedProjectPoolMicroUsdg =
+      metricsSource.latestObservedProjectPoolMicroUsdg === null
         ? null
-        : money(metricsSource.latestObservedProjectPoolMicroUsdc);
+        : money(metricsSource.latestObservedProjectPoolMicroUsdg);
     for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key]);
     for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key]);
 
     return {
-      schemaVersion: 4,
+      schemaVersion: sourceSchemaVersion === 5 ? 5 : 4,
       profile: selected.id,
       badge: selected.badge,
       network: readNetwork(source.network, selected.network),
@@ -243,16 +247,16 @@ function readNetwork(value: unknown, expected: DashboardNetwork): DashboardNetwo
   const source = requiredRecord(value);
   exactKeys(source, NETWORK_KEYS);
   requiredKeys(source, NETWORK_KEYS);
-  const ethereum = requiredRecord(source.ethereum);
+  const evm = requiredRecord(source.evm);
   const solana = requiredRecord(source.solana);
-  exactKeys(ethereum, ETHEREUM_NETWORK_KEYS);
+  exactKeys(evm, EVM_NETWORK_KEYS);
   exactKeys(solana, SOLANA_NETWORK_KEYS);
-  requiredKeys(ethereum, ETHEREUM_NETWORK_KEYS);
+  requiredKeys(evm, EVM_NETWORK_KEYS);
   requiredKeys(solana, SOLANA_NETWORK_KEYS);
   if (
-    ethereum.name !== expected.ethereum.name ||
-    ethereum.chainId !== expected.ethereum.chainId ||
-    ethereum.label !== expected.ethereum.label ||
+    evm.name !== expected.evm.name ||
+    evm.chainId !== expected.evm.chainId ||
+    evm.label !== expected.evm.label ||
     solana.name !== expected.solana.name ||
     solana.genesisHash !== expected.solana.genesisHash ||
     solana.label !== expected.solana.label
@@ -263,110 +267,119 @@ function readNetwork(value: unknown, expected: DashboardNetwork): DashboardNetwo
 function readLatestCycle(value: unknown, schemaVersion: unknown): PublicCommunityCycle | null {
   if (value === null) return null;
   const source = requiredRecord(value);
-  exactKeys(source, LATEST_CYCLE_KEYS);
-  requiredKeys(source, LATEST_CYCLE_KEYS);
+  const required = schemaVersion === 5 ? LATEST_CYCLE_V5_KEYS : LATEST_CYCLE_KEYS;
+  exactKeys(source, required);
+  requiredKeys(source, required);
   const transactions = boundedArray(source.transactions, MAX_TRANSACTIONS).map(readTransaction);
   if (
     new Set(transactions.map(({ chain, id }) =>
-      `${chain}:${chain === "ethereum" ? id.toLowerCase() : id}`)).size !== transactions.length
+      `${chain}:${chain === "evm" ? id.toLowerCase() : id}`)).size !== transactions.length
   ) invalid();
-  return {
+  const result: PublicCommunityCycle = {
     cycleId: boundedText(source.cycleId),
     status: boundedText(source.status),
     reason: source.reason === null ? null : boundedText(source.reason),
     updatedAt: optionalTimestamp(source.updatedAt),
-    paidMicroUsdc: source.paidMicroUsdc === null ? null : money(source.paidMicroUsdc),
+    paidMicroUsdg: source.paidMicroUsdg === null ? null : money(source.paidMicroUsdg),
     payoutRecipientCount: count(source.payoutRecipientCount),
     roundAccounting: readRoundAccounting(
       source.roundAccounting,
       schemaVersion,
-      source.paidMicroUsdc,
+      source.paidMicroUsdg,
     ),
     transactions,
   };
+  if (schemaVersion === 5) result.rewardRecipientLimit = recipientLimit(source.rewardRecipientLimit);
+  return result;
+}
+
+function recipientLimit(value: unknown): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    (value !== 50 && ((value as number) < 100 || (value as number) > 1000 || (value as number) % 100 !== 0))
+  ) invalid();
+  return value as number;
 }
 
 function readRoundAccounting(
   value: unknown,
   schemaVersion: unknown,
-  paidMicroUsdc: unknown,
+  paidMicroUsdg: unknown,
 ): PublicCommunityRoundAccounting | null {
   if (value === null) return null;
   const source = requiredRecord(value);
-  if (schemaVersion === 3) return readLegacyRoundAccounting(source, paidMicroUsdc);
+  if (schemaVersion === 3) return readLegacyRoundAccounting(source, paidMicroUsdg);
   exactKeys(source, ROUND_ACCOUNTING_KEYS);
   requiredKeys(source, ROUND_ACCOUNTING_KEYS);
   const result: PublicCommunityRoundAccounting = {
-    packSpendMicroUsdc: money(source.packSpendMicroUsdc),
-    buybackMicroUsdc: money(source.buybackMicroUsdc),
-    packGainMicroUsdc: money(source.packGainMicroUsdc),
-    packLossMicroUsdc: money(source.packLossMicroUsdc),
+    packSpendMicroUsdg: money(source.packSpendMicroUsdg),
+    buybackMicroUsdg: money(source.buybackMicroUsdg),
+    packGainMicroUsdg: money(source.packGainMicroUsdg),
+    packLossMicroUsdg: money(source.packLossMicroUsdg),
     quotedCosts: readQuotedCosts(source.quotedCosts),
-    protectedCostsMicroUsdc: nullableMoney(source.protectedCostsMicroUsdc),
-    confirmedCostsMicroUsdc: source.confirmedCostsMicroUsdc === null
-      ? null
-      : money(source.confirmedCostsMicroUsdc),
-    cycleGainMicroUsdc: nullableMoney(source.cycleGainMicroUsdc),
-    cycleLossMicroUsdc: nullableMoney(source.cycleLossMicroUsdc),
-    walletBalanceBeforeMicroUsdc: nullableMoney(source.walletBalanceBeforeMicroUsdc),
-    walletBalanceAfterMicroUsdc: nullableMoney(source.walletBalanceAfterMicroUsdc),
+    protectedCostsMicroUsdg: nullableMoney(source.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: nullableSignedMoney(source.confirmedCostsMicroUsdg),
+    cycleGainMicroUsdg: nullableMoney(source.cycleGainMicroUsdg),
+    cycleLossMicroUsdg: nullableMoney(source.cycleLossMicroUsdg),
+    walletBalanceBeforeMicroUsdg: nullableMoney(source.walletBalanceBeforeMicroUsdg),
+    walletBalanceAfterMicroUsdg: nullableMoney(source.walletBalanceAfterMicroUsdg),
     networkFees: readNetworkFees(source.networkFees),
-    feeReserveBeforeMicroUsdc: nullableMoney(source.feeReserveBeforeMicroUsdc),
-    feeReserveTargetMicroUsdc: nullableMoney(source.feeReserveTargetMicroUsdc),
-    feeReserveTopUpMicroUsdc: nullableMoney(source.feeReserveTopUpMicroUsdc),
-    feeReserveAfterMicroUsdc: nullableMoney(source.feeReserveAfterMicroUsdc),
-    plannedHolderRewardsMicroUsdc: nullableMoney(source.plannedHolderRewardsMicroUsdc),
-    paidHolderRewardsMicroUsdc: nullableMoney(source.paidHolderRewardsMicroUsdc),
+    feeReserveBeforeMicroUsdg: nullableMoney(source.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: nullableMoney(source.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: nullableMoney(source.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: nullableMoney(source.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: nullableMoney(source.plannedHolderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: nullableMoney(source.paidHolderRewardsMicroUsdg),
     holderRewardsStatus: boundedText(source.holderRewardsStatus),
     distributionStatus: boundedText(source.distributionStatus),
   };
-  assertExclusive(result.packGainMicroUsdc, result.packLossMicroUsdc);
-  assertNullableExclusive(result.cycleGainMicroUsdc, result.cycleLossMicroUsdc);
+  assertExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
   return result;
 }
 
 function readLegacyRoundAccounting(
   source: Record<string, unknown>,
-  paidMicroUsdc: unknown,
+  paidMicroUsdg: unknown,
 ): PublicCommunityRoundAccounting {
   exactKeys(source, LEGACY_ROUND_ACCOUNTING_KEYS);
   requiredKeys(source, LEGACY_ROUND_ACCOUNTING_KEYS);
-  const packSpend = money(source.packSpendMicroUsdc);
-  const buyback = money(source.buybackMicroUsdc);
-  const confirmedCosts = nullableMoney(source.confirmedCostsMicroUsdc);
-  const completeCost = confirmedCosts === null ? null : addDecimal(packSpend, confirmedCosts);
+  const packSpend = money(source.packSpendMicroUsdg);
+  const buyback = money(source.buybackMicroUsdg);
+  const confirmedCosts = nullableSignedMoney(source.confirmedCostsMicroUsdg);
+  const completeCost = confirmedCosts === null ? null : BigInt(packSpend) + BigInt(confirmedCosts);
   return {
-    packSpendMicroUsdc: packSpend,
-    buybackMicroUsdc: buyback,
-    packGainMicroUsdc: subtractAtZero(buyback, packSpend),
-    packLossMicroUsdc: subtractAtZero(packSpend, buyback),
+    packSpendMicroUsdg: packSpend,
+    buybackMicroUsdg: buyback,
+    packGainMicroUsdg: subtractAtZero(buyback, packSpend),
+    packLossMicroUsdg: subtractAtZero(packSpend, buyback),
     quotedCosts: {
-      outboundBridgeMicroUsdc: null,
-      inboundBridgeMicroUsdc: null,
-      collectorApiMicroUsdc: null,
-      ethereumNetworkMicroUsdc: null,
-      solanaNetworkMicroUsdc: null,
-      slippageMicroUsdc: null,
+      outboundBridgeMicroUsdg: null,
+      inboundBridgeMicroUsdg: null,
+      collectorApiMicroUsdg: null,
+      evmNetworkMicroUsdg: null,
+      solanaNetworkMicroUsdg: null,
+      slippageMicroUsdg: null,
     },
-    protectedCostsMicroUsdc: money(source.protectedCostsMicroUsdc),
-    confirmedCostsMicroUsdc: confirmedCosts,
-    cycleGainMicroUsdc: completeCost === null
+    protectedCostsMicroUsdg: money(source.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: confirmedCosts,
+    cycleGainMicroUsdg: completeCost === null
       ? null
-      : subtractAtZero(buyback, completeCost),
-    cycleLossMicroUsdc: completeCost === null
+      : subtractBigIntAtZero(BigInt(buyback), completeCost),
+    cycleLossMicroUsdg: completeCost === null
       ? null
-      : subtractAtZero(completeCost, buyback),
-    walletBalanceBeforeMicroUsdc: null,
-    walletBalanceAfterMicroUsdc: null,
+      : subtractBigIntAtZero(completeCost, BigInt(buyback)),
+    walletBalanceBeforeMicroUsdg: null,
+    walletBalanceAfterMicroUsdg: null,
     networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
-    feeReserveBeforeMicroUsdc: money(source.feeReserveBeforeMicroUsdc),
-    feeReserveTargetMicroUsdc: money(source.feeReserveTargetMicroUsdc),
-    feeReserveTopUpMicroUsdc: money(source.feeReserveTopUpMicroUsdc),
-    feeReserveAfterMicroUsdc: money(source.feeReserveAfterMicroUsdc),
-    plannedHolderRewardsMicroUsdc: money(source.holderRewardsMicroUsdc),
-    paidHolderRewardsMicroUsdc: nullableMoney(paidMicroUsdc),
+    feeReserveBeforeMicroUsdg: money(source.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: money(source.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: money(source.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: money(source.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: money(source.holderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: nullableMoney(paidMicroUsdg),
     holderRewardsStatus: "computed",
-    distributionStatus: paidMicroUsdc === null ? "pending" : "legacy-settlement-recorded",
+    distributionStatus: paidMicroUsdg === null ? "pending" : "legacy-settlement-recorded",
   };
 }
 
@@ -375,12 +388,12 @@ function readQuotedCosts(value: unknown): PublicQuotedCosts {
   exactKeys(source, QUOTED_COST_KEYS);
   requiredKeys(source, QUOTED_COST_KEYS);
   return {
-    outboundBridgeMicroUsdc: nullableMoney(source.outboundBridgeMicroUsdc),
-    inboundBridgeMicroUsdc: nullableMoney(source.inboundBridgeMicroUsdc),
-    collectorApiMicroUsdc: nullableMoney(source.collectorApiMicroUsdc),
-    ethereumNetworkMicroUsdc: nullableMoney(source.ethereumNetworkMicroUsdc),
-    solanaNetworkMicroUsdc: nullableMoney(source.solanaNetworkMicroUsdc),
-    slippageMicroUsdc: nullableMoney(source.slippageMicroUsdc),
+    outboundBridgeMicroUsdg: nullableMoney(source.outboundBridgeMicroUsdg),
+    inboundBridgeMicroUsdg: nullableMoney(source.inboundBridgeMicroUsdg),
+    collectorApiMicroUsdg: nullableMoney(source.collectorApiMicroUsdg),
+    evmNetworkMicroUsdg: nullableMoney(source.evmNetworkMicroUsdg),
+    solanaNetworkMicroUsdg: nullableMoney(source.solanaNetworkMicroUsdg),
+    slippageMicroUsdg: nullableMoney(source.slippageMicroUsdg),
   };
 }
 
@@ -416,7 +429,7 @@ function readTransaction(value: unknown): PublicTransactionReference {
   const source = requiredRecord(value);
   exactKeys(source, TRANSACTION_KEYS);
   requiredKeys(source, TRANSACTION_KEYS);
-  if (source.chain === "ethereum") {
+  if (source.chain === "evm") {
     if (
       !new Set(["outbound-burn", "inbound-finalization", "reward-settlement"])
         .has(String(source.purpose)) ||
@@ -435,10 +448,11 @@ function readTransaction(value: unknown): PublicTransactionReference {
 
 function readCard(value: unknown, schemaVersion: unknown): PublicCommunityCard {
   const source = requiredRecord(value);
-  exactKeys(source, schemaVersion === 4 ? CARD_KEYS : LEGACY_CARD_KEYS);
+  const currentSchema = schemaVersion === 4 || schemaVersion === 5;
+  exactKeys(source, currentSchema ? CARD_KEYS : LEGACY_CARD_KEYS);
   requiredKeys(
     source,
-    schemaVersion === 4 ? CARD_KEYS : new Set(["cycleId", "productId", "rarity"]),
+    currentSchema ? CARD_KEYS : new Set(["cycleId", "productId", "rarity"]),
   );
   const card: PublicCommunityCard = {
     cycleId: boundedText(source.cycleId),
@@ -449,8 +463,8 @@ function readCard(value: unknown, schemaVersion: unknown): PublicCommunityCard {
     setName: nullableText(source.setName),
     cardNumber: nullableText(source.cardNumber),
     imageUrl: null,
-    packPriceMicroUsdc: nullableMoney(source.packPriceMicroUsdc),
-    buybackMicroUsdc: nullableMoney(source.buybackMicroUsdc),
+    packPriceMicroUsdg: nullableMoney(source.packPriceMicroUsdg),
+    buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg),
   };
   if (source.imageUrl !== undefined && source.imageUrl !== null) {
     const url = new URL(boundedText(source.imageUrl));
@@ -515,19 +529,18 @@ function nullableMoney(value: unknown): string | null {
   return value === undefined || value === null ? null : money(value);
 }
 
-function nullableText(value: unknown): string | null {
-  return value === undefined || value === null ? null : boundedText(value);
+function optionalSignedMoney(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !/^(0|-?[1-9]\d{0,77})$/.test(value)) invalid();
+  return value;
 }
 
-function addDecimal(left: string, right: string): string {
-  let carry = 0;
-  let result = "";
-  for (let offset = 0; offset < Math.max(left.length, right.length); offset += 1) {
-    const sum = Number(left.at(-1 - offset) ?? 0) + Number(right.at(-1 - offset) ?? 0) + carry;
-    result = String(sum % 10) + result;
-    carry = Math.floor(sum / 10);
-  }
-  return carry === 0 ? result : String(carry) + result;
+function nullableSignedMoney(value: unknown): string | null {
+  return value === undefined || value === null ? null : optionalSignedMoney(value);
+}
+
+function nullableText(value: unknown): string | null {
+  return value === undefined || value === null ? null : boundedText(value);
 }
 
 function subtractAtZero(minuend: string, subtrahend: string): string {
@@ -544,6 +557,10 @@ function subtractAtZero(minuend: string, subtrahend: string): string {
     result = String(digit) + result;
   }
   return result.replace(/^0+/, "") || "0";
+}
+
+function subtractBigIntAtZero(minuend: bigint, subtrahend: bigint): string {
+  return (minuend > subtrahend ? minuend - subtrahend : 0n).toString();
 }
 
 function count(value: unknown): number {
