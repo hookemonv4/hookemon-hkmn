@@ -296,15 +296,47 @@ test('a fresh cycle with no completed stages reports the honest all-zero/all-nul
   assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
 });
 
-test('packSpendMicroUsdg becomes the cycle release amount once purchase durably completes, and packLoss reflects it', async t => {
-  const repository = await openRepository(t);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
-  await completeStageInOrder(repository, cycleId, 'purchase', { memo: 'memo-1', signature: 'sig-1' });
+function relayLeg({ direction, state = 'SETTLED', sourceAmountAtomic = '0', destinationAmountAtomic = '0' }) {
+  return { direction, state, sourceAmountAtomic, destinationAmountAtomic };
+}
 
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.packSpendMicroUsdg, '5000000');
-  assert.equal(accounting.packLossMicroUsdg, '5000000', 'no buyback proceeds yet, so the full spend is currently a loss');
+function relayLegRepository({ releaseAmount = '0', relayLegs = new Map(), stages = {} }) {
+  return {
+    async describeCycle() { return { releaseAmount, relayLegs }; },
+    async readStage(_cycleId, stage) { return stages[stage] ?? { status: 'PENDING' }; },
+  };
+}
+
+test('packSpendMicroUsdg is the settled outbound bridge amount, never the allocated cycle budget', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '100', // the cycle's allocated budget
+    relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })]]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.packSpendMicroUsdg, '50', 'real settled spend, not the budget of 100');
+  assert.equal(accounting.packLossMicroUsdg, '50', 'no buyback proceeds yet, so the full spend is currently a loss');
   assert.equal(accounting.packGainMicroUsdg, '0');
+});
+
+test('packSpendMicroUsdg stays 0 until the outbound leg is durably settled', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '100',
+    relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', state: 'RECORDED', sourceAmountAtomic: '50' })]]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.packSpendMicroUsdg, '0');
+});
+
+test('packSpendMicroUsdg stays 0 when more than one settled outbound leg exists (ambiguous, never guessed)', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '100',
+    relayLegs: new Map([
+      ['leg-1', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })],
+      ['leg-2', relayLeg({ direction: 'outbound', sourceAmountAtomic: '60' })],
+    ]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.packSpendMicroUsdg, '0');
 });
 
 test('quotedCosts.outboundBridgeMicroUsdg is derived from the outbound stage evidence real quote amounts when present', async t => {
@@ -354,7 +386,21 @@ test('holderRewardsStatus/distributionStatus advance only as return/distribution
   assert.equal(accounting.holderRewardsStatus, 'paid');
 });
 
-test('completed rehearsal payout evidence supplies the observed proceeds as buyback accounting', async t => {
+test('buybackMicroUsdg is the settled return bridge amount, never the Solana proceeds at an assumed USDG parity', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '5000000',
+    relayLegs: new Map([
+      ['out', relayLeg({ direction: 'outbound', sourceAmountAtomic: '5000000' })],
+      ['ret', relayLeg({ direction: 'return', destinationAmountAtomic: '4995000' })],
+    ]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.buybackMicroUsdg, '4995000');
+  assert.equal(accounting.packGainMicroUsdg, '0');
+  assert.equal(accounting.packLossMicroUsdg, '5000');
+});
+
+test('a completed production payout stage carrying only rehearsal Solana proceeds does not populate buybackMicroUsdg', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
   await completeStageInOrder(repository, cycleId, 'purchase', { signature: 'purchase-1' });
@@ -363,33 +409,5 @@ test('completed rehearsal payout evidence supplies the observed proceeds as buyb
     proceedsMicroSolanaStable: '4995000',
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.buybackMicroUsdg, '4995000');
-  assert.equal(accounting.packGainMicroUsdg, '0');
-  assert.equal(accounting.packLossMicroUsdg, '5000');
-});
-
-test('migrated historical rehearsal payout evidence preserves its atomic accounting totals', async t => {
-  const repository = await openRepository(t);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
-  const migratedHistoricalEvidence = Object.freeze({
-    signature: 'payout-1',
-    proceedsMicroSolanaStable: '4995000',
-  });
-  await completeStageInOrder(repository, cycleId, 'purchase', { signature: 'purchase-1' });
-  await completeStageInOrder(repository, cycleId, 'payout', migratedHistoricalEvidence);
-
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.deepEqual(
-    {
-      buybackMicroUsdg: accounting.buybackMicroUsdg,
-      packGainMicroUsdg: accounting.packGainMicroUsdg,
-      packLossMicroUsdg: accounting.packLossMicroUsdg,
-    },
-    {
-      buybackMicroUsdg: '4995000',
-      packGainMicroUsdg: '0',
-      packLossMicroUsdg: '5000',
-    },
-  );
-  assert.match((await repository.describeCycle(cycleId)).journalHead, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(accounting.buybackMicroUsdg, '0', 'no settled return bridge leg exists, so this is honestly 0, not a rehearsal-derived figure');
 });

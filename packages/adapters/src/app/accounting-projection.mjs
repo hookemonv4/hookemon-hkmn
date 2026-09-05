@@ -52,6 +52,20 @@ function outboundBridgeFee(outboundStage) {
   return subtractAtZero(origin, destination);
 }
 
+/** The single relay leg of the given direction that is durably `SETTLED`, i.e. actually confirmed
+ * on both chains — never a probe-time quote. Returns `null` when no such leg exists yet (nothing
+ * has settled) or when more than one exists (ambiguous; a later work package's recovery/operator
+ * tooling resolves that, this read-only projection never guesses which one is real). `outbound`
+ * legs originate on the Robinhood Chain in USDG by construction (see stages/outbound.mjs); `return`
+ * legs land back on the Robinhood Chain in USDG by construction (see stages/return.mjs) — so
+ * `sourceAmountAtomic`/`destinationAmountAtomic` here are real USDG amounts, not a Solana-USDC
+ * figure treated at an assumed parity. */
+function settledRelayLeg(relayLegs, direction) {
+  if (!(relayLegs instanceof Map)) return null;
+  const matches = [...relayLegs.values()].filter(leg => leg?.direction === direction && leg?.state === 'SETTLED');
+  return matches.length === 1 ? matches[0] : null;
+}
+
 /** Workflow-state labels derived directly from which stages are durably COMPLETE — never a
  * fabricated dollar figure, just an honest description of where the cycle's holder-reward path
  * actually is. Distribution/payout never durably complete today (both still refuse under
@@ -90,22 +104,23 @@ export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   ]);
   const [funding, outbound, purchase, buyback, returnStage, distribution, payout] = stages;
   void funding; // read for symmetry/future use; funding carries no accounting amount today.
+  void purchase; // the real spend evidence is the settled outbound bridge leg, not this stage.
+  void buyback; // the real proceeds evidence is the settled return bridge leg, not this stage.
 
-  // The cycle's own budgeted release amount, attributed as real spend once the purchase stage
-  // durably completes — the closest honest proxy available: neither Collector Crypt's
-  // generatePack/openPack response schema (collector-crypt.mjs's `assertGeneratePackResponse`/
-  // `assertOpenPackResponse`) documents a settled price field, so there is no better real number to
-  // report yet. Before purchase completes, nothing has been spent, so this stays '0'.
-  const packSpendMicroUsdg = isCompleteStage(purchase) && typeof description.releaseAmount === 'string'
-    ? description.releaseAmount
-    : '0';
+  // The cycle's allocated release amount (`description.releaseAmount`) is a budget, not a spend —
+  // reporting it here would equate "authorized to spend up to" with "actually spent" (see
+  // docs/modules/dashboard.md). The real spend is the amount of USDG that durably left operator
+  // custody to fund this cycle's purchase: the settled outbound bridge leg's own source amount.
+  // Nothing has been spent until that leg settles, so this honestly stays '0' until then.
+  const outboundLeg = settledRelayLeg(description.relayLegs, 'outbound');
+  const packSpendMicroUsdg = outboundLeg !== null ? outboundLeg.sourceAmountAtomic : '0';
 
-  // Rehearsal-only source: finalized Circle USD proceeds use six decimals and are treated 1:1 with
-  // USDG. Never use buyback evidence's refundAmount, whose decimal scale is not documented.
-  const buybackMicroSolanaStable = payout?.evidence?.proceedsMicroSolanaStable;
-  const buybackMicroUsdg = isCompleteStage(payout) && typeof buybackMicroSolanaStable === 'string'
-    ? buybackMicroSolanaStable
-    : '0';
+  // The real USDG the operator's treasury actually received back is the settled return bridge
+  // leg's own destination amount — never the Solana-side Circle USD buyback proceeds taken at an
+  // assumed 1:1 parity with USDG (a different asset on a different chain). Nothing has returned
+  // until that leg settles, so this honestly stays '0' until then.
+  const returnLeg = settledRelayLeg(description.relayLegs, 'return');
+  const buybackMicroUsdg = returnLeg !== null ? returnLeg.destinationAmountAtomic : '0';
 
   return Object.freeze({
     packSpendMicroUsdg,
