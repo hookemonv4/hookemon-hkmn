@@ -499,20 +499,23 @@ function projectCard(card, unitPrice) {
   return projected;
 }
 
+// Provenance rule (F-inbox): a legacy record field named with the old `*MicroUsdc` suffix may
+// actually be denominated in chain1 Ethereum USDC, not chain4663 Robinhood USDG. Since these old
+// fields carry no companion chain/asset identity to verify against, they are never read as a
+// same-value fallback for the new `*MicroUsdg` fields — only the exact `*MicroUsdg`-named record
+// field (written by a producer that has already adopted the current chain/asset identity) is
+// accepted. An absent `*MicroUsdg` field means the amount is genuinely unknown here, not '0' and
+// not a silently reinterpreted legacy value.
 function projectRoundAccounting(record) {
   const accounting = record.roundAccounting;
   if (accounting === undefined || accounting === null) return null;
-  const packSpend = anyMoney(accounting.grossPackDebitMicroUsdg ?? accounting.grossPackDebitMicroUsdc);
-  const buyback = anyMoney(accounting.confirmedBuybackMicroUsdg ?? accounting.confirmedBuybackMicroUsdc);
-  const confirmedCosts = optionalAnySignedMoney(
-    accounting.confirmedCostMicroUsdg ?? accounting.confirmedCostMicroUsdc,
-  );
+  const packSpend = anyMoney(accounting.grossPackDebitMicroUsdg);
+  const buyback = anyMoney(accounting.confirmedBuybackMicroUsdg);
+  const confirmedCosts = optionalAnySignedMoney(accounting.confirmedCostMicroUsdg);
   const completeCost = confirmedCosts === null ? null : packSpend + BigInt(confirmedCosts);
-  const planned = optionalAnyMoney(accounting.holderRewardsMicroUsdg ?? accounting.holderRewardsMicroUsdc);
+  const planned = optionalAnyMoney(accounting.holderRewardsMicroUsdg);
   const paid = optionalAnyMoney(
-    record.settlement?.paidThisCycleMicroUsdg ??
-      record.settlement?.paidThisCycleMicroUsdc ??
-      record.settlement?.paid,
+    record.settlement?.paidThisCycleMicroUsdg ?? record.settlement?.paid,
   );
   return {
     packSpendMicroUsdg: packSpend.toString(),
@@ -520,16 +523,14 @@ function projectRoundAccounting(record) {
     packGainMicroUsdg: subtractAtZero(buyback, packSpend).toString(),
     packLossMicroUsdg: subtractAtZero(packSpend, buyback).toString(),
     quotedCosts: {
-      outboundBridgeMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.outboundMicroUsdg ?? record.ledgerSnapshot?.outboundMicroUsdc),
-      inboundBridgeMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.inboundMicroUsdg ?? record.ledgerSnapshot?.inboundMicroUsdc),
-      collectorApiMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.collectorMicroUsdg ?? record.ledgerSnapshot?.collectorMicroUsdc),
-      evmNetworkMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.evmGasMicroUsdg ?? record.ledgerSnapshot?.ethereumGasMicroUsdc),
-      solanaNetworkMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.solanaGasMicroUsdg ?? record.ledgerSnapshot?.solanaGasMicroUsdc),
-      slippageMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.slippageMicroUsdg ?? record.ledgerSnapshot?.slippageMicroUsdc),
+      outboundBridgeMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.outboundMicroUsdg),
+      inboundBridgeMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.inboundMicroUsdg),
+      collectorApiMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.collectorMicroUsdg),
+      evmNetworkMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.evmGasMicroUsdg),
+      solanaNetworkMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.solanaGasMicroUsdg),
+      slippageMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.slippageMicroUsdg),
     },
-    protectedCostsMicroUsdg: optionalAnyMoney(
-      accounting.protectedCostForecastMicroUsdg ?? accounting.protectedCostForecastMicroUsdc,
-    ),
+    protectedCostsMicroUsdg: optionalAnyMoney(accounting.protectedCostForecastMicroUsdg),
     confirmedCostsMicroUsdg: confirmedCosts,
     cycleGainMicroUsdg: completeCost === null
       ? null
@@ -537,25 +538,13 @@ function projectRoundAccounting(record) {
     cycleLossMicroUsdg: completeCost === null
       ? null
       : subtractAtZero(completeCost, buyback).toString(),
-    walletBalanceBeforeMicroUsdg: optionalAnyMoney(
-      record.roundEvidence?.walletBalanceBeforeMicroUsdg ?? record.roundEvidence?.walletBalanceBeforeMicroUsdc,
-    ),
-    walletBalanceAfterMicroUsdg: optionalAnyMoney(
-      record.roundEvidence?.walletBalanceAfterMicroUsdg ?? record.roundEvidence?.walletBalanceAfterMicroUsdc,
-    ),
+    walletBalanceBeforeMicroUsdg: optionalAnyMoney(record.roundEvidence?.walletBalanceBeforeMicroUsdg),
+    walletBalanceAfterMicroUsdg: optionalAnyMoney(record.roundEvidence?.walletBalanceAfterMicroUsdg),
     networkFees: projectNetworkFees(record.roundEvidence?.networkFees),
-    feeReserveBeforeMicroUsdg: optionalAnyMoney(
-      accounting.feeReserveBeforeMicroUsdg ?? accounting.feeReserveBeforeMicroUsdc,
-    ),
-    feeReserveTargetMicroUsdg: optionalAnyMoney(
-      accounting.feeReserveTargetMicroUsdg ?? accounting.feeReserveTargetMicroUsdc,
-    ),
-    feeReserveTopUpMicroUsdg: optionalAnyMoney(
-      accounting.feeReserveTopUpMicroUsdg ?? accounting.feeReserveTopUpMicroUsdc,
-    ),
-    feeReserveAfterMicroUsdg: optionalAnyMoney(
-      accounting.feeReserveAfterMicroUsdg ?? accounting.feeReserveAfterMicroUsdc,
-    ),
+    feeReserveBeforeMicroUsdg: optionalAnyMoney(accounting.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: optionalAnyMoney(accounting.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: optionalAnyMoney(accounting.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: optionalAnyMoney(accounting.feeReserveAfterMicroUsdg),
     plannedHolderRewardsMicroUsdg: planned,
     paidHolderRewardsMicroUsdg: paid,
     holderRewardsStatus: requiredBoundedText(
