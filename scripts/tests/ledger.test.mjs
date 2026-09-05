@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import {
   openLedger, addTask, listTasks, nextTask, claimTask, completeTask, projectTasks,
   heartbeatTask, releaseTask, setTaskDeps, prepareTaskDeferral, deferTask,
-  rebindCompletionCommit,
+  prepareTaskDeferralRebind, rebindCompletionCommit, rebindTaskDeferral,
 } from '../lib/ledger.mjs';
 import { hashFile, writeJson } from '../lib/util.mjs';
 import { validateTaskDeferralApproval } from '../lib/gates.mjs';
@@ -445,4 +445,39 @@ test('task deferral is restricted to the approved dashboard task', () => {
   for (const taskId of ['P1-009', 'P1-010', 'P1-012']) {
     assert.throws(() => prepareTaskDeferral(db, taskId), /only P1-011 may be deferred/);
   }
+});
+
+test('rebindTaskDeferral validates the replacement authority inside its transaction', () => {
+  const { root } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'P1-011', title: 'dashboard' });
+  deferTask(db, 'P1-011', { authority: deferralAuthority(root, db, 'P1-011') });
+  const before = listTasks(db).find(task => task.id === 'P1-011');
+  const rebind = prepareTaskDeferralRebind(db, 'P1-011');
+
+  assert.throws(
+    () => rebindTaskDeferral(db, 'P1-011', {
+      expectedBinding: rebind.binding,
+      descriptorInput: 'decisions/task-deferrals/P1-011.json',
+      approvalInput: 'decisions/owner-approvals/missing-rebind.json',
+    }),
+    /missing-rebind|ENOENT|owner approval/,
+  );
+  const after = listTasks(db).find(task => task.id === 'P1-011');
+  assert.deepEqual(
+    {
+      status: after.status,
+      approval: after.defer_approval,
+      descriptor: after.defer_descriptor,
+      fingerprint: after.defer_prestate_fingerprint,
+      token: after.lease_token,
+    },
+    {
+      status: before.status,
+      approval: before.defer_approval,
+      descriptor: before.defer_descriptor,
+      fingerprint: before.defer_prestate_fingerprint,
+      token: before.lease_token,
+    },
+  );
 });

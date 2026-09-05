@@ -1,17 +1,27 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { keccak256Hex } from './keccak.mjs';
-import { loadCommittedPreflightPackage, PROGRAMMABLE_API_BASE_URL } from './preflight-package.mjs';
+import {
+  assembleV4PreflightRequest,
+  loadCommittedPreflightPackage,
+  PROGRAMMABLE_API_BASE_URL,
+  ROBINHOOD_RPC_URL,
+} from './preflight-package.mjs';
 
 const CHAIN_PATH = '/v4/chains/4663/capabilities';
+const PREFLIGHT_PATH = '/v4/chains/4663/custom-launches/preflight';
+const STATUS_PATH = '/v4/chains/4663/custom-launches/{launchId}';
 const SECRET_FIELD = /(?:api.?key|authorization|credential|secret|password|private.?key|access.?token)/iu;
 
 function apiUrl(baseUrl, path) {
-  return new URL(path, baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString();
+  const base = new URL(baseUrl);
+  if (base.username || base.password) throw new Error('provider API base URL must not contain credentials');
+  const target = new URL(path, base);
+  if (target.origin !== base.origin) throw new Error('provider route must remain on the configured API origin');
+  return target.toString();
 }
 
-async function responseJson(response, label) {
+async function responseJson(response, label, { allowError = false } = {}) {
   const text = await response.text();
   let body;
   try {
@@ -19,48 +29,11 @@ async function responseJson(response, label) {
   } catch {
     throw new Error(`${label} returned invalid JSON`);
   }
-  if (!response.ok) {
+  if (!response.ok && !allowError) {
     const detail = typeof body?.error?.code === 'string' ? ` (${body.error.code})` : '';
     throw new Error(`${label} returned HTTP ${response.status}${detail}`);
   }
-  return body;
-}
-
-function sameAddress(left, right) {
-  return typeof left === 'string' && typeof right === 'string' && left.toLowerCase() === right.toLowerCase();
-}
-
-function compareField(mismatches, path, actual, expected, comparator = Object.is) {
-  if (!comparator(actual, expected)) mismatches.push(`${path}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`);
-}
-
-function compareResponse(response, expected) {
-  const mismatches = [];
-  compareField(mismatches, 'profile.structuralProfileId', response?.profile?.structuralProfileId, expected.profile.structuralProfileId);
-  compareField(mismatches, 'profile.profileDigest', response?.profile?.profileDigest, expected.profile.profileDigest);
-  for (const [key, value] of Object.entries(expected.roots)) compareField(mismatches, `roots.${key}`, response?.roots?.[key], value);
-  for (const [key, value] of Object.entries(expected.digests)) compareField(mismatches, `digests.${key}`, response?.digests?.[key], value);
-  compareField(mismatches, 'caller', response?.caller, expected.caller, sameAddress);
-  compareField(mismatches, 'deployer', response?.deployer, expected.deployer, sameAddress);
-  compareField(mismatches, 'graphTransaction.chainId', String(response?.graphTransaction?.chainId ?? ''), expected.graphTransaction.chainId);
-  compareField(mismatches, 'graphTransaction.to', response?.graphTransaction?.to, expected.graphTransaction.to, sameAddress);
-  compareField(mismatches, 'graphTransaction.value', String(response?.graphTransaction?.value ?? ''), expected.graphTransaction.value);
-  if (typeof response?.graphTransaction?.data !== 'string' || !/^0x[0-9a-f]+$/iu.test(response.graphTransaction.data)) {
-    mismatches.push('graphTransaction.data: expected non-empty hexadecimal calldata');
-  }
-  if (Number.isNaN(Date.parse(response?.graphTransaction?.expiresAt ?? ''))) {
-    mismatches.push('graphTransaction.expiresAt: expected an ISO-8601 expiry');
-  }
-  const allowance = response?.seedTransaction?.permit2Allowance;
-  for (const [key, value] of Object.entries(expected.seedTransaction.permit2Allowance)) {
-    compareField(mismatches, `seedTransaction.permit2Allowance.${key}`, String(allowance?.[key] ?? ''), String(value));
-  }
-  const deadline = response?.seedTransaction?.deadlineSeconds;
-  if (!Number.isInteger(deadline) || deadline < 1 || deadline > expected.seedTransaction.maximumDeadlineSeconds) {
-    mismatches.push(`seedTransaction.deadlineSeconds: expected an integer from 1 through ${expected.seedTransaction.maximumDeadlineSeconds}, received ${JSON.stringify(deadline)}`);
-  }
-  compareField(mismatches, 'seedTransaction.refundDestination', response?.seedTransaction?.refundDestination, expected.seedTransaction.refundDestination, sameAddress);
-  return mismatches.map((message, index) => `${index + 1}. ${message}`);
+  return { status: response.status, ok: response.ok, body };
 }
 
 export function stripSecrets(value) {
@@ -82,80 +55,115 @@ function writeEvidence(outputDirectory, now, body) {
   return path;
 }
 
-function assertCapabilities(capabilities) {
+function assertCapabilities(capabilities, { requireStatusRoute = false } = {}) {
   if (String(capabilities?.chain?.id) !== '4663') throw new Error('capabilities response is not for chain 4663');
+  if (capabilities?.chain?.caip2 !== 'eip155:4663') throw new Error('capabilities response is not for eip155:4663');
   if (capabilities?.safety?.transactionBroadcast !== false) throw new Error('capabilities response does not prohibit provider broadcast');
-  if (typeof capabilities?.routes?.preflight !== 'string') throw new Error('capabilities response does not advertise a preflight route');
+  if (capabilities?.routes?.preflight !== PREFLIGHT_PATH) {
+    throw new Error('capabilities response does not advertise the recorded preflight route');
+  }
+  if (requireStatusRoute && capabilities?.routes?.status !== STATUS_PATH) {
+    throw new Error('capabilities response does not advertise the recorded status route');
+  }
+}
+
+export async function readLaunchWalletNonce({ rpcUrl = ROBINHOOD_RPC_URL, launchWallet, fetchImpl = fetch } = {}) {
+  const response = await responseJson(await fetchImpl(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionCount', params: [launchWallet, 'latest'] }),
+  }), 'Robinhood RPC');
+  if (typeof response.body?.result !== 'string' || !/^0x[0-9a-f]+$/iu.test(response.body.result)) {
+    throw new Error('Robinhood RPC returned an invalid nonce');
+  }
+  return response.body.result;
+}
+
+function providerError(response) {
+  const code = response.body?.error?.code;
+  const message = response.body?.error?.message;
+  return typeof code === 'string' ? `${code}${typeof message === 'string' ? `: ${message}` : ''}` : `HTTP ${response.status}`;
 }
 
 export async function runPreflight({
   root,
   baseUrl = PROGRAMMABLE_API_BASE_URL,
+  rpcUrl = ROBINHOOD_RPC_URL,
   apiKey,
+  source,
   outputDirectory = resolve(root, 'release/phase3/preflight'),
   now = () => new Date(),
+  packageData,
+  requestTemplate,
+  contract,
+  pinnedCapabilities,
+  launchWallet,
+  nonce,
+  fetchImpl = fetch,
 } = {}) {
   if (typeof apiKey !== 'string' || apiKey.length === 0) throw new Error('PROGRAMMABLE_API_KEY is required');
-  const packageData = loadCommittedPreflightPackage(root);
-  const capabilities = await responseJson(await fetch(apiUrl(baseUrl, CHAIN_PATH)), 'capabilities');
+  const committed = requestTemplate === undefined && packageData === undefined
+    ? loadCommittedPreflightPackage(root, { source })
+    : {};
+  const template = packageData?.request ?? requestTemplate ?? committed.template;
+  const activeContract = packageData?.contract ?? contract ?? committed.contract;
+  const activePinnedCapabilities = packageData?.pinnedCapabilities ?? pinnedCapabilities ?? committed.pinnedCapabilities;
+  const activeLaunchWallet = packageData?.launchWallet ?? launchWallet ?? committed.launchWallet;
+  if (template === undefined) throw new Error('a V4 request template is required');
+  if (activeContract === undefined) throw new Error('a recorded V4 request contract is required');
+  if (activePinnedCapabilities === undefined) throw new Error('pinned provider capabilities are required');
+  if (typeof activeLaunchWallet !== 'string' || activeLaunchWallet.length === 0) throw new Error('launchWallet is required');
+  const capabilityResponse = await responseJson(await fetchImpl(apiUrl(baseUrl, CHAIN_PATH)), 'capabilities');
+  const capabilities = capabilityResponse.body;
   assertCapabilities(capabilities);
-  const preflightPath = capabilities.routes.preflight;
-  const response = await responseJson(await fetch(apiUrl(baseUrl, preflightPath), {
+  const assembledRequest = assembleV4PreflightRequest({
+    template,
+    contract: activeContract,
+    capabilities,
+    pinnedCapabilities: activePinnedCapabilities,
+    launchWallet: activeLaunchWallet,
+    nonce: nonce ?? await readLaunchWalletNonce({ rpcUrl, launchWallet: activeLaunchWallet, fetchImpl }),
+    now: now(),
+  });
+  const providerResponse = await responseJson(await fetchImpl(apiUrl(baseUrl, PREFLIGHT_PATH), {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify(packageData.request),
-  }), 'preflight');
-  const mismatches = compareResponse(response, packageData.expected);
+    body: JSON.stringify(assembledRequest),
+  }), 'preflight', { allowError: true });
+  const mismatches = providerResponse.ok ? [] : [`1. provider: ${providerError(providerResponse)}`];
   const evidencePath = writeEvidence(outputDirectory, now(), {
-    schemaVersion: 'hookemon.programmable-preflight-evidence.v1',
-    apiKey: '[REDACTED]',
+    schemaVersion: 'hookemon.programmable-preflight-evidence.v2',
     redactions: ['PROGRAMMABLE_API_KEY'],
-    package: {
-      commit: packageData.commit,
-      tree: packageData.tree,
-      packageTree: packageData.packageTree,
-    },
+    request: assembledRequest,
     capabilities,
-    expected: packageData.expected,
-    response,
+    providerResponse: { httpStatus: providerResponse.status, body: providerResponse.body },
     mismatches,
   });
-  return { ...packageData, capabilities, response, mismatches, evidencePath };
+  if (!providerResponse.ok) {
+    const error = new Error(`preflight returned ${providerError(providerResponse)}`);
+    error.evidencePath = evidencePath;
+    error.mismatches = mismatches;
+    throw error;
+  }
+  return { request: assembledRequest, capabilities, response: providerResponse.body, mismatches, evidencePath };
 }
 
-export async function getPreflightStatus({ baseUrl = PROGRAMMABLE_API_BASE_URL, apiKey, requestId } = {}) {
+export async function getPreflightStatus({ baseUrl = PROGRAMMABLE_API_BASE_URL, apiKey, requestId, fetchImpl = fetch } = {}) {
   if (typeof apiKey !== 'string' || apiKey.length === 0) throw new Error('PROGRAMMABLE_API_KEY is required');
   if (typeof requestId !== 'string' || requestId.length === 0) throw new Error('a request ID is required');
-  const capabilities = await responseJson(await fetch(apiUrl(baseUrl, CHAIN_PATH)), 'capabilities');
-  assertCapabilities(capabilities);
-  if (typeof capabilities?.routes?.status !== 'string') throw new Error('capabilities response does not advertise a status route');
-  const statusPath = capabilities.routes.status.replace('{launchId}', encodeURIComponent(requestId));
-  return stripSecrets(await responseJson(await fetch(apiUrl(baseUrl, statusPath), {
+  const capabilities = (await responseJson(await fetchImpl(apiUrl(baseUrl, CHAIN_PATH)), 'capabilities')).body;
+  assertCapabilities(capabilities, { requireStatusRoute: true });
+  const statusPath = STATUS_PATH.replace('{launchId}', encodeURIComponent(requestId));
+  return stripSecrets((await responseJson(await fetchImpl(apiUrl(baseUrl, statusPath), {
     headers: { authorization: `Bearer ${apiKey}` },
-  }), 'status'));
+  }), 'status')).body);
 }
 
 export function formatWalletHandoff(result) {
-  const { expected, response } = result;
-  const calldataDigest = keccak256Hex(Buffer.from(response.graphTransaction.data.slice(2), 'hex'));
   return [
-    'WALLET HANDOFF',
-    'Transaction 1: graph deployment and pool initialization',
-    `chainId: ${expected.graphTransaction.chainId}`,
-    `to: ${response.graphTransaction.to}`,
-    `value: ${response.graphTransaction.value}`,
-    `calldata digest: ${calldataDigest}`,
-    `graph digest: ${response.digests.graphDraftSha256}`,
-    `expected addresses: ${JSON.stringify(result.graphDraft.graph.targets.map(({ targetId, address }) => ({ targetId, address })))}`,
-    'nonce: set in Rabby immediately before signing',
-    'gas: set in Rabby immediately before signing',
-    `deadline: ${response.graphTransaction.expiresAt}`,
-    '',
-    'Transaction 2: seed and custody binding',
-    `Permit2 allowance: ${expected.seedTransaction.permit2Allowance.amountAtomic} USDG atomic units (240 USDG)`,
-    `deadline: ${response.seedTransaction.deadlineSeconds} seconds (must not exceed ${expected.seedTransaction.maximumDeadlineSeconds})`,
-    `refund destination: ${response.seedTransaction.refundDestination}`,
-    '',
-    'Verify in Rabby before signing: chain 4663, recipient, value, calldata digest, graph digest, expected addresses, nonce, gas, deadline, exact 240 USDG Permit2 allowance, and refund destination.',
+    'READ-ONLY PREFLIGHT',
+    `evidence: ${result.evidencePath}`,
+    `request schema: ${result.request.schemaVersion}`,
+    'A preflight response does not authorize signing, broadcast, or deployment.',
   ].join('\n');
 }

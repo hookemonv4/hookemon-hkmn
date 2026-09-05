@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "hookemon.redteam-evidence.v1",
+  "phase": "redteam",
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "reviewedFindingIds": [
+    "RT-R55-01",
+    "RT-R55-03",
+    "RT-R55-04",
+    "RT-R58-01",
+    "RT-R58-02",
+    "RT-R58-03",
+    "RT-R58-04",
+    "RT-R58-05",
+    "RT-R58-06",
+    "RT-R58-07",
+    "RT-R58-08",
+    "RT-R65-01"
+  ],
+  "record": "docs/audit/2026-09-04/redteam-revision-65.md sha256:a89a12f29f83b96cc5ba30b5d4f86bffd55cb425081f34fd5a0259f95aeb9e54; RT-R65-01 resolution test citations: packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsPayerOutsideTheBoundIntent, packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsLowerTickOutsideTheBoundIntent, packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsUpperTickOutsideTheBoundIntent, packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsLiquidityOutsideTheBoundIntent, packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsAmount0MaximumOutsideTheBoundIntent, packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsAmount1MaximumOutsideTheBoundIntent, packages/contracts/test/launch/LaunchLeg.t.sol::testSeedRejectsDeadlineBeyondMaximumWindow; packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsChangedPayer, packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsChangedLowerTick, packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsChangedUpperTick, packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsChangedLiquidity, packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsChangedAmount0Maximum, packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsChangedAmount1Maximum, packages/contracts/test/release/PhaseThreeReleasePlan.t.sol::test_validateMaterializedSeedCallRejectsLateDeadline; packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol::testSeedIntentRejectsEveryCalldataMutationOnArchiveFork."
+}

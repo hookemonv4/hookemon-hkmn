@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createDefaultOperatorConfiguration } from '../../src/config/state-schema.mjs';
 import {
+  assertCollectorOnlyRehearsalPolicy,
   createPolicyEngine,
   deriveCyclePolicyDigest,
   POLICY_WINDOW_MS,
@@ -60,6 +61,42 @@ function policyFixture({
     replaceConfiguration: next => { current = next; },
   };
 }
+
+test('collector-only live rehearsal policy binds one approved pack, one booster, and one manual approval', () => {
+  const configuration = configuredPolicy({
+    allowedPackIds: ['collector-25'],
+    requestedOrders: 1,
+    maxBoostersPerCycle: 1,
+    maxUnitPriceMicroUsdg: '25000000',
+    maxCycleBudgetMicroUsdg: '25000000',
+    max24HourBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000',
+    maxCyclesPerDay: 1,
+    manualApprovalCycles: 1,
+  });
+
+  assert.deepEqual(
+    assertCollectorOnlyRehearsalPolicy(configuration, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    configuration,
+  );
+  assert.throws(
+    () => assertCollectorOnlyRehearsalPolicy({ ...configuration, maxBoostersPerCycle: 2 }, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    /maxBoostersPerCycle must equal 1/,
+  );
+  assert.throws(
+    () => assertCollectorOnlyRehearsalPolicy({ ...configuration, allowedPackIds: ['another-pack'] }, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    /allow exactly the selected pack/,
+  );
+});
 
 test('standing-authority cap reservation delegates one exact decision to the authoritative repository', async () => {
   const decision = {

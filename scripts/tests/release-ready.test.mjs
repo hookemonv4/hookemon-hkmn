@@ -47,7 +47,9 @@ const expectedFindingIds = [
   'RT-R58-06',
   'RT-R58-07',
   'RT-R58-08',
+  'RT-R65-01',
 ];
+const priorFindingIds = expectedFindingIds.filter(id => id !== 'RT-R65-01');
 const manifestDispositionedIds = ['RT-R58-01', 'RT-R58-02', 'RT-R58-04'];
 const redteamEvidenceInputs = Object.freeze({
   R1: 'qa/redteam/doubt-loop.json',
@@ -56,7 +58,6 @@ const redteamEvidenceInputs = Object.freeze({
   R4: 'qa/redteam/termination.json',
   R5: 'qa/redteam/threat-model.json',
 });
-
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'hookemon-release-ready-')));
   copyTrackedProjectFiles(templateRoot, root);
@@ -120,6 +121,7 @@ function copyCurrentCycle(root) {
   const termination = readJson(terminationPath);
   const bundle = readJson(bundlePath);
   const findings = readJson(findingsPath);
+  findings.evidenceReferences ??= {};
 
   for (const artifact of [evidence, resolutions, termination, bundle, findings]) {
     artifact.requirementsRevision = requirementsRevision;
@@ -133,6 +135,11 @@ function copyCurrentCycle(root) {
   for (const finding of bundle.findings) {
     for (const evidenceRecord of finding.evidence) {
       evidenceRecord.sha256 = hashFile(join(root, evidenceRecord.path));
+    }
+  }
+  for (const findingReferences of Object.values(findings.evidenceReferences)) {
+    for (const reference of findingReferences) {
+      reference.sha256 = hashFile(join(root, reference.path));
     }
   }
   writeJson(bundlePath, bundle);
@@ -175,7 +182,7 @@ function copyOwnerAttestedCycle(root) {
     requirementsRevision: record.priorCycle.requirementsRevision,
     architectureRevision: record.priorCycle.architectureRevision,
     cycle: record.priorCycle.cycle,
-    findings: record.findings.map(finding => ({
+    findings: record.findings.filter(finding => priorFindingIds.includes(finding.id)).map(finding => ({
       id: finding.id,
       reportedSeverity: finding.reportedSeverity,
       classification: finding.classification,

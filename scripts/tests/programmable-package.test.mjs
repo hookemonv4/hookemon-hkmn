@@ -24,6 +24,12 @@ import {
   sourceContentCommitment,
 } from '../programmable/lib/phase3-release.mjs';
 import {
+  buildV4SourceBundleManifest,
+  buildV4SourceDescriptor,
+  materializePhaseThreeCreateRequest,
+  validateRecordedV4RequestTemplate,
+} from '../programmable/lib/create-request-materializer.mjs';
+import {
   PackageValidationError,
   buildLaunchPackage,
   derivePhaseThreeGraphCallsFromCompiledAbi,
@@ -33,9 +39,11 @@ import {
   normalizePhaseThreeSubmissionDraft,
   verifyLaunchPackage,
 } from '../programmable/lib/package.mjs';
+import * as seedIntentCodec from '../programmable/lib/seed-intent.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const buildCli = resolve(root, 'scripts/programmable/build-launch-package.mjs');
+const verifyCli = resolve(root, 'scripts/programmable/verify-launch-package.mjs');
 
 const sha256 = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
 const bytesToHex = (bytes) => `0x${Buffer.from(bytes).toString('hex')}`;
@@ -86,8 +94,172 @@ function writePhaseThreeDraftFixture(directory) {
   return { launchInputs, addressManifest, launchInputsPath, addressManifestPath, standardInputDirectory };
 }
 
+test('materializes the recorded Phase 3 request envelope without fabricating unresolved graph values', () => {
+  const result = materializePhaseThreeCreateRequest({ root });
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(result.request, providerDocuments.v4RequestContract));
+  assert.deepEqual(Object.keys(result.request).sort(), [...providerDocuments.v4RequestContract.required].sort());
+  assert.equal(result.request.schemaVersion, 'programmable.custom-launch-create-request.v4');
+  assert.equal(result.request.chainId, '4663');
+  assert.equal(result.request.caip2, 'eip155:4663');
+  assert.equal(result.request.launchWallet, '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729');
+  assert.equal(result.request.funding.mode, 'none');
+  assert.deepEqual(result.request.graphBundle.targets.map(({ targetId }) => targetId), ['token', 'custody', 'hook']);
+  assert.equal(result.request.graphBundle.targets[0].creationBytecode.startsWith('0x'), true);
+  assert.equal(result.request.verificationBundle.compilationUnits.length, 1);
+  assert.equal(result.request.verificationBundle.components.length, 3);
+  assert.deepEqual(result.unresolvedPaths.slice(0, 5), [
+    '/chainDeployment',
+    '/chainDeploymentDescriptorDigest',
+    '/nonce',
+    '/permitWindow/validAfter',
+    '/permitWindow/deadline',
+  ]);
+  assert.ok(result.unresolvedPaths.includes('/graphBundle/targets/0/applicantSalt'));
+  assert.ok(result.unresolvedPaths.includes('/sourceDescriptor'));
+  assert.ok(result.unresolvedPaths.includes('/sourceBundleManifest'));
+
+  const unexpectedField = structuredClone(result.request);
+  unexpectedField.unexpectedField = true;
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(unexpectedField, providerDocuments.v4RequestContract),
+    /unexpected property at \/unexpectedField/,
+  );
+
+  const unsupportedFunding = structuredClone(result.request);
+  unsupportedFunding.funding.mode = 'unsupported';
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(unsupportedFunding, providerDocuments.v4RequestContract),
+    /funding mode is not recorded at \/funding\/mode/,
+  );
+
+  const missingComponentField = structuredClone(result.request);
+  delete missingComponentField.verificationBundle.components[0].runtimeMaterialization;
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(missingComponentField, providerDocuments.v4RequestContract),
+    /missing required property at \/verificationBundle\/components\/0\/runtimeMaterialization/,
+  );
+
+  const incompleteExternalContract = structuredClone(result.request);
+  incompleteExternalContract.externalContracts = [{}];
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(incompleteExternalContract, providerDocuments.v4RequestContract),
+    /missing required property at \/externalContracts\/0\/schemaVersion/,
+  );
+});
+
+test('records and enforces the nonce shape learned from the preflight probe', () => {
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  assert.deepEqual(providerDocuments.v4RequestContract.nonce, {
+    format: 'lowercase-bytes32',
+    nonzero: true,
+    learnedFromPreflightErrors: true,
+    probeIds: ['001'],
+  });
+
+  const { request } = materializePhaseThreeCreateRequest({ root });
+  request.nonce = '0x0000000000000000000000000000000000000000000000000000000000000001';
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract));
+  request.nonce = '0x000000000000000000000000000000000000000000000000000000000000000A';
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract),
+    /lowercase bytes32 at \/nonce/,
+  );
+});
+
+test('records and enforces the source descriptor object required by the preflight probe', () => {
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  assert.deepEqual(providerDocuments.v4RequestContract.sourceDescriptor, {
+    type: 'object',
+    required: [
+      'schemaVersion',
+      'kind',
+      'controllerWallet',
+      'sourceLineageNonce',
+      'sourceBundleDigest',
+      'bundleContentSha256',
+      'publicOriginCommitment',
+    ],
+    schemaVersion: '2.0.0',
+    kind: 'deterministic-source-bundle',
+    controllerWallet: '0x address',
+    sourceLineageNonce: 'integer string',
+    sourceBundleDigest: 'lowercase bytes32',
+    bundleContentSha256: 'sha256 digest',
+    publicOriginCommitment: 'lowercase bytes32',
+    learnedFromPreflightErrors: true,
+    probeIds: ['002', '004'],
+  });
+
+  const { request } = materializePhaseThreeCreateRequest({ root });
+  request.sourceDescriptor = {
+    schemaVersion: '2.0.0',
+    kind: 'deterministic-source-bundle',
+    controllerWallet: request.launchWallet,
+    sourceLineageNonce: '1',
+    sourceBundleDigest: '0x0000000000000000000000000000000000000000000000000000000000000001',
+    bundleContentSha256: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
+    publicOriginCommitment: '0x0000000000000000000000000000000000000000000000000000000000000001',
+  };
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract));
+  request.sourceDescriptor = { ...request.sourceDescriptor, sourceBundleDigest: '0x01' };
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract),
+    /lowercase bytes32 at \/sourceDescriptor\/sourceBundleDigest/,
+  );
+});
+
+test('builds the source record shapes that reached manifest-digest validation', () => {
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  assert.deepEqual(providerDocuments.v4RequestContract.sourceBundleManifest, {
+    type: 'object',
+    required: ['schemaVersion', 'entries'],
+    schemaVersion: '2.0.0',
+    entries: {
+      minimumLength: 1,
+      entryRequired: ['path', 'kind', 'mode', 'byteLength', 'contentSha256', 'symlinkTarget'],
+      acceptedKind: 'file',
+      acceptedMode: '100644',
+      byteLength: 'integer string',
+      contentSha256: 'sha256 digest',
+      symlinkTarget: null,
+    },
+    learnedFromPreflightErrors: true,
+    probeIds: ['005', '006', '008', '010'],
+  });
+  const manifest = buildV4SourceBundleManifest([{
+    path: 'packages/contracts/src/HookemonHook.sol',
+    kind: 'file',
+    mode: '100644',
+    byteLength: '36427',
+    contentSha256: 'sha256:7bb49163908f732e81834594ffd456a5f4dda30471f325eb2a7d2be31e0dd463',
+    symlinkTarget: null,
+  }]);
+  assert.deepEqual(manifest, {
+    schemaVersion: '2.0.0',
+    entries: [{
+      path: 'packages/contracts/src/HookemonHook.sol',
+      kind: 'file',
+      mode: '100644',
+      byteLength: '36427',
+      contentSha256: 'sha256:7bb49163908f732e81834594ffd456a5f4dda30471f325eb2a7d2be31e0dd463',
+      symlinkTarget: null,
+    }],
+  });
+  assert.deepEqual(buildV4SourceDescriptor({
+    controllerWallet: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    sourceLineageNonce: '1',
+    sourceBundleDigest: '0x0000000000000000000000000000000000000000000000000000000000000001',
+    bundleContentSha256: 'sha256:0000000000000000000000000000000000000000000000000000000000000001',
+    publicOriginCommitment: '0x0000000000000000000000000000000000000000000000000000000000000001',
+  }).kind, 'deterministic-source-bundle');
+  assert.throws(() => buildV4SourceBundleManifest([]), /nonempty source bundle entries/);
+});
+
 function materializedPriceSelectionFixture(launchInputs, selectedOrdering = 'hkmnCurrency0') {
   const token = address('1');
+  const custody = address('3');
   const hook = address('2');
   const usdg = launchInputs.roles.usdg;
   const currency0 = selectedOrdering === 'hkmnCurrency0' ? token : usdg;
@@ -105,6 +277,7 @@ function materializedPriceSelectionFixture(launchInputs, selectedOrdering = 'hkm
     preimages: {
       targets: {
         token: { address: token },
+        custody: { address: custody },
         hook: { address: hook },
       },
       pool: {
@@ -125,6 +298,128 @@ function materializedPriceSelectionFixture(launchInputs, selectedOrdering = 'hkm
     },
   };
 }
+
+function abiUnsignedWord(value) {
+  return BigInt(value).toString(16).padStart(64, '0');
+}
+
+function abiSignedWord(value) {
+  const parsed = BigInt(value);
+  return (parsed < 0n ? (1n << 256n) + parsed : parsed).toString(16).padStart(64, '0');
+}
+
+function abiAddressWord(value) {
+  return value.slice(2).toLowerCase().padStart(64, '0');
+}
+
+function seedCalldata(params) {
+  const selector = bytesToHex(
+    oracleKeccak256(Buffer.from('seedCanonicalLiquidity((int24,int24,uint256,uint128,uint128,uint256,address,address))')),
+  ).slice(2, 10);
+  return `0x${selector}${[
+    abiSignedWord(params.tickLower),
+    abiSignedWord(params.tickUpper),
+    abiUnsignedWord(params.liquidity),
+    abiUnsignedWord(params.amount0Max),
+    abiUnsignedWord(params.amount1Max),
+    abiUnsignedWord(params.deadline),
+    abiAddressWord(params.payer),
+    abiAddressWord(params.custody),
+  ].join('')}`;
+}
+
+test('materializes the immutable seed intent for the selected price tuple', () => {
+  const launchInputs = readJson(resolve(root, 'release/phase3/launch-inputs.json'));
+  const materialized = materializePhaseThreePriceSelection({
+    launchInputs,
+    submission: readJson(resolve(root, 'release/phase3/submission.json')),
+    materializedManifest: materializedPriceSelectionFixture(launchInputs),
+  });
+
+  assert.deepEqual(materialized.seedIntent, {
+    payer: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    tickLower: -887220,
+    tickUpper: 887220,
+    liquidity: '489897948572597439',
+    amount0Max: '1000000000000000000000000000',
+    amount1Max: '240000000',
+    maxDeadlineSeconds: 900,
+    digest: '0xc58c403e4966e3b930cfbf93f04c93b3eb2f14bd18d7826d2fed4a1db690e1f5',
+  });
+});
+
+test('decodes the exact seedCanonicalLiquidity ABI calldata', () => {
+  assert.equal(typeof seedIntentCodec.decodeSeedCanonicalLiquidityCalldata, 'function');
+  const calldata = seedCalldata({
+    tickLower: -887220,
+    tickUpper: 887220,
+    liquidity: '489897948572597439',
+    amount0Max: '1000000000000000000000000000',
+    amount1Max: '240000000',
+    deadline: '1700000900',
+    payer: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    custody: address('3'),
+  });
+
+  assert.deepEqual(seedIntentCodec.decodeSeedCanonicalLiquidityCalldata(calldata), {
+    tickLower: -887220,
+    tickUpper: 887220,
+    liquidity: '489897948572597439',
+    amount0Max: '1000000000000000000000000000',
+    amount1Max: '240000000',
+    deadline: '1700000900',
+    payer: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    custody: address('3'),
+  });
+});
+
+test('verifies every immutable seed field and the separate deadline window', () => {
+  assert.equal(typeof seedIntentCodec.verifyMaterializedSeedTransaction, 'function');
+  const expectedIntent = {
+    payer: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
+    tickLower: -887220,
+    tickUpper: 887220,
+    liquidity: '489897948572597439',
+    amount0Max: '1000000000000000000000000000',
+    amount1Max: '240000000',
+    maxDeadlineSeconds: 900,
+  };
+  const baseline = {
+    ...expectedIntent,
+    deadline: '1700000900',
+    custody: address('3'),
+  };
+  const verify = (params, to = address('2')) => seedIntentCodec.verifyMaterializedSeedTransaction({
+    transaction: {
+      to,
+      value: {
+        chainId: '4663',
+        assetId: 'native',
+        decimals: 18,
+        amountAtomic: '0',
+      },
+      data: seedCalldata(params),
+    },
+    chainId: '4663',
+    expectedHook: address('2'),
+    expectedCustody: address('3'),
+    expectedIntent,
+    referenceTimestamp: '1700000000',
+  });
+
+  assert.equal(verify(baseline).digest, seedIntentCodec.computeSeedIntentDigest(expectedIntent));
+  for (const [name, mutation, message] of [
+    ['payer', { payer: address('4') }, /seed intent digest mismatch/],
+    ['lower tick', { tickLower: -887160 }, /seed intent digest mismatch/],
+    ['upper tick', { tickUpper: 887160 }, /seed intent digest mismatch/],
+    ['liquidity', { liquidity: '489897948572597440' }, /seed intent digest mismatch/],
+    ['amount0 maximum', { amount0Max: '999999999999999999999999999' }, /seed intent digest mismatch/],
+    ['amount1 maximum', { amount1Max: '240000001' }, /seed intent digest mismatch/],
+    ['deadline window', { deadline: '1700000901' }, /seed deadline exceeds its maximum window/],
+  ]) {
+    assert.throws(() => verify({ ...baseline, ...mutation }), message, name);
+  }
+});
 
 function packageBytes(directory) {
   const files = [];
@@ -957,6 +1252,22 @@ test('phase three normalizers preserve the accepted graph and pin the token depl
   assert.match(submissionText, /240 USDG owner seed/i);
 });
 
+test('keeps the seed intent digest nullable until the address-order fixed point is materialized', () => {
+  const manifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+  const schemas = [
+    readJson(resolve(root, 'release/phase3/address-manifest.schema.json')),
+    readJson(resolve(root, 'release/phase3/address-manifest-draft.schema.json')),
+  ];
+
+  assert.equal(manifest.targets[2].constructor.seedIntentDigest, null);
+  for (const schema of schemas) {
+    const constructor = schema.$defs.draftHookTarget?.properties?.constructor
+      ?? schema.$defs.hookTarget?.properties?.constructor;
+    assert.ok(constructor.required.includes('seedIntentDigest'));
+    assert.deepEqual(constructor.properties.seedIntentDigest, { type: 'null' });
+  }
+});
+
 test('phase three draft retains the owner-recorded revision-65 baseline and provider preimage fact', () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-delegated-baseline-test-'));
   try {
@@ -1056,6 +1367,7 @@ test('phase three submission normalization removes builder notes and binds mutab
     'release/phase3/artifacts/custody.json',
     'release/phase3/artifacts/hook.json',
     'release/phase3/build-info/launch.json',
+    'release/phase3/package/create-request.json',
     'release/phase3/package/graph-draft.json',
     'release/phase3/package/package-manifest.json',
     'release/phase3/deployment-manifest.json',
@@ -1128,6 +1440,41 @@ test('phase three draft package binds unresolved graph inputs without materializ
     });
     assert.equal(verification.ok, true);
     assert.equal(verification.readyForPreflight, false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('phase three draft package retains the recorded provider request template', () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-request-template-test-'));
+  try {
+    const packageDirectory = resolve(directory, 'package');
+    const fixture = writePhaseThreeDraftFixture(directory);
+    const result = buildLaunchPackage({
+      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      standardInputDirectory: fixture.standardInputDirectory,
+      launchInputsPath: fixture.launchInputsPath,
+      addressManifestPath: fixture.addressManifestPath,
+      outputDirectory: packageDirectory,
+      requestMaterializationRoot: root,
+    });
+
+    const request = readJson(resolve(packageDirectory, 'create-request.json'));
+    const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+    assert.doesNotThrow(() => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract));
+    assert.equal(result.createRequestSha256, sha256(Buffer.from(JSON.stringify(request, null, 2) + '\n')));
+    assert.equal(readJson(resolve(packageDirectory, 'package-manifest.json')).createRequestTemplateSha256, result.createRequestSha256);
+
+    const verification = verifyLaunchPackage({
+      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      standardInputDirectory: fixture.standardInputDirectory,
+      launchInputsPath: fixture.launchInputsPath,
+      addressManifestPath: fixture.addressManifestPath,
+      packageDirectory,
+      requestMaterializationRoot: root,
+      allowUnverified: true,
+    });
+    assert.equal(verification.createRequestSha256, result.createRequestSha256);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -1264,6 +1611,85 @@ test('builds a materialized phase three graph draft and submission from one publ
   }
 });
 
+test('rejects a seed transaction supplied with a non-rederivable materialized manifest', () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-materialized-seed-test-'));
+  try {
+    const fixture = writePhaseThreeDraftFixture(directory);
+    const candidates = derivePriceCandidates({
+      usdgAtomic: fixture.launchInputs.pool.quoteAsset.amountAtomic,
+      hkmnAtomic: fixture.launchInputs.pool.baseAsset.amountAtomic,
+    });
+    for (const name of ['usdgCurrency0', 'hkmnCurrency0']) {
+      for (const field of ['sqrtLowerX96', 'sqrtUpperX96', 'consumedAmount0', 'consumedAmount1']) {
+        fixture.launchInputs.pool.priceCandidates[name][field] = candidates[name][field];
+      }
+    }
+    writeJson(fixture.launchInputsPath, fixture.launchInputs);
+    const materializedManifest = materializedPriceSelectionFixture(fixture.launchInputs);
+    const selected = materializePhaseThreePriceSelection({
+      launchInputs: fixture.launchInputs,
+      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      materializedManifest,
+    });
+    const materializedSeed = {
+      referenceTimestamp: '1700000000',
+      transaction: {
+        to: materializedManifest.preimages.targets.hook.address,
+        value: {
+          chainId: '4663',
+          assetId: 'native',
+          decimals: 18,
+          amountAtomic: '0',
+        },
+        data: seedCalldata({
+          ...selected.seedIntent,
+          deadline: '1700000900',
+          custody: materializedManifest.preimages.targets.custody.address,
+        }),
+      },
+    };
+    const phaseThreeMaterialization = {
+      materializedManifest,
+      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      materializedSeed,
+    };
+    const packageDirectory = resolve(directory, 'package');
+    const materializedManifestPath = resolve(directory, 'materialized-manifest.json');
+    const submissionPath = resolve(directory, 'submission.json');
+    const materializedSeedPath = resolve(directory, 'materialized-seed.json');
+    writeJson(materializedManifestPath, materializedManifest);
+    writeJson(submissionPath, phaseThreeMaterialization.submission);
+    writeJson(materializedSeedPath, materializedSeed);
+
+    assertFailure(() => buildLaunchPackage({
+      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      standardInputDirectory: fixture.standardInputDirectory,
+      launchInputsPath: fixture.launchInputsPath,
+      addressManifestPath: fixture.addressManifestPath,
+      outputDirectory: packageDirectory,
+      phaseThreeMaterialization,
+      requestMaterializationRoot: root,
+    }), 'INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest');
+    const cliVerification = spawnSync(process.execPath, [
+      verifyCli,
+      '--allow-unverified',
+      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--standard-json-inputs', fixture.standardInputDirectory,
+      '--launch-inputs', fixture.launchInputsPath,
+      '--address-manifest', fixture.addressManifestPath,
+      '--package', packageDirectory,
+      '--materialized-manifest', materializedManifestPath,
+      '--submission', submissionPath,
+      '--materialized-seed', materializedSeedPath,
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(cliVerification.status, 1);
+    assert.match(cliVerification.stderr, /"code":"INVALID_VALUE"/);
+    assert.match(cliVerification.stderr, /materializedManifest/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('CLI materializes one fixed-point selection and writes a separate submission file', () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-materialized-cli-test-'));
   try {
@@ -1341,6 +1767,72 @@ test('CLI materializes one fixed-point selection and writes a separate submissio
     });
     assert.equal(existsSync(resolve(directory, 'second-package')), false);
     assert.deepEqual(readJson(materializedSubmissionOutputPath), materializedSubmission);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('build CLI rejects an optional seed transaction with a non-rederivable manifest', () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-materialized-seed-cli-test-'));
+  try {
+    const fixture = writePhaseThreeDraftFixture(directory);
+    const candidates = derivePriceCandidates({
+      usdgAtomic: fixture.launchInputs.pool.quoteAsset.amountAtomic,
+      hkmnAtomic: fixture.launchInputs.pool.baseAsset.amountAtomic,
+    });
+    for (const name of ['usdgCurrency0', 'hkmnCurrency0']) {
+      for (const field of ['sqrtLowerX96', 'sqrtUpperX96', 'consumedAmount0', 'consumedAmount1']) {
+        fixture.launchInputs.pool.priceCandidates[name][field] = candidates[name][field];
+      }
+    }
+    writeJson(fixture.launchInputsPath, fixture.launchInputs);
+    const materializedManifest = materializedPriceSelectionFixture(fixture.launchInputs);
+    const selected = materializePhaseThreePriceSelection({
+      launchInputs: fixture.launchInputs,
+      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      materializedManifest,
+    });
+    const materializedSeed = {
+      referenceTimestamp: '1700000000',
+      transaction: {
+        to: materializedManifest.preimages.targets.hook.address,
+        value: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
+        data: seedCalldata({
+          ...selected.seedIntent,
+          deadline: '1700000900',
+          custody: materializedManifest.preimages.targets.custody.address,
+        }),
+      },
+    };
+    const materializedManifestPath = resolve(directory, 'materialized-manifest.json');
+    const submissionPath = resolve(directory, 'submission.json');
+    const materializedSeedPath = resolve(directory, 'materialized-seed.json');
+    const materializedSubmissionOutputPath = resolve(directory, 'materialized-submission.json');
+    const packageDirectory = resolve(directory, 'package');
+    writeJson(materializedManifestPath, materializedManifest);
+    writeJson(submissionPath, readJson(resolve(root, 'release/phase3/submission.json')));
+    writeJson(materializedSeedPath, materializedSeed);
+
+    const result = spawnSync(process.execPath, [
+      buildCli,
+      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--standard-json-inputs', fixture.standardInputDirectory,
+      '--launch-inputs', fixture.launchInputsPath,
+      '--address-manifest', fixture.addressManifestPath,
+      '--output', packageDirectory,
+      '--materialized-manifest', materializedManifestPath,
+      '--submission', submissionPath,
+      '--materialized-seed', materializedSeedPath,
+      '--materialized-submission-output', materializedSubmissionOutputPath,
+    ], { cwd: root, encoding: 'utf8' });
+
+    assert.equal(result.status, 1);
+    assert.deepEqual(JSON.parse(result.stderr), {
+      ok: false,
+      code: 'INVALID_VALUE',
+      path: '/phaseThreeMaterialization/materializedManifest',
+    });
+    assert.equal(existsSync(resolve(packageDirectory, 'seed-transaction.json')), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

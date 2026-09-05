@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 const repoRoot = join(import.meta.dirname, '..', '..');
 const workflow = readFileSync(join(repoRoot, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 function git(root, ...args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' });
@@ -34,6 +35,20 @@ function history(root, base, head, forceText) {
   args.push(`${base}..${head}`);
   return git(root, ...args);
 }
+
+test('an empty-tree range includes the root commit history', t => {
+  const root = mkdtempSync(join(tmpdir(), 'hookemon-gitleaks-root-history-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, 'init', '--initial-branch=main');
+  git(root, 'config', 'user.name', 'Hookemon');
+  git(root, 'config', 'user.email', '312745360+hookemonv4@users.noreply.github.com');
+  const marker = 'HOOKEMON_EMPTY_TREE_HISTORY_MARKER';
+  writeFileSync(join(root, 'root.txt'), `${marker}\n`);
+  git(root, 'add', 'root.txt');
+  git(root, 'commit', '-m', 'root history');
+
+  assert.match(history(root, EMPTY_TREE_SHA, git(root, 'rev-parse', 'HEAD').trim(), true), new RegExp(marker));
+});
 
 test('text history reveals an add-then-delete payload hidden by a base binary attribute', t => {
   const root = repository();

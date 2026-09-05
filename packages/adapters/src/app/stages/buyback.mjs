@@ -1,6 +1,7 @@
 import {
   getFinalizedTokenBalanceChanges,
   getTransactionMplCoreTransfers,
+  deriveAssociatedTokenAddress,
   readAssociatedTokenAccount,
   readBlockHeight,
   readBlockhashValidity,
@@ -12,9 +13,10 @@ import {
   decodeProviderTransaction,
   evaluate as evaluateTransactionPolicy,
 } from '../../signing/transaction-policy.mjs';
+import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
 import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../signing/signer-client.mjs';
 import { digest } from '../../../../runner/src/cycle/journal.mjs';
-import { requireLiveMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
+import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import {
   assertSolanaSignerFeeEnvelope,
@@ -92,14 +94,69 @@ function openEvidence(open) {
   return open.evidence;
 }
 
+function purchaseEvidence(purchase, open) {
+  if (purchase?.status !== 'COMPLETE' || typeof purchase.evidence?.memo !== 'string' || purchase.evidence.memo.length === 0
+    || purchase.evidence.expectedCardCount !== 1) {
+    throw new Error('sent-unknown buyback reconciliation requires a completed single-card purchase stage');
+  }
+  if (purchase.evidence.memo !== open.memo) {
+    throw new Error('sent-unknown buyback reconciliation requires the completed purchase and open stages to share a memo');
+  }
+  return purchase.evidence;
+}
+
 function configuredBuyback(config) {
   const value = config?.collectorCrypt?.buyback;
-  if (!plainObject(value) || !plainObject(value.policy)
+  const bundlePolicy = collectorPolicyForStage(config, 'buyback');
+  const policy = bundlePolicy ?? value?.policy;
+  if (!plainObject(value) || !plainObject(policy)
     || typeof value.collectorProgramId !== 'string' || value.collectorProgramId.length === 0
     || typeof value.collectorRecipient !== 'string' || value.collectorRecipient.length === 0) {
     throw new Error('buyback requires a pinned policy, Collector program id, and Collector recipient');
   }
-  return value;
+  return { ...value, policy };
+}
+
+function isLiveCollectorOnlyRehearsal(config) {
+  return config?.execution?.profile === 'rehearsal'
+    && config.execution?.providerMode === 'live'
+    && config.rehearsal?.mode === 'collector-only';
+}
+
+function dedicatedProceedsAccount(config) {
+  if (!isLiveCollectorOnlyRehearsal(config)) return null;
+  const operator = config.accounts?.solana;
+  const proceedsAccount = config.rehearsal?.proceedsAccount;
+  if (typeof operator !== 'string' || operator.length === 0 || typeof proceedsAccount !== 'string' || proceedsAccount.length === 0) {
+    throw new Error('live collector-only buyback requires a dedicated proceeds account');
+  }
+  const conflictsWithRecipient = config.rehearsal.payoutRecipients?.some(recipient => {
+    if (recipient === operator || recipient === proceedsAccount) return true;
+    return deriveAssociatedTokenAddress(recipient, COLLECTOR_CRYPT_SETTLEMENT_ASSET.assetId).toBase58() === proceedsAccount;
+  });
+  if (proceedsAccount === operator || conflictsWithRecipient) {
+    throw new Error('live collector-only buyback proceeds account must be distinct from the operator wallet and every recipient');
+  }
+  const canonical = deriveAssociatedTokenAddress(operator, COLLECTOR_CRYPT_SETTLEMENT_ASSET.assetId).toBase58();
+  if (proceedsAccount !== canonical) {
+    throw new Error('live collector-only buyback proceeds account must be the operator canonical Circle token account');
+  }
+  return proceedsAccount;
+}
+
+export function buildCollectorBuybackRequest({ config, mint }) {
+  if (typeof config?.accounts?.solana !== 'string' || config.accounts.solana.length === 0) {
+    throw new Error('buyback requires a configured Solana operator account');
+  }
+  if (typeof mint !== 'string' || mint.length === 0) throw new Error('buyback requires an opened card asset');
+  const request = {
+    playerAddress: config.accounts.solana,
+    nftAddress: mint,
+  };
+  // The documented API type accepts a wallet public key. Keep the dedicated account as a
+  // finalized-delta check, but do not send an unverified token-account alternate recipient.
+  dedicatedProceedsAccount(config);
+  return Object.freeze(request);
 }
 
 function trustedSolanaDecodeOptions({ adapters, config }) {
@@ -120,10 +177,11 @@ async function hold(cycleRepository, context, terminalState, evidence) {
   await cycleRepository.holdCycle(context.cycleId, terminalState, evidence);
 }
 
-function responseEvidence(record) {
+function responseEvidence(record, requiredProceedsAccount = null) {
   const evidence = record?.responseEvidence;
   if (!plainObject(evidence) || typeof evidence.memo !== 'string' || typeof evidence.mint !== 'string'
     || typeof evidence.signature !== 'string' || !plainObject(evidence.quote) || !plainObject(evidence.refundAmount)) return null;
+  if (requiredProceedsAccount !== null && evidence.proceedsAccount !== requiredProceedsAccount) return null;
   try {
     const quote = typedBuybackAmount(evidence.quote, 'recorded buyback quote');
     const refundAmount = typedBuybackAmount(evidence.refundAmount, 'recorded buyback refund amount');
@@ -134,16 +192,19 @@ function responseEvidence(record) {
   return evidence;
 }
 
-function decodedBindsBuyback({ decoded, owner, mint, buyback }) {
+function decodedBindsBuyback({ decoded, owner, mint, buyback, proceedsAccount = null }) {
   const hasOwner = decoded.feePayer === owner && decoded.requiredSigners.includes(owner);
   const hasProgram = decoded.programIds.includes(buyback.collectorProgramId);
   const hasRecipient = decoded.destination === buyback.collectorRecipient
     || decoded.instructions.some(instruction => instruction.accounts.some(account => account.address === buyback.collectorRecipient));
   const hasMint = decoded.mint === mint
     || decoded.instructions.some(instruction => instruction.mint === mint || instruction.accounts.some(account => account.address === mint));
+  const hasProceedsAccount = proceedsAccount === null || decoded.destination === proceedsAccount
+    || decoded.instructions.some(instruction => instruction.accounts.some(account => account.address === proceedsAccount));
   if (!hasOwner) throw new Error('buyback provider transaction does not bind the operator wallet as fee payer and signer');
   if (!hasProgram || !hasRecipient) throw new Error('buyback provider transaction does not bind the configured Collector program and recipient');
   if (!hasMint) throw new Error('buyback provider transaction does not bind the opened asset');
+  if (!hasProceedsAccount) throw new Error('buyback provider transaction does not bind the dedicated proceeds account');
 }
 
 async function decodeAndSign({ transaction, mint, adapters, config, money, signerClient, beforeSign = null }) {
@@ -158,7 +219,13 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
     throw new Error('buyback provider transaction blockhash is not valid before signing');
   }
   evaluateTransactionPolicy(buyback.policy, decoded);
-  decodedBindsBuyback({ decoded, owner: config.accounts.solana, mint, buyback });
+  decodedBindsBuyback({
+    decoded,
+    owner: config.accounts.solana,
+    mint,
+    buyback,
+    proceedsAccount: dedicatedProceedsAccount(config),
+  });
   await assertSolanaSignerFeeEnvelope({
     client: adapters.solana.client,
     owner: config.accounts?.solana,
@@ -171,7 +238,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(request) {
         if (beforeSign !== null) await beforeSign();
-        requireLiveMutationAuthority();
+        requireCollectorOnlyMutationAuthority(config);
         return signerClient.solana.sign(request);
       },
     },
@@ -181,7 +248,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
         throw new Error('buyback provider transaction blockhash expired before submission');
       }
-      requireLiveMutationAuthority();
+      requireCollectorOnlyMutationAuthority(config);
       return adapters.collectorCrypt.submitTransaction({ signedTransaction: signed.signedTxBase64 });
     },
   });
@@ -348,10 +415,44 @@ function assertPreparedBuybackRequest(prepared, decision) {
   }
 }
 
-function exactPositiveDelta(entries, owner, asset) {
-  const credits = entries.filter(entry => entry.owner === owner && entry.mint === asset.assetId && BigInt(entry.postAmount) > BigInt(entry.preAmount));
+function buybackRequest({ open, epicDecision }) {
+  return {
+    provider: 'collector-crypt',
+    operation: 'buyback',
+    memo: open.memo,
+    mint: open.mint,
+    epicDecision,
+  };
+}
+
+function requestMatchesSentUnknownAttempt({ attempt, context, request }) {
+  if (attempt?.state !== 'SENT_UNKNOWN' || typeof attempt.requestDigest !== 'string') return false;
+  const expectedDigest = digest({
+    schema: 'hookemon.operational-stage-request.v1',
+    cycleId: context.cycleId,
+    stage: 'buyback',
+    request,
+  });
+  return attempt.requestDigest === expectedDigest;
+}
+
+async function readSentUnknownBuybackRequest({ cycleRepository, context }) {
+  const open = openEvidence(await cycleRepository.readStage(context.cycleId, 'open'));
+  purchaseEvidence(await cycleRepository.readStage(context.cycleId, 'purchase'), open);
+  const epicDecision = await readCompletedSellDecision({ cycleRepository, context, open });
+  return buybackRequest({ open, epicDecision });
+}
+
+function exactPositiveDeltaEntry(entries, owner, asset, tokenAccount = null) {
+  const credits = entries.filter(entry => entry.owner === owner && entry.mint === asset.assetId
+    && (tokenAccount === null || entry.tokenAccount === tokenAccount)
+    && BigInt(entry.postAmount) > BigInt(entry.preAmount));
   if (credits.length !== 1) return null;
-  return typedAmount(asset, BigInt(credits[0].postAmount) - BigInt(credits[0].preAmount), 'buyback proceeds');
+  const [entry] = credits;
+  return {
+    entry,
+    proceeds: typedAmount(asset, BigInt(entry.postAmount) - BigInt(entry.preAmount), 'buyback proceeds'),
+  };
 }
 
 async function cardLeftOperator({ adapters, signature, mint, owner, assetKind }) {
@@ -395,7 +496,7 @@ export async function prepareBuybackRequest({ cycleRepository, context }) {
   } catch (error) {
     if (!(error instanceof EpicDecisionRefusal)) throw error;
   }
-  return { provider: 'collector-crypt', operation: 'buyback', memo: evidence.memo, mint: evidence.mint, epicDecision };
+  return buybackRequest({ open: evidence, epicDecision });
 }
 
 export async function probeBuyback({ adapters, config, cycleRepository, context }) {
@@ -421,8 +522,12 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
     if (!sameAsset(epicDecision.offer, asset) || !sameAsset(epicDecision.insuredValue, asset)) {
       refuseEpicDecision('HELD_DATA_UNVERIFIED', { memo: prepared.memo, mint: prepared.mint }, 'completed epic-gate amounts use an unexpected settlement asset');
     }
+    const proceedsAccount = dedicatedProceedsAccount(config);
     const account = await readAssociatedTokenAccount(adapters.solana.client, config.accounts.solana, asset.assetId);
     if (!account.exists || account.decimals !== asset.decimals) throw new Error('buyback requires a matching operator settlement token account');
+    if (proceedsAccount !== null && account.address !== proceedsAccount) {
+      throw new Error('buyback dedicated proceeds account is not the verified operator settlement token account');
+    }
     const available = await adapters.collectorCrypt.getBuybackAvailable({ nft: prepared.mint, wallet: config.accounts.solana });
     if (!available.available) {
       await hold(cycleRepository, context, 'HELD_UNAVAILABLE', { stage: 'buyback', memo: prepared.memo, mint: prepared.mint, reason: 'buyback is unavailable' });
@@ -437,8 +542,8 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
     if (!sameAmount(quote, epicDecision.offer)) {
       refuseEpicDecision('HELD_DATA_UNVERIFIED', { memo: prepared.memo, mint: prepared.mint, quote, epicDecision }, 'buyback quote differs from the completed epic decision');
     }
-    requireLiveMutationAuthority();
-    const built = await adapters.collectorCrypt.buyback({ playerAddress: config.accounts.solana, nftAddress: prepared.mint });
+    requireCollectorOnlyMutationAuthority(config);
+    const built = await adapters.collectorCrypt.buyback(buildCollectorBuybackRequest({ config, mint: prepared.mint }));
     let refundAmount;
     try {
       refundAmount = typedBuybackAmount(built.refundAmount, 'buyback refund amount');
@@ -468,7 +573,14 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
       },
     });
     const submitted = await signer.broadcast(signed);
-    return { memo: prepared.memo, mint: prepared.mint, signature: submitted.signature, quote, refundAmount };
+    return {
+      memo: prepared.memo,
+      mint: prepared.mint,
+      signature: submitted.signature,
+      quote,
+      refundAmount,
+      ...(proceedsAccount === null ? {} : { proceedsAccount }),
+    };
   } catch (error) {
     if (!(error instanceof EpicDecisionRefusal)) throw error;
     const memo = error.evidence.memo ?? prepared?.memo;
@@ -478,9 +590,7 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
   }
 }
 
-export async function reconcileLiveBuyback({ adapters, config, cycleRepository, context }) {
-  const evidence = responseEvidence(await cycleRepository.readOperationalStageAttempt(context.cycleId, 'buyback'));
-  if (!evidence || !adapters?.collectorCrypt || !adapters?.solana?.client) return null;
+async function reconcileBuybackEvidence({ adapters, config, cycleRepository, context, evidence, proceedsAccount, check: recordedCheck = undefined }) {
   const asset = configuredSettlementAsset(config);
   let quote;
   let refundAmount;
@@ -495,12 +605,14 @@ export async function reconcileLiveBuyback({ adapters, config, cycleRepository, 
     await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, reason: 'recorded buyback amounts do not bind the settlement quote' });
     return null;
   }
-  if (typeof adapters.collectorCrypt.getBuybackCheck !== 'function') return null;
-  let check;
-  try {
-    check = await adapters.collectorCrypt.getBuybackCheck({ memo: evidence.memo });
-  } catch {
-    return null;
+  let check = recordedCheck;
+  if (check === undefined) {
+    if (typeof adapters.collectorCrypt.getBuybackCheck !== 'function') return null;
+    try {
+      check = await adapters.collectorCrypt.getBuybackCheck({ memo: evidence.memo });
+    } catch {
+      return null;
+    }
   }
   if (!plainObject(check) || typeof check.exists !== 'boolean') {
     await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, check, reason: 'buyback check response is invalid' });
@@ -550,11 +662,118 @@ export async function reconcileLiveBuyback({ adapters, config, cycleRepository, 
   } catch {
     return null;
   }
-  const proceeds = exactPositiveDelta(entries, config.accounts.solana, asset);
+  const proceedsEntry = exactPositiveDeltaEntry(entries, config.accounts.solana, asset, proceedsAccount);
+  const proceeds = proceedsEntry?.proceeds ?? null;
   if (!leftOperator || proceeds === null || !sameAmount(proceeds, quote)) {
     await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, leftOperator, proceeds, reason: 'finalized card and settlement deltas did not match' });
     return null;
   }
   await recordProceedsLedger(cycleRepository, context.cycleId, asset, proceeds);
-  return { ...evidence, proceeds };
+  if (proceedsAccount === null) return { ...evidence, proceeds };
+  return {
+    ...evidence,
+    proceeds,
+    proceedsProjection: {
+      account: proceedsAccount,
+      beforeAtomic: proceedsEntry.entry.preAmount,
+      afterAtomic: proceedsEntry.entry.postAmount,
+      delta: proceeds,
+    },
+  };
+}
+
+async function reconcileSentUnknownBuyback({ adapters, config, cycleRepository, context, record, proceedsAccount }) {
+  if (record?.attempt?.state !== 'SENT_UNKNOWN') return null;
+  let request;
+  try {
+    request = await readSentUnknownBuybackRequest({ cycleRepository, context });
+  } catch (error) {
+    const terminalState = error instanceof EpicDecisionRefusal ? error.terminalState : 'HELD_DATA_UNVERIFIED';
+    await hold(cycleRepository, context, terminalState, {
+      stage: 'buyback',
+      reason: 'sent-unknown buyback does not have a complete durable purchase, open, and sell decision context',
+      detail: error.message,
+    });
+    return null;
+  }
+  if (!requestMatchesSentUnknownAttempt({ attempt: record.attempt, context, request })) {
+    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback',
+      memo: request.memo,
+      mint: request.mint,
+      reason: 'sent-unknown buyback attempt does not bind the completed durable request',
+    });
+    return null;
+  }
+  if (typeof adapters.collectorCrypt.getBuybackCheck !== 'function') return null;
+  let check;
+  try {
+    check = await adapters.collectorCrypt.getBuybackCheck({ memo: request.memo });
+  } catch {
+    return null;
+  }
+  if (!plainObject(check) || typeof check.exists !== 'boolean') {
+    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback',
+      memo: request.memo,
+      mint: request.mint,
+      check,
+      reason: 'sent-unknown buyback check response is invalid',
+    });
+    return null;
+  }
+  if (!check.exists) return null;
+  if (typeof check.status !== 'string') {
+    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback',
+      memo: request.memo,
+      mint: request.mint,
+      check,
+      reason: 'sent-unknown buyback check status is invalid',
+    });
+    return null;
+  }
+  if (check.status === '') return null;
+  if (check.status !== 'complete') {
+    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback',
+      memo: request.memo,
+      mint: request.mint,
+      check,
+      reason: 'sent-unknown buyback check status is not a documented pending or complete value',
+    });
+    return null;
+  }
+  const evidence = responseEvidence({
+    responseEvidence: {
+      memo: request.memo,
+      mint: request.mint,
+      signature: check.transactionSignature,
+      quote: request.epicDecision.offer,
+      refundAmount: request.epicDecision.offer,
+      ...(proceedsAccount === null ? {} : { proceedsAccount }),
+    },
+  }, proceedsAccount);
+  if (evidence === null) {
+    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback',
+      memo: request.memo,
+      mint: request.mint,
+      check,
+      reason: 'completed sent-unknown buyback check cannot produce canonical reconciliation evidence',
+    });
+    return null;
+  }
+  return reconcileBuybackEvidence({ adapters, config, cycleRepository, context, evidence, proceedsAccount, check });
+}
+
+export async function reconcileLiveBuyback({ adapters, config, cycleRepository, context }) {
+  const proceedsAccount = dedicatedProceedsAccount(config);
+  const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'buyback');
+  const evidence = responseEvidence(record, proceedsAccount);
+  if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
+  if (evidence === null) {
+    return reconcileSentUnknownBuyback({ adapters, config, cycleRepository, context, record, proceedsAccount });
+  }
+  return reconcileBuybackEvidence({ adapters, config, cycleRepository, context, evidence, proceedsAccount });
 }

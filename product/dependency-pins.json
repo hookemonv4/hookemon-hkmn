@@ -22,11 +22,11 @@
     },
     "workflow": {
       "path": ".github/workflows/v4-gates.yml",
-      "sha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276"
+      "sha256": "91f1be89863be27b0db808cbbf2b95051e4a2ae204d5fc350471bf400bf8d513"
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
-      "sha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
+      "sha256": "db27a283abf64f616664d9c26bfe55912fec79dedd780c97e89acbec2141dd7e"
     },
     "forkPinCanary": {
       "path": ".github/workflows/fork-pin-canary.yml",
@@ -34,15 +34,15 @@
     },
     "identityGate": {
       "path": ".github/workflows/identity-gate.yml",
-      "sha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019"
+      "sha256": "896a8df85ab356c84649bb942a9fd171b5dcd6883047cbe40c03a074cfe1e994"
     },
     "controlGate": {
       "path": ".github/workflows/control-gate.yml",
-      "sha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50"
+      "sha256": "45b7339b63b4b334620ab8eac8b873b08788c42af6e8159490baca00ed6916bb"
     },
     "archiveForkProofTest": {
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "sha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8"
+      "sha256": "bb0a05472623238a6f1b618f8c7c58ca1c486dbd4688631dd35b565e98aa2927"
     },
     "githubActions": {
       "actions/checkout": "d23441a48e516b6c34aea4fa41551a30e30af803"
@@ -53,6 +53,11 @@
       "path": "scripts/check-commit-identity.mjs",
       "sha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba",
       "rule": "This script's HISTORICAL_IDENTITY_EXCEPTIONS map is the commit-identity allowlist. The verifier accepts only its static supported digest, and CI loads this checker from the protected pull-request base or push merge-base before it scans the candidate range. A candidate cannot accept its own checker and pin change."
+    },
+    "pushRangeResolver": {
+      "path": "scripts/ci/push-range.mjs",
+      "sha256": "4e7acdb6d7e15b2721fcb35ac8bd2467ac75f3e2188c40458422ce8bc7ddd987",
+      "rule": "This resolver maps a zero-before or parentless push to the empty tree and records the trusted initial revision. The base-defined gates load it from the checked-out protected base except when the pushed first tree is explicitly trusted."
     },
     "forkPinVerifier": {
       "path": "scripts/verify-fork-pin.mjs",
@@ -71,11 +76,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+      "sha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
+          "sha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770"
         },
         {
           "path": "scripts/lib/util.mjs",

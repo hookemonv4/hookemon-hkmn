@@ -71,6 +71,13 @@ contract ProgrammableGraphHarness {
     bytes32 private constant HOOK_TARGET_ID = keccak256("hook-target");
     address private constant TREASURY = address(0x6000);
     address private constant AUTHORIZED_LAUNCHER = 0x34965F2A2ee9254522232C32F02056E92BE0C98a;
+    address private constant SEED_PAYER = address(0xBEEF);
+    uint256 private constant USDG_MAX = 240_000_000;
+    uint256 private constant HKMN_MAX = 1_000_000_000e18;
+    int24 private constant SEED_TICK_LOWER = -887220;
+    int24 private constant SEED_TICK_UPPER = 887220;
+    uint128 private constant USDG_CURRENCY0_LIQUIDITY = 489897948556635619;
+    uint128 private constant HKMN_CURRENCY0_LIQUIDITY = 489897948572597439;
 
     struct GraphRequest {
         bytes32 tokenTargetIdHash;
@@ -81,6 +88,7 @@ contract ProgrammableGraphHarness {
         bytes32 custodyApplicantSalt;
         uint160 initializationPriceX96;
         address hookUsdg;
+        address seedPayer;
         address allocationCustody;
         uint8 hookExpectedDecimals;
     }
@@ -148,15 +156,18 @@ contract ProgrammableGraphHarness {
 
     function hookInitCodeHash(GraphRequest calldata request) external view returns (bytes32) {
         address token = _predictToken(request);
-        return _hookInitCodeHash(token, request.hookUsdg, request.hookExpectedDecimals);
+        return _hookInitCodeHash(
+            token, request.hookUsdg, request.seedPayer, request.hookExpectedDecimals
+        );
     }
 
-    function graphHookInitCodeHash(address token, address hookUsdg, uint8 hookExpectedDecimals)
-        external
-        view
-        returns (bytes32)
-    {
-        return _hookInitCodeHash(token, hookUsdg, hookExpectedDecimals);
+    function graphHookInitCodeHash(
+        address token,
+        address hookUsdg,
+        address seedPayer,
+        uint8 hookExpectedDecimals
+    ) external view returns (bytes32) {
+        return _hookInitCodeHash(token, hookUsdg, seedPayer, hookExpectedDecimals);
     }
 
     function predict(GraphRequest calldata request)
@@ -167,7 +178,9 @@ contract ProgrammableGraphHarness {
         token = _predictToken(request);
         hook = _predict(
             effectiveSalt(request.hookTargetIdHash, request.hookApplicantSalt),
-            _hookInitCodeHash(token, request.hookUsdg, request.hookExpectedDecimals)
+            _hookInitCodeHash(
+                token, request.hookUsdg, request.seedPayer, request.hookExpectedDecimals
+            )
         );
         custody = _predict(
             effectiveSalt(request.custodyTargetIdHash, request.custodyApplicantSalt),
@@ -217,7 +230,7 @@ contract ProgrammableGraphHarness {
             revert UnauthorizedLauncher(msg.sender);
         }
         return new HookemonHook{ salt: effectiveSalt(HOOK_TARGET_ID, salt) }(
-            _hookConfig(token, hookUsdg, hookExpectedDecimals)
+            _hookConfig(token, hookUsdg, SEED_PAYER, hookExpectedDecimals)
         );
     }
 
@@ -259,7 +272,11 @@ contract ProgrammableGraphHarness {
         deployments[2] = TargetDeployment({
             initCode: abi.encodePacked(
                 type(HookemonHook).creationCode,
-                abi.encode(_hookConfig(token, request.hookUsdg, request.hookExpectedDecimals))
+                abi.encode(
+                    _hookConfig(
+                        token, request.hookUsdg, request.seedPayer, request.hookExpectedDecimals
+                    )
+                )
             ),
             salt: effectiveSalt(request.hookTargetIdHash, request.hookApplicantSalt),
             initializerCalldata: abi.encodeCall(
@@ -323,7 +340,9 @@ contract ProgrammableGraphHarness {
         token = _predictToken(request);
         hook = _predict(
             effectiveSalt(request.hookTargetIdHash, request.hookApplicantSalt),
-            _hookInitCodeHash(token, request.hookUsdg, request.hookExpectedDecimals)
+            _hookInitCodeHash(
+                token, request.hookUsdg, request.seedPayer, request.hookExpectedDecimals
+            )
         );
         custody = _predict(
             effectiveSalt(request.custodyTargetIdHash, request.custodyApplicantSalt),
@@ -345,24 +364,26 @@ contract ProgrammableGraphHarness {
         );
     }
 
-    function _hookInitCodeHash(address token, address hookUsdg, uint8 hookExpectedDecimals)
-        private
-        view
-        returns (bytes32)
-    {
+    function _hookInitCodeHash(
+        address token,
+        address hookUsdg,
+        address seedPayer,
+        uint8 hookExpectedDecimals
+    ) private view returns (bytes32) {
         return keccak256(
             abi.encodePacked(
                 type(HookemonHook).creationCode,
-                abi.encode(_hookConfig(token, hookUsdg, hookExpectedDecimals))
+                abi.encode(_hookConfig(token, hookUsdg, seedPayer, hookExpectedDecimals))
             )
         );
     }
 
-    function _hookConfig(address token, address hookUsdg, uint8 hookExpectedDecimals)
-        private
-        view
-        returns (HookemonHook.ConstructorConfig memory config)
-    {
+    function _hookConfig(
+        address token,
+        address hookUsdg,
+        address seedPayer,
+        uint8 hookExpectedDecimals
+    ) private view returns (HookemonHook.ConstructorConfig memory config) {
         config = HookemonHook.ConstructorConfig({
             manager: poolManager,
             positionManager: positionManager,
@@ -378,11 +399,31 @@ contract ProgrammableGraphHarness {
             expectedDecimals: hookExpectedDecimals,
             bindingDigest: keccak256("launch-composition-binding"),
             runtimeDigest: keccak256("launch-composition-runtime"),
+            seedIntentDigest: _seedIntentDigest(token, hookUsdg, seedPayer),
             processClaimLimit6h: 1_000_000,
             processClaimLimitMax: 2_000_000,
             processClaimMaxCount: 8,
             operationsRotationDelay: 3 days
         });
+    }
+
+    function _seedIntentDigest(address token, address hookUsdg, address seedPayer)
+        private
+        pure
+        returns (bytes32)
+    {
+        bool usdgIsCurrency0 = hookUsdg < token;
+        return keccak256(
+            abi.encode(
+                seedPayer,
+                SEED_TICK_LOWER,
+                SEED_TICK_UPPER,
+                usdgIsCurrency0 ? USDG_CURRENCY0_LIQUIDITY : HKMN_CURRENCY0_LIQUIDITY,
+                uint128(usdgIsCurrency0 ? USDG_MAX : HKMN_MAX),
+                uint128(usdgIsCurrency0 ? HKMN_MAX : USDG_MAX),
+                uint256(900)
+            )
+        );
     }
 }
 
@@ -621,7 +662,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
     function testGraphModeRejectsLegacyInitializerForMalformedToken() external {
         LaunchCompositionTestToken malformedToken = new LaunchCompositionTestToken();
         bytes32 initCodeHash =
-            graph.graphHookInitCodeHash(address(malformedToken), address(usdg), 18);
+            graph.graphHookInitCodeHash(address(malformedToken), address(usdg), PAYER, 18);
         bytes32 applicantSalt = _findHookApplicantSalt(initCodeHash);
         address predicted = vm.computeCreate2Address(
             graph.effectiveSalt(HOOK_TARGET_ID, applicantSalt), initCodeHash, address(graph)
@@ -689,6 +730,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
                 custodyApplicantSalt: keccak256("launch-composition-custody-salt"),
                 initializationPriceX96: graph.launchPriceX96(),
                 hookUsdg: address(usdg),
+                seedPayer: PAYER,
                 allocationCustody: address(0),
                 hookExpectedDecimals: 18
             });
@@ -744,6 +786,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
             expectedDecimals: 18,
             bindingDigest: keccak256("known-provider-binding"),
             runtimeDigest: keccak256("known-provider-runtime"),
+            seedIntentDigest: keccak256("known-provider-seed-intent"),
             processClaimLimit6h: 1_000_000,
             processClaimLimitMax: 2_000_000,
             processClaimMaxCount: 8,

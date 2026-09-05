@@ -12,6 +12,47 @@ const gitleaksPolicyConsumers = [
   'scripts/tests/control-dependencies.test.mjs',
 ].map(path => ({ path, text: readFileSync(join(repoRoot, path), 'utf8') }));
 
+test('a zero-before push range uses the empty tree and trusts the pushed revision', async () => {
+  const helper = join(repoRoot, 'scripts', 'ci', 'push-range.mjs');
+  assert.equal(existsSync(helper), true, 'initial-push range helper must exist');
+
+  const { EMPTY_TREE_SHA, ZERO_SHA, resolvePushRange } = await import(helper);
+  const head = 'a'.repeat(40);
+  const result = resolvePushRange({
+    before: ZERO_SHA,
+    head,
+    parents: ['b'.repeat(40)],
+    mode: 'merge-base',
+  });
+
+  assert.deepEqual(result, {
+    initialPush: true,
+    rangeBase: EMPTY_TREE_SHA,
+    rangeHead: head,
+    trustedBase: head,
+    revisionArgs: [head],
+    requireAncestor: false,
+  });
+});
+
+test('a parentless pushed revision uses the empty tree even with a nonzero before SHA', async () => {
+  const { EMPTY_TREE_SHA, resolvePushRange } = await import(join(repoRoot, 'scripts', 'ci', 'push-range.mjs'));
+  const before = 'b'.repeat(40);
+  const head = 'a'.repeat(40);
+
+  const result = resolvePushRange({
+    before,
+    head,
+    parents: [],
+    mode: 'before',
+  });
+
+  assert.equal(result.initialPush, true);
+  assert.equal(result.rangeBase, EMPTY_TREE_SHA);
+  assert.equal(result.trustedBase, head);
+  assert.deepEqual(result.revisionArgs, [head]);
+});
+
 function workflowTriggerKeys(source) {
   const start = source.indexOf('on:\n');
   const end = source.indexOf('\npermissions:', start);
@@ -210,11 +251,45 @@ test('identity gate checks out the trusted base and executes no pull-request sou
   assert.match(identityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(identityWorkflow, /GIT_NO_REPLACE_OBJECTS: '1'/);
   assert.match(identityWorkflow, /git fetch --no-tags origin "\+refs\/pull\/\$\{PR_NUMBER\}\/head:refs\/remotes\/origin\/pull\/\$\{PR_NUMBER\}\/head"/);
-  assert.match(identityWorkflow, /git merge-base "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA"/);
-  assert.match(identityWorkflow, /git checkout --detach "\$range_base"/);
-  assert.match(identityWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(identityWorkflow, /"\$RUNNER_TEMP\/push-range\.mjs" resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(identityWorkflow, /git checkout --detach "\$trusted_base"/);
+  assert.match(identityWorkflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.doesNotMatch(identityWorkflow, /git merge-base/);
   assert.doesNotMatch(identityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.doesNotMatch(identityWorkflow, /node scripts\/check-commit-identity\.mjs/);
+});
+
+test('base-defined gates report their required check names', () => {
+  const workflows = [
+    ['control-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'control-gate.yml'), 'utf8')],
+    ['identity-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'identity-gate.yml'), 'utf8')],
+  ];
+
+  for (const [checkName, source] of workflows) {
+    assert.match(source, new RegExp(`^  pull-request:\\n    name: ${checkName}$`, 'm'));
+    assert.match(source, new RegExp(`^  push:\\n    name: ${checkName}$`, 'm'));
+  }
+
+  const runbook = readFileSync(join(repoRoot, 'docs', 'runbooks', 'ci-fork-proof.md'), 'utf8');
+  assert.match(runbook, /Configure the ruleset with these exact check names: `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
+});
+
+test('push gates resolve an initial push through the tested range helper', () => {
+  const control = readFileSync(join(repoRoot, '.github', 'workflows', 'control-gate.yml'), 'utf8');
+  const identity = readFileSync(join(repoRoot, '.github', 'workflows', 'identity-gate.yml'), 'utf8');
+  const zeroSha = '0'.repeat(40);
+
+  for (const workflowSource of [control, identity]) {
+    assert.match(workflowSource, new RegExp(`ref: \\$\\{\\{ github\\.event\\.before == '${zeroSha}' && github\\.sha \\|\\| github\\.event\\.before \\}\\}`));
+    assert.match(workflowSource, /git show "HEAD:scripts\/ci\/push-range\.mjs" > "\$RUNNER_TEMP\/push-range\.mjs"/);
+    assert.match(workflowSource, /"\$RUNNER_TEMP\/push-range\.mjs" resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA"/);
+    assert.match(workflowSource, /"\$GITHUB_STEP_SUMMARY"/);
+    assert.doesNotMatch(workflowSource, /git show "\$\{PUSH_HEAD_SHA\}:scripts\/ci\/push-range\.mjs"/);
+  }
+  assert.match(identity, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(control, /--base-control "\$trusted_base" "\$range_head"/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs append-only "\$range_base" "\$range_head"/);
 });
 
 test('the canary permits only the default branch and fails closed when its endpoint is absent', () => {
@@ -377,9 +452,12 @@ test('v4 gates keeps explicit pull-request and push ranges for append-only and s
   assert.match(workflow, /PUSH_BASE_SHA:\s*\$\{\{ github\.event\.before \}\}/);
   assert.match(workflow, /PUSH_HEAD_SHA:\s*\$\{\{ github\.sha \}\}/);
   assert.match(workflow, /name: Transitional base commit identity check/);
-  assert.match(workflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(workflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
   assert.match(workflow, /Remove this step only after the owner registers identity-gate and control-gate as required statuses on main\./);
   assert.match(workflow, /node scripts\/check-append-only\.mjs "\$range_base" "\$range_head"/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs append-only "\$range_base" "\$range_head"/);
+  assert.match(workflow, /if \[\[ "\$initial_push" == true \]\]; then/);
   assert.match(workflow, /append_only_options=\(\)/);
   assert.match(workflow, /append_only_options=\(--require-ancestor\)/);
   assert.match(workflow, /"\$\{append_only_options\[@\]\}"/);
@@ -403,6 +481,8 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(runbook, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true FOUNDRY_LIBS=/);
+  assert.match(runbook, /zero `before` SHA or parentless pushed revision/);
+  assert.match(runbook, /empty tree/);
   assert.doesNotMatch(runbook, /required reviewer/i);
   assert.match(card, /\.github\/workflows\/v4-gates\.yml/);
   assert.match(card, /\.github\/workflows\/fork-proof\.yml/);
@@ -416,6 +496,8 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(card, /node scripts\/test-manifest\.mjs check/);
   assert.match(card, /node scripts\/verify-release-ready\.mjs/);
   assert.match(card, /scripts\/check-commit-identity\.mjs/);
+  assert.match(card, /scripts\/ci\/push-range\.mjs/);
+  assert.match(card, /Initial pushes use the empty tree/);
   assert.match(card, /fork-pin verifier/);
   assert.match(card, /verify-release-package-closure\.mjs/);
 });

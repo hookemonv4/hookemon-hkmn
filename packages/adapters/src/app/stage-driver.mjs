@@ -3,6 +3,7 @@ import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle
 import { isStandingAuthorityProvider } from '../../../runner/src/cycle/authorization-provider.mjs';
 import { LeaseLostError } from '../../../runner/src/automation/exclusive-lease.mjs';
 import { SignerClientError } from '../signing/signer-client.mjs';
+import { assertCollectorPolicyBundleRuntimeReady } from '../signing/collector-policy-loader.mjs';
 import { TransactionPolicyError } from '../signing/transaction-policy.mjs';
 import { RelayQuoteExpiredError } from '../relay-client.mjs';
 import { walletNonceLeaseWindow } from './wallet-nonce-lease.mjs';
@@ -29,10 +30,30 @@ import {
   mutateOutbound,
   reconcileLiveOutbound,
 } from './stages/outbound.mjs';
-import { probePurchase, mutatePurchase, reconcileLivePurchase } from './stages/purchase.mjs';
-import { probeOpen, mutateOpen, reconcileLiveOpen } from './stages/open.mjs';
-import { probeEpicGate, mutateEpicGate, reconcileLiveEpicGate } from './stages/epic-gate.mjs';
-import { probeBuyback, mutateBuyback, reconcileLiveBuyback } from './stages/buyback.mjs';
+import {
+  preparePurchaseRequest,
+  probePurchase,
+  mutatePurchase,
+  reconcileLivePurchase,
+} from './stages/purchase.mjs';
+import {
+  prepareOpenRequest,
+  probeOpen,
+  mutateOpen,
+  reconcileLiveOpen,
+} from './stages/open.mjs';
+import {
+  prepareEpicGateRequest,
+  probeEpicGate,
+  mutateEpicGate,
+  reconcileLiveEpicGate,
+} from './stages/epic-gate.mjs';
+import {
+  prepareBuybackRequest,
+  probeBuyback,
+  mutateBuyback,
+  reconcileLiveBuyback,
+} from './stages/buyback.mjs';
 import {
   ReturnRecoveryRequiredError,
   prepareReturnRequest,
@@ -43,10 +64,15 @@ import {
 import { preparePayoutRequest, probePayout, mutatePayout, reconcileLivePayout } from './stages/payout.mjs';
 import {
   createRehearsalSkipHandler,
+  prepareRehearsalPayoutRequest,
   probeRehearsalPayout,
   mutateRehearsalPayout,
   reconcileLiveRehearsalPayout,
 } from './stages/rehearsal.mjs';
+import {
+  isLiveCollectorOnlyRehearsal,
+  requireCollectorOnlyMutationAuthority,
+} from '../../rehearsal/collector-only-authorization.mjs';
 
 export { LiveModeIntegrationPendingError };
 
@@ -70,10 +96,30 @@ const STAGE_HANDLERS = Object.freeze({
     mutate: mutateOutbound,
     reconcileLive: reconcileLiveOutbound,
   },
-  purchase: { probe: probePurchase, mutate: mutatePurchase, reconcileLive: reconcileLivePurchase },
-  open: { probe: probeOpen, mutate: mutateOpen, reconcileLive: reconcileLiveOpen },
-  'epic-gate': { probe: probeEpicGate, mutate: mutateEpicGate, reconcileLive: reconcileLiveEpicGate },
-  buyback: { probe: probeBuyback, mutate: mutateBuyback, reconcileLive: reconcileLiveBuyback },
+  purchase: {
+    prepareRequest: preparePurchaseRequest,
+    probe: probePurchase,
+    mutate: mutatePurchase,
+    reconcileLive: reconcileLivePurchase,
+  },
+  open: {
+    prepareRequest: prepareOpenRequest,
+    probe: probeOpen,
+    mutate: mutateOpen,
+    reconcileLive: reconcileLiveOpen,
+  },
+  'epic-gate': {
+    prepareRequest: prepareEpicGateRequest,
+    probe: probeEpicGate,
+    mutate: mutateEpicGate,
+    reconcileLive: reconcileLiveEpicGate,
+  },
+  buyback: {
+    prepareRequest: prepareBuybackRequest,
+    probe: probeBuyback,
+    mutate: mutateBuyback,
+    reconcileLive: reconcileLiveBuyback,
+  },
   return: {
     chainJournal: true,
     prepareRequest: prepareReturnRequest,
@@ -100,7 +146,16 @@ const LIVE_MUTATION_PENDING = Object.freeze({
 const FAIL_CLOSED_UNJOURNALED_STAGES = new Set();
 const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 
-function requireStageMutationAuthority(preflightAuthority) {
+function integrationPendingFor(config, stage) {
+  return isLiveCollectorOnlyRehearsal(config) ? null : LIVE_MUTATION_PENDING[stage] ?? null;
+}
+
+function isDirectPayoutHandler(handler) {
+  return handler === STAGE_HANDLERS.payout;
+}
+
+function requireStageMutationAuthority(preflightAuthority, config) {
+  if (isLiveCollectorOnlyRehearsal(config)) return requireCollectorOnlyMutationAuthority(config);
   if (preflightAuthority === TEST_PROFILE_MUTATION_AUTHORITY) {
     if (process.env.NODE_TEST_CONTEXT === undefined) {
       throw new Error('stage-driver fixture authority is available only from the Node test runner');
@@ -138,14 +193,24 @@ function stageHandlersForConfig(config) {
   if (config.rehearsal?.mode !== 'collector-only') return STAGE_HANDLERS;
   return Object.freeze({
     ...STAGE_HANDLERS,
+    'eligibility-snapshot': createRehearsalSkipHandler('eligibility-snapshot'),
+    'claim-process': createRehearsalSkipHandler('claim-process'),
     outbound: createRehearsalSkipHandler('outbound'),
     return: createRehearsalSkipHandler('return'),
     payout: {
+      prepareRequest: prepareRehearsalPayoutRequest,
       probe: probeRehearsalPayout,
       mutate: mutateRehearsalPayout,
       reconcileLive: reconcileLiveRehearsalPayout,
     },
   });
+}
+
+function assertCollectorPolicyBundleBeforeMutation(config, stage) {
+  if (!isLiveCollectorOnlyRehearsal(config) || !['purchase', 'open', 'buyback'].includes(stage)) return;
+  const bundle = config?.collectorCrypt?.executionBundle;
+  if (bundle === undefined) return;
+  assertCollectorPolicyBundleRuntimeReady(bundle);
 }
 
 /** Convert adapter values to the canonical subset accepted by the durable journal. */
@@ -305,7 +370,7 @@ function createMutationGuard(context, stageRequestDigest) {
   return async boundary => context.assertMutationAllowed({ ...metadata, boundary });
 }
 
-async function authorizeMutation(context, stageRequestDigest, preflightAuthority) {
+async function authorizeMutation(context, stageRequestDigest, preflightAuthority, config) {
   let guard;
   let guardError;
   try {
@@ -317,7 +382,7 @@ async function authorizeMutation(context, stageRequestDigest, preflightAuthority
 
   let authorityError;
   try {
-    requireStageMutationAuthority(preflightAuthority);
+    requireStageMutationAuthority(preflightAuthority, config);
   } catch (error) {
     authorityError = error;
   }
@@ -595,6 +660,35 @@ function preparationInput(context, config) {
   });
 }
 
+function collectorOnlyPreparationAdapters(adapters, assertLease) {
+  const collectorCrypt = {};
+  const getMachines = leaseFencedReadMethod(adapters?.collectorCrypt, 'getMachines', assertLease);
+  if (getMachines) collectorCrypt.getMachines = getMachines;
+  const solanaClient = {};
+  for (const method of ['getTransaction', 'getAccountInfo']) {
+    const read = leaseFencedReadMethod(adapters?.solana?.client, method, assertLease);
+    if (read) solanaClient[method] = read;
+  }
+  return Object.freeze({
+    collectorCrypt: Object.freeze(collectorCrypt),
+    solana: Object.freeze({ client: Object.freeze(solanaClient) }),
+  });
+}
+
+function collectorOnlyPreparationInput(context, config, adapters, cycleRepository) {
+  return Object.freeze({
+    liveMode: true,
+    adapters: collectorOnlyPreparationAdapters(adapters, context.assertLease),
+    config: frozenCanonicalValue(config),
+    cycleRepository: createLeaseFencedReadRepository(cycleRepository, context.assertLease),
+    context: frozenCanonicalValue({
+      cycleId: context.cycleId,
+      stage: context.stage,
+      intent: context.intent,
+    }),
+  });
+}
+
 function leaseFencedReadMethod(value, method, assertLease) {
   if (typeof value?.[method] !== 'function') return undefined;
   return (...args) => {
@@ -762,13 +856,19 @@ function chainReconciliationInput(context, config, reconciliationAdapters, cycle
 }
 
 async function prepareRequestForMutation({ handler, usesBuiltInHandlers, context, config, adapters, cycleRepository }) {
-  if (usesBuiltInHandlers && LIVE_MUTATION_PENDING[context.stage]) return pendingIntegrationRequest(context);
+  if (usesBuiltInHandlers && integrationPendingFor(config, context.stage)) return pendingIntegrationRequest(context);
   if (typeof handler.prepareRequest !== 'function') {
     throw new Error(`stage-driver: handler "${context.stage}" is missing prepareRequest`);
   }
-  if (usesBuiltInHandlers && context.stage === 'payout') {
+  if (usesBuiltInHandlers && context.stage === 'payout' && isDirectPayoutHandler(handler)) {
     return assertPreparedRequest(
       await handler.prepareRequest({ config, cycleRepository, context }),
+      context.stage,
+    );
+  }
+  if (usesBuiltInHandlers && isLiveCollectorOnlyRehearsal(config)) {
+    return assertPreparedRequest(
+      await handler.prepareRequest(collectorOnlyPreparationInput(context, config, adapters, cycleRepository)),
       context.stage,
     );
   }
@@ -847,7 +947,7 @@ export function createStageDriver({
         const evidence = await handler.reconcileLive({ adapters, config: handlerConfig, cycleRepository, context });
         return evidence === null ? null : toEvidenceValue(evidence);
       }
-      if (usesBuiltInHandlers && context.stage === 'payout') {
+      if (usesBuiltInHandlers && context.stage === 'payout' && isDirectPayoutHandler(handler)) {
         // Payout owns a recipient-level write-ahead journal. It has no single provider request
         // whose response can represent every transfer, so its terminal evidence is reconciled
         // directly from that journal instead of the generic provider-attempt wrapper.
@@ -883,13 +983,18 @@ export function createStageDriver({
         }));
       }
       if (usesBuiltInHandlers
-        && LIVE_MUTATION_PENDING[context.stage]
+        && integrationPendingFor(handlerConfig, context.stage)
         && !FAIL_CLOSED_UNJOURNALED_STAGES.has(context.stage)) return null;
 
       let evidence;
       try {
         evidence = await handler.reconcileLive(
-          reconciliationInput(context, handlerConfig, reconciliationAdapters, cycleRepository),
+          reconciliationInput(
+            context,
+            handlerConfig,
+            isLiveCollectorOnlyRehearsal(handlerConfig) ? reconciliationAdapters ?? adapters : reconciliationAdapters,
+            cycleRepository,
+          ),
         );
       } catch (error) {
         await holdKnownFailure({ cycleRepository, context, error });
@@ -906,13 +1011,14 @@ export function createStageDriver({
     async execute(context) {
       const handler = handlerFor(handlers, context);
       if (!liveMode) return;
+      if (usesBuiltInHandlers) assertCollectorPolicyBundleBeforeMutation(handlerConfig, context.stage);
       const chainJournal = usesBuiltInHandlers && isChainJournalHandler(handler);
 
       if (usesBuiltInHandlers && READ_ONLY_LIVE_RECONCILIATION_STAGES.has(context.stage)) {
         throw new Error(`stage-driver: "${context.stage}" completes only through read-only reconciliation`);
       }
 
-      if (usesBuiltInHandlers && context.stage === 'payout') {
+      if (usesBuiltInHandlers && context.stage === 'payout' && isDirectPayoutHandler(handler)) {
         try {
           context.assertLease?.();
         } catch (error) {
@@ -939,7 +1045,7 @@ export function createStageDriver({
           await holdKnownFailure({ cycleRepository, context, error });
           throw error;
         }
-        const guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority);
+        const guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, handlerConfig);
         let reachedProviderCapability = false;
         const markProviderCapability = () => { reachedProviderCapability = true; };
         const leaseFencedAdapters = createLeaseFencedCapability(
@@ -993,8 +1099,8 @@ export function createStageDriver({
       }
       if (usesBuiltInHandlers
         && FAIL_CLOSED_UNJOURNALED_STAGES.has(context.stage)
-        && LIVE_MUTATION_PENDING[context.stage]) {
-        throw new LiveModeIntegrationPendingError(context.stage, LIVE_MUTATION_PENDING[context.stage]);
+        && integrationPendingFor(handlerConfig, context.stage)) {
+        throw new LiveModeIntegrationPendingError(context.stage, integrationPendingFor(handlerConfig, context.stage));
       }
       let request;
       try {
@@ -1031,12 +1137,12 @@ export function createStageDriver({
         if (!chainJournal) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
         throw error;
       }
-      if (usesBuiltInHandlers && LIVE_MUTATION_PENDING[context.stage]) {
-        throw new LiveModeIntegrationPendingError(context.stage, LIVE_MUTATION_PENDING[context.stage]);
+      if (usesBuiltInHandlers && integrationPendingFor(handlerConfig, context.stage)) {
+        throw new LiveModeIntegrationPendingError(context.stage, integrationPendingFor(handlerConfig, context.stage));
       }
       let guard;
       try {
-        guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority);
+        guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, handlerConfig);
       } catch (error) {
         await holdKnownFailure({ cycleRepository, context, error });
         if (!chainJournal) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);

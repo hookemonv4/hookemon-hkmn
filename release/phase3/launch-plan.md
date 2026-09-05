@@ -2,6 +2,8 @@
 
 Status: do not sign. This is a deterministic preparation record, not deployment authority. Requirements revision 65 records the owner's 2026-09-05 decision: the complete 1,000,000,000 HKMN supply is allocated to the canonical market and no other HKMN allocation exists. The DRAFT_UNSIGNED revision-65 baseline records subject hashes only.
 
+The read-only V4 format probes (records retained outside the repository) recorded ten redacted requests. They confirmed the nonce, source descriptor, and nonempty source-manifest field shapes, but no probe returned a non-error preflight result or wallet handoff. The source manifest digest binding remains an OPEN FACT; no signed or deployable request has been produced.
+
 ## Fixed inputs
 
 The launch wallet and treasury beneficiary are `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729`. Operations is `0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384`. The immutable Programmable recipient is `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` at 10 bps of the 300 bps hook fee; FEE-01 was accepted with the owner on 2026-09-04. The canonical pool uses zero LP fee, spacing 60, and full-range ticks `-887220` through `887220`.
@@ -42,13 +44,26 @@ The selected address order consumes both maximums exactly. Permit2 allowance mus
 | `PROVIDER_API_KEY_PENDING` | Supply an execution-only preflight API key | Persist no credential in the package |
 | `OWNER_WALLET_FUNDING_PENDING` | Fund the launch wallet and record final nonce, gas, deadline, and exact Permit2 allowance after preflight | Retain the 900-second deadline ceiling and exact allowance rule |
 | `BUILDER_IDENTITY_PENDING` | Provide public builder contact details for preflight | Retain null builder identity fields |
+| `PREFLIGHT_SOURCE_BUNDLE_DIGEST` | Obtain the V4 source-bundle digest preimage or provider-generated descriptor; probes `008`–`010` returned `sourceBundleManifest digest does not match sourceDescriptor` | Retain accepted source field shapes and null source commitment values |
+| `PREFLIGHT_NONCE_DERIVATION` | Obtain the provider's V4 nonce rule or a provider-generated nonce; probe `001` confirmed only `nonce must be a nonzero lowercase bytes32 value` | Retain a null nonce and reject a padded EVM account transaction count |
 
 After transaction 1, do not seed if code hashes, hook mask `0x20cc`, the PoolKey, selected tuple, or exact Permit2 allowance differs from the reviewed package. After transaction 2, do not attempt a compensating withdrawal or approval broadening; record the final transaction hashes, PoolKey, PoolId, custody position identifier, balances, and runtime hashes before enabling trading.
 
 ## Owner preflight steps
 
-Before either wallet action, run `export $(cat ~/.hookemon/programmable.env) && node scripts/programmable/preflight.mjs`. It first reads the provider capabilities for chain 4663 and uses only the advertised non-persisting preflight route. It writes a redacted evidence record under `release/phase3/preflight/` and exits nonzero with numbered mismatches when a package root, digest, caller, deployer, transaction target/value, seed allowance, deadline, or refund destination differs.
+Before either wallet action, run:
+
+```sh
+node scripts/programmable/preflight.mjs \
+  --repository-url https://github.com/hookemonv4/hookemon-hkmn \
+  --source-commit "$(git rev-parse HEAD)" \
+  --source-tree "$(git rev-parse HEAD^{tree})"
+```
+
+The command reads `PROGRAMMABLE_API_KEY` from the environment and fetches provider capabilities before using only the advertised non-persisting preflight route. An EVM account transaction count is not treated as a provider nonce: the command rejects it unless an independently established V4 nonce is available. It writes redacted evidence under `release/phase3/preflight/`. It exits nonzero with numbered provider mismatches or when a required V4 field cannot be derived from committed evidence; it never sends a placeholder.
+
+At the current revision, the standard command stops before the provider POST. The pinned provider record omits `capabilities.chainDeployment` and `capabilities.chainDeploymentDescriptorDigest`, and the request template retains explicit nulls for the provider graph and source commitment. The separate format probes reached source-manifest digest validation but did not produce a handoff. Do not replace those values manually; retain the canonical provider capability document, provider digest preimage, and graph preimage first.
 
 In Rabby, compare the handoff with the displayed transaction: chain 4663, recipient, native value, calldata and graph digests, expected addresses, nonce, gas, and deadline for the graph transaction; then exact 240 USDG Permit2 allowance, a deadline no longer than 900 seconds, and the refund destination for the seed. The owner alone decides whether to sign or broadcast. A matching preflight does not authorize either action.
 
-The checked-in package is still `ADDRESS_DERIVATION_PENDING`. The provider route, nonce, intent preimage, materialized target addresses, and unsigned transaction data remain OPEN FACTs. Commit the materialized request and repeat the command against that commit before signing.
+The checked-in package is still `ADDRESS_DERIVATION_PENDING`. It includes a recorded-contract request template, not a materialized provider request. The provider route, intent preimage, materialized target addresses, exact-source request, V4 nonce derivation, and unsigned transaction data remain OPEN FACTs. Commit the fully materialized request and repeat the command against that commit before signing.

@@ -3,7 +3,7 @@
 ## Detection
 
 An open attempt remains `SENT_UNKNOWN` and its memo-bound status cannot prove a
-single card mint after the guarded recovery read.
+single card mint after read-only reconciliation.
 
 ## Safe stop
 

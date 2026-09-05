@@ -8,7 +8,7 @@
 import { join } from 'node:path';
 
 import { AutomatedCycleService } from '../../../runner/src/automation/automated-cycle-service.mjs';
-import { createPolicyEngine } from '../../../runner/src/automation/policy-engine.mjs';
+import { assertCollectorOnlyRehearsalPolicy, createPolicyEngine } from '../../../runner/src/automation/policy-engine.mjs';
 import { createRehearsalStageDriver } from '../../../runner/src/cycle/rehearsal-stage-driver.mjs';
 import { collectRehearsalEvidence, ensureRehearsalEvidence } from '../../../runner/src/cycle/rehearsal-evidence.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
@@ -24,7 +24,8 @@ import { readDashboardProfile } from '../../../dashboard/src/contracts/dashboard
 import { createCollectorCryptClient } from '../collector-crypt.mjs';
 import { createRelayClient } from '../relay-client.mjs';
 import { createHistoricalErc20EvidenceClient, createRobinhoodClient, readChainId } from '../robinhood-rpc.mjs';
-import { createSolanaRpcClient } from '../solana-rpc.mjs';
+import { createSolanaRpcClient, readSolBalance, readUsableLatestBlockhash } from '../solana-rpc.mjs';
+import { attachCollectorPolicyBundle, loadCollectorPolicyBundle } from '../signing/collector-policy-loader.mjs';
 import {
   assertCycleRepositoryInterface,
   createCycleRepositoryClient,
@@ -82,6 +83,21 @@ function configuredEvmUsdgAsset(config) {
     assetId: `eip155:${chainId}/erc20:${normalizedAddress}`,
     decimals,
   });
+}
+
+function isLiveCollectorOnlyRehearsal(config) {
+  return config?.execution?.profile === 'rehearsal'
+    && config.execution?.providerMode === 'live'
+    && config.rehearsal?.mode === 'collector-only';
+}
+
+function collectorOnlyPackPrice(config) {
+  const amountAtomic = config?.collectorCrypt?.packPrice?.amountAtomic;
+  if (typeof config?.pack?.code !== 'string' || config.pack.code.length === 0
+    || typeof amountAtomic !== 'string' || !decimalPattern.test(amountAtomic) || amountAtomic === '0') {
+    throw new Error('live collector-only rehearsal requires a configured pack and typed positive pack price');
+  }
+  return amountAtomic;
 }
 
 async function readPolicyConfiguration(statePath) {
@@ -342,10 +358,13 @@ function buildAdapters(config) {
     : config.collectorCrypt.apiKey
     ? createCollectorCryptClient({ apiKey: config.collectorCrypt.apiKey, baseUrl: config.collectorCrypt.baseUrl })
     : null;
+  const liveCollectorOnly = isLiveCollectorOnlyRehearsal(config);
   const relay = config.execution?.providerMode === 'fake'
     ? fakeProvider('relay')
-    : createRelayClient({ baseUrl: config.relay.baseUrl, apiKey: config.relay.apiKey ?? undefined });
-  const robinhoodClient = createRobinhoodClient({ rpcUrl: config.robinhood.rpcUrl });
+    : liveCollectorOnly
+      ? null
+      : createRelayClient({ baseUrl: config.relay.baseUrl, apiKey: config.relay.apiKey ?? undefined });
+  const robinhoodClient = liveCollectorOnly ? null : createRobinhoodClient({ rpcUrl: config.robinhood.rpcUrl });
   const solanaClient = createSolanaRpcClient({ rpcUrl: config.solana.rpcUrl });
   const historicalEvidenceClient = injectedEvidenceClient ?? archiveEvidenceClientFromConfig(config);
 
@@ -379,8 +398,8 @@ function unavailableNetworkIdentity(network) {
   throw new Error(`compose ${network} network identity unavailable`);
 }
 
-function requireNetworkIdentity(value) {
-  if (!value || typeof value.readEvmChainId !== 'function' || typeof value.readSolanaGenesisHash !== 'function') {
+function requireNetworkIdentity(value, { requireEvm = true } = {}) {
+  if (!value || (requireEvm && typeof value.readEvmChainId !== 'function') || typeof value.readSolanaGenesisHash !== 'function') {
     unavailableNetworkIdentity('injected');
   }
   return value;
@@ -418,27 +437,29 @@ async function readSolanaGenesisHash(client) {
   return payload.result;
 }
 
-function networkIdentityFor(config, adapters) {
-  if (config.networkIdentity !== undefined) return requireNetworkIdentity(config.networkIdentity);
+function networkIdentityFor(config, adapters, { requireEvm = true } = {}) {
+  if (config.networkIdentity !== undefined) return requireNetworkIdentity(config.networkIdentity, { requireEvm });
   if (config.adapters) unavailableNetworkIdentity('injected');
   return Object.freeze({
-    readEvmChainId: () => readChainId(adapters?.robinhood?.client),
+    ...(requireEvm ? { readEvmChainId: () => readChainId(adapters?.robinhood?.client) } : {}),
     readSolanaGenesisHash: () => readSolanaGenesisHash(adapters?.solana?.client),
   });
 }
 
-async function assertNetworkIdentity({ config, adapters, profileId }) {
+async function assertNetworkIdentity({ config, adapters, profileId, requireEvm = true }) {
   const profile = readDashboardProfile(profileId);
-  const identity = networkIdentityFor(config, adapters);
-  let evmChainId;
-  try {
-    evmChainId = await identity.readEvmChainId();
-  } catch {
-    unavailableNetworkIdentity('EVM');
-  }
-  if (!Number.isSafeInteger(evmChainId) || evmChainId <= 0) unavailableNetworkIdentity('EVM');
-  if (evmChainId !== config.chainId) {
-    throw new Error(`compose EVM network identity mismatch: expected chain ${config.chainId}, received ${evmChainId}`);
+  const identity = networkIdentityFor(config, adapters, { requireEvm });
+  if (requireEvm) {
+    let evmChainId;
+    try {
+      evmChainId = await identity.readEvmChainId();
+    } catch {
+      unavailableNetworkIdentity('EVM');
+    }
+    if (!Number.isSafeInteger(evmChainId) || evmChainId <= 0) unavailableNetworkIdentity('EVM');
+    if (evmChainId !== config.chainId) {
+      throw new Error(`compose EVM network identity mismatch: expected chain ${config.chainId}, received ${evmChainId}`);
+    }
   }
 
   let solanaGenesisHash;
@@ -616,7 +637,7 @@ export async function compose(config) {
   };
   for (const [key, value] of Object.entries(budget)) assertDecimal(value, `compose config.budget.${key}`);
 
-  const resolved = {
+  let resolved = {
     chainId: 4663,
     // WP-37: `treasury`/`pool` are operator/test-configured fallbacks for `distribution.mjs`'s own
     // holder-exclusion-set builder (see environment.mjs's own header — `pool` only matters until
@@ -706,6 +727,21 @@ export async function compose(config) {
     && (!resolved.rehearsal || resolved.rehearsal.proceedsAccount === undefined)) {
     throw new Error('compose fake rehearsal requires a dedicated proceeds account');
   }
+  if (isLiveCollectorOnlyRehearsal(resolved)) {
+    if (resolved.accounts?.evm !== null && resolved.accounts?.evm !== undefined) {
+      throw new Error('compose live collector-only rehearsal requires no EVM Operations account');
+    }
+    if (typeof resolved.accounts?.solana !== 'string' || resolved.accounts.solana.length === 0
+      || typeof resolved.rehearsal?.proceedsAccount !== 'string' || resolved.rehearsal.proceedsAccount.length === 0
+      || !Array.isArray(resolved.rehearsal.payoutRecipients) || resolved.rehearsal.payoutRecipients.length === 0) {
+      throw new Error('compose live collector-only rehearsal requires Solana Operations, proceeds, and payout recipients');
+    }
+    if (resolved.rehearsal.proceedsAccount === resolved.accounts.solana
+      || resolved.rehearsal.payoutRecipients.includes(resolved.rehearsal.proceedsAccount)) {
+      throw new Error('compose live collector-only rehearsal requires a proceeds account distinct from Operations and recipients');
+    }
+    collectorOnlyPackPrice(resolved);
+  }
   resolved.moneyConfiguration = resolveMoneyConfiguration(resolved.moneyConfiguration, resolved.execution);
 
   // The dashboard profile is part of the same network boundary as the runner. Resolve and check
@@ -718,6 +754,9 @@ export async function compose(config) {
   );
 
   const adapters = buildAdapters(resolved);
+  if (isLiveCollectorOnlyRehearsal(resolved) && resolved.collectorCrypt?.executionBundleRequired === true) {
+    resolved = attachCollectorPolicyBundle(resolved, await loadCollectorPolicyBundle());
+  }
   if (resolved.execution.profile === 'production') {
     assertProductionHistoricalEvidenceClient(adapters);
   }
@@ -730,6 +769,7 @@ export async function compose(config) {
       config: resolved,
       adapters,
       profileId: dashboardConfig?.profileId ?? 'mainnet',
+      requireEvm: !isLiveCollectorOnlyRehearsal(resolved),
     });
   }
 
@@ -755,7 +795,43 @@ export async function compose(config) {
   let successfulStartPreflight = null;
   let successfulMainnetRpcIdentity = null;
 
+  async function assertLiveCollectorOnlyPolicyConfiguration() {
+    const configuration = await readConfiguration();
+    if (configuration === null) throw new Error('policy configuration is required before service startup');
+    assertCollectorOnlyRehearsalPolicy(configuration, {
+      packCode: resolved.pack.code,
+      packPriceAtomic: collectorOnlyPackPrice(resolved),
+    });
+    return configuration;
+  }
+
+  async function requireLiveCollectorOnlyCanary() {
+    const client = adapters?.solana?.client;
+    const operator = resolved.accounts?.solana;
+    const reserve = resolved.moneyConfiguration?.solana?.lamportReserve;
+    if (!client || typeof operator !== 'string' || operator.length === 0
+      || !reserve || typeof reserve.amountAtomic !== 'string' || !decimalPattern.test(reserve.amountAtomic)) {
+      throw new Error('live collector-only rehearsal requires a Solana RPC client, Operations account, and typed lamport reserve');
+    }
+    const [blockhash, solBalance] = await Promise.all([
+      readUsableLatestBlockhash(client),
+      readSolBalance(client, operator),
+    ]);
+    if (!blockhash || typeof blockhash.blockhash !== 'string' || blockhash.blockhash.length === 0) {
+      throw new Error('live collector-only rehearsal Solana blockhash canary did not return a usable blockhash');
+    }
+    if (typeof solBalance !== 'bigint' || solBalance < BigInt(reserve.amountAtomic)) {
+      throw new Error('live collector-only rehearsal Operations SOL balance is below the typed lamport reserve');
+    }
+    return Object.freeze({ blockhash: blockhash.blockhash, solBalanceLamports: solBalance.toString() });
+  }
+
   async function requireStartPreflight({ requireCanonicalEvmIdentity = true } = {}) {
+    if (isLiveCollectorOnlyRehearsal(resolved)) {
+      await assertLiveCollectorOnlyPolicyConfiguration();
+      await requireLiveCollectorOnlyCanary();
+      return;
+    }
     if (observability === null) throw new Error('observability configuration is required before live service startup');
     if (requireCanonicalEvmIdentity) await assertMainnetRpcChainId();
     if (successfulStartPreflight !== null) {
@@ -864,16 +940,24 @@ export async function compose(config) {
     if (mode !== 'production' && mode !== 'rehearsal') throw new Error('compose readiness mode is invalid');
     if (typeof requireCanaryPreflight !== 'boolean') throw new Error('compose readiness canary requirement is invalid');
     const repository = await assertRepositoryIntegrity();
-    await assertMainnetRpcChainId();
+    const liveCollectorOnly = isLiveCollectorOnlyRehearsal(resolved);
+    if (!liveCollectorOnly) await assertMainnetRpcChainId();
     if (requirePolicyConfiguration) {
       const configuration = await readConfiguration();
       if (configuration === null) throw new Error('policy configuration is required before service startup');
       if (configuration.liveMode !== liveMode) {
         throw new Error('policy configuration liveMode does not match the execution profile');
       }
-      const minimumApprovals = mode === 'production' ? 3 : 1;
-      if (configuration.manualApprovalCycles < minimumApprovals) {
-        throw new Error(`policy configuration manualApprovalCycles must be at least ${minimumApprovals} for ${mode} startup`);
+      if (liveCollectorOnly) {
+        assertCollectorOnlyRehearsalPolicy(configuration, {
+          packCode: resolved.pack.code,
+          packPriceAtomic: collectorOnlyPackPrice(resolved),
+        });
+      } else {
+        const minimumApprovals = mode === 'production' ? 3 : 1;
+        if (configuration.manualApprovalCycles < minimumApprovals) {
+          throw new Error(`policy configuration manualApprovalCycles must be at least ${minimumApprovals} for ${mode} startup`);
+        }
       }
     }
     if (requireCanaryPreflight || liveMode === true) await requireStartPreflight();

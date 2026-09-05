@@ -54,6 +54,7 @@ export const EXAMPLE_CONFIG = {
   expectedDecimals: 18, // PLACEHOLDER_WP04A
   bindingDigest: `0x${'77'.repeat(32)}`, // PLACEHOLDER_WP04A
   runtimeDigest: `0x${'88'.repeat(32)}`, // PLACEHOLDER_WP04A
+  seedIntentDigest: `0x${'99'.repeat(32)}`, // PLACEHOLDER_WP04A
   processClaimLimit6h: '1000000', // PLACEHOLDER_WP04A
   processClaimLimitMax: '2000000', // PLACEHOLDER_WP04A
   processClaimMaxCount: '8', // PLACEHOLDER_WP04A
@@ -162,7 +163,7 @@ export function deriveProgrammableEffectiveSalt({
 /// Field order MUST match HookemonHook.ConstructorConfig exactly:
 ///   manager, positionManager, permit2, usdg, hkmn, tickSpacing, programmable, treasury,
 ///   operations, launchAuthority, issuanceAuthority, expectedDecimals, bindingDigest,
-///   runtimeDigest, processClaimLimit6h, processClaimLimitMax, processClaimMaxCount,
+///   runtimeDigest, seedIntentDigest, processClaimLimit6h, processClaimLimitMax, processClaimMaxCount,
 ///   operationsRotationDelay
 export function encodeConstructorConfig(config) {
   const words = [
@@ -180,6 +181,7 @@ export function encodeConstructorConfig(config) {
     uintWord(config.expectedDecimals, 8),
     bytes32Word(config.bindingDigest),
     bytes32Word(config.runtimeDigest),
+    bytes32Word(config.seedIntentDigest),
     uintWord(config.processClaimLimit6h, 256),
     uintWord(config.processClaimLimitMax, 256),
     uintWord(config.processClaimMaxCount, 256),

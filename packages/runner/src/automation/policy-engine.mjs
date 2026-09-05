@@ -142,6 +142,38 @@ function assertOperatorHardCaps(configuration) {
   return configuration;
 }
 
+/**
+ * Narrows the general operator policy to the single permitted live Collector-only rehearsal.
+ * The caller supplies the immutable pack and typed atomic spend from its environment boundary;
+ * this helper only validates the persisted, owner-controlled policy document.
+ */
+export function assertCollectorOnlyRehearsalPolicy(configuration, { packCode, packPriceAtomic } = {}) {
+  const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
+  assertPackId(packCode);
+  assertAmount(packPriceAtomic, 'collector-only rehearsal packPriceAtomic', { positive: true });
+  if (normalized.liveMode !== true) throw new Error('collector-only rehearsal policy requires liveMode=true');
+  if (normalized.allowedPackIds.length !== 1 || normalized.allowedPackIds[0] !== packCode) {
+    throw new Error('collector-only rehearsal policy must allow exactly the selected pack');
+  }
+  if (normalized.requestedOrders !== 1) throw new Error('collector-only rehearsal policy requestedOrders must equal 1');
+  if (normalized.maxBoostersPerCycle !== 1) throw new Error('collector-only rehearsal policy maxBoostersPerCycle must equal 1');
+  if (normalized.manualApprovalCycles < 1) {
+    throw new Error('collector-only rehearsal policy requires at least one manual approval cycle');
+  }
+  for (const field of [
+    'maxUnitPriceMicroUsdg',
+    'maxCycleBudgetMicroUsdg',
+    'max24HourBudgetMicroUsdg',
+    'perCycleCapMicroUsdg',
+  ]) {
+    if (normalized[field] !== packPriceAtomic) {
+      throw new Error(`collector-only rehearsal policy ${field} must equal the configured pack price`);
+    }
+  }
+  if (normalized.maxCyclesPerDay !== 1) throw new Error('collector-only rehearsal policy maxCyclesPerDay must equal 1');
+  return normalized;
+}
+
 function legacyPolicyMaterial(configuration, configurationRevision) {
   return {
     configurationRevision,

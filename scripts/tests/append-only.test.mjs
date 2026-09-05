@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const scanner = join(import.meta.dirname, '..', 'check-append-only.mjs');
+const pushRange = join(import.meta.dirname, '..', 'ci', 'push-range.mjs');
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const identity = {
   GIT_AUTHOR_NAME: 'Hookemon',
   GIT_AUTHOR_EMAIL: '312745360+hookemonv4@users.noreply.github.com',
@@ -46,9 +48,52 @@ function repository() {
   return { root, base };
 }
 
+function rootRepository() {
+  const root = mkdtempSync(join(tmpdir(), 'hookemon-append-only-root-'));
+  execFileSync('git', ['-C', root, 'init', '--quiet', '--initial-branch=main']);
+  mkdirSync(join(root, 'receipts'), { recursive: true });
+  writeFileSync(join(root, 'receipts', 'first.json'), '{"sequence":1}\n');
+  return { root, head: commit(root, 'initial receipt') };
+}
+
 function scan(root, base, head, ...options) {
   return spawnSync(process.execPath, [scanner, base, head, ...options], { cwd: root, encoding: 'utf8' });
 }
+
+function scanInitialPush(root, head) {
+  return spawnSync(process.execPath, [pushRange, 'append-only', EMPTY_TREE_SHA, head], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+}
+
+test('initial push inspects root receipts from the empty tree', () => {
+  const { root, head } = rootRepository();
+  try {
+    const result = scanInitialPush(root, head);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /append-only check passed \(1 commit\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('initial push inspects every reachable commit', () => {
+  const { root } = rootRepository();
+  try {
+    writeFileSync(join(root, 'receipts', 'first.json'), '{"sequence":2}\n');
+    const head = commit(root, 'modify initial receipt');
+
+    const result = scanInitialPush(root, head);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /append-only check failed/);
+    assert.match(result.stdout, /receipts\/first\.json: modified/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('allows new receipt files and unrelated changes', () => {
   const { root, base } = repository();

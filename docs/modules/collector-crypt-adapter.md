@@ -26,8 +26,8 @@
 - `dryRun: true` refuses all mutation methods before a network call but leaves read methods available.
 - Requests and documented response fields are strictly validated. `getNfts` requires pagination metadata when a page or page size is requested, while an unpaged read accepts the documented `{ nfts }` response. Prize tiers are numeric 1 through 4. `getBuybackAvailable(...).amount` and `buyback(...).refundAmount` are converted to `{ chainId, assetId, decimals, amountAtomic }` for the documented Solana settlement asset. A type drift holds as unverified, while unknown nested `pack/status` fields remain opaque.
 - A selected machine's `contains` field accepts a non-negative safe integer or numeric string and is parsed only during purchase planning. The planner records the expected count, and the current single-award open path refuses a fan-out it cannot independently reconcile.
-- An `openPack` response that carries an award must carry `nft_address` and either `transaction_signature` or `transactionSignature`; snake-case signatures are normalized to `transactionSignature`. Waiting and already-opened responses with no award remain valid provider observations but cannot complete the stage alone. A response-recorded or guarded-retry open without a memo-bound mint holds `HELD_DATA_UNVERIFIED` in the stage journal.
-- The [EVM API documentation](https://docs.collectorcrypt.com/gacha/evm-api) says that calling `openPack` twice returns the same award. Its scope is EVM-only and never relaxes the durable request and reconciliation rule. The Solana lifecycle therefore never retries automatically: after `SENT_UNKNOWN`, it may make one guarded call only when the request digest binds the completed purchase memo and the returned `nft_address` agrees with fresh memo-bound status evidence.
+- An `openPack` response that carries an award must carry `nft_address` and either `transaction_signature` or `transactionSignature`; snake-case signatures are normalized to `transactionSignature`. Waiting and already-opened responses with no award remain valid provider observations but cannot complete the stage alone. An open result without a memo-bound mint holds `HELD_DATA_UNVERIFIED` in the stage journal.
+- The [EVM API documentation](https://docs.collectorcrypt.com/gacha/evm-api) says that calling `openPack` twice returns the same award. Its scope is EVM-only and never relaxes the durable request and reconciliation rule. The Solana lifecycle makes no second open mutation after `SENT_UNKNOWN`; it reconciles only the original memo through read-only status and finalized chain evidence.
 - A present `getBuybackCheck` record requires the documented wallet, card, signature, amount, timestamp, and status fields. Lifecycle reconciliation treats a missing record or the documented empty pending status as unresolved, holds unknown statuses, and requires an exact completed record before it accepts finalized chain deltas.
 - The public read-only capture at `packages/adapters/test/fixtures/collector-crypt/live-2026-09-04/public-readonly-capture.json` records that the permitted machine URL returned HTML, not a live JSON schema. Buyback values use configured Solana stablecoin base units with six decimals. `insured_value` is usable only when persisted reconciliation proves its unit against the machine `instantBuyback` percentage; absent, contradictory, or unreconciled evidence is `HELD_DATA_UNVERIFIED`. Lifecycle code must hold rather than infer those facts.
 
@@ -37,9 +37,9 @@ The client has no durable state. A stage persists its request digest before call
 reconciles a lost response through memo-correlated read endpoints plus finalized chain evidence.
 Buyback reconciliation uses `getBuybackCheck({ memo })` to bind the completed provider record before
 checking card transfer and settlement deltas. This client only returns validated provider
-observations and cannot advance a cycle from `SENT_UNKNOWN` to reconciled. The open-stage
-sent-unknown exception owns its memo, card, and mutation-guard checks; a missing memo-bound mint
-holds rather than inferring a card. Purchase and buyback decode the provider transaction, require a
+observations and cannot advance a cycle from `SENT_UNKNOWN` to reconciled. Open reconciliation owns
+the original memo and finalized card evidence; a missing memo-bound mint holds rather than inferring
+a card or making another provider mutation. Purchase and buyback decode the provider transaction, require a
 matching `MoneyConfigurationV1` settlement asset, cap the decoded priority fee, and check the
 configured lamport reserve plus maximum priority fee before signing. Those stages do not make this
 client a generic signed-byte recovery or rebroadcast authority.
@@ -60,6 +60,7 @@ node --test --test-timeout=120000 test/collector-crypt.test.mjs
   [schema drift](../runbooks/collector-schema-drift.md). Each recovery contract records the
   supported resume command or its absence.
 - Fixture-only coverage lives in `packages/adapters/test/collector-crypt.test.mjs` and `packages/adapters/test/fixtures/collector-crypt/`.
-- On a mutation timeout or lost response, do not call the same endpoint again. The only narrow exception is the open-stage memo-bound retry described above. Query the memo-bound status endpoint for the affected operation and inspect persisted chain evidence from the stage journal. For buyback, use `getBuybackCheck({ memo })`; do not treat a later availability quote as proof of the original sale.
+- On a mutation timeout or lost response, do not call the same endpoint again. Query the memo-bound status endpoint for the affected operation and inspect persisted chain evidence from the stage journal. For buyback, use `getBuybackCheck({ memo })`; do not treat a later availability quote as proof of the original sale.
+- The current Solana API documentation types `altRecipient` as a wallet public key. The Collector-only path omits that optional field until the provider documents token-account support; finalized settlement still must appear at the operator's canonical settlement account.
 - If a response validator fails, update it only after a current authenticated provider example or documentation establishes the new field shape. Do not relax validation to accept an unknown economic value.
 - Documentation excerpts and their URLs are recorded in `packages/adapters/test/fixtures/collector-crypt/docs-evidence-2026-09-04.json`. The unresolved Solana insured-value unit remains an OPEN FACT and is reconciled at the epic gate rather than inferred by this client.

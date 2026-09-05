@@ -167,6 +167,111 @@ export function deferTask(db, taskId, {
   }
 }
 
+function deferredTaskRebindPrestate(db, taskId) {
+  if (taskId !== 'P1-011') throw new Error(`only P1-011 may be rebound (got ${taskId})`);
+  const task = listTasks(db).find(candidate => candidate.id === taskId);
+  if (!task) throw new Error(`no such task ${taskId}`);
+  if (task.status !== 'deferred') throw new Error(`task ${taskId} is ${task.status}`);
+  if (task.lease_owner !== null || task.lease_expires !== null) {
+    throw new Error(`task ${taskId} is leased`);
+  }
+  if (typeof task.defer_approval !== 'string' || typeof task.defer_descriptor !== 'string'
+      || typeof task.defer_prestate_fingerprint !== 'string') {
+    throw new Error(`task ${taskId} has no complete deferred authority binding`);
+  }
+  const root = LEDGER_ROOTS.get(db);
+  if (!root) throw new Error('ledger has no repository root');
+  const descriptor = readTaskDeferralDescriptor(root, task.defer_descriptor, taskId);
+  if (!['ready', 'done'].includes(descriptor?.prestate?.status)) {
+    throw new Error(`task ${taskId} deferred descriptor has no valid original status`);
+  }
+  const prestate = {
+    id: task.id,
+    title: task.title,
+    phase: task.phase,
+    risk: task.risk,
+    deps: task.deps,
+    reqs: task.reqs,
+    status: descriptor.prestate.status,
+    leaseToken: task.lease_token,
+    completionCommit: descriptor.prestate.status === 'done'
+      ? latestCompletionCommit(db, taskId)
+      : null,
+  };
+  const fingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+  if (task.defer_prestate_fingerprint !== fingerprint) {
+    throw new Error(`task ${taskId} deferred prestate fingerprint does not match ledger state`);
+  }
+  if (prestate.status === 'done' && typeof prestate.completionCommit !== 'string') {
+    throw new Error(`task ${taskId} deferred completion has no recorded commit`);
+  }
+  return {
+    task,
+    prestate,
+    fingerprint,
+    binding: {
+      approvalInput: task.defer_approval,
+      descriptorInput: task.defer_descriptor,
+      prestateFingerprint: task.defer_prestate_fingerprint,
+    },
+  };
+}
+
+export function prepareTaskDeferralRebind(db, taskId) {
+  const current = deferredTaskRebindPrestate(db, taskId);
+  return {
+    prestate: current.prestate,
+    prestateFingerprint: current.fingerprint,
+    binding: current.binding,
+  };
+}
+
+export function rebindTaskDeferral(db, taskId, {
+  expectedBinding,
+  descriptorInput,
+  approvalInput,
+}) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const current = deferredTaskRebindPrestate(db, taskId);
+    if (!expectedBinding || current.binding.approvalInput !== expectedBinding.approvalInput
+        || current.binding.descriptorInput !== expectedBinding.descriptorInput
+        || current.binding.prestateFingerprint !== expectedBinding.prestateFingerprint) {
+      throw new Error(`task ${taskId} deferred authority changed before rebind`);
+    }
+    const root = LEDGER_ROOTS.get(db);
+    if (!root) throw new Error('ledger has no repository root');
+    const descriptor = readTaskDeferralDescriptor(root, descriptorInput, taskId);
+    const validated = validateTaskDeferralApproval(root, {
+      taskId,
+      phase: current.task.phase,
+      rationale: descriptor.rationale,
+      descriptorInput,
+      approvalInput,
+      prestate: current.prestate,
+      prestateFingerprint: current.fingerprint,
+    });
+    const binding = assertTaskDeferralAuthority(validated.authority, {
+      taskId,
+      prestateFingerprint: current.fingerprint,
+    });
+    db.prepare(`
+      UPDATE tasks
+      SET defer_approval=?, defer_descriptor=?, defer_prestate_fingerprint=?
+      WHERE id=?
+    `).run(binding.approvalInput, binding.descriptorInput, binding.prestateFingerprint, taskId);
+    db.exec('COMMIT');
+    return {
+      approvalInput: binding.approvalInput,
+      descriptorInput: binding.descriptorInput,
+      prestateFingerprint: binding.prestateFingerprint,
+    };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export function nextTask(db) {
   const now = Date.now();
   const done = new Set(db.prepare("SELECT id FROM tasks WHERE status='done'").all().map(t => t.id));

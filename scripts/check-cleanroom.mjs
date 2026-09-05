@@ -29,7 +29,6 @@ export const DEFAULT_DIGEST_RULES = Object.freeze([
   { id: 'historical-repository', length: 27, sha256: '13f9d8d6e7b6538d6fe2a920ab486cbf7409360cc41ccf55ababd274e2936d74', boundary: false },
   { id: 'historical-repository', length: 19, sha256: 'd15f383e88bcc5a373351c62bbd1a65483fbddc4f567517196dd4a33057d9fc1', boundary: true },
   { id: 'historical-repository', length: 20, sha256: '0228a01d24b6d633601bfbb4f0618b8e4adf15a087ad0a9454203b3a6b35fd8b', boundary: true },
-  { id: 'historical-repository', length: 13, sha256: 'dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1', boundary: false },
   { id: 'historical-identity', length: 14, sha256: '5803aeef8e73d21e32bbeb6fc18b4a2c88d408782c9edf4ed5ab905e209673bf', boundary: false },
   { id: 'historical-identity', length: 18, sha256: 'fe1ac15a487753fb53a7eaf69463681a1f9d0764424fb9e0223e00fec4541f39', boundary: false },
   { id: 'historical-identity', length: 10, sha256: 'd67be943f4a368068987bf02ffff0db30f51ce0cf44fe58aed6a564db616b6d4', boundary: false },

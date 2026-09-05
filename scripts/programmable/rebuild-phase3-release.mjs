@@ -36,6 +36,7 @@ import {
   sourceContentCommitment,
   toEip55Address,
 } from './lib/phase3-release.mjs';
+import { hookConstructorConfigSchemaFromCompiledAbi } from './lib/release-evidence.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const contractsDirectory = resolve(root, 'packages/contracts');
@@ -260,7 +261,7 @@ function updateAddressManifest(manifest, records, buildInfo) {
   return normalizeAddresses(manifest);
 }
 
-function updateDeploymentManifest(manifest) {
+function updateDeploymentManifest(manifest, hookArtifact) {
   manifest = normalizePhaseThreeDeploymentManifest(manifest);
   const schema = 'release/phase3/address-manifest.schema.json';
   manifest.addressManifestSchema = schema;
@@ -279,6 +280,14 @@ function updateDeploymentManifest(manifest) {
   const custody = manifest.deployed.find((target) => target?.name === 'PermanentPositionCustody');
   if (!custody) throw new Error('deployment manifest PermanentPositionCustody target is missing');
   custody.role = 'graph target 1: permanent position NFT custody';
+  const hook = manifest.deployed.find((target) => target?.name === 'HookemonHook');
+  if (!hook?.constructorArgsSchema?.initializerSchema) {
+    throw new Error('deployment manifest HookemonHook initializer schema is missing');
+  }
+  hook.constructorArgsSchema = {
+    ...hookConstructorConfigSchemaFromCompiledAbi(hookArtifact),
+    initializerSchema: hook.constructorArgsSchema.initializerSchema,
+  };
   for (const target of manifest.deployed) target.saltDerivation = `${schema}#/$defs/applicantSalt`;
   delete manifest.deploymentManifestDigest;
   manifest.deploymentManifestDigest = canonicalDigest(manifest);
@@ -324,6 +333,7 @@ function rebuildPackage() {
       launchInputsPath: resolve(releaseDirectory, 'launch-inputs.json'),
       addressManifestPath: resolve(releaseDirectory, 'address-manifest.json'),
       outputDirectory: packageDirectory,
+      requestMaterializationRoot: root,
     });
     rmSync(backupDirectory, { recursive: true, force: true });
   } catch (error) {
@@ -375,7 +385,10 @@ function main() {
     const submissionPath = resolve(releaseDirectory, 'submission.json');
     writeJson(launchInputsPath, updateLaunchInputs(readJson(launchInputsPath)));
     writeJson(addressManifestPath, updateAddressManifest(readJson(addressManifestPath), compilation.records, buildInfo));
-    writeJson(deploymentManifestPath, updateDeploymentManifest(readJson(deploymentManifestPath)));
+    writeJson(
+      deploymentManifestPath,
+      updateDeploymentManifest(readJson(deploymentManifestPath), compilation.records.get('hook').artifact),
+    );
     writeJson(submissionPath, updateSubmission(readJson(submissionPath)));
     updateReleasePlan(compilation.records, releasePlanPath);
     rebuildPackage();

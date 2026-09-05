@@ -8,6 +8,10 @@ Current controls are named exactly. A control marked `planned (WP12)` or
 `planned (WP10b)` does not exist yet and must not be substituted with an
 ad-hoc transaction or dashboard action.
 
+## Release control
+
+- Phase 3 owner closeout: `docs/superpowers/plans/owner-closeout.md`.
+
 ## CI
 
 - [Fork proof](ci-fork-proof.md)

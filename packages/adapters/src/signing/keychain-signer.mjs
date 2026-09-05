@@ -66,6 +66,9 @@ function redactErrorText(text) {
  * @param {string} input.account - a keychain entry identifier (never a secret — a label, e.g.
  *   "hookemon-operator-evm"), forwarded to the tool so it knows which stored key to use.
  * @param {string[]} [input.args] - extra fixed arguments to pass to every invocation.
+ * @param {string[]} [input.operationArgs] - extra fixed arguments passed after the operation,
+ *   role, and account. The Operations child uses this only for a parent-policy marker on the
+ *   explicitly selected Collector-only live Solana path.
  * @returns {{role: string, sign: Function, broadcast?: Function}}
  */
 export function createKeychainSignerClient({
@@ -76,6 +79,7 @@ export function createKeychainSignerClient({
   command,
   account,
   args = [],
+  operationArgs = [],
   timeoutMs = DEFAULT_TIMEOUT_MS,
   transactionPolicy,
   transactionPolicyRules,
@@ -98,6 +102,9 @@ export function createKeychainSignerClient({
   if (!Array.isArray(args) || args.some(entry => typeof entry !== 'string')) {
     throw new SignerClientError('keychain signer args must be an array of strings');
   }
+  if (!Array.isArray(operationArgs) || operationArgs.some(entry => typeof entry !== 'string')) {
+    throw new SignerClientError('keychain signer operationArgs must be an array of strings');
+  }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new SignerClientError('keychain signer timeoutMs must be a positive safe integer');
   }
@@ -118,7 +125,15 @@ export function createKeychainSignerClient({
       result = await Promise.race([
         Promise.resolve().then(() => exec({
           command,
-          args: [...args, operation, '--role', role, '--account', account],
+          args: [
+            ...args,
+            operation,
+            '--role',
+            role,
+            '--account',
+            account,
+            ...(operation === 'sign' ? operationArgs : []),
+          ],
           input: line,
           timeoutMs,
           signal: controller.signal,

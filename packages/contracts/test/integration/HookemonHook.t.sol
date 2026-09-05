@@ -124,6 +124,7 @@ contract HookFactory {
     uint8 private immutable expectedDecimals;
     bytes32 private immutable bindingDigest;
     bytes32 private immutable runtimeDigest;
+    bytes32 private immutable seedIntentDigest;
     uint256 private immutable processClaimLimit6h;
     uint256 private immutable processClaimLimitMax;
     uint256 private immutable processClaimMaxCount;
@@ -144,6 +145,7 @@ contract HookFactory {
         expectedDecimals = config.expectedDecimals;
         bindingDigest = config.bindingDigest;
         runtimeDigest = config.runtimeDigest;
+        seedIntentDigest = config.seedIntentDigest;
         processClaimLimit6h = config.processClaimLimit6h;
         processClaimLimitMax = config.processClaimLimitMax;
         processClaimMaxCount = config.processClaimMaxCount;
@@ -170,6 +172,7 @@ contract HookFactory {
                         expectedDecimals: expectedDecimals,
                         bindingDigest: bindingDigest,
                         runtimeDigest: runtimeDigest,
+                        seedIntentDigest: seedIntentDigest,
                         processClaimLimit6h: processClaimLimit6h,
                         processClaimLimitMax: processClaimLimitMax,
                         processClaimMaxCount: processClaimMaxCount,
@@ -197,6 +200,7 @@ contract HookFactory {
                 expectedDecimals: expectedDecimals,
                 bindingDigest: bindingDigest,
                 runtimeDigest: runtimeDigest,
+                seedIntentDigest: seedIntentDigest,
                 processClaimLimit6h: processClaimLimit6h,
                 processClaimLimitMax: processClaimLimitMax,
                 processClaimMaxCount: processClaimMaxCount,
@@ -337,6 +341,10 @@ contract HookemonHookTest is Test {
 
         config = _config(currency0);
         config.launchAuthority = address(0);
+        _expectConfigRevert(config, HookemonHook.InvalidConstructorConfig.selector);
+
+        config = _config(currency0);
+        config.seedIntentDigest = bytes32(0);
         _expectConfigRevert(config, HookemonHook.InvalidConstructorConfig.selector);
 
         config = _config(currency0);
@@ -1179,6 +1187,7 @@ contract HookemonHookTest is Test {
             expectedDecimals: 18,
             bindingDigest: BINDING_DIGEST,
             runtimeDigest: RUNTIME_DIGEST,
+            seedIntentDigest: keccak256("hook-test-seed-intent"),
             processClaimLimit6h: 1_000_000,
             processClaimLimitMax: 2_000_000,
             processClaimMaxCount: 8,

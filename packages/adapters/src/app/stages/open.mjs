@@ -4,8 +4,9 @@ import {
   readFinalizedSignatureStatus,
   readMplCoreAssetOwner,
 } from '../../solana-rpc.mjs';
-import { requireLiveMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
+import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { digest } from '../../../../runner/src/cycle/journal.mjs';
+import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
 import { AmbiguousCardMintError } from './errors.mjs';
 
 function plainObject(value) {
@@ -116,12 +117,13 @@ export async function probeOpen({ adapters, cycleRepository, context }) {
   return { wouldOpen: true, configured: true, ...prepared, packStatus: status };
 }
 
-export async function mutateOpen({ liveMode, adapters, cycleRepository, context, request }) {
+export async function mutateOpen({ liveMode, adapters, config, cycleRepository, context, request }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateOpen reached without liveMode');
+  if (config?.collectorCrypt?.executionBundle !== undefined) collectorPolicyForStage(config, 'open');
   if (!adapters?.collectorCrypt) throw new Error('open mutate requires a configured collector-crypt client');
   const prepared = request ?? context?.request ?? await prepareOpenRequest({ cycleRepository, context });
   if (prepared.expectedCardCount !== 1) throw new Error('open mutation requires exactly one expected card');
-  requireLiveMutationAuthority();
+  requireCollectorOnlyMutationAuthority(config);
   const opened = await adapters.collectorCrypt.openPack({ memo: prepared.memo });
   return { memo: prepared.memo, expectedCardCount: prepared.expectedCardCount, opened };
 }
@@ -202,50 +204,24 @@ async function reconcileSentUnknownOpen({ adapters, config, cycleRepository, con
   try {
     packStatus = await adapters.collectorCrypt.getPackStatus({ memo: purchase.memo });
   } catch {
+    await holdDataUnverified(cycleRepository, context, {
+      stage: 'open',
+      memo: purchase.memo,
+      reason: 'sent-unknown open could not read memo-bound status',
+    });
     return null;
   }
   if (packStatus.memo !== purchase.memo) {
     await holdDataUnverified(cycleRepository, context, { stage: 'open', memo: purchase.memo, reason: 'pack status memo did not match' });
     return null;
   }
-  if (memoBoundSend(packStatus) !== null) {
-    return reconcileMemoBoundOpen({
-      adapters,
-      config,
-      cycleRepository,
-      context,
-      evidence: { ...purchase, opened: {} },
-      packStatus,
-    });
-  }
-  if (typeof context.assertLease !== 'function' || typeof context.assertMutationAllowed !== 'function') return null;
-  await context.assertLease();
-  await context.assertMutationAllowed({
-    boundary: 'mutation',
-    cycleId: context.cycleId,
-    stage: 'open',
-    requestDigest: record.attempt.requestDigest,
-    fencingToken: context.fencingToken ?? null,
-  });
-  let opened;
-  try {
-    opened = await adapters.collectorCrypt.openPack({ memo: purchase.memo });
-  } catch {
-    return null;
-  }
-  if (!plainObject(opened) || typeof opened.nft_address !== 'string' || opened.nft_address.length === 0) {
-    await holdDataUnverified(cycleRepository, context, { stage: 'open', memo: purchase.memo, opened, reason: 'sent-unknown open retry did not return a card address' });
-    return null;
-  }
-  try {
-    packStatus = await adapters.collectorCrypt.getPackStatus({ memo: purchase.memo });
-  } catch {
-    return null;
-  }
   const send = memoBoundSend(packStatus);
-  if (packStatus.memo !== purchase.memo || send === null || opened.nft_address !== send.mint) {
+  if (send === null) {
     await holdDataUnverified(cycleRepository, context, {
-      stage: 'open', memo: purchase.memo, opened, send: packStatus?.send, reason: 'sent-unknown open retry did not agree with memo-bound card evidence',
+      stage: 'open',
+      memo: purchase.memo,
+      send: packStatus.send ?? null,
+      reason: 'sent-unknown open is missing memo-bound mint evidence',
     });
     return null;
   }
@@ -254,7 +230,7 @@ async function reconcileSentUnknownOpen({ adapters, config, cycleRepository, con
     config,
     cycleRepository,
     context,
-    evidence: { ...purchase, opened },
+    evidence: { ...purchase, opened: {} },
     packStatus,
   });
 }

@@ -38,6 +38,9 @@ const ADAPTERS_DEPENDENCIES = { '@solana/web3.js': '1.98.4', viem: '2.56.3' };
 const REPO_ROOT = join(import.meta.dirname, '..', '..');
 const COMMIT_IDENTITY_ALLOWLIST_SCRIPT = readFileSync(join(REPO_ROOT, 'scripts', 'check-commit-identity.mjs'), 'utf8');
 const COMMIT_IDENTITY_ALLOWLIST_SHA256 = sha256(COMMIT_IDENTITY_ALLOWLIST_SCRIPT);
+const PUSH_RANGE_RESOLVER_PATH = 'scripts/ci/push-range.mjs';
+const PUSH_RANGE_RESOLVER_SCRIPT = readFileSync(join(REPO_ROOT, PUSH_RANGE_RESOLVER_PATH), 'utf8');
+const PUSH_RANGE_RESOLVER_SHA256 = sha256(PUSH_RANGE_RESOLVER_SCRIPT);
 const FORK_PIN_VERIFIER_SCRIPT = readFileSync(join(REPO_ROOT, 'scripts', 'verify-fork-pin.mjs'), 'utf8');
 const FORK_PIN_VERIFIER_SHA256 = sha256(FORK_PIN_VERIFIER_SCRIPT);
 const RELEASE_CLOSURE_BUILDER_MANIFEST_PATH = 'scripts/programmable/vendor/programmable-v4-hook-builder/manifest.json';
@@ -152,6 +155,7 @@ function fixture() {
   mkdirSync(join(root, 'runtime'), { recursive: true });
   mkdirSync(join(root, 'packages', 'adapters'), { recursive: true });
   mkdirSync(join(root, 'scripts'), { recursive: true });
+  mkdirSync(join(root, 'scripts', 'ci'), { recursive: true });
   mkdirSync(join(root, 'scripts', 'programmable', 'vendor'), { recursive: true });
   mkdirSync(join(root, 'packages', 'contracts', 'test', 'integration'), { recursive: true });
   mkdirSync(join(root, 'scripts', 'lib'), { recursive: true });
@@ -166,6 +170,7 @@ function fixture() {
   writeFileSync(join(root, '.github', 'workflows', 'identity-gate.yml'), CANONICAL_IDENTITY_GATE);
   writeFileSync(join(root, '.github', 'workflows', 'control-gate.yml'), CANONICAL_CONTROL_GATE);
   writeFileSync(join(root, 'scripts', 'check-commit-identity.mjs'), COMMIT_IDENTITY_ALLOWLIST_SCRIPT);
+  writeFileSync(join(root, PUSH_RANGE_RESOLVER_PATH), PUSH_RANGE_RESOLVER_SCRIPT);
   writeFileSync(join(root, 'scripts', 'verify-fork-pin.mjs'), FORK_PIN_VERIFIER_SCRIPT);
   cpSync(RELEASE_CLOSURE_BUILDER_ROOT, join(root, 'scripts', 'programmable', 'vendor', 'programmable-v4-hook-builder'), {
     recursive: true,
@@ -214,6 +219,10 @@ function fixture() {
       commitIdentityAllowlist: {
         path: 'scripts/check-commit-identity.mjs',
         sha256: COMMIT_IDENTITY_ALLOWLIST_SHA256,
+      },
+      pushRangeResolver: {
+        path: PUSH_RANGE_RESOLVER_PATH,
+        sha256: PUSH_RANGE_RESOLVER_SHA256,
       },
       forkPinVerifier: {
         path: 'scripts/verify-fork-pin.mjs',
@@ -279,6 +288,16 @@ function fixture() {
   });
   return { root, runtimeExecutablePath };
 }
+
+test('rejects a push range resolver whose content diverges from its pin', () => {
+  const state = fixture();
+  writeFileSync(join(state.root, PUSH_RANGE_RESOLVER_PATH), `${PUSH_RANGE_RESOLVER_SCRIPT}\nexport const fixtureMutation = true;\n`);
+
+  const result = verifyFixture(state);
+
+  assert.equal(result.result, 'FAILED');
+  assert.match(result.errors.join('\n'), /push range resolver digest mismatch/);
+});
 
 function assertWorkflowTamperIsRejected(name, transform) {
   test(name, () => {
@@ -591,6 +610,7 @@ test('the base control checker rejects a candidate verifier import outside the p
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    [PUSH_RANGE_RESOLVER_PATH, { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.controlScripts.pushRangeResolver.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -635,6 +655,7 @@ test('the base control checker permits an owner-approved verifier pin bump with 
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    [PUSH_RANGE_RESOLVER_PATH, { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.controlScripts.pushRangeResolver.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -718,6 +739,41 @@ test('the base control checker rejects a candidate mutation of its utility impor
   assert.match(result.errors.join('\n'), /candidate control input scripts\/lib\/util\.mjs digest does not match its candidate pin/);
 });
 
+test('the base control checker rejects a candidate mutation of the push range resolver', () => {
+  const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
+  const basePins = readJson(join(REPO_ROOT, 'product', 'dependency-pins.json'));
+  const candidatePins = structuredClone(basePins);
+  const mutatedResolver = `${PUSH_RANGE_RESOLVER_SCRIPT}\nexport const candidateResolverMutation = true;\n`;
+
+  const candidateBlobs = new Map([
+    ['.github/workflows/v4-gates.yml', { mode: '100644', type: 'blob', blobId: '1'.repeat(40), sha256: candidatePins.contentAddresses.workflow.sha256 }],
+    ['.github/workflows/fork-proof.yml', { mode: '100644', type: 'blob', blobId: 'a'.repeat(40), sha256: candidatePins.contentAddresses.forkProof.sha256 }],
+    ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
+    ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
+    ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    [PUSH_RANGE_RESOLVER_PATH, { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: sha256(mutatedResolver), bytes: Buffer.from(mutatedResolver) }],
+    ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_SCRIPT) }],
+    [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
+    ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
+    [CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '8'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[1].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_IMPORT_SCRIPT) }],
+    [ARCHIVE_FORK_PROOF_TEST_PATH, { mode: '100644', type: 'blob', blobId: '9'.repeat(40), sha256: candidatePins.contentAddresses.archiveForkProofTest.sha256 }],
+  ]);
+  const result = verifyBaseControlSurface({
+    basePins,
+    candidatePins,
+    basePinsSha256: sha256(JSON.stringify(basePins)),
+    candidatePinsSha256: sha256(JSON.stringify(candidatePins)),
+    baseTree: 'a'.repeat(40),
+    candidateTree: 'b'.repeat(40),
+    baseCheckerBlob: 'c'.repeat(40),
+    candidateBlobs,
+    candidateVerification: {},
+  });
+
+  assert.equal(result.result, 'FAILED');
+  assert.match(result.errors.join('\n'), /candidate control input scripts\/ci\/push-range\.mjs digest does not match its candidate pin/);
+});
+
 test('the base control checker rejects a coordinated candidate control-surface mutation', () => {
   const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
   assert.equal(typeof verifyBaseControlSurface, 'function', 'the protected workflow needs an exported base control checker');
@@ -740,6 +796,7 @@ test('the base control checker rejects a coordinated candidate control-surface m
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    [PUSH_RANGE_RESOLVER_PATH, { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.controlScripts.pushRangeResolver.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256 }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256 }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.sha256 }],

@@ -93,9 +93,12 @@
     "materializedPriceCandidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sqrtPriceX96"],
+      "required": ["sqrtPriceX96", "liquidity", "amount0Max", "amount1Max"],
       "properties": {
-        "sqrtPriceX96": { "$ref": "#/$defs/amount" }
+        "sqrtPriceX96": { "$ref": "#/$defs/amount" },
+        "liquidity": { "$ref": "#/$defs/amount" },
+        "amount0Max": { "$ref": "#/$defs/amount" },
+        "amount1Max": { "$ref": "#/$defs/amount" }
       }
     },
     "selectedMaterializedPriceCandidate": {
@@ -258,7 +261,7 @@
         "constructor": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["manager", "positionManager", "permit2", "usdg", "hkmn", "tickSpacing", "programmable", "treasury", "operations", "launchAuthority", "issuanceAuthority", "expectedDecimals", "bindingDigest", "runtimeDigest", "processClaimLimit6h", "processClaimLimitMax", "processClaimMaxCount", "operationsRotationDelay"],
+          "required": ["manager", "positionManager", "permit2", "usdg", "hkmn", "tickSpacing", "programmable", "treasury", "operations", "launchAuthority", "issuanceAuthority", "expectedDecimals", "bindingDigest", "runtimeDigest", "seedIntentDigest", "processClaimLimit6h", "processClaimLimitMax", "processClaimMaxCount", "operationsRotationDelay"],
           "properties": {
             "manager": { "$ref": "#/$defs/nonzeroAddress" },
             "positionManager": { "$ref": "#/$defs/nonzeroAddress" },
@@ -274,6 +277,7 @@
             "expectedDecimals": { "const": 18 },
             "bindingDigest": { "type": "null" },
             "runtimeDigest": { "type": "null" },
+            "seedIntentDigest": { "type": "null" },
             "processClaimLimit6h": { "$ref": "#/$defs/amount" },
             "processClaimLimitMax": { "$ref": "#/$defs/amount" },
             "processClaimMaxCount": { "const": 24 },
@@ -551,7 +555,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "schemaVersion", "chain", "graphAuthorization", "compilerProfile", "usdg", "roles", "pool",
+        "schemaVersion", "chain", "graphAuthorization", "compilerProfile", "usdg", "roles", "pool", "seedIntent",
         "hookConstructorConfig", "targets"
       ],
       "properties": {
@@ -602,6 +606,17 @@
                 "hkmnCurrency0": { "$ref": "#/$defs/materializedPriceCandidate" }
               }
             }
+          }
+        },
+        "seedIntent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["payer", "tickLower", "tickUpper", "maxDeadlineSeconds"],
+          "properties": {
+            "payer": { "$ref": "#/$defs/nonzeroAddress" },
+            "tickLower": { "const": -887220 },
+            "tickUpper": { "const": 887220 },
+            "maxDeadlineSeconds": { "const": 900 }
           }
         },
         "hookConstructorConfig": { "type": "object" },

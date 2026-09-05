@@ -23,19 +23,19 @@ contract PhaseThreeReleasePlan {
     bytes32 public constant TOKEN_RUNTIME_TEMPLATE_CODE_HASH =
         0xc79e26bd2c8c26952c04f1d3749db091f009febd7507b67232b3838bb148f429;
     bytes32 public constant TOKEN_ARTIFACT_SHA256 =
-        0x8a134aa16b09ca267055c976d05c5760ccc865c35ab608ceed20248a0e54ac68;
+        0x328c8615cfd6ab821114abbe7b3cd3b854434c046664afdc5f72b89a935ee1af;
     bytes32 public constant HOOK_CREATION_CODE_HASH =
-        0x39c3aeecae31c42f7ad707dae7b18ea976687d33f715befbe9941b853e0af8c2;
+        0xe5e9e19f9aa63e4cfac29723467bc751cc532cd478eedad066df9408f591a26e;
     bytes32 public constant HOOK_RUNTIME_TEMPLATE_CODE_HASH =
-        0x95302da944386ccd8b7fb1b898d128098cce7aef178b318998a7a14c1897a36c;
+        0xe5a252941cfa1daa2fe0124f5125186a4be4cea6837b0d8bd1ae4a1f05f08b7b;
     bytes32 public constant HOOK_ARTIFACT_SHA256 =
-        0x389f63c267cbb76cd703101fd22d00f1221656cd7ea3adcb082d2719dd41aa66;
+        0xae1ef81a0afaf06affb2fb8b0d850e764e0fe1d432d415cdd4f50bca1b7d4ead;
     bytes32 public constant CUSTODY_CREATION_CODE_HASH =
         0x778625cf6f5b602c891c7d605941d5e3cfc4662624a9407d67e2873cd4d99dd5;
     bytes32 public constant CUSTODY_RUNTIME_TEMPLATE_CODE_HASH =
         0x06f47cecc7026b4d9c5d393c39f8883c7e87c3fdacd30cf6f496ee41c9d4ca0c;
     bytes32 public constant CUSTODY_ARTIFACT_SHA256 =
-        0x08043ea6d688242703d972040bb476b4d5da3ef4a5e9c04db1e0636a1ff86ae5;
+        0x25efec6d5b2a8ff409dd2545bec928b3dbad73456499923a15d6a6b824a12088;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     uint256 public constant POOL_ALLOCATION = TOTAL_SUPPLY;
@@ -50,6 +50,13 @@ contract PhaseThreeReleasePlan {
     uint16 public constant PROGRAMMABLE_FEE_BPS = 10;
     uint16 public constant TREASURY_FEE_BPS = 40;
     uint16 public constant PROCESS_FEE_BPS = 250;
+    uint256 public constant MAX_SEED_DEADLINE_SECONDS = 900;
+
+    bytes4 public constant SEED_CANONICAL_LIQUIDITY_SELECTOR = 0x08298a0c;
+    bytes4 private constant SEED_INTENT_DIGEST_SELECTOR = bytes4(keccak256("seedIntentDigest()"));
+    bytes4 private constant CANONICAL_LAUNCH_CUSTODY_SELECTOR =
+        bytes4(keccak256("canonicalLaunchCustody()"));
+    uint256 private constant SEED_CALLDATA_LENGTH = 4 + 8 * 32;
 
     uint160 public constant USDG_CURRENCY0_SQRT_PRICE_X96 = 161723809515207654588927258648643645224;
     uint160 public constant HKMN_CURRENCY0_SQRT_PRICE_X96 = 38813714284914462669;
@@ -105,6 +112,8 @@ contract PhaseThreeReleasePlan {
     }
 
     error InvalidDraft();
+    error InvalidMaterializedSeedCall();
+    error SeedIntentDigestMismatch(bytes32 expected, bytes32 actual);
     error WrongChain(uint256 expected, uint256 actual);
 
     function draftDigest(Draft calldata draft) public pure returns (bytes32) {
@@ -114,6 +123,80 @@ contract PhaseThreeReleasePlan {
     function validateDraft(Draft calldata draft) external pure returns (bytes32) {
         _validateDraft(draft);
         return draftDigest(draft);
+    }
+
+    /// @notice Validates an unsigned owner seed call against the frozen release policy.
+    /// @dev expectedTarget and expectedCustody come from the materialized graph manifest because
+    ///      this contract retains draft-only graph fields.
+    function validateMaterializedSeedCall(
+        address target,
+        uint256 value,
+        bytes calldata seedCalldata,
+        address expectedTarget,
+        address expectedCustody,
+        bytes32 expectedSeedIntentDigest
+    ) external view returns (bytes32 actualSeedIntentDigest) {
+        if (
+            expectedTarget == address(0) || expectedCustody == address(0)
+                || expectedSeedIntentDigest == bytes32(0) || target != expectedTarget || value != 0
+                || seedCalldata.length != SEED_CALLDATA_LENGTH
+        ) revert InvalidMaterializedSeedCall();
+
+        _requireTargetSeedIntent(target, expectedSeedIntentDigest, expectedCustody);
+
+        bytes4 selector;
+        assembly ("memory-safe") {
+            selector := calldataload(seedCalldata.offset)
+        }
+        if (selector != SEED_CANONICAL_LIQUIDITY_SELECTOR) revert InvalidMaterializedSeedCall();
+
+        (
+            int24 tickLower,
+            int24 tickUpper,
+            uint256 liquidity,
+            uint128 amount0Max,
+            uint128 amount1Max,
+            uint256 deadline,
+            address payer,
+            address custody
+        ) = abi.decode(
+            seedCalldata[4:], (int24, int24, uint256, uint128, uint128, uint256, address, address)
+        );
+
+        if (
+            custody != expectedCustody || deadline < block.timestamp
+                || deadline - block.timestamp > MAX_SEED_DEADLINE_SECONDS
+                || !_isApprovedSeedIntentDigest(expectedSeedIntentDigest)
+        ) revert InvalidMaterializedSeedCall();
+
+        actualSeedIntentDigest =
+            _seedIntentDigest(payer, tickLower, tickUpper, liquidity, amount0Max, amount1Max);
+        if (actualSeedIntentDigest != expectedSeedIntentDigest) {
+            revert SeedIntentDigestMismatch(expectedSeedIntentDigest, actualSeedIntentDigest);
+        }
+    }
+
+    function _readTargetWord(address target, bytes4 selector) private view returns (bytes32 value) {
+        if (target.code.length == 0) revert InvalidMaterializedSeedCall();
+        (bool succeeded, bytes memory result) = target.staticcall(abi.encodeWithSelector(selector));
+        if (!succeeded || result.length != 32) revert InvalidMaterializedSeedCall();
+        assembly ("memory-safe") {
+            value := mload(add(result, 32))
+        }
+    }
+
+    function _requireTargetSeedIntent(
+        address target,
+        bytes32 expectedSeedIntentDigest,
+        address expectedCustody
+    ) private view {
+        bytes32 actualSeedIntentDigest = _readTargetWord(target, SEED_INTENT_DIGEST_SELECTOR);
+        if (actualSeedIntentDigest != expectedSeedIntentDigest) {
+            revert SeedIntentDigestMismatch(expectedSeedIntentDigest, actualSeedIntentDigest);
+        }
+        address actualCustody =
+            address(uint160(uint256(_readTargetWord(target, CANONICAL_LAUNCH_CUSTODY_SELECTOR))));
+        if (actualCustody != expectedCustody) revert InvalidMaterializedSeedCall();
     }
 
     function _validateDraft(Draft calldata draft) private pure {
@@ -161,5 +244,47 @@ contract PhaseThreeReleasePlan {
                 && draft.liquidity == HKMN_CURRENCY0_LIQUIDITY
                 && draft.amount0Max == POOL_ALLOCATION
                 && draft.amount1Max == USDG_SEED);
+    }
+
+    function _isApprovedSeedIntentDigest(bytes32 digest) private pure returns (bool) {
+        return digest
+                == _seedIntentDigest(
+                LAUNCH_WALLET,
+                TICK_LOWER,
+                TICK_UPPER,
+                USDG_CURRENCY0_LIQUIDITY,
+                uint128(USDG_SEED),
+                uint128(POOL_ALLOCATION)
+            )
+            || digest
+                == _seedIntentDigest(
+                LAUNCH_WALLET,
+                TICK_LOWER,
+                TICK_UPPER,
+                HKMN_CURRENCY0_LIQUIDITY,
+                uint128(POOL_ALLOCATION),
+                uint128(USDG_SEED)
+            );
+    }
+
+    function _seedIntentDigest(
+        address payer,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 liquidity,
+        uint128 amount0Max,
+        uint128 amount1Max
+    ) private pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                payer,
+                tickLower,
+                tickUpper,
+                liquidity,
+                amount0Max,
+                amount1Max,
+                MAX_SEED_DEADLINE_SECONDS
+            )
+        );
     }
 }

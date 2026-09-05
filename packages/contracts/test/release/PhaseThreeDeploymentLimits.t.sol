@@ -85,6 +85,7 @@ contract PhaseThreeDeploymentLimitsTest is Test {
             expectedDecimals: 18,
             bindingDigest: bytes32(uint256(1)),
             runtimeDigest: bytes32(uint256(2)),
+            seedIntentDigest: bytes32(uint256(3)),
             processClaimLimit6h: 50_000_000_000,
             processClaimLimitMax: 500_000_000_000,
             processClaimMaxCount: 24,

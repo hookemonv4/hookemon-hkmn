@@ -11,7 +11,13 @@ import { LeaseLostError } from '../../../runner/src/automation/exclusive-lease.m
 import { LiveModeIntegrationPendingError, createStageDriver } from '../../src/app/stage-driver.mjs';
 import { ReturnRecoveryRequiredError } from '../../src/app/stages/return.mjs';
 import { preparePurchaseRequest } from '../../src/app/stages/purchase.mjs';
-import { createSolanaRpcClient, submitSignedTransaction } from '../../src/solana-rpc.mjs';
+import {
+  CIRCLE_USD_DECIMALS,
+  CIRCLE_USD_MINT,
+  createSolanaRpcClient,
+  deriveAssociatedTokenAddress,
+  submitSignedTransaction,
+} from '../../src/solana-rpc.mjs';
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createPreparedChainTransactionAttempt, createRecordedRelayLeg } from '../../../runner/src/cycle/money-schemas.mjs';
@@ -569,6 +575,119 @@ test('the remaining frozen built-in mutation stages refuse live mutations before
     const attempt = await cycleRepository.readOperationalStageAttempt(CYCLE_ID, stage);
     assert.equal(attempt.attempt.state, 'PREPARED');
   }
+});
+
+test('a live collector-only rehearsal journals and invokes the real open handler instead of the frozen integration refusal', async () => {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const attempts = new Map();
+  const stages = new Map([['purchase', {
+    status: 'COMPLETE',
+    evidence: { memo: 'collector-memo', expectedCardCount: 1 },
+  }]]);
+  const cycleRepository = fakeCycleRepository(stages, '0', attempts);
+  let openCalls = 0;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: {
+      collectorCrypt: {
+        async openPack({ memo }) {
+          openCalls += 1;
+          assert.equal(memo, 'collector-memo');
+          return { nft_address: 'Card111111111111111111111111111111111111111' };
+        },
+      },
+      relay: null,
+      robinhood: { client: null },
+      solana: { client: null },
+    },
+    signerClient: null,
+    config: baseConfig({
+      accounts: { evm: null, solana: operator },
+      execution: { profile: 'rehearsal', providerMode: 'live' },
+      signer: {
+        backend: 'keychain',
+        liveMode: true,
+        roles: ['operator-solana'],
+        keychain: { solanaAccount: 'operator-solana' },
+      },
+      solana: { chainId: 'solana-mainnet' },
+      pack: { code: 'collector-25' },
+      collectorCrypt: {
+        settlementAsset: asset,
+        packPrice: { ...asset, amountAtomic: '25000000' },
+      },
+      moneyConfiguration: {
+        assets: { solanaStablecoin: asset },
+        solana: { lamportReserve: { chainId: 'solana-mainnet', assetId: 'native', decimals: 9, amountAtomic: '5000000' } },
+      },
+      rehearsal: {
+        mode: 'collector-only',
+        proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+        payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+        split: 'equal',
+      },
+    }),
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+  });
+
+  await driver.execute({
+    cycleId: CYCLE_ID,
+    stage: 'open',
+    intent: { journalHead: 'collector-open' },
+    assertMutationAllowed: async () => {},
+  });
+
+  assert.equal(openCalls, 1);
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'open')).attempt.state, 'RESPONSE_RECORDED');
+});
+
+test('a live collector-only rehearsal records no-effect eligibility and claim stages without an EVM adapter', async () => {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const cycleRepository = writeAheadRepository();
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig({
+      accounts: { evm: null, solana: operator },
+      execution: { profile: 'rehearsal', providerMode: 'live' },
+      signer: {
+        backend: 'keychain',
+        liveMode: true,
+        roles: ['operator-solana'],
+        keychain: { solanaAccount: 'operator-solana' },
+      },
+      solana: { chainId: 'solana-mainnet' },
+      pack: { code: 'collector-25' },
+      collectorCrypt: { settlementAsset: asset, packPrice: { ...asset, amountAtomic: '25000000' } },
+      moneyConfiguration: {
+        assets: { solanaStablecoin: asset },
+        solana: { lamportReserve: { chainId: 'solana-mainnet', assetId: 'native', decimals: 9, amountAtomic: '5000000' } },
+      },
+      rehearsal: {
+        mode: 'collector-only',
+        proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+        payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+        split: 'equal',
+      },
+    }),
+    cycleRepository,
+  });
+
+  const eligibility = await driver.reconcile({ cycleId: CYCLE_ID, stage: 'eligibility-snapshot' });
+  assert.equal(eligibility.skipped, true);
+  await driver.execute({
+    cycleId: CYCLE_ID,
+    stage: 'claim-process',
+    intent: { journalHead: 'collector-no-claim' },
+    assertMutationAllowed: async () => {},
+  });
+  const claim = await driver.reconcile({ cycleId: CYCLE_ID, stage: 'claim-process' });
+  assert.equal(claim.skipped, true);
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'claim-process')).attempt.state, 'RECONCILED');
 });
 
 test('the built-in eligibility snapshot completes only through read-only reconciliation', async () => {

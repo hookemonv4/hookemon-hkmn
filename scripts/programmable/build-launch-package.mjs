@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { PackageValidationError, buildLaunchPackage, cliErrorPayload } from './lib/package.mjs';
@@ -13,7 +13,7 @@ const requiredOptionNames = [
   'addressManifestPath',
   'outputDirectory',
 ];
-const materializationOptionNames = [
+const requiredMaterializationOptionNames = [
   'materializedManifestPath',
   'submissionPath',
   'materializedSubmissionOutputPath',
@@ -45,7 +45,9 @@ function readJson(path, pointer) {
 function validateMaterializationOutput(options) {
   const output = resolve(options.materializedSubmissionOutputPath);
   if (
-    [options.materializedManifestPath, options.submissionPath].map((path) => resolve(path)).includes(output)
+    [options.materializedManifestPath, options.submissionPath, options.materializedSeedPath]
+      .filter((path) => path !== undefined)
+      .map((path) => resolve(path)).includes(output)
     || isWithin(options.outputDirectory, output)
   ) {
     fail('INVALID_PATH', '/materializedSubmissionOutputPath');
@@ -59,6 +61,9 @@ function phaseThreeMaterialization(options) {
   return {
     materializedManifest: readJson(options.materializedManifestPath, '/materializedManifestPath'),
     submission: readJson(options.submissionPath, '/submissionPath'),
+    ...(options.materializedSeedPath === undefined
+      ? {}
+      : { materializedSeed: readJson(options.materializedSeedPath, '/materializedSeedPath') }),
   };
 }
 
@@ -81,6 +86,7 @@ function parseArguments(argv) {
     ['--output', 'outputDirectory'],
     ['--materialized-manifest', 'materializedManifestPath'],
     ['--submission', 'submissionPath'],
+    ['--materialized-seed', 'materializedSeedPath'],
     ['--materialized-submission-output', 'materializedSubmissionOutputPath'],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
@@ -90,10 +96,13 @@ function parseArguments(argv) {
     options[name] = argv[++index];
   }
   if (requiredOptionNames.some((name) => options[name] === undefined)) throw new Error('invalid arguments');
-  const materializationCount = materializationOptionNames
+  const materializationCount = requiredMaterializationOptionNames
     .filter((name) => options[name] !== undefined)
     .length;
-  if (materializationCount !== 0 && materializationCount !== materializationOptionNames.length) {
+  if (
+    (materializationCount !== 0 && materializationCount !== requiredMaterializationOptionNames.length)
+    || (options.materializedSeedPath !== undefined && materializationCount !== requiredMaterializationOptionNames.length)
+  ) {
     fail('INVALID_VALUE', '/phaseThreeMaterialization');
   }
   return options;
@@ -108,6 +117,9 @@ export function run(argv) {
     launchInputsPath: options.launchInputsPath,
     addressManifestPath: options.addressManifestPath,
     outputDirectory: options.outputDirectory,
+    ...(options.materializedManifestPath === undefined
+      ? {}
+      : { materializedManifestInputDirectory: dirname(resolve(options.materializedManifestPath)) }),
     ...(materialization === null ? {} : { phaseThreeMaterialization: materialization }),
   });
   const response = {
