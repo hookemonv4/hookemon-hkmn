@@ -36,6 +36,10 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/deploy-web.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/fork-pin-canary.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
@@ -54,6 +58,20 @@
       {
         "workflow": ".github/workflows/v4-gates.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/web-ci.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      }
+    ],
+    "actions/setup-node": [
+      {
+        "workflow": ".github/workflows/deploy-web.yml",
+        "ref": "249970729cb0ef3589644e2896645e5dc5ba9c38"
+      },
+      {
+        "workflow": ".github/workflows/web-ci.yml",
+        "ref": "249970729cb0ef3589644e2896645e5dc5ba9c38"
       }
     ]
   },
@@ -128,13 +146,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770",
-      "actualSha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770",
+      "expectedSha256": "e4e1d1a52f5ae4ac615de647e2356c036dfdec5135d63f13b91d201b885e8c79",
+      "actualSha256": "e4e1d1a52f5ae4ac615de647e2356c036dfdec5135d63f13b91d201b885e8c79",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770",
-          "actualSha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770"
+          "sha256": "e4e1d1a52f5ae4ac615de647e2356c036dfdec5135d63f13b91d201b885e8c79",
+          "actualSha256": "e4e1d1a52f5ae4ac615de647e2356c036dfdec5135d63f13b91d201b885e8c79"
         },
         {
           "path": "scripts/lib/util.mjs",

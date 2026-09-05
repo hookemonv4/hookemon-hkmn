@@ -27,12 +27,16 @@ const FORK_PROOF_WORKFLOW_PATH = '.github/workflows/fork-proof.yml';
 const FORK_PIN_CANARY_WORKFLOW_PATH = '.github/workflows/fork-pin-canary.yml';
 const IDENTITY_GATE_WORKFLOW_PATH = '.github/workflows/identity-gate.yml';
 const CONTROL_GATE_WORKFLOW_PATH = '.github/workflows/control-gate.yml';
+const WEB_CI_WORKFLOW_PATH = '.github/workflows/web-ci.yml';
+const DEPLOY_WEB_WORKFLOW_PATH = '.github/workflows/deploy-web.yml';
 const PERMITTED_WORKFLOW_PATHS = new Set([
   V4_GATES_WORKFLOW_PATH,
   FORK_PROOF_WORKFLOW_PATH,
   FORK_PIN_CANARY_WORKFLOW_PATH,
   IDENTITY_GATE_WORKFLOW_PATH,
   CONTROL_GATE_WORKFLOW_PATH,
+  WEB_CI_WORKFLOW_PATH,
+  DEPLOY_WEB_WORKFLOW_PATH,
 ]);
 const COMMIT_IDENTITY_ALLOWLIST_PATH = 'scripts/check-commit-identity.mjs';
 const PUSH_RANGE_RESOLVER_PATH = 'scripts/ci/push-range.mjs';
