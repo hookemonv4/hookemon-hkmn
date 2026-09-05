@@ -1,0 +1,10 @@
+{
+  "name": "Collector Crypt",
+  "origin": "https://gacha.collectorcrypt.com",
+  "category": "Pokemon",
+  "currency": "USD",
+  "pageSize": 24,
+  "imageHosts": ["d1xpxki1g4htqu.cloudfront.net", "arweave.net"],
+  "source": "https://gacha.collectorcrypt.com/",
+  "schemaVerifiedAt": "2026-09-05"
+}

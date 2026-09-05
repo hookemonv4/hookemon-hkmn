@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#fff9ef" />
+  <title>Explore the packs · Hookemon</title>
+  <meta name="description" content="Explore Collector Crypt Pokémon pack inventories by pack and rarity. See provider insured values, grades and card details." />
+  <link rel="icon" type="image/svg+xml" href="/hookemon-symbol.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Lilita+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/comic-production/adventure.css" /><link rel="stylesheet" href="/comic-production/packs.css" />
+</head>
+<body class="pack-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="pack-header"><nav class="shell" aria-label="Primary navigation">
+    <a href="/" aria-label="Hookemon home"><img src="/hookemon-logo.svg" width="185" height="43" alt="Hookemon" /></a>
+    <div><a href="/#machine">Dashboard</a><a href="/packs" aria-current="page">Packs</a><a href="/cycles">Cycles</a><a href="/holders">Holders</a><a href="/transparency">Transparency</a></div>
+  </nav></header>
+  <main id="main" class="shell pack-main">
+    <section class="pack-intro" aria-labelledby="page-title">
+      <p class="pack-eyebrow">THE PACK LIBRARY</p><h1 id="page-title">A peek at<br /><span>what’s possible.</span></h1>
+      <p>Choose a pack. Explore its rarity tiers. Get to know the cards inside the provider’s current inventory.</p>
+      <div class="pack-disclosure"><strong>A look inside Collector Crypt.</strong> This is the provider’s inventory, not Hookemon’s holdings or a confirmed purchase plan. Cards can change before the next purchase. Values are provider insured values in USD, not sale prices or promised proceeds.</div>
+    </section>
+    <section aria-labelledby="library-title">
+      <div class="pack-library-heading"><div><p class="pack-eyebrow">POKÉMON · PROVIDER CATALOGUE</p><h2 id="library-title">Find your next favourite.</h2></div><button id="refresh-packs" type="button">Refresh catalogue ↻</button></div>
+      <p id="catalog-status" class="pack-status" role="status">Loading the provider catalogue…</p>
+      <div id="pack-list"></div>
+      <noscript><p>Enable JavaScript to load the pack inventory, or <a href="https://gacha.collectorcrypt.com/" rel="noopener noreferrer" target="_blank">view Collector Crypt directly ↗</a>.</p></noscript>
+    </section>
+    <aside class="pack-explainer"><h2>Each rarity has its own story.</h2><p>Common, Uncommon, Rare and Epic are the provider’s pack tiers. They describe that pack’s value bands, rather than the printed rarity of a Pokémon card. A card’s tier can differ between packs. The library shows individual cards currently reported by the provider; a list of cards does not imply equal draw probabilities.</p><a href="/transparency">How we label values and sources ↗</a></aside>
+  </main>
+  <footer class="pack-footer shell"><a href="/"><img src="/hookemon-logo.svg" width="150" height="35" alt="Hookemon home" /></a><p>A little curiosity goes a long way.</p><a href="/holders">Understand the holder rules ↗</a></footer>
+  <script type="module" src="/comic-production/packs.mjs"></script>
+</body>
+</html>
