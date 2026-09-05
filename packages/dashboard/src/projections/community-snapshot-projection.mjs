@@ -1,5 +1,5 @@
 // Maps terminal cycle facts supplied by the repository-backed operator authority onto the website's
-// public community-dashboard contract (contracts/public-community-snapshot.mjs, schemaVersion 5).
+// public community-dashboard contract (contracts/public-community-snapshot.mjs, schemaVersion 7).
 // Lifetime aggregate amounts have no accounting-index evidence path, so they remain zero rather than
 // being reconstructed from incomplete lifecycle data. `latestCycle.roundAccounting` is read through
 // the optional composed accounting seam for one unambiguously selected repository cycle.
@@ -28,6 +28,7 @@ const ZERO_METRICS = Object.freeze({
 const PLACEHOLDER_REWARD_RECIPIENT_LIMIT = 200;
 
 const repositoryTerminalStatus = Object.freeze({
+  COMPLETE: 'paid-out',
   COMPLETED: 'paid-out',
   FAILED: 'failed',
   HELD_DATA_UNVERIFIED: 'held-data-unverified',
@@ -51,7 +52,7 @@ const repositoryTerminalStatus = Object.freeze({
  *   `latestCycle.roundAccounting` — typically `packages/adapters/src/app/accounting-projection.mjs`'s
  *   `projectCycleAccounting` bound to the live `cycleRepository`. Omitted, `latestCycle.roundAccounting`
  *   stays `null`, exactly as before this parameter existed.
- * @returns {Promise<object>} a `PublicCommunitySnapshot` (schemaVersion 5), already validated.
+ * @returns {Promise<object>} a `PublicCommunitySnapshot` (schemaVersion 7), already validated.
  */
 export async function buildPublicCommunitySnapshot({
   profileId,
@@ -62,12 +63,13 @@ export async function buildPublicCommunitySnapshot({
   skippedCycles = 0,
   openedPacks = 0,
   readAccounting = null,
+  heldPositions = [],
 }) {
   const profile = readDashboardProfile(profileId);
   const latestTerminal = repositoryCycles.length > 0 ? repositoryCycles.at(-1) : null;
 
   const snapshot = {
-    schemaVersion: 5,
+    schemaVersion: 7,
     profile: profile.id,
     badge: profile.badge,
     network: profile.network,
@@ -79,6 +81,8 @@ export async function buildPublicCommunitySnapshot({
     metrics: { ...ZERO_METRICS, completedCycles, skippedCycles, openedPacks },
     latestCycle: latestTerminal ? await buildLatestCycle(latestTerminal, readAccounting) : null,
     cards: [],
+    heldPositionCount: heldPositions.length,
+    heldPositions,
   };
   return normalizePublicCommunitySnapshot(snapshot, profileId);
 }

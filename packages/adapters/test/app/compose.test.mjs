@@ -790,7 +790,8 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
 
   assert.deepEqual(CYCLE_REPOSITORY_CLIENT_INTERFACE, [
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
-    'readChainTransactionAttempt', 'readClaimPreconditions', 'listKnownCycleIds',
+    'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'listHeldPositions',
+    'readSupplementarySettlement', 'listKnownCycleIds',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
   assert.deepEqual(Object.keys(composition.cycleRepository).sort(), [...CYCLE_REPOSITORY_CLIENT_INTERFACE].sort());
@@ -1855,6 +1856,80 @@ test('dashboard composed in-process: restart-request/reconcile-request over HTTP
   // No cycle is active yet, so the real recoverActiveCycle() call reports NO_ACTIVE_CYCLE — proving
   // the request actually reached the live service (RECORDED_NO_LIVE_SERVICE would mean it did not).
   assert.equal(decision.body.code, 'RECOVERY_NO_ACTIVE_CYCLE');
+});
+
+test('operator resume-cycle recovers a supplementary settlement after its completed cycle is no longer active', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  await writeOperatorState(statePath);
+
+  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const cycle = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  for (const stage of AUTOMATED_CYCLE_STAGES) {
+    await repository.prepareStage(cycle.cycleId, stage);
+    await repository.completeStage(cycle.cycleId, stage, { stage, finalized: true });
+  }
+  const position = await repository.recordHeldPosition(cycle.cycleId, {
+    packId: 'base-pack',
+    memo: 'memo-resume-supplementary',
+    mint: 'mint-resume-supplementary',
+    cardRef: 'mint-resume-supplementary',
+    costMicroUsdg: '1',
+    valueMicroUsdg: '1',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await repository.completeCycle(cycle.cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'resume-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  assert.equal(await repository.readActiveCycle(), null, 'the completed main cycle is deliberately no longer active');
+
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: { baseUrl: 'https://example.invalid' },
+    adapters: minimalInjectedAdapters(),
+    now: () => 1_000,
+    supplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        async reconcile({ cycleRepository, position: heldPosition, settlement }) {
+          await cycleRepository.advanceSupplementarySettlement(heldPosition.positionId, {
+            expectedState: settlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'a'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+  t.after(() => composition.shutdown());
+
+  const outcome = await composition.executeAudited({
+    requestId: 'resume-supplementary-1',
+    expectedRevision: 0,
+    command: { type: 'resume-cycle' },
+    effect: () => composition.operatorControl.execute({
+      expectedRevision: 0,
+      requestId: 'resume-supplementary-1',
+      command: { type: 'resume-cycle' },
+    }),
+  });
+
+  assert.equal(outcome.commandState, 'APPLIED');
+  assert.equal(outcome.receipt.resultCode, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  assert.equal((await composition.cycleRepository.readSupplementarySettlement(position.positionId)).state, 'BUYBACK_SENT_UNKNOWN');
 });
 
 test('dashboard composed in-process: pause/activate decisions are read fresh by the real scheduler on its next tick', async t => {

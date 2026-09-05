@@ -145,6 +145,30 @@ test('accepts the legacy schemaVersion 1 idle shape and normalizes to schemaVers
   assert.equal(result.executionState, 'unknown');
 });
 
+test('keeps identifier-bearing held positions in schema version 4 while schema version 5 exposes only public status fields', () => {
+  const legacyHeld = {
+    ...idleStatus(),
+    schemaVersion: 4,
+    heldPositionCount: 1,
+    heldPositions: [{
+      positionId: 'position-1', cycleId: 'cycle-1', reason: 'EPIC_THRESHOLD', ageSeconds: 60, cycleState: 'COMPLETE',
+    }],
+  };
+  const publicHeld = {
+    ...idleStatus(),
+    schemaVersion: 5,
+    heldPositionCount: 1,
+    heldPositions: [{ reason: 'EPIC_THRESHOLD', ageSeconds: 60, cycleState: 'COMPLETE' }],
+  };
+
+  assert.equal(normalizePublicCycleStatus(legacyHeld, 'mainnet').heldPositions[0].positionId, 'position-1');
+  assert.deepEqual(normalizePublicCycleStatus(publicHeld, 'mainnet').heldPositions, publicHeld.heldPositions);
+  assert.throws(() => normalizePublicCycleStatus({
+    ...publicHeld,
+    heldPositions: [{ ...publicHeld.heldPositions[0], positionId: 'position-1' }],
+  }, 'mainnet'));
+});
+
 test('rejects a non-object value', () => {
   assert.throws(() => normalizePublicCycleStatus(null, 'mainnet'));
   assert.throws(() => normalizePublicCycleStatus('nope', 'mainnet'));

@@ -12,7 +12,7 @@ import {
 
 function validConfiguration(overrides = {}) {
   return {
-    schema: 'hookemon.operator-configuration.v2',
+    schema: 'hookemon.operator-configuration.v3',
     intervalMinutes: 20,
     allowedPackIds: ['base', 'turbo-pack'],
     requestedOrders: 1,
@@ -26,6 +26,9 @@ function validConfiguration(overrides = {}) {
     perCycleCapMicroUsdg: '25500000',
     lossCapMicroUsdg: '50000000',
     maxOutstandingCustodyMicroUsdg: '50000000',
+    maxHeldPositions: 10,
+    maxHeldValueMicroUsdg: '5000000000',
+    unresolvedCardDeadlineMinutes: 30,
     executionPaused: false,
     killSwitch: false,
     manualApprovalCycles: 0,
@@ -100,6 +103,22 @@ test('rejects maxBoostersPerCycle out of range', () => {
   assert.throws(() => assertOperatorConfiguration(validConfiguration({ maxBoostersPerCycle: 1001 })), /maxBoostersPerCycle/);
 });
 
+test('validates held-position count and value limits', () => {
+  assert.doesNotThrow(() => assertOperatorConfiguration(validConfiguration({ maxHeldPositions: 0, maxHeldValueMicroUsdg: '0' })));
+  assert.doesNotThrow(() => assertOperatorConfiguration(validConfiguration({ maxHeldPositions: 1000, maxHeldValueMicroUsdg: '5000000000' })));
+  assert.throws(() => assertOperatorConfiguration(validConfiguration({ maxHeldPositions: -1 })), /maxHeldPositions/);
+  assert.throws(() => assertOperatorConfiguration(validConfiguration({ maxHeldPositions: 1001 })), /maxHeldPositions/);
+  assert.throws(() => assertOperatorConfiguration(validConfiguration({ maxHeldValueMicroUsdg: '05' })), /maxHeldValueMicroUsdg/);
+});
+
+test('validates the unresolved-card reconciliation deadline', () => {
+  assert.doesNotThrow(() => assertOperatorConfiguration(validConfiguration({ unresolvedCardDeadlineMinutes: 5 })));
+  assert.doesNotThrow(() => assertOperatorConfiguration(validConfiguration({ unresolvedCardDeadlineMinutes: 1440 })));
+  assert.throws(() => assertOperatorConfiguration(validConfiguration({ unresolvedCardDeadlineMinutes: 4 })), /unresolvedCardDeadlineMinutes/);
+  assert.throws(() => assertOperatorConfiguration(validConfiguration({ unresolvedCardDeadlineMinutes: 1441 })), /unresolvedCardDeadlineMinutes/);
+  assert.throws(() => assertOperatorConfiguration(validConfiguration({ unresolvedCardDeadlineMinutes: 30.5 })), /unresolvedCardDeadlineMinutes/);
+});
+
 test('rejects non-canonical or negative micro-USDG amounts', () => {
   for (const bad of ['-1', '01', '1.5', 'abc', '', ' 1']) {
     assert.throws(() => assertOperatorConfiguration(validConfiguration({ maxUnitPriceMicroUsdg: bad })), /maxUnitPriceMicroUsdg/);
@@ -129,7 +148,7 @@ test('rejects a negative or non-integer configurationRevision', () => {
 
 test('the default configuration is conservative: no packs, zero budget, dry-run, unpaused', () => {
   const config = createDefaultOperatorConfiguration();
-  assert.equal(config.schema, 'hookemon.operator-configuration.v2');
+  assert.equal(config.schema, 'hookemon.operator-configuration.v3');
   assert.equal(config.intervalMinutes, DEFAULT_INTERVAL_MINUTES);
   assert.equal(config.liveMode, DEFAULT_LIVE_MODE);
   assert.deepEqual(config.allowedPackIds, []);
@@ -148,6 +167,9 @@ test('the default configuration carries fail-closed policy controls and empty du
   assert.equal(config.executionPaused, false);
   assert.equal(config.killSwitch, false);
   assert.equal(config.manualApprovalCycles, 0);
+  assert.equal(config.maxHeldPositions, 10);
+  assert.equal(config.maxHeldValueMicroUsdg, '5000000000');
+  assert.equal(config.unresolvedCardDeadlineMinutes, 30);
   assert.deepEqual(config.pendingEpicDecisions, []);
   assert.deepEqual(config.approvalsByCycleDigest, {});
   assert.deepEqual(config.spendLedger, []);
@@ -171,13 +193,42 @@ test('migrates the prior configuration shape with fail-closed new controls', () 
 
   const migration = migrateOperatorConfiguration(legacy);
   assert.equal(migration.migrated, true);
-  assert.equal(migration.configuration.schema, 'hookemon.operator-configuration.v2');
+  assert.equal(migration.configuration.schema, 'hookemon.operator-configuration.v3');
   assert.equal(migration.configuration.maxCyclesPerDay, 0);
   assert.equal(migration.configuration.perCycleCapMicroUsdg, base.maxCycleBudgetMicroUsdg);
   assert.equal(migration.configuration.lossCapMicroUsdg, '0');
   assert.equal(migration.configuration.maxOutstandingCustodyMicroUsdg, '0');
   assert.equal(migration.configuration.executionPaused, true);
   assert.deepEqual(migration.configuration.spendLedger, []);
+});
+
+test('migrates a version 2 configuration with held-position and unresolved-card defaults', () => {
+  const {
+    maxHeldPositions: _maxHeldPositions,
+    maxHeldValueMicroUsdg: _maxHeldValueMicroUsdg,
+    unresolvedCardDeadlineMinutes: _unresolvedCardDeadlineMinutes,
+    ...versionTwo
+  } = validConfiguration({
+    schema: 'hookemon.operator-configuration.v2',
+  });
+
+  const migration = migrateOperatorConfiguration(versionTwo);
+
+  assert.equal(migration.migrated, true);
+  assert.equal(migration.configuration.schema, 'hookemon.operator-configuration.v3');
+  assert.equal(migration.configuration.maxHeldPositions, 10);
+  assert.equal(migration.configuration.maxHeldValueMicroUsdg, '5000000000');
+  assert.equal(migration.configuration.unresolvedCardDeadlineMinutes, 30);
+});
+
+test('migrates an early version 3 configuration without the unresolved-card deadline', () => {
+  const { unresolvedCardDeadlineMinutes: _unresolvedCardDeadlineMinutes, ...preDeadlineVersionThree } = validConfiguration();
+
+  const migration = migrateOperatorConfiguration(preDeadlineVersionThree);
+
+  assert.equal(migration.migrated, true);
+  assert.equal(migration.configuration.schema, 'hookemon.operator-configuration.v3');
+  assert.equal(migration.configuration.unresolvedCardDeadlineMinutes, 30);
 });
 
 test('applyOperatorConfiguration bumps the revision by exactly one and starts from the default when null', () => {

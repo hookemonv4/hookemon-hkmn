@@ -78,6 +78,32 @@ function assertBoundary(value) {
   return value;
 }
 
+function normalizeHeldPositions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('policy custody heldPositions is invalid');
+  }
+  if (!Number.isSafeInteger(value.count) || value.count < 0) {
+    throw new Error('policy custody heldPositions count is invalid');
+  }
+  if (!Array.isArray(value.positions) || value.positions.length !== value.count) {
+    throw new Error('policy custody heldPositions count does not match positions');
+  }
+  const reportedValue = assertAmount(value.valueMicroUsdg, 'policy custody heldPositions valueMicroUsdg');
+  const positionValue = value.positions.reduce((total, position, index) => {
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error(`policy custody heldPositions positions[${index}] is invalid`);
+    }
+    return total + assertAmount(
+      position.valueMicroUsdg,
+      `policy custody heldPositions positions[${index}] valueMicroUsdg`,
+    );
+  }, 0n);
+  if (positionValue !== reportedValue) {
+    throw new Error('policy custody heldPositions value does not match positions');
+  }
+  return { count: value.count, valueMicroUsdg: reportedValue };
+}
+
 function normalizeCustody(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('policy custody projection is invalid');
   const normalized = {
@@ -85,6 +111,7 @@ function normalizeCustody(value) {
     atRiskMicroUsdg: assertAmount(value.atRiskMicroUsdg, 'policy custody atRiskMicroUsdg'),
     outstandingMicroUsdg: assertAmount(value.outstandingMicroUsdg, 'policy custody outstandingMicroUsdg'),
     heldAssets: value.heldAssets,
+    heldPositions: normalizeHeldPositions(value.heldPositions),
     unattributed: value.unattributed,
     unvaluedExposure: value.unvaluedExposure,
   };
@@ -100,6 +127,7 @@ function zeroCustody() {
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -119,6 +147,41 @@ function cycleMode(liveMode, explicitMode = undefined) {
 }
 
 function policyMaterial(configuration) {
+  return {
+    allowedPackIds: [...configuration.allowedPackIds],
+    requestedOrders: configuration.requestedOrders,
+    maxBoostersPerCycle: configuration.maxBoostersPerCycle,
+    maxUnitPriceMicroUsdg: configuration.maxUnitPriceMicroUsdg,
+    perCycleCapMicroUsdg: configuration.perCycleCapMicroUsdg,
+    max24HourBudgetMicroUsdg: configuration.max24HourBudgetMicroUsdg,
+    maxCyclesPerDay: configuration.maxCyclesPerDay,
+    lossCapMicroUsdg: configuration.lossCapMicroUsdg,
+    maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
+    maxHeldPositions: configuration.maxHeldPositions,
+    maxHeldValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+    unresolvedCardDeadlineMinutes: configuration.unresolvedCardDeadlineMinutes,
+    manualApprovalCycles: configuration.manualApprovalCycles,
+  };
+}
+
+function versionThreePolicyMaterial(configuration) {
+  return {
+    allowedPackIds: [...configuration.allowedPackIds],
+    requestedOrders: configuration.requestedOrders,
+    maxBoostersPerCycle: configuration.maxBoostersPerCycle,
+    maxUnitPriceMicroUsdg: configuration.maxUnitPriceMicroUsdg,
+    perCycleCapMicroUsdg: configuration.perCycleCapMicroUsdg,
+    max24HourBudgetMicroUsdg: configuration.max24HourBudgetMicroUsdg,
+    maxCyclesPerDay: configuration.maxCyclesPerDay,
+    lossCapMicroUsdg: configuration.lossCapMicroUsdg,
+    maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
+    maxHeldPositions: configuration.maxHeldPositions,
+    maxHeldValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+    manualApprovalCycles: configuration.manualApprovalCycles,
+  };
+}
+
+function versionTwoPolicyMaterial(configuration) {
   return {
     allowedPackIds: [...configuration.allowedPackIds],
     requestedOrders: configuration.requestedOrders,
@@ -177,7 +240,7 @@ export function assertCollectorOnlyRehearsalPolicy(configuration, { packCode, pa
 function legacyPolicyMaterial(configuration, configurationRevision) {
   return {
     configurationRevision,
-    ...policyMaterial(configuration),
+    ...versionTwoPolicyMaterial(configuration),
   };
 }
 
@@ -198,8 +261,32 @@ export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountM
   assertAmount(releaseAmountMicroUsdg, 'policy releaseAmountMicroUsdg', { positive: true });
   assertPackId(packId);
   return digestCyclePolicy({
-    schema: 'hookemon.policy-cycle.v2',
+    schema: 'hookemon.policy-cycle.v3',
     policy: policyMaterial(normalized),
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+}
+
+function deriveVersionTwoCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+  return digestCyclePolicy({
+    schema: 'hookemon.policy-cycle.v2',
+    policy: versionTwoPolicyMaterial(configuration),
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+}
+
+function deriveVersionThreeCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+  return digestCyclePolicy({
+    schema: 'hookemon.policy-cycle.v3',
+    policy: versionThreePolicyMaterial(configuration),
     cycleId,
     releaseAmountMicroUsdg,
     packId,
@@ -223,6 +310,24 @@ function deriveLegacyCyclePolicyDigest({ configuration, cycleId, releaseAmountMi
 function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
   const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode });
   if (existing.cycleDigest === current) return current;
+  const versionThree = deriveVersionThreeCyclePolicyDigest({
+    configuration,
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+  if (existing.cycleDigest === versionThree) return versionThree;
+  const versionTwo = deriveVersionTwoCyclePolicyDigest({
+    configuration,
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+  if (existing.cycleDigest === versionTwo) return versionTwo;
   if (configuration.configurationRevision > LEGACY_POLICY_DIGEST_REVISION_SEARCH_LIMIT) return null;
   for (let revision = 0; revision <= configuration.configurationRevision; revision += 1) {
     const legacy = deriveLegacyCyclePolicyDigest({
@@ -374,9 +479,12 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
 
   if (context.boundary === 'claim-process') {
     if (context.cycleId === null || context.packId === null) throw new Error('policy claim-process requires cycleId and packId');
-    if (normalized.pendingEpicDecisions.length > 0 || custodyState.heldAssets) return refused('HELD_CUSTODY');
     if (custodyState.unattributed) return refused('UNATTRIBUTED_CUSTODY');
     if (custodyState.unvaluedExposure) return refused('UNVALUED_CUSTODY');
+    if (custodyState.heldPositions.count >= normalized.maxHeldPositions
+      || custodyState.heldPositions.valueMicroUsdg > BigInt(normalized.maxHeldValueMicroUsdg)) {
+      return refused('HELD_LIMIT');
+    }
     if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
     if (normalized.requestedOrders === 0) return refused('NO_ORDERS_REQUESTED');
     if (context.releaseAmount > effectiveCycleCap(normalized, context)) return refused('PER_CYCLE_CAP');
@@ -444,7 +552,6 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
 
   if (context.boundary === 'purchase') {
     if (context.cycleId === null || context.packId === null) throw new Error('policy purchase requires cycleId and packId');
-    if (normalized.pendingEpicDecisions.length > 0 || custodyState.heldAssets) return refused('HELD_CUSTODY');
     if (custodyState.unattributed) return refused('UNATTRIBUTED_CUSTODY');
     if (custodyState.unvaluedExposure) return refused('UNVALUED_CUSTODY');
     if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');

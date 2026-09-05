@@ -62,6 +62,7 @@ export const CUSTODY_LEDGER_BUCKETS = Object.freeze([
   'refunds',
   'residual',
   'heldAssets',
+  'heldPositions',
   'payoutLiability',
   'dust',
   'unattributed',

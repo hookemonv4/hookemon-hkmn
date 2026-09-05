@@ -17,7 +17,8 @@ creating a second authority.
   `executeAudited({ requestId, expectedRevision, command, effect })`. The executor invokes
   `effect()` only after it has durably recorded the request.
 - `held-owner-decision` requires `--expected-revision`, `--request-id`, and a canonical JSON
-  `--input` containing the cycle ID, held-evidence digest, cycle revision, and choice.
+  `--input` containing `positionId`, `heldEvidenceDigest`, `expectedPositionRevision`, and the
+  `sell` or `keep-holding` choice.
 - `update-configuration`, `manual-approval`, and `held-owner-decision` require a canonical JSON
   `--input` path.
 - `hookemon-runner operator [--state <absolute-path>] <operator-command> [operator flags]` builds
@@ -43,6 +44,8 @@ creating a second authority.
 - The request ID flows to both the audit executor and the authority effect. A held owner decision
   therefore binds its persisted repository transition to the same idempotency key as its audit
   record.
+- The held decision input is scoped to one position and its evidence digest and revision. A stale
+  position revision cannot select a different card or overwrite a later decision.
 - `reconcile` is the only non-status command allowed without an audited executor and remains
   read-only.
 - Status uses a pure repository peek and cannot run archival recovery as a side effect.

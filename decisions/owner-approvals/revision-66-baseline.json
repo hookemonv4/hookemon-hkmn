@@ -1,0 +1,17 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "DRAFT_UNSIGNED: proposes adoption of requirements revision 66 while retaining architecture revision 9 for the Phase 3 Operations-wallet money path. It records the owner-directed 2026-09-05 held-position carve-out, bounded claim exposure, per-position decision path, settled-proceeds-only payout, and public reason-and-age projection. This draft grants no deployment, credential use, signing, broadcast, asset movement, spending, or publication authority.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "draftStatus": "UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE",
+  "subjectHashes": {
+    "decisions/ADR-0024-held-position-carve-out.md": "d80d76c5c74af934749cc7663678c1431ff57fe2093d70007e6be6191d56317b",
+    "docs/audit/2026-09-04/failure-matrix.json": "2348771591cd1df6471b194fa57153f3434792123cd89eb3cd8dd6a33b8acf30",
+    "docs/modules/dashboard.md": "acdf22a7bcdcdf0a258d960378a35dc21833103460db55e8c25ec5c92a1c7ba5",
+    "docs/runbooks/README.md": "f7f9723df39e10630e38e2cff57a07bfb5585988a614c7d6fca11f598e81d5a6",
+    "specs/requirements.json": "680600e9ea179f374c1cb8605245e029a5c3981ede638b0aa67e76a108be32da"
+  }
+}

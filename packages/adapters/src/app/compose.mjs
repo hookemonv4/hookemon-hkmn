@@ -63,6 +63,7 @@ function emptyPolicyCustody({ unvaluedExposure = false } = {}) {
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: Object.freeze({ count: 0, valueMicroUsdg: '0', positions: Object.freeze([]) }),
     unattributed: false,
     unvaluedExposure,
     cycles: Object.freeze([]),
@@ -153,13 +154,19 @@ function buildPolicyCustodyReader({ config, cycleRepository }) {
   return async () => projectPolicyCustody({ cycleRepository, evmUsdg });
 }
 
-function operatorAuditResultCode(command, status) {
+function operatorAuditResultCode(command) {
   if (command?.type === 'run-cycle-now') return 'TICK_TRIGGERED';
-  if (command?.type === 'resume-cycle') {
-    return status?.activeCycleId === null ? 'RECOVERY_NO_ACTIVE_CYCLE' : 'RECOVERY_DISPATCHED';
-  }
+  if (command?.type === 'resume-cycle') return 'RECOVERY_DISPATCHED';
   if (command?.type === 'reconcile') return 'RECONCILIATION_DISPATCHED';
   return 'DECISION_ACCEPTED';
+}
+
+function withResumeAuditResult(command, result) {
+  if (command?.type !== 'resume-cycle' || !result || typeof result !== 'object' || Array.isArray(result)
+    || typeof result.resultCode !== 'string' || result.resultCode.length === 0) {
+    return result;
+  }
+  return { ...result, auditResultCode: result.resultCode };
 }
 
 /** Builds the dashboard request context in-process, beside the scheduler. The injected
@@ -673,6 +680,10 @@ export async function compose(config) {
     && process.env.NODE_TEST_CONTEXT === undefined) {
     throw new Error('compose stageHandlers are available only from the Node test runner');
   }
+  if (resolved.supplementaryStageHandlers !== undefined && resolved.supplementaryStageHandlers !== null
+    && process.env.NODE_TEST_CONTEXT === undefined) {
+    throw new Error('compose supplementaryStageHandlers are available only from the Node test runner');
+  }
 
   if (!resolved.execution || typeof resolved.execution !== 'object' || Array.isArray(resolved.execution)) {
     throw new Error('compose execution profile is invalid');
@@ -1014,7 +1025,9 @@ export async function compose(config) {
         config: resolved,
         cycleRepository,
         stageHandlers: resolved.stageHandlers ?? null,
+        supplementaryStageHandlers: resolved.supplementaryStageHandlers ?? null,
         preflightAuthority: resolved.preflightAuthority,
+        readOperatorConfiguration: readConfiguration,
       }), resolved.restartInjector ?? null);
     const serviceConfig = {
       owner: resolved.workerOwner,
@@ -1072,6 +1085,16 @@ export async function compose(config) {
     });
   }
 
+  function buildConfiguredRecoveryService() {
+    if (resolved.execution.profile === 'production') {
+      return buildAutomatedCycleService(!resolved.execution.dryRun, 'production');
+    }
+    if (resolved.execution.profile === 'rehearsal') {
+      return buildAutomatedCycleService(resolved.execution.providerMode === 'live', 'rehearsal');
+    }
+    return buildAutomatedCycleService(false, resolved.execution.dryRun ? 'production' : 'rehearsal');
+  }
+
   // Tracked so the composed dashboard's `ctx.lastTick()` (status-projection.mjs's `nextRunAt`) always
   // reflects the real, most recent tick this exact scheduler ran — never a value the dashboard
   // guessed or cached independently. Updated on every tick outcome, not only a successful one, since
@@ -1097,13 +1120,15 @@ export async function compose(config) {
     triggerTick: () => scheduler.triggerTick(),
     async resumeActiveCycle() {
       const active = await cycleRepository.readActiveCycle();
-      if (active === null) return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
+      if (active === null) {
+        return buildConfiguredRecoveryService().recoverActiveCycle({});
+      }
       if (active.mode !== 'production' && active.mode !== 'rehearsal') {
         return { status: 'CYCLE_MODE_UNRESOLVED', cycleId: active.cycleId, stage: null };
       }
       return buildAutomatedCycleService(active.mode === 'production', active.mode).recoverActiveCycle({});
     },
-    recordHeldOwnerDecision: ({ cycleId, ...decision }) => cycleRepository.recordHeldOwnerDecision(cycleId, decision),
+    recordHeldOwnerDecision: ({ positionId, ...decision }) => cycleRepository.recordHeldOwnerDecision(positionId, decision),
   });
 
   async function executeAudited({ requestId, expectedRevision, command, effect, note = null } = {}) {
@@ -1117,8 +1142,8 @@ export async function compose(config) {
       actor: { email: 'local-operator' },
       actorRole: 'operator',
       note,
-      resultCode: operatorAuditResultCode(command, status),
-      effect,
+      resultCode: operatorAuditResultCode(command),
+      effect: async receipt => withResumeAuditResult(command, await effect(receipt)),
     });
   }
 

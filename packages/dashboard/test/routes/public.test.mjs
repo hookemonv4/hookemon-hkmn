@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createCycleStatusHandler } from '../../src/routes/public.mjs';
+import { createCommunityDashboardHandler, createCycleStatusHandler } from '../../src/routes/public.mjs';
 
 async function request(handler) {
   let status = null;
@@ -39,4 +39,63 @@ test('public cycle status reports a held terminal state instead of an earlier co
 
   assert.equal(result.status, 200);
   assert.equal(result.body.cycle.status, 'HELD_OWNER_DECISION');
+});
+
+test('public projections expose only the held reason, age, and cycle state after the attributed cycle completes', async () => {
+  const heldPosition = {
+    positionId: 'position-1',
+    cycleId: 'cycle-complete',
+    reason: 'EPIC_THRESHOLD',
+    openedAtMs: Date.UTC(2025, 11, 31, 23, 58),
+    terminalState: 'OPEN',
+    memo: 'private-provider-memo',
+    mint: 'PrivateMintIdentity',
+    cardRef: 'private-card-reference',
+    evidenceDigest: `sha256:${'a'.repeat(64)}`,
+    insuredValue: { chainId: 'solana', assetId: 'usdg', decimals: 6, amountAtomic: '400' },
+    costMicroUsdg: '100',
+  };
+  const status = async () => ({
+    configuration: { intervalMinutes: 20, maxBoostersPerCycle: 1, paused: false, executionPaused: false, killSwitch: false },
+    activeCycleId: null,
+    cycles: [{ cycleId: 'cycle-complete', terminalState: 'COMPLETE', stages: [{ stage: 'payout', status: 'COMPLETE' }] }],
+    heldPositions: [heldPosition],
+  });
+  const ctx = { profileId: 'mainnet', now: () => Date.UTC(2026, 0, 1), operatorControl: { status } };
+
+  const cycleStatus = await request(createCycleStatusHandler(ctx));
+  const community = await request(createCommunityDashboardHandler(ctx));
+
+  for (const body of [cycleStatus.body, community.body]) {
+    assert.equal(body.heldPositionCount, 1);
+    assert.deepEqual(body.heldPositions, [{
+      reason: 'EPIC_THRESHOLD',
+      ageSeconds: 120,
+      cycleState: 'COMPLETE',
+    }]);
+    assert.doesNotMatch(JSON.stringify(body.heldPositions), /position-1|cycle-complete/i);
+    assert.doesNotMatch(JSON.stringify(body), /memo|mint|cardRef|evidenceDigest|insuredValue|costMicroUsdg/i);
+  }
+});
+
+test('the public community projection reports a complete main cycle as paid out while held positions remain separate', async () => {
+  const handler = createCommunityDashboardHandler({
+    profileId: 'mainnet',
+    now: () => Date.UTC(2026, 0, 1),
+    operatorControl: {
+      async status() {
+        return {
+          configuration: { intervalMinutes: 20, maxBoostersPerCycle: 1, paused: false, executionPaused: false, killSwitch: false },
+          activeCycleId: null,
+          cycles: [{ cycleId: 'cycle-complete', terminalState: 'COMPLETE', stages: [{ stage: 'payout', status: 'COMPLETE' }] }],
+          heldPositions: [],
+        };
+      },
+    },
+  });
+
+  const result = await request(handler);
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.latestCycle.status, 'paid-out');
 });

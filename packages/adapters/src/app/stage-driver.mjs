@@ -1,11 +1,7 @@
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { isStandingAuthorityProvider } from '../../../runner/src/cycle/authorization-provider.mjs';
-import { LeaseLostError } from '../../../runner/src/automation/exclusive-lease.mjs';
-import { SignerClientError } from '../signing/signer-client.mjs';
 import { assertCollectorPolicyBundleRuntimeReady } from '../signing/collector-policy-loader.mjs';
-import { TransactionPolicyError } from '../signing/transaction-policy.mjs';
-import { RelayQuoteExpiredError } from '../relay-client.mjs';
 import { walletNonceLeaseWindow } from './wallet-nonce-lease.mjs';
 import {
   createTestProfileMutationAuthority,
@@ -62,6 +58,7 @@ import {
   reconcileLiveReturn,
 } from './stages/return.mjs';
 import { preparePayoutRequest, probePayout, mutatePayout, reconcileLivePayout } from './stages/payout.mjs';
+import { assertSupplementarySettlementDispatch } from './stages/supplementary-settlement.mjs';
 import {
   createRehearsalSkipHandler,
   prepareRehearsalPayoutRequest,
@@ -145,6 +142,7 @@ const LIVE_MUTATION_PENDING = Object.freeze({
 });
 const FAIL_CLOSED_UNJOURNALED_STAGES = new Set();
 const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
+const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
 
 function integrationPendingFor(config, stage) {
   return isLiveCollectorOnlyRehearsal(config) ? null : LIVE_MUTATION_PENDING[stage] ?? null;
@@ -180,6 +178,7 @@ const RECONCILIATION_REPOSITORY_METHODS = Object.freeze([
 ]);
 
 const READ_ONLY_LIVE_RECONCILIATION_STAGES = new Set(['eligibility-snapshot']);
+const CARD_HELD_POSITION_RECONCILIATION_STAGES = new Set(['open', 'epic-gate', 'buyback']);
 const CHAIN_JOURNAL_REPOSITORY_METHODS = Object.freeze([
   'readChainTransactionAttempt',
   'prepareChainTransactionAttempt',
@@ -188,6 +187,17 @@ const CHAIN_JOURNAL_REPOSITORY_METHODS = Object.freeze([
   'recordCustodyLedger',
   'recordFinality',
 ]);
+const SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS = Object.freeze([
+  ...RECONCILIATION_REPOSITORY_METHODS,
+  'readHeldPosition',
+  'readSupplementarySettlement',
+  'readSupplementarySettlementEvidence',
+  'advanceSupplementarySettlement',
+  'resolveHeldPosition',
+  'readPagedPayoutState',
+  'persistPagedPayoutState',
+]);
+const EMPTY_SUPPLEMENTARY_CAPABILITIES = Object.freeze({});
 
 function stageHandlersForConfig(config) {
   if (config.rehearsal?.mode !== 'collector-only') return STAGE_HANDLERS;
@@ -243,56 +253,10 @@ function assertWriteAheadJournal(cycleRepository) {
   }
 }
 
-function keychainInteractionDenied(error) {
-  return error instanceof SignerClientError
-    && /keychain command/i.test(error.message)
-    && /user interaction is not allowed/i.test(error.message);
-}
-
-async function holdKnownFailure({ cycleRepository, context, error }) {
-  let evidence;
-  let terminalState = 'HELD_UNAVAILABLE';
-  if (error instanceof RelayQuoteExpiredError) {
-    evidence = {
-      stage: context.stage,
-      reason: 'RELAY_QUOTE_EXPIRED',
-      error: error.message,
-    };
-  } else if (keychainInteractionDenied(error)) {
-    evidence = {
-      stage: context.stage,
-      reason: 'KEYCHAIN_INTERACTION_DENIED',
-      error: error.message,
-    };
-  } else if (error instanceof LeaseLostError && error.code === 'LEASE_LOST') {
-    evidence = {
-      stage: context.stage,
-      reason: 'LEASE_LOST',
-      lease: error.lease,
-    };
-  } else if (error instanceof ReturnRecoveryRequiredError
-    && error.recoveryState === 'RETURN_SIGNED_BLOCKHASH_EXPIRED') {
-    evidence = {
-      stage: context.stage,
-      reason: 'RETURN_SIGNED_BLOCKHASH_EXPIRED',
-      error: error.message,
-    };
-  } else if (error instanceof TransactionPolicyError) {
-    terminalState = 'HELD_DATA_UNVERIFIED';
-    evidence = {
-      stage: context.stage,
-      reason: 'TRANSACTION_POLICY_REFUSED',
-      error: error.message,
-    };
-  } else {
-    return false;
-  }
-  if (typeof cycleRepository?.holdCycle !== 'function') {
-    throw new Error('stage-driver terminal conversion requires cycleRepository.holdCycle');
-  }
-  await cycleRepository.holdCycle(context.cycleId, terminalState, evidence);
-  return true;
-}
+// The write-ahead attempt state is the recovery authority for signer, quote, lease, and
+// transaction-policy failures. They remain retryable and never convert a recoverable stage error
+// into a whole-cycle terminal hold. Stage handlers reserve whole-cycle holds for conditions that
+// make the cycle itself unattributable, such as a missing predecessor or snapshot evidence.
 
 function assertChainJournal(cycleRepository) {
   for (const method of CHAIN_JOURNAL_REPOSITORY_METHODS) {
@@ -648,6 +612,30 @@ function stageConfiguration(config) {
   return { ...withoutCapabilities, standingAuthority: document };
 }
 
+function assertUnresolvedCardDeadlineMinutes(value) {
+  if (!Number.isSafeInteger(value) || value < 5 || value > 1440) {
+    throw new Error('stage-driver unresolvedCardDeadlineMinutes must be an integer from 5 through 1440');
+  }
+  return value;
+}
+
+async function stageConfigurationWithOperatorDeadline(config, readOperatorConfiguration) {
+  const base = stageConfiguration(config);
+  const operatorConfiguration = readOperatorConfiguration === null
+    ? null
+    : await readOperatorConfiguration();
+  if (operatorConfiguration !== null && (typeof operatorConfiguration !== 'object' || Array.isArray(operatorConfiguration))) {
+    throw new Error('stage-driver operator configuration is invalid');
+  }
+  const deadline = operatorConfiguration?.unresolvedCardDeadlineMinutes
+    ?? base.unresolvedCardDeadlineMinutes
+    ?? DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES;
+  return Object.freeze({
+    ...base,
+    unresolvedCardDeadlineMinutes: assertUnresolvedCardDeadlineMinutes(deadline),
+  });
+}
+
 function preparationInput(context, config) {
   return Object.freeze({
     liveMode: true,
@@ -807,15 +795,36 @@ function createLeaseFencedReadRepository(cycleRepository, assertLease) {
   return Object.freeze(readRepository);
 }
 
+function cardReconciliationRepository(cycleRepository, context) {
+  const repository = { ...createLeaseFencedReadRepository(cycleRepository, context.assertLease) };
+  if (CARD_HELD_POSITION_RECONCILIATION_STAGES.has(context.stage)) {
+    const recordHeldPosition = leaseFencedReadMethod(cycleRepository, 'recordHeldPosition', context.assertLease);
+    if (recordHeldPosition) repository.recordHeldPosition = recordHeldPosition;
+    const holdCycle = leaseFencedReadMethod(cycleRepository, 'holdCycle', context.assertLease);
+    if (holdCycle) repository.holdCycle = holdCycle;
+  }
+  return Object.freeze(repository);
+}
+
+function supplementarySettlementRepository(cycleRepository, assertLease) {
+  const repository = {};
+  for (const method of SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS) {
+    const fenced = leaseFencedReadMethod(cycleRepository, method, assertLease);
+    if (fenced) repository[method] = fenced;
+  }
+  return Object.freeze(repository);
+}
+
 function reconciliationInput(context, config, reconciliationAdapters, cycleRepository) {
   return Object.freeze({
     adapters: createLeaseFencedCapability(reconciliationAdapters, context.assertLease, () => {}),
     config: frozenCanonicalValue(config),
-    cycleRepository: createLeaseFencedReadRepository(cycleRepository, context.assertLease),
+    cycleRepository: cardReconciliationRepository(cycleRepository, context),
     context: frozenCanonicalValue({
       cycleId: context.cycleId,
       stage: context.stage,
       intent: context.intent,
+      nowMs: context.nowMs ?? null,
     }),
   });
 }
@@ -889,6 +898,21 @@ function handlerFor(handlers, context) {
   return handler;
 }
 
+function supplementaryHandlerFor(handlers, settlement) {
+  if (handlers === null) return null;
+  const handler = handlers[settlement.state] ?? null;
+  if (handler === null) return null;
+  if (!handler || typeof handler !== 'object' || Array.isArray(handler)
+    || typeof handler.stage !== 'string' || !handler.stage.startsWith('supplementary-')
+    || typeof handler.reconcile !== 'function') {
+    throw new Error(`stage-driver: supplementary handler for "${settlement.state}" is invalid`);
+  }
+  if (Object.hasOwn(handler, 'mutation') || Object.hasOwn(handler, 'requestDigest')) {
+    throw new Error('stage-driver: supplementary handlers are observation-only');
+  }
+  return handler;
+}
+
 async function reconcileOperationalAttempt({ cycleRepository, context, evidence, allowMissingAttempt = false }) {
   const current = await cycleRepository.readOperationalStageAttempt(context.cycleId, context.stage);
   if (!current) return allowMissingAttempt ? evidence : null;
@@ -916,6 +940,8 @@ export function createStageDriver({
   cycleRepository,
   stageHandlers = null,
   preflightAuthority,
+  readOperatorConfiguration = null,
+  supplementaryStageHandlers = null,
 }) {
   if (typeof liveMode !== 'boolean') throw new Error('stage-driver liveMode must be a boolean');
   if (!adapters || typeof adapters !== 'object') throw new Error('stage-driver adapters must be an object');
@@ -924,13 +950,88 @@ export function createStageDriver({
   }
   if (!config || typeof config !== 'object') throw new Error('stage-driver config must be an object');
   if (!cycleRepository) throw new Error('stage-driver cycleRepository is required');
+  if (readOperatorConfiguration !== null && typeof readOperatorConfiguration !== 'function') {
+    throw new Error('stage-driver readOperatorConfiguration must be a function or null');
+  }
+  if (supplementaryStageHandlers !== null
+    && (!supplementaryStageHandlers || typeof supplementaryStageHandlers !== 'object' || Array.isArray(supplementaryStageHandlers))) {
+    throw new Error('stage-driver supplementaryStageHandlers must be an object or null');
+  }
+  if (supplementaryStageHandlers !== null && process.env.NODE_TEST_CONTEXT === undefined) {
+    throw new Error('stage-driver supplementaryStageHandlers are available only from the Node test runner');
+  }
   assertWriteAheadJournal(cycleRepository);
   const usesBuiltInHandlers = stageHandlers === null;
   const handlers = stageHandlers ?? stageHandlersForConfig(config);
-  const handlerConfig = stageConfiguration(config);
+  const handlerConfig = () => stageConfigurationWithOperatorDeadline(config, readOperatorConfiguration);
 
   return Object.freeze({
+    /**
+     * Reconciles one owner-approved held-position settlement outside the normal cycle stage
+     * sequence. These test-only handlers are observation-only: they receive a lease-fenced
+     * repository facade but no provider or signer capability. Production leaves this seam null
+     * until a provider-specific implementation has its own documented mutation boundary.
+     */
+    async runSupplementarySettlement(input) {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        throw new Error('stage-driver supplementary settlement input is invalid');
+      }
+      if (input.assertLease !== undefined && typeof input.assertLease !== 'function') {
+        throw new Error('stage-driver supplementary settlement assertLease is invalid');
+      }
+      const { position, settlement } = assertSupplementarySettlementDispatch(input.position, input.settlement);
+      const handler = supplementaryHandlerFor(supplementaryStageHandlers, settlement);
+      const pending = Object.freeze({
+        status: 'PENDING',
+        positionId: position.positionId,
+        cycleId: settlement.cycleId,
+        manifestId: settlement.manifestId,
+        stage: handler?.stage ?? null,
+        state: settlement.state,
+      });
+      if (handler === null) return pending;
+
+      input.assertLease?.();
+      const currentHandlerConfig = await handlerConfig();
+      const context = Object.freeze({
+        cycleId: settlement.cycleId,
+        stage: handler.stage,
+        positionId: position.positionId,
+        manifestId: settlement.manifestId,
+        settlementState: settlement.state,
+        ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
+        ...(input.fencingToken === undefined ? {} : { fencingToken: input.fencingToken }),
+      });
+      await handler.reconcile(Object.freeze({
+        adapters: EMPTY_SUPPLEMENTARY_CAPABILITIES,
+        config: frozenCanonicalValue(currentHandlerConfig),
+        cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
+        context: frozenCanonicalValue(context),
+        position,
+        settlement,
+      }));
+      input.assertLease?.();
+      if (typeof cycleRepository.readSupplementarySettlement !== 'function') {
+        throw new Error('stage-driver supplementary settlement requires cycleRepository.readSupplementarySettlement');
+      }
+      const refreshed = await cycleRepository.readSupplementarySettlement(position.positionId);
+      if (refreshed === null) {
+        throw new Error('stage-driver supplementary settlement disappeared during reconciliation');
+      }
+      const checked = assertSupplementarySettlementDispatch(position, refreshed).settlement;
+      if (checked.state === settlement.state) return pending;
+      return Object.freeze({
+        status: 'ADVANCED',
+        positionId: position.positionId,
+        cycleId: checked.cycleId,
+        manifestId: checked.manifestId,
+        stage: handler.stage,
+        state: checked.state,
+      });
+    },
+
     async reconcile(context) {
+      const currentHandlerConfig = await handlerConfig();
       const handler = handlerFor(handlers, context);
       const current = await cycleRepository.readOperationalStageAttempt(context.cycleId, context.stage);
       if (usesBuiltInHandlers && isChainJournalHandler(handler)) {
@@ -941,10 +1042,10 @@ export function createStageDriver({
         if (current) {
           throw new Error(`stage-driver: "${context.stage}" has an unresolved live attempt and requires live reconciliation`);
         }
-        return toEvidenceValue(await handler.probe({ adapters, config: handlerConfig, cycleRepository, context }));
+        return toEvidenceValue(await handler.probe({ adapters, config: currentHandlerConfig, cycleRepository, context }));
       }
       if (usesBuiltInHandlers && READ_ONLY_LIVE_RECONCILIATION_STAGES.has(context.stage)) {
-        const evidence = await handler.reconcileLive({ adapters, config: handlerConfig, cycleRepository, context });
+        const evidence = await handler.reconcileLive({ adapters, config: currentHandlerConfig, cycleRepository, context });
         return evidence === null ? null : toEvidenceValue(evidence);
       }
       if (usesBuiltInHandlers && context.stage === 'payout' && isDirectPayoutHandler(handler)) {
@@ -953,7 +1054,7 @@ export function createStageDriver({
         // directly from that journal instead of the generic provider-attempt wrapper.
         const evidence = await handler.reconcileLive({
           adapters: reconciliationAdapters ?? adapters,
-          config: handlerConfig,
+          config: currentHandlerConfig,
           cycleRepository,
           context,
         });
@@ -964,10 +1065,9 @@ export function createStageDriver({
         let evidence;
         try {
           evidence = await handler.reconcileLive(
-            chainReconciliationInput(context, handlerConfig, reconciliationAdapters ?? adapters, cycleRepository),
+            chainReconciliationInput(context, currentHandlerConfig, reconciliationAdapters ?? adapters, cycleRepository),
           );
         } catch (error) {
-          await holdKnownFailure({ cycleRepository, context, error });
           throw error;
         }
         if (evidence === null) return null;
@@ -983,7 +1083,7 @@ export function createStageDriver({
         }));
       }
       if (usesBuiltInHandlers
-        && integrationPendingFor(handlerConfig, context.stage)
+        && integrationPendingFor(currentHandlerConfig, context.stage)
         && !FAIL_CLOSED_UNJOURNALED_STAGES.has(context.stage)) return null;
 
       let evidence;
@@ -991,13 +1091,12 @@ export function createStageDriver({
         evidence = await handler.reconcileLive(
           reconciliationInput(
             context,
-            handlerConfig,
-            isLiveCollectorOnlyRehearsal(handlerConfig) ? reconciliationAdapters ?? adapters : reconciliationAdapters,
+            currentHandlerConfig,
+            isLiveCollectorOnlyRehearsal(currentHandlerConfig) ? reconciliationAdapters ?? adapters : reconciliationAdapters,
             cycleRepository,
           ),
         );
       } catch (error) {
-        await holdKnownFailure({ cycleRepository, context, error });
         throw error;
       }
       if (evidence === null) return null;
@@ -1009,9 +1108,10 @@ export function createStageDriver({
     },
 
     async execute(context) {
+      const currentHandlerConfig = await handlerConfig();
       const handler = handlerFor(handlers, context);
       if (!liveMode) return;
-      if (usesBuiltInHandlers) assertCollectorPolicyBundleBeforeMutation(handlerConfig, context.stage);
+      if (usesBuiltInHandlers) assertCollectorPolicyBundleBeforeMutation(currentHandlerConfig, context.stage);
       const chainJournal = usesBuiltInHandlers && isChainJournalHandler(handler);
 
       if (usesBuiltInHandlers && READ_ONLY_LIVE_RECONCILIATION_STAGES.has(context.stage)) {
@@ -1022,7 +1122,6 @@ export function createStageDriver({
         try {
           context.assertLease?.();
         } catch (error) {
-          await holdKnownFailure({ cycleRepository, context, error });
           throw error;
         }
         let request;
@@ -1031,21 +1130,19 @@ export function createStageDriver({
             handler,
             usesBuiltInHandlers,
             context,
-            config: handlerConfig,
+            config: currentHandlerConfig,
             cycleRepository,
           });
         } catch (error) {
-          await holdKnownFailure({ cycleRepository, context, error });
           throw error;
         }
         const preparedRequestDigest = requestDigest(context, request);
         try {
           context.assertLease?.();
         } catch (error) {
-          await holdKnownFailure({ cycleRepository, context, error });
           throw error;
         }
-        const guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, handlerConfig);
+        const guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, currentHandlerConfig);
         let reachedProviderCapability = false;
         const markProviderCapability = () => { reachedProviderCapability = true; };
         const leaseFencedAdapters = createLeaseFencedCapability(
@@ -1071,7 +1168,7 @@ export function createStageDriver({
             adapters: guardedAdapters(leaseFencedAdapters, guard),
             signerClient: guardedSignerClient(leaseFencedSignerClient, guard, nonceFence, standingAuthoritySigningGuard),
             policySignerClient: signerClient,
-            config: handlerConfig,
+            config: currentHandlerConfig,
             cycleRepository,
             evmNonceFence: nonceFence,
             context: Object.freeze({ ...context, request, requestDigest: preparedRequestDigest }),
@@ -1080,7 +1177,6 @@ export function createStageDriver({
         } catch (error) {
           // Direct payout writes each recipient boundary before it reaches a signer or RPC
           // transport. Its own durable state is therefore the recovery authority.
-          await holdKnownFailure({ cycleRepository, context, error });
           if (reachedProviderCapability) context.assertLease?.();
           throw error;
         }
@@ -1099,8 +1195,8 @@ export function createStageDriver({
       }
       if (usesBuiltInHandlers
         && FAIL_CLOSED_UNJOURNALED_STAGES.has(context.stage)
-        && integrationPendingFor(handlerConfig, context.stage)) {
-        throw new LiveModeIntegrationPendingError(context.stage, integrationPendingFor(handlerConfig, context.stage));
+        && integrationPendingFor(currentHandlerConfig, context.stage)) {
+        throw new LiveModeIntegrationPendingError(context.stage, integrationPendingFor(currentHandlerConfig, context.stage));
       }
       let request;
       try {
@@ -1108,12 +1204,11 @@ export function createStageDriver({
           handler,
           usesBuiltInHandlers,
           context,
-          config: handlerConfig,
+          config: currentHandlerConfig,
           adapters,
           cycleRepository,
         });
       } catch (error) {
-        await holdKnownFailure({ cycleRepository, context, error });
         throw error;
       }
       const preparedRequestDigest = requestDigest(context, request);
@@ -1133,18 +1228,16 @@ export function createStageDriver({
       try {
         context.assertLease?.();
       } catch (error) {
-        await holdKnownFailure({ cycleRepository, context, error });
         if (!chainJournal) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
         throw error;
       }
-      if (usesBuiltInHandlers && integrationPendingFor(handlerConfig, context.stage)) {
-        throw new LiveModeIntegrationPendingError(context.stage, integrationPendingFor(handlerConfig, context.stage));
+      if (usesBuiltInHandlers && integrationPendingFor(currentHandlerConfig, context.stage)) {
+        throw new LiveModeIntegrationPendingError(context.stage, integrationPendingFor(currentHandlerConfig, context.stage));
       }
       let guard;
       try {
-        guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, handlerConfig);
+        guard = await authorizeMutation(context, preparedRequestDigest, preflightAuthority, currentHandlerConfig);
       } catch (error) {
-        await holdKnownFailure({ cycleRepository, context, error });
         if (!chainJournal) await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
         throw error;
       }
@@ -1181,14 +1274,13 @@ export function createStageDriver({
           // payout receives this original reference only to verify that the facade delegates to a
           // transaction-policy signer; it never invokes this unguarded reference.
           policySignerClient: signerClient,
-          config: handlerConfig,
+          config: currentHandlerConfig,
           cycleRepository,
           context: Object.freeze({ ...context, request, requestDigest: preparedRequestDigest }),
           request,
           preflightAuthority,
         });
       } catch (error) {
-        await holdKnownFailure({ cycleRepository, context, error });
         if (!chainJournal) {
           if (reachedProviderCapability) {
             await cycleRepository.markStageAttemptSentUnknown(context.cycleId, context.stage);

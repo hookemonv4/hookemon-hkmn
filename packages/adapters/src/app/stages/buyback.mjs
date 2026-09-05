@@ -15,7 +15,7 @@ import {
 } from '../../signing/transaction-policy.mjs';
 import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
 import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../signing/signer-client.mjs';
-import { digest } from '../../../../runner/src/cycle/journal.mjs';
+import { canonicalJson, digest } from '../../../../runner/src/cycle/journal.mjs';
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import {
@@ -34,9 +34,12 @@ const INSURED_VALUE_UNITS = new Set(['whole-usd', 'atomic']);
 const WHOLE_USD_ATOMIC_SCALE = 1_000_000n;
 const MINIMUM_INSTANT_BUYBACK_PERCENT = 85;
 const MAXIMUM_INSTANT_BUYBACK_PERCENT = 94;
+const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
+const MINIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES = 5;
+const MAXIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES = 1440;
 const CUSTODY_BUCKETS = Object.freeze([
   'claimed', 'bridgeOut', 'bridgeIn', 'packCost', 'buybackProceeds', 'returnInput', 'returnReceived',
-  'refunds', 'residual', 'heldAssets', 'payoutLiability', 'dust', 'unattributed',
+  'refunds', 'residual', 'heldAssets', 'heldPositions', 'payoutLiability', 'dust', 'unattributed',
 ]);
 
 class EpicDecisionRefusal extends Error {
@@ -92,6 +95,23 @@ function openEvidence(open) {
     throw new Error('buyback requires a completed open stage with a card asset and memo');
   }
   return open.evidence;
+}
+
+function heldOpenPosition(open) {
+  const evidence = open?.status === 'COMPLETE' ? open.evidence : null;
+  if (!plainObject(evidence) || evidence.decision !== 'held') return null;
+  if (typeof evidence.memo !== 'string' || evidence.memo.length === 0 || evidence.expectedCardCount !== 1
+    || (evidence.mint !== null && (typeof evidence.mint !== 'string' || evidence.mint.length === 0))
+    || typeof evidence.terminalState !== 'string' || evidence.terminalState.length === 0
+    || typeof evidence.reason !== 'string' || evidence.reason.length === 0
+    || !plainObject(evidence.heldPosition)
+    || typeof evidence.heldPosition.positionId !== 'string' || evidence.heldPosition.positionId.length === 0
+    || typeof evidence.heldPosition.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(evidence.heldPosition.evidenceDigest)
+    || evidence.heldPosition.terminalState !== evidence.terminalState
+    || evidence.heldPosition.reason !== evidence.reason) {
+    throw new Error('buyback held open evidence does not bind the original held position');
+  }
+  return evidence;
 }
 
 function purchaseEvidence(purchase, open) {
@@ -172,15 +192,152 @@ function trustedSolanaDecodeOptions({ adapters, config }) {
   });
 }
 
-async function hold(cycleRepository, context, terminalState, evidence) {
-  if (typeof cycleRepository?.holdCycle !== 'function') throw new Error('buyback requires cycleRepository.holdCycle');
-  await cycleRepository.holdCycle(context.cycleId, terminalState, evidence);
+function heldPositionReason(terminalState) {
+  if (terminalState === 'HELD_UNAVAILABLE') return 'BUYBACK_UNAVAILABLE';
+  if (terminalState === 'HELD_OWNER_DECISION') return 'EPIC_THRESHOLD';
+  if (terminalState === 'HELD_UNRESOLVED') return 'SENT_UNKNOWN_DEADLINE';
+  return 'DATA_UNVERIFIED';
+}
+
+function optionalTypedAmount(value) {
+  try {
+    return assertTypedAmount(value, 'held buyback insured value');
+  } catch {
+    return null;
+  }
+}
+
+function heldPositionValueMicroUsdg(costMicroUsdg, insuredValue, config) {
+  const usdg = config?.moneyConfiguration?.assets?.usdg;
+  if (insuredValue !== null && sameAsset(insuredValue, usdg) && insuredValue.chainId === '4663' && insuredValue.decimals === 6) {
+    return insuredValue.amountAtomic;
+  }
+  return costMicroUsdg;
+}
+
+function heldPositionLedgerAsset(config) {
+  const asset = config?.moneyConfiguration?.assets?.usdg;
+  const typed = assertTypedAmount({ ...asset, amountAtomic: '0' }, 'held buyback USDG ledger asset');
+  if (typed.chainId !== '4663' || typed.decimals !== 6) {
+    throw new Error('held buyback USDG ledger asset must use the configured six-decimal USDG asset');
+  }
+  return { chainId: typed.chainId, assetId: typed.assetId, decimals: typed.decimals };
+}
+
+async function holdWholeCycleForUnattributableCard(cycleRepository, context, evidence) {
+  if (typeof cycleRepository?.holdCycle !== 'function') {
+    throw new Error('buyback cannot record an unattributable held card without cycle hold authority');
+  }
+  await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', evidence);
+  return null;
+}
+
+async function hold(cycleRepository, config, context, terminalState, evidence, reason = heldPositionReason(terminalState)) {
+  const memo = evidence?.memo;
+  const mint = evidence?.mint;
+  if (typeof memo !== 'string' || memo.length === 0 || typeof mint !== 'string' || mint.length === 0) {
+    return holdWholeCycleForUnattributableCard(cycleRepository, context, {
+      stage: 'buyback',
+      ...evidence,
+      reason: 'held card is missing its durable memo or card identity',
+    });
+  }
+  if (typeof cycleRepository?.recordHeldPosition !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
+    throw new Error('buyback requires held-position attribution capabilities');
+  }
+  const description = await cycleRepository.describeCycle(context.cycleId);
+  const costMicroUsdg = description?.releaseAmount;
+  const packId = config?.pack?.code;
+  if (typeof costMicroUsdg !== 'string' || !canonicalUnsignedInteger.test(costMicroUsdg)
+    || typeof packId !== 'string' || packId.length === 0) {
+    return holdWholeCycleForUnattributableCard(cycleRepository, context, {
+      stage: 'buyback',
+      ...evidence,
+      reason: 'held card is missing attributable cycle purchase evidence',
+    });
+  }
+  const insuredValue = optionalTypedAmount(evidence?.insuredValue ?? evidence?.epicDecision?.insuredValue ?? null);
+  const position = await cycleRepository.recordHeldPosition(context.cycleId, {
+    packId,
+    memo,
+    mint,
+    cardRef: mint,
+    costMicroUsdg,
+    valueMicroUsdg: heldPositionValueMicroUsdg(costMicroUsdg, insuredValue, config),
+    ledgerAsset: heldPositionLedgerAsset(config),
+    insuredValue,
+    reason,
+    terminalState,
+    evidence,
+  });
+  return {
+    memo,
+    expectedCardCount: 1,
+    mint,
+    decision: 'held',
+    terminalState,
+    reason,
+    heldPosition: {
+      positionId: position.positionId,
+      evidenceDigest: position.evidenceDigest,
+      terminalState: position.terminalState,
+      reason: position.reason,
+    },
+  };
+}
+
+function unresolvedCardDeadlineMinutes(config) {
+  const value = config?.unresolvedCardDeadlineMinutes ?? DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES;
+  if (!Number.isSafeInteger(value)
+    || value < MINIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES
+    || value > MAXIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES) {
+    throw new Error('buyback unresolvedCardDeadlineMinutes is invalid');
+  }
+  return value;
+}
+
+function sentUnknownPastDeadline(record, config, context) {
+  if (record?.attempt?.state !== 'SENT_UNKNOWN' || !Number.isSafeInteger(record.sentAtMs) || record.sentAtMs < 0) return false;
+  const nowMs = context?.nowMs ?? Date.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) throw new Error('buyback reconciliation clock is invalid');
+  return nowMs >= record.sentAtMs + unresolvedCardDeadlineMinutes(config) * 60_000;
+}
+
+async function holdPastDeadlineSentUnknown({ cycleRepository, config, context, record }) {
+  let open;
+  try {
+    open = openEvidence(await cycleRepository.readStage(context.cycleId, 'open'));
+  } catch {
+    return holdWholeCycleForUnattributableCard(cycleRepository, context, {
+      stage: 'buyback',
+      attempt: record?.attempt ?? null,
+      sentAtMs: record?.sentAtMs ?? null,
+      reason: 'sent-unknown buyback lacks an attributable opened card at the reconcile deadline',
+    });
+  }
+  return hold(cycleRepository, config, context, 'HELD_UNRESOLVED', {
+    stage: 'buyback',
+    memo: open.memo,
+    mint: open.mint,
+    attempt: record.attempt,
+    sentAtMs: record.sentAtMs,
+    deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+    reason: 'buyback provider mutation remained sent-unknown past the reconcile deadline',
+  }, 'SENT_UNKNOWN_DEADLINE');
 }
 
 function responseEvidence(record, requiredProceedsAccount = null) {
   const evidence = record?.responseEvidence;
-  if (!plainObject(evidence) || typeof evidence.memo !== 'string' || typeof evidence.mint !== 'string'
-    || typeof evidence.signature !== 'string' || !plainObject(evidence.quote) || !plainObject(evidence.refundAmount)) return null;
+  if (!plainObject(evidence) || typeof evidence.memo !== 'string') return null;
+  if (evidence.decision === 'held') {
+    if ((evidence.mint !== null && typeof evidence.mint !== 'string') || evidence.expectedCardCount !== 1
+      || typeof evidence.terminalState !== 'string' || evidence.terminalState.length === 0
+      || typeof evidence.reason !== 'string' || evidence.reason.length === 0
+      || !plainObject(evidence.heldPosition)) return null;
+    return evidence;
+  }
+  if (typeof evidence.mint !== 'string') return null;
+  if (typeof evidence.signature !== 'string' || !plainObject(evidence.quote) || !plainObject(evidence.refundAmount)) return null;
   if (requiredProceedsAccount !== null && evidence.proceedsAccount !== requiredProceedsAccount) return null;
   try {
     const quote = typedBuybackAmount(evidence.quote, 'recorded buyback quote');
@@ -396,6 +553,53 @@ async function readCompletedSellDecision({ cycleRepository, context, open }) {
   return completedSellDecision({ stage, open, cycleId: context.cycleId });
 }
 
+function heldEpicPosition(stage, open) {
+  const evidence = stage?.status === 'COMPLETE' ? stage.evidence : null;
+  if (!plainObject(evidence) || evidence.decision !== 'held') return null;
+  if (evidence.memo !== open.memo || evidence.mint !== open.mint
+    || typeof evidence.terminalState !== 'string' || evidence.terminalState.length === 0
+    || typeof evidence.reason !== 'string' || evidence.reason.length === 0
+    || !plainObject(evidence.heldPosition)
+    || typeof evidence.heldPosition.positionId !== 'string' || evidence.heldPosition.positionId.length === 0
+    || typeof evidence.heldPosition.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(evidence.heldPosition.evidenceDigest)) {
+    throw new Error('buyback held epic evidence does not bind the opened card and position');
+  }
+  return evidence;
+}
+
+function heldBuybackRequest(open, heldPosition) {
+  return {
+    provider: 'collector-crypt',
+    operation: 'buyback',
+    memo: open.memo,
+    mint: open.mint,
+    decision: 'held',
+    terminalState: heldPosition.terminalState,
+    reason: heldPosition.reason,
+    heldPosition: heldPosition.heldPosition,
+  };
+}
+
+function heldBuybackEvidence(heldPosition) {
+  return {
+    memo: heldPosition.memo,
+    expectedCardCount: heldPosition.expectedCardCount,
+    mint: heldPosition.mint,
+    decision: 'held',
+    terminalState: heldPosition.terminalState,
+    reason: heldPosition.reason,
+    heldPosition: heldPosition.heldPosition,
+  };
+}
+
+function assertHeldBuybackRequest(prepared, open, heldPosition) {
+  const expected = heldBuybackRequest(open, heldPosition);
+  if (canonicalJson(prepared) !== canonicalJson(expected)) {
+    throw new Error('buyback prepared held request does not bind the completed epic held position');
+  }
+  return expected;
+}
+
 function assertPreparedBuybackRequest(prepared, decision) {
   const baseEvidence = { memo: decision.memo, mint: decision.mint };
   if (!plainObject(prepared) || prepared.provider !== 'collector-crypt' || prepared.operation !== 'buyback'
@@ -489,10 +693,15 @@ async function recordProceedsLedger(cycleRepository, cycleId, asset, proceeds) {
 
 export async function prepareBuybackRequest({ cycleRepository, context }) {
   const open = await cycleRepository.readStage(context.cycleId, 'open');
+  const heldOpen = heldOpenPosition(open);
+  if (heldOpen !== null) return heldBuybackRequest(heldOpen, heldOpen);
   const evidence = openEvidence(open);
+  const epicStage = await cycleRepository.readStage(context.cycleId, 'epic-gate');
+  const heldPosition = heldEpicPosition(epicStage, evidence);
+  if (heldPosition !== null) return heldBuybackRequest(evidence, heldPosition);
   let epicDecision = null;
   try {
-    epicDecision = await readCompletedSellDecision({ cycleRepository, context, open: evidence });
+    epicDecision = completedSellDecision({ stage: epicStage, open: evidence, cycleId: context.cycleId });
   } catch (error) {
     if (!(error instanceof EpicDecisionRefusal)) throw error;
   }
@@ -510,10 +719,22 @@ export async function probeBuyback({ adapters, config, cycleRepository, context 
 
 export async function mutateBuyback({ liveMode, adapters, config, signerClient, cycleRepository, context, request }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateBuyback reached without liveMode');
+  let prepared = request ?? context?.request ?? await prepareBuybackRequest({ cycleRepository, context });
+  if (prepared?.decision === 'held') {
+    const openStage = await cycleRepository.readStage(context.cycleId, 'open');
+    const heldOpen = heldOpenPosition(openStage);
+    if (heldOpen !== null) {
+      assertHeldBuybackRequest(prepared, heldOpen, heldOpen);
+      return heldBuybackEvidence(heldOpen);
+    }
+    const open = openEvidence(openStage);
+    const heldPosition = heldEpicPosition(await cycleRepository.readStage(context.cycleId, 'epic-gate'), open);
+    if (heldPosition === null) throw new Error('buyback prepared held request has no completed held epic position');
+    assertHeldBuybackRequest(prepared, open, heldPosition);
+    return heldBuybackEvidence(heldPosition);
+  }
   if (!adapters?.collectorCrypt) throw new Error('buyback requires a configured collector-crypt client');
-  let prepared;
   try {
-    prepared = request ?? context?.request ?? await prepareBuybackRequest({ cycleRepository, context });
     const asset = configuredSettlementAsset(config);
     const money = assertSolanaSignerMoneyConfiguration({ config, asset, stage: 'buyback' });
     const open = openEvidence(await cycleRepository.readStage(context.cycleId, 'open'));
@@ -530,8 +751,9 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
     }
     const available = await adapters.collectorCrypt.getBuybackAvailable({ nft: prepared.mint, wallet: config.accounts.solana });
     if (!available.available) {
-      await hold(cycleRepository, context, 'HELD_UNAVAILABLE', { stage: 'buyback', memo: prepared.memo, mint: prepared.mint, reason: 'buyback is unavailable' });
-      return { memo: prepared.memo, mint: prepared.mint, decision: 'held', terminalState: 'HELD_UNAVAILABLE' };
+      return hold(cycleRepository, config, context, 'HELD_UNAVAILABLE', {
+        stage: 'buyback', memo: prepared.memo, mint: prepared.mint, insuredValue: epicDecision.insuredValue, reason: 'buyback is unavailable',
+      });
     }
     let quote;
     try {
@@ -548,12 +770,14 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
     try {
       refundAmount = typedBuybackAmount(built.refundAmount, 'buyback refund amount');
     } catch {
-      await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', memo: prepared.memo, mint: prepared.mint, quote, built, reason: 'provider buyback response has an invalid refund amount' });
-      return { memo: prepared.memo, mint: prepared.mint, decision: 'held', terminalState: 'HELD_DATA_UNVERIFIED' };
+      return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+        stage: 'buyback', memo: prepared.memo, mint: prepared.mint, quote, built, insuredValue: epicDecision.insuredValue, reason: 'provider buyback response has an invalid refund amount',
+      });
     }
     if (built.memo !== prepared.memo || !sameAmount(refundAmount, quote)) {
-      await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', memo: prepared.memo, mint: prepared.mint, quote, built, reason: 'provider buyback response did not bind the quote and memo' });
-      return { memo: prepared.memo, mint: prepared.mint, decision: 'held', terminalState: 'HELD_DATA_UNVERIFIED' };
+      return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+        stage: 'buyback', memo: prepared.memo, mint: prepared.mint, quote, built, insuredValue: epicDecision.insuredValue, reason: 'provider buyback response did not bind the quote and memo',
+      });
     }
     const { signer, signed } = await decodeAndSign({
       transaction: built.serializedTransaction,
@@ -585,8 +809,7 @@ export async function mutateBuyback({ liveMode, adapters, config, signerClient, 
     if (!(error instanceof EpicDecisionRefusal)) throw error;
     const memo = error.evidence.memo ?? prepared?.memo;
     const mint = error.evidence.mint ?? prepared?.mint;
-    await hold(cycleRepository, context, error.terminalState, error.evidence);
-    return { memo, mint, decision: 'held', terminalState: error.terminalState };
+    return hold(cycleRepository, config, context, error.terminalState, { ...error.evidence, memo, mint });
   }
 }
 
@@ -598,12 +821,14 @@ async function reconcileBuybackEvidence({ adapters, config, cycleRepository, con
     quote = typedBuybackAmount(evidence.quote, 'recorded buyback quote');
     refundAmount = typedBuybackAmount(evidence.refundAmount, 'recorded buyback refund amount');
   } catch {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, reason: 'recorded buyback amount is invalid' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, reason: 'recorded buyback amount is invalid',
+    });
   }
   if (!sameAsset(quote, asset) || !sameAmount(quote, refundAmount)) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, reason: 'recorded buyback amounts do not bind the settlement quote' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, reason: 'recorded buyback amounts do not bind the settlement quote',
+    });
   }
   let check = recordedCheck;
   if (check === undefined) {
@@ -615,31 +840,36 @@ async function reconcileBuybackEvidence({ adapters, config, cycleRepository, con
     }
   }
   if (!plainObject(check) || typeof check.exists !== 'boolean') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, check, reason: 'buyback check response is invalid' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, check, reason: 'buyback check response is invalid',
+    });
   }
   if (!check.exists) return null;
   if (typeof check.status !== 'string') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, check, reason: 'buyback check status is invalid' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, check, reason: 'buyback check status is invalid',
+    });
   }
   if (check.status === '') return null;
   if (check.status !== 'complete') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, check, reason: 'buyback check status is not a documented pending or complete value' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, check, reason: 'buyback check status is not a documented pending or complete value',
+    });
   }
   let checkedQuote;
   try {
     checkedQuote = typedAmount(asset, check.buybackAmount, 'completed buyback amount');
   } catch {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, check, reason: 'completed buyback amount is invalid' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, check, reason: 'completed buyback amount is invalid',
+    });
   }
   if (check.playerWallet !== config.accounts.solana || check.nft !== evidence.mint
     || check.transactionSignature !== evidence.signature || typeof check.createdAt !== 'string' || check.createdAt.length === 0
     || !sameAmount(checkedQuote, quote)) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, check, checkedQuote, reason: 'completed buyback check does not bind the memo, signature, card, and quote' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, check, checkedQuote, reason: 'completed buyback check does not bind the memo, signature, card, and quote',
+    });
   }
   let status;
   try {
@@ -649,8 +879,9 @@ async function reconcileBuybackEvidence({ adapters, config, cycleRepository, con
   }
   if (status === null) return null;
   if (status.err) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, signatureStatus: status });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, signatureStatus: status,
+    });
   }
   const open = await cycleRepository.readStage(context.cycleId, 'open');
   const assetKind = open.evidence?.assetKind ?? 'spl';
@@ -665,8 +896,9 @@ async function reconcileBuybackEvidence({ adapters, config, cycleRepository, con
   const proceedsEntry = exactPositiveDeltaEntry(entries, config.accounts.solana, asset, proceedsAccount);
   const proceeds = proceedsEntry?.proceeds ?? null;
   if (!leftOperator || proceeds === null || !sameAmount(proceeds, quote)) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'buyback', ...evidence, leftOperator, proceeds, reason: 'finalized card and settlement deltas did not match' });
-    return null;
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...evidence, leftOperator, proceeds, reason: 'finalized card and settlement deltas did not match',
+    });
   }
   await recordProceedsLedger(cycleRepository, context.cycleId, asset, proceeds);
   if (proceedsAccount === null) return { ...evidence, proceeds };
@@ -684,26 +916,27 @@ async function reconcileBuybackEvidence({ adapters, config, cycleRepository, con
 
 async function reconcileSentUnknownBuyback({ adapters, config, cycleRepository, context, record, proceedsAccount }) {
   if (record?.attempt?.state !== 'SENT_UNKNOWN') return null;
+  if (sentUnknownPastDeadline(record, config, context)) {
+    return holdPastDeadlineSentUnknown({ cycleRepository, config, context, record });
+  }
   let request;
   try {
     request = await readSentUnknownBuybackRequest({ cycleRepository, context });
   } catch (error) {
     const terminalState = error instanceof EpicDecisionRefusal ? error.terminalState : 'HELD_DATA_UNVERIFIED';
-    await hold(cycleRepository, context, terminalState, {
+    return hold(cycleRepository, config, context, terminalState, {
       stage: 'buyback',
       reason: 'sent-unknown buyback does not have a complete durable purchase, open, and sell decision context',
       detail: error.message,
     });
-    return null;
   }
   if (!requestMatchesSentUnknownAttempt({ attempt: record.attempt, context, request })) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
       stage: 'buyback',
       memo: request.memo,
       mint: request.mint,
       reason: 'sent-unknown buyback attempt does not bind the completed durable request',
     });
-    return null;
   }
   if (typeof adapters.collectorCrypt.getBuybackCheck !== 'function') return null;
   let check;
@@ -713,36 +946,33 @@ async function reconcileSentUnknownBuyback({ adapters, config, cycleRepository, 
     return null;
   }
   if (!plainObject(check) || typeof check.exists !== 'boolean') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
       stage: 'buyback',
       memo: request.memo,
       mint: request.mint,
       check,
       reason: 'sent-unknown buyback check response is invalid',
     });
-    return null;
   }
   if (!check.exists) return null;
   if (typeof check.status !== 'string') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
       stage: 'buyback',
       memo: request.memo,
       mint: request.mint,
       check,
       reason: 'sent-unknown buyback check status is invalid',
     });
-    return null;
   }
   if (check.status === '') return null;
   if (check.status !== 'complete') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
       stage: 'buyback',
       memo: request.memo,
       mint: request.mint,
       check,
       reason: 'sent-unknown buyback check status is not a documented pending or complete value',
     });
-    return null;
   }
   const evidence = responseEvidence({
     responseEvidence: {
@@ -755,14 +985,13 @@ async function reconcileSentUnknownBuyback({ adapters, config, cycleRepository, 
     },
   }, proceedsAccount);
   if (evidence === null) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
+    return hold(cycleRepository, config, context, 'HELD_DATA_UNVERIFIED', {
       stage: 'buyback',
       memo: request.memo,
       mint: request.mint,
       check,
       reason: 'completed sent-unknown buyback check cannot produce canonical reconciliation evidence',
     });
-    return null;
   }
   return reconcileBuybackEvidence({ adapters, config, cycleRepository, context, evidence, proceedsAccount, check });
 }
@@ -771,6 +1000,10 @@ export async function reconcileLiveBuyback({ adapters, config, cycleRepository, 
   const proceedsAccount = dedicatedProceedsAccount(config);
   const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'buyback');
   const evidence = responseEvidence(record, proceedsAccount);
+  if (evidence?.decision === 'held') return evidence;
+  if (sentUnknownPastDeadline(record, config, context)) {
+    return holdPastDeadlineSentUnknown({ cycleRepository, config, context, record });
+  }
   if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
   if (evidence === null) {
     return reconcileSentUnknownBuyback({ adapters, config, cycleRepository, context, record, proceedsAccount });

@@ -65,6 +65,11 @@ const PLAN_FIELDS = [
   'payableRecipientCount',
   'planDigest',
 ];
+const HELD_POSITION_EXCLUSIONS_SCHEMA = 'hookemon.direct-payout-held-position-exclusions.v1';
+const HELD_POSITION_EXCLUSIONS_FIELDS = ['schema', 'cycleId', 'count', 'positions', 'evidenceDigest'];
+const HELD_POSITION_EXCLUSION_FIELDS = ['positionId', 'evidenceDigest', 'reason', 'terminalState'];
+const HELD_POSITION_ID = /^held:[0-9a-f]{64}$/;
+const HELD_POSITION_REASON = /^[A-Z][A-Z0-9_]{2,63}$/;
 const ERC20_TRANSFER_ABI = [{
   type: 'function',
   name: 'transfer',
@@ -374,6 +379,99 @@ function assertPlan(value) {
   };
 }
 
+function heldPositionExclusionsDigest({ cycleId, count, positions }) {
+  return canonicalDigest({
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count,
+    positions,
+  });
+}
+
+function emptyHeldPositionExclusions(cycleId) {
+  return {
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count: 0,
+    positions: [],
+    evidenceDigest: heldPositionExclusionsDigest({ cycleId, count: 0, positions: [] }),
+  };
+}
+
+function normalizeHeldPositionExclusions(value, cycleId) {
+  if (value === undefined || value === null) return emptyHeldPositionExclusions(cycleId);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail('direct payout held position exclusions are invalid');
+  }
+  if (Object.keys(value).length !== HELD_POSITION_EXCLUSIONS_FIELDS.length
+    || !HELD_POSITION_EXCLUSIONS_FIELDS.every(field => Object.hasOwn(value, field))) {
+    fail('direct payout held position exclusions must use the exact schema');
+  }
+  if (value.schema !== HELD_POSITION_EXCLUSIONS_SCHEMA || value.cycleId !== cycleId) {
+    fail('direct payout held position exclusions do not bind the payout cycle');
+  }
+  if (!Number.isSafeInteger(value.count) || value.count < 0 || !Array.isArray(value.positions)
+    || value.count !== value.positions.length) {
+    fail('direct payout held position exclusion count is invalid');
+  }
+  const positions = value.positions.map((position, index) => {
+    if (!position || typeof position !== 'object' || Array.isArray(position)
+      || Object.keys(position).length !== HELD_POSITION_EXCLUSION_FIELDS.length
+      || !HELD_POSITION_EXCLUSION_FIELDS.every(field => Object.hasOwn(position, field))) {
+      fail(`direct payout held position exclusion ${index} must use the exact schema`);
+    }
+    if (!HELD_POSITION_ID.test(position.positionId)
+      || !HELD_POSITION_REASON.test(position.reason)
+      || !HELD_POSITION_REASON.test(position.terminalState)) {
+      fail(`direct payout held position exclusion ${index} identity is invalid`);
+    }
+    return {
+      positionId: position.positionId,
+      evidenceDigest: assertDigest(position.evidenceDigest, `direct payout held position exclusion ${index} evidence digest`),
+      reason: position.reason,
+      terminalState: position.terminalState,
+    };
+  });
+  for (let index = 1; index < positions.length; index += 1) {
+    if (positions[index - 1].positionId >= positions[index].positionId) {
+      fail('direct payout held position exclusions must be unique and sorted by positionId');
+    }
+  }
+  const evidenceDigest = heldPositionExclusionsDigest({ cycleId, count: value.count, positions });
+  if (value.evidenceDigest !== evidenceDigest) {
+    fail('direct payout held position exclusions digest is invalid');
+  }
+  return {
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count: value.count,
+    positions,
+    evidenceDigest,
+  };
+}
+
+function heldPositionExclusionsForCycle(cycleId, cycle) {
+  const heldPositions = cycle?.heldPositions;
+  if (heldPositions === undefined || heldPositions === null) return emptyHeldPositionExclusions(cycleId);
+  if (!(heldPositions instanceof Map)) fail('direct payout cycle held positions are invalid');
+  const positions = [...heldPositions.values()]
+    .filter(position => position?.resolution === null)
+    .map(position => ({
+      positionId: position.positionId,
+      evidenceDigest: position.evidenceDigest,
+      reason: position.reason,
+      terminalState: position.terminalState,
+    }))
+    .sort((left, right) => left.positionId.localeCompare(right.positionId));
+  return normalizeHeldPositionExclusions({
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count: positions.length,
+    positions,
+    evidenceDigest: heldPositionExclusionsDigest({ cycleId, count: positions.length, positions }),
+  }, cycleId);
+}
+
 function directTransferCalldata(recipient, amountAtomic) {
   return encodeFunctionData({
     abi: ERC20_TRANSFER_ABI,
@@ -419,6 +517,7 @@ function normalizedState(stateValue) {
   if (typeof state.manifestFrozen !== 'boolean' || typeof state.feasibilityChecked !== 'boolean') {
     fail('direct payout state flags are invalid');
   }
+  state.heldPositionExclusions = normalizeHeldPositionExclusions(state.heldPositionExclusions, state.cycleId);
   state.distributablePool = assertUsdAmount(state.distributablePool, 'direct payout state distributable pool');
   state.dust = assertUsdAmount(state.dust, 'direct payout state dust');
   if (state.distributablePool.amountAtomic !== planInfo.distributablePool.amountAtomic
@@ -997,7 +1096,14 @@ export async function createDirectPayoutPolicySigner({ signerClient, state, reci
  * its recipient records as one durable stage value, so recovery never reconstructs a nonce or
  * signed payload from transient process state.
  */
-export function createDirectPayoutState({ plan, operations, usdgAddress, firstNonce, gasPriceWei }) {
+export function createDirectPayoutState({
+  plan,
+  operations,
+  usdgAddress,
+  firstNonce,
+  gasPriceWei,
+  heldPositionExclusions = undefined,
+}) {
   const { plan: sourcePlan, distributablePool, dust, allocations } = assertPlan(plan);
   const operationAddress = assertAddress(operations, 'Operations address');
   const tokenAddress = assertAddress(usdgAddress, 'USDG address');
@@ -1013,6 +1119,7 @@ export function createDirectPayoutState({ plan, operations, usdgAddress, firstNo
   if (BigInt(selectedGasPrice) > BigInt(sourcePlan.feasibility.maxGasPriceWei)) {
     fail('initial payout gasPriceWei exceeds the frozen gas-price cap');
   }
+  const exclusions = normalizeHeldPositionExclusions(heldPositionExclusions, sourcePlan.cycleId);
   const recipients = [];
   for (const allocation of allocations) {
     if (allocation.amount.amountAtomic === '0') continue;
@@ -1046,6 +1153,7 @@ export function createDirectPayoutState({ plan, operations, usdgAddress, firstNo
     usdgAddress: tokenAddress,
     manifestFrozen: false,
     feasibilityChecked: false,
+    heldPositionExclusions: exclusions,
     distributablePool,
     dust,
     firstNonce: initialNonce,
@@ -1056,15 +1164,31 @@ export function createDirectPayoutState({ plan, operations, usdgAddress, firstNo
   };
 }
 
-export async function initializeDirectPayout({ payoutStore, plan, operations, usdgAddress, firstNonce, gasPriceWei }) {
-  const state = createDirectPayoutState({ plan, operations, usdgAddress, firstNonce, gasPriceWei });
+export async function initializeDirectPayout({
+  payoutStore,
+  plan,
+  operations,
+  usdgAddress,
+  firstNonce,
+  gasPriceWei,
+  heldPositionExclusions = undefined,
+}) {
+  const state = createDirectPayoutState({
+    plan,
+    operations,
+    usdgAddress,
+    firstNonce,
+    gasPriceWei,
+    heldPositionExclusions,
+  });
   if (!payoutStore || typeof payoutStore.load !== 'function') fail('direct payout requires a durable payoutStore.load()');
   const existing = await payoutStore.load();
   if (existing !== null && existing !== undefined) {
     const recovered = normalizedState(existing);
     if (recovered.planDigest !== state.planDigest
       || recovered.operations !== state.operations
-      || recovered.usdgAddress !== state.usdgAddress) {
+      || recovered.usdgAddress !== state.usdgAddress
+      || recovered.heldPositionExclusions.evidenceDigest !== state.heldPositionExclusions.evidenceDigest) {
       fail('direct payout refuses to replace an existing immutable payout state');
     }
     return recovered;
@@ -1871,7 +1995,7 @@ function returnBinding(returnEvidence, config, cycleId) {
   };
 }
 
-function payoutRequestForPlan(planValue) {
+function payoutRequestForPlan(planValue, heldPositionExclusions = undefined) {
   const plan = assertPlan(planValue).plan;
   return Object.freeze({
     schema: 'hookemon.direct-payout-request.v1',
@@ -1879,6 +2003,7 @@ function payoutRequestForPlan(planValue) {
     planDigest: plan.planDigest,
     recipientCount: plan.payableRecipientCount,
     distributablePool: plan.distributablePool,
+    heldPositionExclusions: normalizeHeldPositionExclusions(heldPositionExclusions, plan.cycleId),
     plan,
   });
 }
@@ -1919,9 +2044,12 @@ function priorDustFromConsumption(value) {
 /** Builds a frozen direct-payout request for the coordinator-owned stage-driver integration. */
 export async function preparePayoutRequest({ config, cycleRepository, context, payoutStore = null }) {
   if (config?.payout?.legacyVault === true) fail('legacy payout mode is explicitly disabled for Operations EOA payouts');
-  const [snapshot, returned] = await Promise.all([
+  const [snapshot, returned, cycle] = await Promise.all([
     cycleRepository.readStage(context.cycleId, 'eligibility-snapshot'),
     cycleRepository.readStage(context.cycleId, 'return'),
+    typeof cycleRepository.describeCycle === 'function'
+      ? cycleRepository.describeCycle(context.cycleId)
+      : Promise.resolve(null),
   ]);
   if (snapshot?.status !== 'COMPLETE' || !snapshot.evidence) fail('payout requires a completed frozen eligibility snapshot');
   if (returned?.status !== 'COMPLETE' || !returned.evidence) fail('payout requires a completed finalized return');
@@ -1935,9 +2063,12 @@ export async function preparePayoutRequest({ config, cycleRepository, context, p
       // Once a plan has consumed predecessor dust, retries must use the durable plan rather than
       // querying dust again. Its digest remains the mutation-policy request identity until payout
       // reaches terminal conservation.
-      return payoutRequestForPlan(state.plan);
+      return payoutRequestForPlan(state.plan, state.heldPositionExclusions);
     }
   }
+  // Held-card exclusions are audit evidence frozen with this payout request. A later reconciliation
+  // may close a position, but it cannot alter the already-attributed main-cycle payout.
+  const heldPositionExclusions = heldPositionExclusionsForCycle(context.cycleId, cycle);
   if (typeof cycleRepository.readPayoutDust !== 'function') {
     fail('payout requires a durable prior-dust repository reader');
   }
@@ -1969,7 +2100,7 @@ export async function preparePayoutRequest({ config, cycleRepository, context, p
   if (consumed !== null && plan.planDigest !== priorDust.planDigest) {
     fail('payout consumed-dust recovery record does not match the reconstructed immutable plan');
   }
-  return payoutRequestForPlan(plan);
+  return payoutRequestForPlan(plan, heldPositionExclusions);
 }
 
 function usesLegacyVaultPayout(config) {
@@ -2240,6 +2371,7 @@ function payoutTerminalEvidence(stateValue) {
       refusalEvidence: attempt.refusalEvidence,
     })),
     quarantine: state.quarantine,
+    heldPositionExclusions: state.heldPositionExclusions,
   };
 }
 
@@ -2255,6 +2387,7 @@ function payoutCustodyLedger(cycleId, amount) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -2320,11 +2453,23 @@ async function recoverPagedPayoutInitialization({ cycleRepository, cycleId, plan
   }
 }
 
+function frozenHeldPositionExclusions({ cycleId, requested }) {
+  return normalizeHeldPositionExclusions(requested, cycleId);
+}
+
 async function ensureDirectPayoutState({ cycleRepository, context, request, adapters, config, evmNonceFence = null }) {
   const payoutStore = createCycleRepositoryPayoutStore({ cycleRepository, cycleId: context.cycleId });
+  const preparedPlan = assertPlan(request.plan);
+  const heldPositionExclusions = frozenHeldPositionExclusions({
+    cycleId: context.cycleId,
+    requested: request.heldPositionExclusions,
+  });
   const existing = await payoutStore.load();
   if (existing !== null && existing !== undefined) {
     assertPayoutManifestUnchanged(existing, request.plan);
+    if (normalizedState(existing).heldPositionExclusions.evidenceDigest !== heldPositionExclusions.evidenceDigest) {
+      fail('direct payout state held position exclusions do not match the prepared request');
+    }
     await recoverPagedPayoutInitialization({
       cycleRepository,
       cycleId: context.cycleId,
@@ -2344,20 +2489,25 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
   if (!pagedInitialization && !legacyTestInitialization) {
     fail('direct payout production execution requires atomic prior-dust consumption and payout-state storage');
   }
-  const client = adapters?.robinhood?.client;
-  if (!client || typeof client.getTransactionCount !== 'function') {
-    fail('direct payout requires getTransactionCount before initializing recipient state');
-  }
-  await evmNonceFence?.();
-  const firstNonce = normalizeNonce(
-    await client.getTransactionCount({ address: config.accounts.evm, blockTag: 'pending' }),
-    'initial direct payout nonce',
-  );
+  const firstNonce = preparedPlan.plan.payableRecipientCount === 0
+    ? '0'
+    : await (async () => {
+      const client = adapters?.robinhood?.client;
+      if (!client || typeof client.getTransactionCount !== 'function') {
+        fail('direct payout requires getTransactionCount before initializing recipient state');
+      }
+      await evmNonceFence?.();
+      return normalizeNonce(
+        await client.getTransactionCount({ address: config.accounts.evm, blockTag: 'pending' }),
+        'initial direct payout nonce',
+      );
+    })();
   const initialState = createDirectPayoutState({
     plan: request.plan,
     operations: config.accounts.evm,
     usdgAddress: config.contracts.usdg,
     firstNonce,
+    heldPositionExclusions,
   });
   const initialization = {
     source: request.plan.previousDustSource,
@@ -2561,6 +2711,7 @@ export async function mutatePayout(args) {
     || typeof context.fencingToken !== 'string' || context.fencingToken.length === 0) {
     fail('direct payout production execution requires a request digest and persisted fencing token');
   }
+  const noPayableRecipients = assertPlan(request.plan).plan.payableRecipientCount === 0;
   // Bind every direct-payout signature to a policy decoded from its durable recipient attempt.
   // The factory receives the stage driver's guarded facade, never an unguarded keychain or
   // external-module client, so it cannot bypass standing-authority or lease checks.
@@ -2573,6 +2724,19 @@ export async function mutatePayout(args) {
     });
     return composed.policySigner;
   };
+  if (noPayableRecipients) {
+    const { state } = await ensureDirectPayoutState({
+      cycleRepository,
+      context,
+      request,
+      adapters,
+      config,
+    });
+    if (!isDirectPayoutComplete(state)) {
+      fail('direct payout without payable recipients is not terminal');
+    }
+    return finalizeDirectPayoutResult({ cycleRepository, state });
+  }
   await reserveDirectPayoutWalletNonce({ cycleRepository, context, config });
   const walletNonceFence = async () => {
     await assertDirectPayoutWalletNonce({ cycleRepository, context, config });
@@ -2620,11 +2784,13 @@ export async function reconcileLivePayout(args = {}) {
     if (!isDirectPayoutComplete(state)) return null;
     // A crash after the final recipient boundary but before mutatePayout() returns must still
     // write successor dust before the stage can be reconciled and completed.
-    await recoverDirectPayoutWalletNonce({
-      cycleRepository: args.cycleRepository,
-      context: args.context,
-      config: args.config,
-    });
+    if (state.recipients.length > 0) {
+      await recoverDirectPayoutWalletNonce({
+        cycleRepository: args.cycleRepository,
+        context: args.context,
+        config: args.config,
+      });
+    }
     const evidence = await finalizeDirectPayoutResult({ cycleRepository: args.cycleRepository, state });
     return evidence;
   } catch (error) {

@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson } from '../../src/cycle/journal.mjs';
-import {
-  compileDirectPayoutPlan as compilePayoutPlan,
+import * as payoutPlan from '../../src/distribution/payout-plan.mjs';
+
+const {
+  compileSupplementaryDirectPayoutPlan,
+  compileDirectPayoutPlan: compilePayoutPlan,
   createUsdgPayoutAmount,
   directPayoutPlanDigest,
-} from '../../src/distribution/payout-plan.mjs';
+  supplementaryPayoutPlanDigest,
+} = payoutPlan;
 
 const TOKEN = `0x${'a'.repeat(40)}`;
 const RETURN_BINDING = Object.freeze({
@@ -399,6 +403,55 @@ test('keeps the plan digest stable after a canonical persistence reload', () => 
   const reloadedPlan = JSON.parse(canonicalJson(plan));
 
   assert.equal(directPayoutPlanDigest(reloadedPlan), plan.planDigest);
+});
+
+test('compiles a deterministic supplementary payout plan from the original frozen eligibility snapshot', () => {
+  const cycleId = 'cycle-supplementary';
+  const manifest = eligibilityManifest([holder(0, 2), holder(1, 1)], { cycleId });
+  const input = {
+    cycleId,
+    supplementaryIndex: 2,
+    eligibilityManifest: manifest,
+    finalizedReturn: usdg('7'),
+    previousDust: usdg('0'),
+    returnBinding: RETURN_BINDING,
+  };
+
+  const first = compileSupplementaryDirectPayoutPlan(input);
+  const second = compileSupplementaryDirectPayoutPlan({ ...input, eligibilityManifest: JSON.parse(canonicalJson(manifest)) });
+  manifest.entries[0].hkmnBalance.amountAtomic = '999';
+
+  assert.equal(first.schema, 'hookemon.supplementary-direct-payout-plan.v1');
+  assert.equal(first.cycleId, cycleId);
+  assert.equal(first.manifestId, 'cycle-supplementary:supplementary:2');
+  assert.equal(first.supplementaryIndex, 2);
+  assert.equal(first.payoutPlan.cycleId, cycleId);
+  assert.equal(first.payoutPlan.eligibility.holderSnapshotDigest, `sha256:${'d'.repeat(64)}`);
+  assert.deepEqual(first.payoutPlan.allocations.map(({ recipient, amount }) => [recipient, amount.amountAtomic]), [
+    [address(0), '4'],
+    [address(1), '2'],
+  ]);
+  assert.equal(first.supplementaryPlanDigest, second.supplementaryPlanDigest);
+  assert.equal(supplementaryPayoutPlanDigest(JSON.parse(canonicalJson(first))), first.supplementaryPlanDigest);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.payoutPlan), true);
+});
+
+test('refuses an invalid supplementary manifest ordinal', () => {
+  const input = {
+    cycleId: 'cycle-supplementary-ordinal',
+    eligibilityManifest: eligibilityManifest([holder(0, 1)], { cycleId: 'cycle-supplementary-ordinal' }),
+    finalizedReturn: usdg('1'),
+    previousDust: usdg('0'),
+    returnBinding: RETURN_BINDING,
+  };
+
+  for (const supplementaryIndex of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => compileSupplementaryDirectPayoutPlan({ ...input, supplementaryIndex }),
+      /supplementary.*index/i,
+    );
+  }
 });
 
 test('refuses a frozen feasibility envelope that cannot support the payout', () => {

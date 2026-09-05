@@ -41,7 +41,7 @@ const UPDATE_CONFIGURATION_KEYS = new Set([
   'intervalMinutes', 'allowedPackIds', 'requestedOrders', 'maxBoostersPerCycle',
   'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg', 'liveMode',
   'maxCyclesPerDay', 'perCycleCapMicroUsdg', 'lossCapMicroUsdg', 'maxOutstandingCustodyMicroUsdg',
-  'manualApprovalCycles',
+  'manualApprovalCycles', 'maxHeldPositions', 'maxHeldValueMicroUsdg', 'unresolvedCardDeadlineMinutes',
 ]);
 const runnerCycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/;
 const packCodePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
@@ -88,17 +88,17 @@ function readCommand(value) {
     return { type, cycleId: source.cycleId, cycleDigest: source.cycleDigest };
   }
   if (type === 'held-owner-decision') {
-    exactKeys(source, new Set(['type', 'cycleId', 'heldEvidenceDigest', 'expectedCycleRevision', 'choice']), invalid);
-    requiredKeys(source, ['type', 'cycleId', 'heldEvidenceDigest', 'expectedCycleRevision', 'choice'], invalid);
-    if (typeof source.cycleId !== 'string' || !runnerCycleIdPattern.test(source.cycleId)) invalid();
+    exactKeys(source, new Set(['type', 'positionId', 'heldEvidenceDigest', 'expectedPositionRevision', 'choice']), invalid);
+    requiredKeys(source, ['type', 'positionId', 'heldEvidenceDigest', 'expectedPositionRevision', 'choice'], invalid);
+    if (typeof source.positionId !== 'string' || !runnerCycleIdPattern.test(source.positionId)) invalid();
     if (typeof source.heldEvidenceDigest !== 'string' || !cycleDigestPattern.test(source.heldEvidenceDigest)) invalid();
-    if (!Number.isSafeInteger(source.expectedCycleRevision) || source.expectedCycleRevision < 0) invalid();
+    if (!Number.isSafeInteger(source.expectedPositionRevision) || source.expectedPositionRevision < 0) invalid();
     if (source.choice !== 'sell' && source.choice !== 'keep-holding') invalid();
     return {
       type,
-      cycleId: source.cycleId,
+      positionId: source.positionId,
       heldEvidenceDigest: source.heldEvidenceDigest,
-      expectedCycleRevision: source.expectedCycleRevision,
+      expectedPositionRevision: source.expectedPositionRevision,
       choice: source.choice,
     };
   }
@@ -136,7 +136,7 @@ function readConfigurationPatch(value) {
   }
   for (const key of [
     'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg',
-    'perCycleCapMicroUsdg', 'lossCapMicroUsdg', 'maxOutstandingCustodyMicroUsdg',
+    'perCycleCapMicroUsdg', 'lossCapMicroUsdg', 'maxOutstandingCustodyMicroUsdg', 'maxHeldValueMicroUsdg',
   ]) {
     if (Object.hasOwn(source, key)) {
       if (typeof source[key] !== 'string' || !microUsdgPattern.test(source[key])) invalid();
@@ -146,6 +146,15 @@ function readConfigurationPatch(value) {
   if (Object.hasOwn(source, 'liveMode')) {
     if (typeof source.liveMode !== 'boolean') invalid();
     patch.liveMode = source.liveMode;
+  }
+  if (Object.hasOwn(source, 'maxHeldPositions')) {
+    if (!Number.isSafeInteger(source.maxHeldPositions) || source.maxHeldPositions < 0 || source.maxHeldPositions > 1000) invalid();
+    patch.maxHeldPositions = source.maxHeldPositions;
+  }
+  if (Object.hasOwn(source, 'unresolvedCardDeadlineMinutes')) {
+    if (!Number.isSafeInteger(source.unresolvedCardDeadlineMinutes)
+      || source.unresolvedCardDeadlineMinutes < 5 || source.unresolvedCardDeadlineMinutes > 1_440) invalid();
+    patch.unresolvedCardDeadlineMinutes = source.unresolvedCardDeadlineMinutes;
   }
   for (const key of ['maxCyclesPerDay', 'manualApprovalCycles']) {
     if (Object.hasOwn(source, key)) {
@@ -171,9 +180,12 @@ const OPERATOR_STATE_KEYS = new Set([
   'version', 'desiredStatus', 'mode', 'communityPackIds', 'manualPackOrders', 'maxBoostersPerCycle',
   'rewardRecipientLimit', 'cycleIntervalMinutes', 'skipNextCycleSequence', 'runNowSequence',
   'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg',
+  'maxHeldPositions', 'maxHeldValueMicroUsdg', 'unresolvedCardDeadlineMinutes',
   'configurationComplete', 'executionConnected', 'liveMode',
 ]);
-const HARD_CAPS_KEYS = new Set(['maxBoostersPerCycle', 'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg']);
+const HARD_CAPS_KEYS = new Set([
+  'maxBoostersPerCycle', 'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg', 'maxHeldPositions',
+]);
 const READINESS_KEYS = new Set(['ready', 'reasons']);
 
 export function assertBootstrap(value) {
@@ -188,6 +200,10 @@ export function assertBootstrap(value) {
   exactKeys(state, OPERATOR_STATE_KEYS, invalid);
   requiredKeys(state, OPERATOR_STATE_KEYS, invalid);
   if (typeof state.liveMode !== 'boolean') invalid();
+  if (!Number.isSafeInteger(state.maxHeldPositions) || state.maxHeldPositions < 0 || state.maxHeldPositions > 1000) invalid();
+  money(state.maxHeldValueMicroUsdg, invalid);
+  if (!Number.isSafeInteger(state.unresolvedCardDeadlineMinutes)
+    || state.unresolvedCardDeadlineMinutes < 5 || state.unresolvedCardDeadlineMinutes > 1_440) invalid();
   const hardCaps = requiredRecord(source.hardCaps, invalid);
   exactKeys(hardCaps, HARD_CAPS_KEYS, invalid);
   requiredKeys(hardCaps, HARD_CAPS_KEYS, invalid);
@@ -284,6 +300,7 @@ const DASHBOARD_KEYS = new Set([
   'cap', 'custody', 'alerts', 'payoutStatus',
 ]);
 const DASHBOARD_V6_KEYS = new Set([...DASHBOARD_KEYS, 'alertSources']);
+const DASHBOARD_V7_KEYS = new Set([...DASHBOARD_V6_KEYS, 'heldPositions']);
 const DASHBOARD_METRICS_KEYS = new Set([
   'cycleStartProjectPoolMicroUsdg', 'totalCycleFundingMicroUsdg', 'totalCollectorSpendMicroUsdg',
   'totalBuybacksReturnedMicroUsdg', 'totalBridgedBackMicroUsdg', 'totalRewardsPaidMicroUsdg',
@@ -299,6 +316,11 @@ const DASHBOARD_LATEST_CYCLE_KEYS = new Set([
   'cycleId', 'status', 'reason', 'updatedAt', 'paidMicroUsdg', 'payoutRecipientCount', 'rewardRecipientLimit',
   'selectedCount', 'paidCount', 'deferredCount', 'roundAccounting', 'transactions',
 ]);
+const HELD_POSITION_KEYS = new Set([
+  'positionId', 'cycleId', 'reason', 'openedAtMs', 'ageSeconds', 'insuredValue', 'costMicroUsdg', 'valueMicroUsdg',
+  'evidenceDigest', 'ownerDecision', 'terminalState', 'positionRevision',
+]);
+const TYPED_AMOUNT_KEYS = new Set(['chainId', 'assetId', 'decimals', 'amountAtomic']);
 
 /** Validate `/operator/api/dashboard`'s response shape (readSet: apps/web/app/operator/
  * OperatorControlPanel.tsx's `Dashboard` type / `decodeDashboard`). Only checks key sets and basic
@@ -307,8 +329,10 @@ const DASHBOARD_LATEST_CYCLE_KEYS = new Set([
  * (contracts/public-cycle-status.mjs) and are not duplicated here. */
 export function assertDashboardResponse(value) {
   const source = requiredRecord(value, invalid);
-  if (![1, 2, 3, 4, 5, 6].includes(source.schemaVersion)) invalid();
-  const dashboardKeys = source.schemaVersion === 6 ? DASHBOARD_V6_KEYS : DASHBOARD_KEYS;
+  if (![1, 2, 3, 4, 5, 6, 7].includes(source.schemaVersion)) invalid();
+  const dashboardKeys = source.schemaVersion === 7
+    ? DASHBOARD_V7_KEYS
+    : (source.schemaVersion === 6 ? DASHBOARD_V6_KEYS : DASHBOARD_KEYS);
   exactKeys(source, dashboardKeys, invalid);
   requiredKeys(source, dashboardKeys, invalid);
   if (typeof source.historyComplete !== 'boolean' || typeof source.cardHistoryComplete !== 'boolean') invalid();
@@ -342,9 +366,11 @@ export function assertDashboardResponse(value) {
   }
   boundedArray(source.cycles, 10_000, invalid).forEach(cycle => requiredRecord(cycle, invalid));
   const cap = requiredRecord(source.cap, invalid);
-  const capKeys = source.schemaVersion === 6
-    ? new Set(['offChain24Hour', 'loss', 'outstandingCustody', 'onChainRemainingCapacity'])
-    : new Set(['offChain24Hour', 'onChainRemainingCapacity']);
+  const capKeys = source.schemaVersion === 7
+    ? new Set(['offChain24Hour', 'loss', 'outstandingCustody', 'onChainRemainingCapacity', 'heldPositions'])
+    : (source.schemaVersion === 6
+      ? new Set(['offChain24Hour', 'loss', 'outstandingCustody', 'onChainRemainingCapacity'])
+      : new Set(['offChain24Hour', 'onChainRemainingCapacity']));
   exactKeys(cap, capKeys, invalid);
   requiredKeys(cap, [...capKeys], invalid);
   if (cap.offChain24Hour !== null) {
@@ -355,7 +381,7 @@ export function assertDashboardResponse(value) {
     money(offChain.limitMicroUsdg, invalid);
     money(offChain.remainingMicroUsdg, invalid);
   }
-  if (source.schemaVersion === 6 && cap.loss !== null) {
+  if (source.schemaVersion >= 6 && cap.loss !== null) {
     const loss = requiredRecord(cap.loss, invalid);
     exactKeys(loss, new Set(['realizedLossMicroUsdg', 'atRiskMicroUsdg', 'usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg']), invalid);
     requiredKeys(loss, ['realizedLossMicroUsdg', 'atRiskMicroUsdg', 'usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg'], invalid);
@@ -363,7 +389,7 @@ export function assertDashboardResponse(value) {
       money(loss[field], invalid);
     }
   }
-  if (source.schemaVersion === 6 && cap.outstandingCustody !== null) {
+  if (source.schemaVersion >= 6 && cap.outstandingCustody !== null) {
     const outstanding = requiredRecord(cap.outstandingCustody, invalid);
     exactKeys(outstanding, new Set(['usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg']), invalid);
     requiredKeys(outstanding, ['usedMicroUsdg', 'limitMicroUsdg', 'remainingMicroUsdg'], invalid);
@@ -374,10 +400,21 @@ export function assertDashboardResponse(value) {
   exactKeys(custody, new Set(['buckets']), invalid);
   requiredKeys(custody, ['buckets'], invalid);
   boundedArray(custody.buckets, 10_000, invalid).forEach(bucket => requiredRecord(bucket, invalid));
-  if (source.schemaVersion === 6) {
+  if (source.schemaVersion >= 6) {
     const alertSources = requiredRecord(source.alertSources, invalid);
     exactKeys(alertSources, new Set(['safetyTelemetry']), invalid);
     if (typeof alertSources.safetyTelemetry !== 'boolean') invalid();
+  }
+  if (source.schemaVersion === 7) {
+    if (cap.heldPositions !== null) {
+      const held = requiredRecord(cap.heldPositions, invalid);
+      exactKeys(held, new Set(['count', 'maxCount', 'valueMicroUsdg', 'maxValueMicroUsdg']), invalid);
+      requiredKeys(held, ['count', 'maxCount', 'valueMicroUsdg', 'maxValueMicroUsdg'], invalid);
+      if (!Number.isSafeInteger(held.count) || held.count < 0 || !Number.isSafeInteger(held.maxCount) || held.maxCount < 0) invalid();
+      money(held.valueMicroUsdg, invalid);
+      money(held.maxValueMicroUsdg, invalid);
+    }
+    boundedArray(source.heldPositions, 1_000, invalid).forEach(assertHeldPosition);
   }
   boundedArray(source.alerts, 10_000, invalid);
   if (source.payoutStatus !== null) {
@@ -388,6 +425,39 @@ export function assertDashboardResponse(value) {
     if (payout.transactionIds !== null) boundedArray(payout.transactionIds, 100, invalid);
   }
   return source;
+}
+
+function assertHeldPosition(value) {
+  const source = requiredRecord(value, invalid);
+  exactKeys(source, HELD_POSITION_KEYS, invalid);
+  requiredKeys(source, HELD_POSITION_KEYS, invalid);
+  boundedText(source.positionId, invalid);
+  boundedText(source.cycleId, invalid);
+  if (typeof source.reason !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(source.reason)) invalid();
+  if (!Number.isSafeInteger(source.openedAtMs) || source.openedAtMs < 0) invalid();
+  if (!Number.isSafeInteger(source.ageSeconds) || source.ageSeconds < 0) invalid();
+  if (source.insuredValue !== null) assertTypedAmount(source.insuredValue);
+  money(source.costMicroUsdg, invalid);
+  money(source.valueMicroUsdg, invalid);
+  if (typeof source.evidenceDigest !== 'string' || !cycleDigestPattern.test(source.evidenceDigest)) invalid();
+  if (source.ownerDecision !== null) {
+    const decision = requiredRecord(source.ownerDecision, invalid);
+    exactKeys(decision, new Set(['choice']), invalid);
+    requiredKeys(decision, ['choice'], invalid);
+    if (decision.choice !== 'sell' && decision.choice !== 'keep-holding') invalid();
+  }
+  boundedText(source.terminalState, invalid);
+  if (!Number.isSafeInteger(source.positionRevision) || source.positionRevision < 0) invalid();
+}
+
+function assertTypedAmount(value) {
+  const source = requiredRecord(value, invalid);
+  exactKeys(source, TYPED_AMOUNT_KEYS, invalid);
+  requiredKeys(source, TYPED_AMOUNT_KEYS, invalid);
+  boundedText(source.chainId, invalid);
+  boundedText(source.assetId, invalid);
+  if (!Number.isSafeInteger(source.decimals) || source.decimals < 0 || source.decimals > 255) invalid();
+  money(source.amountAtomic, invalid);
 }
 
 export { ContractValidationError };

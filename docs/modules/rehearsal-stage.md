@@ -49,7 +49,13 @@ collector-only skips and are not evidence for production settlement.
   exactly conserve the finalized source delta.
 - Provider and chain effects follow the durable write-ahead protocol. An uncertain send remains
   `SENT_UNKNOWN`; recovery reconciles the recorded request instead of issuing a replacement effect
-  or signature.
+  or signature. A card-specific open, Epic, buyback-data, unavailable-buyback, or overdue
+  `SENT_UNKNOWN` result is recorded as a held position attributed to the original cycle. Its
+  evidence is forwarded through the later card stages without a second provider mutation, while
+  any settled card proceeds remain independent.
+- The held-position carve-out does not relax the collector-only rehearsal contract:
+  `maxBoostersPerCycle = 1` and `maxCyclesPerDay = 1` remain required. A held card never permits a
+  second pack, replacement card, or cross-cycle use of its custody value.
 - The live profile runs its collector-only canaries and a Keychain sign-only check before it can
   construct a transaction-capable signer. The stage rechecks the request-bound policy at signing
   and broadcast.
@@ -68,6 +74,10 @@ sealed -> cycle completed`.
 
 Any missing account, policy mismatch, data conflict, incomplete finality, or payout-conservation
 failure enters a held or unresolved state. It never advances by using a replacement request.
+
+For an attributable held card, `open`, `epic-gate`, and `buyback` record or forward the same
+position evidence without another collector request. The main settlement follows its zero-proceeds
+route when every card is held; it does not borrow custody from another rehearsal cycle.
 
 ## Operational commands
 
@@ -89,6 +99,9 @@ The detailed manual-approval and recovery procedure is
 - Inspect `hookemon-runner status --cycle <cycle-id>` before `resume`.
 - Keep a recorded purchase, open, buyback, signature, or payout pending until its own provider or
   chain evidence resolves it. Do not create replacement bytes.
+- At the configured unresolved-card deadline, reconcile a `SENT_UNKNOWN` card into its original
+  held position before any replacement request. A temporarily unavailable provider status remains
+  unresolved before that deadline.
 - Correct a missing recipient account, a refused Keychain interaction, or a configuration mismatch
   before opening a new rehearsal cycle.
 - OPEN FACT: available provider material does not prove that the buyback destination field accepts

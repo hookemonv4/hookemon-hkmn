@@ -62,10 +62,54 @@ test('dashboard projection preserves policy cap usage and safety telemetry avail
 
   const validated = assertDashboardResponse(dashboard);
 
-  assert.equal(validated.schemaVersion, 6);
+  assert.equal(validated.schemaVersion, 7);
   assert.equal(validated.cap.loss.usedMicroUsdg, '15');
   assert.equal(validated.cap.outstandingCustody.usedMicroUsdg, '19');
   assert.deepEqual(validated.alertSources, { safetyTelemetry: true });
+});
+
+test('dashboard projects held positions and their configured count and value limits', () => {
+  const dashboard = buildDashboardReadModel({
+    authorityStatus: {
+      revision: 3,
+      configuration: null,
+      activeCycleId: null,
+      cycles: [{ cycleId: 'cycle-complete', terminalState: 'COMPLETE', stages: [], payout: null }],
+      heldPositions: [{
+        positionId: 'position-1',
+        cycleId: 'cycle-complete',
+        reason: 'EPIC_THRESHOLD',
+        openedAtMs: Date.UTC(2025, 11, 31, 23, 58),
+        insuredValue: { chainId: 'solana', assetId: 'usdg', decimals: 6, amountAtomic: '400' },
+        costMicroUsdg: '100',
+        valueMicroUsdg: '400',
+        evidenceDigest: `sha256:${'a'.repeat(64)}`,
+        ownerDecision: null,
+        terminalState: 'HELD_OWNER_DECISION',
+        positionRevision: 0,
+      }],
+      cap: {
+        offChain24Hour: null,
+        loss: null,
+        outstandingCustody: null,
+        onChainRemainingCapacity: null,
+        heldPositions: { count: 1, maxCount: 10, valueMicroUsdg: '400', maxValueMicroUsdg: '5000000000' },
+      },
+      custody: { buckets: [] },
+      alertSources: { safetyTelemetry: true },
+      alerts: [],
+    },
+    now: () => Date.UTC(2026, 0, 1),
+  });
+
+  const validated = assertDashboardResponse(dashboard);
+
+  assert.equal(validated.schemaVersion, 7);
+  assert.deepEqual(validated.cap.heldPositions, { count: 1, maxCount: 10, valueMicroUsdg: '400', maxValueMicroUsdg: '5000000000' });
+  assert.equal(validated.heldPositions[0].positionId, 'position-1');
+  assert.equal(validated.heldPositions[0].ageSeconds, 120);
+  assert.equal(validated.heldPositions[0].valueMicroUsdg, '400');
+  assert.equal(validated.heldPositions[0].insuredValue.amountAtomic, '400');
 });
 
 test('dashboard contract continues to accept the prior cap-only response shape', () => {
@@ -83,8 +127,10 @@ test('dashboard contract continues to accept the prior cap-only response shape',
   });
   legacy.schemaVersion = 5;
   delete legacy.alertSources;
+  delete legacy.heldPositions;
   delete legacy.cap.loss;
   delete legacy.cap.outstandingCustody;
+  delete legacy.cap.heldPositions;
 
   assert.equal(assertDashboardResponse(legacy).schemaVersion, 5);
 });

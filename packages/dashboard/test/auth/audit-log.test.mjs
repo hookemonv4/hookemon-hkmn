@@ -204,6 +204,32 @@ test('an audited command persists one dispatch receipt before its effect and rep
   assert.equal(observed[0][0].commandDigest, first.receipt.commandDigest);
 });
 
+test('an effect may replace its applied audit result code without changing its prepared or replayed receipt', async () => {
+  const path = await tempPath();
+  const input = auditedInput(path, {
+    requestId: 'request-supplementary-recovery',
+    command: { type: 'resume-cycle' },
+    resultCode: 'RECOVERY_DISPATCHED',
+    async effect() {
+      return { auditResultCode: 'RECOVERY_SUPPLEMENTARY_SETTLEMENT' };
+    },
+  });
+
+  const first = await executeAuditedCommand(input);
+  const replay = await executeAuditedCommand(input);
+  const records = await readAllAuditEntries(path);
+
+  assert.equal(first.replayed, false);
+  assert.equal(first.receipt.resultCode, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.receipt.resultCode, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  assert.deepEqual(records.map(record => record.resultCode), [
+    'COMMAND_PREPARED',
+    'RECOVERY_SUPPLEMENTARY_SETTLEMENT',
+  ]);
+  assert.deepEqual(records.map(record => record.commandState), ['PREPARED', 'APPLIED']);
+});
+
 test('an audit persistence failure prevents the command effect', async () => {
   let effects = 0;
   await assert.rejects(

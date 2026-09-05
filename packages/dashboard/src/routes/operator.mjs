@@ -24,6 +24,16 @@ const CARD_QUERY_KEYS = new Set([
   'cursor', 'limit', 'sort', 'cycleId', 'productId', 'rarity', 'from', 'to',
   'minBuybackMicroUsdg', 'maxBuybackMicroUsdg',
 ]);
+const HELD_OWNER_DECISION_REJECTION_MESSAGES = new Set([
+  'cycle-repository recordHeldOwnerDecision: positionId is invalid',
+  'cycle-repository recordHeldOwnerDecision: held position is unknown',
+  'cycle-repository recordHeldOwnerDecision: archived held positions require supplementary settlement recovery',
+  'cycle-repository recordHeldOwnerDecision: held evidence digest does not match the position',
+  'cycle-repository recordHeldOwnerDecision: held position is already resolved',
+  'cycle-repository recordHeldOwnerDecision: requestId conflict',
+  'cycle-repository recordHeldOwnerDecision: held position already has a sell decision',
+  'cycle-repository recordHeldOwnerDecision: stale position revision',
+]);
 
 function parsedUrl(req) {
   return new URL(req.url, 'http://internal.invalid');
@@ -92,13 +102,19 @@ function unavailable(res, error) {
   return false;
 }
 
-function receiptResultCode(command, authorityStatus) {
+function receiptResultCode(command) {
   if (command.type === 'run-cycle-now') return 'TICK_TRIGGERED';
-  if (command.type === 'resume-cycle') {
-    return authorityStatus.activeCycleId === null ? 'RECOVERY_NO_ACTIVE_CYCLE' : 'RECOVERY_DISPATCHED';
-  }
+  if (command.type === 'resume-cycle') return 'RECOVERY_DISPATCHED';
   if (command.type === 'reconcile') return 'RECONCILIATION_DISPATCHED';
   return 'DECISION_ACCEPTED';
+}
+
+function withResumeAuditResult(command, result) {
+  if (command.type !== 'resume-cycle' || !result || typeof result !== 'object' || Array.isArray(result)
+    || typeof result.resultCode !== 'string' || result.resultCode.length === 0) {
+    return result;
+  }
+  return { ...result, auditResultCode: result.resultCode };
 }
 
 function auditCommandHttpStatus(commandState) {
@@ -108,10 +124,14 @@ function auditCommandHttpStatus(commandState) {
   return 200;
 }
 
-function isDeterministicAuthorityRejection(error) {
+function isDeterministicAuthorityRejection(error, command) {
   if (!error || typeof error.message !== 'string') return false;
-  return error.message === 'stale operator state revision'
-    || /^operator configuration (maxBoostersPerCycle|maxUnitPriceMicroUsdg|maxCycleBudgetMicroUsdg|max24HourBudgetMicroUsdg) exceeds the fixed hard cap$/.test(error.message);
+  if (error.message === 'stale operator state revision'
+    || /^operator configuration (maxBoostersPerCycle|maxUnitPriceMicroUsdg|maxCycleBudgetMicroUsdg|max24HourBudgetMicroUsdg) exceeds the fixed hard cap$/.test(error.message)) {
+    return true;
+  }
+  return command?.type === 'held-owner-decision'
+    && HELD_OWNER_DECISION_REJECTION_MESSAGES.has(error.message);
 }
 
 export function createBootstrapHandler(ctx) {
@@ -278,7 +298,7 @@ export function createDecisionsHandler(ctx) {
         expectedVersion: request.expectedVersion,
         observedVersion: observed.revision ?? 0,
         command: request.command,
-        resultCode: receiptResultCode(request.command, observed),
+        resultCode: receiptResultCode(request.command),
         actor: { email: identity.email },
         actorRole: 'operator',
         note: request.note,
@@ -286,14 +306,15 @@ export function createDecisionsHandler(ctx) {
         effect: async receipt => {
           await projectDurableAuditReceipt(ctx, receipt);
           try {
-            return await applyDecision({
+            const result = await applyDecision({
               requestId: request.requestId,
               expectedVersion: request.expectedVersion,
               command: request.command,
               operatorControl: ctx.operatorControl,
             });
+            return withResumeAuditResult(request.command, result);
           } catch (error) {
-            if (isDeterministicAuthorityRejection(error)) return { auditCommandState: 'REJECTED' };
+            if (isDeterministicAuthorityRejection(error, request.command)) return { auditCommandState: 'REJECTED' };
             throw error;
           }
         },

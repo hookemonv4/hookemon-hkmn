@@ -1,8 +1,8 @@
 // Clean-room re-implementation of GET /public/api/cycle-status's contract (readSet:
 // apps/web/lib/public-cycle-status.ts on the legacy codex/mainnet-cycle-canary branch,
-// `normalizePublicCycleStatus`/schemaVersion 3). Ported field-for-field, including the legacy
+// `normalizePublicCycleStatus`/schemaVersion 5). Ported field-for-field, including the legacy
 // schemaVersion-1/2 acceptance paths the website's validator still carries — this service only ever
-// *emits* schemaVersion 3, but the validator is reused verbatim by the dashboard's own tests as the
+// *emits* schemaVersion 5, but the validator is reused verbatim by the dashboard's own tests as the
 // exact gate the website itself would apply, so it must accept the same inputs the website accepts.
 import { readDashboardProfile } from './dashboard-profile.mjs';
 import {
@@ -29,6 +29,8 @@ const STATUS_KEYS = new Set([
   'schemaVersion', 'profile', 'network', 'executionState', 'executionReason',
   'generatedAt', 'nextCycleAt', 'countdownSeconds', 'cycle',
 ]);
+const STATUS_V4_KEYS = new Set([...STATUS_KEYS, 'heldPositionCount', 'heldPositions']);
+const STATUS_V5_KEYS = new Set([...STATUS_KEYS, 'heldPositionCount', 'heldPositions']);
 const LEGACY_IDLE_STATUS_KEYS = new Set(['schemaVersion', 'generatedAt', 'nextCycleAt', 'countdownSeconds', 'cycle']);
 const NETWORK_KEYS = new Set(['evm', 'solana']);
 const EVM_NETWORK_KEYS = new Set(['name', 'chainId', 'label']);
@@ -59,6 +61,8 @@ const QUOTED_COST_KEYS = new Set([
 ]);
 const NETWORK_FEE_KEYS = new Set(['walletLamportsCharged', 'purchase', 'buyback']);
 const NATIVE_FEE_KEYS = new Set(['lamports', 'paidBy']);
+const HELD_POSITION_V4_KEYS = new Set(['positionId', 'cycleId', 'reason', 'ageSeconds', 'cycleState']);
+const HELD_POSITION_V5_KEYS = new Set(['reason', 'ageSeconds', 'cycleState']);
 const ACTION_STATUSES = new Set(['pending', 'complete', 'failed']);
 const EXECUTION_STATES = new Set(['active', 'paused', 'unknown']);
 const MAX_PUBLIC_CARDS = 60;
@@ -75,9 +79,12 @@ export function normalizePublicCycleStatus(value, expectedProfile) {
 function readPublicCycleStatus(value, expectedProfile) {
   const source = requiredRecord(value, invalid);
   if (source.schemaVersion === 1) return readLegacyIdleStatus(source, expectedProfile);
-  exactKeys(source, STATUS_KEYS, invalid);
-  requiredKeys(source, STATUS_KEYS, invalid);
-  if (!(source.schemaVersion === 2 || source.schemaVersion === 3)) invalid();
+  const statusKeys = source.schemaVersion === 5
+    ? STATUS_V5_KEYS
+    : (source.schemaVersion === 4 ? STATUS_V4_KEYS : STATUS_KEYS);
+  exactKeys(source, statusKeys, invalid);
+  requiredKeys(source, statusKeys, invalid);
+  if (!(source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5)) invalid();
   const schemaVersion = source.schemaVersion;
   const selected = readDashboardProfile(source.profile);
   if (expectedProfile !== undefined && readDashboardProfile(expectedProfile).id !== selected.id) invalid();
@@ -91,8 +98,8 @@ function readPublicCycleStatus(value, expectedProfile) {
   const expectedCountdown = Math.ceil(Math.max(0, Date.parse(nextCycleAt) - Date.parse(generatedAt)) / 1_000);
   if (source.countdownSeconds !== expectedCountdown) invalid();
 
-  return {
-    schemaVersion: 3,
+  const result = {
+    schemaVersion: schemaVersion === 5 ? 5 : (schemaVersion === 4 ? 4 : 3),
     profile: selected.id,
     network: readNetwork(source.network, selected.network),
     executionState: source.executionState,
@@ -102,6 +109,11 @@ function readPublicCycleStatus(value, expectedProfile) {
     countdownSeconds: nonNegativeInteger(source.countdownSeconds, invalid),
     cycle: source.cycle === null ? null : readCycle(source.cycle, schemaVersion),
   };
+  if (schemaVersion >= 4) {
+    result.heldPositionCount = nonNegativeInteger(source.heldPositionCount, invalid);
+    result.heldPositions = readHeldPositions(source.heldPositions, source.heldPositionCount, schemaVersion);
+  }
+  return result;
 }
 
 function readLegacyIdleStatus(source, expectedProfile) {
@@ -149,8 +161,9 @@ function readNetwork(value, expected) {
 
 function readCycle(value, schemaVersion) {
   const source = requiredRecord(value, invalid);
-  exactKeys(source, schemaVersion === 3 ? CYCLE_KEYS : LEGACY_CYCLE_KEYS, invalid);
-  requiredKeys(source, schemaVersion === 3 ? CYCLE_REQUIRED_KEYS : LEGACY_CYCLE_REQUIRED_KEYS, invalid);
+  const currentSchema = schemaVersion === 3 || schemaVersion === 4 || schemaVersion === 5;
+  exactKeys(source, currentSchema ? CYCLE_KEYS : LEGACY_CYCLE_KEYS, invalid);
+  requiredKeys(source, currentSchema ? CYCLE_REQUIRED_KEYS : LEGACY_CYCLE_REQUIRED_KEYS, invalid);
 
   const maxBoostersPerCycle = source.maxBoostersPerCycle === null ? null : positiveSafeInteger(source.maxBoostersPerCycle, invalid);
   const plannedBoosters = nonNegativeInteger(source.plannedBoosters, invalid);
@@ -171,7 +184,7 @@ function readCycle(value, schemaVersion) {
     cards,
     returnedMicroUsdg: optionalMoney(source.returnedMicroUsdg, invalid),
     rewardStatus: optionalText(source.rewardStatus, invalid),
-    roundAccounting: schemaVersion === 3 ? readRoundAccounting(source.roundAccounting) : null,
+    roundAccounting: currentSchema ? readRoundAccounting(source.roundAccounting) : null,
   };
   if (source.startedAt !== undefined) cycle.startedAt = isoTimestamp(source.startedAt, invalid);
   if (source.updatedAt !== undefined) cycle.updatedAt = isoTimestamp(source.updatedAt, invalid);
@@ -179,6 +192,28 @@ function readCycle(value, schemaVersion) {
   if (source.paidMicroUsdg !== undefined) cycle.paidMicroUsdg = optionalMoney(source.paidMicroUsdg, invalid);
   if (source.reason !== undefined) cycle.reason = stableReason(source.reason);
   return cycle;
+}
+
+function readHeldPositions(value, heldPositionCount, schemaVersion) {
+  const positions = boundedArray(value, 1_000, invalid).map(position => {
+    const source = requiredRecord(position, invalid);
+    const keys = schemaVersion === 5 ? HELD_POSITION_V5_KEYS : HELD_POSITION_V4_KEYS;
+    exactKeys(source, keys, invalid);
+    requiredKeys(source, keys, invalid);
+    if (typeof source.reason !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(source.reason)) invalid();
+    const result = {
+      reason: source.reason,
+      ageSeconds: nonNegativeInteger(source.ageSeconds, invalid),
+      cycleState: boundedText(source.cycleState, invalid),
+    };
+    if (schemaVersion === 4) {
+      result.positionId = boundedText(source.positionId, invalid);
+      result.cycleId = boundedText(source.cycleId, invalid);
+    }
+    return result;
+  });
+  if (heldPositionCount !== positions.length) invalid();
+  return positions;
 }
 
 function stableReason(value) {
@@ -196,8 +231,9 @@ function readAction(value) {
 
 function readCard(value, schemaVersion) {
   const source = requiredRecord(value, invalid);
-  exactKeys(source, schemaVersion === 3 ? CARD_KEYS : LEGACY_CARD_KEYS, invalid);
-  requiredKeys(source, schemaVersion === 3 ? CARD_KEYS : new Set(['productId', 'rarity']), invalid);
+  const currentSchema = schemaVersion === 3 || schemaVersion === 4 || schemaVersion === 5;
+  exactKeys(source, currentSchema ? CARD_KEYS : LEGACY_CARD_KEYS, invalid);
+  requiredKeys(source, currentSchema ? CARD_KEYS : new Set(['productId', 'rarity']), invalid);
   const card = {
     productId: boundedText(source.productId, invalid),
     rarity: boundedText(source.rarity, invalid),

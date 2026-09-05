@@ -26,6 +26,7 @@ export const OPERATOR_HARD_CAPS = Object.freeze({
   maxUnitPriceMicroUsdg: '25000000',
   maxCycleBudgetMicroUsdg: '50000000',
   max24HourBudgetMicroUsdg: '3600000000',
+  maxHeldPositions: '1000',
 });
 
 function exactObject(value, fields, label) {

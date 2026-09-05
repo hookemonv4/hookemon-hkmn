@@ -1228,6 +1228,7 @@ async function seedProductionReturnCycle(stateDir) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
