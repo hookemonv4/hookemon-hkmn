@@ -12,6 +12,10 @@ The cycle page explains recorded stages and public observations; the holder page
 
 `.github/workflows/web-ci.yml` runs website installation, `npm test` and lint on pull requests and main pushes. The production workflow deploys only the exact successful main-push CI revision. The production environment and its Cloudflare and dashboard secrets must be configured separately in the canonical GitHub repository; migrating source files does not migrate secrets. Recovery uses a previous verified Worker version and committed website source. Existing project workflows remain independent.
 
+OPEN FACT: The repository control-dependency policy does not yet permit the two website workflows or their pinned `actions/setup-node` action. Integrating them requires a reviewed control-policy revision with explicit workflow and dependency pins. The verified alternative is the green website-only CI and local preview; do not merge or deploy while the required repository gate fails.
+
+The legacy operator regression dependencies are isolated in `tests/fixtures/legacy-control` and never imported by the Worker. The retired Durable Object implementation is not part of the website runtime; operator authority remains in the canonical backend.
+
 The hero coin uses `coin-spin.mjs` for a full rotation with two circular gold faces carrying the approved H symbol. A closed cylindrical rim uses tangent gold surfaces; its radius and thickness track the responsive face size. Horizontal mouse or touch drags set its angle and release with decaying momentum. Vertical gestures remain native scrolling. Clicking pauses or resumes automatic rotation; arrow keys rotate in discrete steps. Reduced motion disables automatic rotation and inertia. Offscreen coins and hidden tabs stop animation frames.
 
 The public dashboard uses the existing production USDC and Ethereum/Sepolia response contract. This presentation release does not migrate the server schema, network profile or private operator controls.

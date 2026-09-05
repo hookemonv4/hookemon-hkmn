@@ -16,7 +16,7 @@ function cardView(card) {
   else imageArea.append(element("p", "pack-status", "Image unavailable"));
   const copy = element("div", "inventory-copy");
   copy.append(element("p", "inventory-tier", `${label(card.rarity)} · ${card.gradingCompany || "Grade not reported"}`), element("h3", "", card.name), element("p", "inventory-value", currency.format(card.insuredValue)), element("p", "inventory-value-note", "Provider insured value · USD"));
-  const details = element("details"); details.append(element("summary", "", "Card details & reverse"));
+  const details = element("details"); details.append(element("summary", "", card.backImage ? "Card details & reverse" : "Card details"));
   const dl = element("dl");
   for (const [name, value] of [["Grade", card.grade], ["Certificate", card.certification], ["Year", card.year], ["Category", card.category], ["Variant", card.parallel], ["Grade population", card.population], ["Vault", card.vault]]) { dl.append(element("dt", "", name), element("dd", "", value === null || value === undefined ? "Not reported" : String(value))); }
   details.append(dl);
