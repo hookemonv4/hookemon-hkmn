@@ -50,3 +50,13 @@ test("provider failure has no stale or showcase fallback", async () => {
   const body = await response.json(); assert.equal(body.fetchedAt, null); assert.equal(body.packs, undefined); assert.equal(body.cards, undefined);
   assert.equal((await handlePackCatalog(new Request("https://hookemon.com/api/packs", { method: "POST" }), fetcher)).status, 405);
 });
+
+test("oversized streamed provider response is cancelled and rejected", async () => {
+  let cancelled = false;
+  const fetcher = async url => url.pathname === "/api/status" ? Response.json(state) : new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array(2_000_001)); },
+    cancel() { cancelled = true; },
+  }));
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503); assert.equal(cancelled, true);
+});

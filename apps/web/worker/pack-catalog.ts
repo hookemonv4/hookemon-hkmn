@@ -1,4 +1,5 @@
 import provider from "../../../config/pack-provider.json" with { type: "json" };
+import { cancelResponseBody, readBoundedUtf8Body } from "./bounded-response-body.ts";
 
 type Row = Record<string, unknown>;
 const rarities = ["common", "uncommon", "rare", "epic"] as const;
@@ -18,9 +19,10 @@ async function read(path: string, fetcher: typeof fetch): Promise<unknown> {
   const response = await fetcher(new URL(path, provider.origin), {
     method: "GET", redirect: "error", headers: { accept: "application/json" }, signal: AbortSignal.timeout(6500),
   });
-  if (!response.ok) throw new Error("Provider unavailable");
-  const raw = await response.text();
-  if (raw.length > 2_000_000) throw new Error("Provider response too large");
+  if (!response.ok) { await cancelResponseBody(response); throw new Error("Provider unavailable"); }
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && Number(contentLength) > 2_000_000) { await cancelResponseBody(response); throw new Error("Provider response too large"); }
+  const raw = await readBoundedUtf8Body(response, 2_000_000);
   return JSON.parse(raw);
 }
 
@@ -38,7 +40,7 @@ export function normalizePacks(value: unknown, statusValue: unknown) {
       return {
         code, name: text(pack.name), category: "Pokémon", price, currency: provider.currency, contains,
         availability: state.machineStatus === "running" && status?.isOpen === true ? "open" : status?.isOpen === false || state.machineStatus === "stopped" ? "closed" : "unknown",
-        sourceUrl: `${provider.origin}/?pack=${encodeURIComponent(code)}`,
+        sourceUrl: provider.source,
         tiers: rarities.map(rarity => {
           const range = object(object(pack.tierRanges)[rarity]);
           return { rarity, minimum: number(range.start), maximum: number(range.end) };

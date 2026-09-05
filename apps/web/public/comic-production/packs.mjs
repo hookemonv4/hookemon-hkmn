@@ -30,7 +30,7 @@ function packView(pack) {
   const main = element("div", "pack-summary-main"); main.append(element("h3", "", pack.name), element("p", "", `${pack.contains} card${pack.contains === 1 ? "" : "s"} per pack · ${availability(pack.availability)}`));
   const plus = element("span", "pack-chevron", "+"); plus.setAttribute("aria-hidden", "true");
   summary.append(glyph, main, element("span", "pack-price", currency.format(pack.price)), plus); accordion.append(summary);
-  const body = element("div", "pack-body"); const intro = element("div", "pack-body-intro"); intro.append(element("p", "", "Choose a rarity to browse its current cards. Value bands are provider insured values."), sourceLink(pack.sourceUrl, "View this pack at Collector Crypt ↗"));
+  const body = element("div", "pack-body"); const intro = element("div", "pack-body-intro"); intro.append(element("p", "", "Choose a rarity to browse its current cards. Value bands are provider insured values."), sourceLink(pack.sourceUrl, "Explore Collector Crypt ↗"));
   const filters = element("div", "pack-filters"); filters.setAttribute("role", "group"); filters.setAttribute("aria-label", `${pack.name} rarity filters`);
   const message = element("p", "inventory-status"); message.setAttribute("role", "status");
   const grid = element("div", "inventory-grid"); const more = element("button", "inventory-more", "Load more cards"); more.type = "button"; more.hidden = true;
