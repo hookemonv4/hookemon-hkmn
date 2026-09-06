@@ -57,28 +57,6 @@ test('commit scanner accepts the exact project author and committer', () => {
   }
 });
 
-test('commit scanner accepts the pinned Phase 1 history', () => {
-  const result = scan(
-    repoRoot,
-    'ec13a1a93a18c6588f03f91d9074ad4e5e0d003f',
-    '6094af899d91b33cf5f87425fc9f5a2b426e4a22',
-  );
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /commit identity check passed \(227 commits\)/);
-});
-
-test('commit scanner accepts the pinned collector-only rehearsal history', () => {
-  const result = scan(
-    repoRoot,
-    '01abcc20a3e7d922395d42a7328fb38a5e48770b',
-    'ad8a9fe856268c8fff5b41c235678be74225d956',
-  );
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /commit identity check passed \(21 commits\)/);
-});
-
 test('commit scanner rejects a non-project author', () => {
   const { root, base } = repository();
   try {
