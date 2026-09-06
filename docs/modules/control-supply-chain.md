@@ -8,7 +8,7 @@ The control supply chain content-addresses selected Node and Gitleaks executable
 
 - `node scripts/verify-control-dependencies.mjs` verifies runtime and control pins.
 - `node scripts/verify-control-dependencies.mjs --write` refreshes the deterministic local verification artifact.
-- `.github/workflows/v4-gates.yml` runs required state, trace, clean-room, append-only, secret, test, launch-package, and closure checks.
+- `.github/workflows/v4-gates.yml` runs required trace, clean-room, append-only, secret, test, launch-package, and closure checks, then the deterministic state check last so it never masks an earlier failure.
 - `.github/workflows/fork-proof.yml` runs the mandatory archive fork proof after a main push or a manual main dispatch.
 - `.github/workflows/identity-gate.yml` runs base-defined commit-identity validation for pull requests and main pushes.
 - `.github/workflows/control-gate.yml` runs base-defined control-surface validation for pull requests and main pushes.
