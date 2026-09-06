@@ -51,6 +51,7 @@ import {
 import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { assertMoneyConfiguration } from '../../../runner/src/cycle/money-schemas.mjs';
 import { CIRCLE_USD_DECIMALS, CIRCLE_USD_MINT } from '../solana-rpc.mjs';
+import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../collector-crypt.mjs';
 
 // Signing dependencies load only when a signer is actually constructed. Read-only configuration,
 // repository status, and direct keychain readiness must not initialize the transaction-policy path.
@@ -840,6 +841,15 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     if (relaySolanaMint === null || relayEvmDepository === null) {
       fail('production profile requires explicit USDG and Solana stablecoin asset routes');
     }
+    // Asset-identity check only, not a chain-id/namespace claim: the Collector Crypt platform only
+    // ever settles purchase/buyback in the documented mint and decimals identified by
+    // COLLECTOR_CRYPT_SETTLEMENT_ASSET. The configured Relay Solana mint/decimals (used for Relay
+    // bridge legs, in Relay's own numeric chain-id namespace) must name that same asset identity, so
+    // a mismatch is refused here instead of surfacing only as an opaque decode/policy failure deep
+    // inside a stage.
+    if (relaySolanaMint !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.assetId || relaySolanaDecimals !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.decimals) {
+      fail('production profile requires HOOKEMON_RELAY_SOLANA_MINT and HOOKEMON_RELAY_SOLANA_DECIMALS to match the documented Collector settlement asset');
+    }
   }
   if (profile === 'rehearsal') {
     if (providerMode === 'fake') {
@@ -965,6 +975,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     solana: Object.freeze({
       rpcUrl: solanaRpcUrl,
       ...(collectorOnlyRehearsal ? { chainId: 'solana-mainnet' } : {}),
+      ...(profile === 'production' ? { chainId: COLLECTOR_CRYPT_SETTLEMENT_ASSET.chainId } : {}),
     }),
     relay: Object.freeze({
       baseUrl: relayBaseUrl,
@@ -987,6 +998,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
           amountAtomic: budget.packPriceUsdg,
         }),
       } : {}),
+      ...(profile === 'production' ? { settlementAsset: COLLECTOR_CRYPT_SETTLEMENT_ASSET } : {}),
     }),
     contracts: Object.freeze({
       vault: vaultAddress,

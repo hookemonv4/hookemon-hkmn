@@ -96,6 +96,14 @@ repository client.
   both EIP-1559 fee fields and a post-fee native reserve. Return, purchase, and buyback require the
   configured Solana asset, cap the decoded priority fee, and check the post-fee lamport reserve;
   these are pre-sign balance checks, not transactional balance reservations.
+- For the production profile, `readEnvironment` binds `config.solana.chainId` and
+  `config.collectorCrypt.settlementAsset` to the native `COLLECTOR_CRYPT_SETTLEMENT_ASSET`
+  (`solana-mainnet`, the Collector transaction-policy label), the same value collector-only
+  rehearsal already uses, and refuses a configured `HOOKEMON_RELAY_SOLANA_MINT`/
+  `HOOKEMON_RELAY_SOLANA_DECIMALS` pair whose mint and decimals are not exactly that documented
+  asset identity, since Collector Crypt purchase and buyback settle only in it. This is an
+  asset-identity check, not a namespace merge: `MoneyConfigurationV1`'s Solana asset keeps its own
+  numeric Relay chain-id namespace (`792703809`) unchanged.
 - The composition return value and dashboard request context expose only the frozen repository
   client. Writer methods remain reachable only through the composition's closed-over automation
   dependencies.

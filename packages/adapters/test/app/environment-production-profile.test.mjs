@@ -254,25 +254,74 @@ test('production profile accepts an explicit complete configuration', async t =>
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   const config = readEnvironment(completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
   }), { profile: 'production' });
   assert.equal(config.execution.profile, 'production');
   assert.equal(config.relay.solanaMint, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
   assert.deepEqual(config.observability, {});
 });
 
+test('production profile wires solana.chainId and collectorCrypt.settlementAsset from the Collector settlement asset, distinct from the Relay money namespace', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
+  await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
+  const config = readEnvironment(completeProductionEnvironment({
+    HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+    HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
+  }), { profile: 'production' });
+
+  assert.equal(config.solana.chainId, 'solana-mainnet');
+  assert.deepEqual(config.collectorCrypt.settlementAsset, {
+    chainId: 'solana-mainnet',
+    assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    decimals: 6,
+  });
+  // The Relay-side MoneyConfigurationV1 asset keeps its own numeric chain-id namespace (Relay's
+  // cross-chain identifier, 792703809) — distinct from the native Collector transaction-policy
+  // label above, even though both currently name the same mint and decimals.
+  assert.equal(config.moneyConfiguration.assets.solanaStablecoin.chainId, '792703809');
+  assert.notDeepEqual(config.collectorCrypt.settlementAsset, config.moneyConfiguration.assets.solanaStablecoin);
+});
+
+test('production profile refuses a Relay Solana mint that is not the documented Collector settlement asset', () => {
+  assert.throws(
+    () => readEnvironment(completeProductionEnvironment({
+      HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+      HOOKEMON_RELAY_SOLANA_MINT: 'So11111111111111111111111111111111111111112',
+    }), { profile: 'production' }),
+    /HOOKEMON_RELAY_SOLANA_MINT and HOOKEMON_RELAY_SOLANA_DECIMALS to match the documented Collector settlement asset/,
+  );
+  assert.throws(
+    () => readEnvironment(completeProductionEnvironment({
+      HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+      HOOKEMON_RELAY_SOLANA_DECIMALS: '9',
+    }), { profile: 'production' }),
+    /HOOKEMON_RELAY_SOLANA_MINT and HOOKEMON_RELAY_SOLANA_DECIMALS to match the documented Collector settlement asset/,
+  );
+});
+
 test('production profile builds MoneyConfigurationV1 from explicit assets, minima, caps, and reserves', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   const config = readEnvironment(completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '2',
     HOOKEMON_MIN_SOLANA_RECEIVE: '3',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
   }), { profile: 'production' });
 
   assert.deepEqual(config.moneyConfiguration, {
@@ -322,10 +371,13 @@ test('production profile rejects the atomic placeholder and refuses legacy nativ
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   const complete = completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
   });
 
   assert.throws(
