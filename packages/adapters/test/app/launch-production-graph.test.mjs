@@ -23,6 +23,7 @@ import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authori
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { createTestKeychain } from '../fixtures/keychain/fixture.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
+import { deriveAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '../../src/solana-rpc.mjs';
 
 const execFileAsync = promisify(execFile);
 const BIN_PATH = fileURLToPath(new URL('../../bin/hookemon-runner.mjs', import.meta.url));
@@ -308,13 +309,12 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
       respond(response, { machines: [{ code: 'return-fixture', price: PACK_PRICE, contains: 1 }] });
       return;
     }
-    // Purchase's mutation endpoints are deliberately left unimplemented (still counted, then
-    // refused with 404): the current production configuration wiring makes
-    // `assertSolanaSignerMoneyConfiguration` refuse every purchase mutate attempt before it reaches
-    // any of these (see the frontier comment below this fixture), so none of these three branches
-    // is exercised by this run today. They stay in place, and are asserted at exactly zero calls,
-    // so a future config fix that reaches this far is caught reaching an intentionally-unimplemented
-    // provider response rather than silently appearing to "work" against no fixture at all.
+    // Purchase's own Collector mutation endpoints. A truthful response shape was built and
+    // verified for each (two unique memos with syntactically valid unsigned transactions for the
+    // isolated Operations address; observation-only pack status), then removed once actual
+    // execution proved none of the three is reachable today -- see the frontier comment below this
+    // fixture for the real, earlier defect that stops the batch before any of them is called. Only
+    // the call count survives, so a future fix that reaches this far is still measured precisely.
     if (request.url === '/api/generateYoloPacks') { calls.collectorGenerateYoloPacks += 1; response.writeHead(404); response.end(); return; }
     if (request.url.startsWith('/api/pack/status')) { calls.collectorPackStatus += 1; response.writeHead(404); response.end(); return; }
     if (request.url === '/api/submitTransaction') { calls.collectorSubmitTransaction += 1; response.writeHead(404); response.end(); return; }
@@ -439,6 +439,38 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
     if (rpc.method === 'getBalance') return reply({ context: { slot: 1 }, value: 10000000 });
     if (rpc.method === 'getLatestBlockhash') return reply({ context: { slot: 1 }, value: { blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 1000 } });
     if (rpc.method === 'getBlockHeight') return reply(1);
+    // Purchase's own settlement account read: the real jsonParsed shape `readAssociatedTokenAccount`
+    // (solana-rpc.mjs) requires, for exactly the ATA this run's own Operations identity derives for
+    // the settlement mint -- carrying enough balance to cover the admitted purchase.
+    if (rpc.method === 'getAccountInfo') {
+      const [address, options] = rpc.params ?? [];
+      const settlementAta = operationsSolanaAccount() === null
+        ? null
+        : deriveAssociatedTokenAddress(operationsSolanaAccount(), SOLANA_MINT).toBase58();
+      if (address === settlementAta && options?.encoding === 'jsonParsed') {
+        return reply({
+          context: { slot: 1 },
+          value: {
+            owner: TOKEN_PROGRAM_ID,
+            data: {
+              program: 'spl-token',
+              parsed: {
+                type: 'account',
+                info: {
+                  mint: SOLANA_MINT,
+                  owner: operationsSolanaAccount(),
+                  tokenAmount: { amount: AGGREGATE_PURCHASE_ATOMIC.toString(), decimals: 6 },
+                },
+              },
+            },
+          },
+        });
+      }
+      return reply({ context: { slot: 1 }, value: null });
+    }
+    // Purchase's own pre-sign blockhash check: the generated transaction's recent blockhash is
+    // still the one this fixture's own `getLatestBlockhash` names, so it truthfully remains usable.
+    if (rpc.method === 'isBlockhashValid') return reply({ context: { slot: 1 }, value: true });
     // The outbound leg's destination-chain evidence: the Relay solver's own finalized settlement,
     // discoverable only by the Operations Solana account this run actually generated, and only once
     // that account is known (see the `operationsAccount()` callback pattern above for the EVM twin).
@@ -926,49 +958,54 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   // next automatic tick durably reaches the purchase operation boundary.
   //
   // Purchase/open/epic-gate/buyback/return/payout completion are the next bounded steps and are
-  // deliberately not asserted here yet. Every defect this comment previously named (the
-  // preparation-adapter gap, then the pack-quantity config-wiring gap) is now resolved: purchase
-  // durably reaches PREPARED with the admitted quantity of 2.
+  // deliberately not asserted here yet. Every defect this comment previously named -- the
+  // preparation-adapter gap, the pack-quantity config-wiring gap, and the native/Relay
+  // settlement-asset namespace mismatch in `assertSolanaSignerMoneyConfiguration` -- is now
+  // resolved (solana-money-controls.mjs's `PRODUCTION_RELAY_SOLANA_STABLECOIN_ASSET` mapping).
+  // Purchase now durably reads its own settlement ATA (this fixture's `getAccountInfo`) and passes
+  // the priority-fee envelope check before attempting to record its batch.
   //
-  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after both
-  // prior fixes) is earlier and more fundamental than the previously expected Collector-policy
-  // refusal, and is a real production defect outside this file's write-set: `mutatePurchase`
-  // (purchase.mjs:327-332) calls `assertSolanaSignerMoneyConfiguration` with
-  // `config.collectorCrypt.settlementAsset` -- the native Collector asset identity
-  // (`COLLECTOR_CRYPT_SETTLEMENT_ASSET`, chain id `solana-mainnet`, environment.mjs:975-1002) --
-  // and that function (solana-money-controls.mjs:41-52) requires it to `sameAsset`-equal
-  // `config.moneyConfiguration.assets.solanaStablecoin`, which production always builds in Relay's
-  // own numeric chain-id namespace (`792703809`, environment.mjs:544-548) even though both name the
-  // same mint and decimals. The two chain-id labels are deliberately kept distinct (Relay's
-  // cross-chain numbering is not a Solana RPC or Collector transaction-policy identity --
-  // solana-rpc.mjs's own `SOLANA_RELAY_CHAIN_ID` doc comment), so this is a real cross-file
-  // inconsistency, not a fixture gap: every live production purchase mutate attempt throws
-  // "purchase MoneyConfigurationV1 Solana asset does not match the configured settlement asset"
-  // on every tick, before any Collector Crypt HTTP call, durable batch write, or ATA read. This
-  // makes the Collector-policy-refusal boundary this comment previously anticipated currently
-  // unreachable; closing that requires reconciling the two namespaces in `purchase.mjs` or
-  // `solana-money-controls.mjs`, which is out of this file's write-set.
+  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after the
+  // native/Relay fix) is a real production defect outside this file's write-set, one step earlier
+  // than the previously expected Collector-policy refusal: `mutatePurchase`
+  // (purchase.mjs:353-358) calls `cycleRepository.recordPackBatchIntent` with
+  // `packType: prepared.packType` -- this fixture's own configured `HOOKEMON_PACK_CODE`,
+  // `'return-fixture'` -- before ever calling `generateYoloPacks`. `assertPackBatchIntent`
+  // (cycle-repository.mjs:527-537) validates that field against `packTypeFieldPattern`
+  // (cycle-repository.mjs:492, `/^[a-z][a-z0-9_]{0,63}$/`), which has no hyphen, while
+  // `environment.mjs`'s own `packCodePattern` (environment.mjs:211, `/^[a-z0-9][a-z0-9_-]{1,63}$/`)
+  // explicitly allows one. Any hyphenated `HOOKEMON_PACK_CODE` -- a value `readEnvironment` itself
+  // accepts -- durably fails every purchase batch-intent write with "purchase pack batch intent
+  // packType is invalid", before any Collector Crypt HTTP call. This makes the Collector-policy
+  // refusal this comment previously anticipated currently unreachable for this pack code; closing
+  // it requires reconciling the two patterns in `environment.mjs` or `cycle-repository.mjs`, which
+  // is out of this file's write-set. Truthful `generateYoloPacks`/`pack/status`/`submitTransaction`
+  // fixture responses (two unique memos, syntactically valid unsigned transactions for the
+  // isolated Operations address, observation-only status) were built and exercised against this
+  // exact run; actual execution proved this earlier defect stops every attempt before any of the
+  // three is ever called, so the response bodies were removed as unreachable and only each
+  // endpoint's call count remains, asserted at zero below.
   assert.equal(cycle.stages.get('outbound')?.status, 'COMPLETE', `outbound must durably settle from Solana destination-chain evidence; ${await diagnostics()}`);
   const purchase = cycle.preparedStages.get('purchase') ?? null;
   assert.ok(purchase, `purchase must durably reach the PREPARED operation boundary once outbound settles; ${await diagnostics()}`);
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
   assert.match(
     stderr,
-    /purchase MoneyConfigurationV1 Solana asset does not match the configured settlement asset/,
-    `every purchase mutate tick must refuse the current settlement-asset/MoneyConfigurationV1 namespace mismatch; ${await diagnostics()}`,
+    /purchase pack batch intent packType is invalid/,
+    `every purchase mutate tick must refuse the hyphenated pack code's batch-intent packType validation; ${await diagnostics()}`,
   );
   assert.equal(
     await repository.readPackBatchIntent(cycleIds[0], 'purchase'), null,
-    `purchase must never durably record a batch intent while its money-configuration guard refuses first; ${await diagnostics()}`,
+    `purchase must never durably record a batch intent while its packType validation refuses first; ${await diagnostics()}`,
   );
   assert.equal(
     await repository.readPackBatchRequest(cycleIds[0], 'purchase'), null,
-    `purchase must never durably record generated pack memos while its money-configuration guard refuses first; ${await diagnostics()}`,
+    `purchase must never durably record generated pack memos while its packType validation refuses first; ${await diagnostics()}`,
   );
   const purchaseAttempt = await repository.readOperationalStageAttempt(cycleIds[0], 'purchase');
   assert.equal(
-    purchaseAttempt?.attempt?.state, 'NOT_SENT',
-    `purchase's operational attempt must stay NOT_SENT -- refused before any provider call, never reaching SENT_UNKNOWN; ${await diagnostics()}`,
+    purchaseAttempt?.attempt?.state, 'SENT_UNKNOWN',
+    `purchase's operational attempt must be marked SENT_UNKNOWN once its mutate call was entered, even though the packType validation refused before any Collector HTTP call; ${await diagnostics()}`,
   );
   assert.equal(fixture.calls.collectorGenerateYoloPacks, 0, `purchase must never call generateYoloPacks; ${await diagnostics()}`);
   assert.equal(fixture.calls.collectorPackStatus, 0, `purchase must never poll pack status with no batch to reconcile; ${await diagnostics()}`);
