@@ -94,11 +94,16 @@ function assertSameDirectory(expectedDirectory, actualDirectory) {
   const actualFiles = filesIn(actualDirectory);
   assert.deepEqual(actualFiles, expectedFiles, 'materialization changed the Phase 3 release file set');
   for (const path of expectedFiles) {
-    assert.deepEqual(
-      readFileSync(resolve(actualDirectory, path)),
-      readFileSync(resolve(expectedDirectory, path)),
-      `materialization drifted ${path}`,
-    );
+    const actualBytes = readFileSync(resolve(actualDirectory, path));
+    const expectedBytes = readFileSync(resolve(expectedDirectory, path));
+    if (!actualBytes.equals(expectedBytes)) {
+      // A structural assert.deepEqual on ~385KB Buffers renders a huge diff and can exhaust
+      // memory before failing; report exact byte identity only (path, SHA-256, length).
+      assert.fail(
+        `materialization drifted ${path} (actual ${sha256(actualBytes)} ${actualBytes.length} bytes, `
+        + `expected ${sha256(expectedBytes)} ${expectedBytes.length} bytes)`,
+      );
+    }
   }
 }
 
