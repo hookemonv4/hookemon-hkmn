@@ -1839,6 +1839,126 @@ test('removes standing authority providers and resolvers from handler configurat
   assert.equal('resolveStepAuthorization' in handlerConfig.standingAuthority, false);
 });
 
+test('strips the trusted Solana blockhashContextResolver out of ordinary purchase request preparation', async () => {
+  const cycleRepository = writeAheadRepository();
+  let handlerConfig = null;
+  const resolver = async blockhash => ({ blockhash, lastValidBlockHeight: '100' });
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig({ solana: { chainId: 'solana-mainnet', blockhashContextResolver: resolver } }),
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+    stageHandlers: {
+      purchase: {
+        async probe() { return null; },
+        async prepareRequest({ config }) {
+          handlerConfig = config;
+          return { provider: 'collector-test', playerAddress: 'PLAYER11111111111111111111111111111111111' };
+        },
+        async mutate() { return { providerReceipt: 'handler-config-blockhash-redaction' }; },
+        async reconcileLive() { return null; },
+      },
+    },
+  });
+
+  await driver.execute({
+    cycleId: CYCLE_ID,
+    stage: 'purchase',
+    intent: { journalHead: 'handler-config-blockhash-redaction' },
+    async assertMutationAllowed() {},
+  });
+
+  assert.equal(handlerConfig.solana.chainId, 'solana-mainnet');
+  assert.notEqual(typeof handlerConfig.solana.blockhashContextResolver, 'function');
+});
+
+test('the production supplementary reconcile mutation boundary receives the real trusted Solana blockhashContextResolver, while the rest of config stays frozen and canonical', async () => {
+  const position = {
+    positionId: `held:${'a'.repeat(64)}`,
+    cycleId: CYCLE_ID,
+    packId: 'base-pack',
+    memo: 'memo-supplementary-blockhash',
+    mint: 'mint-supplementary-blockhash',
+    cardRef: 'mint-supplementary-blockhash',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'1'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  let settlement = {
+    positionId: position.positionId,
+    cycleId: CYCLE_ID,
+    manifestId: `${CYCLE_ID}:supplementary:9`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  const repository = fakeCycleRepository();
+  repository.readSupplementarySettlement = async () => structuredClone(settlement);
+  repository.advanceSupplementarySettlement = async (positionId, input) => {
+    settlement = { ...settlement, state: input.nextState };
+    return structuredClone(settlement);
+  };
+
+  let resolverCalls = 0;
+  let observedBlockhash = null;
+  const resolver = async blockhash => {
+    resolverCalls += 1;
+    observedBlockhash = blockhash;
+    return { blockhash, lastValidBlockHeight: '4242' };
+  };
+  let receivedConfig = null;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig({ solana: { chainId: 'solana-mainnet', blockhashContextResolver: resolver } }),
+    cycleRepository: repository,
+    supplementaryAdapters: Object.freeze({}),
+    supplementarySignerClient: Object.freeze({}),
+    productionSupplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        mutation: 'buyback',
+        async reconcile({ config, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
+          receivedConfig = config;
+          return injectedRepository.advanceSupplementarySettlement(position.positionId, {
+            expectedState: receivedSettlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'2'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+
+  const result = await driver.runSupplementarySettlement({
+    position,
+    settlement,
+    nowMs: 1_001,
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {},
+  });
+
+  assert.equal(result.status, 'ADVANCED');
+  assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
+  assert.equal(Object.isFrozen(receivedConfig), true);
+  assert.equal(Object.isFrozen(receivedConfig.solana), true);
+  assert.equal(receivedConfig.solana.chainId, 'solana-mainnet');
+  assert.equal(typeof receivedConfig.solana.blockhashContextResolver, 'function');
+  assert.deepEqual(
+    await receivedConfig.solana.blockhashContextResolver('observed-blockhash-xyz'),
+    { blockhash: 'observed-blockhash-xyz', lastValidBlockHeight: '4242' },
+  );
+  assert.equal(resolverCalls, 1);
+  assert.equal(observedBlockhash, 'observed-blockhash-xyz');
+});
+
 test('fences injected provider and signer calls immediately before they run', async () => {
   const calls = { provider: 0, signer: 0 };
   const cases = [

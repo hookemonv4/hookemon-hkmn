@@ -410,6 +410,21 @@ function buildAdapters(config) {
   };
 }
 
+/** The one trusted `config.solana.blockhashContextResolver` purchase/buyback/supplementary-buyback
+ * and signed transaction-policy revalidation all consume (packages/adapters/src/signing/
+ * transaction-policy.mjs). It refuses any provider blockhash that is not the configured Solana
+ * client's own current latest usable blockhash, because only that RPC pair's `lastValidBlockHeight`
+ * is trustworthy -- a still-valid older blockhash has no independently recoverable deadline. */
+export function createTrustedSolanaBlockhashContextResolver(client) {
+  return async function trustedSolanaBlockhashContextResolver(observedBlockhash) {
+    const latest = await readUsableLatestBlockhash(client);
+    if (latest.blockhash !== observedBlockhash) {
+      throw new Error('compose Solana blockhashContextResolver refuses a blockhash that is not the current latest');
+    }
+    return { blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight };
+  };
+}
+
 /** The public Robinhood endpoint has verified latest-only state reads, so it is never a valid
  * source of historical settlement evidence. Production requires a separate archive-capable
  * client, either injected explicitly or built from the distinct configured archive endpoint. */
@@ -1199,6 +1214,15 @@ export async function compose(config) {
   let adapters = buildAdapters(resolved);
   if (isLiveCollectorOnlyRehearsal(resolved) && resolved.collectorCrypt?.executionBundleRequired === true) {
     resolved = attachCollectorPolicyBundle(resolved, await loadCollectorPolicyBundle());
+  }
+  if (adapters.solana?.client) {
+    resolved = {
+      ...resolved,
+      solana: {
+        ...resolved.solana,
+        blockhashContextResolver: createTrustedSolanaBlockhashContextResolver(adapters.solana.client),
+      },
+    };
   }
   if (resolved.execution.profile === 'production') {
     assertProductionHistoricalEvidenceClient(adapters);

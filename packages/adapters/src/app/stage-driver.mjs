@@ -618,6 +618,18 @@ function frozenCanonicalValue(value) {
   return freezeRequest(toEvidenceValue(value));
 }
 
+/** Canonicalizes `config` like `frozenCanonicalValue`, but re-attaches the one trusted
+ * `config.solana.blockhashContextResolver` function seam (compose.mjs's real production Solana RPC
+ * resolver) that canonicalization would otherwise stringify away. This is the only supplementary
+ * reconcile call site that reaches a live mutation boundary (the production supplementary buyback
+ * handler); every other frozen preparation/reconciliation payload stays capability-free. */
+function frozenSupplementaryReconcileConfig(config) {
+  const canonical = frozenCanonicalValue(config);
+  const resolver = config?.solana?.blockhashContextResolver;
+  if (typeof resolver !== 'function') return canonical;
+  return Object.freeze({ ...canonical, solana: Object.freeze({ ...canonical.solana, blockhashContextResolver: resolver }) });
+}
+
 function stageConfiguration(config) {
   const {
     standingAuthorityStepAuthorization: _standingAuthorityStepAuthorization,
@@ -1105,7 +1117,7 @@ export function createStageDriver({
       await handler.reconcile(Object.freeze({
         adapters: supplementaryCapabilities.adapters,
         signerClient: supplementaryCapabilities.signerClient,
-        config: frozenCanonicalValue(currentHandlerConfig),
+        config: frozenSupplementaryReconcileConfig(currentHandlerConfig),
         cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
         context: frozenCanonicalValue(context),
         assertLease: input.assertLease,

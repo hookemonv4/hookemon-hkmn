@@ -20,7 +20,7 @@ import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
-import { compose as composeRoot } from '../../src/app/compose.mjs';
+import { compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
 import {
   CYCLE_REPOSITORY_CLIENT_INTERFACE,
   assertCycleRepositoryClientInterface,
@@ -32,6 +32,7 @@ import { DISTRIBUTION_SIGNER_ROLE, VERIFIER_ROLE } from '../../../runner/src/dis
 import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
+  SolanaAdapterError,
   createSolanaRpcClient,
   deriveAssociatedTokenAddress,
 } from '../../src/solana-rpc.mjs';
@@ -429,6 +430,82 @@ test('compose starts a live collector-only rehearsal with only Solana identity a
     requirePolicyConfiguration: true,
     requireCanaryPreflight: true,
   }), { cycleCount: 0, preflight: 'PASSED' });
+});
+
+/** A configured-RPC double for `createTrustedSolanaBlockhashContextResolver`: `getLatestBlockhash`
+ * and `isBlockhashValid` answer from the given fixed values, and every call is counted so a test can
+ * assert the resolver actually reached this exact client instance instead of some other. */
+function configurableSolanaRpcClient({ blockhash, lastValidBlockHeight = 101, valid = true } = {}) {
+  const calls = { getLatestBlockhash: 0, isBlockhashValid: 0 };
+  const client = createSolanaRpcClient({
+    rpcUrl: 'https://solana.example.test',
+    fetchImpl: async (_url, request) => {
+      const { id, method } = JSON.parse(request.body);
+      calls[method] = (calls[method] ?? 0) + 1;
+      const result = method === 'getLatestBlockhash'
+        ? { value: { blockhash, lastValidBlockHeight } }
+        : method === 'isBlockhashValid'
+          ? { value: valid }
+          : null;
+      return { ok: true, async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); } };
+    },
+  });
+  return { client, calls };
+}
+
+test('the trusted Solana blockhashContextResolver returns the exact RPC pair on an exact latest-blockhash match', async () => {
+  const latestBlockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { client } = configurableSolanaRpcClient({ blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+  const resolver = createTrustedSolanaBlockhashContextResolver(client);
+
+  const context = await resolver(latestBlockhash);
+
+  assert.deepEqual(context, { blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+});
+
+test('the trusted Solana blockhashContextResolver refuses a provider blockhash that is not the current latest', async () => {
+  const { client } = configurableSolanaRpcClient({ blockhash: 'SysvarC1ock11111111111111111111111111111111' });
+  const resolver = createTrustedSolanaBlockhashContextResolver(client);
+
+  await assert.rejects(
+    () => resolver('SysvarRecentB1ockHashes11111111111111111111'),
+    /compose Solana blockhashContextResolver refuses a blockhash that is not the current latest/,
+  );
+});
+
+test('the trusted Solana blockhashContextResolver refuses when the RPC latest blockhash is already unusable', async () => {
+  const latestBlockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { client } = configurableSolanaRpcClient({ blockhash: latestBlockhash, valid: false });
+  const resolver = createTrustedSolanaBlockhashContextResolver(client);
+
+  await assert.rejects(() => resolver(latestBlockhash), SolanaAdapterError);
+});
+
+test('compose installs the trusted resolver from its own configured Solana client, not an arbitrary same-shaped one', async t => {
+  const latestBlockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { client: solanaClient, calls } = configurableSolanaRpcClient({ blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+  const stateDir = await tempStateDir(t);
+  const composition = await compose({
+    stateDir,
+    statePath: join(stateDir, 'operator-state.json'),
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: { baseUrl: 'https://example.invalid' },
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: solanaClient } },
+  });
+  t.after(() => composition.shutdown());
+
+  // `compose` never re-exports the resolved `config.solana.blockhashContextResolver` it builds and
+  // hands to the stage driver (see stage-driver.test.mjs for that capability-threading proof); what
+  // is public here is the exact same configured client instance the resolver factory closes over,
+  // identity-checked so a future refactor cannot silently point it at a different, untrusted client.
+  assert.equal(composition.adapters.solana.client, solanaClient);
+  const resolver = createTrustedSolanaBlockhashContextResolver(composition.adapters.solana.client);
+  assert.deepEqual(await resolver(latestBlockhash), { blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+  assert.equal(calls.getLatestBlockhash, 1);
 });
 
 test('compose refuses a production profile without MoneyConfigurationV1 before opening durable state', async t => {
