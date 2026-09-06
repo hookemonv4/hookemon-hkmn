@@ -13,53 +13,42 @@ This is why the new PR-triggered `fork-proof` job (`.github/workflows/fork-proof
 which checks out `github.event.pull_request.head.sha` read-only and re-runs the same proof) is rejected:
 "Branch 'refs/pull/3/merge' is not allowed to deploy to fork-proof due to environment protection rules."
 
-## What A confirmed from official GitHub REST API docs (this turn)
+## Confirmed REST API shape and ref-matching semantics (official docs, coordinator-verified)
 
 - List: `GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies`
 - Create: `POST /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies`
-  body: `{ "name": "<pattern>", "type": "branch" | "tag" }` (type defaults to `branch`); pattern matching
-  follows glob-style rules where `*` does not cross `/` (e.g. `release/*/*` matches one extra path segment).
+  body: `{ "name": "<pattern>", "type": "branch" | "tag" }` (type defaults to `branch`).
+- Ref-matching for `pull_request`-triggered deployments is explicitly documented, not inferred: GitHub's
+  official docs, [Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+  (source: https://github.com/github/docs/blob/main/content/actions/reference/workflows-and-actions/deployments-and-environments.md),
+  state that adding a branch policy for the pattern `refs/pull/*/merge` allows workflow runs triggered by
+  `pull_request` to deploy to a protected environment. This resolves the one fact A's own doc-fetch attempts
+  this turn could not confirm (A's prior text speculated it might need base-branch matching instead — that
+  speculation is withdrawn; the coordinator's citation above is authoritative and it is a distinct `branch`
+  pattern entry, not a base-branch match).
 - Required-reviewer protection and deployment-branch-policy are two independent, additively-enforced
-  environment protection rules: adding or widening a branch/tag policy does not remove, weaken, or bypass
-  the existing required-reviewer rule for `hookemonv4`. Both must still pass for a deployment to proceed.
-
-## What A could NOT independently confirm from fetched docs this turn
-
-GitHub's public docs pages A attempted to fetch either 404'd or did not state explicitly whether a
-`type: "branch"` deployment-branch-policy pattern matches refs outside `refs/heads/*` — specifically whether
-it can be made to match the `pull_request`-triggered merge ref (`refs/pull/<number>/merge`, which is what
-`github.ref` resolves to for that job) at all, or whether GitHub instead evaluates a PR-triggered job's base
-branch for this purpose. **A is not asserting either behavior as confirmed** — this is exactly the kind of
-claim this proposal must not fabricate.
+  environment protection rules: adding this branch policy does not remove, weaken, or bypass the existing
+  required-reviewer rule for `hookemonv4`. Both must still pass for a deployment to proceed.
 
 ## The proposed narrow, ready-to-approve action
 
-Because the exact ref-matching mechanics are the one unconfirmed fact, A proposes the owner (or an operator
-the owner explicitly authorizes) take this single verification-then-action step, rather than A guessing at a
-pattern that might silently fail to match or might over-broaden the policy:
+Exact payload, addable with a single API call, changing nothing else:
 
-1. Owner directly inspects, in the GitHub UI, Settings → Environments → `fork-proof` → Deployment branches
-   and tags, what "Selected branches and tags" pattern options GitHub's own environment editor currently
-   offers for this repository (GitHub's own UI is authoritative over any pattern guess made here).
-2. If the UI (or a `GET` to the deployment-branch-policies endpoint after a manual trial) confirms a pattern
-   that admits `refs/pull/<number>/merge` for PR-triggered runs — for example a policy scoped to `main` is
-   already documented by GitHub to also require confirming whether "Allow administrators to bypass"-style
-   settings are involved for PR contexts — the owner adds **exactly one** additional deployment branch policy
-   entry via `POST .../deployment-branch-policies` with the minimal pattern GitHub's own tooling confirms is
-   correct. No existing policy entry (`main`, policy `59176106`) is removed or modified.
-3. The required reviewer (`hookemonv4`) stays configured exactly as-is; this proposal adds a branch/tag
-   policy entry only and touches no reviewer/protection-rule field.
-4. After the addition, the owner reruns the PR's `fork-proof` job once to confirm it now executes (rather
+```
+POST /repos/hookemonv4/hookemon-hkmn/environments/fork-proof/deployment-branch-policies
+{ "name": "refs/pull/*/merge", "type": "branch" }
+```
+
+1. The owner (or an operator the owner explicitly authorizes) adds this one deployment-branch-policy entry.
+   The existing `main` policy (id `59176106`) and the required reviewer (`hookemonv4`) are untouched —
+   neither removed nor modified.
+2. After the addition, the owner reruns the PR's `fork-proof` job once to confirm it now executes (rather
    than being rejected before the read-only proof step runs) and that the required-reviewer prompt still
    appears exactly as before.
 
 ## Why A is not doing this itself
 
-- This is a live GitHub Environment settings mutation, explicitly forbidden to A under this turn's
-  instructions ("do not mutate environment").
-- The one open technical fact (whether a branch-type pattern can match `refs/pull/*/merge` at all, or
-  whether the correct approach is instead to scope the policy to the PR's base branch) needs GitHub's own
-  authoritative behavior, which A could not fully confirm from the docs pages fetched this turn — verifying
-  it against GitHub's live UI/API response, which only the owner (or an explicitly authorized operator with
-  environment-admin access) can safely do, is the responsible way to avoid proposing a pattern that either
-  silently fails to match or is broader than intended.
+This is a live GitHub Environment settings mutation, explicitly forbidden to A under this turn's
+instructions ("do not mutate environment"). The technical content of the proposal is now fully resolved
+(exact payload, cited official source); only the actual API call remains, and only the owner (or an
+explicitly authorized operator) may make it.

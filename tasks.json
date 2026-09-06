@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-06T01:52:04.912Z",
+  "generatedAt": "2026-09-06T02:30:41.462Z",
   "tasks": [
     {
       "id": "LAUNCH-A",
@@ -107,6 +107,15 @@
         "LAUNCH-H",
         "LAUNCH-I"
       ],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-Q",
+      "title": "Bind exact-output bridge quotes to multi-pack admission",
+      "phase": "build",
+      "risk": "R3",
+      "deps": [],
       "reqs": [],
       "status": "ready"
     },
