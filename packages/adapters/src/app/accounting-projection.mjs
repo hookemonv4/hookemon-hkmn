@@ -61,7 +61,7 @@ function subtractAtZero(a, b) {
 
 /** The outbound bridge's quoted origin (USDG) and destination (Solana USDC) amounts are two
  * different assets on two different chains. Equal decimals and an approximate peg are not a
- * same-asset fee: `origin - destination` would silently mix a USDG figure with a USDC figure and
+ * same-asset fee: `origin - destination` would silently mix a USDG figure with a settlement-asset figure and
  * report the difference as if it were a USDG cost. No same-asset bridge-fee evidence exists
  * anywhere in the current stage evidence, so this honestly stays `null` rather than fabricate a
  * cross-asset subtraction. A later work package may replace this once the relay adapter reports an
@@ -76,7 +76,7 @@ function outboundBridgeFee() {
  * tooling resolves that, this read-only projection never guesses which one is real). `outbound`
  * legs originate on the Robinhood Chain in USDG by construction (see stages/outbound.mjs); `return`
  * legs land back on the Robinhood Chain in USDG by construction (see stages/return.mjs) — so
- * `sourceAmountAtomic`/`destinationAmountAtomic` here are real USDG amounts, not a Solana-USDC
+ * `sourceAmountAtomic`/`destinationAmountAtomic` here are real USDG amounts, not a Solana settlement-asset
  * figure treated at an assumed parity. */
 function settledRelayLeg(relayLegs, direction) {
   if (!(relayLegs instanceof Map)) return null;
@@ -509,7 +509,7 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
 
   // No honest USDG-denominated pack-spend/buyback/gain/loss producer exists: the bridge amounts are
   // a different fact (custody movement) and the Collector amounts are a different asset (Solana
-  // USDC). Computing a "gain/loss" from either would either mix assets or silently relabel a bridge
+  // settlement asset). Computing a "gain/loss" from either would either mix assets or silently relabel a bridge
   // movement as pack economics — both are exactly the anti-patterns this projection must avoid.
   const packSpendMicroUsdg = null;
   const buybackMicroUsdg = null;

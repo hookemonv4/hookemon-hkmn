@@ -1063,7 +1063,7 @@ function encodeBase58(bytes) {
 /**
  * The deterministic on-chain identifier a correct broadcast of these exact already-signed bytes
  * must return: the EVM transaction hash (`keccak256` of the raw signed transaction, per the
- * Ethereum JSON-RPC `eth_sendRawTransaction` contract) or the Solana transaction signature (the
+ * EVM JSON-RPC `eth_sendRawTransaction` contract) or the Solana transaction signature (the
  * base58 encoding of the transaction's own first signature slot, per the Solana `sendTransaction`
  * contract — a fully-signed transaction's id *is* that signature). Used to refuse a broadcast
  * result that does not correspond to the bytes actually sent, whether from a malfunctioning RPC or

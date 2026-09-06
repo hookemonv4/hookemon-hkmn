@@ -104,7 +104,7 @@ fails loudly here rather than downstream):
 { schema: 'hookemon.supplementary-confirmed-sale.v1',
   positionId, cycleId, manifestId,
   sourceWallet,          // config.accounts.solana -- the operator wallet that received proceeds
-  mint,                  // the settlement asset's own mint (e.g. Circle USDC), NOT the card mint
+  mint,                  // the settlement asset's own mint (e.g. Circle stablecoin), NOT the card mint
   decimals, amountAtomic,
   transactionSignature,  // the real Solana signature, recomputed from durably-recorded raw bytes
   memo,                  // the held position's immutable memo

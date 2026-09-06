@@ -1,5 +1,5 @@
 // Network/profile shape mirrors the authoritative packages/dashboard/src/contracts/dashboard-profile.mjs:
-// "mainnet" targets the Robinhood Chain / USDG product, not EVM mainnet / Circle USDC.
+// "mainnet" targets the Robinhood Chain / USDG product, not EVM mainnet / Circle stablecoin.
 const PROFILES = Object.freeze({
   testnet: Object.freeze({
     id: "testnet",
