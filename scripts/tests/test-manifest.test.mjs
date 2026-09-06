@@ -330,7 +330,7 @@ test('CI runs every bare-node suite from the manifest with the required timeout 
 });
 
 test('CI serializes exactly the three resource-heavy scripts-suite files, then runs the remaining manifest once with the required timeout', () => {
-  const scriptsStep = [
+  const scriptsStepBody = [
     'files="$(node scripts/test-manifest.mjs list scripts)"',
     'heavy_files=(',
     '  scripts/tests/cleanroom.test.mjs',
@@ -350,12 +350,18 @@ test('CI serializes exactly the three resource-heavy scripts-suite files, then r
     'done',
     'node --test --test-timeout=120000 $remaining_files',
   ].join('\n');
+  // The workflow's `run: |` block scalar indents every body line 10 spaces (6 for the step,
+  // +2 for `run:`, +4 for its content); match that literally instead of dedenting the workflow.
+  const scriptsStep = scriptsStepBody
+    .split('\n')
+    .map(line => `          ${line}`)
+    .join('\n');
   assert.ok(
     workflow.includes(scriptsStep),
     'scripts suite must fail on a missing/duplicated heavy member, serialize exactly the three heavy files with the required timeout, then run every remaining manifest file exactly once at the existing default parallelism',
   );
-  assert.doesNotMatch(scriptsStep, /\*\*/);
-  assert.doesNotMatch(scriptsStep, /\*\.test\.mjs/);
+  assert.doesNotMatch(scriptsStepBody, /\*\*/);
+  assert.doesNotMatch(scriptsStepBody, /\*\.test\.mjs/);
 });
 
 test('the web suite is honestly executed by web-ci, not duplicated as an incompatible bare-node gate', () => {
