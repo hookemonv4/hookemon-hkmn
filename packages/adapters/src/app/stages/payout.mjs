@@ -62,6 +62,7 @@ const PLAN_FIELDS = [
   'totalAllocated',
   'dust',
   'feasibility',
+  'outcome',
   'payableRecipientCount',
   'planDigest',
 ];
@@ -89,6 +90,14 @@ const FROZEN_ABI = [{
 }];
 
 export class DirectPayoutError extends Error {}
+
+export class DirectPayoutFrozenAssetError extends DirectPayoutError {
+  constructor({ operations }) {
+    super(`direct payout USDG is frozen for the Operations sender ${operations}: nothing was admitted or spent`);
+    this.name = 'DirectPayoutFrozenAssetError';
+    this.operations = operations;
+  }
+}
 
 export class DirectPayoutNonceInterferenceError extends DirectPayoutError {
   constructor({ recipient, expectedNonce, observedNonce }) {
@@ -531,6 +540,10 @@ function normalizedState(stateValue) {
     fail('direct payout state gasPriceWei exceeds its frozen gas-price cap');
   }
   if (BigInt(state.nextNonce) < BigInt(state.firstNonce)) fail('direct payout state nextNonce is invalid');
+  if (state.inFlightWindow === undefined) state.inFlightWindow = 1;
+  if (!Number.isSafeInteger(state.inFlightWindow) || state.inFlightWindow < 1) {
+    fail('direct payout state inFlightWindow is invalid');
+  }
   if (!Array.isArray(state.recipients) || !Array.isArray(state.quarantine)) fail('direct payout state journals are invalid');
   const recipients = new Set();
   state.recipients = state.recipients.map((attempt, index) => normalizeAttempt(
@@ -1103,7 +1116,11 @@ export function createDirectPayoutState({
   firstNonce,
   gasPriceWei,
   heldPositionExclusions = undefined,
+  inFlightWindow = 1,
 }) {
+  if (!Number.isSafeInteger(inFlightWindow) || inFlightWindow < 1) {
+    fail('direct payout inFlightWindow must be a positive safe integer');
+  }
   const { plan: sourcePlan, distributablePool, dust, allocations } = assertPlan(plan);
   const operationAddress = assertAddress(operations, 'Operations address');
   const tokenAddress = assertAddress(usdgAddress, 'USDG address');
@@ -1159,6 +1176,7 @@ export function createDirectPayoutState({
     firstNonce: initialNonce,
     nextNonce: initialNonce,
     gasPriceWei: selectedGasPrice,
+    inFlightWindow,
     recipients,
     quarantine: [],
   };
@@ -1172,6 +1190,7 @@ export async function initializeDirectPayout({
   firstNonce,
   gasPriceWei,
   heldPositionExclusions = undefined,
+  inFlightWindow = 1,
 }) {
   const state = createDirectPayoutState({
     plan,
@@ -1180,6 +1199,7 @@ export async function initializeDirectPayout({
     firstNonce,
     gasPriceWei,
     heldPositionExclusions,
+    inFlightWindow,
   });
   if (!payoutStore || typeof payoutStore.load !== 'function') fail('direct payout requires a durable payoutStore.load()');
   const existing = await payoutStore.load();
@@ -1205,14 +1225,51 @@ export function buildDirectPayoutTransaction({ state, recipient }) {
   return buildTransaction(normalized, attempt);
 }
 
-function nextUnresolvedRecipient(state) {
-  return state.recipients.find(attempt => !['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state)) ?? null;
+const RESOLVED_RECIPIENT_STATES = ['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'];
+const IN_FLIGHT_RECIPIENT_STATES = ['SIGNED', 'BROADCAST'];
+
+/**
+ * A recipient only occupies an on-chain nonce slot once it reaches SIGNED (nonce reserved *and*
+ * the transaction built) or BROADCAST. A recipient still in PREPARED -- even after reserving its
+ * nonce number locally -- has not yet been sent to the network, so the wallet's real pending-nonce
+ * count cannot yet corroborate a *later* recipient's reservation. A PREPARED recipient therefore
+ * always blocks every later recipient, exactly as the original fully-serial dispatch did; the
+ * window only lets up to `state.inFlightWindow` *already-broadcast-or-signed* recipients await
+ * finality concurrently, so one slow confirmation cannot stall the recipients behind it.
+ */
+function inFlightWindowRecipients(state) {
+  const window = [];
+  let inFlight = 0;
+  for (const attempt of state.recipients) {
+    if (RESOLVED_RECIPIENT_STATES.includes(attempt.state)) continue;
+    if (attempt.state === 'PREPARED') {
+      if (inFlight < state.inFlightWindow) window.push(attempt);
+      break;
+    }
+    window.push(attempt);
+    inFlight += 1;
+  }
+  return window;
 }
 
-function assertRecipientIsNext(state, attempt) {
-  const next = nextUnresolvedRecipient(state);
-  if (next && next.recipient !== attempt.recipient) {
-    fail(`direct payout must reconcile ${next.recipient} before advancing ${attempt.recipient}`);
+/**
+ * Mirrors `inFlightWindowRecipients`'s eligibility rule for a single recipient, so
+ * `advanceDirectPayout` refuses out-of-window or out-of-order requests the same way the driver's
+ * own selection would. Continuing an already SIGNED/BROADCAST recipient's lifecycle is always
+ * allowed regardless of the window: finishing in-flight work drains the window rather than being
+ * blocked by it. `inFlightWindow` of 1 reproduces the original fully-serial dispatch exactly.
+ */
+function assertRecipientAdvanceable(state, attempt) {
+  const index = state.recipients.indexOf(attempt);
+  const unresolvedBefore = state.recipients.slice(0, index).filter(entry => !RESOLVED_RECIPIENT_STATES.includes(entry.state));
+  const blockedByEarlierRecipient = unresolvedBefore.find(entry => entry.state === 'PREPARED');
+  if (blockedByEarlierRecipient) {
+    fail(`direct payout must reconcile ${blockedByEarlierRecipient.recipient} before advancing ${attempt.recipient}`);
+  }
+  if (attempt.state !== 'PREPARED') return;
+  const inFlightAhead = unresolvedBefore.filter(entry => IN_FLIGHT_RECIPIENT_STATES.includes(entry.state)).length;
+  if (inFlightAhead >= state.inFlightWindow) {
+    fail(`direct payout in-flight window (${state.inFlightWindow}) is full before advancing ${attempt.recipient}`);
   }
 }
 
@@ -1672,7 +1729,7 @@ export async function advanceDirectPayout({
       observedNonce: attempt.nonceInterference?.observedNonce ?? attempt.nonce,
     });
   }
-  assertRecipientIsNext(state, attempt);
+  assertRecipientAdvanceable(state, attempt);
 
   if (attempt.state === 'PREPARED') {
     if (await isRecipientFrozen(client, state.usdgAddress, attempt.recipient)) {
@@ -1845,7 +1902,7 @@ export async function replaceDirectPayout({
   assertRuntimeConfiguration(state, config);
   const { index, attempt } = stateRecipient(state, recipient);
   if (!['SIGNED', 'BROADCAST'].includes(attempt.state)) fail('direct payout replacement requires a signed or broadcast unresolved recipient attempt');
-  assertRecipientIsNext(state, attempt);
+  assertRecipientAdvanceable(state, attempt);
   const prior = await assertSignedTransaction({ rawSignedBytes: attempt.rawSignedBytes, state, attempt });
   const nextGasPriceWei = assertAtomic(replacementGasPriceWei, 'direct payout replacement gasPriceWei', { positive: true });
   if (BigInt(nextGasPriceWei) > BigInt(state.plan.feasibility.maxGasPriceWei)) {
@@ -2457,6 +2514,62 @@ function frozenHeldPositionExclusions({ cycleId, requested }) {
   return normalizeHeldPositionExclusions(requested, cycleId);
 }
 
+export const DIRECT_PAYOUT_ADMISSION_OUTCOME = Object.freeze({
+  OK: 'OK',
+  NON_SPENDING_BRIDGE_SHORTFALL: 'NON_SPENDING_BRIDGE_SHORTFALL',
+  NON_SPENDING_FROZEN_ASSET: 'NON_SPENDING_FROZEN_ASSET',
+});
+
+/**
+ * Pure pre-admission check: an attributable distributable amount can never exceed the actually
+ * finalized, available proceeds backing it (e.g. an under-delivered bridge relay). Never signs or
+ * spends anything itself; it only reports the exact deficit so a refusal is auditable before any
+ * irreversible admission, matching the accounting rule that pack purchases and holder payouts
+ * never share treasury, other-cycle, or owner-gas balances as an alternate funding source.
+ */
+export function evaluateDirectPayoutBridgeAdmission({ attributableDistributableAmount, finalizedAvailableAmount }) {
+  const attributable = BigInt(attributableDistributableAmount);
+  const available = BigInt(finalizedAvailableAmount);
+  if (available >= attributable) {
+    return Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.OK, deficit: '0' });
+  }
+  return Object.freeze({
+    outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_BRIDGE_SHORTFALL,
+    deficit: (attributable - available).toString(),
+  });
+}
+
+/**
+ * Pure pre-admission check: when the payout asset itself is frozen for the Operations sender, the
+ * whole distributable pool becomes non-spending unsent liability rather than being partially
+ * dispatched -- distinct from the existing per-recipient USDG_FROZEN quarantine, which only ever
+ * refuses one already-admitted recipient after admission has begun.
+ */
+export function evaluateDirectPayoutFrozenAssetAdmission({ frozen, attributableDistributableAmount, dust }) {
+  if (!frozen) return Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.OK });
+  return Object.freeze({
+    outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_FROZEN_ASSET,
+    finalized: '0',
+    pending: '0',
+    unsentLiability: (BigInt(attributableDistributableAmount) - BigInt(dust)).toString(),
+    remainingDust: String(dust),
+  });
+}
+
+/**
+ * Reads the configured bounded nonce-aware in-flight window for direct-payout dispatch. Defaults
+ * to 1 (fully serial, byte-identical to the pre-existing behavior) unless the deployment
+ * explicitly opts into wider concurrency for large recipient counts.
+ */
+function directPayoutInFlightWindow(config) {
+  const configured = config?.payout?.inFlightWindow;
+  if (configured === undefined) return 1;
+  if (!Number.isSafeInteger(configured) || configured < 1) {
+    fail('config.payout.inFlightWindow must be a positive safe integer');
+  }
+  return configured;
+}
+
 async function ensureDirectPayoutState({ cycleRepository, context, request, adapters, config, evmNonceFence = null }) {
   const payoutStore = createCycleRepositoryPayoutStore({ cycleRepository, cycleId: context.cycleId });
   const preparedPlan = assertPlan(request.plan);
@@ -2489,6 +2602,29 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
   if (!pagedInitialization && !legacyTestInitialization) {
     fail('direct payout production execution requires atomic prior-dust consumption and payout-state storage');
   }
+  if (preparedPlan.plan.payableRecipientCount > 0) {
+    const freezeCheckClient = adapters?.robinhood?.client;
+    if (freezeCheckClient && typeof freezeCheckClient.readContract === 'function') {
+      const frozen = await isRecipientFrozen(freezeCheckClient, config.contracts.usdg, config.accounts.evm);
+      if (frozen) {
+        const admission = evaluateDirectPayoutFrozenAssetAdmission({
+          frozen: true,
+          attributableDistributableAmount: request.plan.distributablePool.amountAtomic,
+          dust: request.plan.dust.amountAtomic,
+        });
+        if (typeof cycleRepository.holdCycle === 'function') {
+          await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+            stage: STAGE,
+            category: 'frozen-asset',
+            reason: 'PAYOUT_FROZEN_ASSET',
+            admission,
+            planDigest: request.plan.planDigest,
+          });
+        }
+        throw new DirectPayoutFrozenAssetError({ operations: config.accounts.evm });
+      }
+    }
+  }
   const firstNonce = preparedPlan.plan.payableRecipientCount === 0
     ? '0'
     : await (async () => {
@@ -2508,6 +2644,7 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
     usdgAddress: config.contracts.usdg,
     firstNonce,
     heldPositionExclusions,
+    inFlightWindow: directPayoutInFlightWindow(config),
   });
   const initialization = {
     source: request.plan.previousDustSource,
@@ -2552,24 +2689,31 @@ async function advanceDirectPayoutUntilPending({
   for (let boundary = 0; boundary < maximumBoundaries; boundary += 1) {
     const state = await load(payoutStore);
     if (isDirectPayoutComplete(state)) return state;
-    const next = nextUnresolvedRecipient(state);
-    if (!next) fail('direct payout has no unresolved recipient before terminal conservation');
-    const before = canonicalDigest(state);
-    const advanced = await advanceDirectPayout({
-      payoutStore,
-      recipient: next.recipient,
-      adapters,
-      signerClient,
-      policySignerClient,
-      policySignerFactory,
-      config,
-      cycleRepository,
-      requestDigest,
-      fencingToken,
-      evmNonceFence,
-      nonceLeaseContext,
-    });
-    if (canonicalDigest(advanced) === before) return null;
+    // Drive every recipient currently inside the bounded in-flight window one step forward per
+    // pass, so up to `inFlightWindow` recipients advance concurrently instead of waiting for the
+    // whole cycle-length serial queue ahead of them to finalize first.
+    const window = inFlightWindowRecipients(state);
+    if (window.length === 0) fail('direct payout has no unresolved recipient before terminal conservation');
+    let progressed = false;
+    for (const target of window) {
+      const before = canonicalDigest(await load(payoutStore));
+      const advanced = await advanceDirectPayout({
+        payoutStore,
+        recipient: target.recipient,
+        adapters,
+        signerClient,
+        policySignerClient,
+        policySignerFactory,
+        config,
+        cycleRepository,
+        requestDigest,
+        fencingToken,
+        evmNonceFence,
+        nonceLeaseContext,
+      });
+      if (canonicalDigest(advanced) !== before) progressed = true;
+    }
+    if (!progressed) return null;
   }
   fail('direct payout exceeded its durable recipient-boundary budget');
 }
