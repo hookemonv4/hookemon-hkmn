@@ -205,7 +205,7 @@ jobs:
           }
           fork_pin_scripts_verify_fork_pin_mjs_sha256='09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a'
           fork_pin_scripts_programmable_lib_keccak_mjs_sha256='ce4ea412ddd845b7495fc960f16855a2d5dea62482f224c5dc4cd8aefaede863'
-          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='bb0a05472623238a6f1b618f8c7c58ca1c486dbd4688631dd35b565e98aa2927'
+          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8'
           verify_regular_git_blob 'scripts/verify-fork-pin.mjs' "$fork_pin_scripts_verify_fork_pin_mjs_sha256"
           verify_regular_git_blob 'scripts/programmable/lib/keccak.mjs' "$fork_pin_scripts_programmable_lib_keccak_mjs_sha256"
           verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"

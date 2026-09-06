@@ -900,6 +900,83 @@ test('rejects a simultaneous fork-pin-canary workflow and candidate pin mutation
   assert.match(result.errors.join('\n'), /fork-pin canary (?:digest must match the supported release|content mismatch)/);
 });
 
+// verifyForkPinVerifierWorkflow is exercised directly (not through the full fixture
+// pipeline) so a job-scoped closure divergence can be isolated from the unrelated
+// whole-file SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 check, which would fail on any byte
+// change regardless of whether the job-scoping fix works.
+const FORK_PROOF_PR_JOB_MARKER = '\n  pull-request:\n';
+const REAL_DEPENDENCY_PINS = readJson(join(REPO_ROOT, 'product', 'dependency-pins.json'));
+const FORK_PIN_VERIFIER_CLOSURE_WITH_ARCHIVE_TEST = {
+  ...REAL_DEPENDENCY_PINS.controlScripts.forkPinVerifier,
+  closure: [
+    ...REAL_DEPENDENCY_PINS.controlScripts.forkPinVerifier.closure,
+    { path: ARCHIVE_FORK_PROOF_TEST_PATH, sha256: REAL_DEPENDENCY_PINS.contentAddresses.archiveForkProofTest.sha256 },
+  ],
+};
+const FORK_PROOF_ARCHIVE_TEST_ASSIGNMENT =
+  "fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='"
+  + `${REAL_DEPENDENCY_PINS.contentAddresses.archiveForkProofTest.sha256}'`;
+const FORK_PROOF_ARCHIVE_TEST_CHECK =
+  "verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "
+  + '"$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"';
+
+function mutateForkProofJob(job, transform) {
+  const markerIndex = CANONICAL_FORK_PROOF.indexOf(FORK_PROOF_PR_JOB_MARKER);
+  assert.ok(markerIndex !== -1, 'fork-proof.yml must define a pull-request job');
+  const head = CANONICAL_FORK_PROOF.slice(0, markerIndex);
+  const tail = CANONICAL_FORK_PROOF.slice(markerIndex);
+  return job === 'main' ? transform(head) + tail : head + transform(tail);
+}
+
+function assertForkProofJobDivergenceIsRejected(name, job, transform, messagePattern) {
+  test(name, () => {
+    const mutated = mutateForkProofJob(job, transform);
+    assert.notEqual(mutated, CANONICAL_FORK_PROOF);
+
+    const errors = [];
+    controlDependencies.verifyForkPinVerifierWorkflow(
+      mutated, '.github/workflows/fork-proof.yml', FORK_PIN_VERIFIER_CLOSURE_WITH_ARCHIVE_TEST, errors,
+    );
+
+    assert.match(errors.join('\n'), messagePattern);
+  });
+}
+
+test('verifying the unmutated fork-proof workflow against its real pin closure yields no errors', () => {
+  const errors = [];
+  controlDependencies.verifyForkPinVerifierWorkflow(
+    CANONICAL_FORK_PROOF, '.github/workflows/fork-proof.yml', FORK_PIN_VERIFIER_CLOSURE_WITH_ARCHIVE_TEST, errors,
+  );
+  assert.deepEqual(errors, []);
+});
+
+assertForkProofJobDivergenceIsRejected(
+  'rejects a fork-proof pull-request job whose archive-test pin diverges from the main job',
+  'pull-request',
+  section => section.replace(
+    FORK_PROOF_ARCHIVE_TEST_ASSIGNMENT,
+    `fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='${'f'.repeat(64)}'`,
+  ),
+  /fork-proof\.yml job pull-request must verify the supported fork-pin verifier closure/,
+);
+
+assertForkProofJobDivergenceIsRejected(
+  'rejects a fork-proof main job whose archive-test pin diverges from the pull-request job',
+  'main',
+  section => section.replace(
+    FORK_PROOF_ARCHIVE_TEST_ASSIGNMENT,
+    `fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='${'f'.repeat(64)}'`,
+  ),
+  /fork-proof\.yml job main must verify the supported fork-pin verifier closure/,
+);
+
+assertForkProofJobDivergenceIsRejected(
+  'rejects a fork-proof job missing its fork-pin verifier blob check even with a correct assignment',
+  'pull-request',
+  section => section.replace(`          ${FORK_PROOF_ARCHIVE_TEST_CHECK}\n`, ''),
+  /fork-proof\.yml job pull-request must verify the supported fork-pin verifier closure/,
+);
+
 test('rejects Phase 2 runner coverage that omits the operator suite', () => {
   const state = fixture();
   const workflowPath = join(state.root, '.github', 'workflows', 'v4-gates.yml');

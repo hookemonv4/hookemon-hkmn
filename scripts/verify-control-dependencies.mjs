@@ -47,7 +47,7 @@ const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mj
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
 const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '622a06fd3fc18f45611bf7a6e0995636a63ec889557878ccb1e31f6e2696cad4';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '3b2ef4a745828acf808adba0f81ceb9d5499f7015b19b4df4a7010a631e5b313';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
@@ -1137,27 +1137,51 @@ function verifyArchiveForkProofTestIntegrity(root, pins, errors) {
     errors,
   );
 }
-function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
-  const closure = pin.closure;
-  const invocation = `node ${FORK_PIN_VERIFIER_PATH}`;
-  const invocationIndex = workflow.indexOf(invocation);
+// A multi-job workflow (fork-proof.yml has separate main/pull-request jobs) can diverge
+// per job. A whole-file `indexOf` only ever finds the first job's assignment/check pair,
+// so a stale or missing pin in a later job is invisible. Scope every check to the job
+// text that actually invokes the verifier.
+function splitWorkflowJobs(workflow) {
+  const jobsMarker = '\njobs:\n';
+  const jobsMarkerIndex = workflow.indexOf(jobsMarker);
+  if (jobsMarkerIndex === -1) return [{ id: null, text: workflow }];
+  const jobsBody = workflow.slice(jobsMarkerIndex + jobsMarker.length);
+  const starts = [...jobsBody.matchAll(/^  ([A-Za-z0-9_-]+):$/gm)];
+  if (starts.length === 0) return [{ id: null, text: workflow }];
+  return starts.map((match, index) => ({
+    id: match[1],
+    text: jobsBody.slice(match.index, starts[index + 1]?.index ?? jobsBody.length),
+  }));
+}
 
-  if (!Array.isArray(closure) || invocationIndex === -1) {
+export function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
+  const closure = pin.closure;
+  if (!Array.isArray(closure)) {
     errors.push(`${label} must verify the complete supported fork-pin verifier closure before execution`);
     return;
   }
-  for (const entry of closure) {
-    const variable = `fork_pin_${entry.path.replaceAll(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '')}_sha256`;
-    const assignment = `${variable}='${entry.sha256 ?? ''}'`;
-    const check = `verify_regular_git_blob '${entry.path}' "$${variable}"`;
-    const assignmentIndex = workflow.indexOf(assignment);
-    const checkIndex = workflow.indexOf(check);
-    if (assignmentIndex === -1 || checkIndex === -1) {
-      errors.push(`${label} must verify the supported fork-pin verifier closure before execution`);
-      continue;
-    }
-    if (assignmentIndex > checkIndex || checkIndex > invocationIndex) {
-      errors.push(`${label} must verify each fork-pin verifier closure entry before execution`);
+  const invocation = `node ${FORK_PIN_VERIFIER_PATH}`;
+  const applicableJobs = splitWorkflowJobs(workflow).filter(job => job.text.includes(invocation));
+  if (applicableJobs.length === 0) {
+    errors.push(`${label} must verify the complete supported fork-pin verifier closure before execution`);
+    return;
+  }
+  for (const job of applicableJobs) {
+    const jobLabel = job.id === null ? label : `${label} job ${job.id}`;
+    const invocationIndex = job.text.indexOf(invocation);
+    for (const entry of closure) {
+      const variable = `fork_pin_${entry.path.replaceAll(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '')}_sha256`;
+      const assignment = `${variable}='${entry.sha256 ?? ''}'`;
+      const check = `verify_regular_git_blob '${entry.path}' "$${variable}"`;
+      const assignmentIndex = job.text.indexOf(assignment);
+      const checkIndex = job.text.indexOf(check);
+      if (assignmentIndex === -1 || checkIndex === -1) {
+        errors.push(`${jobLabel} must verify the supported fork-pin verifier closure before execution`);
+        continue;
+      }
+      if (assignmentIndex > checkIndex || checkIndex > invocationIndex) {
+        errors.push(`${jobLabel} must verify each fork-pin verifier closure entry before execution`);
+      }
     }
   }
 }
@@ -1809,7 +1833,13 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
   const controlDependencyVerifier = verifyControlDependencyVerifierIntegrity(root, pins, errors);
   const archiveForkProofTest = verifyArchiveForkProofTestIntegrity(root, pins, errors);
-  verifyForkPinVerifierWorkflow(forkProofWorkflow, FORK_PROOF_WORKFLOW_PATH, pins.controlScripts?.forkPinVerifier ?? {}, errors);
+  verifyForkPinVerifierWorkflow(forkProofWorkflow, FORK_PROOF_WORKFLOW_PATH, {
+    ...pins.controlScripts?.forkPinVerifier,
+    closure: [
+      ...(pins.controlScripts?.forkPinVerifier?.closure ?? []),
+      { path: ARCHIVE_FORK_PROOF_TEST_PATH, sha256: pins.contentAddresses?.archiveForkProofTest?.sha256 },
+    ],
+  }, errors);
   verifyForkPinVerifierWorkflow(forkPinCanaryWorkflow, FORK_PIN_CANARY_WORKFLOW_PATH, pins.controlScripts?.forkPinVerifier ?? {}, errors);
   verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors);
   verifyLocalPhase2Gates(workflow, errors);
