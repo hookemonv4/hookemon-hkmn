@@ -1,6 +1,6 @@
 import { readSolBalance, SOLANA_RELAY_CHAIN_ID } from '../../solana-rpc.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
-import { assertMoneyConfiguration } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { assertMoneyConfiguration, assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
 
 const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
 const microLamportsPerLamport = 1_000_000n;
@@ -73,6 +73,27 @@ export function assertSolanaSignerMoneyConfiguration({ config, asset, stage }) {
     throw new Error(`${stage} MoneyConfigurationV1 Solana asset does not match the configured settlement asset`);
   }
   return money;
+}
+
+/**
+ * Normalizes a durably admitted Solana purchase amount into the native Collector settlement asset.
+ *
+ * An admitted amount (e.g. `admission.unitPurchase`, packages/adapters/src/app/compose.mjs) is
+ * necessarily typed in whatever asset `assertSolanaSignerMoneyConfiguration` already validated as
+ * `money.assets.solanaStablecoin` for this execution profile: the production Relay tuple (chain id
+ * `792703809`) or, in every non-production profile, the native Collector tuple (chain id
+ * `solana-mainnet`). Comparing it to the native `asset` by literal equality, as purchase code once
+ * did, refuses every real production admission before policy preflight ever runs. This is the one
+ * place that maps an admitted amount typed in either namespace back onto the native tuple, in each
+ * case accepting only the exact already-validated `money.assets.solanaStablecoin` tuple and
+ * carrying the original canonical `amountAtomic` across unchanged.
+ */
+export function assertSolanaAdmittedPurchaseAmount({ money, asset, amount, label }) {
+  const asserted = assertTypedAmount(amount, label);
+  if (!sameAsset(asserted, money.assets.solanaStablecoin)) {
+    throw new Error(`${label} does not match the configured MoneyConfigurationV1 Solana settlement asset`);
+  }
+  return { ...asset, amountAtomic: asserted.amountAtomic };
 }
 
 /**

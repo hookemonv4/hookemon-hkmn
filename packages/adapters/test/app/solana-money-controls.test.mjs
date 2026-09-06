@@ -4,6 +4,7 @@ import test from 'node:test';
 import { CIRCLE_USD_DECIMALS, CIRCLE_USD_MINT, SOLANA_RELAY_CHAIN_ID, SYSTEM_PROGRAM_ID, createSolanaRpcClient } from '../../src/solana-rpc.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../src/collector-crypt.mjs';
 import {
+  assertSolanaAdmittedPurchaseAmount,
   assertSolanaSignerFeeEnvelope,
   assertSolanaSignerMoneyConfiguration,
 } from '../../src/app/stages/solana-money-controls.mjs';
@@ -207,6 +208,101 @@ test('assertSolanaSignerFeeEnvelope: refuses an amount above the cap', async () 
       stage: 'purchase',
     }),
     /priority fee exceeds the configured MoneyConfigurationV1 cap/,
+  );
+});
+
+test('assertSolanaAdmittedPurchaseAmount: production maps the exact admitted Relay tuple back onto the native tuple, keeping amountAtomic', () => {
+  const money = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  const normalized = assertSolanaAdmittedPurchaseAmount({
+    money,
+    asset: nativeAsset(),
+    amount: relayAsset({ amountAtomic: '1500000' }),
+    label: 'admitted unitPurchase',
+  });
+  assert.deepEqual(normalized, nativeAsset({ amountAtomic: '1500000' }));
+});
+
+test('assertSolanaAdmittedPurchaseAmount: rehearsal maps the exact admitted native tuple onto itself, keeping amountAtomic', () => {
+  const money = assertSolanaSignerMoneyConfiguration({ config: rehearsalConfig(), asset: nativeAsset(), stage: 'purchase' });
+  const normalized = assertSolanaAdmittedPurchaseAmount({
+    money,
+    asset: nativeAsset(),
+    amount: nativeAsset({ amountAtomic: '2500000' }),
+    label: 'admitted unitPurchase',
+  });
+  assert.deepEqual(normalized, nativeAsset({ amountAtomic: '2500000' }));
+});
+
+test('assertSolanaAdmittedPurchaseAmount: production refuses a native-labelled admitted amount', () => {
+  const money = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money, asset: nativeAsset(), amount: nativeAsset({ amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+});
+
+test('assertSolanaAdmittedPurchaseAmount: rehearsal refuses a Relay-labelled admitted amount', () => {
+  const money = assertSolanaSignerMoneyConfiguration({ config: rehearsalConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money, asset: nativeAsset(), amount: relayAsset({ amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+});
+
+test('assertSolanaAdmittedPurchaseAmount: refuses a third, unrecognized chain label in either profile', () => {
+  const productionMoney = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money: productionMoney, asset: nativeAsset(), amount: relayAsset({ chainId: '999999', amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+  const rehearsalMoney = assertSolanaSignerMoneyConfiguration({ config: rehearsalConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money: rehearsalMoney, asset: nativeAsset(), amount: nativeAsset({ chainId: '999999', amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+});
+
+test('assertSolanaAdmittedPurchaseAmount: refuses wrong mint in either profile', () => {
+  const productionMoney = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money: productionMoney, asset: nativeAsset(), amount: relayAsset({ assetId: OTHER_MINT, amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+  const rehearsalMoney = assertSolanaSignerMoneyConfiguration({ config: rehearsalConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money: rehearsalMoney, asset: nativeAsset(), amount: nativeAsset({ assetId: OTHER_MINT, amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+});
+
+test('assertSolanaAdmittedPurchaseAmount: refuses wrong decimals in either profile', () => {
+  const productionMoney = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money: productionMoney, asset: nativeAsset(), amount: relayAsset({ decimals: 9, amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+  const rehearsalMoney = assertSolanaSignerMoneyConfiguration({ config: rehearsalConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money: rehearsalMoney, asset: nativeAsset(), amount: nativeAsset({ decimals: 9, amountAtomic: '100' }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+});
+
+test('assertSolanaAdmittedPurchaseAmount: refuses a malformed or noncanonical amountAtomic before the asset comparison', () => {
+  const money = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  for (const amountAtomic of ['01', '-5', '1.5', '', ' 5', '5 ', '0x5']) {
+    assert.throws(
+      () => assertSolanaAdmittedPurchaseAmount({ money, asset: nativeAsset(), amount: relayAsset({ amountAtomic }), label: 'admitted unitPurchase' }),
+      /admitted unitPurchase amountAtomic is invalid/,
+    );
+  }
+});
+
+test('assertSolanaAdmittedPurchaseAmount: rejects a non-canonical amount type outright', () => {
+  const money = assertSolanaSignerMoneyConfiguration({ config: productionConfig(), asset: nativeAsset(), stage: 'purchase' });
+  assert.throws(
+    () => assertSolanaAdmittedPurchaseAmount({ money, asset: nativeAsset(), amount: relayAsset({ amountAtomic: 100 }), label: 'admitted unitPurchase' }),
+    /admitted unitPurchase amountAtomic is invalid/,
   );
 });
 

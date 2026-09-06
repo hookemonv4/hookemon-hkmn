@@ -24,6 +24,7 @@ import { digest } from '../../../runner/src/cycle/journal.mjs';
 import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
+  SOLANA_RELAY_CHAIN_ID,
   TOKEN_PROGRAM_ID,
   createSolanaRpcClient,
   deriveAssociatedTokenAddress,
@@ -468,7 +469,68 @@ test('wrong unit asset: an admitted unitPurchase whose asset identity disagrees 
 
   await assert.rejects(
     () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, repo, unitPurchaseOverride: wrongUnitPurchase })),
-    /admitted unitPurchase asset does not match the configured settlement asset/,
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+  assert.equal(generateCalls, 0);
+  assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
+});
+
+test('wrong unit namespace: an admitted unitPurchase carrying the Relay chain id in this native-namespace execution profile refuses before generation', async () => {
+  // This is the exact production admission shape (MoneyConfigurationV1's Relay-namespaced
+  // amount, docs/modules/composition-root.md:99-106) misapplied to a config whose validated
+  // MoneyConfigurationV1 Solana asset is native -- the assertSolanaAdmittedPurchaseAmount mapping
+  // must refuse it here rather than silently accepting a cross-namespace amount.
+  let generateCalls = 0;
+  const signSpy = { calls: 0 };
+  const repo = repository();
+  const collectorCrypt = {
+    async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
+    async submitTransaction() { throw new Error('must not be called'); },
+  };
+  const relayLabelledUnitPurchase = { chainId: String(SOLANA_RELAY_CHAIN_ID), assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS, amountAtomic: PACK_PRICE_ATOMIC };
+
+  await assert.rejects(
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, repo, unitPurchaseOverride: relayLabelledUnitPurchase })),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+  assert.equal(generateCalls, 0);
+  assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
+});
+
+test('wrong unit decimals: an admitted unitPurchase whose decimals disagree with the configured settlement asset refuses before generation', async () => {
+  let generateCalls = 0;
+  const signSpy = { calls: 0 };
+  const repo = repository();
+  const collectorCrypt = {
+    async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
+    async submitTransaction() { throw new Error('must not be called'); },
+  };
+  const wrongDecimalsUnitPurchase = { chainId: CHAIN_ID, assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS + 1, amountAtomic: PACK_PRICE_ATOMIC };
+
+  await assert.rejects(
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, repo, unitPurchaseOverride: wrongDecimalsUnitPurchase })),
+    /admitted unitPurchase does not match the configured MoneyConfigurationV1 Solana settlement asset/,
+  );
+  assert.equal(generateCalls, 0);
+  assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
+});
+
+test('malformed unit amount: a noncanonical admitted unitPurchase amountAtomic refuses before generation', async () => {
+  let generateCalls = 0;
+  const signSpy = { calls: 0 };
+  const repo = repository();
+  const collectorCrypt = {
+    async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
+    async submitTransaction() { throw new Error('must not be called'); },
+  };
+  const malformedUnitPurchase = { chainId: CHAIN_ID, assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS, amountAtomic: '007' };
+
+  await assert.rejects(
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, repo, unitPurchaseOverride: malformedUnitPurchase })),
+    /admitted unitPurchase amountAtomic is invalid/,
   );
   assert.equal(generateCalls, 0);
   assert.equal(signSpy.calls, 0);

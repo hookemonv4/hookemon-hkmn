@@ -20,6 +20,7 @@ import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../s
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { parseCollectorMachineContains } from '../../collector-crypt.mjs';
 import {
+  assertSolanaAdmittedPurchaseAmount,
   assertSolanaSignerFeeEnvelope,
   assertSolanaSignerMoneyConfiguration,
 } from './solana-money-controls.mjs';
@@ -419,12 +420,20 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
     if (!plainObject(prepared.unitPurchase)) {
       throw new Error('purchase mutation requires the admitted unitPurchase amount');
     }
-    const admittedUnitPurchase = assertTypedAmount(prepared.unitPurchase, 'purchase mutation admitted unitPurchase');
-    if (admittedUnitPurchase.chainId !== asset.chainId || admittedUnitPurchase.assetId !== asset.assetId
-      || admittedUnitPurchase.decimals !== asset.decimals) {
+    // Maps the admitted amount (typed in MoneyConfigurationV1's Relay namespace in production,
+    // the native Collector namespace everywhere else -- docs/modules/composition-root.md:99-106)
+    // back onto the native settlement asset before the equality check below ever runs.
+    const normalizedUnitPurchase = assertSolanaAdmittedPurchaseAmount({
+      money,
+      asset,
+      amount: prepared.unitPurchase,
+      label: 'purchase mutation admitted unitPurchase',
+    });
+    if (normalizedUnitPurchase.chainId !== asset.chainId || normalizedUnitPurchase.assetId !== asset.assetId
+      || normalizedUnitPurchase.decimals !== asset.decimals) {
       throw new Error('purchase mutation admitted unitPurchase asset does not match the configured settlement asset');
     }
-    admittedUnitAmountAtomic = admittedUnitPurchase.amountAtomic;
+    admittedUnitAmountAtomic = normalizedUnitPurchase.amountAtomic;
 
     // The one seam this task wires: validate a Node-test-only fixture binding (schema, digest,
     // and native chain/settlement identity) before ever calling generateYoloPacks, so a bad or
