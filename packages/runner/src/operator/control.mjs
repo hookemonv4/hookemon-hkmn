@@ -8,12 +8,15 @@ import {
   assertProviderMutationAttempt,
   assertTypedAmount,
 } from '../cycle/money-schemas.mjs';
+import { canonicalJson } from '../cycle/journal.mjs';
 import { POLICY_WINDOW_MS } from '../automation/policy-engine.mjs';
 import {
   createEmptyOperatorState,
   mutateOperatorState,
   readOperatorState,
 } from './state-file.mjs';
+
+const staleRevisionMessage = 'stale operator state revision';
 
 const missingStateFileMessage = 'operator state file does not exist';
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
@@ -65,6 +68,11 @@ function assertExpectedRevision(value) {
 
 function assertCycleId(value) {
   if (typeof value !== 'string' || !cycleIdPattern.test(value)) throw new Error('operator control cycleId is invalid');
+  return value;
+}
+
+function assertPositionId(value) {
+  if (typeof value !== 'string' || !cycleIdPattern.test(value)) throw new Error('operator control positionId is invalid');
   return value;
 }
 
@@ -143,13 +151,13 @@ function assertCommand(value) {
       exactObject(value, ['type', 'cycleId', 'cycleDigest'], 'operator control command');
       return { type: value.type, cycleId: assertCycleId(value.cycleId), cycleDigest: assertDigest(value.cycleDigest) };
     case 'held-owner-decision':
-      exactObject(value, ['type', 'cycleId', 'heldEvidenceDigest', 'expectedCycleRevision', 'choice'], 'operator control command');
+      exactObject(value, ['type', 'positionId', 'heldEvidenceDigest', 'expectedPositionRevision', 'choice'], 'operator control command');
       if (!heldOwnerDecisionChoices.has(value.choice)) throw new Error('operator control held owner decision choice is invalid');
       return {
         type: value.type,
-        cycleId: assertCycleId(value.cycleId),
+        positionId: assertPositionId(value.positionId),
         heldEvidenceDigest: assertDigest(value.heldEvidenceDigest),
-        expectedCycleRevision: assertCycleRevision(value.expectedCycleRevision),
+        expectedPositionRevision: assertCycleRevision(value.expectedPositionRevision),
         choice: value.choice,
       };
     default:
@@ -262,6 +270,13 @@ function projectCycle(cycleId, description) {
     throw new Error('operator control repository cycle description is invalid');
   }
   const terminalState = typeof description.terminalState === 'string' ? description.terminalState : null;
+  // A cycle finalized before terminalAtMs/completedAtMs shipped (see cycle-repository.mjs's own
+  // #replayStored note) genuinely has no durable value here; null is the honest answer, never a
+  // fabricated "now". A consumer with 2+ terminal cycles and any null here must fail closed on
+  // ordering rather than guess (see Public-Integration-interface.md).
+  const terminalAtMs = terminalState !== null && Number.isSafeInteger(description.terminalAtMs)
+    ? description.terminalAtMs
+    : null;
   const stageStates = new Map();
   for (const [stage, state] of mapEntries(description.stages)) {
     assertOperationalStage(stage, 'operator control repository stage');
@@ -306,6 +321,7 @@ function projectCycle(cycleId, description) {
     cycleId,
     releaseAmount: typeof description.releaseAmount === 'string' ? description.releaseAmount : null,
     terminalState,
+    terminalAtMs,
     version,
     heldEvidenceDigest,
     ownerDecision,
@@ -349,11 +365,21 @@ function projectPolicyTelemetry(value) {
   for (const field of ['heldAssets', 'unattributed', 'unvaluedExposure']) {
     if (typeof value[field] !== 'boolean') return null;
   }
+  const heldPositions = value.heldPositions;
+  if (!heldPositions || typeof heldPositions !== 'object' || Array.isArray(heldPositions)
+    || !Number.isSafeInteger(heldPositions.count) || heldPositions.count < 0
+    || typeof heldPositions.valueMicroUsdg !== 'string' || !atomicAmountPattern.test(heldPositions.valueMicroUsdg)
+    || !Array.isArray(heldPositions.positions)) return null;
   return deepFreeze({
     realizedLossMicroUsdg: value.realizedLossMicroUsdg,
     atRiskMicroUsdg: value.atRiskMicroUsdg,
     outstandingMicroUsdg: value.outstandingMicroUsdg,
     heldAssets: value.heldAssets,
+    heldPositions: {
+      count: heldPositions.count,
+      valueMicroUsdg: heldPositions.valueMicroUsdg,
+      positions: structuredClone(heldPositions.positions),
+    },
     unattributed: value.unattributed,
     unvaluedExposure: value.unvaluedExposure,
   });
@@ -394,6 +420,16 @@ function projectOutstandingCustodyCap(configuration, telemetry) {
   );
 }
 
+function projectHeldPositionsCap(configuration, telemetry) {
+  if (configuration === null || telemetry === null) return null;
+  return deepFreeze({
+    count: telemetry.heldPositions.count,
+    maxCount: configuration.maxHeldPositions,
+    valueMicroUsdg: telemetry.heldPositions.valueMicroUsdg,
+    maxValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+  });
+}
+
 function safetyTelemetryAlerts(available) {
   return available
     ? []
@@ -414,7 +450,9 @@ function configurationIncreasesExposure(current, next) {
   if (!current.liveMode && next.liveMode) return true;
   if (next.intervalMinutes < current.intervalMinutes || next.requestedOrders > current.requestedOrders
     || next.maxBoostersPerCycle > current.maxBoostersPerCycle || next.maxCyclesPerDay > current.maxCyclesPerDay
-    || next.manualApprovalCycles < current.manualApprovalCycles || hasNewAllowedPack(current, next)) {
+    || next.manualApprovalCycles < current.manualApprovalCycles || next.maxHeldPositions > current.maxHeldPositions
+    || next.unresolvedCardDeadlineMinutes > current.unresolvedCardDeadlineMinutes
+    || hasNewAllowedPack(current, next)) {
     return true;
   }
   for (const field of [
@@ -424,6 +462,7 @@ function configurationIncreasesExposure(current, next) {
     'perCycleCapMicroUsdg',
     'lossCapMicroUsdg',
     'maxOutstandingCustodyMicroUsdg',
+    'maxHeldValueMicroUsdg',
   ]) {
     if (BigInt(next[field]) > BigInt(current[field])) return true;
   }
@@ -461,6 +500,7 @@ export function createOperatorControl({
   now = () => Date.now(),
   triggerTick = undefined,
   resumeActiveCycle = undefined,
+  reconcileActiveCycle = undefined,
   readCustody = undefined,
   recordHeldOwnerDecision = undefined,
 } = {}) {
@@ -470,6 +510,9 @@ export function createOperatorControl({
   if (typeof now !== 'function') throw new Error('operator control now is required');
   if (triggerTick !== undefined && typeof triggerTick !== 'function') throw new Error('operator control triggerTick must be a function');
   if (resumeActiveCycle !== undefined && typeof resumeActiveCycle !== 'function') throw new Error('operator control resumeActiveCycle must be a function');
+  if (reconcileActiveCycle !== undefined && typeof reconcileActiveCycle !== 'function') {
+    throw new Error('operator control reconcileActiveCycle must be a function');
+  }
   if (readCustody !== undefined && typeof readCustody !== 'function') throw new Error('operator control readCustody must be a function');
   if (recordHeldOwnerDecision !== undefined && typeof recordHeldOwnerDecision !== 'function') {
     throw new Error('operator control recordHeldOwnerDecision must be a function');
@@ -501,19 +544,68 @@ export function createOperatorControl({
         offChain24Hour: projectOffChainCap(state?.configuration ?? null, timestamp),
         loss: projectLossCap(state?.configuration ?? null, safetyTelemetry.telemetry),
         outstandingCustody: projectOutstandingCustodyCap(state?.configuration ?? null, safetyTelemetry.telemetry),
+        heldPositions: projectHeldPositionsCap(state?.configuration ?? null, safetyTelemetry.telemetry),
         onChainRemainingCapacity: safetyTelemetry.onChainRemainingCapacity,
       },
+      heldPositions: safetyTelemetry.telemetry === null ? null : safetyTelemetry.telemetry.heldPositions.positions,
       custody: { buckets: custodyBuckets },
       alertSources: { safetyTelemetry: safetyTelemetry.available },
       alerts: safetyTelemetryAlerts(safetyTelemetry.available),
     });
   }
 
+  // A generic 'stale operator state revision' CAS failure carries no command-specific identity: it
+  // only means some write happened after `expectedRevision`, not that this exact patch was the one
+  // durably applied (see docs/modules/dashboard-audit-log.md and the P0 review it was written for).
+  // The one authoritative postcondition this control layer can check without guessing is functional
+  // equality: applying the same patch again to whatever is durably current now, and comparing every
+  // field except configurationRevision (which a fresh application always bumps) against that current
+  // state. If they already match, this patch's intended effect is durably present regardless of who
+  // wrote it or why the revision moved — a real postcondition, not an inferred one. If they don't
+  // match, this is a genuine conflict and the stale-revision error is rethrown unchanged.
+  function configurationFunctionallyEquals(a, b) {
+    const { configurationRevision: revisionA, ...restA } = a;
+    const { configurationRevision: revisionB, ...restB } = b;
+    void revisionA;
+    void revisionB;
+    return canonicalJson(restA) === canonicalJson(restB);
+  }
+
+  async function recoverIdempotentConfigurationMutation(patch, error) {
+    const actual = await readStateOrNull(statePath);
+    if (actual === null || actual.configuration === null) throw error;
+    const intended = applyOperatorConfiguration(actual.configuration, patch);
+    if (!configurationFunctionallyEquals(actual.configuration, intended)) throw error;
+    return actual;
+  }
+
+  // Same reasoning as recoverIdempotentConfigurationMutation, applied to manual-approval's own
+  // authority (packages/runner/src/automation/policy-engine.mjs's recordManualApproval). That
+  // authority's injected mutateConfiguration dependency can reject a stale expectedRevision before
+  // ever reaching recordManualApproval's own cycleDigest-keyed idempotency check — exactly the shape
+  // of a crash-after-effect replay, since the approval itself is what advanced the revision the retry
+  // still expects. The one command-specific durable postcondition this control layer can check
+  // without guessing is a direct readback: does approvalsByCycleDigest[cycleDigest] already record
+  // this exact cycleId? If so, the approval is durably present regardless of who wrote it or why the
+  // revision moved, and that recorded approval is the real, authoritative answer — not an inferred
+  // one. If not, this is a genuine conflict and the stale-revision error is rethrown unchanged.
+  async function recoverIdempotentManualApproval(cycleId, cycleDigest, error) {
+    const actual = await readStateOrNull(statePath);
+    const existing = actual?.configuration?.approvalsByCycleDigest?.[cycleDigest];
+    if (!existing || existing.cycleId !== cycleId) throw error;
+    return Object.freeze({ cycleDigest, cycleId: existing.cycleId, approvedAtMs: existing.approvedAtMs });
+  }
+
   async function mutateConfiguration(expectedRevision, patch) {
-    return mutateOperatorState(statePath, expectedRevision, current => {
-      const base = current ?? createEmptyOperatorState();
-      return { ...base, configuration: applyOperatorConfiguration(base.configuration, patch) };
-    });
+    try {
+      return await mutateOperatorState(statePath, expectedRevision, current => {
+        const base = current ?? createEmptyOperatorState();
+        return { ...base, configuration: applyOperatorConfiguration(base.configuration, patch) };
+      });
+    } catch (error) {
+      if (error?.message !== staleRevisionMessage) throw error;
+      return recoverIdempotentConfigurationMutation(patch, error);
+    }
   }
 
   async function execute({ expectedRevision, requestId = undefined, command } = {}) {
@@ -535,7 +627,16 @@ export function createOperatorControl({
         return deepFreeze({ action: 'kill', revision: state.revision, configuration: structuredClone(state.configuration) });
       }
       case 'update-configuration': {
-        const current = await requireExpectedRevision(statePath, revision);
+        let current;
+        try {
+          current = await requireExpectedRevision(statePath, revision);
+        } catch (error) {
+          if (error?.message !== staleRevisionMessage) throw error;
+          const recovered = await recoverIdempotentConfigurationMutation(normalized.configuration, error);
+          return deepFreeze({
+            action: 'update-configuration', revision: recovered.revision, configuration: structuredClone(recovered.configuration),
+          });
+        }
         const base = current ?? createEmptyOperatorState();
         const next = applyOperatorConfiguration(base.configuration, normalized.configuration);
         if (configurationIncreasesExposure(base.configuration ?? createDefaultOperatorConfiguration(), next)) {
@@ -546,13 +647,20 @@ export function createOperatorControl({
         return deepFreeze({ action: 'update-configuration', revision: state.revision, configuration: structuredClone(state.configuration) });
       }
       case 'manual-approval': {
+        assertRequestId(requestId);
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const approval = await policyEngine.recordManualApproval({
-          cycleId: normalized.cycleId,
-          cycleDigest: normalized.cycleDigest,
-          expectedRevision: revision,
-        });
+        let approval;
+        try {
+          approval = await policyEngine.recordManualApproval({
+            cycleId: normalized.cycleId,
+            cycleDigest: normalized.cycleDigest,
+            expectedRevision: revision,
+          });
+        } catch (error) {
+          if (error?.message !== staleRevisionMessage) throw error;
+          approval = await recoverIdempotentManualApproval(normalized.cycleId, normalized.cycleDigest, error);
+        }
         const state = await readStateOrNull(statePath);
         return deepFreeze({
           action: 'manual-approval',
@@ -564,9 +672,9 @@ export function createOperatorControl({
         const state = await requireExpectedRevision(statePath, revision);
         if (recordHeldOwnerDecision === undefined) throw new Error('operator held owner decision authority is unavailable');
         const decision = await recordHeldOwnerDecision({
-          cycleId: normalized.cycleId,
+          positionId: normalized.positionId,
           heldEvidenceDigest: normalized.heldEvidenceDigest,
-          expectedRevision: normalized.expectedCycleRevision,
+          expectedRevision: normalized.expectedPositionRevision,
           requestId: assertRequestId(requestId),
           choice: normalized.choice,
         });
@@ -577,15 +685,26 @@ export function createOperatorControl({
         });
       }
       case 'reconcile': {
-        await requireExpectedRevision(statePath, revision);
-        return deepFreeze({ action: 'reconcile', inspection: await status() });
+        const state = await requireExpectedRevision(statePath, revision);
+        if (reconcileActiveCycle === undefined) {
+          return deepFreeze({ action: 'reconcile', revision: state?.revision ?? null, inspection: await status() });
+        }
+        const safetyTelemetry = await readSafetyTelemetry(readCustody);
+        if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
+        const result = await reconcileActiveCycle({ requestId: assertRequestId(requestId) });
+        return deepFreeze({
+          action: 'reconcile',
+          resultCode: recoveryResultCode(result),
+          result: structuredClone(result),
+          revision: state?.revision ?? null,
+        });
       }
       case 'resume-cycle': {
         const state = await requireExpectedRevision(statePath, revision);
         if (resumeActiveCycle === undefined) throw new Error('operator resume-cycle authority is unavailable');
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const result = await resumeActiveCycle();
+        const result = await resumeActiveCycle({ requestId: assertRequestId(requestId) });
         return deepFreeze({
           action: 'resume-cycle',
           resultCode: recoveryResultCode(result),
@@ -598,7 +717,7 @@ export function createOperatorControl({
         if (triggerTick === undefined) throw new Error('operator run-cycle-now authority is unavailable');
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const result = await triggerTick();
+        const result = await triggerTick({ requestId: assertRequestId(requestId) });
         return deepFreeze({
           action: 'run-cycle-now',
           resultCode: 'TICK_TRIGGERED',

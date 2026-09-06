@@ -42,7 +42,8 @@ function requireCycleDescription(value) {
  * Returns the only safe recovery posture derived from the durable journal. A provider attempt that
  * may have reached its provider is reconciliation-only; a signed or broadcast chain attempt must
  * be observed or rebroadcast from its persisted bytes by the stage owner, never replaced by a new
- * signature.
+ * signature. A chain attempt still at PREPARED never left this process (no signature exists
+ * anywhere), so it is resumable -- the stage owner retries it from the same durable request.
  */
 export function inspectCycleRecovery(description) {
   const cycle = requireCycleDescription(description);
@@ -53,7 +54,12 @@ export function inspectCycleRecovery(description) {
     return Object.freeze({ resumable: false, reason: 'CYCLE_TERMINAL', reconciliationOnly: false });
   }
   for (const { attempt } of cycle.chainAttempts.values()) {
-    if (!attempt || attempt.state !== 'FINALIZED') {
+    // PREPARED never left this process -- no signature or broadcast exists anywhere else, so the
+    // stage owner may safely retry it from the same durable request (prepareChainTransactionAttempt
+    // is idempotent for an unchanged digest and a signing attempt may simply be re-tried). Only
+    // SIGNED/BROADCAST (a signature exists and may have reached the network) forces reconciliation
+    // instead of a fresh signature -- see this function's own header.
+    if (!attempt || (attempt.state !== 'FINALIZED' && attempt.state !== 'PREPARED')) {
       return Object.freeze({ resumable: false, reason: 'CHAIN_ATTEMPT_UNRESOLVED', reconciliationOnly: false });
     }
   }
@@ -179,9 +185,9 @@ function commandFromInput(command, input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('held owner decision input is invalid');
     return {
       type: command,
-      cycleId: input.cycleId,
+      positionId: input.positionId,
       heldEvidenceDigest: input.heldEvidenceDigest,
-      expectedCycleRevision: input.expectedCycleRevision,
+      expectedPositionRevision: input.expectedPositionRevision,
       choice: input.choice,
     };
   }

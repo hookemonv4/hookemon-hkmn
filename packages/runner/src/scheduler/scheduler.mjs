@@ -51,6 +51,25 @@ import { readOperatorState } from '../operator/state-file.mjs';
  * operator configuration has been written yet (first boot, before any dashboard edit). */
 export const DEFAULT_TICK_INTERVAL_MS = 1_200_000;
 
+/** Default fast-reconciliation retry: how soon a tick that reports an already-open cycle still
+ * waiting to reconcile (or a partial supplementary settlement) is retried, instead of waiting out the
+ * full `intervalMinutes` new-cycle cadence. Also the starting point for the bounded outage backoff
+ * below. */
+export const RECONCILE_RETRY_MS = 5_000;
+
+/** Ceiling for the bounded backoff applied to consecutive tick outages (a state-file read failure, a
+ * worker that cannot be built, or the worker call itself throwing) — doubled on every consecutive
+ * outage tick starting from RECONCILE_RETRY_MS, reset the moment a tick stops being an outage. */
+export const RECONCILE_MAX_BACKOFF_MS = 300_000;
+
+const RECONCILE_BACKOFF_FACTOR = 2;
+
+// AutomatedCycleService statuses meaning "a cycle is already open and there is more to reconcile
+// right now" (as opposed to "nothing to do until the next interval"). These get the flat
+// RECONCILE_RETRY_MS retry, never the growing outage backoff: a chain confirmation still pending is
+// normal latency, not a fault.
+const RECONCILE_PENDING_STATUSES = new Set(['ACTIVE_CYCLE_NOT_RECONCILED', 'SUPPLEMENTARY_SETTLEMENT']);
+
 const missingStateMessage = 'operator state file does not exist';
 
 function defaultSchedule({ delayMs, callback }) {
@@ -107,6 +126,8 @@ export function createScheduler(options) {
     cancel = defaultCancel,
     onTick,
     defaultIntervalMs = DEFAULT_TICK_INTERVAL_MS,
+    reconcileRetryMs = RECONCILE_RETRY_MS,
+    reconcileMaxBackoffMs = RECONCILE_MAX_BACKOFF_MS,
   } = options;
 
   if (typeof statePath !== 'string' || statePath.length === 0) throw new Error('scheduler statePath must be a nonempty string');
@@ -117,6 +138,9 @@ export function createScheduler(options) {
   assertFunction(cancel, 'scheduler cancel');
   assertFunction(onTick, 'scheduler onTick', { optional: true });
   assertPositiveInteger(defaultIntervalMs, 'scheduler defaultIntervalMs');
+  assertPositiveInteger(reconcileRetryMs, 'scheduler reconcileRetryMs');
+  assertPositiveInteger(reconcileMaxBackoffMs, 'scheduler reconcileMaxBackoffMs');
+  if (reconcileMaxBackoffMs < reconcileRetryMs) throw new Error('scheduler reconcileMaxBackoffMs must be at least reconcileRetryMs');
 
   let stopped = true;
   let timerHandle = null;
@@ -124,6 +148,12 @@ export function createScheduler(options) {
   let tickChain = Promise.resolve();
   let currentAbortController = null;
   let scheduleGeneration = 0;
+  let outageBackoffMs = null;
+  let nextCycleAtMs = null;
+  let nextReconcileAtMs = null;
+  let lastConfigPaused = true;
+  let lastAutomationEnabled = false;
+  let lastPendingReason = null;
 
   function emit(event) {
     if (typeof onTick !== 'function') return;
@@ -144,6 +174,38 @@ export function createScheduler(options) {
     }
   }
 
+  // UI-facing reason a tick did not (or could not) advance a cycle right now — precise enough for the
+  // dashboard to distinguish "paused by the operator" from "waiting on funds" from "waiting on an
+  // already-sent transaction" rather than a single generic idle state.
+  function tickPendingReason({ configuration, result }) {
+    if (configuration === null) return 'CONFIGURATION_NOT_SET';
+    // A specific external result (a pending reconciliation, a lease held elsewhere, an insufficient
+    // process budget, a policy refusal) is reported ahead of the generic pause flags: it is the more
+    // actionable fact, and the raw `paused` flag remains separately visible on the view regardless.
+    if (result) {
+      switch (result.status) {
+        case 'WAITING_FOR_PROCESS_BUDGET': return 'INSUFFICIENT_FUNDS';
+        case 'ACTIVE_CYCLE_NOT_RECONCILED':
+        case 'SUPPLEMENTARY_SETTLEMENT': return 'RECONCILING_PENDING_TRANSACTION';
+        case 'LEASE_HELD': return 'LEASE_HELD_BY_ANOTHER_RUNNER';
+        case 'POLICY_REFUSED': return `POLICY_REFUSED_${result.reason ?? 'UNKNOWN'}`;
+        case 'RECOVERY_REFUSED': return `RECOVERY_REFUSED_${result.reason ?? 'UNKNOWN'}`;
+        default: break;
+      }
+    }
+    if (configuration.killSwitch) return 'KILL_SWITCH';
+    if (configuration.executionPaused) return 'EXECUTION_PAUSED';
+    if (configuration.paused) return 'PAUSED';
+    return null;
+  }
+
+  /**
+   * Runs one tick and classifies its outcome for scheduling: `requiresFastRetry` is `'outage'` for a
+   * transient failure (state read, worker construction, or the worker call itself throwing) — retried
+   * with growing bounded backoff — `'pending'` for a successfully-observed but still-open cycle or
+   * settlement — retried at a flat `reconcileRetryMs` — or `null` for a tick that has nothing left to
+   * do until the next `intervalMinutes` new-cycle wakeup.
+   */
   async function runTick() {
     tickCount += 1;
     const tick = tickCount;
@@ -153,10 +215,13 @@ export function createScheduler(options) {
     const paused = configuration ? Boolean(configuration.paused || configuration.executionPaused || configuration.killSwitch) : true;
     const liveMode = configuration ? configuration.liveMode : false;
     const intervalMs = configuration ? configuration.intervalMinutes * 60_000 : defaultIntervalMs;
+    lastConfigPaused = configuration ? Boolean(configuration.paused) : true;
+    lastAutomationEnabled = configuration !== null && !configuration.paused && !configuration.executionPaused && !configuration.killSwitch;
 
     if (stateError) {
+      const missing = stateError.message === missingStateMessage;
       emit({
-        type: stateError.message === missingStateMessage ? 'TICK_STATE_MISSING' : 'TICK_STATE_READ_FAILED',
+        type: missing ? 'TICK_STATE_MISSING' : 'TICK_STATE_READ_FAILED',
         tick,
         at,
         error: stateError,
@@ -164,7 +229,11 @@ export function createScheduler(options) {
         liveMode,
         intervalMs,
       });
-      return { intervalMs };
+      return {
+        intervalMs,
+        requiresFastRetry: missing ? null : 'outage',
+        pendingReason: missing ? 'CONFIGURATION_NOT_SET' : 'STATE_UNAVAILABLE',
+      };
     }
 
     let worker;
@@ -172,7 +241,7 @@ export function createScheduler(options) {
       worker = buildWorker({ liveMode, configuration });
     } catch (error) {
       emit({ type: 'TICK_WORKER_BUILD_FAILED', tick, at, error, paused, liveMode, intervalMs });
-      return { intervalMs };
+      return { intervalMs, requiresFastRetry: 'outage', pendingReason: 'WORKER_UNAVAILABLE' };
     }
     if (!worker || typeof worker.runOnce !== 'function' || typeof worker.recoverActiveCycle !== 'function') {
       emit({
@@ -184,7 +253,7 @@ export function createScheduler(options) {
         liveMode,
         intervalMs,
       });
-      return { intervalMs };
+      return { intervalMs, requiresFastRetry: 'outage', pendingReason: 'WORKER_UNAVAILABLE' };
     }
 
     currentAbortController = new AbortController();
@@ -202,11 +271,16 @@ export function createScheduler(options) {
 
     if (runError) {
       emit({ type: 'TICK_FAILED', tick, at, error: runError, paused, liveMode, intervalMs, calledMethod });
-      return { intervalMs };
+      return { intervalMs, requiresFastRetry: 'outage', pendingReason: 'TICK_FAILED' };
     }
 
     emit({ type: 'TICK_COMPLETE', tick, at, paused, liveMode, intervalMs, calledMethod, result });
-    return { intervalMs, result };
+    return {
+      intervalMs,
+      result,
+      requiresFastRetry: RECONCILE_PENDING_STATUSES.has(result?.status) ? 'pending' : null,
+      pendingReason: tickPendingReason({ configuration, result }),
+    };
   }
 
   function scheduleNext(delayMs) {
@@ -215,10 +289,60 @@ export function createScheduler(options) {
     timerHandle = schedule({ delayMs, callback: () => wake({ scheduledGeneration }) });
   }
 
+  // Turns one tick's classified outcome into the actual next-wakeup delay, and records it as
+  // nextCycleAt/nextReconcileAt for getView(). The two are mutually exclusive at any moment: either
+  // the next wakeup is the ordinary new-cycle cadence, or it is a fast reconciliation/outage retry —
+  // never both, since a single timer drives the loop and whichever is more urgent wins.
+  // A clean manual tick (nothing urgent found) never touches nextCycleAtMs/nextReconcileAtMs/the
+  // backoff counter: it did not drive the installed timer, so it must not silently reset an
+  // in-progress interval countdown just because someone happened to check. A manual tick that *does*
+  // find urgent pending work is different: the whole point of a fast-retry/outage classification is
+  // that the next real attempt happens soon, not whenever the old cadence next fires, so this always
+  // computes (and the caller always installs) that real deadline regardless of who triggered the tick
+  // that discovered it. A manual tick's pendingReason is, either way, real information and is always
+  // recorded.
+  function applyScheduleOutcome(outcome, { scheduleAfter }) {
+    lastPendingReason = outcome.pendingReason ?? null;
+    if (!scheduleAfter && outcome.requiresFastRetry === null) return null;
+    if (outcome.requiresFastRetry === 'outage') {
+      outageBackoffMs = outageBackoffMs === null
+        ? reconcileRetryMs
+        : Math.min(outageBackoffMs * RECONCILE_BACKOFF_FACTOR, reconcileMaxBackoffMs);
+      nextReconcileAtMs = now() + outageBackoffMs;
+      nextCycleAtMs = null;
+      return outageBackoffMs;
+    }
+    if (outcome.requiresFastRetry === 'pending') {
+      outageBackoffMs = null;
+      nextReconcileAtMs = now() + reconcileRetryMs;
+      nextCycleAtMs = null;
+      return reconcileRetryMs;
+    }
+    outageBackoffMs = null;
+    nextCycleAtMs = now() + outcome.intervalMs;
+    nextReconcileAtMs = null;
+    return outcome.intervalMs;
+  }
+
+  // A manual tick that just computed an urgent real deadline preempts whatever cadence timer is
+  // currently installed: cancel it, bump the generation (so a callback already in flight for the
+  // cancelled timer is a guaranteed no-op even if `cancel` itself were ever to race), and install the
+  // new one. A no-op while stopped — `scheduleNext` already refuses to arm a timer in that state, so a
+  // stopped scheduler never gains a timer just because a manual tick was run against it.
+  function preemptInstalledTimer(delayMs) {
+    if (stopped) return;
+    scheduleGeneration += 1;
+    if (timerHandle !== null) {
+      cancel(timerHandle);
+      timerHandle = null;
+    }
+    scheduleNext(delayMs);
+  }
+
   function enqueueTick({ scheduleAfter, scheduledGeneration = null }) {
     const dispatch = () => {
       if (scheduledGeneration !== null && (stopped || scheduledGeneration !== scheduleGeneration)) {
-        return { intervalMs: defaultIntervalMs };
+        return { intervalMs: defaultIntervalMs, requiresFastRetry: null, pendingReason: lastPendingReason };
       }
       return runTick();
     };
@@ -227,8 +351,13 @@ export function createScheduler(options) {
       dispatch,
     );
     tickChain = outcome.then(
-      ({ intervalMs }) => {
-        if (scheduleAfter) scheduleNext(intervalMs);
+      result => {
+        const delayMs = applyScheduleOutcome(result, { scheduleAfter });
+        if (scheduleAfter) {
+          scheduleNext(delayMs);
+        } else if (delayMs !== null) {
+          preemptInstalledTimer(delayMs);
+        }
       },
       () => {
         if (scheduleAfter) scheduleNext(defaultIntervalMs);
@@ -266,6 +395,23 @@ export function createScheduler(options) {
     },
     isRunning() {
       return !stopped;
+    },
+    /** The frozen SchedulerView contract: the actual next new-cycle and reconciliation wakeups (never
+     * both at once — see applyScheduleOutcome), whether standing automation is currently allowed to
+     * open a cycle unattended, the raw operator pause flag, and a precise UI-facing reason nothing is
+     * advancing right now (insufficient funds, a paused state, or an external pending result), or
+     * `null` when there is nothing blocking. Reflects the most recently settled tick, automatic or
+     * manually triggered. */
+    getView() {
+      // Stopped means no timer is installed, full stop — neither field may report a future wakeup
+      // regardless of whatever the last automatic tick happened to compute before stop() ran.
+      return Object.freeze({
+        nextCycleAt: stopped || nextCycleAtMs === null ? null : new Date(nextCycleAtMs).toISOString(),
+        nextReconcileAt: stopped || nextReconcileAtMs === null ? null : new Date(nextReconcileAtMs).toISOString(),
+        automationEnabled: lastAutomationEnabled,
+        paused: lastConfigPaused,
+        pendingReason: lastPendingReason,
+      });
     },
     /** Abort the signal passed to the in-flight worker call, if any. AutomatedCycleService checks this
      * signal between stages (never mid-stage), so this still respects "let the current stage finish". */

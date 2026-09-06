@@ -12,13 +12,33 @@ const PREVIOUS_DUST_SOURCE_FIELDS = ['cycleId', 'digest', 'planDigest'];
 const FORBIDDEN_CANONICAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const MAX_UINT256 = (1n << 256n) - 1n;
 
-export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 1025;
+// A hard technical ceiling protecting the canonical-JSON/in-memory bounds below AND the durable
+// payout store's real capacity: this is the acceptance boundary for compileDirectPayoutPlan and
+// eligibility-snapshot.mjs's feasibility gate, so a plan admitted here must survive its full
+// on-disk lifecycle, not just initial persistence.
+//
+// The durable store (packages/runner/src/cycle/durable-store.mjs, journal.mjs -- owned by the
+// storage-scale task, not this module) enforces a 20,000-object canonical budget per persisted
+// payout state. A recipient's object footprint grows as it progresses (SIGNED/FINALIZED add an
+// approvalContext and a finalizedTransfer object each), so the *worst case* terminal state is the
+// real ceiling, not the smaller initial-admission footprint. Measured against the unmodified store
+// on 2026-09-06: initial admission survives up to 3,995 recipients; a fully-finalized state survives
+// up to 2,854. This constant is set below both with margin for held-position-exclusion and
+// quarantine objects that add further overhead. Raising it requires a coordinated object-count (or
+// paging-scheme) increase in the durable store, not just this constant -- see D-inbox/E-inbox for
+// the handoff.
+export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 2_500;
 
 const PAYOUT_PLAN_CANONICAL_LIMITS = Object.freeze({
-  objects: 20_000,
+  objects: 200_000,
   arrays: 10_000,
   arrayItems: DIRECT_PAYOUT_RECIPIENT_LIMIT,
-  aggregateBytes: 4_194_304,
+  aggregateBytes: 33_554_432,
+});
+
+export const DIRECT_PAYOUT_OUTCOME = Object.freeze({
+  ALLOCATED: 'ALLOCATED',
+  NON_SPENDING_NO_ELIGIBLE_HOLDERS: 'NON_SPENDING_NO_ELIGIBLE_HOLDERS',
 });
 
 export const USDG_PAYOUT_CHAIN_ID = 4663;
@@ -168,7 +188,9 @@ function compareAddress(left, right) {
 }
 
 function normalizeEntries(entries, supply) {
-  if (!Array.isArray(entries) || entries.length === 0) throw new Error('eligibility manifest entries must be a nonempty array');
+  // An empty array is valid: it is the frozen shape of a cycle with no eligible holders, handled
+  // by compileDirectPayoutPlan as an explicit non-spending outcome rather than an exception.
+  if (!Array.isArray(entries)) throw new Error('eligibility manifest entries must be an array');
   const recipients = new Set();
   const normalized = entries.map((entry, index) => {
     assertExactFields(entry, ['recipient', 'hkmnBalance'], `eligibility manifest entry ${index}`);
@@ -352,12 +374,35 @@ function unsignedPlan(value) {
     totalAllocated: value.totalAllocated,
     dust: value.dust,
     feasibility: value.feasibility,
+    outcome: value.outcome,
   };
 }
 
 /** Returns the canonical digest for the immutable, unsigned payout plan payload. */
 export function directPayoutPlanDigest(value) {
   return payoutPlanDigest(unsignedPlan(value));
+}
+
+function assertSupplementaryIndex(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error('supplementary payout plan supplementary index must be a positive safe integer');
+  }
+  return value;
+}
+
+function unsignedSupplementaryPlan(value) {
+  return {
+    schema: value.schema,
+    cycleId: value.cycleId,
+    manifestId: value.manifestId,
+    supplementaryIndex: value.supplementaryIndex,
+    payoutPlan: value.payoutPlan,
+  };
+}
+
+/** Returns the canonical digest for an immutable supplementary payout-plan wrapper. */
+export function supplementaryPayoutPlanDigest(value) {
+  return payoutPlanDigest(unsignedSupplementaryPlan(value));
 }
 
 function freezePlan(value) {
@@ -393,9 +438,14 @@ export function compileDirectPayoutPlan({
     throw new Error('direct payout distributable pool exceeds uint256');
   }
   const totalEligibleHkmn = eligibility.entries.reduce((sum, entry) => sum + BigInt(entry.hkmnBalance.amountAtomic), 0n);
-  if (totalEligibleHkmn === 0n) throw new Error('eligibility manifest has no positive HKMN balance');
+  // No eligible holder this cycle is not an error: nothing is spent, and the entire distributable
+  // pool is retained as durable dust for the successor cycle rather than being invented away or
+  // thrown as an exception.
+  const outcome = totalEligibleHkmn === 0n
+    ? DIRECT_PAYOUT_OUTCOME.NON_SPENDING_NO_ELIGIBLE_HOLDERS
+    : DIRECT_PAYOUT_OUTCOME.ALLOCATED;
 
-  const candidates = eligibility.entries.map(entry => {
+  const candidates = totalEligibleHkmn === 0n ? [] : eligibility.entries.map(entry => {
     const numerator = BigInt(entry.hkmnBalance.amountAtomic) * distributablePool;
     return {
       recipient: entry.recipient,
@@ -455,10 +505,48 @@ export function compileDirectPayoutPlan({
     }),
     dust,
     feasibility: eligibility.feasibility,
+    outcome,
   };
   return freezePlan({
     ...unsigned,
     payableRecipientCount: allocations.filter(allocation => allocation.amount.amountAtomic !== '0').length,
     planDigest: directPayoutPlanDigest(unsigned),
+  });
+}
+
+/**
+ * Compiles a pure supplementary payout-plan wrapper for one held-position settlement. It preserves
+ * the original cycle's eligibility snapshot and makes the supplementary manifest identity part of
+ * the wrapper digest. Persistence, signing, broadcast, and recipient execution remain adapter
+ * responsibilities.
+ */
+export function compileSupplementaryDirectPayoutPlan({
+  cycleId,
+  supplementaryIndex,
+  eligibilityManifest,
+  finalizedReturn,
+  previousDust,
+  previousDustSource = null,
+  returnBinding,
+}) {
+  const index = assertSupplementaryIndex(supplementaryIndex);
+  const payoutPlan = compileDirectPayoutPlan({
+    cycleId,
+    eligibilityManifest,
+    finalizedReturn,
+    previousDust,
+    previousDustSource,
+    returnBinding,
+  });
+  const unsigned = {
+    schema: 'hookemon.supplementary-direct-payout-plan.v1',
+    cycleId,
+    manifestId: `${cycleId}:supplementary:${index}`,
+    supplementaryIndex: index,
+    payoutPlan,
+  };
+  return freezePlan({
+    ...unsigned,
+    supplementaryPlanDigest: supplementaryPayoutPlanDigest(unsigned),
   });
 }
