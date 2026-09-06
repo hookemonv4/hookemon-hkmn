@@ -206,7 +206,12 @@ async function dispatch({ operation, role, account, parentPolicyEvaluated = fals
   const deadline = Date.now() + timeout;
   const isLive = liveMode();
   if (operation === 'broadcast') {
-    return { error: { code: 'broadcast_not_supported', message: 'broadcast is performed by the configured RPC client' } };
+    // This command signs only. A production caller injects a real chain RPC transport into the
+    // signer-client facade (`createKeychainSignerClient`'s `broadcast` option) instead of ever
+    // sending this operation; reaching this line is always a caller defect, so it fails the
+    // process rather than returning a success-shaped `{ error }` object a caller could mistake for
+    // a broadcast result.
+    fail('broadcast is performed by the configured RPC client, not the sign-only keychain command');
   }
   if (role === 'operator-evm') {
     if (operation === 'probe') {

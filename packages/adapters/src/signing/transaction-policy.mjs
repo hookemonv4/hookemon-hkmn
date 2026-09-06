@@ -10,6 +10,7 @@ import {
   encodeFunctionData,
   getAddress,
   isAddress,
+  keccak256,
   parseTransaction,
   recoverTransactionAddress,
 } from 'viem';
@@ -1035,4 +1036,49 @@ export async function revalidateSignedMessage(signedMessage, approved, options =
     fail('signed message differs from its approved semantic description');
   }
   return redecoded;
+}
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function encodeBase58(bytes) {
+  if (bytes.length === 0) return '';
+  const digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      const next = digits[index] * 256 + carry;
+      digits[index] = next % 58;
+      carry = Math.floor(next / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let leadingZeroes = 0;
+  while (leadingZeroes < bytes.length && bytes[leadingZeroes] === 0) leadingZeroes += 1;
+  return `${'1'.repeat(leadingZeroes)}${digits.reverse().map(digit => BASE58_ALPHABET[digit]).join('')}`;
+}
+
+/**
+ * The deterministic on-chain identifier a correct broadcast of these exact already-signed bytes
+ * must return: the EVM transaction hash (`keccak256` of the raw signed transaction, per the
+ * Ethereum JSON-RPC `eth_sendRawTransaction` contract) or the Solana transaction signature (the
+ * base58 encoding of the transaction's own first signature slot, per the Solana `sendTransaction`
+ * contract — a fully-signed transaction's id *is* that signature). Used to refuse a broadcast
+ * result that does not correspond to the bytes actually sent, whether from a malfunctioning RPC or
+ * from a caller supplying signed bytes for one transaction and a result for another.
+ */
+export function expectedBroadcastIdentifier(signedMessage, family) {
+  const payload = signedTransactionPayload(signedMessage, family);
+  if (family === 'evm') {
+    if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(payload)) {
+      fail('EVM broadcast identifier check requires even-length hexadecimal signed bytes');
+    }
+    return keccak256(payload).toLowerCase();
+  }
+  const transaction = fullSignedSolanaTransaction(payload);
+  const first = transaction.signatures[0];
+  if (!signatureIsNonzero(first)) fail('Solana broadcast identifier check requires a non-zero first signature');
+  return encodeBase58(first);
 }
