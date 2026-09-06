@@ -6,7 +6,7 @@ import { runEvmKeychainChildProcess } from '../src/signing/keychain-child-evm.mj
 import { runSolanaWalletKeychainChildProcess } from '../src/signing/operations-wallet-keychain-child.mjs';
 import { signRequestDigest } from '../src/signing/signer-client.mjs';
 
-const USAGE = 'Usage: hookemon-keychain-signer.mjs <probe|sign|broadcast> --role <operator-evm|operator-solana> --account <account>';
+const USAGE = 'Usage: hookemon-keychain-signer.mjs <probe|sign|broadcast> --role <operator-evm|operator-solana> --account <account> [--parent-policy-evaluated]';
 const DEFAULT_SERVICE = 'hookemon-operations';
 const DEFAULT_SECURITY_COMMAND = '/usr/bin/security';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -57,7 +57,8 @@ export function parseWireArgs(argv) {
   if (!['probe', 'sign', 'broadcast'].includes(operation)) {
     throw new Error(`operation must be probe, sign, or broadcast\n\n${USAGE}`);
   }
-  if (rest.length !== 4 || rest[0] !== '--role' || rest[2] !== '--account') {
+  const parentPolicyEvaluated = rest.length === 5 && rest[4] === '--parent-policy-evaluated';
+  if ((rest.length !== 4 && !parentPolicyEvaluated) || rest[0] !== '--role' || rest[2] !== '--account') {
     throw new Error(`expected --role and --account\n\n${USAGE}`);
   }
   const [, role, , account] = rest;
@@ -68,7 +69,12 @@ export function parseWireArgs(argv) {
   if (account !== configuredAccount(role)) {
     throw new Error(`account ${account} is not configured for role ${role}`);
   }
-  return { operation, role, account };
+  if (parentPolicyEvaluated && (operation !== 'sign' || role !== 'operator-solana')) {
+    throw new Error('parent-policy marker only applies to Solana sign operations');
+  }
+  return parentPolicyEvaluated
+    ? { operation, role, account, parentPolicyEvaluated: true }
+    : { operation, role, account };
 }
 
 async function readSingleJsonLine() {
@@ -172,12 +178,12 @@ async function probeSolana({ account, command, deadline, timeout }) {
   if (!result || typeof result.signedTxBase64 !== 'string') fail('Solana sign-only readiness check did not return a signed transaction');
   const signed = Transaction.from(Buffer.from(result.signedTxBase64, 'base64'));
   if (!signed.verifySignatures()) fail('Solana sign-only readiness signature did not verify');
-  return { ready: true };
+  return { ready: true, publicKey: expectedAccount };
 }
 
-async function signSolana(payload, { account, command, deadline, timeout, isLive }) {
+async function signSolana(payload, { account, command, deadline, timeout, isLive, parentPolicyEvaluated }) {
   const request = solanaRequest(payload);
-  if (isLive) {
+  if (isLive && parentPolicyEvaluated !== true) {
     fail('live Solana signing requires parent transaction policy evaluation with trusted chain resolvers');
   }
   if (request.policy !== undefined) {
@@ -194,7 +200,7 @@ async function signSolana(payload, { account, command, deadline, timeout, isLive
   }, { timeoutMs: remainingTimeout(deadline, timeout) });
 }
 
-async function dispatch({ operation, role, account }, payload) {
+async function dispatch({ operation, role, account, parentPolicyEvaluated = false }, payload) {
   const command = keychainCommand();
   const timeout = timeoutMs();
   const deadline = Date.now() + timeout;
@@ -226,7 +232,16 @@ async function dispatch({ operation, role, account }, payload) {
   }
   if (role === 'operator-solana') {
     if (operation === 'probe') return probeSolana({ account, command, deadline, timeout });
-    if (operation === 'sign') return signSolana(payload, { account, command, deadline, timeout, isLive });
+    if (operation === 'sign') {
+      return signSolana(payload, {
+        account,
+        command,
+        deadline,
+        timeout,
+        isLive,
+        parentPolicyEvaluated,
+      });
+    }
   }
   fail(`unsupported keychain signer operation: ${operation}`);
 }

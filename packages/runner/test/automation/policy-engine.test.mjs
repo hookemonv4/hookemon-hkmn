@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createDefaultOperatorConfiguration } from '../../src/config/state-schema.mjs';
 import {
+  assertCollectorOnlyRehearsalPolicy,
   createPolicyEngine,
   deriveCyclePolicyDigest,
   POLICY_WINDOW_MS,
@@ -44,6 +45,7 @@ function policyFixture({
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
       ...custody,
@@ -60,6 +62,42 @@ function policyFixture({
     replaceConfiguration: next => { current = next; },
   };
 }
+
+test('collector-only live rehearsal policy binds one approved pack, one booster, and one manual approval', () => {
+  const configuration = configuredPolicy({
+    allowedPackIds: ['collector-25'],
+    requestedOrders: 1,
+    maxBoostersPerCycle: 1,
+    maxUnitPriceMicroUsdg: '25000000',
+    maxCycleBudgetMicroUsdg: '25000000',
+    max24HourBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000',
+    maxCyclesPerDay: 1,
+    manualApprovalCycles: 1,
+  });
+
+  assert.deepEqual(
+    assertCollectorOnlyRehearsalPolicy(configuration, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    configuration,
+  );
+  assert.throws(
+    () => assertCollectorOnlyRehearsalPolicy({ ...configuration, maxBoostersPerCycle: 2 }, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    /maxBoostersPerCycle must equal 1/,
+  );
+  assert.throws(
+    () => assertCollectorOnlyRehearsalPolicy({ ...configuration, allowedPackIds: ['another-pack'] }, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    /allow exactly the selected pack/,
+  );
+});
 
 test('standing-authority cap reservation delegates one exact decision to the authoritative repository', async () => {
   const decision = {
@@ -198,6 +236,7 @@ test('a claim admission rechecks custody inside the durable reservation boundary
         atRiskMicroUsdg: '0',
         outstandingMicroUsdg: '0',
         heldAssets: false,
+        heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
         unattributed: reads > 1,
         unvaluedExposure: false,
       };
@@ -331,11 +370,107 @@ test('a claim-stage mutation guard requires the admission reservation to persist
   );
 });
 
-test('claim admission fails closed for the pack allowlist and all custody loss controls', async () => {
+test('claim admission keeps legacy held state and pending decisions nonblocking', async () => {
+  const { engine } = policyFixture({
+    configuration: configuredPolicy({
+      maxHeldPositions: 2,
+      maxHeldValueMicroUsdg: '5',
+      pendingEpicDecisions: [{
+        cycleId: 'cycle-prior-held-decision',
+        cycleDigest: `sha256:${'d'.repeat(64)}`,
+        heldAtMs: 1,
+      }],
+    }),
+    custody: {
+      heldAssets: true,
+      heldPositions: { count: 1, valueMicroUsdg: '5', positions: [{ valueMicroUsdg: '5' }] },
+    },
+  });
+
+  const decision = await engine.admit({
+    boundary: 'claim-process',
+    cycleId: 'cycle-held-position-under-limit',
+    releaseAmountMicroUsdg: '5000000',
+    packId: 'base-pack',
+    liveMode: true,
+  });
+
+  assert.equal(decision.allowed, true);
+});
+
+test('claim admission refuses at the held-position count or value limit', async () => {
+  for (const [configuration, custody] of [
+    [
+      configuredPolicy({ maxHeldPositions: 1, maxHeldValueMicroUsdg: '100' }),
+      { heldPositions: { count: 1, valueMicroUsdg: '0', positions: [{ valueMicroUsdg: '0' }] } },
+    ],
+    [
+      configuredPolicy({ maxHeldPositions: 2, maxHeldValueMicroUsdg: '5' }),
+      { heldPositions: { count: 1, valueMicroUsdg: '6', positions: [{ valueMicroUsdg: '6' }] } },
+    ],
+  ]) {
+    const { engine } = policyFixture({ configuration, custody });
+    assert.deepEqual(await engine.admit({
+      boundary: 'claim-process',
+      cycleId: `cycle-held-limit-${custody.heldPositions.count}-${custody.heldPositions.valueMicroUsdg}`,
+      releaseAmountMicroUsdg: '5000000',
+      packId: 'base-pack',
+      liveMode: true,
+    }), { allowed: false, reason: 'HELD_LIMIT' });
+  }
+});
+
+test('claim admission rejects a held-position projection whose count understates its positions', async () => {
+  const { engine } = policyFixture({
+    configuration: configuredPolicy({ maxHeldPositions: 1, maxHeldValueMicroUsdg: '5' }),
+    custody: {
+      heldPositions: {
+        count: 0,
+        valueMicroUsdg: '0',
+        positions: [{ valueMicroUsdg: '6' }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    engine.admit({
+      boundary: 'claim-process',
+      cycleId: 'cycle-inconsistent-held-positions',
+      releaseAmountMicroUsdg: '5000000',
+      packId: 'base-pack',
+      liveMode: true,
+    }),
+    /heldPositions count/i,
+  );
+});
+
+test('claim admission rejects a held-position projection whose value understates its positions', async () => {
+  const { engine } = policyFixture({
+    configuration: configuredPolicy({ maxHeldPositions: 2, maxHeldValueMicroUsdg: '5' }),
+    custody: {
+      heldPositions: {
+        count: 1,
+        valueMicroUsdg: '0',
+        positions: [{ valueMicroUsdg: '6' }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    engine.admit({
+      boundary: 'claim-process',
+      cycleId: 'cycle-inconsistent-held-value',
+      releaseAmountMicroUsdg: '5000000',
+      packId: 'base-pack',
+      liveMode: true,
+    }),
+    /heldPositions value/i,
+  );
+});
+
+test('claim admission fails closed for the pack allowlist and custody loss controls', async () => {
   const scenarios = [
     [{}, { packId: 'other-pack' }, 'PACK_NOT_ALLOWED'],
-    [{ pendingEpicDecisions: [{ cycleId: 'held-cycle', cycleDigest: `sha256:${'1'.repeat(64)}`, heldAtMs: 1 }] }, {}, 'HELD_CUSTODY'],
-    [{}, { custody: { heldAssets: true } }, 'HELD_CUSTODY'],
     [{}, { custody: { unattributed: true } }, 'UNATTRIBUTED_CUSTODY'],
     [{}, { custody: { unvaluedExposure: true } }, 'UNVALUED_CUSTODY'],
     [{ lossCapMicroUsdg: '5000000' }, { custody: { atRiskMicroUsdg: '1' } }, 'LOSS_CAP'],
@@ -432,6 +567,7 @@ test('a reservation expires at the end of the off-chain policy window and remain
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -530,6 +666,7 @@ test('a cycle-bound broadcast guard rereads loss and custody caps before broadca
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -574,6 +711,7 @@ test('a later-stage execution guard does not count an already observed claim as 
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -634,6 +772,85 @@ test('a pause and resume revision does not invalidate an admitted cycle policy d
     allowed: true,
     cycleDigest: admission.cycleDigest,
   });
+});
+
+test('cycle policy digest binds the unresolved-card reconciliation deadline', () => {
+  const configuration = configuredPolicy({ unresolvedCardDeadlineMinutes: 45 });
+  const cycleId = 'cycle-deadline-policy';
+  const releaseAmountMicroUsdg = '5000000';
+  const expected = digest({
+    schema: 'hookemon.policy-cycle.v3',
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    mode: 'production',
+    policy: {
+      allowedPackIds: [...configuration.allowedPackIds],
+      requestedOrders: configuration.requestedOrders,
+      maxBoostersPerCycle: configuration.maxBoostersPerCycle,
+      maxUnitPriceMicroUsdg: configuration.maxUnitPriceMicroUsdg,
+      perCycleCapMicroUsdg: configuration.perCycleCapMicroUsdg,
+      max24HourBudgetMicroUsdg: configuration.max24HourBudgetMicroUsdg,
+      maxCyclesPerDay: configuration.maxCyclesPerDay,
+      lossCapMicroUsdg: configuration.lossCapMicroUsdg,
+      maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
+      maxHeldPositions: configuration.maxHeldPositions,
+      maxHeldValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+      unresolvedCardDeadlineMinutes: configuration.unresolvedCardDeadlineMinutes,
+      manualApprovalCycles: configuration.manualApprovalCycles,
+    },
+  });
+
+  assert.equal(deriveCyclePolicyDigest({
+    configuration,
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    liveMode: true,
+  }), expected);
+});
+
+test('an active held-position policy digest without an unresolved-card deadline remains valid', async () => {
+  const cycleId = 'cycle-pre-deadline-policy';
+  const releaseAmountMicroUsdg = '5000000';
+  const base = configuredPolicy();
+  const cycleDigest = digest({
+    schema: 'hookemon.policy-cycle.v3',
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    mode: 'production',
+    policy: {
+      allowedPackIds: [...base.allowedPackIds],
+      requestedOrders: base.requestedOrders,
+      maxBoostersPerCycle: base.maxBoostersPerCycle,
+      maxUnitPriceMicroUsdg: base.maxUnitPriceMicroUsdg,
+      perCycleCapMicroUsdg: base.perCycleCapMicroUsdg,
+      max24HourBudgetMicroUsdg: base.max24HourBudgetMicroUsdg,
+      maxCyclesPerDay: base.maxCyclesPerDay,
+      lossCapMicroUsdg: base.lossCapMicroUsdg,
+      maxOutstandingCustodyMicroUsdg: base.maxOutstandingCustodyMicroUsdg,
+      maxHeldPositions: base.maxHeldPositions,
+      maxHeldValueMicroUsdg: base.maxHeldValueMicroUsdg,
+      manualApprovalCycles: base.manualApprovalCycles,
+    },
+  });
+  const { engine } = policyFixture({
+    configuration: {
+      ...base,
+      configurationRevision: 2,
+      cycleLedger: [{ cycleId, cycleDigest, mode: 'production', openedAtMs: 1_000, releaseAmountMicroUsdg }],
+      spendLedger: [{ cycleId, cycleDigest, amountMicroUsdg: releaseAmountMicroUsdg, reservedAtMs: 1_000 }],
+    },
+  });
+
+  assert.deepEqual(await engine.evaluatePurchase({
+    boundary: 'purchase',
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    liveMode: true,
+  }), { allowed: true, cycleDigest });
 });
 
 test('a legacy policy digest remains valid when only its generic revision changed', async () => {
@@ -700,6 +917,7 @@ test('manual approval forwards its caller revision into the configuration mutati
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),

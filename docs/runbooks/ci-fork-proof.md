@@ -10,6 +10,7 @@ canary reports endpoint or pin drift only from `main`.
 ## Safe stop
 
 Pull requests require `control-gate`, `identity-gate`, and `gates`. Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`.
+Configure the ruleset with these exact check names: `control-gate`, `identity-gate`, `gates`, and `fork-proof`.
 
 Do not merge while a pull-request status is pending or failed. Do not put an
 endpoint in repository files, workflow logs, issue comments, or local fixtures.
@@ -29,6 +30,11 @@ manual runs check `refs/heads/main` before observing current-head drift.
 `identity-gate` and `control-gate` protect pull requests without endpoint
 access. They execute base-defined checks and treat the proposed revision as Git
 data, not executable workflow code.
+
+For a zero `before` SHA or parentless pushed revision, range gates use the Git
+empty tree, scan every reachable commit, and record the explicitly trusted
+pushed base in the identity and control job summaries. Do not bypass a failed
+initial-push range check; an unset `fork-proof` endpoint is independent.
 
 ## Coordinator checkpoint
 
@@ -50,25 +56,19 @@ to `main` only, then store `ROBINHOOD_FORK_RPC_URL` as its environment secret.
 The post-merge `fork-proof` status is the enforced fork gate. A manual proof is
 valid only when dispatched from `main`.
 
-Keep the transitional identity check in `v4-gates.yml` until the owner has
-registered `identity-gate` and `control-gate` as required statuses on `main`.
-The CI launch-package command allows draft inputs; the no-override form of
-`verify-launch-package.mjs` remains the release gate after owner preflight inputs
-exist.
+Keep the transitional identity check until the owner registers `identity-gate` and
+`control-gate` as required statuses on `main`; the no-override launch verifier remains the release gate after owner preflight.
 
 ## Escalation
 
-Escalate an archive pin mismatch, archive-suite failure, unavailable endpoint,
-or a fork-proof run from a non-main ref. Re-run the local checkpoint commands
-after fixing configuration or pin material.
+Escalate an archive pin mismatch, archive-suite failure, unavailable endpoint, or a
+fork-proof run from a non-main ref. Re-run the local checkpoint commands after fixing configuration or pin material.
 
 ## Evidence
 
-The workflow source proves the trigger boundary and fail-closed behavior. The
+The workflow source proves the trigger boundary and fail-closed behavior; the
 owner configures the environment and protected statuses. GitHub documents
-branch-filtered `push` events and manual workflow dispatch in its
-[workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
-and [manual workflow guide](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow?tool=webui).
+[workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) and [manual dispatch](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow?tool=webui).
 ## Recovery contract
 
 Failure-matrix cells: none (not in frozen matrix)

@@ -215,6 +215,14 @@ Programmable accepted the Phase 3 launch route on 2026-09-05 and accepted `FEE-0
 10-basis-point platform share on 2026-09-04. These decisions resolve the former allocation and
 provider-acceptance questions.
 
+## Decision note: 2026-09-05 (revision 65 seed intent binding)
+
+Requirements revision 65 already requires the bound seed path at `specs/requirements.json:608-614`;
+no requirements revision is needed. The hook constructor commits the fixed payer, ticks, liquidity,
+maxima, and 900-second deadline policy as an immutable digest. Seed execution, the release plan,
+and package verification independently reject materialized calldata that does not match that
+digest. This note adds no signing, funding, deployment, or owner authorization.
+
 OPEN FACT: the provider has not supplied the encoded launch-intent preimage. The missing values
 are the route namespace, route nonce, topology hash, target-id hashes, and serialized graph call
 data for the accepted three-call sequence. Obtain those values in the provider preflight response;

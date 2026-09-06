@@ -71,6 +71,7 @@ function custodyLedger(cycleId) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -83,6 +84,7 @@ function safetyTelemetry(overrides = {}) {
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
     ...overrides,
@@ -114,6 +116,7 @@ function createRepository({ activeCycleId = 'cycle-one', knownCycleIds = [active
         version: 0,
         heldEvidenceDigest: null,
         ownerDecision: null,
+        heldPositions: new Map(),
         stages: new Map(),
         operationalAttempts: new Map(),
         custodyLedgers: new Map(),
@@ -132,6 +135,7 @@ function policyEngineForState(statePath) {
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
       cycles: [],
@@ -274,6 +278,12 @@ test('status projects cycle facts and typed custody buckets from the repository'
       limitMicroUsdg: '100',
       remainingMicroUsdg: '100',
     },
+    heldPositions: {
+      count: 0,
+      maxCount: 10,
+      valueMicroUsdg: '0',
+      maxValueMicroUsdg: '5000000000',
+    },
     onChainRemainingCapacity: null,
   });
   assert.deepEqual(status.cycles[0].stages, [
@@ -361,6 +371,7 @@ test('status projects canonical lifecycle order and durable chain transaction ev
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -475,6 +486,7 @@ test('status leaves a payout unavailable when no durable payout stage exists', a
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -538,6 +550,7 @@ test('status projects loss and outstanding custody cap usage from policy telemet
       atRiskMicroUsdg: '8',
       outstandingMicroUsdg: '19',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -559,6 +572,47 @@ test('status projects loss and outstanding custody cap usage from policy telemet
   });
   assert.deepEqual(status.alertSources, { safetyTelemetry: true });
   assert.deepEqual(status.alerts, []);
+});
+
+test('status exposes held-position limit usage and the open positions', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath, configuration({ maxHeldPositions: 3, maxHeldValueMicroUsdg: '100' }));
+  const position = {
+    positionId: 'position-one',
+    cycleId: 'cycle-one',
+    packId: 'base-pack',
+    memo: 'memo-one',
+    mint: 'mint-one',
+    cardRef: 'card-one',
+    costMicroUsdg: '7',
+    insuredValue: null,
+    reason: 'HELD_UNAVAILABLE',
+    terminalState: 'OPEN',
+    evidenceDigest: hash('e'),
+    openedAtMs: nowMs,
+    ownerDecision: null,
+    resolution: null,
+    positionRevision: 0,
+  };
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry({
+      heldPositions: { count: 1, valueMicroUsdg: '7', positions: [position] },
+    }),
+  });
+
+  const status = await control.status();
+
+  assert.deepEqual(status.cap.heldPositions, {
+    count: 1,
+    maxCount: 3,
+    valueMicroUsdg: '7',
+    maxValueMicroUsdg: '100',
+  });
+  assert.deepEqual(status.heldPositions, [position]);
 });
 
 test('status marks unavailable safety telemetry with an authority alert', async t => {
@@ -625,6 +679,26 @@ test('an exposure-increasing configuration update refuses unavailable safety tel
   );
 });
 
+test('increasing the unresolved-card deadline requires safety telemetry', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => { throw new Error('reader offline'); },
+  });
+
+  await assert.rejects(
+    control.execute({
+      expectedRevision: 0,
+      command: { type: 'update-configuration', configuration: { unresolvedCardDeadlineMinutes: 31 } },
+    }),
+    /safety telemetry.*unavailable/i,
+  );
+});
+
 test('pause and kill persist execution guards before the policy engine observes them', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
@@ -677,7 +751,7 @@ test('manual approval delegates one exact digest-bound request to the policy eng
   assert.deepEqual(result.approval, { cycleId: 'cycle-one', cycleDigest: hash('c'), approvedAtMs: nowMs });
 });
 
-test('held owner decisions carry the audited request and held-cycle revision to the repository authority', async t => {
+test('held owner decisions carry the audited request and position revision to the repository authority', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
   const calls = [];
@@ -697,15 +771,15 @@ test('held owner decisions carry the audited request and held-cycle revision to 
     requestId: 'held-decision-1',
     command: {
       type: 'held-owner-decision',
-      cycleId: 'cycle-held',
+      positionId: 'position-held',
       heldEvidenceDigest: hash('d'),
-      expectedCycleRevision: 4,
+      expectedPositionRevision: 4,
       choice: 'keep-holding',
     },
   });
 
   const decision = {
-    cycleId: 'cycle-held',
+    positionId: 'position-held',
     heldEvidenceDigest: hash('d'),
     expectedRevision: 4,
     requestId: 'held-decision-1',

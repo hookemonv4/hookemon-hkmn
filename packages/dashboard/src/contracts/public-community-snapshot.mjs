@@ -1,6 +1,6 @@
 // Clean-room re-implementation of GET /public/api/community-dashboard's contract (readSet:
 // apps/web/lib/public-community-snapshot.ts on the legacy codex/mainnet-cycle-canary branch,
-// `normalizePublicCommunitySnapshot`/schemaVersion 5). This service only ever emits schemaVersion 5;
+// `normalizePublicCommunitySnapshot`/schemaVersion 7). This service only ever emits schemaVersion 7;
 // the legacy schemaVersion-3/4 acceptance paths are ported too so the validator remains the exact
 // gate the website itself applies.
 import { readDashboardProfile } from './dashboard-profile.mjs';
@@ -36,6 +36,8 @@ const SNAPSHOT_KEYS = new Set([
   'schemaVersion', 'profile', 'badge', 'network', 'historyComplete', 'generatedAt', 'nextCycleAt',
   'delayed', 'poolObservedAt', 'metrics', 'latestCycle', 'cards',
 ]);
+const SNAPSHOT_V6_KEYS = new Set([...SNAPSHOT_KEYS, 'heldPositionCount', 'heldPositions']);
+const SNAPSHOT_V7_KEYS = new Set([...SNAPSHOT_KEYS, 'heldPositionCount', 'heldPositions']);
 const NETWORK_KEYS = new Set(['evm', 'solana']);
 const EVM_NETWORK_KEYS = new Set(['name', 'chainId', 'label']);
 const SOLANA_NETWORK_KEYS = new Set(['name', 'genesisHash', 'label']);
@@ -62,6 +64,8 @@ const QUOTED_COST_KEYS = new Set([
 ]);
 const NETWORK_FEE_KEYS = new Set(['walletLamportsCharged', 'purchase', 'buyback']);
 const NATIVE_FEE_KEYS = new Set(['lamports', 'paidBy']);
+const HELD_POSITION_V6_KEYS = new Set(['positionId', 'cycleId', 'reason', 'ageSeconds', 'cycleState']);
+const HELD_POSITION_V7_KEYS = new Set(['reason', 'ageSeconds', 'cycleState']);
 const TRANSACTION_KEYS = new Set(['chain', 'purpose', 'id']);
 const CARD_KEYS = new Set([
   'cycleId', 'productId', 'rarity', 'nftAddress', 'cardName', 'setName', 'cardNumber', 'imageUrl',
@@ -75,10 +79,13 @@ const POOL_FRESHNESS_MS = 90_000;
 export function normalizePublicCommunitySnapshot(value, expectedProfile) {
   try {
     const source = requiredRecord(value, invalid);
-    exactKeys(source, SNAPSHOT_KEYS, invalid);
-    requiredKeys(source, SNAPSHOT_KEYS, invalid);
+    const snapshotKeys = source.schemaVersion === 7
+      ? SNAPSHOT_V7_KEYS
+      : (source.schemaVersion === 6 ? SNAPSHOT_V6_KEYS : SNAPSHOT_KEYS);
+    exactKeys(source, snapshotKeys, invalid);
+    requiredKeys(source, snapshotKeys, invalid);
     if (
-      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5)
+      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6 || source.schemaVersion === 7)
       || typeof source.historyComplete !== 'boolean'
     ) invalid();
     const sourceSchemaVersion = source.schemaVersion;
@@ -103,8 +110,8 @@ export function normalizePublicCommunitySnapshot(value, expectedProfile) {
     for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key], invalid);
     for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key], invalid);
 
-    return {
-      schemaVersion: sourceSchemaVersion === 5 ? 5 : 4,
+    const result = {
+      schemaVersion: sourceSchemaVersion === 7 ? 7 : (sourceSchemaVersion === 6 ? 6 : (sourceSchemaVersion === 5 ? 5 : 4)),
       profile: selected.id,
       badge: selected.badge,
       network: readNetwork(source.network, selected.network),
@@ -117,10 +124,37 @@ export function normalizePublicCommunitySnapshot(value, expectedProfile) {
       latestCycle: readLatestCycle(source.latestCycle, sourceSchemaVersion),
       cards: boundedArray(source.cards, MAX_CARDS, invalid).map(card => readCard(card, sourceSchemaVersion)),
     };
+    if (sourceSchemaVersion >= 6) {
+      result.heldPositionCount = count(source.heldPositionCount, invalid);
+      result.heldPositions = readHeldPositions(source.heldPositions, source.heldPositionCount, sourceSchemaVersion);
+    }
+    return result;
   } catch (error) {
     if (error instanceof ContractValidationError) throw error;
     throw new ContractValidationError('PUBLIC_COMMUNITY_SNAPSHOT_INVALID');
   }
+}
+
+function readHeldPositions(value, heldPositionCount, schemaVersion) {
+  const positions = boundedArray(value, 1_000, invalid).map(position => {
+    const source = requiredRecord(position, invalid);
+    const keys = schemaVersion === 7 ? HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS;
+    exactKeys(source, keys, invalid);
+    requiredKeys(source, keys, invalid);
+    if (typeof source.reason !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(source.reason)) invalid();
+    const result = {
+      reason: source.reason,
+      ageSeconds: count(source.ageSeconds, invalid),
+      cycleState: boundedText(source.cycleState, invalid),
+    };
+    if (schemaVersion === 6) {
+      result.positionId = boundedText(source.positionId, invalid);
+      result.cycleId = boundedText(source.cycleId, invalid);
+    }
+    return result;
+  });
+  if (heldPositionCount !== positions.length) invalid();
+  return positions;
 }
 
 function readNetwork(value, expected) {
@@ -147,7 +181,8 @@ function readNetwork(value, expected) {
 function readLatestCycle(value, schemaVersion) {
   if (value === null) return null;
   const source = requiredRecord(value, invalid);
-  const required = schemaVersion === 5 ? LATEST_CYCLE_V5_KEYS : LATEST_CYCLE_KEYS;
+  const currentSchema = schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7;
+  const required = currentSchema ? LATEST_CYCLE_V5_KEYS : LATEST_CYCLE_KEYS;
   exactKeys(source, required, invalid);
   requiredKeys(source, required, invalid);
   const transactions = boundedArray(source.transactions, MAX_TRANSACTIONS, invalid).map(readTransaction);
@@ -165,7 +200,7 @@ function readLatestCycle(value, schemaVersion) {
     roundAccounting: readRoundAccounting(source.roundAccounting, schemaVersion, source.paidMicroUsdg),
     transactions,
   };
-  if (schemaVersion === 5) result.rewardRecipientLimit = recipientLimit(source.rewardRecipientLimit);
+  if (currentSchema) result.rewardRecipientLimit = recipientLimit(source.rewardRecipientLimit);
   return result;
 }
 
@@ -303,7 +338,7 @@ function readTransaction(value) {
 
 function readCard(value, schemaVersion) {
   const source = requiredRecord(value, invalid);
-  const currentSchema = schemaVersion === 4 || schemaVersion === 5;
+  const currentSchema = schemaVersion === 4 || schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7;
   exactKeys(source, currentSchema ? CARD_KEYS : LEGACY_CARD_KEYS, invalid);
   requiredKeys(source, currentSchema ? CARD_KEYS : new Set(['cycleId', 'productId', 'rarity']), invalid);
   const card = {

@@ -11,12 +11,22 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 
 - `CYCLE_REPOSITORY_CLIENT_INTERFACE` exposes `readActiveCycle`, `peekActiveCycle`, `readStage`,
   `describeCycle`, `readOperationalStageAttempt`,
-  `readChainTransactionAttempt(cycleId, stage, requestDigest)`, `readClaimPreconditions`, and
-  `listKnownCycleIds`. `peekActiveCycle` observes the active slot without performing the archival
-  repair that `readActiveCycle` may perform.
+  `readChainTransactionAttempt(cycleId, stage, requestDigest)`, `readClaimPreconditions`,
+  `readHeldPosition`, `listHeldPositions`, `readSupplementarySettlement`, and `listKnownCycleIds`.
+  `peekActiveCycle` observes the active slot without performing the archival repair that
+  `readActiveCycle` may perform.
 - `CYCLE_REPOSITORY_INTERFACE` adds `createCycle`, `prepareStage`, `completeStage`,
   `completeCycle`, `holdCycle`, provider-attempt writes, chain-attempt writes, Relay settlement,
-  standing-authority decisions, wallet nonce reservations, paged payout state, and custody writes.
+  standing-authority decisions, held-position and supplementary-settlement writes, wallet nonce
+  reservations, paged payout state, and custody writes.
+- `readHeldPosition(positionId)`, `listHeldPositions({cycleId, includeResolved})`, and
+  `readSupplementarySettlement(positionId)` expose durable per-card held positions and their
+  settlement preparation through the read client. `recordHeldPosition(cycleId, input)` records the
+  card's original cycle, pack, memo, nullable mint, card reference, attributed USDG cost and
+  control value, typed insured value when verified, reason, terminal class, and evidence digest
+  without changing the cycle terminal state. `resolveHeldPosition(positionId, input)` closes an
+  open position as `SOLD`, `REFUNDED`, or `NEVER_SENT` with evidence bound to the held digest and
+  position revision.
 - Provider writes are `prepareStageAttempt`, `markStageAttemptNotSent`,
   `markStageAttemptSentUnknown`, `recordStageAttemptResponse`, and
   `reconcileStageAttempt`. `markStageAttemptNotSent` preserves the request digest without effect
@@ -62,10 +72,26 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   operating-system lease, a new owner may remove a legacy fence only after it confirms the same
   inode and token and that the recorded PID no longer exists; a live or ambiguous PID remains
   lock contention.
-- `recordHeldOwnerDecision(cycleId, { heldEvidenceDigest, requestId, expectedRevision, choice })`
-  is a writer-only transition for `HELD_OWNER_DECISION`. `choice` is `sell` or `keep-holding`;
-  the method is deliberately outside the read facade until a separately authorized control path
-  consumes it.
+- `recordHeldOwnerDecision(positionId, { heldEvidenceDigest, requestId, expectedRevision, choice })`
+  is a writer-only, position-bound transition. `choice` is `sell` or `keep-holding`; its evidence
+  digest and revision must match the exact held position. `sell` prepares one supplementary
+  settlement with manifest id `<cycleId>:supplementary:<n>`, the digest of that cycle's completed
+  `eligibility-snapshot` evidence, and no payout source yet; `keep-holding` leaves the position
+  open. A sell decision is refused without the original completed snapshot. The method remains
+  outside the read facade until an authorized control path consumes it.
+- `advanceSupplementarySettlement(positionId, { expectedState, nextState, evidence })` appends one
+  immutable boundary for that prepared settlement. Its only sequence is `PREPARED ->
+  BUYBACK_SENT_UNKNOWN -> RETURN_BROADCAST -> PAYOUT_BROADCAST -> COMPLETE`; matching retries
+  require the same state and evidence and never replace the manifest id. The
+  `RETURN_BROADCAST` evidence must be the position-, cycle-, and manifest-bound finalized-return
+  record. The repository derives and persists its USDG return, return binding, and zero-amount
+  supplementary dust setting as one `payoutSourceDigest`; callers cannot supply an alternate
+  payout source. A nonzero original-cycle dust record cannot enter supplementary settlement until
+  a position-aware atomic consumption transition exists.
+- `CycleRepository.readSupplementarySettlementEvidence(positionId)` is a full-repository-only
+  recovery method. It returns the latest `{state, evidenceDigest, evidence}` record for an existing
+  supplementary boundary. The frozen client facade deliberately omits it because that evidence can
+  contain provider or transaction facts.
 - `readPayoutDust(cycleId, {chainId, assetId, decimals})` returns either the one unconsumed prior
   record as `{amount, source: {cycleId, digest, planDigest}}` or a zero amount with `source: null`.
   `recordPayoutDust` records positive successor dust, `consumePayoutDust` consumes its exact source,
@@ -101,8 +127,9 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 - A stage is prepared once. Retrying preparation returns its original journal head without adding a
   duplicate event. Operational completion requires that preparation and every earlier configured
   stage to be complete.
-- A pre-call lease loss, signing denial, or policy refusal records `NOT_SENT` before its matching
-  terminal hold. A completed stage with a provider attempt uses matching reconciliation evidence.
+- A pre-call lease loss, signing denial, or policy refusal records `NOT_SENT` for the same durable
+  request. These recoverable failures do not become a whole-cycle hold. A completed stage with a
+  provider attempt uses matching reconciliation evidence.
 - A chain-specific Relay source or destination transaction identifier may attribute to one
   `RelayLegV1` across every cycle and direction. A leg is settled only with both finalized own-RPC
   observations and a
@@ -142,17 +169,47 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   1,025-recipient manifest round-trips without lowering the payout feasibility limit. A page-only
   publication is not signable until recovery records its matching compact reference and predecessor
   dust consumption.
-- A cycle closes only after every configured operational stage is complete, all provider attempts
-  reconcile, all chain attempts finalize, and no custody record retains held assets, payout
-  liability, refunds, residual, dust, or unattributed value.
+- A held position is append-only, identity-bound to its original cycle and evidence digest, and
+  retries with the same identity-bound evidence reuse the original `openedAtMs` record rather than
+  creating another position. When a position supplies an exact configured six-decimal USDG ledger
+  asset, its `valueMicroUsdg` is added atomically to that cycle's `heldPositions` custody bucket in
+  the same journal event. A verified insured value contributes only when it already uses that exact
+  USDG asset; a Solana insured value remains typed evidence and uses the attributed purchase cost
+  as its USDG control value.
+- The settled main cycle reaches `COMPLETED` only after every configured operational stage is
+  complete, all provider attempts reconcile, all chain attempts finalize, and no settled-custody
+  record retains held assets, payout liability, refunds, residual, dust, or unattributed value.
+  Open `heldPositions` do not prevent `COMPLETED` because they are excluded from the settled main
+  proceeds. `COMPLETED` is not archival: the record remains available for position recovery until
+  its open positions resolve. `readActiveCycle()` skips it for scheduling admission, but the
+  completed record remains one active DurableCycleStore entry until archival follows resolution.
 - The first custody record for `(cycleId, chainId, assetId)` fixes decimals. Writes and replay
   reject a later record that changes atomic units.
 - CycleRecord stores immutable `production` or `rehearsal` mode. Finalized observed balances remain
   separate from obligations, unresolved principal is counted once, and unattributed external
   deposits pause new claims.
-- A held-owner decision binds the cycle id, a digest of the original held evidence, request id,
-  and the journal revision observed by the owner. An exact retry is idempotent; any changed
-  request, revision, evidence digest, or choice conflicts. Replay validates the same binding.
+- A held-owner decision binds a position id, a digest of the original held evidence, request id,
+  and the position revision observed by the owner. An exact retry is idempotent; a repeated
+  `keep-holding` has no effect, while a changed request, revision, evidence digest, or choice
+  conflicts. A `sell` decision writes the position's next supplementary manifest identity and the
+  original completed eligibility-snapshot evidence digest in the same durable transition. Replay
+  validates the same binding.
+- A supplementary payout can use only the settlement's original snapshot digest and the
+  repository-derived `payoutSourceDigest`. The latter binds the finalized position return, its
+  Operations/USDG return binding, and a zero-amount dust value with no source. The immutable
+  return-boundary evidence and matching source are retained for restart; a newer snapshot, return,
+  or dust setting conflicts before a recipient state can persist. A normal-cycle dust source stays
+  unavailable to supplementary settlement until an atomic, position-aware consumption transition
+  binds it.
+- A held-position resolution binds the original held evidence digest, current position revision,
+  terminal outcome, and reconciliation evidence. Resolution removes only that position's control
+  value from its original cycle's `heldPositions` bucket; it never reallocates proceeds to another
+  cycle.
+- Whole-cycle holds remain only for cycle-wide custody, evidence, or safety conditions: unattributed
+  deposits, missing predecessor evidence, eligibility-snapshot failure, a paused or frozen USDG
+  canary (`HELD_UNAVAILABLE`), and a backed payout quarantine liability
+  (`HELD_OWNER_DECISION`). An attributable held card never changes a settled card's return or payout
+  path.
 
 ## State transitions
 
@@ -177,9 +234,22 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 - Quarantine lifecycle: verified recipient evidence plus a matching custody ledger -> durable
   liability reservation.
 - Stage lifecycle: `PENDING -> PREPARED -> COMPLETE`; preparation is journal-idempotent.
-- Cycle lifecycle: active -> held terminal state or fully closed -> archived.
-- Owner-decision lifecycle: `HELD_OWNER_DECISION -> HELD_OWNER_DECISION + owner decision record`.
-  Recording `sell` or `keep-holding` never resumes an effect on its own.
+- Held-position lifecycle: attributable card evidence -> `held-position-recorded` with the
+  matching USDG custody bucket -> optional position-bound `keep-holding` or `sell` decision. A
+  sell decision creates `PREPARED` supplementary settlement state, which advances only through
+  `BUYBACK_SENT_UNKNOWN`, `RETURN_BROADCAST`, `PAYOUT_BROADCAST`, and `COMPLETE` with bound
+  evidence. `RETURN_BROADCAST` derives and freezes the payout source; recipient recovery later
+  requires that source and the stored original snapshot digest. Reconciliation can append one
+  `SOLD`, `REFUNDED`, or `NEVER_SENT` resolution and remove the position from the limit bucket.
+  The surrounding cycle remains active and can complete its settled stages.
+- Cycle lifecycle: active -> whole-cycle held terminal state for a cycle-level custody, evidence,
+  USDG-canary, or payout-quarantine condition, or `COMPLETED`. A completed record with open held
+  positions is skipped by scheduler admission but remains an active DurableCycleStore entry for
+  supplementary recovery; it archives after its held positions resolve.
+- Owner-decision lifecycle: `open position -> keep-holding` (idempotent) or `sell` bound to the
+  same position evidence and revision. Recording the choice persists intent only; the later
+  supplementary integration must own any provider mutation and reuse its durable attempts after
+  restart. The repository boundary record itself does not invoke a provider or broadcaster.
 
 ## Operational commands
 
@@ -203,17 +273,39 @@ node --test --test-timeout=120000 packages/runner/test/cycle/money-schemas.test.
   the exact raw bytes; otherwise leave it unresolved. Do not construct a new nonce, blockhash, or
   signature while an attempt remains unresolved.
 - A timeout or lost response remains observation-only until reconciliation establishes an outcome.
-- Keep a cycle held when custody attribution or finality cannot be proven. Do not close it by
-  substituting another cycle's balance or evidence.
-- For `HELD_OWNER_DECISION`, read `heldEvidenceDigest` and `version` from `describeCycle`, then
-  retry only the exact durable decision tuple. The operator CLI and dashboard can record the
-  choice, but no transaction path consumes it; custody remains held until an authorized recovery
-  transition does so.
+- Keep a whole cycle held when custody attribution or finality cannot be proven, a USDG canary is
+  paused or frozen, or a payout quarantine liability remains backed. Do not close it by substituting
+  another cycle's balance or evidence. For an attributable card, record or read its held position
+  instead; the settled portion of that original cycle remains independent.
+- For a held position, read its `positionId`, `evidenceDigest`, and `positionRevision`, then retry
+  only the exact durable decision tuple. `keep-holding` remains counted in the custody limit.
+  A `sell` decision prepares the position's supplementary settlement; resume its durable
+  `BUYBACK_SENT_UNKNOWN`, `RETURN_BROADCAST`, or `PAYOUT_BROADCAST` boundary from the recorded
+  state and full-repository recovery evidence instead of creating a replacement request or
+  manifest. Before an associated payout persists, verify the settlement's original snapshot digest,
+  repository-derived return source, and zero-amount dust setting against the retained return
+  boundary.
+  Reconciliation closes a `SENT_UNKNOWN` position only as `SOLD`, `REFUNDED`, or `NEVER_SENT` with
+  evidence bound to that position.
+- OPEN FACT: The repository can durably resolve an overdue held position from observation evidence,
+  and its repository tests cover `SOLD`, `REFUNDED`, and `NEVER_SENT`; no production service yet
+  obtains that observation from a provider or automatically starts the resulting supplementary
+  intent. Resolve it by adding a lease-fenced, observation-only provider reconciler and a
+  position-bound handoff to the existing supplementary settlement path, with restart tests.
+  Verified safe alternative: retain the position and its evidence until an operator supplies a
+  reconciled outcome; do not send another provider mutation.
 - Bind a predecessor dust source into the frozen payout plan, then call
   `consumePayoutDustAndPersistPagedPayoutState` before allocations can use it. If a crash leaves
   page data without its compact journal reference, replay that same call with the same source and
   plan before signing or starting the next cycle. Record only positive successor dust after terminal
   conservation.
+- OPEN FACT: A completed cycle with open positions remains an active DurableCycleStore entry, and
+  the store has capacity for 16 entries. The default `maxHeldPositions: 10` remains capacity-safe
+  when positions span completed cycles, but values above 10 have no verified new-cycle capacity
+  guarantee and values at or above 16 can exhaust the store. Resolve this by adding
+  post-completion position archival with recoverable supplementary evidence, or a store-capacity
+  exemption, and test new-cycle admission across the configured position cap. Verified safe
+  alternative: keep `maxHeldPositions` at 10 or lower until that transition exists.
 - Reserve a frozen or cancelled recipient through `reservePayoutQuarantine` only after durable
   evidence establishes that its amount cannot become a normal final payment. A missing custody
   ledger is not a substitute for backing.

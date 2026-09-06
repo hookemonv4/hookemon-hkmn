@@ -17,6 +17,7 @@ const expectedPhaseThreeJsonPaths = [
   'release/phase3/address-manifest.schema.json',
   'release/phase3/admission/preflight-probe.json',
   'release/phase3/admission/provider-documents.json',
+  'release/phase3/admission/provider-statement-2026-09-05.json',
   'release/phase3/admission/route-log.json',
   'release/phase3/artifacts/custody.json',
   'release/phase3/artifacts/hook.json',
@@ -29,6 +30,7 @@ const expectedPhaseThreeJsonPaths = [
   'release/phase3/graph-gas-evidence.json',
   'release/phase3/launch-inputs.example.json',
   'release/phase3/launch-inputs.json',
+  'release/phase3/package/create-request.json',
   'release/phase3/package/graph-draft.json',
   'release/phase3/package/package-manifest.json',
   'release/phase3/submission.json',
@@ -75,11 +77,17 @@ function phaseThreeClosurePaths() {
     .sort();
 }
 
+// release/phase3/admission/provider-statement-2026-09-05.json is real, tracked admission evidence
+// (added alongside provider-documents.json and route-log.json) and is now listed in
+// release/phase3/submission.json's evidencePaths, so the vendored builder's closure derivation
+// surfaces it like every other admission artifact.
+const expectedPhaseThreeClosurePaths = expectedPhaseThreeJsonPaths;
+
 function phaseThreeJsonRecords() {
   const closurePaths = phaseThreeClosurePaths()
     .filter((path) => path.startsWith('release/phase3/') && path.endsWith('.json'))
     .sort();
-  assert.deepEqual(closurePaths, expectedPhaseThreeJsonPaths, 'the derived closure must cover the Phase 3 JSON evidence set');
+  assert.deepEqual(closurePaths, expectedPhaseThreeClosurePaths, 'the derived closure must cover the Phase 3 JSON evidence set declared in submission.json');
   assert.deepEqual(phaseThreeJsonPathsOnDisk(), expectedPhaseThreeJsonPaths, 'the Phase 3 JSON evidence set drifted on disk');
   return closurePaths.map((path) => ({ path, value: readJson(path) }));
 }
@@ -127,10 +135,40 @@ test('the committed launch package retains only the current owner and provider i
   ]);
 });
 
-test('the unsigned revision 65 baseline pins its current approval subjects', () => {
-  const baseline = readJson('decisions/owner-approvals/revision-65-baseline.json');
+test('the launch-package verifier retains the request template for explicit Phase 3 paths', () => {
+  const result = spawnSync(node, [
+    'scripts/programmable/verify-launch-package.mjs',
+    '--allow-unverified',
+    '--artifacts', resolve(root, 'release/phase3/artifacts'),
+    '--standard-json-inputs', resolve(root, 'release/phase3/build-info'),
+    '--launch-inputs', resolve(root, 'release/phase3/launch-inputs.json'),
+    '--address-manifest', resolve(root, 'release/phase3/address-manifest.json'),
+    '--package', resolve(root, 'release/phase3/package'),
+  ], { cwd: root, encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(JSON.parse(result.stdout).createRequestSha256, /^sha256:[0-9a-f]{64}$/);
+});
+
+test('the unsigned revision 66 baseline pins its current approval subjects', () => {
+  const baseline = readJson('decisions/owner-approvals/revision-66-baseline.json');
   assert.equal(baseline.approvalToken, 'DRAFT_UNSIGNED_NOT_YET_APPROVED');
   for (const [path, digest] of Object.entries(baseline.subjectHashes)) {
+    assert.equal(digest, sha256(path), `${path} drifted from the unsigned baseline`);
+  }
+});
+
+test('the unsigned revision 65 baseline remains a preserved historical record', () => {
+  const baseline = readJson('decisions/owner-approvals/revision-65-baseline.json');
+  assert.equal(baseline.approvalToken, 'DRAFT_UNSIGNED_NOT_YET_APPROVED');
+  // specs/requirements.json moved on to revision 66 (pinned separately above); revision 65's own
+  // record of it is frozen allocation history and must stay exactly what revision 65 actually
+  // proposed, not silently track the live file. Every other subject is stable architecture/
+  // decision content shared by both revisions and must still match current content exactly.
+  const { 'specs/requirements.json': historicalRequirementsDigest, ...stableSubjects } = baseline.subjectHashes;
+  assert.equal(historicalRequirementsDigest, '927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff');
+  assert.notEqual(historicalRequirementsDigest, sha256('specs/requirements.json'));
+  for (const [path, digest] of Object.entries(stableSubjects)) {
     assert.equal(digest, sha256(path), `${path} drifted from the unsigned baseline`);
   }
 });

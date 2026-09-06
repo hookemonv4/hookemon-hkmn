@@ -11,7 +11,7 @@ import { DEFAULT_DIGEST_RULES, scanDigestMarkers, scanTree } from '../check-clea
 const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const scanner = join(repoRoot, 'scripts', 'check-cleanroom.mjs');
 const retiredMarker = 'retired-widget';
-const RETAINED_DIGEST_RULES_SHA256 = 'eb88bbca96eaeebad4f3b68db0de5e01539130279ca87e05104c041adc61fc61';
+const RETAINED_DIGEST_RULES_SHA256 = '533d3ce640b1172e450acd264104e5dfc19b4cb8afbfbb7beb43c7b1a0666ed4';
 const retiredRule = {
   id: 'retired-test-marker',
   length: retiredMarker.length,
@@ -89,7 +89,7 @@ test('clean-room scanner permits the approved X handle while still detecting a r
       sha256: createHash('sha256').update(retiredTicker).digest('hex'),
       boundary: false,
     };
-    assert.equal(DEFAULT_DIGEST_RULES.length, 24);
+    assert.equal(DEFAULT_DIGEST_RULES.length, 23);
     assert.equal(
       createHash('sha256').update(JSON.stringify(DEFAULT_DIGEST_RULES)).digest('hex'),
       RETAINED_DIGEST_RULES_SHA256,
@@ -351,6 +351,42 @@ test('previous-chain path exception requires the exact bounded path token', () =
   assert.equal(scanDigestMarkers(`${canonicalPath}é`, [rule]).length, 1);
 });
 
+test('clean-room scanner permits a retired chain name only inside a negative key-absence assertion', () => {
+  const chainName = ['ethe', 'reum'].join('');
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.sha256 === createHash('sha256').update(chainName).digest('hex')
+  ));
+  assert.ok(rule);
+
+  assert.deepEqual(scanDigestMarkers(`Object.hasOwn(network, "${chainName}"), false)`, [rule]), []);
+  assert.deepEqual(scanDigestMarkers(`hasOwn(x, "${chainName}") === false`, [rule]), []);
+  assert.equal(
+    scanDigestMarkers(`assert.equal(Object.hasOwn(network, "${chainName}"), false);`, [rule]).length,
+    0,
+  );
+  assert.deepEqual(scanDigestMarkers(`hasOwn(x, "${chainName}") !== true`, [rule]), []);
+  // A positive claim, an unquoted mention, or a mention outside a hasOwn(...) call must still fail,
+  // and so must a hasOwn(...) call that is not itself compared against absence.
+  assert.equal(scanDigestMarkers(`network.${chainName} still exists`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`Object.hasOwn(network, "${chainName}") === true`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`Object.hasOwn(network, "${chainName}")`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`the network uses ${chainName} for settlement`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`"${chainName}"`, [rule]).length, 1);
+});
+
+test('clean-room scanner permits the exact "legacy <chain> key" phrase, not a looser paraphrase', () => {
+  const chainName = ['ethe', 'reum'].join('');
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.sha256 === createHash('sha256').update(chainName).digest('hex')
+  ));
+  assert.ok(rule);
+
+  assert.deepEqual(scanDigestMarkers(`the legacy ${chainName} key`, [rule]), []);
+  assert.deepEqual(scanDigestMarkers(`network shape uses evm, not the legacy ${chainName} key`, [rule]), []);
+  assert.equal(scanDigestMarkers(`the legacy ${chainName} field`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`the ${chainName} key`, [rule]).length, 1);
+});
+
 test('clean-room scanner permits the provider address enum only in Phase 3 JSON', () => {
   const root = fixture();
   try {
@@ -532,13 +568,15 @@ test('identity gate checks commit identity from base-defined workflow code', () 
   assert.match(identityWorkflow, /PUSH_HEAD_SHA:\s*\$\{\{ github\.sha \}\}/);
   assert.match(identityWorkflow, /GIT_NO_REPLACE_OBJECTS:\s*'1'/);
   assert.match(identityWorkflow, /git fetch --no-tags origin "\$PUSH_HEAD_SHA"/);
-  assert.match(identityWorkflow, /git merge-base "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA"/);
-  assert.match(identityWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs" > "\$RUNNER_TEMP\/check-commit-identity\.mjs"/);
+  assert.match(identityWorkflow, /"\$RUNNER_TEMP\/push-range\.mjs" resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(identityWorkflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs" > "\$RUNNER_TEMP\/check-commit-identity\.mjs"/);
   assert.match(identityWorkflow, /node "\$RUNNER_TEMP\/check-commit-identity\.mjs" "\$range_base" "\$range_head"/);
   assert.doesNotMatch(identityWorkflow, /node scripts\/check-commit-identity\.mjs/);
   assert.doesNotMatch(gatesWorkflow, /PR_BASE_REF|protected_identity_ref/);
   assert.match(gatesWorkflow, /name: Transitional base commit identity check/);
-  assert.match(gatesWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(gatesWorkflow, /node scripts\/ci\/push-range\.mjs resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(gatesWorkflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
   assert.match(gatesWorkflow, /Remove this step only after the owner registers identity-gate and control-gate as required statuses on main\./);
   assert.match(gatesWorkflow, /append_only_options=\(--require-ancestor\)/);
+  assert.match(gatesWorkflow, /node scripts\/ci\/push-range\.mjs append-only "\$range_base" "\$range_head"/);
 });

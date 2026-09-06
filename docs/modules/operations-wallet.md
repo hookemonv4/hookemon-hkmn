@@ -12,6 +12,10 @@ the long-lived application Node process. This card covers `REQ-operations-wallet
 `REQ-operations-wallet-3` and the Operations-side contracts in `REQ-cycle-repository-1`,
 `REQ-transaction-policy-1`, and `REQ-direct-payout-1`.
 
+The live Collector-only rehearsal uses only the Operations Solana identity. Its public key is
+`BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE`; the Keychain service is
+`hookemon-operations` and the account is `operator-solana`. It does not construct an EVM signer.
+
 ## Public interface
 
 The Phase 3 hook interface is represented by the typed adapter calldata builder and the frozen ABI.
@@ -83,6 +87,10 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
   performs and verifies a fixed internal sign-only check without broadcasting, and
   `export-public --out <absolute-path>` writes both public identities with schema
   `hookemon-operations-wallets-v1`.
+- `hookemon-runner preflight` invokes the same isolated Keychain child for a Solana sign-only
+  readiness check before the live Collector-only rehearsal can construct a transaction-capable
+  client. Its command is `packages/adapters/bin/hookemon-keychain-signer.mjs`; there is no
+  rehearsal-specific signer path.
 - `hookemon-bridge-native --from-chain 1 --to-chain 4663 --amount max|<native>` is an owner-operated
   recovery command for native assets sent to the Operations EVM address on EVM L1. It reads
   only the Keychain-backed public identity, obtains a native Relay quote for the same recipient,
@@ -158,11 +166,12 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
   lamport reserve caps are mandatory. Atomic value `1` is a configuration error, never a fallback.
   Return, purchase, and buyback cap decoded priority fees and require the configured lamport reserve
   plus the maximum fee before signing; this is a balance check, not a balance reservation.
-  Production and rehearsal require
-  `HOOKEMON_RELAY_SOLANA_MINT`, `HOOKEMON_RELAY_SOLANA_DECIMALS`,
-  `HOOKEMON_EVM_GAS_PRICE_CAP`, `HOOKEMON_EVM_NATIVE_RESERVE`,
-  `HOOKEMON_SOLANA_PRIORITY_FEE_CAP`, and `HOOKEMON_SOLANA_LAMPORT_RESERVE`; the retained
-  legacy native-cap projection cannot satisfy any of those controls.
+  Production and non-Collector rehearsal require `HOOKEMON_RELAY_SOLANA_MINT` and
+  `HOOKEMON_RELAY_SOLANA_DECIMALS`. The live Collector-only rehearsal instead fixes the typed
+  Circle USD Solana asset and still requires `HOOKEMON_EVM_GAS_PRICE_CAP`,
+  `HOOKEMON_EVM_NATIVE_RESERVE`, `HOOKEMON_SOLANA_PRIORITY_FEE_CAP`, and
+  `HOOKEMON_SOLANA_LAMPORT_RESERVE`; the retained legacy native-cap projection cannot satisfy any
+  of those controls.
 - Private keys, seeds, mnemonics, and Keychain secret values never enter the application process, environment variables, repository, dashboard, journal, CI, or public export. `export-public` contains only public addresses and Keychain labels.
 - The wallet child starts `/usr/bin/security -i` with no secret in its process arguments and sends `add-generic-password -a <account> -s hookemon-operations [-U] -w <secret> <login-keychain-path>` only over standard input. It refuses use unless the current default Keychain is the login Keychain and names that verified login Keychain for reads and writes.
 - The wallet-management CLI does not confer authority to claim, sign arbitrary bytes, broadcast, deploy, or move funds. A transaction still requires the cycle policy, semantic transaction allowlist, and live-operation approval path.
@@ -192,9 +201,10 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
   `MoneyConfigurationV1` validation to a frozen composition value. Missing required controls,
   incorrect asset metadata, an atomic placeholder value, or any nonzero return minimum are rejected
   before adapters or durable state are constructed.
-- `collector-only` rehearsal replaces outbound and return with explicit skip handlers. The fake
-  `relay-roundtrip` rehearsal profile enables those handlers only with a positive explicit cap and
-  the same manual-approval boundary as any other signable work.
+- `collector-only` rehearsal replaces outbound and return with explicit skip handlers. The live
+  profile uses the Operations Solana identity for purchase, open, buyback, and direct payout only
+  after manual approval. The fake `relay-roundtrip` rehearsal profile enables its own handlers only
+  with a positive explicit cap and the same manual-approval boundary as any other signable work.
 - Expired window entries cease counting without erasing historical evidence.
 - A scheduled limit increase becomes executable after 21600 seconds. An emergency rotation becomes
   executable after immutable 43200 seconds; rotation leaves process claims paused and cannot be
@@ -216,6 +226,9 @@ node packages/adapters/bin/hookemon-wallet.mjs probe --identity operations-evm
 node packages/adapters/bin/hookemon-wallet.mjs probe --identity operations-solana
 node packages/adapters/bin/hookemon-wallet.mjs export-public --out /absolute/path/operations-wallets-public.json
 node packages/adapters/bin/hookemon-bridge-native.mjs --from-chain 1 --to-chain 4663 --amount max --state-dir /absolute/path/to/operations-bridge-state
+node packages/adapters/bin/hookemon-runner.mjs operator initialize-collector-only-policy
+node packages/adapters/bin/hookemon-runner.mjs preflight
+node packages/adapters/bin/hookemon-runner.mjs run --mode rehearsal --cycles 1 --cap-usdg 25000000 --collector-only
 ```
 
 Create or replace an identity only through the documented `generate` command and its explicit
@@ -248,3 +261,7 @@ checks are `packages/adapters/test/wallet-cli.test.mjs` and
   dry-run mode, review its single-step Relay plan, then rerun with `--confirm` and answer `y`.
   Reuse the same state directory after a submission disconnect. Do not delete its bridge record or
   request a replacement signature.
+- OPEN FACT: available provider material does not prove that the Collector buyback destination
+  field accepts an exact Solana token-account address. Resolve it with versioned provider
+  confirmation. Until then, the Collector-only payout remains gated by the finalized delta at the
+  configured Operations-owned settlement account and holds without payout on any mismatch.

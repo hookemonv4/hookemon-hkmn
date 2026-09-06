@@ -28,7 +28,12 @@ import {
 import { createFileLeaseStore } from '../../src/app/lease-store.mjs';
 import { runOnePass as runVerifierPass } from '../../bin/hookemon-verifier.mjs';
 import { DISTRIBUTION_SIGNER_ROLE, VERIFIER_ROLE } from '../../../runner/src/distribution/distribution-signer.mjs';
-import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
+import {
+  CIRCLE_USD_DECIMALS,
+  CIRCLE_USD_MINT,
+  createSolanaRpcClient,
+  deriveAssociatedTokenAddress,
+} from '../../src/solana-rpc.mjs';
 import { MoneyConfigurationRejected } from '../../src/app/environment.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
@@ -83,6 +88,31 @@ function productionMoneyConfiguration() {
         amountAtomic: '25000',
       },
       lamportReserve: { chainId: '792703809', assetId: 'native', decimals: 9, amountAtomic: '5000000' },
+    },
+  };
+}
+
+function collectorOnlyMoneyConfiguration() {
+  const production = productionMoneyConfiguration();
+  const solanaStablecoin = {
+    chainId: 'solana-mainnet',
+    assetId: CIRCLE_USD_MINT,
+    decimals: CIRCLE_USD_DECIMALS,
+  };
+  return {
+    ...production,
+    assets: { ...production.assets, solanaStablecoin },
+    minimums: {
+      ...production.minimums,
+      solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
+    },
+    solana: {
+      priorityFeeCap: {
+        chainId: 'solana-mainnet', assetId: 'microlamports-per-compute-unit', decimals: 0, amountAtomic: '25000',
+      },
+      lamportReserve: {
+        chainId: 'solana-mainnet', assetId: 'native', decimals: 9, amountAtomic: '5000000',
+      },
     },
   };
 }
@@ -191,6 +221,17 @@ function livePolicyPatch(packId) {
   };
 }
 
+function collectorOnlyLivePolicyPatch() {
+  return {
+    ...livePolicyPatch('collector-25'),
+    maxUnitPriceMicroUsdg: '25000000',
+    maxCycleBudgetMicroUsdg: '25000000',
+    max24HourBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000',
+    manualApprovalCycles: 1,
+  };
+}
+
 async function writeOperatorState(statePath, patch = {}) {
   return mutateOperatorState(statePath, null, state => ({
     ...(state ?? createEmptyOperatorState()),
@@ -270,6 +311,80 @@ function compose(config) {
     ? config
     : { ...config, networkIdentity: networkIdentity() });
 }
+
+function collectorOnlySolanaCanaryClient({ balance = 5_000_000n } = {}) {
+  return createSolanaRpcClient({
+    rpcUrl: 'https://solana.example.test',
+    fetchImpl: async (_url, request) => {
+      const { id, method } = JSON.parse(request.body);
+      const result = method === 'getLatestBlockhash'
+        ? { value: { blockhash: 'SysvarC1ock11111111111111111111111111111111', lastValidBlockHeight: 101 } }
+        : method === 'isBlockhashValid'
+          ? { value: true }
+          : method === 'getBalance'
+            ? { value: Number(balance) }
+            : null;
+      return {
+        ok: true,
+        async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); },
+      };
+    },
+  });
+}
+
+test('compose starts a live collector-only rehearsal with only Solana identity and canaries', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  await writeOperatorState(statePath, collectorOnlyLivePolicyPatch());
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    solana: { rpcUrl: 'https://solana.example.test', chainId: 'solana-mainnet' },
+    collectorCrypt: {
+      baseUrl: 'https://collector.example.test',
+      apiKey: 'fixture-api-key',
+      settlementAsset: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS },
+      packPrice: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS, amountAtomic: '25000000' },
+    },
+    accounts: { evm: null, solana: operator },
+    pack: { code: 'collector-25' },
+    budget: {
+      availableProcessUsdg: '25000000',
+      packPriceUsdg: '25000000',
+      outboundCapUsdg: '0',
+      returnCapUsdg: '0',
+      operatingMarginUsdg: '0',
+    },
+    moneyConfiguration: collectorOnlyMoneyConfiguration(),
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+      payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+      split: 'equal',
+    },
+    execution: { profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    adapters: {
+      collectorCrypt: {},
+      relay: {},
+      robinhood: { client: null },
+      solana: { client: collectorOnlySolanaCanaryClient() },
+    },
+    networkIdentity: {
+      async readSolanaGenesisHash() { return SOLANA_MAINNET_GENESIS_HASH; },
+    },
+  });
+  t.after(() => composition.shutdown());
+
+  assert.deepEqual(await composition.assertStartReadiness({
+    liveMode: true,
+    mode: 'rehearsal',
+    requirePolicyConfiguration: true,
+    requireCanaryPreflight: true,
+  }), { cycleCount: 0, preflight: 'PASSED' });
+});
 
 test('compose refuses a production profile without MoneyConfigurationV1 before opening durable state', async t => {
   const stateDir = await tempStateDir(t);
@@ -675,7 +790,8 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
 
   assert.deepEqual(CYCLE_REPOSITORY_CLIENT_INTERFACE, [
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
-    'readChainTransactionAttempt', 'readClaimPreconditions', 'listKnownCycleIds',
+    'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'listHeldPositions',
+    'readSupplementarySettlement', 'listKnownCycleIds',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
   assert.deepEqual(Object.keys(composition.cycleRepository).sort(), [...CYCLE_REPOSITORY_CLIENT_INTERFACE].sort());
@@ -1740,6 +1856,80 @@ test('dashboard composed in-process: restart-request/reconcile-request over HTTP
   // No cycle is active yet, so the real recoverActiveCycle() call reports NO_ACTIVE_CYCLE — proving
   // the request actually reached the live service (RECORDED_NO_LIVE_SERVICE would mean it did not).
   assert.equal(decision.body.code, 'RECOVERY_NO_ACTIVE_CYCLE');
+});
+
+test('operator resume-cycle recovers a supplementary settlement after its completed cycle is no longer active', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  await writeOperatorState(statePath);
+
+  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const cycle = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  for (const stage of AUTOMATED_CYCLE_STAGES) {
+    await repository.prepareStage(cycle.cycleId, stage);
+    await repository.completeStage(cycle.cycleId, stage, { stage, finalized: true });
+  }
+  const position = await repository.recordHeldPosition(cycle.cycleId, {
+    packId: 'base-pack',
+    memo: 'memo-resume-supplementary',
+    mint: 'mint-resume-supplementary',
+    cardRef: 'mint-resume-supplementary',
+    costMicroUsdg: '1',
+    valueMicroUsdg: '1',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await repository.completeCycle(cycle.cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'resume-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  assert.equal(await repository.readActiveCycle(), null, 'the completed main cycle is deliberately no longer active');
+
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: { baseUrl: 'https://example.invalid' },
+    adapters: minimalInjectedAdapters(),
+    now: () => 1_000,
+    supplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        async reconcile({ cycleRepository, position: heldPosition, settlement }) {
+          await cycleRepository.advanceSupplementarySettlement(heldPosition.positionId, {
+            expectedState: settlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'a'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+  t.after(() => composition.shutdown());
+
+  const outcome = await composition.executeAudited({
+    requestId: 'resume-supplementary-1',
+    expectedRevision: 0,
+    command: { type: 'resume-cycle' },
+    effect: () => composition.operatorControl.execute({
+      expectedRevision: 0,
+      requestId: 'resume-supplementary-1',
+      command: { type: 'resume-cycle' },
+    }),
+  });
+
+  assert.equal(outcome.commandState, 'APPLIED');
+  assert.equal(outcome.receipt.resultCode, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  assert.equal((await composition.cycleRepository.readSupplementarySettlement(position.positionId)).state, 'BUYBACK_SENT_UNKNOWN');
 });
 
 test('dashboard composed in-process: pause/activate decisions are read fresh by the real scheduler on its next tick', async t => {

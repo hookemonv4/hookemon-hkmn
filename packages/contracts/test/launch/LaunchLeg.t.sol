@@ -84,6 +84,10 @@ contract LaunchLegTest is Test, DeployPermit2 {
     address private constant PAYER = address(0xBEEF);
     bytes32 private constant BINDING_DIGEST = keccak256("launch-leg-local-binding");
     bytes32 private constant RUNTIME_DIGEST = keccak256("launch-leg-local-runtime");
+    bytes4 private constant SEED_INTENT_MISMATCH_SELECTOR =
+        bytes4(keccak256("SeedIntentMismatch()"));
+    bytes4 private constant SEED_DEADLINE_EXCEEDS_MAXIMUM_SELECTOR =
+        bytes4(keccak256("SeedDeadlineExceedsMaximum()"));
 
     PoolManager private manager;
     IAllowanceTransfer private permit2;
@@ -183,6 +187,16 @@ contract LaunchLegTest is Test, DeployPermit2 {
             );
         assertFalse(canApprove);
         assertFalse(canTransfer);
+    }
+
+    function testSeedAcceptsDeadlineAtMaximumWindow() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.deadline = block.timestamp + hook.MAX_SEED_DEADLINE_SECONDS();
+
+        vm.prank(AUTHORITY);
+        hook.seedCanonicalLiquidity(params);
+
+        assertTrue(hook.canonicalLiquiditySeeded());
     }
 
     function testSeedRejectsWhenObservedPositionCounterDoesNotAdvanceExactlyOnce() external {
@@ -381,6 +395,66 @@ contract LaunchLegTest is Test, DeployPermit2 {
         assertEq(token0.balanceOf(address(hook)), 0);
     }
 
+    function testSeedRejectsPayerOutsideTheBoundIntent() external {
+        address alternatePayer = address(0xCAFE);
+        token0.mint(alternatePayer, SEED_MAX);
+        vm.startPrank(alternatePayer);
+        token0.approve(address(permit2), SEED_MAX);
+        permit2.approve(address(token0), address(hook), SEED_MAX, type(uint48).max);
+        vm.stopPrank();
+
+        HookemonHook.SeedParams memory params = _seedParams(alternatePayer);
+        _assertSeedIntentMismatch(params);
+    }
+
+    function testSeedRejectsLowerTickOutsideTheBoundIntent() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.tickLower = -60;
+        _assertSeedIntentMismatch(params);
+    }
+
+    function testSeedRejectsUpperTickOutsideTheBoundIntent() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.tickUpper = 60;
+        _assertSeedIntentMismatch(params);
+    }
+
+    function testSeedRejectsLiquidityOutsideTheBoundIntent() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.liquidity = SEED_LIQUIDITY - 1;
+        _assertSeedIntentMismatch(params);
+    }
+
+    function testSeedRejectsAmount0MaximumOutsideTheBoundIntent() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.amount0Max = uint128(SEED_MAX - 1);
+        _assertSeedIntentMismatch(params);
+    }
+
+    function testSeedRejectsAmount1MaximumOutsideTheBoundIntent() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.amount1Max = uint128(SEED_MAX - 1);
+        _assertSeedIntentMismatch(params);
+    }
+
+    function testSeedRejectsDeadlineBeyondMaximumWindow() external {
+        HookemonHook.SeedParams memory params = _seedParams(PAYER);
+        params.deadline = block.timestamp + 901;
+
+        uint256 nextTokenId = positionManager.nextTokenId();
+        uint256 payerUsdgBefore = token0.balanceOf(PAYER);
+        uint256 hookHkmnBefore = token1.balanceOf(address(hook));
+
+        vm.expectRevert(SEED_DEADLINE_EXCEEDS_MAXIMUM_SELECTOR);
+        vm.prank(AUTHORITY);
+        hook.seedCanonicalLiquidity(params);
+
+        assertFalse(hook.canonicalLiquiditySeeded());
+        assertEq(positionManager.nextTokenId(), nextTokenId);
+        assertEq(token0.balanceOf(PAYER), payerUsdgBefore);
+        assertEq(token1.balanceOf(address(hook)), hookHkmnBefore);
+    }
+
     function testForeignPoolInitializationRevertsBeforeAndAfterHookDeployment() external {
         LaunchLegHookFactory factory = _newHookFactory();
         (bytes32 salt, address predicted) = _findHookSalt(factory);
@@ -426,6 +500,21 @@ contract LaunchLegTest is Test, DeployPermit2 {
         });
     }
 
+    function _assertSeedIntentMismatch(HookemonHook.SeedParams memory params) private {
+        uint256 nextTokenId = positionManager.nextTokenId();
+        uint256 payerUsdgBefore = token0.balanceOf(params.payer);
+        uint256 hookHkmnBefore = token1.balanceOf(address(hook));
+
+        vm.expectRevert(SEED_INTENT_MISMATCH_SELECTOR);
+        vm.prank(AUTHORITY);
+        hook.seedCanonicalLiquidity(params);
+
+        assertFalse(hook.canonicalLiquiditySeeded());
+        assertEq(positionManager.nextTokenId(), nextTokenId);
+        assertEq(token0.balanceOf(params.payer), payerUsdgBefore);
+        assertEq(token1.balanceOf(address(hook)), hookHkmnBefore);
+    }
+
     function _deployHook() private returns (HookemonHook deployed) {
         return _deployHook(usdg, hkmn);
     }
@@ -464,11 +553,29 @@ contract LaunchLegTest is Test, DeployPermit2 {
                 expectedDecimals: 18,
                 bindingDigest: BINDING_DIGEST,
                 runtimeDigest: RUNTIME_DIGEST,
+                seedIntentDigest: _configuredSeedIntentDigest(configuredUsdg),
                 processClaimLimit6h: 1_000_000,
                 processClaimLimitMax: 2_000_000,
                 processClaimMaxCount: 8,
                 operationsRotationDelay: 3 days
             })
+        );
+    }
+
+    function _configuredSeedIntentDigest(Currency configuredUsdg) private view returns (bytes32) {
+        uint128 amount1Max = Currency.unwrap(configuredUsdg) == Currency.unwrap(currency0)
+            ? uint128(SEED_MAX)
+            : uint128(SEED_MAX - 1);
+        return keccak256(
+            abi.encode(
+                PAYER,
+                int24(-120),
+                int24(120),
+                SEED_LIQUIDITY,
+                uint128(SEED_MAX),
+                amount1Max,
+                uint256(900)
+            )
         );
     }
 

@@ -1,6 +1,124 @@
 {
-  "generatedAt": "2026-09-04T02:07:52.198Z",
+  "generatedAt": "2026-09-06T02:30:41.462Z",
   "tasks": [
+    {
+      "id": "LAUNCH-A",
+      "title": "Establish canonical backend foundations",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-B",
+      "title": "Repair production signer transport",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-C",
+      "title": "Implement multiple pack recovery",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-CS",
+      "title": "Implement production held-card resale handler",
+      "phase": "build",
+      "risk": "R3",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-D",
+      "title": "Implement scalable holder settlement",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-E",
+      "title": "Repair automatic scheduling and recovery",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-F",
+      "title": "Publish durable public accounting",
+      "phase": "build",
+      "risk": "ordinary",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-G",
+      "title": "Connect canonical website",
+      "phase": "build",
+      "risk": "ordinary",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-H",
+      "title": "Prepare launch admission and funding",
+      "phase": "build",
+      "risk": "high",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-I",
+      "title": "Wire verified production graph",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "LAUNCH-B",
+        "LAUNCH-C",
+        "LAUNCH-D",
+        "LAUNCH-E",
+        "LAUNCH-F"
+      ],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-J",
+      "title": "Verify final release and bounded acceptance",
+      "phase": "build",
+      "risk": "high",
+      "deps": [
+        "LAUNCH-G",
+        "LAUNCH-H",
+        "LAUNCH-I"
+      ],
+      "reqs": [],
+      "status": "ready"
+    },
+    {
+      "id": "LAUNCH-Q",
+      "title": "Bind exact-output bridge quotes to multi-pack admission",
+      "phase": "build",
+      "risk": "R3",
+      "deps": [],
+      "reqs": [],
+      "status": "ready"
+    },
     {
       "id": "P1-001",
       "title": "Freeze immutable launch contract",
@@ -171,20 +289,6 @@
       ],
       "status": "done",
       "commitSha": "1fcf3cee0c2226734c19780299707d9dba8d6509"
-    },
-    {
-      "id": "P1-011",
-      "title": "Render loop dashboard",
-      "phase": "build",
-      "risk": "ordinary",
-      "deps": [
-        "P1-001"
-      ],
-      "reqs": [],
-      "status": "deferred",
-      "deferApproval": "decisions/owner-approvals/phase-2-revision-58-dashboard-deferral-approved.json",
-      "deferDescriptor": "decisions/task-deferrals/P1-011.json",
-      "deferPrestateFingerprint": "b05e44062790639cf601a6a69776054b814b981924c0aa5f60d44c34b83f8031"
     },
     {
       "id": "P1-012",

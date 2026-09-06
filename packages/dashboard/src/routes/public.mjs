@@ -63,6 +63,29 @@ function readNextCycleAt(ctx) {
   return new Date(tick.at + tick.intervalMs).toISOString();
 }
 
+function projectPublicHeldPositions(positions, cycles, generatedAt) {
+  if (positions === undefined || positions === null) return [];
+  if (!Array.isArray(positions)) throw new Error('authority held positions are invalid');
+  const cycleStates = new Map((Array.isArray(cycles) ? cycles : [])
+    .filter(cycle => typeof cycle?.cycleId === 'string')
+    .map(cycle => [cycle.cycleId, typeof cycle.terminalState === 'string' ? cycle.terminalState : activeStage(cycle)]));
+  const generatedAtMs = Date.parse(generatedAt);
+  return positions.map(position => {
+    if (!position || typeof position !== 'object' || Array.isArray(position)
+      || typeof position.positionId !== 'string' || typeof position.cycleId !== 'string'
+      || typeof position.reason !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(position.reason)
+      || !Number.isSafeInteger(position.openedAtMs)
+      || position.openedAtMs < 0) {
+      throw new Error('authority held position is invalid');
+    }
+    return {
+      reason: position.reason,
+      ageSeconds: Math.max(0, Math.floor((generatedAtMs - position.openedAtMs) / 1_000)),
+      cycleState: cycleStates.get(position.cycleId) ?? 'UNKNOWN',
+    };
+  });
+}
+
 async function readAuthorityProjection(ctx) {
   const authorityStatus = await loadAuthorityStatus(ctx);
   const configuration = authorityStatus.configuration ?? null;
@@ -72,8 +95,9 @@ async function readAuthorityProjection(ctx) {
     ? await ctx.readAccounting(current.cycleId)
     : null;
   const cycles = Array.isArray(authorityStatus.cycles) ? authorityStatus.cycles : [];
+  const heldPositions = projectPublicHeldPositions(authorityStatus.heldPositions, cycles, generatedAt);
   const terminals = cycles.filter(cycle => typeof cycle?.terminalState === 'string');
-  const completedCycles = terminals.filter(cycle => cycle.terminalState === 'COMPLETED').length;
+  const completedCycles = terminals.filter(cycle => cycle.terminalState === 'COMPLETE' || cycle.terminalState === 'COMPLETED').length;
 
   return {
     authorityStatus,
@@ -86,11 +110,13 @@ async function readAuthorityProjection(ctx) {
       activeCycle: current ? { cycleId: current.cycleId, stage: activeStage(current), accounting } : null,
       lastPayout: null,
       totals: { paidOut: completedCycles },
+      heldPositions,
     },
     // The repository status currently has no terminal timestamp. A one-item set is unambiguous;
     // with more, omit `latestCycle` instead of guessing an order from an identifier.
     unambiguousRepositoryCycles: terminals.length === 1 ? terminals : [],
     completedCycles,
+    heldPositions,
   };
 }
 
@@ -125,6 +151,7 @@ export function createCommunityDashboardHandler(ctx) {
         completedCycles: projection.completedCycles,
         skippedCycles: 0,
         openedPacks: 0,
+        heldPositions: projection.heldPositions,
         readAccounting: ctx.readAccounting ? cycleId => ctx.readAccounting(cycleId) : null,
       });
       sendJson(res, 200, snapshot, { cache: 'public, max-age=30, stale-while-revalidate=60' });

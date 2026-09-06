@@ -64,10 +64,13 @@ function custodyLedger({ proceeds = '24000000', committed = '0' } = {}) {
   };
 }
 
-function repository(ledger = custodyLedger()) {
+function repository(ledger = custodyLedger(), { heldPositions = [] } = {}) {
   return {
     async describeCycle() {
-      return { custodyLedgers: new Map([[`${ledger.chainId}\u0000${ledger.assetId}`, ledger]]) };
+      return {
+        custodyLedgers: ledger === null ? new Map() : new Map([[`${ledger.chainId}\u0000${ledger.assetId}`, ledger]]),
+        heldPositions: new Map(heldPositions),
+      };
     },
   };
 }
@@ -118,6 +121,125 @@ test('prepareReturnRequest refuses a fresh return when every cycle-attributed pr
     }),
     /no uncommitted cycle-attributed proceeds/,
   );
+});
+
+test('prepareReturnRequest records a zero-proceeds cycle return without quoting a bridge', async () => {
+  let quoteCalls = 0;
+  const request = await prepareReturnRequest({
+    adapters: {
+      relay: {
+        async quoteReturnBridge() {
+          quoteCalls += 1;
+          throw new Error('a zero-proceeds cycle must not quote a bridge');
+        },
+      },
+    },
+    config: {
+      chainId: 4663,
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
+      moneyConfiguration: moneyConfiguration(),
+    },
+    cycleRepository: repository(custodyLedger({ proceeds: '0', committed: '0' })),
+    context: { cycleId: 'cycle-return-all-held' },
+    nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+  });
+
+  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v1');
+  assert.equal(request.cycleId, 'cycle-return-all-held');
+  assert.deepEqual(request.inputAmount, {
+    chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '0',
+  });
+  assert.deepEqual(request.destinationAmount, {
+    chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '0',
+  });
+  assert.equal(quoteCalls, 0);
+});
+
+test('prepareReturnRequest records a zero-proceeds return when every card is held before buyback custody exists', async () => {
+  let quoteCalls = 0;
+  const request = await prepareReturnRequest({
+    adapters: {
+      relay: {
+        async quoteReturnBridge() {
+          quoteCalls += 1;
+          throw new Error('an all-held cycle must not quote a bridge');
+        },
+      },
+    },
+    config: {
+      chainId: 4663,
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
+      moneyConfiguration: moneyConfiguration(),
+    },
+    cycleRepository: repository(null, {
+      heldPositions: [['position-return-all-held', { positionId: 'position-return-all-held' }]],
+    }),
+    context: { cycleId: 'cycle-return-all-held-before-buyback' },
+    nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+  });
+
+  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v1');
+  assert.equal(request.inputAmount.amountAtomic, '0');
+  assert.equal(request.destinationAmount.amountAtomic, '0');
+  assert.equal(quoteCalls, 0);
+});
+
+test('a zero-proceeds return persists final evidence without a signer or bridge mutation', async () => {
+  const request = await prepareReturnRequest({
+    adapters: { relay: { async quoteReturnBridge() { throw new Error('bridge must not be quoted'); } } },
+    config: {
+      chainId: 4663,
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
+      moneyConfiguration: moneyConfiguration(),
+    },
+    cycleRepository: repository(custodyLedger({ proceeds: '0', committed: '0' })),
+    context: { cycleId: 'cycle-return-all-held' },
+    nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+  });
+  let stored = null;
+  let signerCalls = 0;
+  const cycleRepository = {
+    async recordStageAttempt(cycleId, stage, evidence) {
+      stored = { cycleId, stage, evidence };
+    },
+    async readStageAttempt(cycleId, stage) {
+      assert.equal(cycleId, 'cycle-return-all-held');
+      assert.equal(stage, 'return');
+      return stored?.evidence ?? null;
+    },
+  };
+  const config = {
+    chainId: 4663,
+    accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+    relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
+    moneyConfiguration: moneyConfiguration(),
+  };
+
+  const mutation = await mutateReturn({
+    liveMode: true,
+    adapters: null,
+    signerClient: { solana: { async sign() { signerCalls += 1; } } },
+    config,
+    cycleRepository,
+    context: { cycleId: 'cycle-return-all-held', stage: 'return', requestDigest: `sha256:${'a'.repeat(64)}` },
+    request,
+    preflightAuthority: TEST_PREFLIGHT_AUTHORITY,
+  });
+
+  assert.equal(signerCalls, 0);
+  assert.deepEqual(mutation, {
+    schema: 'hookemon.return-zero-proceeds-evidence.v1',
+    cycleId: 'cycle-return-all-held',
+    finalized: true,
+    noBridge: true,
+    destinationAccount: EVM_ACCOUNT,
+    destinationAsset: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    destinationCreditAmount: '0',
+  });
+  assert.deepEqual(await reconcileLiveReturn({ adapters: null, config, cycleRepository, context: { cycleId: 'cycle-return-all-held' } }), mutation);
 });
 
 test('prepareReturnRequest refuses every nonzero return minimum before requesting a Relay quote', async () => {

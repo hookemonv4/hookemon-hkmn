@@ -1,6 +1,6 @@
 // Maps the runner's internal status projection (packages/runner/src/observability/
 // status-projection.mjs's `projectCycleStatus`) onto the website's public cycle-status contract
-// (contracts/public-cycle-status.mjs, schemaVersion 3). The internal projection is deliberately
+// (contracts/public-cycle-status.mjs, schemaVersion 5). The internal projection is deliberately
 // conservative — it carries a stage name and stage-completion counts for the active cycle, and
 // (only when the caller supplied `projectCycleStatus`'s optional `readAccounting` seam — see
 // routes/public.mjs's `ctx.readAccounting`, wired by compose.mjs to
@@ -20,7 +20,7 @@ import { normalizePublicCycleStatus } from '../contracts/public-cycle-status.mjs
  * @param {object} input.internalStatus - the object `projectCycleStatus` returns.
  * @param {{maxBoostersPerCycle: number}|null} [input.configuration] - the runner configuration
  *   supplied with the status projection. It sizes `maxBoostersPerCycle` for the public view.
- * @returns {object} a `PublicCycleStatus` (schemaVersion 3), already validated against
+ * @returns {object} a `PublicCycleStatus` (schemaVersion 5), already validated against
  *   `normalizePublicCycleStatus` — this function never returns a shape the website's own validator
  *   would reject.
  */
@@ -37,7 +37,7 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
   const countdownSeconds = Math.ceil(Math.max(0, Date.parse(nextCycleAt) - Date.parse(generatedAt)) / 1_000);
 
   const status = {
-    schemaVersion: 3,
+    schemaVersion: 5,
     profile: profile.id,
     network: profile.network,
     executionState,
@@ -46,6 +46,8 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
     nextCycleAt,
     countdownSeconds,
     cycle: internalStatus.activeCycle ? buildPublicActiveCycle(internalStatus.activeCycle, configuration) : null,
+    heldPositionCount: Array.isArray(internalStatus.heldPositions) ? internalStatus.heldPositions.length : 0,
+    heldPositions: Array.isArray(internalStatus.heldPositions) ? internalStatus.heldPositions : [],
   };
   return normalizePublicCycleStatus(status, profileId);
 }

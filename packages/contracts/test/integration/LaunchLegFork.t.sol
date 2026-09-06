@@ -195,6 +195,41 @@ contract LaunchLegForkTest is Test {
         assertEq(hkmnToken.allowance(address(hook), PERMIT2), 0);
     }
 
+    function testSeedIntentRejectsEveryCalldataMutationOnFork() external {
+        if (!forkReady) return;
+
+        HookemonHook.SeedParams memory params = _seedParams();
+
+        params.payer = address(0xCAFE);
+        _assertSeedIntentMismatch(params);
+
+        params = _seedParams();
+        params.tickLower = TICK_LOWER + 60;
+        _assertSeedIntentMismatch(params);
+
+        params = _seedParams();
+        params.tickUpper = TICK_UPPER - 60;
+        _assertSeedIntentMismatch(params);
+
+        params = _seedParams();
+        params.liquidity -= 1;
+        _assertSeedIntentMismatch(params);
+
+        params = _seedParams();
+        params.amount0Max -= 1;
+        _assertSeedIntentMismatch(params);
+
+        params = _seedParams();
+        params.amount1Max -= 1;
+        _assertSeedIntentMismatch(params);
+
+        params = _seedParams();
+        params.deadline = block.timestamp + hook.MAX_SEED_DEADLINE_SECONDS() + 1;
+        vm.expectRevert(HookemonHook.SeedDeadlineExceedsMaximum.selector);
+        vm.prank(AUTHORITY);
+        hook.seedCanonicalLiquidity(params);
+    }
+
     function testLaunchLegUsesProviderOrderedGraphInitializers() external view {
         if (!forkReady) return;
 
@@ -242,6 +277,19 @@ contract LaunchLegForkTest is Test {
         });
     }
 
+    function _assertSeedIntentMismatch(HookemonHook.SeedParams memory params) private {
+        uint256 nextTokenId = positionManager.nextTokenId();
+        uint256 hookHkmnBefore = hkmnToken.balanceOf(address(hook));
+
+        vm.expectRevert(HookemonHook.SeedIntentMismatch.selector);
+        vm.prank(AUTHORITY);
+        hook.seedCanonicalLiquidity(params);
+
+        assertFalse(hook.canonicalLiquiditySeeded());
+        assertEq(positionManager.nextTokenId(), nextTokenId);
+        assertEq(hkmnToken.balanceOf(address(hook)), hookHkmnBefore);
+    }
+
     function _graphRequest()
         private
         view
@@ -256,6 +304,7 @@ contract LaunchLegForkTest is Test {
             custodyApplicantSalt: keccak256("launch-leg-fork-custody-salt"),
             initializationPriceX96: graph.launchPriceX96(),
             hookUsdg: USDG,
+            seedPayer: PAYER,
             allocationCustody: address(0),
             hookExpectedDecimals: 18
         });

@@ -3,11 +3,11 @@
 # Project State
 
 Current phase: **init**
-Generated: 2026-09-04T04:10:01.961Z
+Generated: 2026-09-06T00:45:35.306Z
 
 | Phase | Result | Receipt |
 |---|---|---|
-| init | STALE | r-00624 |
+| init | FAILED | r-00649 |
 | spec | STALE | r-00625 |
 | architecture | STALE | r-00626 |
 | feasibility | STALE | r-00637 |

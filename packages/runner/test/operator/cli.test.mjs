@@ -259,8 +259,8 @@ test('held owner decision input is forwarded through the audited authority', asy
   const decisionPath = workspace.inputPath('held-owner-decision.json');
   await writeCanonical(decisionPath, {
     choice: 'keep-holding',
-    cycleId: 'cycle-one',
-    expectedCycleRevision: 2,
+    positionId: 'position-one',
+    expectedPositionRevision: 2,
     heldEvidenceDigest: hash('b'),
   });
   const injected = authority();
@@ -275,9 +275,9 @@ test('held owner decision input is forwarded through the audited authority', asy
     expectedRevision: 4,
     command: {
       type: 'held-owner-decision',
-      cycleId: 'cycle-one',
+      positionId: 'position-one',
       heldEvidenceDigest: hash('b'),
-      expectedCycleRevision: 2,
+      expectedPositionRevision: 2,
       choice: 'keep-holding',
     },
   }]);
@@ -286,9 +286,9 @@ test('held owner decision input is forwarded through the audited authority', asy
     requestId: 'request-held',
     command: {
       type: 'held-owner-decision',
-      cycleId: 'cycle-one',
+      positionId: 'position-one',
       heldEvidenceDigest: hash('b'),
-      expectedCycleRevision: 2,
+      expectedPositionRevision: 2,
       choice: 'keep-holding',
     },
   }]);

@@ -68,6 +68,11 @@ function assertCycleId(value) {
   return value;
 }
 
+function assertPositionId(value) {
+  if (typeof value !== 'string' || !cycleIdPattern.test(value)) throw new Error('operator control positionId is invalid');
+  return value;
+}
+
 function assertDigest(value) {
   if (typeof value !== 'string' || !digestPattern.test(value)) throw new Error('operator control cycleDigest is invalid');
   return value;
@@ -143,13 +148,13 @@ function assertCommand(value) {
       exactObject(value, ['type', 'cycleId', 'cycleDigest'], 'operator control command');
       return { type: value.type, cycleId: assertCycleId(value.cycleId), cycleDigest: assertDigest(value.cycleDigest) };
     case 'held-owner-decision':
-      exactObject(value, ['type', 'cycleId', 'heldEvidenceDigest', 'expectedCycleRevision', 'choice'], 'operator control command');
+      exactObject(value, ['type', 'positionId', 'heldEvidenceDigest', 'expectedPositionRevision', 'choice'], 'operator control command');
       if (!heldOwnerDecisionChoices.has(value.choice)) throw new Error('operator control held owner decision choice is invalid');
       return {
         type: value.type,
-        cycleId: assertCycleId(value.cycleId),
+        positionId: assertPositionId(value.positionId),
         heldEvidenceDigest: assertDigest(value.heldEvidenceDigest),
-        expectedCycleRevision: assertCycleRevision(value.expectedCycleRevision),
+        expectedPositionRevision: assertCycleRevision(value.expectedPositionRevision),
         choice: value.choice,
       };
     default:
@@ -349,11 +354,21 @@ function projectPolicyTelemetry(value) {
   for (const field of ['heldAssets', 'unattributed', 'unvaluedExposure']) {
     if (typeof value[field] !== 'boolean') return null;
   }
+  const heldPositions = value.heldPositions;
+  if (!heldPositions || typeof heldPositions !== 'object' || Array.isArray(heldPositions)
+    || !Number.isSafeInteger(heldPositions.count) || heldPositions.count < 0
+    || typeof heldPositions.valueMicroUsdg !== 'string' || !atomicAmountPattern.test(heldPositions.valueMicroUsdg)
+    || !Array.isArray(heldPositions.positions)) return null;
   return deepFreeze({
     realizedLossMicroUsdg: value.realizedLossMicroUsdg,
     atRiskMicroUsdg: value.atRiskMicroUsdg,
     outstandingMicroUsdg: value.outstandingMicroUsdg,
     heldAssets: value.heldAssets,
+    heldPositions: {
+      count: heldPositions.count,
+      valueMicroUsdg: heldPositions.valueMicroUsdg,
+      positions: structuredClone(heldPositions.positions),
+    },
     unattributed: value.unattributed,
     unvaluedExposure: value.unvaluedExposure,
   });
@@ -394,6 +409,16 @@ function projectOutstandingCustodyCap(configuration, telemetry) {
   );
 }
 
+function projectHeldPositionsCap(configuration, telemetry) {
+  if (configuration === null || telemetry === null) return null;
+  return deepFreeze({
+    count: telemetry.heldPositions.count,
+    maxCount: configuration.maxHeldPositions,
+    valueMicroUsdg: telemetry.heldPositions.valueMicroUsdg,
+    maxValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+  });
+}
+
 function safetyTelemetryAlerts(available) {
   return available
     ? []
@@ -414,7 +439,9 @@ function configurationIncreasesExposure(current, next) {
   if (!current.liveMode && next.liveMode) return true;
   if (next.intervalMinutes < current.intervalMinutes || next.requestedOrders > current.requestedOrders
     || next.maxBoostersPerCycle > current.maxBoostersPerCycle || next.maxCyclesPerDay > current.maxCyclesPerDay
-    || next.manualApprovalCycles < current.manualApprovalCycles || hasNewAllowedPack(current, next)) {
+    || next.manualApprovalCycles < current.manualApprovalCycles || next.maxHeldPositions > current.maxHeldPositions
+    || next.unresolvedCardDeadlineMinutes > current.unresolvedCardDeadlineMinutes
+    || hasNewAllowedPack(current, next)) {
     return true;
   }
   for (const field of [
@@ -424,6 +451,7 @@ function configurationIncreasesExposure(current, next) {
     'perCycleCapMicroUsdg',
     'lossCapMicroUsdg',
     'maxOutstandingCustodyMicroUsdg',
+    'maxHeldValueMicroUsdg',
   ]) {
     if (BigInt(next[field]) > BigInt(current[field])) return true;
   }
@@ -501,8 +529,10 @@ export function createOperatorControl({
         offChain24Hour: projectOffChainCap(state?.configuration ?? null, timestamp),
         loss: projectLossCap(state?.configuration ?? null, safetyTelemetry.telemetry),
         outstandingCustody: projectOutstandingCustodyCap(state?.configuration ?? null, safetyTelemetry.telemetry),
+        heldPositions: projectHeldPositionsCap(state?.configuration ?? null, safetyTelemetry.telemetry),
         onChainRemainingCapacity: safetyTelemetry.onChainRemainingCapacity,
       },
+      heldPositions: safetyTelemetry.telemetry === null ? null : safetyTelemetry.telemetry.heldPositions.positions,
       custody: { buckets: custodyBuckets },
       alertSources: { safetyTelemetry: safetyTelemetry.available },
       alerts: safetyTelemetryAlerts(safetyTelemetry.available),
@@ -564,9 +594,9 @@ export function createOperatorControl({
         const state = await requireExpectedRevision(statePath, revision);
         if (recordHeldOwnerDecision === undefined) throw new Error('operator held owner decision authority is unavailable');
         const decision = await recordHeldOwnerDecision({
-          cycleId: normalized.cycleId,
+          positionId: normalized.positionId,
           heldEvidenceDigest: normalized.heldEvidenceDigest,
-          expectedRevision: normalized.expectedCycleRevision,
+          expectedRevision: normalized.expectedPositionRevision,
           requestId: assertRequestId(requestId),
           choice: normalized.choice,
         });

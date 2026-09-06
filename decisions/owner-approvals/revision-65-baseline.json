@@ -10,7 +10,7 @@
   "subjectHashes": {
     "architecture/capability-map.json": "5084346bb35177b5fe9c2400c37782d383b0323bea97dfaf3d425de0578b32ec",
     "architecture/interfaces.json": "3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10",
-    "decisions/ADR-0022-operations-wallet-money-path.md": "d6a6929206fffb5a11cff0c44319aa288cfdcb93a48f83278349834a4f631447",
+    "decisions/ADR-0022-operations-wallet-money-path.md": "d23270e4aa908e2d2f90fe77aebaf203ed40f755e07a7cbacfad7c1c963c3965",
     "decisions/owner-inputs/launch-inputs-owner.json": "bd48bf2d59c8685631243b3a883ad366266268e699f7730363c0df7fb809b7a3",
     "decisions/owner-inputs/programmable-acceptance.json": "d9efda3241b8a924ac2068e976353576da076a832d0ef890d58b8ef75a64dc44",
     "product/delivery-boundary.json": "5b36a35a59a407c9bf86a2586b3eb5889207f61563ba3385dab7718e46534acc",

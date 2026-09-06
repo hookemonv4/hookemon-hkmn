@@ -12,6 +12,47 @@ const gitleaksPolicyConsumers = [
   'scripts/tests/control-dependencies.test.mjs',
 ].map(path => ({ path, text: readFileSync(join(repoRoot, path), 'utf8') }));
 
+test('a zero-before push range uses the empty tree and trusts the pushed revision', async () => {
+  const helper = join(repoRoot, 'scripts', 'ci', 'push-range.mjs');
+  assert.equal(existsSync(helper), true, 'initial-push range helper must exist');
+
+  const { EMPTY_TREE_SHA, ZERO_SHA, resolvePushRange } = await import(helper);
+  const head = 'a'.repeat(40);
+  const result = resolvePushRange({
+    before: ZERO_SHA,
+    head,
+    parents: ['b'.repeat(40)],
+    mode: 'merge-base',
+  });
+
+  assert.deepEqual(result, {
+    initialPush: true,
+    rangeBase: EMPTY_TREE_SHA,
+    rangeHead: head,
+    trustedBase: head,
+    revisionArgs: [head],
+    requireAncestor: false,
+  });
+});
+
+test('a parentless pushed revision uses the empty tree even with a nonzero before SHA', async () => {
+  const { EMPTY_TREE_SHA, resolvePushRange } = await import(join(repoRoot, 'scripts', 'ci', 'push-range.mjs'));
+  const before = 'b'.repeat(40);
+  const head = 'a'.repeat(40);
+
+  const result = resolvePushRange({
+    before,
+    head,
+    parents: [],
+    mode: 'before',
+  });
+
+  assert.equal(result.initialPush, true);
+  assert.equal(result.rangeBase, EMPTY_TREE_SHA);
+  assert.equal(result.trustedBase, head);
+  assert.deepEqual(result.revisionArgs, [head]);
+});
+
 function workflowTriggerKeys(source) {
   const start = source.indexOf('on:\n');
   const end = source.indexOf('\npermissions:', start);
@@ -115,34 +156,47 @@ test('CI runs the manifest-driven dashboard and contracts-js suites', () => {
   assert.match(workflow, /name: Verify the test manifest covers every test file\n\s+run: node scripts\/test-manifest\.mjs check/);
 });
 
-test('fork-proof runs only after a main push or a manual main dispatch and fails closed without its endpoint', () => {
+test('fork-proof runs the same read-only archive proof for a main push, a manual main dispatch, and a pull request head, and fails closed without its endpoint', () => {
   const forkProofPath = join(repoRoot, '.github', 'workflows', 'fork-proof.yml');
-  assert.equal(existsSync(forkProofPath), true, 'fork-proof must be a separate workflow so pull requests do not create a skipped job');
+  assert.equal(existsSync(forkProofPath), true, 'fork-proof must be a separate workflow so other pull requests do not create a skipped job');
   if (!existsSync(forkProofPath)) return;
   const forkProof = readFileSync(forkProofPath, 'utf8');
 
-  assert.deepEqual(workflowTriggerKeys(forkProof), ['push', 'workflow_dispatch']);
+  assert.deepEqual(workflowTriggerKeys(forkProof), ['push', 'pull_request', 'workflow_dispatch']);
   assert.match(forkProof, /^  push:\n    branches: \[main\]$/m);
-  assert.doesNotMatch(forkProof, /^  pull_request:/m);
+  assert.match(forkProof, /^  pull_request:$/m);
+  assert.doesNotMatch(forkProof, /pull_request_target/);
   assert.doesNotMatch(workflow, /^ {2}fork-proof:$/m);
-  assert.match(forkProof, /^  fork-proof:\n    environment: fork-proof$/m);
-  assert.doesNotMatch(forkProof, /^    if:/m, 'a non-main manual dispatch must fail instead of creating a skipped proof job');
+  assert.match(forkProof, /^permissions:\n  contents: read$/m);
+
+  assert.match(forkProof, /^  main:\n    name: fork-proof\n    if: github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\n    environment: fork-proof$/m);
   assert.match(forkProof, /name: Require main branch/);
   assert.match(forkProof, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/);
-  assert.match(forkProof, /name: Run the mandatory archive fork proof/);
-  assert.match(forkProof, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
-  assert.match(forkProof, /ROBINHOOD_FORK_PINNED: 'true'/);
-  assert.match(forkProof, /if \[\[ -z "\$\{ROBINHOOD_FORK_RPC_URL:-\}" \]\]; then\n\s+echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof\." >&2\n\s+exit 1/);
-  assert.match(
-    forkProof,
-    /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts -vv --match-path 'test\/integration\/RobinhoodV4ArchiveFork\.t\.sol'/,
-  );
-  assert.match(forkProof, /node scripts\/verify-fork-pin\.mjs/);
-  assert.ok(
-    forkProof.indexOf('node scripts/verify-fork-pin.mjs')
-      < forkProof.indexOf("forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'"),
-    'the archive pin must validate before Forge contacts the fork endpoint',
-  );
+
+  assert.match(forkProof, /^  pull-request:\n    name: fork-proof\n    if: github\.event_name == 'pull_request'\n    environment: fork-proof$/m);
+  assert.match(forkProof, /name: Require an exact PR head SHA/);
+  assert.match(forkProof, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(forkProof, /\[\[ "\$PR_HEAD_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(forkProof, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/, 'the PR job must prove the exact head, not a synthetic merge ref');
+
+  const jobBodies = forkProof.split(/^  (?=main:|pull-request:)/m).filter(body => /^(?:main|pull-request):/.test(body));
+  assert.equal(jobBodies.length, 2, 'fork-proof must define exactly the main and pull-request jobs');
+  for (const body of jobBodies) {
+    assert.match(body, /name: Run the mandatory archive fork proof/);
+    assert.match(body, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
+    assert.match(body, /ROBINHOOD_FORK_PINNED: 'true'/);
+    assert.match(body, /if \[\[ -z "\$\{ROBINHOOD_FORK_RPC_URL:-\}" \]\]; then\n\s+echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof\." >&2\n\s+exit 1/);
+    assert.match(
+      body,
+      /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts -vv --match-path 'test\/integration\/RobinhoodV4ArchiveFork\.t\.sol'/,
+    );
+    assert.match(body, /node scripts\/verify-fork-pin\.mjs/);
+    assert.ok(
+      body.indexOf('node scripts/verify-fork-pin.mjs')
+        < body.indexOf("forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'"),
+      'the archive pin must validate before Forge contacts the fork endpoint',
+    );
+  }
   assert.doesNotMatch(forkProof, /--ffi|EVENT_NAME|skipping the archive fork proof|continue-on-error/);
 });
 
@@ -210,11 +264,45 @@ test('identity gate checks out the trusted base and executes no pull-request sou
   assert.match(identityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(identityWorkflow, /GIT_NO_REPLACE_OBJECTS: '1'/);
   assert.match(identityWorkflow, /git fetch --no-tags origin "\+refs\/pull\/\$\{PR_NUMBER\}\/head:refs\/remotes\/origin\/pull\/\$\{PR_NUMBER\}\/head"/);
-  assert.match(identityWorkflow, /git merge-base "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA"/);
-  assert.match(identityWorkflow, /git checkout --detach "\$range_base"/);
-  assert.match(identityWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(identityWorkflow, /"\$RUNNER_TEMP\/push-range\.mjs" resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(identityWorkflow, /git checkout --detach "\$trusted_base"/);
+  assert.match(identityWorkflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.doesNotMatch(identityWorkflow, /git merge-base/);
   assert.doesNotMatch(identityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.doesNotMatch(identityWorkflow, /node scripts\/check-commit-identity\.mjs/);
+});
+
+test('base-defined gates report their required check names', () => {
+  const workflows = [
+    ['control-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'control-gate.yml'), 'utf8')],
+    ['identity-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'identity-gate.yml'), 'utf8')],
+  ];
+
+  for (const [checkName, source] of workflows) {
+    assert.match(source, new RegExp(`^  pull-request:\\n    name: ${checkName}$`, 'm'));
+    assert.match(source, new RegExp(`^  push:\\n    name: ${checkName}$`, 'm'));
+  }
+
+  const runbook = readFileSync(join(repoRoot, 'docs', 'runbooks', 'ci-fork-proof.md'), 'utf8');
+  assert.match(runbook, /Configure the ruleset with these exact check names: `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
+});
+
+test('push gates resolve an initial push through the tested range helper', () => {
+  const control = readFileSync(join(repoRoot, '.github', 'workflows', 'control-gate.yml'), 'utf8');
+  const identity = readFileSync(join(repoRoot, '.github', 'workflows', 'identity-gate.yml'), 'utf8');
+  const zeroSha = '0'.repeat(40);
+
+  for (const workflowSource of [control, identity]) {
+    assert.match(workflowSource, new RegExp(`ref: \\$\\{\\{ github\\.event\\.before == '${zeroSha}' && github\\.sha \\|\\| github\\.event\\.before \\}\\}`));
+    assert.match(workflowSource, /git show "HEAD:scripts\/ci\/push-range\.mjs" > "\$RUNNER_TEMP\/push-range\.mjs"/);
+    assert.match(workflowSource, /"\$RUNNER_TEMP\/push-range\.mjs" resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA"/);
+    assert.match(workflowSource, /"\$GITHUB_STEP_SUMMARY"/);
+    assert.doesNotMatch(workflowSource, /git show "\$\{PUSH_HEAD_SHA\}:scripts\/ci\/push-range\.mjs"/);
+  }
+  assert.match(identity, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(control, /--base-control "\$trusted_base" "\$range_head"/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs append-only "\$range_base" "\$range_head"/);
 });
 
 test('the canary permits only the default branch and fails closed when its endpoint is absent', () => {
@@ -377,9 +465,12 @@ test('v4 gates keeps explicit pull-request and push ranges for append-only and s
   assert.match(workflow, /PUSH_BASE_SHA:\s*\$\{\{ github\.event\.before \}\}/);
   assert.match(workflow, /PUSH_HEAD_SHA:\s*\$\{\{ github\.sha \}\}/);
   assert.match(workflow, /name: Transitional base commit identity check/);
-  assert.match(workflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs resolve "\$PUSH_BASE_SHA" "\$PUSH_HEAD_SHA" merge-base/);
+  assert.match(workflow, /git show "\$\{trusted_base\}:scripts\/check-commit-identity\.mjs"/);
   assert.match(workflow, /Remove this step only after the owner registers identity-gate and control-gate as required statuses on main\./);
   assert.match(workflow, /node scripts\/check-append-only\.mjs "\$range_base" "\$range_head"/);
+  assert.match(workflow, /node scripts\/ci\/push-range\.mjs append-only "\$range_base" "\$range_head"/);
+  assert.match(workflow, /if \[\[ "\$initial_push" == true \]\]; then/);
   assert.match(workflow, /append_only_options=\(\)/);
   assert.match(workflow, /append_only_options=\(--require-ancestor\)/);
   assert.match(workflow, /"\$\{append_only_options\[@\]\}"/);
@@ -403,6 +494,8 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(runbook, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.match(runbook, /ROBINHOOD_FORK_PINNED=true FOUNDRY_LIBS=/);
+  assert.match(runbook, /zero `before` SHA or parentless pushed revision/);
+  assert.match(runbook, /empty tree/);
   assert.doesNotMatch(runbook, /required reviewer/i);
   assert.match(card, /\.github\/workflows\/v4-gates\.yml/);
   assert.match(card, /\.github\/workflows\/fork-proof\.yml/);
@@ -416,6 +509,8 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(card, /node scripts\/test-manifest\.mjs check/);
   assert.match(card, /node scripts\/verify-release-ready\.mjs/);
   assert.match(card, /scripts\/check-commit-identity\.mjs/);
+  assert.match(card, /scripts\/ci\/push-range\.mjs/);
+  assert.match(card, /Initial pushes use the empty tree/);
   assert.match(card, /fork-pin verifier/);
   assert.match(card, /verify-release-package-closure\.mjs/);
 });

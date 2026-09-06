@@ -14,6 +14,14 @@ The same runner module owns `MoneyConfigurationV1`. Environment parsing construc
 explicit asset metadata and atomic values; composition revalidates that one record before a
 production or rehearsal service can open durable state.
 
+`packages/adapters/rehearsal/collector-policy/` contains the Collector execution evidence bundle.
+Its `hookemon.collector-policy-bundle.v1` manifest binds an ordered purchase, open, and buyback
+specimen set with canonical JSON digests. Each `hookemon.collector-policy-specimen.v1` file records
+the finalized signature, slot, timestamp, raw serialized transaction, RPC read parameters, account
+roles, and the complete decoder summary. The loader re-decodes those bytes and rejects a summary,
+instruction order, account binding, amount, memo, program, or digest mismatch before it creates a
+process-local policy sidecar.
+
 ## Public interface
 
 - `decodeProviderTransaction(input)` supports EVM legacy and EIP-1559 transactions plus unsigned
@@ -40,6 +48,11 @@ production or rehearsal service can open durable state.
 - `validateMoneyConfiguration(value)` wraps the canonical `assertMoneyConfiguration()` result in a
   frozen configuration value. It is exported from the environment boundary and re-exported by the
   composition root. Invalid input raises `MoneyConfigurationRejected` before adapter composition.
+- `loadCollectorPolicyBundle()` reads only the checked-in manifest and its referenced specimens,
+  verifies their canonical SHA-256 digests, decodes the recorded legacy Solana transactions, and
+  returns their process-local policies. `attachCollectorPolicyBundle()` attaches that verified
+  object to a live Collector-only configuration. `collectorPolicyForStage()` refuses an unverified
+  runtime bundle rather than accepting a caller-supplied sidecar.
 - `MoneyConfigurationV1` carries typed USDG and Solana-stablecoin assets, three typed receive
   minima, EVM `perTransactionGasPriceCap` and `nativeReserve`, plus Solana `priorityFeeCap` and
   `lamportReserve`. The configured Relay quote must use the decimal precision from this record's
@@ -83,6 +96,14 @@ production or rehearsal service can open durable state.
 - v0 lookup tables are resolved at finalized commitment and must match the requested key and be
   active. The current resolver result lacks owner and raw-account-data digest evidence; a live
   policy path must remain unavailable until the frozen resolver interface provides both.
+- The Collector bundle currently covers only three finalized legacy transactions from the historical
+  rehearsal. It observes the Compute Budget, Memo, SPL Token, Associated Token, Metaplex Core, and
+  System program bindings used by those transactions; it permits no extra instruction, changed
+  account, mint, recipient, amount, memo data, or priority-fee value in a specimen policy.
+- `runtime.status: "evidence-only"` is not authority to sign for the current Operations wallet. The
+  loader deliberately refuses a live stage or CLI preflight until a current-operator provider
+  transaction contract, the role substitutions it permits, and the signing-slot arrangement are
+  independently verified. No v0 or address lookup table is covered by the recorded specimens.
 
 ## State transitions
 
@@ -106,6 +127,7 @@ exact-byte reauthorization to broadcast; it never creates another signature duri
 ```sh
 cd packages/adapters && node --test --test-timeout=120000 test/signing/transaction-policy.test.mjs
 cd packages/adapters && node --test --test-timeout=120000 test/signing/transaction-policy-schema-boundary.test.mjs
+cd packages/adapters && node --test --test-timeout=120000 test/signing/collector-policy-loader.test.mjs
 ```
 
 The suite uses independently authored EVM, legacy-Solana, and v0-with-ALT policies. It includes a
@@ -135,3 +157,8 @@ mint, amount, extra instruction, expiry, fee payer, lookup-table resolution, and
 - Correct a rejected money configuration at the environment boundary. Do not restore removed
   defaults or use the legacy native-cap projection in place of EVM gas-price/native-reserve or
   Solana priority-fee/lamport-reserve controls.
+- For Collector execution, keep the bundle evidence-only when a provider transaction changes, the
+  current operator has no matching specimen, the machine account derivation is undocumented, or a
+  token-account alternate recipient is unsupported. Resolve those facts with a versioned provider
+  contract and an authorized current-operator specimen; do not copy the historical wallet or widen
+  a static policy.

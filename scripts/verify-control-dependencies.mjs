@@ -27,26 +27,32 @@ const FORK_PROOF_WORKFLOW_PATH = '.github/workflows/fork-proof.yml';
 const FORK_PIN_CANARY_WORKFLOW_PATH = '.github/workflows/fork-pin-canary.yml';
 const IDENTITY_GATE_WORKFLOW_PATH = '.github/workflows/identity-gate.yml';
 const CONTROL_GATE_WORKFLOW_PATH = '.github/workflows/control-gate.yml';
+const WEB_CI_WORKFLOW_PATH = '.github/workflows/web-ci.yml';
+const DEPLOY_WEB_WORKFLOW_PATH = '.github/workflows/deploy-web.yml';
 const PERMITTED_WORKFLOW_PATHS = new Set([
   V4_GATES_WORKFLOW_PATH,
   FORK_PROOF_WORKFLOW_PATH,
   FORK_PIN_CANARY_WORKFLOW_PATH,
   IDENTITY_GATE_WORKFLOW_PATH,
   CONTROL_GATE_WORKFLOW_PATH,
+  WEB_CI_WORKFLOW_PATH,
+  DEPLOY_WEB_WORKFLOW_PATH,
 ]);
 const COMMIT_IDENTITY_ALLOWLIST_PATH = 'scripts/check-commit-identity.mjs';
+const PUSH_RANGE_RESOLVER_PATH = 'scripts/ci/push-range.mjs';
 const FORK_PIN_VERIFIER_PATH = 'scripts/verify-fork-pin.mjs';
 const RELEASE_CLOSURE_BUILDER_MANIFEST_PATH = 'scripts/programmable/vendor/programmable-v4-hook-builder/manifest.json';
 const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '2945c9c7946eb2c3fa113142d2b46d8f03d8f387305a1b5ed6198baa3a79a5b9';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'ad9cdcb2b2d596a43900cbe082e273723b97db7c851c30e0fa7807aed7657ffe';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
-const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = 'd917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019';
-const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = '08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50';
+const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '896a8df85ab356c84649bb942a9fd171b5dcd6883047cbe40c03a074cfe1e994';
+const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = '45b7339b63b4b334620ab8eac8b873b08788c42af6e8159490baca00ed6916bb';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
+const SUPPORTED_PUSH_RANGE_RESOLVER_SHA256 = '4e7acdb6d7e15b2721fcb35ac8bd2467ac75f3e2188c40458422ce8bc7ddd987';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_MANIFEST_SHA256 = 'd3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_SOURCE_TREE_SHA256 = '4795ee279dec6ae22e047e6fe6c032b85f242cc96797f40d4560f70b6e8559ae';
@@ -297,6 +303,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   if (forkProofNodeBlock !== null && forkProofNodeBlock !== canonicalNodeInstallBlock(pins)) {
     errors.push('fork-proof Node install block must match the canonical verified data flow');
   }
+  const forkProofPrNodeBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Node (fork-proof pull-request)', errors);
+  if (forkProofPrNodeBlock !== null && forkProofPrNodeBlock !== canonicalNodeInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Node install block must match the canonical verified data flow');
+  }
   const gitleaksBlock = workflowInstallRunBlock(workflow, 'Install pinned Gitleaks', errors);
   if (gitleaksBlock !== null && gitleaksBlock !== canonicalGitleaksInstallBlock(pins)) {
     errors.push('Gitleaks install block must match the canonical verified data flow');
@@ -308,6 +318,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   const forkProofFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof)', errors);
   if (forkProofFoundryBlock !== null && forkProofFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
     errors.push('fork-proof Foundry install block must match the canonical verified data flow');
+  }
+  const forkProofPrFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof pull-request)', errors);
+  if (forkProofPrFoundryBlock !== null && forkProofPrFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Foundry install block must match the canonical verified data flow');
   }
 }
 
@@ -592,6 +606,34 @@ function verifyCommitIdentityAllowlistIntegrity(root, pins, errors) {
 
   return {
     path: COMMIT_IDENTITY_ALLOWLIST_PATH,
+    expectedSha256: pin.sha256 ?? null,
+    actualSha256,
+  };
+}
+
+function verifyPushRangeResolverIntegrity(root, pins, errors) {
+  const pin = pins.controlScripts?.pushRangeResolver ?? {};
+
+  if (pin.path !== PUSH_RANGE_RESOLVER_PATH) {
+    errors.push(`push range resolver path must be ${PUSH_RANGE_RESOLVER_PATH}`);
+  }
+  if (!SHA256_PATTERN.test(pin.sha256 ?? '')) {
+    errors.push('push range resolver digest must be a SHA-256');
+  }
+  if (pin.sha256 !== SUPPORTED_PUSH_RANGE_RESOLVER_SHA256) {
+    errors.push('push range resolver digest must match the supported release');
+  }
+
+  const actualSha256 = regularRepositoryFileHash(root, PUSH_RANGE_RESOLVER_PATH, 'push range resolver', errors);
+  if (actualSha256 !== null && pin.sha256 && actualSha256 !== pin.sha256) {
+    errors.push(`push range resolver digest mismatch: expected ${pin.sha256}, got ${actualSha256}`);
+  }
+  if (actualSha256 !== null && actualSha256 !== SUPPORTED_PUSH_RANGE_RESOLVER_SHA256) {
+    errors.push('push range resolver content mismatch: the resolver must match the supported release');
+  }
+
+  return {
+    path: PUSH_RANGE_RESOLVER_PATH,
     expectedSha256: pin.sha256 ?? null,
     actualSha256,
   };
@@ -1110,6 +1152,33 @@ function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
 }
 
 const CONTROL_PIN_BUMP_SCHEMA = 'hookemon.control-gate-pin-bump.v1';
+// v1 requires the signed record to state the exact commit SHA of the candidate tree that will
+// contain it. That commit does not exist yet when the record is authored, and adding the record
+// to product/dependency-verification.json changes that tree's own content, which changes the
+// resulting commit's own SHA -- so a v1 record can never correctly describe the commit it ships
+// in; this is a structural impossibility (finding a fixed point of a SHA-based commit hash), not
+// a workaround-able inconvenience. v2 drops the commit-SHA binding entirely and relies only on
+// deterministic approved-content digests that are already fully known before the record is
+// written: the exact bytes of product/dependency-pins.json (candidatePinsSha256) and the exact
+// enumerated control-surface digest changes (controls) -- everything the record needs to bind is
+// already true the moment it is authored, so no self-reference is possible. This intentionally
+// makes an approval reusable across any later commit with the identical pinned bytes (nothing
+// security-relevant changed), and equally unable to admit any commit whose pinned bytes differ
+// even slightly (the exact property v1 was trying, and structurally failing, to provide).
+const CONTROL_PIN_BUMP_SCHEMA_V2 = 'hookemon.control-gate-pin-bump.v2';
+// Deliberately excludes baseTree/candidateTree (the impossible self-reference) and approvalToken
+// is checked for value, not just presence, so it is still listed here for the exact-keys check.
+const CONTROL_PIN_BUMP_V2_KEYS = [
+  'schema', 'approvalToken', 'basePinsSha256', 'candidatePinsSha256', 'baseChecker', 'controls',
+];
+
+function sameKeys(object, expectedKeys) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return false;
+  const actualKeys = Object.keys(object);
+  if (actualKeys.length !== expectedKeys.length) return false;
+  const expected = new Set(expectedKeys);
+  return actualKeys.every(key => expected.has(key));
+}
 
 function controlSurfaceDescriptors(pins, errors, source) {
   const descriptors = [];
@@ -1128,6 +1197,7 @@ function controlSurfaceDescriptors(pins, errors, source) {
   add('fork-pin canary workflow', FORK_PIN_CANARY_WORKFLOW_PATH, pins.contentAddresses?.forkPinCanary);
   add('identity-gate workflow', IDENTITY_GATE_WORKFLOW_PATH, pins.contentAddresses?.identityGate);
   add('control-gate workflow', CONTROL_GATE_WORKFLOW_PATH, pins.contentAddresses?.controlGate);
+  add('push range resolver', PUSH_RANGE_RESOLVER_PATH, pins.controlScripts?.pushRangeResolver);
   const forkPinVerifier = pins.controlScripts?.forkPinVerifier ?? {};
   const closure = forkPinVerifier.closure;
   if (!Array.isArray(closure) || closure.length !== 2) {
@@ -1176,23 +1246,10 @@ function sameControlChanges(actual, expected) {
   ));
 }
 
-function baseCheckerPinBumpErrors({
-  candidateVerification,
-  baseTree,
-  candidateTree,
-  basePinsSha256,
-  candidatePinsSha256,
-  baseCheckerBlob,
-  changes,
+function baseCheckerPinBumpErrorsV1({
+  bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
 }) {
   const errors = [];
-  const bump = candidateVerification?.controlGatePinBump;
-  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
-    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
-  }
-  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
-    errors.push('control pin bump must use the base-checker schema');
-  }
   if (bump.approvalToken !== 'OWNER APPROVED') {
     errors.push('control pin bump requires an explicit OWNER APPROVED token');
   }
@@ -1209,6 +1266,58 @@ function baseCheckerPinBumpErrors({
     errors.push('control pin bump must enumerate the exact control-surface digest changes');
   }
   return errors;
+}
+
+/**
+ * v2: a deterministic approved-content binding with no commit-SHA self-reference (see
+ * CONTROL_PIN_BUMP_SCHEMA_V2's own comment for why v1's binding is structurally unsatisfiable).
+ * Every field here is knowable before the record is authored and stays true for any later commit
+ * with byte-identical pinned content -- baseTree/candidateTree are deliberately not part of this
+ * schema at all, not merely unchecked.
+ */
+function baseCheckerPinBumpErrorsV2({
+  bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
+}) {
+  const errors = [];
+  if (!sameKeys(bump, CONTROL_PIN_BUMP_V2_KEYS)) {
+    errors.push(`control pin bump v2 must contain exactly ${CONTROL_PIN_BUMP_V2_KEYS.join(', ')}`);
+    return errors;
+  }
+  if (bump.approvalToken !== 'OWNER APPROVED') {
+    errors.push('control pin bump requires an explicit OWNER APPROVED token');
+  }
+  if (bump.basePinsSha256 !== basePinsSha256 || bump.candidatePinsSha256 !== candidatePinsSha256) {
+    errors.push('control pin bump must bind the exact base and candidate dependency-pin bytes');
+  }
+  if (bump.baseChecker?.path !== CONTROL_DEPENDENCY_VERIFIER_PATH || bump.baseChecker?.blobId !== baseCheckerBlob) {
+    errors.push('control pin bump must bind the protected base checker blob');
+  }
+  if (!sameControlChanges(bump.controls, changes)) {
+    errors.push('control pin bump must enumerate the exact control-surface digest changes');
+  }
+  return errors;
+}
+
+function baseCheckerPinBumpErrors({
+  candidateVerification,
+  baseTree,
+  candidateTree,
+  basePinsSha256,
+  candidatePinsSha256,
+  baseCheckerBlob,
+  changes,
+}) {
+  const bump = candidateVerification?.controlGatePinBump;
+  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
+    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
+  }
+  if (bump.schema === CONTROL_PIN_BUMP_SCHEMA_V2) {
+    return baseCheckerPinBumpErrorsV2({ bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
+  }
+  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
+    return ['control pin bump must use a supported base-checker schema'];
+  }
+  return baseCheckerPinBumpErrorsV1({ bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
 }
 
 function candidateBlob(candidateBlobs, path) {
@@ -1322,6 +1431,7 @@ function controlSurfacePaths() {
     FORK_PIN_CANARY_WORKFLOW_PATH,
     IDENTITY_GATE_WORKFLOW_PATH,
     CONTROL_GATE_WORKFLOW_PATH,
+    PUSH_RANGE_RESOLVER_PATH,
     FORK_PIN_VERIFIER_PATH,
     FORK_PIN_VERIFIER_IMPORT_PATH,
     CONTROL_DEPENDENCY_VERIFIER_PATH,
@@ -1706,6 +1816,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const identityGate = verifyIdentityGateIntegrity(root, pins, errors);
   const controlGate = verifyControlGateIntegrity(root, pins, errors);
   const commitIdentityAllowlist = verifyCommitIdentityAllowlistIntegrity(root, pins, errors);
+  const pushRangeResolver = verifyPushRangeResolverIntegrity(root, pins, errors);
   const forkPinVerifier = verifyForkPinVerifierIntegrity(root, pins, errors);
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
   const controlDependencyVerifier = verifyControlDependencyVerifierIntegrity(root, pins, errors);
@@ -1805,6 +1916,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
     controlGate,
     controlScripts: {
       commitIdentityAllowlist,
+      pushRangeResolver,
       forkPinVerifier,
       releaseClosureBuilder,
       controlDependencyVerifier,

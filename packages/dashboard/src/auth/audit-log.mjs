@@ -286,6 +286,17 @@ function resultCodeForState(commandState, appliedResultCode) {
   return appliedResultCode;
 }
 
+function effectAuditResultCode(effectResult, fallback) {
+  if (!effectResult || typeof effectResult !== 'object' || Array.isArray(effectResult)
+    || !Object.hasOwn(effectResult, 'auditResultCode')) {
+    return fallback;
+  }
+  if (typeof effectResult.auditResultCode !== 'string' || effectResult.auditResultCode.length === 0) {
+    throw new Error('audited command effect auditResultCode must be a nonempty string');
+  }
+  return effectResult.auditResultCode;
+}
+
 async function appendCommandState(path, initial, commandState, now, appliedResultCode) {
   return doAppend(path, {
     eventId: crypto.randomUUID(),
@@ -374,7 +385,16 @@ export async function executeAuditedCommand({
       : effectResult?.auditCommandState === 'UNCERTAIN'
         ? 'UNCERTAIN'
         : 'APPLIED';
-    const completed = await completeCommand(path, requestId, commandState, now, resultCode);
+    const completionResultCode = commandState === 'APPLIED'
+      ? effectAuditResultCode(effectResult, resultCode)
+      : resultCode;
+    const completed = await completeCommand(
+      path,
+      requestId,
+      commandState,
+      now,
+      completionResultCode,
+    );
     return commandResult(completed.record, completed.commandState, false);
   } catch (error) {
     const completed = await completeCommand(path, requestId, 'UNCERTAIN', now, resultCode);

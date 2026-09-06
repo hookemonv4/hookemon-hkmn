@@ -7,11 +7,11 @@
   "artifacts": {
     "resolutions": {
       "path": "qa/redteam/resolutions.json",
-      "sha256": "e9f0d5c56d77ee912d8608d1b7f3587bfd57166faebbbf1b50d4bcdde99588df"
+      "sha256": "8eef1e0a324e7fd84a2bb310ee2bedb988946710557086b12cbca94f520b7415"
     },
     "termination": {
       "path": "qa/redteam/termination.json",
-      "sha256": "679ec9a1470697c245bdb9f90ada4cffbff369f260c431eb801be03ba26edb5f"
+      "sha256": "d63c8152d1baf1ac82846f84fa2c7dae5a6ec45bf2abba5c899e344b48673b71"
     }
   },
   "findings": [
@@ -21,7 +21,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "evidence-proof-validation",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R55-03",
@@ -29,7 +29,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "redteam-receipt-authority",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R55-04",
@@ -37,7 +37,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "module-card-index-authority",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-01",
@@ -45,7 +45,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "payout-authorization-binding",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-02",
@@ -53,7 +53,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "signer-key-separation",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-03",
@@ -61,7 +61,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "signer-role-separation",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-04",
@@ -69,7 +69,7 @@
       "classification": "valid-tradeoff",
       "canonicalIssue": "degraded-confirmation-binding",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-05",
@@ -77,7 +77,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "operations-liability-control",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-06",
@@ -85,7 +85,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "durable-proof-recovery",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-07",
@@ -93,7 +93,7 @@
       "classification": "valid-actionable",
       "canonicalIssue": "production-router-proof",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
     },
     {
       "id": "RT-R58-08",
@@ -101,7 +101,23 @@
       "classification": "valid-actionable",
       "canonicalIssue": "holder-exclusion-completeness",
       "statusTransition": { "from": "OPEN_FAIL_CLOSED", "to": "RESOLVED" },
-      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "0ccef2212c0dd164188272a6ced52571a66be625f42aac7b1f71d6016493bc78" }]
+      "evidence": [{ "path": "qa/redteam/current-cycle-evidence.json", "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d" }]
+    },
+    {
+      "id": "RT-R65-01",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "seed-intent-not-bound-onchain",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "89841a64dc9cc338cec2fd585cb368d00db592a944dba4a1286996b242aad49d"
+        }
+      ]
     }
   ]
 }

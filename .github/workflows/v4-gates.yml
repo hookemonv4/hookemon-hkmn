@@ -49,16 +49,23 @@ jobs:
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             range_base="$PR_BASE_SHA"
             range_head="$PR_HEAD_SHA"
+            trusted_base="$range_base"
           elif [[ "$EVENT_NAME" == "push" ]]; then
-            range_base="$PUSH_BASE_SHA"
-            range_head="$PUSH_HEAD_SHA"
+            push_range_output="$RUNNER_TEMP/push-range-transition"
+            : > "$push_range_output"
+            node scripts/ci/push-range.mjs resolve "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA" merge-base "$push_range_output"
+            source "$push_range_output"
           else
             echo "unsupported event: $EVENT_NAME" >&2
             exit 1
           fi
-          git cat-file -e "${range_base}^{commit}"
+          if [[ "$range_base" == '4b825dc642cb6eb9a060e54bf8d69288fbee4904' ]]; then
+            git cat-file -e "${range_base}^{tree}"
+          else
+            git cat-file -e "${range_base}^{commit}"
+          fi
           git cat-file -e "${range_head}^{commit}"
-          git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
+          git show "${trusted_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
           node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"
       - name: Install pinned Foundry
         shell: bash
@@ -125,18 +132,31 @@ jobs:
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             range_base="$PR_BASE_SHA"
             range_head="$PR_HEAD_SHA"
+            initial_push=false
           elif [[ "$EVENT_NAME" == "push" ]]; then
-            range_base="$PUSH_BASE_SHA"
-            range_head="$PUSH_HEAD_SHA"
-            append_only_options=(--require-ancestor)
+            push_range_output="$RUNNER_TEMP/push-range-append-only"
+            : > "$push_range_output"
+            node scripts/ci/push-range.mjs resolve "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA" before "$push_range_output"
+            source "$push_range_output"
+            if [[ "$initial_push" != true ]]; then
+              append_only_options=(--require-ancestor)
+            fi
           else
             echo "unsupported event: $EVENT_NAME" >&2
             exit 1
           fi
 
-          git cat-file -e "${range_base}^{commit}"
+          if [[ "$range_base" == '4b825dc642cb6eb9a060e54bf8d69288fbee4904' ]]; then
+            git cat-file -e "${range_base}^{tree}"
+          else
+            git cat-file -e "${range_base}^{commit}"
+          fi
           git cat-file -e "${range_head}^{commit}"
-          node scripts/check-append-only.mjs "$range_base" "$range_head" "${append_only_options[@]}"
+          if [[ "$initial_push" == true ]]; then
+            node scripts/ci/push-range.mjs append-only "$range_base" "$range_head"
+          else
+            node scripts/check-append-only.mjs "$range_base" "$range_head" "${append_only_options[@]}"
+          fi
 
           empty_ignore="${RUNNER_TEMP}/gitleaks-empty-ignore"
           : > "$empty_ignore"
@@ -192,6 +212,11 @@ jobs:
         shell: bash
         run: |
           files="$(node scripts/test-manifest.mjs list dashboard)"
+          node --test --test-timeout=120000 $files
+      - name: Verify domain suite
+        shell: bash
+        run: |
+          files="$(node scripts/test-manifest.mjs list domain)"
           node --test --test-timeout=120000 $files
       - name: Initialize pinned top-level contract dependencies
         run: git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery

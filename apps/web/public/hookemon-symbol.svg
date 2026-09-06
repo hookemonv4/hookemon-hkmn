@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="82.5 76 347 347" role="img" aria-labelledby="hookemon-symbol-title">
+  <title id="hookemon-symbol-title">Hookemon H</title>
+  <!-- Traced from the complete H in hookemon-mark.png. Original silhouette and color regions; no background. -->
+  <g>
+    <path id="navy-depth" fill="#153e7e" d="M 128 149 L 175 128 L 248 104 L 250 105 L 253 124 L 255 124 L 269 106 L 360 90 L 397 354 L 381 372 L 312 393 L 301 395 L 298 377 L 296 377 L 291 385 L 210 409 L 160 221 L 159 219 L 152 219 L 133 221 L 115 169 L 115 165 Z" />
+    <path id="blue-outline" fill="#1b72bb" d="M 129 148 L 175 128 L 249 104 L 253 124 L 268 195 L 273 194 L 283 191 L 283 188 L 269 106 L 360 90 L 397 354 L 316 376 L 297 273 L 295 273 L 288 275 L 287 280 L 305 366 L 224 389 L 172 202 L 149 206 L 135 222 L 128 201 L 144 193 L 144 190 Z" />
+    <path id="gold-bevel" fill="#cf9e16" d="M 153 158 L 187 144 L 236 129 L 254 216 L 259 217 L 303 204 L 290 121 L 344 111 L 376 341 L 329 352 L 312 255 L 311 252 L 306 252 L 266 262 L 284 353 L 237 366 L 186 182 L 162 185 Z" />
+    <path id="yellow-face" fill="#ffcc03" d="M 156 165 L 203 148 L 229 142 L 245 222 L 247 228 L 249 228 L 293 215 L 297 208 L 303 204 L 292 130 L 336 123 L 367 343 L 333 352 L 329 351 L 312 252 L 309 251 L 268 261 L 258 270 L 275 355 L 237 365 L 186 181 L 162 185 Z" />
+  </g>
+</svg>

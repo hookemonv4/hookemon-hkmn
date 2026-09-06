@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { hashFile, readJson } from './lib/util.mjs';
 import {
   GATE_PROOF_SCHEMA,
+  EXPECTED_REDTEAM_FINDING_IDS,
   OWNER_ACTIONS,
   OWNER_EVIDENCE_PRODUCER,
   isGateReceiptAuthoritative,
@@ -38,7 +39,8 @@ export const REDTEAM_DOUBT_LOOP_PATH = 'qa/redteam/doubt-loop.json';
 export const REDTEAM_THREAT_MODEL_PATH = 'qa/redteam/threat-model.json';
 
 export const REQUIRED_DISPOSITIONED_FINDING_ID = 'RT-R58-05';
-export const EXPECTED_REDTEAM_FINDING_IDS = Object.freeze([
+export { EXPECTED_REDTEAM_FINDING_IDS };
+const EXPECTED_PRIOR_REDTEAM_FINDING_IDS = Object.freeze([
   'RT-R55-01',
   'RT-R55-03',
   'RT-R55-04',
@@ -597,7 +599,12 @@ function checkPriorReviewBundle(root, record, errors) {
     }
     findingsById.set(finding.id, finding);
   }
-  const exactIds = checkExactFindingIdSet(findingsById, EXPECTED_REDTEAM_FINDING_IDS, 'prior review bundle', errors);
+  const exactIds = checkExactFindingIdSet(
+    findingsById,
+    EXPECTED_PRIOR_REDTEAM_FINDING_IDS,
+    'prior review bundle',
+    errors,
+  );
   return { bundle, findingsById, exactIds };
 }
 

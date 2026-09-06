@@ -11,12 +11,15 @@ import { fileURLToPath } from 'node:url';
 export const TEST_FILE_SUFFIX = '.test.mjs';
 export const TEST_TIMEOUT_MS = 120000;
 export const EXCLUDED_DIRECTORY_NAMES = new Set(['node_modules', '.git', '.worktrees']);
-export const EXCLUDED_PATHS = new Set(['packages/contracts/lib']);
+// apps/web has its own CI job (.github/workflows/web-ci.yml) and its own test runner
+// (a Cloudflare Workers loader with --experimental-strip-types), not plain `node --test`.
+export const EXCLUDED_PATHS = new Set(['packages/contracts/lib', 'apps/web']);
 
 export const SUITES = Object.freeze({
   runner: Object.freeze({ roots: Object.freeze(['packages/runner/test']) }),
   adapters: Object.freeze({ roots: Object.freeze(['packages/adapters/test']) }),
   dashboard: Object.freeze({ roots: Object.freeze(['packages/dashboard/test']) }),
+  domain: Object.freeze({ roots: Object.freeze(['packages/domain/test']) }),
   'contracts-js': Object.freeze({ roots: Object.freeze(['packages/contracts/test-js', 'packages/contracts/test/blind']) }),
   'contracts-abi': Object.freeze({ roots: Object.freeze(['packages/contracts/test/process']) }),
   scripts: Object.freeze({ roots: Object.freeze(['scripts/tests']) }),

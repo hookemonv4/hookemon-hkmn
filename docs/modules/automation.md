@@ -14,7 +14,7 @@ signer or a provider client.
   flag when creating the cycle and refuses a recovered cycle whose flag does not match the service.
 - Live mode additionally requires a policy engine and selected pack id.
 - Stage contexts contain the current lease, stable `fencingToken`, cycle release amount, pack id,
-  stage name, `assertLease`, and async `assertMutationAllowed`.
+  stage name, deterministic `nowMs`, `assertLease`, and async `assertMutationAllowed`.
 - `EvmPolicyWallet` and `SolanaPolicyWallet` bind a policy, intent, owner authorization, signed-bytes
   checkpoint, and injected signer client. Their optional `preflightAuthority` accepts only the exact
   fixture authority while running under the Node test runner.
@@ -37,6 +37,18 @@ signer or a provider client.
   result holds the active cycle before stage execution, signing, or broadcast.
 - Completed stages are reconciled rather than executed again. Stage joins still require eligibility
   evidence before claim and eligibility plus return evidence before payout.
+- The claim join gate does not treat the legacy `heldAssets` flag as an independent refusal. It
+  retains unattributed custody and unresolved obligations as fail-closed conditions. Per-card held
+  positions use a separate custody bucket, and policy admission enforces the owner position limits.
+- One `nowMs` value is captured for the stage context before preparation and is reused by that
+  stage's reconciliation, execution, and commit calls. The stage driver uses it with the frozen
+  unresolved-card deadline when resolving a `SENT_UNKNOWN` provider attempt.
+- A completed main cycle with open held positions is not selected by the scheduler as the active
+  cycle, but it remains an active DurableCycleStore entry. A prepared supplementary settlement
+  remains bound to its original cycle and position; the normal scheduler does not turn it into a
+  new cycle or dispatch an unrecorded provider effect. The dispatcher can reconcile only an
+  injected Node-test handler; that handler is observation-only and receives no provider or signer
+  capability. Production leaves this seam unset.
 - Policy-wallet signing and broadcast read the active mutation authority immediately before invoking
   the injected signer client. A provisional or digestless authority refuses before either client call.
 
@@ -56,6 +68,13 @@ signer or a provider client.
   chain-attempt runtime is v1; the frozen v2 policy, fencing, refusal, and approval-digest fields
   are unavailable. Built-in outbound and return use the repository's combined Relay signing
   record for their recovery authority.
+- A held card records an attributed position and lets the main cycle continue with settled cards.
+  A later `sell` decision creates a position-scoped supplementary settlement; no scheduler tick
+  treats that decision as authority to send a fresh provider mutation without its write-ahead state.
+- `recoverActiveCycle()` checks one pending supplementary settlement before it looks for a normal
+  active cycle. It returns `SUPPLEMENTARY_SETTLEMENT` after an observed advance and otherwise
+  leaves normal recovery idle for a pending test-only handler. It never reopens the completed main
+  cycle or creates a replacement settlement.
 
 ## Operational commands
 
@@ -82,4 +101,12 @@ node --test packages/runner/test/automation/automated-cycle-service.test.mjs \
 - On restart, keep generic v1 live rebroadcast closed because it has no persisted approval digest.
   Outbound and return may reauthorize only their exact bytes with a matching combined Relay recovery
   record; direct payout reads its exact authority from the self-contained recipient record. A held
-  terminal state advances only through an idempotent owner decision.
+  position advances only through its digest- and revision-bound owner decision or reconciliation
+  evidence; both paths preserve the original cycle attribution. A completed main cycle with an open
+  sell settlement is recovered through that settlement's stored position, snapshot, manifest, and
+  return-boundary identities, not through the main stage sequence.
+- OPEN FACT: The service can preserve a deadline-held position and recover a prepared supplementary
+  settlement, but it has no production observation-only provider reconciler that resolves the
+  position as `SOLD`, `REFUNDED`, or `NEVER_SENT` and starts the supplementary intent. Resolve it by
+  adding a lease-fenced read adapter and evidence-bound handoff with restart tests. Verified safe
+  alternative: leave the held position open; do not issue a replacement provider request.

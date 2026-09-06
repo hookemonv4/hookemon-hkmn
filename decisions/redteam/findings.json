@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
   "phase": "redteam",
-  "requirementsRevision": 58,
-  "architectureRevision": 5,
-  "cycle": 2,
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "cycle": 3,
   "priorCycle": {
-    "cycle": 1,
-    "requirementsRevision": 55,
-    "architectureRevision": 4,
-    "note": "RT-R55-01/03/04 stay RESOLVED and are carried forward unchanged below. RT-R55-02/05/06 are re-scoped against revision 58 in place (see each entry's revision58Disposition) rather than duplicated under new ids, per WP-26's instruction to carry forward or re-scope them."
+    "cycle": 2,
+    "requirementsRevision": 58,
+    "architectureRevision": 5,
+    "note": "The revision 58 cycle is preserved in the content-addressed prior review bundle. Revision 55 aliases are normalized to RT-R58-05, RT-R58-06, and RT-R58-07."
   },
   "classificationPrecedence": [
     "contract-misread",
@@ -16,152 +16,277 @@
     "valid-tradeoff",
     "noise"
   ],
+  "reviewBundle": {
+    "path": "qa/redteam/current-review-bundle.json",
+    "sha256": "6bb4db787e0592ff8aa7d0e7fc92ea4db7f8b885f5e7e8465a2b52e02a2b9856"
+  },
+  "priorReviewBundle": {
+    "path": "qa/redteam/prior-review-bundle.json",
+    "sha256": "7d92e1af1d88319c766d95e9be9537d6a3beb6e4f728411116b35cede67e04ce"
+  },
   "findings": [
     {
       "id": "RT-R55-01",
       "reportedSeverity": "critical",
       "classification": "valid-actionable",
       "canonicalIssue": "generic-system-evidence-semantic-bypass",
-      "summary": "Generic SYSTEM receipts could previously present malformed F3 or F4 artifacts as passing evidence.",
+      "summary": "Generic SYSTEM evidence cannot satisfy a gate without the required semantic proof schema and bound inputs.",
       "status": "RESOLVED",
-      "evidence": ["1e647d4", "ac02407", "scripts/tests/gates.test.mjs"],
-      "disposition": "The recorder and receipt verifier now require exact F3 spike semantics and transitive F4 architecture/freeze authority; negative tests fail closed."
-    },
-    {
-      "id": "RT-R55-02",
-      "reportedSeverity": "high",
-      "classification": "valid-actionable",
-      "canonicalIssue": "compromised-operations-exposure",
-      "summary": "A compromised current Operations identity can release and control the complete accrued process liability; the cooperative 100 USDG runner cap is not enforced onchain.",
-      "status": "OPEN_FAIL_CLOSED",
-      "evidence": ["614ae93", "feasibility/model-results.json", "feasibility/survivability-bounds.json", "product/PRD.md"],
-      "disposition": "The model now records the full liability exposure with no fixed system-wide cap. F2 requires explicit owner reapproval of the corrected scope; no zero-loss or 100-USDG system-cap claim is permitted.",
-      "revision58Disposition": "STILL_OPEN_UNCHANGED: the new StandingAuthorityProvider (packages/runner/src/cycle/authorization-provider.mjs) enforces perCycleSpendCap/maxCyclesPerDay only as an off-chain policy-signature check before a journal entry is accepted; FeeAccounting.sol/ProcessBudget.sol still impose no on-chain ceiling on the process liability a compromised Operations/authorizer identity could debit (FeeAccounting._debitProcessLiability only checks amount <= processLiabilityAmount). See qa/redteam/revision-58-findings.json rescopedFromRevision55 (RT-R58-05)."
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "Evidence recording and verification reject forged F3 proofs and bind transitive F4 authority."
     },
     {
       "id": "RT-R55-03",
       "reportedSeverity": "high",
       "classification": "valid-actionable",
       "canonicalIssue": "stale-redteam-authority",
-      "summary": "A projected PASSED redteam state pointed to stale review evidence for requirements 54 and architecture 3.",
+      "summary": "Generated state cannot replace current receipt-backed red-team authority.",
       "status": "RESOLVED",
-      "evidence": ["0b91d9c", "8a3ff3f", "dd48c94", "scripts/tests/state.test.mjs", "state.json"],
-      "disposition": "The historical continuation after the failed redteam gate occurred and is invalidated. Gate evaluation now requires authoritative predecessor gates, downstream overrides cannot bypass a failed or stale predecessor, and state projection marks downstream phases stale. The current redteam gate remains FAILED with no override."
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "Gate authority is recomputed from ordered receipts, current hashes, and authoritative predecessor gates."
     },
     {
       "id": "RT-R55-04",
       "reportedSeverity": "high",
       "classification": "valid-actionable",
       "canonicalIssue": "module-index-authority",
-      "summary": "A6 previously trusted an incomplete module index without exact card identity, revision, digest, path, or structure binding.",
+      "summary": "Architecture evidence must bind the exact current module-card set rather than trusting incomplete index metadata.",
       "status": "RESOLVED",
-      "evidence": ["323b2f3", "9851a10", "fb983c6", "scripts/tests/gates.test.mjs"],
-      "disposition": "A6 now binds the exact capability-map module set and order, current revisions, regular non-symlink cards, exact digests, titles, headings, and Markdown fence structure."
-    },
-    {
-      "id": "RT-R55-05",
-      "reportedSeverity": "high",
-      "classification": "valid-actionable",
-      "canonicalIssue": "durable-proof-recovery",
-      "summary": "Two successful publication reads do not define durable, non-expiring proof recovery after correlated provider or administrator failure.",
-      "status": "OPEN_FAIL_CLOSED",
-      "evidence": ["specs/requirements.json", "docs/modules/payout-commitment.md", "tasks/P1-009.md"],
-      "disposition": "Positive publication attestation, payout-funding preparation, and P1-009 completion remain blocked until owner-approved retention, independent failure domains, content-addressed archive, recovery, republish, and long-horizon verification semantics are normative and implemented.",
-      "revision58Disposition": "STILL_OPEN_UNCHANGED: WP-27's disk-backed DurableCycleStore fixes the runner's own in-memory cycle-count ceiling, a related but distinct operational defect, and does not implement durable, independently-recoverable public retention of a holder's unpaid-entitlement proof (manifest republication/archival across independent failure domains). See qa/redteam/revision-58-findings.json rescopedFromRevision55 (RT-R58-06)."
-    },
-    {
-      "id": "RT-R55-06",
-      "reportedSeverity": "high",
-      "classification": "valid-actionable",
-      "canonicalIssue": "production-router-proof",
-      "summary": "Buyer-output settlement is proven only through a test-local router rather than the production Robinhood router and PoolManager path.",
-      "status": "OPEN_FAIL_CLOSED",
-      "evidence": ["packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol", "feasibility/interface-freeze.json"],
-      "disposition": "Production readiness remains false until a release-bound fork or live read-only integration proves the actual router, PoolManager callback, recipient settlement, and zero additional surcharge behavior.",
-      "revision58Disposition": "PARTIALLY_MITIGATED_STILL_OPEN: WP-05's open-router/optional-hookData change (REQ-canonical-market-6) removes the pool's dependency on any specific router address for correct fee/liability behavior -- the practical risk this finding named. WP-24 adds a pinned-block fork suite (RobinhoodV4Fork.t.sol) and a current-head drift smoke test (RobinhoodV4ForkSmoke.t.sol) against a real forked PoolManager, closing the 'test-local router only' gap for the callback/settlement path. What remains open is a genuine live (non-forked) confirmation once Programmable's chain-4663 profile is launch-ready -- blocked on external readiness (status: unavailable as of 2026-09-02), not a code defect. See qa/redteam/revision-58-findings.json rescopedFromRevision55 (RT-R58-07)."
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "A6 validates exact module identity, revision, path, digest, structure, and capability coverage."
     },
     {
       "id": "RT-R58-01",
       "reportedSeverity": "critical",
       "classification": "valid-actionable",
       "canonicalIssue": "payout-authorization-lacks-onchain-dual-signature-binding",
-      "summary": "PegCycleVault.authorizePayout and PayoutCommitment.commitPayoutChunk trust msg.sender == pegCycleVault.authorizer() alone; neither checks any distribution-signer or verifier signature over the rootHash/rootSum on-chain. Because the vault-authorizer identity is the always-on worker's own signerClient.evm key (packages/adapters/src/app/stages/funding.mjs and payout.mjs both sign with it), a single compromised worker key can author and commit an arbitrary payout manifest -- with itself as the sole leaf -- and settle the cycle's entire returned proceeds to itself via HolderSettlement.payEntitlement, fully bypassing the distribution-signer + verifier process design.md section 2.3/2.4 and decision D7 require.",
+      "summary": "The vault verifies two payout signatures, but the retained chunk-commit path still lets its authorizer replace a funded root without the second signature.",
       "status": "OPEN_FAIL_CLOSED",
       "evidence": [
-        "packages/contracts/src/process/PegCycleVault.sol:300-338 (authorizePayout)",
-        "packages/contracts/src/payout/PayoutCommitment.sol:134-170 (commitPayoutChunk)",
-        "packages/contracts/src/process/IPegCycleVault.sol:27-44 (PayoutAuthorization struct has no signature field)",
-        "packages/adapters/src/app/stages/payout.mjs:46-47,107 (signerClient.evm)",
-        "packages/adapters/src/app/stages/funding.mjs:124,157,173 (same signerClient.evm)",
-        "packages/adapters/src/app/stages/outbound.mjs:76 (same signerClient.evm again, see RT-R58-03)"
+        "qa/redteam/current-cycle-evidence.json"
       ],
-      "disposition": "OPEN. This is the single highest-severity finding of the revision-58 review and directly contradicts WP-26's own acceptance criterion 'No finding shows a path for a single compromised key to redirect a cycle's proceeds.' Requires an on-chain (or cryptographically-enforced, contract-checked) binding of authorizePayout/commitPayoutChunk to two independent, non-worker-held signatures before either call is accepted. Report only; product code not modified by this review per WP-26's scope."
+      "disposition": "The affected process contracts remain excluded from the Phase 3 deployment manifest. Bind every committed chunk to the dual-signed funded root before including this family."
     },
     {
       "id": "RT-R58-02",
       "reportedSeverity": "critical",
       "classification": "valid-actionable",
       "canonicalIssue": "distribution-signer-verification-keys-are-public-fixture-keys",
-      "summary": "packages/runner/src/distribution/manifest.mjs hardcodes the Ed25519 public keys it checks a distribution-signer approval (OWNER_PUBLIC_KEY) and a verifier receipt (DISTRIBUTION_VERIFIER_PUBLIC_KEY) against, as module-level constants. The matching private keys are committed in plaintext in this repository's own test fixtures and reused unchanged by the live distribution.mjs stage (WP-35/36) -- there is no environment/config seam to inject a real, operator-held production key. Anyone who has read this public repository already holds the keys needed to forge a valid-looking distribution-signer approval and verifier receipt for any manifest.",
+      "summary": "The retained legacy distribution compiler still embeds fixture verification identities even though the active production signing module requires configured identities.",
       "status": "OPEN_FAIL_CLOSED",
       "evidence": [
-        "packages/runner/src/distribution/manifest.mjs:11-26 (hardcoded public keys), 172-220 (verifyApproval), 107-169 (verifyDistributionVerificationReceipt)",
-        "packages/runner/test/cycle/fixture-crypto.mjs:25 (OWNER_PRIVATE_KEY hex 8566b1706357d4653313d88defec8219a3f4ad9d2abca8484765a4af92b12cb9, derives OWNER_PUBLIC_KEY)",
-        "packages/runner/test/distribution/manifest.test.mjs:36-50 (same OWNER_PRIVATE_KEY plus DISTRIBUTION_VERIFIER_PRIVATE_KEY hex 66d19592d6fe485bacd309b93ae3524217a22bdcba8ee6333d1c0f51fb150e16, used successfully against manifest.mjs's hardcoded public keys)",
-        "packages/adapters/src/app/stages/distribution.mjs:60-61 (imports compileApprovedDistribution/verifyDistributionVerificationReceipt from that same manifest.mjs, unmodified, for the live stage)"
+        "qa/redteam/current-cycle-evidence.json"
       ],
-      "disposition": "OPEN. Compounds RT-R58-01: even if authorizePayout were fixed to require these signatures on-chain, the keys they would be checked against are public. Requires threading a genuinely operator-configured, non-fixture owner/verifier public key into manifest.mjs's verification path, with a hard refusal (never a fallback to the fixture key) when a production evidence profile is active and no such key is configured. Report only; product code not modified by this review."
+      "disposition": "Keep the legacy distribution profile outside the authorized release surface until its verification identities are production-configured with no fixture fallback."
     },
     {
       "id": "RT-R58-03",
       "reportedSeverity": "medium",
       "classification": "valid-actionable",
       "canonicalIssue": "single-evm-signer-role-cannot-satisfy-authorizer-and-operationstrigger-simultaneously",
-      "summary": "packages/adapters' composition root exposes exactly one EVM signer role (signerClient.evm), used identically to sign authorizeFunding/authorizePayout (must be pegCycleVault.authorizer()) and executeOutbound (must be activeAuthorization.operationsTrigger). PegCycleVault._validateFundingAuthorization explicitly rejects operationsTrigger == authorizer. Since funding.mjs always sets operationsTrigger to config.accounts.evm while signerClient.evm signs from whichever address HOOKEMON_KEYCHAIN_EVM_ACCOUNT (or the external signer module) actually names, no single-signer configuration lets both authorizeFunding/authorizePayout and executeOutbound succeed for the same cycle -- the live path cannot complete a full cycle as composed.",
-      "status": "OPEN_FAIL_CLOSED",
+      "summary": "The prior process topology could not satisfy its distinct authorization and Operations roles with one composed EVM signer.",
+      "status": "RESOLVED",
       "evidence": [
-        "packages/contracts/src/process/PegCycleVault.sol:490-496 (operationsTrigger == authorizer rejected)",
-        "packages/adapters/src/app/stages/funding.mjs:124,157 (operationsTrigger: config.accounts.evm), 173 (signerClient.evm.sign)",
-        "packages/adapters/src/app/stages/outbound.mjs:76 (signerClient.evm.sign)",
-        "packages/adapters/src/app/stages/payout.mjs:46-47,107 (signerClient.evm)",
-        "packages/adapters/src/app/environment.mjs:254 (evmAccount), 265-266 (keychainEvmAccount, independently configured), 356 (keychain signer bound to keychainEvmAccount, not evmAccount)"
+        "qa/redteam/current-cycle-evidence.json"
       ],
-      "disposition": "OPEN. Fails closed (blocks the live path rather than enabling redirection), so it does not itself violate WP-26's money-safety acceptance criteria, but it is a genuine availability/correctness gap in the merged composition that should be fixed before any live cycle is attempted: add a second, distinct EVM signer role for the vault-authorizer calls, separate from the operationsTrigger-role signer. Report only; product code not modified by this review."
+      "disposition": "The active topology exposes only the approved Operations identities and refuses a third Operations EVM signer before service creation."
     },
     {
       "id": "RT-R58-04",
       "reportedSeverity": "medium",
       "classification": "valid-tradeoff",
       "canonicalIssue": "degraded-confirmation-flag-not-cryptographically-bound",
-      "summary": "PegCycleVault.recordDegradedReturn accepts any acceptDegraded=true boolean from msg.sender==authorizer as attestation that the required off-chain human confirmation already happened; nothing on-chain distinguishes a genuinely human-confirmed call from an unattended policy that always passes true. This can quarantine (never steal -- see RT-R58-CLOSED-02 in qa/redteam/revision-58-findings.json) a cycle's proceeds at the authorizer's sole discretion, including a cycle that would otherwise have paid out cleanly.",
+      "summary": "The retained vault accepts an authorizer-supplied degraded-return confirmation boolean without independent cryptographic binding.",
       "status": "OPEN_FAIL_CLOSED",
       "evidence": [
-        "packages/contracts/src/process/PegCycleVault.sol:408-428 (recordDegradedReturn, acceptDegraded is trusted, not independently verified)"
+        "qa/redteam/current-cycle-evidence.json"
       ],
-      "disposition": "OPEN, classified as a documented trade-off rather than a pure defect: design.md section 2.5 already states this must never be signed from an unattended policy, as an off-chain operational rule. Recommend the ADR-0021 text (design.md section 8) name this trust boundary on the authorizer key explicitly, or bind acceptDegraded to a second confirmation signature if the owner wants it cryptographically enforced. Report only; product code not modified by this review."
+      "disposition": "The affected vault remains excluded from the Phase 3 deployment manifest. A second confirmation signature is required before promoting this path."
+    },
+    {
+      "id": "RT-R58-05",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "compromised-operations-exposure",
+      "summary": "A compromised Operations identity previously had no on-chain rolling ceiling on current process exposure.",
+      "status": "RESOLVED",
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "The hook enforces the strict six-hour exposure window and its configured liability cap on-chain."
+    },
+    {
+      "id": "RT-R58-06",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "durable-proof-recovery",
+      "summary": "The prior public-proof payout design did not guarantee durable recovery across publication failures.",
+      "status": "RESOLVED",
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "Revision 65 replaces that design with durable direct payout, persisted effect boundaries, exact transaction recovery, and quarantine."
+    },
+    {
+      "id": "RT-R58-07",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "production-router-proof",
+      "summary": "The production router and PoolManager path previously lacked a release-bound integration proof.",
+      "status": "RESOLVED",
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "A pinned mandatory archive-fork suite exercises the production path and fails closed without its configured endpoint."
     },
     {
       "id": "RT-R58-08",
       "reportedSeverity": "medium",
       "classification": "valid-actionable",
       "canonicalIssue": "holder-snapshot-exclusion-set-incomplete",
-      "summary": "distribution.mjs's holder-snapshot builder excludes only the vault, the hook, and the current cycle's own return escrow -- not the canonical pool, the treasury/Programmable beneficiaries, or any prior cycle's return escrow -- so a live distribution computed today would treat any HKMN held by those addresses as an ordinary payable holder.",
+      "summary": "Holder snapshots previously omitted deployment, beneficiary, custody, and historical role addresses from the exclusion set.",
       "status": "RESOLVED",
       "evidence": [
-        "574d84b (fix(distribution): complete the holder-snapshot exclusion set and fix stale docs)",
-        "packages/adapters/src/app/stages/distribution.mjs:144-176 (buildHolderExclusionSet)",
-        "packages/adapters/test/app/distribution-exclusion.test.mjs"
+        "qa/redteam/current-cycle-evidence.json"
       ],
-      "disposition": "RESOLVED by WP-37, merged onto this branch. buildHolderExclusionSet now excludes the vault, the hook, the Uniswap v4 PoolManager, the canonical pool custody address, the pinned Programmable beneficiary, the current treasury beneficiary, every prior cycle's own return escrow (derived via the vault's computeCycleEscrow for every id cycleRepository.listKnownCycleIds() knows about), the zero address, and any operator-supplied HOOKEMON_EXCLUDED_HOLDER_ADDRESSES, recorded in full next to the compiled manifest. packages/adapters/test/app/distribution-exclusion.test.mjs proves a snapshot built from the full set never pays the pool manager, the treasury, or a prior cycle's escrow."
+      "disposition": "The snapshot exclusion digest covers deployment and historical roles while preserving unrelated recipients."
+    },
+    {
+      "id": "RT-R65-01",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "seed-intent-not-bound-onchain",
+      "summary": "The canonical-liquidity seed call must match the owner-bound payer, ticks, liquidity, maxima, and a deadline within the 900-second execution window.",
+      "status": "RESOLVED",
+      "evidence": [
+        "qa/redteam/current-cycle-evidence.json"
+      ],
+      "disposition": "The hook, release plan, and launch-package verifier bind the materialized seed call to the immutable intent digest and separately enforce deadline <= block.timestamp + 900. The content-addressed QA record cites the unit, release-plan, and archive-fork mutation tests."
     }
   ],
   "counts": {
     "contract-misread": 0,
-    "valid-actionable": 10,
+    "valid-actionable": 11,
     "valid-tradeoff": 1,
     "noise": 0,
-    "resolved": 4,
-    "open": 7,
+    "resolved": 9,
+    "open": 3,
     "inProgress": 0
+  },
+  "evidenceReferences": {
+    "RT-R55-01": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/gates.test.mjs",
+        "testName": "feasibility gate check rejects forged F3 evidence for blocked spikes"
+      }
+    ],
+    "RT-R55-03": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/release-ready.test.mjs",
+        "testName": "state projections cannot replace an authoritative redteam receipt"
+      }
+    ],
+    "RT-R55-04": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/gates.test.mjs",
+        "testName": "architecture A6 rejects reduced module sets and stale revision bindings"
+      }
+    ],
+    "RT-R58-01": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/deployment-manifest.test.mjs",
+        "testName": "rejects a deployment manifest that includes an excluded process contract"
+      }
+    ],
+    "RT-R58-02": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "packages/adapters/test/signing/payout-distribution.test.mjs",
+        "testName": "this module never imports the fixture Ed25519 manifest.mjs public keys (source-level check)"
+      }
+    ],
+    "RT-R58-03": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "packages/adapters/test/app/compose.test.mjs",
+        "testName": "compose refuses a third Operations EVM identity before creating services"
+      }
+    ],
+    "RT-R58-04": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/deployment-manifest.test.mjs",
+        "testName": "rejects a deployment manifest that includes an excluded process contract"
+      }
+    ],
+    "RT-R58-05": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/reqs.test.mjs",
+        "testName": "Phase 3 process claims use a strict six-hour window without changing the policy spend ledger"
+      }
+    ],
+    "RT-R58-06": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "packages/adapters/test/app/stages-payout.test.mjs",
+        "testName": "a restart after every persisted boundary never signs a second transaction for the same recipient and nonce"
+      }
+    ],
+    "RT-R58-07": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/workflow-security.test.mjs",
+        "testName": "fork-proof runs only after a main push or a manual main dispatch and fails closed without its endpoint"
+      }
+    ],
+    "RT-R58-08": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "packages/adapters/test/app/eligibility-snapshot.test.mjs",
+        "testName": "excludes deployment and historical role addresses without excluding unrelated contract recipients"
+      }
+    ],
+    "RT-R65-01": [
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/gates.test.mjs",
+        "testName": "redteam R2 rejects a current findings artifact that omits RT-R65-01"
+      },
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/programmable-package.test.mjs",
+        "testName": "rejects a seed transaction supplied with a non-rederivable materialized manifest"
+      },
+      {
+        "path": "qa/redteam/current-cycle-evidence.json",
+        "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9",
+        "testPath": "scripts/tests/launch-addresses.test.mjs",
+        "testName": "package seed verification requires a rederivable materialized hook manifest"
+      }
+    ]
   }
 }

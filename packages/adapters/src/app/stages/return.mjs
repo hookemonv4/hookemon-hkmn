@@ -133,6 +133,65 @@ export function returnableProceedsDelta(ledger) {
   return (proceeds - committed).toString();
 }
 
+function zeroProceedsReturnEvidence({ request, context, configured, money }) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)
+    || request.schema !== 'hookemon.return-zero-proceeds-request.v1'
+    || request.cycleId !== context?.cycleId
+    || !request.inputAmount || !request.destinationAmount) {
+    throw new Error('return zero-proceeds request is invalid');
+  }
+  const input = request.inputAmount;
+  const destination = request.destinationAmount;
+  if (input.chainId !== SOLANA_CHAIN_ID || input.assetId !== configured.solanaMint
+    || input.decimals !== money.assets.solanaStablecoin.decimals || input.amountAtomic !== '0'
+    || destination.chainId !== EVM_CHAIN_ID || destination.assetId?.toLowerCase() !== USDG_ADDRESS
+    || destination.decimals !== money.assets.usdg.decimals || destination.amountAtomic !== '0') {
+    throw new Error('return zero-proceeds request does not match the configured settlement assets');
+  }
+  return Object.freeze({
+    schema: 'hookemon.return-zero-proceeds-evidence.v1',
+    cycleId: context.cycleId,
+    finalized: true,
+    noBridge: true,
+    destinationAccount: configured.evm,
+    destinationAsset: USDG_ADDRESS,
+    destinationCreditAmount: '0',
+  });
+}
+
+function isZeroProceedsReturnEvidence(value, { cycleId, configured, money }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.schema !== 'hookemon.return-zero-proceeds-evidence.v1'
+    || value.cycleId !== cycleId || value.finalized !== true || value.noBridge !== true
+    || value.destinationAccount?.toLowerCase() !== configured.evm.toLowerCase()
+    || value.destinationAsset?.toLowerCase() !== USDG_ADDRESS
+    || value.destinationCreditAmount !== '0') return false;
+  return money.assets.usdg.chainId === EVM_CHAIN_ID && money.assets.usdg.decimals === 6;
+}
+
+function zeroProceedsReturnRequest({ context, configured, money }) {
+  return Object.freeze({
+    schema: 'hookemon.return-zero-proceeds-request.v1',
+    cycleId: context.cycleId,
+    inputAmount: Object.freeze({
+      chainId: SOLANA_CHAIN_ID,
+      assetId: configured.solanaMint,
+      decimals: money.assets.solanaStablecoin.decimals,
+      amountAtomic: '0',
+    }),
+    destinationAmount: Object.freeze({
+      chainId: EVM_CHAIN_ID,
+      assetId: USDG_ADDRESS,
+      decimals: money.assets.usdg.decimals,
+      amountAtomic: '0',
+    }),
+  });
+}
+
+function hasHeldPositionWithoutProceedsLedger(cycle) {
+  return cycle?.heldPositions instanceof Map && cycle.heldPositions.size > 0;
+}
+
 function assertReturnQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.RETURN) throw new Error('return requires a RETURN Relay quote');
   if (quote.origin?.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID || quote.origin?.address !== config.solanaMint) {
@@ -190,8 +249,15 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   const money = assertReturnMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
   const ledger = custodyLedgerFor(cycle, { chainId: String(RELAY_CONSTANTS.SOLANA_CHAIN_ID), assetId: configured.solanaMint });
+  if (ledger === null && hasHeldPositionWithoutProceedsLedger(cycle)) {
+    return zeroProceedsReturnRequest({ context, configured, money });
+  }
   const amountAtomic = returnableProceedsDelta(ledger);
-  if (amountAtomic === '0') throw new Error('return has no uncommitted cycle-attributed proceeds');
+  if (amountAtomic === '0') {
+    const proceeds = canonicalAmount(ledger.buybackProceeds, 'return custody buybackProceeds');
+    if (proceeds !== '0') throw new Error('return has no uncommitted cycle-attributed proceeds');
+    return zeroProceedsReturnRequest({ context, configured, money });
+  }
   const quote = await adapters.relay.quoteReturnBridge({
     user: configured.solana,
     recipient: configured.evm,
@@ -674,9 +740,24 @@ export async function mutateReturn({
   if (typeof context?.requestDigest !== 'string' || !DIGEST.test(context.requestDigest)) {
     throw new Error('return requires the durable stage request digest');
   }
-  assertReturnMutationRepository(cycleRepository);
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
+  if (request?.schema === 'hookemon.return-zero-proceeds-request.v1') {
+    const evidence = zeroProceedsReturnEvidence({ request, context, configured, money });
+    if (typeof cycleRepository?.readStageAttempt !== 'function' || typeof cycleRepository?.recordStageAttempt !== 'function') {
+      throw new Error('return zero-proceeds settlement requires a durable stage-attempt repository');
+    }
+    const existing = await cycleRepository.readStageAttempt(context.cycleId, 'return');
+    if (existing !== null && existing !== undefined) {
+      if (canonicalDigest(existing) !== canonicalDigest(evidence)) {
+        throw new Error('return zero-proceeds settlement conflicts with recorded evidence');
+      }
+      return evidence;
+    }
+    await cycleRepository.recordStageAttempt(context.cycleId, 'return', evidence);
+    return evidence;
+  }
+  assertReturnMutationRepository(cycleRepository);
   const client = adapters?.solana?.client;
   if (!client) throw new Error('return requires a configured Solana RPC client');
   const cycle = await cycleRepository.describeCycle(context.cycleId);
@@ -890,6 +971,20 @@ export async function readReturnLegDestinationProof({ client, pointer, leg, sour
  * then binds an authenticated Relay hash pointer to a separately finalized EVM receipt proof.
  */
 export async function reconcileLiveReturn({ adapters, config, cycleRepository, context }) {
+  if (typeof cycleRepository?.readStageAttempt === 'function') {
+    const zeroEvidence = await cycleRepository.readStageAttempt(context.cycleId, 'return');
+    if (zeroEvidence?.schema === 'hookemon.return-zero-proceeds-evidence.v1') {
+      const configured = assertReturnConfiguration(config);
+      const money = assertReturnMoneyConfiguration(config, configured);
+      if (!isZeroProceedsReturnEvidence(zeroEvidence, { cycleId: context.cycleId, configured, money })) {
+        throw new ReturnRecoveryRequiredError(
+          'RETURN_ZERO_PROCEEDS_EVIDENCE_INVALID',
+          'the durable zero-proceeds return evidence does not bind the configured cycle route',
+        );
+      }
+      return Object.freeze(structuredClone(zeroEvidence));
+    }
+  }
   if (typeof cycleRepository?.describeCycle !== 'function') {
     const intent = legacyUnauthenticatedReturnAttempt(await cycleRepository.readOperationalStageAttempt?.(context.cycleId, 'return'));
     if (intent === null) return null;

@@ -217,6 +217,39 @@ test('run-cycle-now invokes the authority once and retains its precomputed recei
   assert.deepEqual(server.calls.execute, [{ expectedRevision: 0, requestId: 'run-now', command: { type: 'run-cycle-now' } }]);
 });
 
+test('resume-cycle persists the authority recovery result after a completed cycle leaves no active cycle', async (t) => {
+  const server = await buildTestServer(t);
+  server.ctx.operatorControl.status = async () => ({ ...status(0), activeCycleId: null, cycles: [] });
+  server.ctx.operatorControl.execute = async input => {
+    server.calls.execute.push(input);
+    return {
+      action: 'resume-cycle',
+      resultCode: 'RECOVERY_SUPPLEMENTARY_SETTLEMENT',
+      result: { status: 'SUPPLEMENTARY_SETTLEMENT', cycleId: 'cycle-complete' },
+      revision: 0,
+    };
+  };
+
+  const request = { requestId: 'resume-supplementary', expectedVersion: 0, command: { type: 'resume-cycle' } };
+  const first = await server.post('/operator/api/decisions', request, AUTH);
+  const replay = await server.post('/operator/api/decisions', request, AUTH);
+
+  assert.equal(first.status, 200);
+  assert.equal(first.body.code, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.code, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  assert.equal(replay.body.replayed, true);
+  assert.deepEqual(server.calls.execute, [{
+    expectedRevision: 0,
+    requestId: 'resume-supplementary',
+    command: { type: 'resume-cycle' },
+  }]);
+  assert.deepEqual(
+    (await readAllAuditEntries(server.ctx.auditLogPath)).map(entry => entry.resultCode),
+    ['COMMAND_PREPARED', 'RECOVERY_SUPPLEMENTARY_SETTLEMENT'],
+  );
+});
+
 test('cards, packs, identities, static controls, and unknown paths preserve their route contracts', async (t) => {
   const server = await buildTestServer(t, {
     identities: Object.freeze({ vaultAddress: '0xabc', collectorCryptConfigured: false }),
@@ -379,6 +412,7 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -413,6 +447,74 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
   assert.deepEqual(
     (await readAllAuditEntries(server.ctx.auditLogPath)).map(entry => entry.commandState),
     ['PREPARED', 'REJECTED', 'PREPARED', 'REJECTED'],
+  );
+});
+
+test('held owner decision repository validation failures are audited as rejected', async (t) => {
+  const server = await buildTestServer(t);
+  const validationErrors = [
+    'cycle-repository recordHeldOwnerDecision: positionId is invalid',
+    'cycle-repository recordHeldOwnerDecision: stale position revision',
+    'cycle-repository recordHeldOwnerDecision: held evidence digest does not match the position',
+    'cycle-repository recordHeldOwnerDecision: held position is unknown',
+    'cycle-repository recordHeldOwnerDecision: archived held positions require supplementary settlement recovery',
+    'cycle-repository recordHeldOwnerDecision: held position is already resolved',
+    'cycle-repository recordHeldOwnerDecision: requestId conflict',
+    'cycle-repository recordHeldOwnerDecision: held position already has a sell decision',
+  ];
+  let nextError = 0;
+  server.ctx.operatorControl.execute = async () => {
+    throw new Error(validationErrors[nextError++]);
+  };
+
+  for (const [index, message] of validationErrors.entries()) {
+    const result = await server.post('/operator/api/decisions', {
+      requestId: `held-validation-${index}`,
+      expectedVersion: 0,
+      command: {
+        type: 'held-owner-decision',
+        positionId: `held:${'a'.repeat(64)}`,
+        heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
+        expectedPositionRevision: 0,
+        choice: 'sell',
+      },
+    }, AUTH);
+
+    assert.equal(result.status, 409, message);
+    assert.equal(result.body.code, 'COMMAND_REJECTED', message);
+    assert.equal(result.body.commandState, 'REJECTED', message);
+  }
+
+  assert.deepEqual(
+    (await readAllAuditEntries(server.ctx.auditLogPath)).map(entry => entry.commandState),
+    validationErrors.flatMap(() => ['PREPARED', 'REJECTED']),
+  );
+});
+
+test('a held owner decision provider failure remains uncertain', async (t) => {
+  const server = await buildTestServer(t);
+  server.ctx.operatorControl.execute = async () => {
+    throw new Error('collector provider timed out while reading the position');
+  };
+
+  const result = await server.post('/operator/api/decisions', {
+    requestId: 'held-provider-timeout',
+    expectedVersion: 0,
+    command: {
+      type: 'held-owner-decision',
+      positionId: `held:${'a'.repeat(64)}`,
+      heldEvidenceDigest: `sha256:${'b'.repeat(64)}`,
+      expectedPositionRevision: 0,
+      choice: 'sell',
+    },
+  }, AUTH);
+
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'COMMAND_UNCERTAIN');
+  assert.equal(result.body.commandState, 'UNCERTAIN');
+  assert.deepEqual(
+    (await readAllAuditEntries(server.ctx.auditLogPath)).map(entry => entry.commandState),
+    ['PREPARED', 'UNCERTAIN'],
   );
 });
 

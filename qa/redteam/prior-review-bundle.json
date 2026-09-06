@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "hookemon.redteam-review-bundle.v1",
+  "phase": "redteam",
+  "requirementsRevision": 58,
+  "architectureRevision": 5,
+  "cycle": 2,
+  "findings": [
+    {
+      "id": "RT-R55-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "generic-system-evidence-semantic-bypass",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "RT-R55-03",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "stale-redteam-authority",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "RT-R55-04",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "module-index-authority",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "RT-R58-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "payout-authorization-lacks-onchain-dual-signature-binding",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-02",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "distribution-signer-verification-keys-are-public-fixture-keys",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-03",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "single-evm-signer-role-cannot-satisfy-authorizer-and-operationstrigger-simultaneously",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-04",
+      "reportedSeverity": "medium",
+      "classification": "valid-tradeoff",
+      "canonicalIssue": "degraded-confirmation-flag-not-cryptographically-bound",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-05",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "compromised-operations-exposure",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-06",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "durable-proof-recovery",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-07",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "production-router-proof",
+      "status": "OPEN_FAIL_CLOSED"
+    },
+    {
+      "id": "RT-R58-08",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "holder-snapshot-exclusion-set-incomplete",
+      "status": "RESOLVED"
+    }
+  ]
+}

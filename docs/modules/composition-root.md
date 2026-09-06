@@ -24,10 +24,14 @@ repository client.
   immutable mode, provider profile, and dry-run flag when it opens a cycle.
 - `hookemon-runner dry-run --mode production` selects that explicit production dry run. It requires
   fake providers, does not construct a signer, and never invokes a provider mutation or broadcast.
-- `config.observability` supplies the canary, alert, and start-preflight configuration. The runner
-  requires it before every explicitly selected production or rehearsal profile, including a fake
-  rehearsal, and runs it before signer construction. A live `runOnce`, `recoverActiveCycle`, or
-  scheduler-built worker also refuses to run until its start preflight succeeds.
+- `hookemon-runner operator initialize-collector-only-policy` creates the sealed first-use policy
+  for an absent dedicated rehearsal state file. It requires the selected live Collector-only
+  environment, writes no signing material, and refuses an existing state rather than modifying it.
+- `config.observability` supplies the production canary, alert, and start-preflight configuration.
+  The live Collector-only rehearsal instead uses bounded Solana and Collector read-only canaries
+  plus a trusted execution bundle. Both profiles run their applicable preflight before signer
+  construction, and a live `runOnce`, `recoverActiveCycle`, or scheduler-built worker refuses until
+  that preflight succeeds.
 - `cycleRepository` is a frozen `CYCLE_REPOSITORY_CLIENT_INTERFACE` facade containing
   `readActiveCycle`, `peekActiveCycle`, `readStage`, `describeCycle`, `readOperationalStageAttempt`,
   `readChainTransactionAttempt`, `readClaimPreconditions`, and `listKnownCycleIds`. The
@@ -60,12 +64,13 @@ repository client.
 - The root exposes read-only dependency health and readiness to automation and dashboard surfaces.
   The decoder-backed, request-scoped signing wrapper remains an integration boundary; live startup
   preflight does not replace its final per-signature canary call.
-- The runner's start boundary validates the selected profile, replays repository integrity, reads
-  the configured RPC chain ID and requires mainnet `4663`, probes both Keychain identities, and runs the observability
-  preflight before it constructs a transaction-capable signer. Execution profiles also require a
-  valid persisted policy configuration whose `liveMode` matches the selected provider profile.
-  Production requires `manualApprovalCycles >= 3`; rehearsal requires at least one manual approval
-  slot.
+- The runner's start boundary validates the selected profile, replays repository integrity, and
+  runs its applicable preflight before it constructs a transaction-capable signer. Production
+  checks both Operations identities and its EVM and Solana canaries. The live Collector-only
+  rehearsal checks only `operator-solana`, its expected public key, Collector read-only state, and
+  Solana read-only state. Execution profiles also require a valid persisted policy configuration
+  whose `liveMode` matches the selected provider profile. Production requires
+  `manualApprovalCycles >= 3`; rehearsal requires at least one manual approval slot.
 
 ## Invariants
 
@@ -74,11 +79,12 @@ repository client.
 - `production` requires live providers unless explicit `dryRun` selects fake providers and rejects
   all rehearsal flags in either case.
 - A production dry run is not rehearsal: it uses the production mode and persisted flag while
-  omitting signer construction and all mutation capabilities.
-  The runnable rehearsal profile requires sealed fake providers. A requested live rehearsal is
-  refused before signer construction until the dedicated Solana proceeds projection and finality
-  evidence are implemented. The runnable profiles use the same runner, repository, policy engine,
-  leases, and write-ahead stage driver.
+  omitting signer construction and all mutation capabilities. Fake rehearsal uses sealed providers.
+  Live rehearsal is limited to the `collector-only` profile with the Operations Solana signer,
+  one pack, manual approval, a single pack-code allowlist entry, and a dedicated finalized-proceeds
+  account. It also requires in-process pinned purchase, buyback, and payout policies with rule
+  sidecars plus trusted Solana transaction-context resolvers. The runnable profiles use the same
+  runner, repository, policy engine, leases, and write-ahead stage driver.
 - `execution.enforceProfile` makes the composed runner reject an inspection profile that attempts
   live execution, a production profile that is not live production, and a rehearsal profile whose
   live state disagrees with its explicit provider mode. The CLI sets this boundary for every
@@ -96,6 +102,9 @@ repository client.
   both EIP-1559 fee fields and a post-fee native reserve. Return, purchase, and buyback require the
   configured Solana asset, cap the decoded priority fee, and check the post-fee lamport reserve;
   these are pre-sign balance checks, not transactional balance reservations.
+- The live Collector-only profile uses the typed Circle USD asset on Solana and does not construct
+  an EVM signer, bridge client, or EVM canary. It still validates the configured EVM typed fields
+  as part of the frozen money object; they do not authorize an EVM mutation.
 - The composition return value and dashboard request context expose only the frozen repository
   client. Writer methods remain reachable only through the composition's closed-over automation
   dependencies.
@@ -111,9 +120,10 @@ repository client.
   `launchEligible` without the release-evidence gate.
 - Before opening the cycle repository or dashboard listener, production composition reads EVM
   `eth_chainId` and Solana `getGenesisHash`. Both must match the configured chain and selected
-  dashboard profile; unavailable or malformed identity fails closed. Test-only injected adapters
-  must provide `networkIdentity` with those two reads for deterministic validation without a
-  transport.
+  dashboard profile; unavailable or malformed identity fails closed. The live Collector-only
+  rehearsal validates its Solana genesis identity and does not use an EVM identity as a substitute.
+  Test-only injected adapters provide the profile-appropriate identity reads for deterministic
+  validation without a transport.
 - The listener-free operator facade and an optional dashboard share one append-only audit ledger.
   Dashboard startup verifies its hash chain before it opens or rebuilds SQLite; a listener-free
   command uses the same pre-effect reservation and terminal outcome protocol.
@@ -151,11 +161,12 @@ repository client.
   use their durable Relay legs and complete only from canonical own-RPC settlement evidence,
   including a `SETTLED` replay. Built-in payout prepares an immutable direct-transfer request,
   advances durable recipient state, and reconciles only terminal conservation evidence after return
-  is complete. Purchase, open, epic gate, and buyback remain pending. The CLI still cannot reach
-  payout from a fresh live cycle until all predecessor stage integrations and pinned signer policy
-  inputs are available. Read-only probes for eligibility snapshot, claim process, and epic gate live in
-  `packages/adapters/src/app/stages/eligibility-snapshot.mjs`, `claim-process.mjs`, and
-  `epic-gate.mjs`.
+  is complete. The dedicated live Collector-only profile bypasses the production-only predecessor
+  legs with explicit skips and executes purchase, open, epic gate, buyback, and exact-account
+  payout under its Solana transaction policies. Its CLI can reach payout only after an accepted
+  execution bundle and finalization at the configured proceeds account. Read-only probes for eligibility snapshot, claim process, and
+  epic gate live in `packages/adapters/src/app/stages/eligibility-snapshot.mjs`,
+  `claim-process.mjs`, and `epic-gate.mjs`.
 - An explicit production dry run can traverse return and payout with fake providers and injected
   stage handlers, but it does not construct a signer or make a provider mutation.
 - Dry runs use probes only. They never invoke a signer, broadcast, or provider mutation, and they
@@ -166,9 +177,10 @@ repository client.
   nonempty pack ID.
 - A held cycle remains active as `HELD_DATA_UNVERIFIED`, `HELD_UNAVAILABLE`, or
   `HELD_OWNER_DECISION`; the scheduler does not resume it automatically.
-- Live composition fails closed when observability configuration is absent, its durable alert sink is
-  unavailable, a required signer is not ready, or required RPC evidence is not positive. The startup
-  gate does not replace the decoder-backed canary required at the final signing boundary.
+- Live composition fails closed when the selected profile's canary inputs are absent, a required
+  signer is not ready, or required RPC evidence is not positive. Production additionally requires
+  its observability configuration and durable alert sink. The startup gate does not replace the
+  decoder-backed canary required at the final signing boundary.
 - Fake rehearsal composes sealed fake Relay and Collector adapters. They provide deterministic
   effect records to the rehearsal driver and cannot issue a network request. Its evidence is sealed
   after every stage is reconciled and before terminal archival.
@@ -176,9 +188,9 @@ repository client.
 ## State transitions
 
 1. A pinned mainnet profile becomes a composed runtime only after configuration, repository
-   integrity, RPC chain identity, Keychain probes, policy approval-count validation, and canary
-   preflight pass. A failed check leaves the repository inspectable but refuses signer construction
-   and every execution path.
+   integrity, profile-appropriate RPC identity, Keychain probe, policy approval-count validation,
+   and canary preflight pass. A failed check leaves the repository inspectable but refuses signer
+   construction and every execution path.
 2. `createCycle` appends `cycle-opened`; each incomplete stage is prepared, reconciled, and
    completed in the fixed operational order. The event includes immutable `production` or
    `rehearsal` mode and its provider profile. Recovery rejects an absent or conflicting provider
@@ -210,7 +222,8 @@ repository client.
 (cd packages/adapters && npm ci --ignore-scripts && \
   node --test --test-timeout=120000 test/app/cycle-repository.test.mjs test/app/stage-driver.test.mjs test/app/observability.test.mjs test/app/compose.test.mjs)
 node packages/adapters/bin/hookemon-runner.mjs dry-run
-node packages/adapters/bin/hookemon-runner.mjs run --mode rehearsal --cycles 1 --cap-usdg 25000000 --collector-only --restart-inject
+node packages/adapters/bin/hookemon-runner.mjs preflight
+node packages/adapters/bin/hookemon-runner.mjs run --mode rehearsal --cycles 1 --cap-usdg 25000000 --collector-only
 node --test packages/runner/test/cycle/money-schemas.test.mjs packages/runner/test/cycle/failure-matrix.test.mjs
 ```
 
@@ -235,9 +248,9 @@ node --test packages/runner/test/cycle/money-schemas.test.mjs packages/runner/te
   before another live attempt. Do not replace the cycle or reuse a stale admission result.
 - Reconstruct the root from the pinned profile and repository journal after a process restart. Keep
   a failed composition outside automation until its evidence mismatch is resolved.
-- Supply an approved observability configuration before enabling live mode. If start preflight
-  fails, restore the alert sink, signer readiness, or chain evidence before rebuilding the live
-  service; do not bypass the gate with a dry-run setting.
+- Supply the profile's required canary inputs before enabling live mode. If start preflight fails,
+  restore signer readiness, provider state, or chain evidence before rebuilding the live service;
+  do not bypass the gate with a dry-run setting.
 - Use `hookemon-runner status --cycle <cycle-id>` before recovery. Reconcile a `SENT_UNKNOWN` or
   unresolved `SIGNED` attempt from its recorded digest and evidence before `resume`; no recovery
   path may create replacement bytes, a new nonce, or a new provider effect.

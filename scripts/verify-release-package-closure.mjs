@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -400,14 +400,28 @@ export function verifyReleasePackageClosure(reviewTargetPath = resolve(root, 're
 }
 
 function parseArgs(argv) {
-  if (argv.length === 0) return resolve(root, 'release/phase3/review-target.json');
-  if (argv.length === 2 && argv[0] === '--review-target') return resolve(argv[1]);
-  fail('usage: node scripts/verify-release-package-closure.mjs [--review-target <path>]');
+  const positional = argv.filter((arg) => arg !== '--write');
+  const write = argv.includes('--write');
+  if (positional.length === 0) return { reviewTargetPath: resolve(root, 'release/phase3/review-target.json'), write };
+  if (positional.length === 2 && positional[0] === '--review-target') return { reviewTargetPath: resolve(positional[1]), write };
+  fail('usage: node scripts/verify-release-package-closure.mjs [--review-target <path>] [--write]');
+}
+
+/**
+ * Regenerates release/phase3/review-target.json from the same trusted derivation this verifier
+ * already runs for every check -- never hand-edited, never a separate ad hoc computation.
+ */
+export function writeReleasePackageReviewTarget(reviewTargetPath = resolve(root, 'release/phase3/review-target.json')) {
+  runVendoredPackageVerifier();
+  const derived = deriveReleasePackageClosure();
+  writeFileSync(reviewTargetPath, `${JSON.stringify(derived, null, 2)}\n`);
+  return verifyReleasePackageClosure(reviewTargetPath);
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
-    const result = verifyReleasePackageClosure(parseArgs(process.argv.slice(2)));
+    const { reviewTargetPath, write } = parseArgs(process.argv.slice(2));
+    const result = write ? writeReleasePackageReviewTarget(reviewTargetPath) : verifyReleasePackageClosure(reviewTargetPath);
     process.stdout.write(`release package closure verified: ${result.files} files\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);

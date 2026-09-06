@@ -1,4 +1,5 @@
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { canonicalJson } from '../../../../runner/src/cycle/journal.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 
 const DOCUMENTED_PRIZE_TIER_RARITIES = Object.freeze({
@@ -156,9 +157,119 @@ function openEvidence(open) {
   return open.evidence;
 }
 
-async function hold(cycleRepository, context, terminalState, evidence) {
-  if (typeof cycleRepository?.holdCycle !== 'function') throw new Error('epic gate requires cycleRepository.holdCycle');
-  await cycleRepository.holdCycle(context.cycleId, terminalState, evidence);
+function heldOpenPosition(open) {
+  const evidence = open?.status === 'COMPLETE' ? open.evidence : null;
+  if (!plainObject(evidence) || evidence.decision !== 'held') return null;
+  if (typeof evidence.memo !== 'string' || evidence.memo.length === 0 || evidence.expectedCardCount !== 1
+    || (evidence.mint !== null && (typeof evidence.mint !== 'string' || evidence.mint.length === 0))
+    || typeof evidence.terminalState !== 'string' || evidence.terminalState.length === 0
+    || typeof evidence.reason !== 'string' || evidence.reason.length === 0
+    || !plainObject(evidence.heldPosition)
+    || typeof evidence.heldPosition.positionId !== 'string' || evidence.heldPosition.positionId.length === 0
+    || typeof evidence.heldPosition.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(evidence.heldPosition.evidenceDigest)
+    || evidence.heldPosition.terminalState !== evidence.terminalState
+    || evidence.heldPosition.reason !== evidence.reason) {
+    throw new Error('epic gate held open evidence does not bind the original held position');
+  }
+  return evidence;
+}
+
+function heldEpicGateRequest(position) {
+  return {
+    provider: 'collector-crypt',
+    operation: 'epic-gate',
+    memo: position.memo,
+    mint: position.mint,
+    decision: 'held',
+    terminalState: position.terminalState,
+    reason: position.reason,
+    heldPosition: position.heldPosition,
+  };
+}
+
+function assertHeldEpicGateRequest(request, position) {
+  const expected = heldEpicGateRequest(position);
+  if (canonicalJson(request) !== canonicalJson(expected)) {
+    throw new Error('epic gate prepared held request does not bind the open held position');
+  }
+  return expected;
+}
+
+function optionalTypedAmount(value) {
+  try {
+    return assertTypedAmount(value, 'held epic insured value');
+  } catch {
+    return null;
+  }
+}
+
+function heldPositionReason(terminalState) {
+  if (terminalState === 'HELD_UNAVAILABLE') return 'BUYBACK_UNAVAILABLE';
+  return 'DATA_UNVERIFIED';
+}
+
+function heldPositionValueMicroUsdg(costMicroUsdg, insuredValue, config) {
+  const usdg = config?.moneyConfiguration?.assets?.usdg;
+  if (insuredValue !== null && sameAsset(insuredValue, usdg)
+    && insuredValue.chainId === '4663' && insuredValue.decimals === 6) {
+    return insuredValue.amountAtomic;
+  }
+  return costMicroUsdg;
+}
+
+function heldPositionLedgerAsset(config) {
+  const asset = config?.moneyConfiguration?.assets?.usdg;
+  const typed = assertTypedAmount({ ...asset, amountAtomic: '0' }, 'held epic USDG ledger asset');
+  if (typed.chainId !== '4663' || typed.decimals !== 6) {
+    throw new Error('held epic USDG ledger asset must use the configured six-decimal USDG asset');
+  }
+  return { chainId: typed.chainId, assetId: typed.assetId, decimals: typed.decimals };
+}
+
+async function recordHeldEpicPosition({ cycleRepository, config, context, memo, mint, terminalState, reason, insuredValue = null, evidence }) {
+  if (typeof cycleRepository?.recordHeldPosition !== 'function') {
+    throw new Error('epic gate requires cycleRepository.recordHeldPosition');
+  }
+  if (typeof cycleRepository.describeCycle !== 'function') {
+    throw new Error('epic gate requires cycleRepository.describeCycle for held-card attribution');
+  }
+  const description = await cycleRepository.describeCycle(context.cycleId);
+  const costMicroUsdg = description?.releaseAmount;
+  if (typeof costMicroUsdg !== 'string' || !canonicalUnsignedInteger.test(costMicroUsdg)) {
+    throw new Error('epic gate cannot attribute a held card without the cycle release amount');
+  }
+  const packId = config?.pack?.code;
+  if (typeof packId !== 'string' || packId.length === 0) {
+    throw new Error('epic gate cannot attribute a held card without a pack identifier');
+  }
+  const verifiedInsuredValue = optionalTypedAmount(insuredValue);
+  const position = await cycleRepository.recordHeldPosition(context.cycleId, {
+    packId,
+    memo,
+    mint,
+    cardRef: mint,
+    costMicroUsdg,
+    valueMicroUsdg: heldPositionValueMicroUsdg(costMicroUsdg, verifiedInsuredValue, config),
+    ledgerAsset: heldPositionLedgerAsset(config),
+    insuredValue: verifiedInsuredValue,
+    reason,
+    terminalState,
+    evidence,
+  });
+  return {
+    memo,
+    expectedCardCount: 1,
+    mint,
+    decision: 'held',
+    terminalState,
+    reason,
+    heldPosition: {
+      positionId: position.positionId,
+      evidenceDigest: position.evidenceDigest,
+      terminalState: position.terminalState,
+      reason: position.reason,
+    },
+  };
 }
 
 async function findMintCard({ collectorCrypt, packCode, mint, gate }) {
@@ -258,8 +369,14 @@ async function evaluateLiveGate({ adapters, config, cycleRepository, context, me
 function responseEvidence(record) {
   const evidence = record?.responseEvidence;
   if (!plainObject(evidence) || typeof evidence.memo !== 'string' || evidence.memo.length === 0
-    || typeof evidence.mint !== 'string' || evidence.mint.length === 0 || typeof evidence.decision !== 'string') return null;
-  if (evidence.decision === 'held') return evidence;
+    || typeof evidence.decision !== 'string') return null;
+  if (evidence.decision === 'held') {
+    if ((evidence.mint !== null && (typeof evidence.mint !== 'string' || evidence.mint.length === 0))
+      || evidence.expectedCardCount !== 1 || typeof evidence.terminalState !== 'string' || evidence.terminalState.length === 0
+      || typeof evidence.reason !== 'string' || evidence.reason.length === 0 || !plainObject(evidence.heldPosition)) return null;
+    return evidence;
+  }
+  if (typeof evidence.mint !== 'string' || evidence.mint.length === 0) return null;
   if (!INSURED_VALUE_UNITS.has(evidence.insuredValueUnit)
     || !canonicalUnsignedInteger.test(evidence.rawInsuredValue)
     || !Number.isSafeInteger(evidence.instantBuybackPercent)
@@ -286,6 +403,8 @@ function sameQuote(left, right) {
 
 export async function prepareEpicGateRequest({ cycleRepository, context }) {
   const open = await cycleRepository.readStage(context.cycleId, 'open');
+  const heldPosition = heldOpenPosition(open);
+  if (heldPosition !== null) return heldEpicGateRequest(heldPosition);
   const evidence = openEvidence(open);
   return { provider: 'collector-crypt', operation: 'epic-gate', memo: evidence.memo, mint: evidence.mint };
 }
@@ -304,45 +423,111 @@ export async function probeEpicGate({ cycleRepository, context }) {
 export async function mutateEpicGate({ liveMode, adapters, config, cycleRepository, context, request }) {
   if (liveMode !== true) throw new Error('epic-gate mutate reached without live mode');
   const prepared = request ?? context?.request ?? await prepareEpicGateRequest({ cycleRepository, context });
+  if (prepared?.decision === 'held') {
+    const heldPosition = heldOpenPosition(await cycleRepository.readStage(context.cycleId, 'open'));
+    if (heldPosition === null) throw new Error('epic gate prepared held request has no completed held open position');
+    assertHeldEpicGateRequest(prepared, heldPosition);
+    return heldPosition;
+  }
   try {
     const result = await evaluateLiveGate({ ...prepared, adapters, config, cycleRepository, context });
     if (result.held) {
-      await hold(cycleRepository, context, result.terminalState, result.evidence);
-      return { memo: prepared.memo, mint: prepared.mint, decision: 'held', terminalState: result.terminalState };
+      return recordHeldEpicPosition({
+        cycleRepository,
+        config,
+        context,
+        memo: prepared.memo,
+        mint: prepared.mint,
+        terminalState: result.terminalState,
+        reason: heldPositionReason(result.terminalState),
+        insuredValue: result.evidence.insuredValue ?? null,
+        evidence: result.evidence,
+      });
+    }
+    if (result.evidence.decision === 'hold') {
+      return recordHeldEpicPosition({
+        cycleRepository,
+        config,
+        context,
+        memo: prepared.memo,
+        mint: prepared.mint,
+        terminalState: 'HELD_OWNER_DECISION',
+        reason: 'EPIC_THRESHOLD',
+        insuredValue: result.evidence.insuredValue,
+        evidence: { stage: 'epic-gate', ...result.evidence },
+      });
     }
     return result.evidence;
   } catch (error) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'epic-gate', memo: prepared.memo, mint: prepared.mint, reason: error.message });
-    return { memo: prepared.memo, mint: prepared.mint, decision: 'held', terminalState: 'HELD_DATA_UNVERIFIED' };
+    return recordHeldEpicPosition({
+      cycleRepository,
+      config,
+      context,
+      memo: prepared.memo,
+      mint: prepared.mint,
+      terminalState: 'HELD_DATA_UNVERIFIED',
+      reason: 'DATA_UNVERIFIED',
+      evidence: { stage: 'epic-gate', memo: prepared.memo, mint: prepared.mint, reason: error.message },
+    });
   }
 }
 
 export async function reconcileLiveEpicGate({ adapters, config, cycleRepository, context }) {
   const recorded = responseEvidence(await cycleRepository.readOperationalStageAttempt(context.cycleId, 'epic-gate'));
   if (!recorded) return null;
-  if (recorded.decision === 'held') return null;
+  if (recorded.decision === 'held') return recorded;
   if (recorded.decision === 'hold') {
-    await hold(cycleRepository, context, 'HELD_OWNER_DECISION', { stage: 'epic-gate', ...recorded });
-    return null;
+    return recordHeldEpicPosition({
+      cycleRepository,
+      config,
+      context,
+      memo: recorded.memo,
+      mint: recorded.mint,
+      terminalState: 'HELD_OWNER_DECISION',
+      reason: 'EPIC_THRESHOLD',
+      insuredValue: recorded.insuredValue,
+      evidence: { stage: 'epic-gate', ...recorded },
+    });
   }
   if (recorded.decision !== 'sell') {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', { stage: 'epic-gate', ...recorded, reason: 'unknown epic decision' });
-    return null;
+    return recordHeldEpicPosition({
+      cycleRepository,
+      config,
+      context,
+      memo: recorded.memo,
+      mint: recorded.mint,
+      terminalState: 'HELD_DATA_UNVERIFIED',
+      reason: 'DATA_UNVERIFIED',
+      evidence: { stage: 'epic-gate', ...recorded, reason: 'unknown epic decision' },
+    });
   }
   let refreshed;
   try {
     refreshed = await evaluateLiveGate({ adapters, config, cycleRepository, context, memo: recorded.memo, mint: recorded.mint });
   } catch (error) {
-    if (error instanceof InsuredValueReconciliationError) {
-      await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
-        stage: 'epic-gate', memo: recorded.memo, mint: recorded.mint, recorded, reason: error.message,
-      });
-    }
-    return null;
+    return recordHeldEpicPosition({
+      cycleRepository,
+      config,
+      context,
+      memo: recorded.memo,
+      mint: recorded.mint,
+      terminalState: 'HELD_DATA_UNVERIFIED',
+      reason: 'DATA_UNVERIFIED',
+      evidence: { stage: 'epic-gate', memo: recorded.memo, mint: recorded.mint, recorded, reason: error.message },
+    });
   }
   if (refreshed.held) {
-    await hold(cycleRepository, context, refreshed.terminalState, refreshed.evidence);
-    return null;
+    return recordHeldEpicPosition({
+      cycleRepository,
+      config,
+      context,
+      memo: recorded.memo,
+      mint: recorded.mint,
+      terminalState: refreshed.terminalState,
+      reason: heldPositionReason(refreshed.terminalState),
+      insuredValue: refreshed.evidence.insuredValue ?? null,
+      evidence: refreshed.evidence,
+    });
   }
   if (refreshed.evidence.decision !== 'sell' || !sameQuote(recorded.offer, refreshed.evidence.offer)
     || !sameQuote(recorded.insuredValue, refreshed.evidence.insuredValue)
@@ -351,10 +536,18 @@ export async function reconcileLiveEpicGate({ adapters, config, cycleRepository,
     || recorded.instantBuybackPercent !== refreshed.evidence.instantBuybackPercent
     || recorded.matchedBuybackPercent !== refreshed.evidence.matchedBuybackPercent
     || recorded.prizeTier !== refreshed.evidence.prizeTier || recorded.rarity !== refreshed.evidence.rarity) {
-    await hold(cycleRepository, context, 'HELD_DATA_UNVERIFIED', {
-      stage: 'epic-gate', memo: recorded.memo, mint: recorded.mint, recorded, refreshed: refreshed.evidence, reason: 'buyback quote or card facts changed',
+    return recordHeldEpicPosition({
+      cycleRepository,
+      config,
+      context,
+      memo: recorded.memo,
+      mint: recorded.mint,
+      terminalState: 'HELD_DATA_UNVERIFIED',
+      reason: 'DATA_UNVERIFIED',
+      evidence: {
+        stage: 'epic-gate', memo: recorded.memo, mint: recorded.mint, recorded, refreshed: refreshed.evidence, reason: 'buyback quote or card facts changed',
+      },
     });
-    return null;
   }
   return recorded;
 }

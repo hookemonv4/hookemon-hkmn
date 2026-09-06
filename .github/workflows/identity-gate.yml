@@ -13,6 +13,7 @@ env:
   GIT_NO_REPLACE_OBJECTS: '1'
 jobs:
   pull-request:
+    name: identity-gate
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -40,16 +41,18 @@ jobs:
           git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
           node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"
   push:
+    name: identity-gate
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ github.event.before }}
+          ref: ${{ github.event.before == '0000000000000000000000000000000000000000' && github.sha || github.event.before }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify push commit identity from the merge base
+      - name: Resolve pushed identity range
+        id: push-range
         shell: bash
         env:
           PUSH_BASE_SHA: ${{ github.event.before }}
@@ -57,11 +60,30 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags origin "$PUSH_HEAD_SHA"
-          range_head="$PUSH_HEAD_SHA"
-          range_base="$(git merge-base "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA")"
-          git cat-file -e "${range_base}^{commit}"
+          git show "HEAD:scripts/ci/push-range.mjs" > "$RUNNER_TEMP/push-range.mjs"
+          push_range_output="$RUNNER_TEMP/push-range-output"
+          : > "$push_range_output"
+          node "$RUNNER_TEMP/push-range.mjs" resolve "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA" merge-base "$push_range_output" "$GITHUB_STEP_SUMMARY"
+          cat "$push_range_output" >> "$GITHUB_OUTPUT"
+      - name: Verify pushed commit identity range
+        shell: bash
+        env:
+          RANGE_BASE: ${{ steps.push-range.outputs.range_base }}
+          RANGE_HEAD: ${{ steps.push-range.outputs.range_head }}
+          TRUSTED_BASE: ${{ steps.push-range.outputs.trusted_base }}
+        run: |
+          set -euo pipefail
+          range_base="$RANGE_BASE"
+          range_head="$RANGE_HEAD"
+          trusted_base="$TRUSTED_BASE"
+          if [[ "$range_base" == '4b825dc642cb6eb9a060e54bf8d69288fbee4904' ]]; then
+            git cat-file -e "${range_base}^{tree}"
+          else
+            git cat-file -e "${range_base}^{commit}"
+          fi
           git cat-file -e "${range_head}^{commit}"
-          git checkout --detach "$range_base"
-          [[ "$(git rev-parse HEAD)" == "$range_base" ]]
-          git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
+          git cat-file -e "${trusted_base}^{commit}"
+          git checkout --detach "$trusted_base"
+          [[ "$(git rev-parse HEAD)" == "$trusted_base" ]]
+          git show "${trusted_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
           node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"

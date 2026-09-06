@@ -298,9 +298,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
     bytes32 private constant PROVIDER_GAS_CUSTODY_RUNTIME_CODEHASH =
         0x0d63637b005fc544332b142fa4debae3af6e3bc14dc7493a718b2154a70dfb87;
     bytes32 private constant PROVIDER_GAS_HOOK_RUNTIME_CODEHASH =
-        0x2ca1fa1c1a23730bc06cb37a8bd38e1cc61e62880c84fa6022d7b23d94e79051;
+        0x0508dec733b31a935dab99ba982d6eb46aef56184529309065076b7dc2a86313;
     bytes32 private constant PROVIDER_GAS_GRAPH_DEPLOYMENT_HASH =
-        0xe1b2b55129c74cc24d49d5da4f80d7573bb61b4e43bf1ed653950409d3dda0ef;
+        0x9873003251d48d8e6e570777f6fdfdde966fa2f24ddd36f987c63050c7858fdc;
     bytes32 private constant PROVIDER_GAS_ROUTE_NAMESPACE =
         keccak256("phase-three-provider-gas-namespace-v1");
     bytes32 private constant PROVIDER_GAS_ROUTE_NONCE =
@@ -765,7 +765,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
     function testGraphInitializersRejectUnauthorizedWrongOrderAndReplay() external {
         Market memory candidate =
-            _deployGraphMarket(false, keccak256("archive-fork-foreign-initialization"));
+            _deployGraphMarket(false, PAYER, keccak256("archive-fork-foreign-initialization"));
 
         _assertGraphInitializerGuards(candidate);
         _assertWrongOrderGraphInitializationRollsBack();
@@ -773,7 +773,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
     }
 
     function testSeedPermit2FundingAndCustodyFailuresRevertAtomically() external {
-        Market memory missingPermit = _deployUnseededMarket(true);
+        Market memory missingPermit = _deployUnseededMarket(true, SECOND_PAYER);
         _prepareSeedInventory(SECOND_PAYER, true);
         _assertSolvent(missingPermit.hook);
         uint256 missingPermitHkmnBefore = missingPermit.token.balanceOf(address(missingPermit.hook));
@@ -793,7 +793,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(positionManager.nextTokenId(), nextTokenBefore);
         _assertSolvent(missingPermit.hook);
 
-        Market memory fundingFailure = _deployUnseededMarket(true);
+        Market memory fundingFailure = _deployUnseededMarket(true, UNFUNDED_PAYER);
         _prepareSeedInventory(UNFUNDED_PAYER, false);
         _assertSolvent(fundingFailure.hook);
         _approveSeedPayer(UNFUNDED_PAYER, fundingFailure.hook);
@@ -815,7 +815,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(positionManager.nextTokenId(), nextTokenBefore);
         _assertSolvent(fundingFailure.hook);
 
-        Market memory custodyMismatch = _deployUnseededMarket(true);
+        Market memory custodyMismatch = _deployUnseededMarket(true, THIRD_PAYER);
         _prepareSeedInventory(THIRD_PAYER, true);
         _assertSolvent(custodyMismatch.hook);
         _approveSeedPayer(THIRD_PAYER, custodyMismatch.hook);
@@ -836,8 +836,41 @@ contract RobinhoodV4ArchiveForkTest is Test {
         _assertSolvent(custodyMismatch.hook);
     }
 
+    function testSeedIntentRejectsEveryCalldataMutationOnArchiveFork() external {
+        Market memory market = _deployUnseededMarket(true, PAYER);
+        HookemonHook.SeedParams memory params =
+            _seedParams(market.token, market.hook, PAYER, address(market.custody));
+
+        params.payer = SECOND_PAYER;
+        _assertSeedIntentMismatch(market, params);
+
+        params = _seedParams(market.token, market.hook, PAYER, address(market.custody));
+        params.tickLower = TICK_LOWER + 60;
+        _assertSeedIntentMismatch(market, params);
+
+        params = _seedParams(market.token, market.hook, PAYER, address(market.custody));
+        params.tickUpper = TICK_UPPER - 60;
+        _assertSeedIntentMismatch(market, params);
+
+        params = _seedParams(market.token, market.hook, PAYER, address(market.custody));
+        params.liquidity -= 1;
+        _assertSeedIntentMismatch(market, params);
+
+        params = _seedParams(market.token, market.hook, PAYER, address(market.custody));
+        params.amount0Max -= 1;
+        _assertSeedIntentMismatch(market, params);
+
+        params = _seedParams(market.token, market.hook, PAYER, address(market.custody));
+        params.amount1Max -= 1;
+        _assertSeedIntentMismatch(market, params);
+
+        params = _seedParams(market.token, market.hook, PAYER, address(market.custody));
+        params.deadline = block.timestamp + market.hook.MAX_SEED_DEADLINE_SECONDS() + 1;
+        _assertSeedDeadlineExceedsMaximum(market, params);
+    }
+
     function testSeedCustodyBindingFailureAfterMintRollsBackAllState() external {
-        Market memory candidate = _deployUnseededMarket(true);
+        Market memory candidate = _deployUnseededMarket(true, THIRD_PAYER);
         _prepareSeedInventory(THIRD_PAYER, true);
         _approveSeedPayer(THIRD_PAYER, candidate.hook);
 
@@ -863,7 +896,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
     }
 
     function _deployThreeTargets() private {
-        Market memory primary = _deployGraphMarket(true, keccak256("archive-fork-primary"));
+        Market memory primary = _deployGraphMarket(true, PAYER, keccak256("archive-fork-primary"));
         hkmn = primary.token;
         hook = primary.hook;
         custody = primary.custody;
@@ -878,7 +911,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         returns (Market memory market)
     {
         market = _deployGraphMarket(
-            usdgIsCurrency0, keccak256(abi.encodePacked("archive-fork-seeded", payer))
+            usdgIsCurrency0, payer, keccak256(abi.encodePacked("archive-fork-seeded", payer))
         );
         _fundUsdg(payer, USDG_SEED_AMOUNT);
         deal(payer, 100 ether);
@@ -913,9 +946,14 @@ contract RobinhoodV4ArchiveForkTest is Test {
         _assertSolvent(market.hook);
     }
 
-    function _deployUnseededMarket(bool usdgIsCurrency0) private returns (Market memory market) {
+    function _deployUnseededMarket(bool usdgIsCurrency0, address seedPayer)
+        private
+        returns (Market memory market)
+    {
         return _deployGraphMarket(
-            usdgIsCurrency0, keccak256(abi.encodePacked("archive-fork-unseeded", usdgIsCurrency0))
+            usdgIsCurrency0,
+            seedPayer,
+            keccak256(abi.encodePacked("archive-fork-unseeded", usdgIsCurrency0, seedPayer))
         );
     }
 
@@ -1954,6 +1992,39 @@ contract RobinhoodV4ArchiveForkTest is Test {
         });
     }
 
+    function _assertSeedIntentMismatch(Market memory market, HookemonHook.SeedParams memory params)
+        private
+    {
+        uint256 nextTokenId = positionManager.nextTokenId();
+        uint256 hookHkmnBefore = market.token.balanceOf(address(market.hook));
+        uint256 payerUsdgBefore = IArchiveErc20(USDG).balanceOf(params.payer);
+
+        vm.expectRevert(HookemonHook.SeedIntentMismatch.selector);
+        vm.prank(AUTHORITY);
+        market.hook.seedCanonicalLiquidity(params);
+
+        assertFalse(market.hook.canonicalLiquiditySeeded());
+        assertEq(positionManager.nextTokenId(), nextTokenId);
+        assertEq(market.token.balanceOf(address(market.hook)), hookHkmnBefore);
+        assertEq(IArchiveErc20(USDG).balanceOf(params.payer), payerUsdgBefore);
+    }
+
+    function _assertSeedDeadlineExceedsMaximum(
+        Market memory market,
+        HookemonHook.SeedParams memory params
+    ) private {
+        uint256 nextTokenId = positionManager.nextTokenId();
+        uint256 hookHkmnBefore = market.token.balanceOf(address(market.hook));
+
+        vm.expectRevert(HookemonHook.SeedDeadlineExceedsMaximum.selector);
+        vm.prank(AUTHORITY);
+        market.hook.seedCanonicalLiquidity(params);
+
+        assertFalse(market.hook.canonicalLiquiditySeeded());
+        assertEq(positionManager.nextTokenId(), nextTokenId);
+        assertEq(market.token.balanceOf(address(market.hook)), hookHkmnBefore);
+    }
+
     function _fundUsdg(address recipient, uint256 amount) private {
         deal(USDG, recipient, amount, true);
         assertEq(IArchiveErc20(USDG).balanceOf(recipient), amount, "USDG funding mismatch");
@@ -2021,7 +2092,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         ProgrammableGraphHarness executor = _newGraphExecutor(graphNonce);
         executor.setLaunchPriceX96(_releaseSqrtPriceX96(false));
         ProgrammableGraphHarness.GraphRequest memory request =
-            _graphRequest(executor, false, graphNonce);
+            _graphRequest(executor, false, PAYER, graphNonce);
         (address predictedToken, address predictedHook, address predictedCustody) =
             executor.predict(request);
         ProgrammableGraphHarness.TargetDeployment[3] memory deployments =
@@ -2041,14 +2112,14 @@ contract RobinhoodV4ArchiveForkTest is Test {
         );
     }
 
-    function _deployGraphMarket(bool usdgIsCurrency0, bytes32 graphNonce)
+    function _deployGraphMarket(bool usdgIsCurrency0, address seedPayer, bytes32 graphNonce)
         private
         returns (Market memory market)
     {
         market.executor = _newGraphExecutor(graphNonce);
         market.executor.setLaunchPriceX96(_releaseSqrtPriceX96(usdgIsCurrency0));
         ProgrammableGraphHarness.GraphRequest memory request =
-            _graphRequest(market.executor, usdgIsCurrency0, graphNonce);
+            _graphRequest(market.executor, usdgIsCurrency0, seedPayer, graphNonce);
         (market.tokenPredicted, market.hookPredicted, market.custodyPredicted) =
             market.executor.predict(request);
 
@@ -2098,6 +2169,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
     function _graphRequest(
         ProgrammableGraphHarness executor,
         bool usdgIsCurrency0,
+        address seedPayer,
         bytes32 graphNonce
     ) private view returns (ProgrammableGraphHarness.GraphRequest memory request) {
         request = ProgrammableGraphHarness.GraphRequest({
@@ -2109,6 +2181,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             custodyApplicantSalt: keccak256(abi.encodePacked("archive-fork-custody", graphNonce)),
             initializationPriceX96: executor.launchPriceX96(),
             hookUsdg: USDG,
+            seedPayer: seedPayer,
             allocationCustody: address(0),
             hookExpectedDecimals: 18
         });
@@ -2360,6 +2433,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             expectedDecimals: 18,
             bindingDigest: keccak256("phase-three-provider-gas-binding-v1"),
             runtimeDigest: keccak256("phase-three-provider-gas-runtime-v1"),
+            seedIntentDigest: keccak256("phase-three-provider-gas-seed-intent-v1"),
             processClaimLimit6h: 50_000_000_000,
             processClaimLimitMax: 500_000_000_000,
             processClaimMaxCount: 24,

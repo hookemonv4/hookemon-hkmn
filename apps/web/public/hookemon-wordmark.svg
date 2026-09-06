@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 96" fill="none">
+  <defs>
+    <linearGradient id="hookemon-wordmark-gold" x1="8" y1="15" x2="420" y2="83" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF2A8"/>
+      <stop offset="0.42" stop-color="#F6C53A"/>
+      <stop offset="0.78" stop-color="#C88812"/>
+      <stop offset="1" stop-color="#FFE887"/>
+    </linearGradient>
+    <filter id="hookemon-wordmark-glow" x="-12%" y="-40%" width="124%" height="180%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feFlood flood-color="#F6C53A" flood-opacity="0.35"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g fill="url(#hookemon-wordmark-gold)" filter="url(#hookemon-wordmark-glow)">
+    <text
+      x="7"
+      y="69"
+      font-family="Arial, Helvetica, sans-serif"
+      font-size="68"
+      font-weight="500"
+      letter-spacing="-3"
+      textLength="322"
+      lengthAdjust="spacingAndGlyphs"
+    >ookemon</text>
+    <rect x="344" y="18" width="78" height="60" rx="12" fill="none" stroke="url(#hookemon-wordmark-gold)" stroke-width="3"/>
+    <text
+      x="354"
+      y="64"
+      font-family="Arial, Helvetica, sans-serif"
+      font-size="42"
+      font-weight="500"
+      letter-spacing="-2"
+    >V4</text>
+  </g>
+</svg>

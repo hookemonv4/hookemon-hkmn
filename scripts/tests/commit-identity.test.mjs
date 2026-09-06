@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const scanner = join(repoRoot, 'scripts', 'check-commit-identity.mjs');
+const pushRange = join(repoRoot, 'scripts', 'ci', 'push-range.mjs');
 const identityGate = join(repoRoot, '.github', 'workflows', 'identity-gate.yml');
 const projectIdentity = {
   name: 'Hookemon',
@@ -19,6 +20,12 @@ function repository() {
   execFileSync('git', ['-C', root, 'init', '--quiet']);
   commit(root, 'base');
   return { root, base: head(root) };
+}
+
+function rootRepository() {
+  const root = mkdtempSync(join(tmpdir(), 'hookemon-identity-root-'));
+  execFileSync('git', ['-C', root, 'init', '--quiet']);
+  return { root };
 }
 
 function commit(root, subject, { author = projectIdentity, committer = projectIdentity, body } = {}) {
@@ -42,6 +49,88 @@ function head(root) {
 function scan(root, base, tip) {
   return spawnSync(process.execPath, [scanner, base, tip], { cwd: root, encoding: 'utf8' });
 }
+
+async function initialPushRange(root, headSha) {
+  const { ZERO_SHA, resolvePushRangeFromGit } = await import(pushRange);
+  return resolvePushRangeFromGit(root, {
+    before: ZERO_SHA,
+    head: headSha,
+    mode: 'merge-base',
+  });
+}
+
+test('a zero-before event accepts a conforming root commit', async () => {
+  const { root } = rootRepository();
+  try {
+    commit(root, 'initial commit');
+    const range = await initialPushRange(root, head(root));
+    const result = scan(root, range.rangeBase, range.rangeHead);
+
+    assert.equal(range.initialPush, true);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /commit identity check passed \(1 commit\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a zero-before event rejects a nonconforming root commit', async () => {
+  const { root } = rootRepository();
+  try {
+    commit(root, 'initial commit', { author: { name: 'Unapproved Author', email: projectIdentity.email } });
+    const range = await initialPushRange(root, head(root));
+    const result = scan(root, range.rangeBase, range.rangeHead);
+
+    assert.equal(range.initialPush, true);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /author-identity/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the push-range command records the trusted initial revision in the job summary', () => {
+  const { root } = rootRepository();
+  try {
+    commit(root, 'initial commit');
+    const headSha = head(root);
+    const outputPath = join(root, 'push-range-output');
+    const summaryPath = join(root, 'push-range-summary');
+    const result = spawnSync(
+      process.execPath,
+      [pushRange, 'resolve', '0'.repeat(40), headSha, 'merge-base', outputPath, summaryPath],
+      { cwd: root, encoding: 'utf8' },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(readFileSync(outputPath, 'utf8'), /initial_push=true/);
+    const summary = readFileSync(summaryPath, 'utf8');
+    assert.match(summary, /Initial push range/);
+    assert.match(summary, new RegExp(headSha));
+    assert.match(summary, /4b825dc642cb6eb9a060e54bf8d69288fbee4904/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the push-range command handles a parentless revision before attempting a merge base', () => {
+  const { root } = rootRepository();
+  try {
+    commit(root, 'initial commit');
+    const outputPath = join(root, 'push-range-output');
+    const result = spawnSync(
+      process.execPath,
+      [pushRange, 'resolve', 'b'.repeat(40), head(root), 'merge-base', outputPath],
+      { cwd: root, encoding: 'utf8' },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(readFileSync(outputPath, 'utf8'), /initial_push=true/);
+    assert.match(readFileSync(outputPath, 'utf8'), /range_base=4b825dc642cb6eb9a060e54bf8d69288fbee4904/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('commit scanner accepts the exact project author and committer', () => {
   const { root, base } = repository();

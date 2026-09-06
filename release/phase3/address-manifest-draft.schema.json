@@ -235,7 +235,7 @@
         "constructor": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["manager", "positionManager", "permit2", "usdg", "hkmn", "tickSpacing", "programmable", "treasury", "operations", "launchAuthority", "issuanceAuthority", "expectedDecimals", "bindingDigest", "runtimeDigest", "processClaimLimit6h", "processClaimLimitMax", "processClaimMaxCount", "operationsRotationDelay"],
+          "required": ["manager", "positionManager", "permit2", "usdg", "hkmn", "tickSpacing", "programmable", "treasury", "operations", "launchAuthority", "issuanceAuthority", "expectedDecimals", "bindingDigest", "runtimeDigest", "seedIntentDigest", "processClaimLimit6h", "processClaimLimitMax", "processClaimMaxCount", "operationsRotationDelay"],
           "properties": {
             "manager": { "$ref": "#/$defs/nonzeroAddress" },
             "positionManager": { "$ref": "#/$defs/nonzeroAddress" },
@@ -251,6 +251,7 @@
             "expectedDecimals": { "const": 18 },
             "bindingDigest": { "type": "null" },
             "runtimeDigest": { "type": "null" },
+            "seedIntentDigest": { "type": "null" },
             "processClaimLimit6h": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
             "processClaimLimitMax": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
             "processClaimMaxCount": { "const": 24 },

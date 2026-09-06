@@ -360,6 +360,28 @@ export function directPayoutPlanDigest(value) {
   return payoutPlanDigest(unsignedPlan(value));
 }
 
+function assertSupplementaryIndex(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error('supplementary payout plan supplementary index must be a positive safe integer');
+  }
+  return value;
+}
+
+function unsignedSupplementaryPlan(value) {
+  return {
+    schema: value.schema,
+    cycleId: value.cycleId,
+    manifestId: value.manifestId,
+    supplementaryIndex: value.supplementaryIndex,
+    payoutPlan: value.payoutPlan,
+  };
+}
+
+/** Returns the canonical digest for an immutable supplementary payout-plan wrapper. */
+export function supplementaryPayoutPlanDigest(value) {
+  return payoutPlanDigest(unsignedSupplementaryPlan(value));
+}
+
 function freezePlan(value) {
   if (Array.isArray(value)) {
     value.forEach(freezePlan);
@@ -460,5 +482,42 @@ export function compileDirectPayoutPlan({
     ...unsigned,
     payableRecipientCount: allocations.filter(allocation => allocation.amount.amountAtomic !== '0').length,
     planDigest: directPayoutPlanDigest(unsigned),
+  });
+}
+
+/**
+ * Compiles a pure supplementary payout-plan wrapper for one held-position settlement. It preserves
+ * the original cycle's eligibility snapshot and makes the supplementary manifest identity part of
+ * the wrapper digest. Persistence, signing, broadcast, and recipient execution remain adapter
+ * responsibilities.
+ */
+export function compileSupplementaryDirectPayoutPlan({
+  cycleId,
+  supplementaryIndex,
+  eligibilityManifest,
+  finalizedReturn,
+  previousDust,
+  previousDustSource = null,
+  returnBinding,
+}) {
+  const index = assertSupplementaryIndex(supplementaryIndex);
+  const payoutPlan = compileDirectPayoutPlan({
+    cycleId,
+    eligibilityManifest,
+    finalizedReturn,
+    previousDust,
+    previousDustSource,
+    returnBinding,
+  });
+  const unsigned = {
+    schema: 'hookemon.supplementary-direct-payout-plan.v1',
+    cycleId,
+    manifestId: `${cycleId}:supplementary:${index}`,
+    supplementaryIndex: index,
+    payoutPlan,
+  };
+  return freezePlan({
+    ...unsigned,
+    supplementaryPlanDigest: supplementaryPayoutPlanDigest(unsigned),
   });
 }

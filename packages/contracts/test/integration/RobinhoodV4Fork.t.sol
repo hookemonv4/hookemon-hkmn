@@ -615,6 +615,7 @@ contract RobinhoodV4ForkTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: BINDING_DIGEST,
                 runtimeDigest: RUNTIME_DIGEST,
+                seedIntentDigest: keccak256("fork-seed-intent"),
                 processClaimLimit6h: 1_000_000,
                 processClaimLimitMax: 2_000_000,
                 processClaimMaxCount: 8,

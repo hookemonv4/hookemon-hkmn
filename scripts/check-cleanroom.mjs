@@ -29,7 +29,6 @@ export const DEFAULT_DIGEST_RULES = Object.freeze([
   { id: 'historical-repository', length: 27, sha256: '13f9d8d6e7b6538d6fe2a920ab486cbf7409360cc41ccf55ababd274e2936d74', boundary: false },
   { id: 'historical-repository', length: 19, sha256: 'd15f383e88bcc5a373351c62bbd1a65483fbddc4f567517196dd4a33057d9fc1', boundary: true },
   { id: 'historical-repository', length: 20, sha256: '0228a01d24b6d633601bfbb4f0618b8e4adf15a087ad0a9454203b3a6b35fd8b', boundary: true },
-  { id: 'historical-repository', length: 13, sha256: 'dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1', boundary: false },
   { id: 'historical-identity', length: 14, sha256: '5803aeef8e73d21e32bbeb6fc18b4a2c88d408782c9edf4ed5ab905e209673bf', boundary: false },
   { id: 'historical-identity', length: 18, sha256: 'fe1ac15a487753fb53a7eaf69463681a1f9d0764424fb9e0223e00fec4541f39', boundary: false },
   { id: 'historical-identity', length: 10, sha256: 'd67be943f4a368068987bf02ffff0db30f51ce0cf44fe58aed6a564db616b6d4', boundary: false },
@@ -78,6 +77,27 @@ const approvedPathDelimiter = /[\s"'`()\[\]{},;]/;
 const identifierCharacter = /[A-Za-z0-9_$\\]|[^\x00-\x7f]/;
 const PHASE_THREE_JSON_PATH = /^release\/phase3\/[^/]+\.json$/;
 const PHASE_THREE_PROVIDER_ADDRESS_ENUM = ['nonzero', ['ethe', 'reum'].join(''), 'address'].join('-');
+// The current architecture retains a real Solana-side USD stablecoin leg (typed distinctly from
+// EVM chain 4663's USDG); a bare stablecoin mention is not itself a retired-architecture claim.
+// Only the exact, case-insensitive adjacency "solana <stablecoin>" is approved -- a bare mention,
+// a mention qualified by a retired chain or retired bridge protocol name, or any other
+// surrounding phrasing all stay flagged.
+const STABLECOIN_DIGEST = 'a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966';
+const SOLANA_STABLECOIN_PREFIX_LENGTH = 'solana '.length;
+const SOLANA_STABLECOIN_MENTION_DIGEST = '93bdce2c282d77c0f6598a2cd3f960b51978bcefe8ae098d184787678777b0be';
+// A test that names a retired chain identifier only to assert its absence is a regression guard
+// for the retirement, not a claim the retired chain is real -- it must keep matching (and keep
+// failing closed) if the assertion is ever weakened into a positive claim. Two narrow, structural
+// exceptions only: (1) the retired name as a quoted string literal argument to a `hasOwn(...)`
+// absence check, anywhere in the surrounding source; (2) the exact adjacency "legacy <retired
+// chain> key" in prose. Neither exempts a bare mention or any other surrounding phrasing.
+const NEGATIVE_KEY_ASSERTION_LOOKBEHIND = 40;
+const NEGATIVE_KEY_ASSERTION_LOOKAHEAD = 16;
+const NEGATIVE_KEY_ASSERTION_PATTERN = /(?:Object\.)?hasOwn\([A-Za-z0-9_$.]+,\s*"$/;
+const NEGATIVE_KEY_ASSERTION_SUFFIX_PATTERN = /^"\)\s*(?:,\s*false\)|\s*===\s*false|\s*!==\s*true)/;
+const LEGACY_KEY_PHRASE_PREFIX_LENGTH = 'legacy '.length;
+const LEGACY_KEY_PHRASE_SUFFIX = ' key';
+const LEGACY_KEY_PHRASE_DIGEST = '0817267ff2e0046848ec7715d8d01fbd04b03669454c9830a26f921162333470';
 
 // Exact full-token hashes keep the revision-56 exception fail-closed. New
 // identifiers require an explicit control change instead of inheriting a
@@ -139,14 +159,43 @@ function isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file) {
   return /:\s*"$/.test(prefix) && /^"\s*(?:[,}\]])/.test(suffix);
 }
 
+function isApprovedSolanaStablecoinMention(text, offset, rule) {
+  if (rule.sha256 !== STABLECOIN_DIGEST) return false;
+  const tokenStart = offset - SOLANA_STABLECOIN_PREFIX_LENGTH;
+  if (tokenStart < 0) return false;
+  const token = text.slice(tokenStart, offset + rule.length).toLowerCase();
+  return token.length === SOLANA_STABLECOIN_PREFIX_LENGTH + rule.length
+    && sha256Text(token) === SOLANA_STABLECOIN_MENTION_DIGEST;
+}
+
+function isApprovedNegativeKeyAssertion(text, offset, rule) {
+  if (rule.sha256 !== PREVIOUS_CHAIN_NAME_DIGEST) return false;
+  const before = text.slice(Math.max(0, offset - NEGATIVE_KEY_ASSERTION_LOOKBEHIND), offset);
+  if (!NEGATIVE_KEY_ASSERTION_PATTERN.test(before)) return false;
+  const after = text.slice(offset + rule.length, offset + rule.length + NEGATIVE_KEY_ASSERTION_LOOKAHEAD);
+  return NEGATIVE_KEY_ASSERTION_SUFFIX_PATTERN.test(after);
+}
+
+function isApprovedLegacyKeyPhrase(text, offset, rule) {
+  if (rule.sha256 !== PREVIOUS_CHAIN_NAME_DIGEST) return false;
+  const tokenStart = offset - LEGACY_KEY_PHRASE_PREFIX_LENGTH;
+  const tokenEnd = offset + rule.length + LEGACY_KEY_PHRASE_SUFFIX.length;
+  if (tokenStart < 0 || tokenEnd > text.length) return false;
+  const token = text.slice(tokenStart, tokenEnd).toLowerCase();
+  return sha256Text(token) === LEGACY_KEY_PHRASE_DIGEST;
+}
+
 function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   if (rule.sha256 === RETIRED_CYCLE_VAULT_DIGEST) {
     return isApprovedRevision56Identifier(text, offset, rule.length);
   }
   if (rule.sha256 === PREVIOUS_CHAIN_NAME_DIGEST) {
     return isApprovedPreviousChainPathToken(text, offset)
-      || isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file);
+      || isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file)
+      || isApprovedNegativeKeyAssertion(text, offset, rule)
+      || isApprovedLegacyKeyPhrase(text, offset, rule);
   }
+  if (isApprovedSolanaStablecoinMention(text, offset, rule)) return true;
   return false;
 }
 

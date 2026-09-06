@@ -584,6 +584,7 @@ contract ProcessClaimsTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: keccak256("process-claims-binding"),
                 runtimeDigest: keccak256("process-claims-runtime"),
+                seedIntentDigest: keccak256("process-claims-seed-intent"),
                 processClaimLimit6h: limit,
                 processClaimLimitMax: maximum,
                 processClaimMaxCount: maxCount,

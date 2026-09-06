@@ -1,0 +1,211 @@
+{
+  "schemaVersion": "hookemon.redteam-review-bundle.v1",
+  "phase": "redteam",
+  "requirementsRevision": 65,
+  "architectureRevision": 9,
+  "cycle": 3,
+  "artifacts": {
+    "resolutions": {
+      "path": "qa/redteam/resolutions.json",
+      "sha256": "183ba3d1fa68fde88f8b293eb825f4a912cf7116c6a3a486283d3bd396a4d2bf"
+    },
+    "termination": {
+      "path": "qa/redteam/termination.json",
+      "sha256": "eeec9050403733c5c13e15d5ee887d3f38096a5df85bafc4617fd2a834c8737f"
+    }
+  },
+  "findings": [
+    {
+      "id": "RT-R55-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "generic-system-evidence-semantic-bypass",
+      "statusTransition": {
+        "from": "RESOLVED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R55-03",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "stale-redteam-authority",
+      "statusTransition": {
+        "from": "RESOLVED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R55-04",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "module-index-authority",
+      "statusTransition": {
+        "from": "RESOLVED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-01",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "payout-authorization-lacks-onchain-dual-signature-binding",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "OPEN_FAIL_CLOSED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-02",
+      "reportedSeverity": "critical",
+      "classification": "valid-actionable",
+      "canonicalIssue": "distribution-signer-verification-keys-are-public-fixture-keys",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "OPEN_FAIL_CLOSED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-03",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "single-evm-signer-role-cannot-satisfy-authorizer-and-operationstrigger-simultaneously",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-04",
+      "reportedSeverity": "medium",
+      "classification": "valid-tradeoff",
+      "canonicalIssue": "degraded-confirmation-flag-not-cryptographically-bound",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "OPEN_FAIL_CLOSED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-05",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "compromised-operations-exposure",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-06",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "durable-proof-recovery",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-07",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "production-router-proof",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R58-08",
+      "reportedSeverity": "medium",
+      "classification": "valid-actionable",
+      "canonicalIssue": "holder-snapshot-exclusion-set-incomplete",
+      "statusTransition": {
+        "from": "RESOLVED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    },
+    {
+      "id": "RT-R65-01",
+      "reportedSeverity": "high",
+      "classification": "valid-actionable",
+      "canonicalIssue": "seed-intent-not-bound-onchain",
+      "statusTransition": {
+        "from": "OPEN_FAIL_CLOSED",
+        "to": "RESOLVED"
+      },
+      "evidence": [
+        {
+          "path": "qa/redteam/current-cycle-evidence.json",
+          "sha256": "84e1f575b8b6cc7f362e8f2804905297fded805589f6a36987aef675ec40f0d9"
+        }
+      ]
+    }
+  ]
+}

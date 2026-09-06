@@ -158,6 +158,7 @@ const POLICY_CUSTODY_ALL_BUCKETS = Object.freeze([
   'refunds',
   'residual',
   'heldAssets',
+  'heldPositions',
   'payoutLiability',
   'dust',
   'unattributed',
@@ -212,6 +213,52 @@ function freezePolicyCycle(value) {
   });
 }
 
+function openHeldPositions(description, cycleId) {
+  if (description.heldPositions === undefined) return [];
+  if (!(description.heldPositions instanceof Map)) {
+    throw new Error('projectPolicyCustody held positions are invalid');
+  }
+  const positions = [];
+  for (const [positionId, position] of description.heldPositions) {
+    if (!position || typeof position !== 'object' || Array.isArray(position)
+      || typeof positionId !== 'string' || position.positionId !== positionId
+      || position.cycleId !== cycleId || !Object.hasOwn(position, 'resolution')) {
+      throw new Error('projectPolicyCustody held position identity is invalid');
+    }
+    parsePolicyAtomic(position.costMicroUsdg, 'held position costMicroUsdg');
+    const valueMicroUsdg = parsePolicyAtomic(position.valueMicroUsdg, 'held position valueMicroUsdg');
+    if (typeof position.reason !== 'string' || position.reason.length === 0
+      || typeof position.terminalState !== 'string' || position.terminalState.length === 0
+      || typeof position.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(position.evidenceDigest)
+      || !Number.isSafeInteger(position.openedAtMs) || position.openedAtMs < 0
+      || !Number.isSafeInteger(position.positionRevision) || position.positionRevision < 0
+      || !Object.hasOwn(position, 'insuredValue') || !Object.hasOwn(position, 'ownerDecision')) {
+      throw new Error('projectPolicyCustody held position evidence is invalid');
+    }
+    if (position.insuredValue !== null && (typeof position.insuredValue !== 'object' || Array.isArray(position.insuredValue))) {
+      throw new Error('projectPolicyCustody held position insuredValue is invalid');
+    }
+    if (position.ownerDecision !== null && (typeof position.ownerDecision !== 'object' || Array.isArray(position.ownerDecision))) {
+      throw new Error('projectPolicyCustody held position ownerDecision is invalid');
+    }
+    if (position.resolution !== null) continue;
+    positions.push(Object.freeze({
+      positionId,
+      cycleId,
+      costMicroUsdg: position.costMicroUsdg,
+      valueMicroUsdg: valueMicroUsdg.toString(),
+      insuredValue: position.insuredValue === null ? null : structuredClone(position.insuredValue),
+      reason: position.reason,
+      terminalState: position.terminalState,
+      evidenceDigest: position.evidenceDigest,
+      openedAtMs: position.openedAtMs,
+      positionRevision: position.positionRevision,
+      ownerDecision: position.ownerDecision === null ? null : structuredClone(position.ownerDecision),
+    }));
+  }
+  return positions.sort((left, right) => left.positionId.localeCompare(right.positionId));
+}
+
 /**
  * Projects the policy engine's USDG-only custody controls from every active and archived cycle.
  * It never applies a price or decimal conversion: any non-USDG ledger with a nonzero balance marks
@@ -232,9 +279,11 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
   let atRisk = 0n;
   let outstanding = 0n;
   let heldAssets = false;
+  let heldPositionValue = 0n;
   let unattributed = false;
   let unvaluedExposure = false;
   const cycles = [];
+  const heldPositions = [];
 
   for (const cycleId of [...cycleIds].sort()) {
     const description = await cycleRepository.describeCycle(cycleId);
@@ -244,6 +293,11 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
     let cycleRealizedLoss = 0n;
     let cycleAtRisk = 0n;
     let cycleOutstanding = 0n;
+    const cycleHeldPositions = openHeldPositions(description, cycleId);
+    for (const position of cycleHeldPositions) {
+      heldPositionValue += BigInt(position.valueMicroUsdg);
+      heldPositions.push(position);
+    }
     for (const ledgerValue of description.custodyLedgers.values()) {
       const ledger = assertPolicyLedger(ledgerValue, cycleId);
       const held = parsePolicyAtomic(ledger.heldAssets, 'custody ledger heldAssets') > 0n;
@@ -282,6 +336,13 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
     atRiskMicroUsdg: atRisk.toString(),
     outstandingMicroUsdg: outstanding.toString(),
     heldAssets,
+    heldPositions: Object.freeze({
+      count: heldPositions.length,
+      valueMicroUsdg: heldPositionValue.toString(),
+      positions: Object.freeze(heldPositions.sort((left, right) => (
+        left.cycleId.localeCompare(right.cycleId) || left.positionId.localeCompare(right.positionId)
+      ))),
+    }),
     unattributed,
     unvaluedExposure,
     cycles: Object.freeze(cycles),

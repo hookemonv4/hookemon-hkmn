@@ -18,7 +18,10 @@ import {
   sha256CanonicalJson,
   stableJsonBytes,
 } from './canonical-json.mjs';
+import { materializePhaseThreeCreateRequest } from './create-request-materializer.mjs';
 import { keccak256Hex } from './keccak.mjs';
+import { deriveSeedIntent, verifyMaterializedSeedTransaction } from './seed-intent.mjs';
+import { verifyAddressManifest } from '../../launch/build-address-manifest.mjs';
 import {
   artifactHashes,
   derivePriceCandidates,
@@ -123,6 +126,8 @@ const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,255}$/;
 const RFC3339_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const HOOK_CONSTRUCTOR_CONFIG_WORDS = 19;
+const HOOK_SEED_INTENT_DIGEST_WORD = 14;
 const PHASE_THREE_GRAPH_CALLS = [
   {
     callId: 'token-allocate',
@@ -173,15 +178,40 @@ const PHASE_THREE_RELEASE_GRAPH_EVIDENCE_PATHS = [
   'release/phase3/artifacts/custody.json',
   'release/phase3/artifacts/hook.json',
   'release/phase3/build-info/launch.json',
+  'release/phase3/package/create-request.json',
   'release/phase3/package/graph-draft.json',
   'release/phase3/package/package-manifest.json',
   'release/phase3/deployment-manifest.json',
   'release/phase3/tickmath-vectors.json',
 ];
-const PHASE_THREE_DRAFT_README = `# Phase 3 draft package
-
-This directory is a content-addressed draft for provider preflight. It is committed so review can bind the exact launch inputs, compiler evidence, target order, and unresolved provider facts that produced the package. It is not a signable provider request while address derivation remains pending.
-`;
+const PHASE_THREE_DRAFT_README = [
+  '# Phase 3 draft package',
+  '',
+  'This directory is a content-addressed `ADDRESS_DERIVATION_PENDING` package. It binds the recorded request envelope and build inputs, but it is not a signable request or a provider POST body.',
+  '',
+  '`package-manifest.json` now owns the source-bundle coverage declaration. It lists the implementation sources from `submission.json`, the Standard JSON input, and the three compiler artifacts. Attestation evidence and the project metadata image remain explicit unresolved fields. The source-bundle builder refuses to create a manifest until both paths are concrete and committed; it never fills them with a guessed file name.',
+  '',
+  'Rebuild a disposable package with the package builder:',
+  '',
+  '```sh',
+  'node scripts/programmable/build-launch-package.mjs \\',
+  '  --artifacts release/phase3/artifacts \\',
+  '  --standard-json-inputs release/phase3/build-info \\',
+  '  --launch-inputs release/phase3/launch-inputs.json \\',
+  '  --address-manifest release/phase3/address-manifest.json \\',
+  '  --request-materialization-root . \\',
+  '  --output /private/tmp/hookemon-phase3-package',
+  '```',
+  '',
+  'Verify the committed draft with:',
+  '',
+  '```sh',
+  'node scripts/programmable/verify-launch-package.mjs --allow-unverified',
+  '```',
+  '',
+  'Without `--allow-unverified`, verification intentionally reports the unresolved launch-intent commitment. Resolve the provider graph preimage, the metadata image, and attestation evidence before treating a regenerated package as preflight-ready.',
+  '',
+].join('\n');
 
 export class PackageValidationError extends Error {
   constructor(code, path) {
@@ -921,9 +951,11 @@ function selectionFromMaterializedManifest(launchInputs, materializedManifest) {
   const preimages = assertObject(materializedManifest.preimages, '/materializedManifest/preimages');
   const targets = assertObject(preimages.targets, '/materializedManifest/preimages/targets');
   const token = assertObject(targets.token, '/materializedManifest/preimages/targets/token');
+  const custody = assertObject(targets.custody, '/materializedManifest/preimages/targets/custody');
   const hook = assertObject(targets.hook, '/materializedManifest/preimages/targets/hook');
   const pool = assertObject(preimages.pool, '/materializedManifest/preimages/pool');
   assertAddress(token.address, '/materializedManifest/preimages/targets/token/address');
+  assertAddress(custody.address, '/materializedManifest/preimages/targets/custody/address');
   assertAddress(hook.address, '/materializedManifest/preimages/targets/hook/address');
   assertAddress(pool.currency0, '/materializedManifest/preimages/pool/currency0');
   assertAddress(pool.currency1, '/materializedManifest/preimages/pool/currency1');
@@ -975,6 +1007,8 @@ function selectionFromMaterializedManifest(launchInputs, materializedManifest) {
     selectedSqrtPriceX96: pool.priceCandidate.sqrtPriceX96,
     poolKey: pool.poolKeyEncoded,
     poolId: pool.poolId,
+    hook: hook.address,
+    custody: custody.address,
   };
 }
 
@@ -1014,7 +1048,326 @@ export function materializePhaseThreePriceSelection({ launchInputs, submission, 
     assertString(candidateQuadrant.currency, `/launchInputs/pool/priceCandidates/${selected.selectedOrdering}/swapFeeQuadrants/${name}/currency`);
     submissionQuadrant.currency = candidateQuadrant.currency;
   }
-  return { launchInputs: materializedLaunchInputs, submission: materializedSubmission };
+  const seed = assertObject(materializedLaunchInputs.seed, '/launchInputs/seed');
+  const allowance = assertObject(seed.permit2Allowance, '/launchInputs/seed/permit2Allowance');
+  const deadlinePolicy = assertObject(seed.deadlinePolicy, '/launchInputs/seed/deadlinePolicy');
+  const fullRange = assertObject(materializedLaunchInputs.pool.fullRange, '/launchInputs/pool/fullRange');
+  const selectedCandidate = assertObject(
+    candidates[selected.selectedOrdering],
+    `/launchInputs/pool/priceCandidates/${selected.selectedOrdering}`,
+  );
+  assertAddress(allowance.owner, '/launchInputs/seed/permit2Allowance/owner');
+  assertInteger(fullRange.minimumTick, '/launchInputs/pool/fullRange/minimumTick');
+  assertInteger(fullRange.maximumTick, '/launchInputs/pool/fullRange/maximumTick');
+  assertAmount(selectedCandidate.liquidity, `/launchInputs/pool/priceCandidates/${selected.selectedOrdering}/liquidity`);
+  assertAmount(selectedCandidate.amount0Max, `/launchInputs/pool/priceCandidates/${selected.selectedOrdering}/amount0Max`);
+  assertAmount(selectedCandidate.amount1Max, `/launchInputs/pool/priceCandidates/${selected.selectedOrdering}/amount1Max`);
+  assertInteger(
+    deadlinePolicy.maximumSecondsAfterWalletConfirmation,
+    '/launchInputs/seed/deadlinePolicy/maximumSecondsAfterWalletConfirmation',
+  );
+  let seedIntent;
+  try {
+    seedIntent = deriveSeedIntent({
+      payer: allowance.owner,
+      tickLower: fullRange.minimumTick,
+      tickUpper: fullRange.maximumTick,
+      liquidity: selectedCandidate.liquidity,
+      amount0Max: selectedCandidate.amount0Max,
+      amount1Max: selectedCandidate.amount1Max,
+      maxDeadlineSeconds: deadlinePolicy.maximumSecondsAfterWalletConfirmation,
+    });
+  } catch {
+    fail('INVALID_VALUE', '/launchInputs/seed');
+  }
+  return { launchInputs: materializedLaunchInputs, submission: materializedSubmission, seedIntent };
+}
+
+export function verifyPhaseThreeMaterializedSeedManifest({
+  materializedManifest,
+  inputDirectory,
+  artifactsDirectory,
+  expectedSeedIntentDigest,
+  frozenSeedPolicy,
+} = {}) {
+  try {
+    verifyAddressManifest({
+      manifest: materializedManifest,
+      inputDirectory,
+      artifactsDirectory,
+    });
+    if (frozenSeedPolicy !== undefined) {
+      verifyMaterializedSeedManifestFrozenPolicy(materializedManifest, frozenSeedPolicy);
+    }
+    if (expectedSeedIntentDigest !== undefined) {
+      const expected = assertHex32(
+        expectedSeedIntentDigest,
+        '/phaseThreeMaterialization/expectedSeedIntentDigest',
+        { nonzero: true },
+      );
+      if (materializedHookSeedIntentDigest(materializedManifest) !== expected.toLowerCase()) {
+        fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest/preimages/targets/hook/constructorArguments');
+      }
+    }
+    return true;
+  } catch {
+    fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest');
+  }
+}
+
+function verifyMaterializedSeedManifestFrozenPolicy(materializedManifest, frozenSeedPolicy) {
+  const inputs = assertObject(
+    materializedManifest?.launchInputs,
+    '/phaseThreeMaterialization/materializedManifest/launchInputs',
+  );
+  const policy = assertObject(frozenSeedPolicy, '/phaseThreeMaterialization/frozenSeedPolicy');
+  const policyChain = assertObject(policy.chain, '/phaseThreeMaterialization/frozenSeedPolicy/chain');
+  const policyRoles = assertObject(policy.roles, '/phaseThreeMaterialization/frozenSeedPolicy/roles');
+  const policyPool = assertObject(policy.pool, '/phaseThreeMaterialization/frozenSeedPolicy/pool');
+  const policySeedIntent = assertObject(policy.seedIntent, '/phaseThreeMaterialization/frozenSeedPolicy/seedIntent');
+  const policyHook = assertObject(policy.hook, '/phaseThreeMaterialization/frozenSeedPolicy/hook');
+  const policyArtifacts = assertObject(policy.artifacts, '/phaseThreeMaterialization/frozenSeedPolicy/artifacts');
+  const inputChain = assertObject(inputs.chain, '/phaseThreeMaterialization/materializedManifest/launchInputs/chain');
+  const inputGraphAuthorization = assertObject(
+    inputs.graphAuthorization,
+    '/phaseThreeMaterialization/materializedManifest/launchInputs/graphAuthorization',
+  );
+  const inputRoles = assertObject(inputs.roles, '/phaseThreeMaterialization/materializedManifest/launchInputs/roles');
+  const inputPool = assertObject(inputs.pool, '/phaseThreeMaterialization/materializedManifest/launchInputs/pool');
+  const inputSeedIntent = assertObject(inputs.seedIntent, '/phaseThreeMaterialization/materializedManifest/launchInputs/seedIntent');
+
+  if (inputChain.chainId !== policyChain.chainId) fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest/launchInputs/chain/chainId');
+  assertExactAddress(inputChain.factory, policyChain.factory, '/phaseThreeMaterialization/materializedManifest/launchInputs/chain/factory');
+  assertExactAddress(
+    inputChain.authorizedLauncher,
+    policyChain.authorizedLauncher,
+    '/phaseThreeMaterialization/materializedManifest/launchInputs/chain/authorizedLauncher',
+  );
+  if (inputGraphAuthorization.totalValue?.amountAtomic !== policyChain.totalValue) {
+    fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest/launchInputs/graphAuthorization/totalValue');
+  }
+
+  const roleFields = [
+    'manager', 'positionManager', 'permit2', 'programmable', 'treasury', 'operations',
+    'launchAuthority', 'issuanceAuthority',
+  ];
+  for (const field of roleFields) {
+    assertExactAddress(
+      inputRoles[field],
+      policyRoles[field],
+      `/phaseThreeMaterialization/materializedManifest/launchInputs/roles/${field}`,
+    );
+  }
+  assertExactAddress(inputs.usdg, policyRoles.usdg, '/phaseThreeMaterialization/materializedManifest/launchInputs/usdg');
+
+  if (inputPool.fee !== policyPool.fee || inputPool.tickSpacing !== policyPool.tickSpacing) {
+    fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest/launchInputs/pool');
+  }
+  const inputCandidates = assertObject(inputPool.priceCandidates, '/phaseThreeMaterialization/materializedManifest/launchInputs/pool/priceCandidates');
+  const policyCandidates = assertObject(policyPool.priceCandidates, '/phaseThreeMaterialization/frozenSeedPolicy/pool/priceCandidates');
+  for (const name of PHASE_THREE_PRICE_CANDIDATE_ORDERINGS) {
+    const candidate = assertObject(inputCandidates[name], `/phaseThreeMaterialization/materializedManifest/launchInputs/pool/priceCandidates/${name}`);
+    const expected = assertObject(policyCandidates[name], `/phaseThreeMaterialization/frozenSeedPolicy/pool/priceCandidates/${name}`);
+    for (const field of ['sqrtPriceX96', 'liquidity', 'amount0Max', 'amount1Max']) {
+      if (candidate[field] !== expected[field]) {
+        fail('INVALID_VALUE', `/phaseThreeMaterialization/materializedManifest/launchInputs/pool/priceCandidates/${name}/${field}`);
+      }
+    }
+  }
+
+  assertExactAddress(
+    inputSeedIntent.payer,
+    policySeedIntent.payer,
+    '/phaseThreeMaterialization/materializedManifest/launchInputs/seedIntent/payer',
+  );
+  for (const field of ['tickLower', 'tickUpper', 'maxDeadlineSeconds']) {
+    if (inputSeedIntent[field] !== policySeedIntent[field]) {
+      fail('INVALID_VALUE', `/phaseThreeMaterialization/materializedManifest/launchInputs/seedIntent/${field}`);
+    }
+  }
+
+  const hookWords = constructorWords(
+    materializedManifest,
+    'hook',
+    HOOK_CONSTRUCTOR_CONFIG_WORDS,
+  );
+  const hookAddressFields = [
+    ['manager', 0], ['positionManager', 1], ['permit2', 2], ['usdg', 3], ['programmable', 6],
+    ['treasury', 7], ['operations', 8], ['launchAuthority', 9], ['issuanceAuthority', 10],
+  ];
+  for (const [field, index] of hookAddressFields) {
+    const expected = field === 'usdg' ? policyRoles.usdg : policyRoles[field];
+    assertConstructorAddressWord(hookWords[index], expected, `hook constructor ${field}`);
+  }
+  assertConstructorUnsignedWord(hookWords[5], policyPool.tickSpacing, 'hook constructor tickSpacing');
+  assertConstructorUnsignedWord(hookWords[11], policyHook.expectedDecimals, 'hook constructor expectedDecimals');
+  assertConstructorUnsignedWord(hookWords[15], policyHook.processClaimLimit6h, 'hook constructor processClaimLimit6h');
+  assertConstructorUnsignedWord(hookWords[16], policyHook.processClaimLimitMax, 'hook constructor processClaimLimitMax');
+  assertConstructorUnsignedWord(hookWords[17], policyHook.processClaimMaxCount, 'hook constructor processClaimMaxCount');
+  assertConstructorUnsignedWord(hookWords[18], policyHook.operationsRotationDelay, 'hook constructor operationsRotationDelay');
+
+  const pool = assertObject(materializedManifest.preimages?.pool, '/phaseThreeMaterialization/materializedManifest/preimages/pool');
+  const selectedCandidate = assertObject(
+    inputCandidates[pool.selectedOrdering],
+    '/phaseThreeMaterialization/materializedManifest/preimages/pool/selectedOrdering',
+  );
+  const tokenWords = constructorWords(materializedManifest, 'token', 4);
+  assertConstructorAddressWord(tokenWords[0], policyRoles.issuanceAuthority, 'token constructor issuanceAuthority');
+  assertConstructorAddressWord(tokenWords[1], policyRoles.usdg, 'token constructor expectedUsdg');
+  assertConstructorUnsignedWord(tokenWords[2], policyHook.expectedDecimals, 'token constructor decimals');
+  assertConstructorUnsignedWord(tokenWords[3], selectedCandidate.sqrtPriceX96, 'token constructor launchSqrtPriceX96');
+
+  const custodyWords = constructorWords(materializedManifest, 'custody', 2);
+  assertConstructorAddressWord(custodyWords[0], policyRoles.positionManager, 'custody constructor manager');
+  assertConstructorUnsignedWord(custodyWords[1], 0, 'custody constructor tokenId');
+
+  for (const targetId of ['token', 'hook', 'custody']) {
+    const expectedArtifactDigest = assertHash(
+      policyArtifacts[targetId],
+      `/phaseThreeMaterialization/frozenSeedPolicy/artifacts/${targetId}`,
+    );
+    const materializedTarget = assertObject(
+      materializedManifest?.preimages?.targets?.[targetId],
+      `/phaseThreeMaterialization/materializedManifest/preimages/targets/${targetId}`,
+    );
+    if (materializedTarget.artifactDigest !== expectedArtifactDigest) {
+      fail('INVALID_VALUE', `/phaseThreeMaterialization/materializedManifest/preimages/targets/${targetId}/artifactDigest`);
+    }
+  }
+}
+
+function constructorWords(materializedManifest, targetId, expectedWordCount) {
+  const constructorArguments = assertHex(
+    materializedManifest?.preimages?.targets?.[targetId]?.constructorArguments,
+    `/phaseThreeMaterialization/materializedManifest/preimages/targets/${targetId}/constructorArguments`,
+    { nonempty: true },
+  );
+  const words = constructorArguments.slice(2);
+  if (words.length !== expectedWordCount * 64) {
+    fail('INVALID_VALUE', `/phaseThreeMaterialization/materializedManifest/preimages/targets/${targetId}/constructorArguments`);
+  }
+  return Array.from({ length: expectedWordCount }, (_, index) => words.slice(index * 64, (index + 1) * 64));
+}
+
+function assertConstructorAddressWord(word, expectedAddress, label) {
+  const expected = assertAddress(expectedAddress, label).toLowerCase().slice(2).padStart(64, '0');
+  if (word !== expected) fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest');
+}
+
+function assertConstructorUnsignedWord(word, expectedValue, label) {
+  if (BigInt(`0x${word}`) !== BigInt(expectedValue)) {
+    fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedManifest');
+  }
+}
+
+function materializedHookSeedIntentDigest(materializedManifest) {
+  return `0x${constructorWords(materializedManifest, 'hook', HOOK_CONSTRUCTOR_CONFIG_WORDS)[
+    HOOK_SEED_INTENT_DIGEST_WORD
+  ]}`.toLowerCase();
+}
+
+function phaseThreeFrozenSeedPolicy(launchInputs, addressManifest) {
+  const roles = assertObject(launchInputs?.roles, '/launchInputs/roles');
+  const pool = assertObject(launchInputs?.pool, '/launchInputs/pool');
+  const priceCandidates = assertObject(pool.priceCandidates, '/launchInputs/pool/priceCandidates');
+  const seed = assertObject(launchInputs?.seed, '/launchInputs/seed');
+  const allowance = assertObject(seed.permit2Allowance, '/launchInputs/seed/permit2Allowance');
+  const deadlinePolicy = assertObject(seed.deadlinePolicy, '/launchInputs/seed/deadlinePolicy');
+  const fullRange = assertObject(pool.fullRange, '/launchInputs/pool/fullRange');
+  const graphFunding = assertObject(seed.graphFunding, '/launchInputs/seed/graphFunding');
+  const targets = assertArray(addressManifest?.targets, '/addressManifest/targets');
+  const hookTarget = targets.find((target) => target?.targetId === 'hook');
+  const hook = assertObject(hookTarget?.constructor, '/addressManifest/targets/hook/constructor');
+  const artifacts = Object.fromEntries(['token', 'hook', 'custody'].map((targetId) => {
+    const target = assertObject(
+      targets.find((candidate) => candidate?.targetId === targetId),
+      `/addressManifest/targets/${targetId}`,
+    );
+    return [targetId, assertHash(target.artifactSha256, `/addressManifest/targets/${targetId}/artifactSha256`)];
+  }));
+  const candidates = Object.fromEntries(PHASE_THREE_PRICE_CANDIDATE_ORDERINGS.map((name) => {
+    const candidate = assertObject(priceCandidates[name], `/launchInputs/pool/priceCandidates/${name}`);
+    return [name, {
+      sqrtPriceX96: candidate.sqrtPriceX96,
+      liquidity: candidate.liquidity,
+      amount0Max: candidate.amount0Max,
+      amount1Max: candidate.amount1Max,
+    }];
+  }));
+  return {
+    chain: {
+      chainId: launchInputs.chain?.chainId,
+      factory: launchInputs.chain?.graphFactory,
+      authorizedLauncher: launchInputs.chain?.launchAndStampV1Router,
+      totalValue: graphFunding.amountAtomic,
+    },
+    roles: {
+      manager: roles.poolManager,
+      positionManager: roles.positionManager,
+      permit2: roles.permit2,
+      programmable: roles.programmablePlatform,
+      treasury: roles.treasury,
+      operations: roles.operations,
+      launchAuthority: roles.launchAuthority,
+      issuanceAuthority: roles.issuanceAuthority,
+      usdg: roles.usdg,
+    },
+    pool: {
+      fee: pool.fee,
+      tickSpacing: pool.tickSpacing,
+      priceCandidates: candidates,
+    },
+    seedIntent: {
+      payer: allowance.owner,
+      tickLower: fullRange.minimumTick,
+      tickUpper: fullRange.maximumTick,
+      maxDeadlineSeconds: deadlinePolicy.maximumSecondsAfterWalletConfirmation,
+    },
+    hook: {
+      expectedDecimals: hook.expectedDecimals,
+      processClaimLimit6h: hook.processClaimLimit6h,
+      processClaimLimitMax: hook.processClaimLimitMax,
+      processClaimMaxCount: hook.processClaimMaxCount,
+      operationsRotationDelay: hook.operationsRotationDelay,
+    },
+    artifacts,
+  };
+}
+
+function materializePhaseThreeSeedTransaction({
+  materializedSeed,
+  seedIntent,
+  selection,
+  launchInputs,
+  materializedManifest,
+  materializedManifestInputDirectory,
+  artifactsDirectory,
+  frozenSeedPolicy,
+}) {
+  verifyPhaseThreeMaterializedSeedManifest({
+    materializedManifest,
+    inputDirectory: materializedManifestInputDirectory,
+    artifactsDirectory,
+    expectedSeedIntentDigest: seedIntent.digest,
+    frozenSeedPolicy,
+  });
+  const seed = assertObject(materializedSeed, '/phaseThreeMaterialization/materializedSeed');
+  assertExactKeys(seed, ['referenceTimestamp', 'transaction'], '/phaseThreeMaterialization/materializedSeed');
+  assertAmount(seed.referenceTimestamp, '/phaseThreeMaterialization/materializedSeed/referenceTimestamp');
+  const chain = assertObject(launchInputs.chain, '/launchInputs/chain');
+  try {
+    verifyMaterializedSeedTransaction({
+      transaction: seed.transaction,
+      chainId: chain.chainId,
+      expectedHook: selection.hook,
+      expectedCustody: selection.custody,
+      expectedIntent: seedIntent,
+      referenceTimestamp: seed.referenceTimestamp,
+    });
+  } catch {
+    fail('INVALID_VALUE', '/phaseThreeMaterialization/materializedSeed');
+  }
+  return cloneJson(seed);
 }
 
 function materializePhaseThreeDraft(options, launchInputs, addressManifest) {
@@ -1023,7 +1376,13 @@ function materializePhaseThreeDraft(options, launchInputs, addressManifest) {
     fail('INVALID_VALUE', '/phaseThreeMaterialization');
   }
   const materialization = assertObject(options.phaseThreeMaterialization, '/phaseThreeMaterialization');
-  assertExactKeys(materialization, ['materializedManifest', 'submission'], '/phaseThreeMaterialization');
+  assertExactKeys(
+    materialization,
+    Object.hasOwn(materialization, 'materializedSeed')
+      ? ['materializedManifest', 'submission', 'materializedSeed']
+      : ['materializedManifest', 'submission'],
+    '/phaseThreeMaterialization',
+  );
   const result = materializePhaseThreePriceSelection({
     launchInputs,
     submission: materialization.submission,
@@ -1033,6 +1392,22 @@ function materializePhaseThreeDraft(options, launchInputs, addressManifest) {
     launchInputs: result.launchInputs,
     materializedManifest: cloneJson(materialization.materializedManifest),
     submission: result.submission,
+    seedIntent: result.seedIntent,
+    ...(Object.hasOwn(materialization, 'materializedSeed')
+      ? {
+        materializedSeed: materializePhaseThreeSeedTransaction({
+          materializedSeed: materialization.materializedSeed,
+          seedIntent: result.seedIntent,
+          selection: selectionFromMaterializedManifest(launchInputs, materialization.materializedManifest),
+          launchInputs,
+          materializedManifest: materialization.materializedManifest,
+          materializedManifestInputDirectory:
+            options.materializedManifestInputDirectory ?? dirname(options.launchInputsPath),
+          artifactsDirectory: options.artifactDirectory,
+          frozenSeedPolicy: phaseThreeFrozenSeedPolicy(launchInputs, addressManifest),
+        }),
+      }
+      : {}),
   };
 }
 
@@ -1238,7 +1613,7 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     targetId: 'hook', targetIndex: 2, componentKind: 'hook', sourcePath: 'packages/contracts/src/HookemonHook.sol', contractName: 'HookemonHook',
   });
   if (!sameStringSet(hook.declaredHookPermissions, ['beforeInitialize', 'beforeSwap', 'beforeSwapReturnDelta', 'afterSwap', 'afterSwapReturnDelta']) || hook.permissionMask !== '0x20cc') fail('INVALID_VALUE', `${manifestPath}/targets/2`);
-  assertExactKeys(hook.constructor, ['manager', 'positionManager', 'permit2', 'usdg', 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations', 'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'processClaimLimit6h', 'processClaimLimitMax', 'processClaimMaxCount', 'operationsRotationDelay'], `${manifestPath}/targets/2/constructor`);
+  assertExactKeys(hook.constructor, ['manager', 'positionManager', 'permit2', 'usdg', 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations', 'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'seedIntentDigest', 'processClaimLimit6h', 'processClaimLimitMax', 'processClaimMaxCount', 'operationsRotationDelay'], `${manifestPath}/targets/2/constructor`);
   const expectedHookConstructorAddresses = {
     manager: expectedRoles.poolManager,
     positionManager: expectedRoles.positionManager,
@@ -1253,7 +1628,7 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   for (const [field, expected] of Object.entries(expectedHookConstructorAddresses)) assertExactAddress(hook.constructor[field], expected, `${manifestPath}/targets/2/constructor/${field}`);
   if (
     hook.constructor.hkmn !== null || hook.constructor.tickSpacing !== 60
-    || hook.constructor.expectedDecimals !== 18 || hook.constructor.bindingDigest !== null || hook.constructor.runtimeDigest !== null
+    || hook.constructor.expectedDecimals !== 18 || hook.constructor.bindingDigest !== null || hook.constructor.runtimeDigest !== null || hook.constructor.seedIntentDigest !== null
     || hook.constructor.processClaimLimit6h !== '50000000000' || hook.constructor.processClaimLimitMax !== '500000000000'
     || hook.constructor.processClaimMaxCount !== 24 || hook.constructor.operationsRotationDelay !== '43200'
   ) fail('INVALID_VALUE', `${manifestPath}/targets/2/constructor`);
@@ -1315,7 +1690,12 @@ function phaseThreeDraftUnverified() {
   ];
 }
 
-function assemblePhaseThreeAddressDerivationDraft(launchInputs, addressManifest, materialization = null) {
+function assemblePhaseThreeAddressDerivationDraft(
+  launchInputs,
+  addressManifest,
+  materialization = null,
+  { requestMaterializationRoot = null } = {},
+) {
   const unverified = phaseThreeDraftUnverified(launchInputs, addressManifest);
   const inputDigests = {
     launchInputsSha256: sha256CanonicalJson(launchInputs),
@@ -1324,6 +1704,9 @@ function assemblePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   if (materialization) {
     inputDigests.materializedManifestSha256 = sha256CanonicalJson(materialization.materializedManifest);
     inputDigests.submissionSha256 = sha256CanonicalJson(materialization.submission);
+    if (materialization.materializedSeed) {
+      inputDigests.materializedSeedSha256 = sha256CanonicalJson(materialization.materializedSeed);
+    }
   }
   const graphDraft = {
     schemaVersion: 'hookemon.phase3.graph-draft.v1',
@@ -1363,27 +1746,43 @@ function assemblePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
       permit2Allowance: cloneJson(launchInputs.seed.permit2Allowance),
       deadlinePolicy: cloneJson(launchInputs.seed.deadlinePolicy),
       refundAndDust: cloneJson(launchInputs.seed.refundAndDust),
+      ...(materialization?.seedIntent ? { intent: cloneJson(materialization.seedIntent) } : {}),
     },
     metadata: cloneJson(launchInputs.metadata),
     openFacts: [...new Set([...launchInputs.openFacts, ...addressManifest.openFacts])],
     unverified,
   };
   const graphDraftBytes = stableJsonBytes(graphDraft);
+  const requestMaterialization = requestMaterializationRoot === null
+    ? null
+    : materializePhaseThreeCreateRequest({ root: requestMaterializationRoot, graphDraft });
+  const createRequestBytes = requestMaterialization === null
+    ? null
+    : stableJsonBytes(requestMaterialization.request);
+  const createRequestSha256 = createRequestBytes === null ? null : sha256Bytes(createRequestBytes);
   const packageManifest = {
     schemaVersion: 'hookemon.phase3.local-package-manifest.v1',
     status: 'ADDRESS_DERIVATION_PENDING',
     graphDraftSha256: sha256Bytes(graphDraftBytes),
     inputDigests: graphDraft.inputDigests,
+    ...(createRequestSha256 === null ? {} : { createRequestTemplateSha256: createRequestSha256 }),
+    ...(requestMaterialization?.sourceBundleCoverage === undefined
+      ? {}
+      : { sourceBundleCoverage: cloneJson(requestMaterialization.sourceBundleCoverage) }),
     unverified,
   };
   return {
     mode: 'address-derivation-pending',
-    createRequestSha256: null,
+    createRequestSha256,
     unverified,
     materializedSubmission: materialization?.submission ?? null,
     files: [
       { path: 'README.md', bytes: Buffer.from(PHASE_THREE_DRAFT_README, 'utf8') },
+      ...(createRequestBytes === null ? [] : [{ path: 'create-request.json', bytes: createRequestBytes }]),
       { path: 'graph-draft.json', bytes: graphDraftBytes },
+      ...(materialization?.materializedSeed
+        ? [{ path: 'seed-transaction.json', bytes: stableJsonBytes(materialization.materializedSeed) }]
+        : []),
       { path: 'package-manifest.json', bytes: stableJsonBytes(packageManifest) },
     ],
   };
@@ -1764,7 +2163,9 @@ function assemblePackage(options) {
     const materializedLaunchInputs = materialization?.launchInputs ?? launchInputs;
     validatePhaseThreeAddressDerivationDraft(materializedLaunchInputs, addressManifest, artifactDirectory);
     validatePhaseThreeBuildEvidence(artifactDirectory, standardInputDirectory, addressManifest);
-    return assemblePhaseThreeAddressDerivationDraft(materializedLaunchInputs, addressManifest, materialization);
+    return assemblePhaseThreeAddressDerivationDraft(materializedLaunchInputs, addressManifest, materialization, {
+      requestMaterializationRoot: options.requestMaterializationRoot,
+    });
   }
   if (Object.hasOwn(options, 'phaseThreeMaterialization')) fail('INVALID_VALUE', '/phaseThreeMaterialization');
   validateLaunchInputs(launchInputs);
@@ -2037,7 +2438,7 @@ export function verifyLaunchPackage(options) {
       ok: true,
       mode: assembled.mode,
       readyForPreflight: false,
-      createRequestSha256: null,
+      createRequestSha256: assembled.createRequestSha256,
       unverified: assembled.unverified,
     };
   }

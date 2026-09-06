@@ -49,18 +49,33 @@ import {
   recordRehearsalSessionRestart,
 } from '../../runner/src/cycle/rehearsal-session.mjs';
 import { inspectCycleRecovery, projectCycleRepositoryStatus } from '../../runner/src/operator/cli.mjs';
-import { readOperatorState } from '../../runner/src/operator/state-file.mjs';
-import { deriveCyclePolicyDigest, PolicyRefusalError } from '../../runner/src/automation/policy-engine.mjs';
+import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../runner/src/operator/state-file.mjs';
+import { applyOperatorConfiguration } from '../../runner/src/config/state-schema.mjs';
+import {
+  assertCollectorOnlyRehearsalPolicy,
+  deriveCyclePolicyDigest,
+  PolicyRefusalError,
+} from '../../runner/src/automation/policy-engine.mjs';
 import { createProcessExec } from '../src/signing/keychain-process-exec.mjs';
+import {
+  assertCollectorPolicyBundleRuntimeReady,
+  attachCollectorPolicyBundle,
+  loadCollectorPolicyBundle,
+} from '../src/signing/collector-policy-loader.mjs';
+import { createCollectorCryptClient } from '../src/collector-crypt.mjs';
+import { createSolanaRpcClient } from '../src/solana-rpc.mjs';
+import { runCollectorOnlyPreflight as runCollectorOnlyPreflightPlan } from '../rehearsal/collector-only-preflight.mjs';
 
 export { compositionInput, createProcessExec, parseArgv };
 
 const USAGE = `Usage: hookemon-runner run --mode rehearsal --cycles <positive-integer> --cap-usdg <atomic-amount> (--collector-only|--relay-roundtrip) [--restart-inject]
+   or: hookemon-runner preflight [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner run --mode production [--state <absolute-path-to-operator-state.json>] [--no-dashboard]
    or: hookemon-runner dry-run [--mode inspection|production] [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner status [--cycle <cycle-id>] [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner resume <cycle-id> [--state <absolute-path-to-operator-state.json>]
    or: hookemon-runner abort-cycle <cycle-id> --reason <reason> [--state <absolute-path-to-operator-state.json>]
+   or: hookemon-runner operator [--state <absolute-path-to-operator-state.json>] initialize-collector-only-policy
    or: hookemon-runner operator [--state <absolute-path-to-operator-state.json>] <operator-command> [operator flags]
 
 Configuration is read from HOOKEMON_* environment variables (see packages/adapters/src/app/environment.mjs)
@@ -86,10 +101,11 @@ function parseOperatorArgv(rest) {
   return Object.freeze({ statePathOverride, operatorArgv });
 }
 
-const COMMANDS = new Set(['run', 'tick', 'dry-run', 'status', 'resume', 'abort-cycle', 'operator']);
+const COMMANDS = new Set(['run', 'preflight', 'tick', 'dry-run', 'status', 'resume', 'abort-cycle', 'operator']);
 const BOOLEAN_FLAGS = new Set(['no-dashboard', 'collector-only', 'relay-roundtrip', 'restart-inject']);
 const FLAG_ALLOWLIST = Object.freeze({
   run: new Set(['state', 'no-dashboard', 'mode', 'cycles', 'cap-usdg', 'collector-only', 'relay-roundtrip', 'restart-inject']),
+  preflight: new Set(['state']),
   tick: new Set(['state']),
   'dry-run': new Set(['state', 'mode']),
   status: new Set(['state', 'cycle']),
@@ -196,6 +212,16 @@ function parseArgv(argv) {
       operatorArgv: null,
     });
   }
+  if (command === 'preflight') {
+    if (positionals.length !== 0) throw usageError('preflight does not accept positional arguments');
+    return Object.freeze({
+      command,
+      statePathOverride: flags.state ?? null,
+      noDashboard: false,
+      cycleId: null,
+      operatorArgv: null,
+    });
+  }
   if (command === 'resume' || command === 'abort-cycle') {
     if (positionals.length !== 1 || positionals[0].startsWith('--')) throw usageError(`${command} requires one cycleId`);
     if (command === 'abort-cycle' && (!flags.reason || flags.reason.length > 512 || /[\u0000-\u001f\u007f]/.test(flags.reason))) {
@@ -257,10 +283,13 @@ function resolveStatePath(env, statePathOverride) {
 
 function keychainReadinessSigners(readiness) {
   if (readiness === null) return null;
-  return Object.freeze({
-    'operator-evm': Object.freeze({ probe: async () => readiness['operator-evm'] }),
-    'operator-solana': Object.freeze({ probe: async () => readiness['operator-solana'] }),
-  });
+  const signers = {};
+  for (const role of ['operator-evm', 'operator-solana']) {
+    if (readiness[role] !== undefined) {
+      signers[role] = Object.freeze({ probe: async () => readiness[role] });
+    }
+  }
+  return Object.freeze(signers);
 }
 
 async function assertRepositoryIntegrityAt(stateDir) {
@@ -386,8 +415,8 @@ async function buildComposition({
     await readinessComposition.shutdown();
   }
 
-  // A collector-only rehearsal has no transaction-capable provider or signer. Live profiles load
-  // the signer only after repository integrity, keychain readiness, and canary preflight passed.
+  // Fake rehearsals have no transaction-capable signer. Live profiles construct the selected
+  // Operations signer only after repository integrity, keychain readiness, and canary preflight passed.
   const signerClient = env.execution.providerMode === 'fake' || !constructSigner
     ? null
     : await loadOperatorSignerClient(env, { exec: createProcessExec() });
@@ -450,6 +479,76 @@ async function runRun(composition) {
 async function runDryRun(composition, emitJson = writeJson) {
   const result = await composition.service.runOnce({ liveMode: false });
   emitJson(result);
+}
+
+/** This owner-facing admission path deliberately constructs neither a scheduler nor a signer. */
+async function runCollectorOnlyPreflight({ statePathOverride, environment = process.env } = {}) {
+  const environmentConfig = readEnvironment(environment, { profile: 'rehearsal' });
+  const bundle = await loadCollectorPolicyBundle();
+  const env = attachCollectorPolicyBundle(environmentConfig, bundle);
+  assertCollectorPolicyBundleRuntimeReady(bundle);
+  if (env.execution.providerMode !== 'live' || env.rehearsal?.mode !== 'collector-only') {
+    throw new Error('preflight requires HOOKEMON_REHEARSAL_MODE=collector-only and HOOKEMON_PROVIDER_MODE=live');
+  }
+  const statePath = resolveStatePath(env, statePathOverride);
+  const state = await readOperatorState(statePath);
+  if (state.configuration === null) throw new Error('collector-only preflight refused: policy configuration is missing');
+  const adapters = Object.freeze({
+    collectorCrypt: createCollectorCryptClient({ apiKey: env.collectorCrypt.apiKey, baseUrl: env.collectorCrypt.baseUrl }),
+    solana: Object.freeze({ client: createSolanaRpcClient({ rpcUrl: env.solana.rpcUrl }) }),
+  });
+  return runCollectorOnlyPreflightPlan({
+    config: env,
+    policyConfiguration: state.configuration,
+    adapters,
+    probeKeychain: () => probeKeychainOperations(env, { exec: createProcessExec() }),
+  });
+}
+
+/** Creates the sealed first-use policy only when the dedicated rehearsal state does not exist. */
+export async function initializeCollectorOnlyPolicy({
+  statePathOverride,
+  environment = process.env,
+  readEnvironmentFn = readEnvironment,
+} = {}) {
+  const env = readEnvironmentFn(environment, { profile: 'rehearsal' });
+  assertRehearsalProfile({ env, collectorOnly: true, relayRoundtrip: false });
+  const packPriceAtomic = env.collectorCrypt?.packPrice?.amountAtomic;
+  assertLiveCollectorOnlyRunOptions({
+    env,
+    cycles: 1,
+    capUsdg: packPriceAtomic,
+    restartInject: false,
+  });
+  const statePath = resolveStatePath(env, statePathOverride);
+  const configurationPatch = Object.freeze({
+    allowedPackIds: Object.freeze([env.pack.code]),
+    requestedOrders: 1,
+    maxBoostersPerCycle: 1,
+    maxUnitPriceMicroUsdg: packPriceAtomic,
+    maxCycleBudgetMicroUsdg: packPriceAtomic,
+    max24HourBudgetMicroUsdg: packPriceAtomic,
+    maxCyclesPerDay: 1,
+    perCycleCapMicroUsdg: packPriceAtomic,
+    lossCapMicroUsdg: packPriceAtomic,
+    maxOutstandingCustodyMicroUsdg: packPriceAtomic,
+    manualApprovalCycles: 1,
+    liveMode: true,
+  });
+  const state = await mutateOperatorState(statePath, null, current => {
+    if (current !== null) throw new Error('collector-only policy initializer only initializes an absent operator state');
+    const configuration = applyOperatorConfiguration(null, configurationPatch);
+    assertCollectorOnlyRehearsalPolicy(configuration, {
+      packCode: env.pack.code,
+      packPriceAtomic,
+    });
+    return { ...createEmptyOperatorState(), configuration };
+  });
+  return Object.freeze({
+    action: 'initialize-collector-only-policy',
+    revision: state.revision,
+    configuration: state.configuration,
+  });
 }
 
 async function runOperator(composition, operatorArgv, runComposedOperatorCli) {
@@ -541,15 +640,28 @@ async function runResume({ statePathOverride, cycleId }) {
   }
 }
 
-function assertRehearsalProfile({ env, collectorOnly, relayRoundtrip }) {
+export function assertRehearsalProfile({ env, collectorOnly, relayRoundtrip }) {
   const requested = collectorOnly ? 'collector-only' : relayRoundtrip ? 'relay-roundtrip' : null;
   if (requested === null) throw new Error('rehearsal requires one explicit profile flag');
-  if (env.execution.providerMode !== 'fake') {
-    throw new Error(`${requested} rehearsal requires HOOKEMON_PROVIDER_MODE=fake`);
-  }
   if (env.rehearsal?.mode !== requested) {
     throw new Error(`${requested} rehearsal flag does not match HOOKEMON_REHEARSAL_MODE`);
   }
+  if (env.execution.providerMode === 'fake') return;
+  if (env.execution.providerMode === 'live' && requested === 'collector-only') return;
+  throw new Error(`${requested} rehearsal requires HOOKEMON_PROVIDER_MODE=fake`);
+}
+
+export function assertLiveCollectorOnlyRunOptions({ env, cycles, capUsdg, restartInject }) {
+  const liveCollectorOnly = env?.execution?.providerMode === 'live' && env?.rehearsal?.mode === 'collector-only';
+  if (!liveCollectorOnly) return false;
+  if (cycles !== 1) throw new Error('live collector-only rehearsal requires exactly one cycle');
+  if (restartInject === true) throw new Error('live collector-only rehearsal refuses restart injection');
+  const packPrice = env.collectorCrypt?.packPrice?.amountAtomic;
+  if (typeof packPrice !== 'string' || !/^(0|[1-9][0-9]*)$/.test(packPrice)) {
+    throw new Error('live collector-only rehearsal requires a typed configured pack price');
+  }
+  if (capUsdg !== packPrice) throw new Error('live collector-only rehearsal requires the exact configured pack price cap');
+  return true;
 }
 
 function assertRehearsalSessionMatches(session, { cycles, capUsdg, collectorOnly }) {
@@ -574,28 +686,42 @@ async function repairCompletedSessionCycles({ composition, stateDir, sessionPath
 
 export async function buildManualApprovalHandoff({ composition, env, statePath }) {
   const active = await composition.cycleRepository.readActiveCycle();
-  if (!active || active.mode !== 'rehearsal' || active.providerMode !== 'fake') {
-    throw new Error('manual approval handoff requires an active fake rehearsal cycle');
+  const liveCollectorOnly = active?.mode === 'rehearsal'
+    && active.providerMode === 'live'
+    && env.execution?.providerMode === 'live'
+    && env.rehearsal?.mode === 'collector-only';
+  const fakeRehearsal = active?.mode === 'rehearsal' && active.providerMode === 'fake';
+  if (!fakeRehearsal && !liveCollectorOnly) {
+    throw new Error('manual approval handoff requires an active fake rehearsal or live collector-only cycle');
   }
   const state = await readOperatorState(statePath);
   if (state.configuration === null) throw new Error('manual approval handoff requires a persisted policy configuration');
   if (env.pack?.code === null || env.pack?.code === undefined) throw new Error('manual approval handoff requires a configured pack');
-  const policyDigest = deriveCyclePolicyDigest({
+  const cycleDigest = deriveCyclePolicyDigest({
     configuration: state.configuration,
     cycleId: active.cycleId,
     releaseAmountMicroUsdg: active.releaseAmount,
     packId: env.pack.code,
-    liveMode: false,
+    liveMode: liveCollectorOnly,
     mode: 'rehearsal',
   });
-  return Object.freeze({ status: 'AWAITING_MANUAL_APPROVAL', cycleId: active.cycleId, policyDigest });
+  return Object.freeze({ status: 'AWAITING_MANUAL_APPROVAL', cycleId: active.cycleId, cycleDigest });
 }
 
-async function runRehearsal({ statePathOverride, cycles, capUsdg, collectorOnly, relayRoundtrip, restartInject }) {
-  const env = readEnvironment(process.env, { profile: 'rehearsal' });
+export async function runRehearsal({ statePathOverride, cycles, capUsdg, collectorOnly, relayRoundtrip, restartInject }, {
+  environment = process.env,
+  readEnvironmentFn = readEnvironment,
+  runCollectorOnlyPreflightFn = runCollectorOnlyPreflight,
+  buildCompositionFn = buildComposition,
+} = {}) {
+  const env = readEnvironmentFn(environment, { profile: 'rehearsal' });
   assertRehearsalProfile({ env, collectorOnly, relayRoundtrip });
+  const liveCollectorOnly = assertLiveCollectorOnlyRunOptions({ env, cycles, capUsdg, restartInject });
+  if (liveCollectorOnly) {
+    await runCollectorOnlyPreflightFn({ statePathOverride, environment });
+  }
   const statePath = resolveStatePath(env, statePathOverride);
-  const sessionPath = restartInject ? process.env[REHEARSAL_SESSION_PATH_ENV] ?? null : null;
+  const sessionPath = restartInject ? environment[REHEARSAL_SESSION_PATH_ENV] ?? null : null;
   let session = sessionPath === null ? null : await readRehearsalSession({ path: sessionPath });
   const localCompleted = [];
   if (session !== null) assertRehearsalSessionMatches(session, { cycles, capUsdg, collectorOnly });
@@ -605,7 +731,7 @@ async function runRehearsal({ statePathOverride, cycles, capUsdg, collectorOnly,
     const restartInjector = restartInject
       ? async () => { throw new RehearsalRestartInjectedError(); }
       : null;
-    const composition = await buildComposition({
+    const composition = await buildCompositionFn({
       statePathOverride,
       withDashboard: false,
       profile: 'rehearsal',
@@ -619,7 +745,7 @@ async function runRehearsal({ statePathOverride, cycles, capUsdg, collectorOnly,
         if (session.state === 'COMPLETE') break;
       }
       const result = await composition.service.runOnce({
-        liveMode: false,
+        liveMode: liveCollectorOnly,
         mode: 'rehearsal',
       });
       if (result.status !== 'COMPLETE') {
@@ -689,6 +815,12 @@ export async function runRehearsalSupervisor(parsed, {
     collectorOnly: parsed.collectorOnly,
     relayRoundtrip: parsed.relayRoundtrip,
   });
+  assertLiveCollectorOnlyRunOptions({
+    env,
+    cycles: parsed.cycles,
+    capUsdg: parsed.capUsdg,
+    restartInject: true,
+  });
   const session = await openSessionFn({
     stateDir: env.stateDir,
     cycles: parsed.cycles,
@@ -735,6 +867,8 @@ export async function runCli(argv, options = {}) {
   const environment = options.environment ?? process.env;
   const runRehearsalFn = options.runRehearsalFn ?? runRehearsal;
   const runRehearsalSupervisorFn = options.runRehearsalSupervisorFn ?? runRehearsalSupervisor;
+  const runCollectorOnlyPreflightFn = options.runCollectorOnlyPreflightFn ?? runCollectorOnlyPreflight;
+  const initializeCollectorOnlyPolicyFn = options.initializeCollectorOnlyPolicyFn ?? initializeCollectorOnlyPolicy;
   const parsed = parseArgv(argv);
   if (parsed.invalidCommand) {
     process.stderr.write(`${USAGE}\n`);
@@ -759,8 +893,16 @@ export async function runCli(argv, options = {}) {
     await runAbortCycle(parsed);
     return;
   }
+  if (command === 'preflight') {
+    emitJson(await runCollectorOnlyPreflightFn({ statePathOverride }));
+    return;
+  }
   if (command === 'resume') {
     await runResume(parsed);
+    return;
+  }
+  if (command === 'operator' && operatorArgv.length === 1 && operatorArgv[0] === 'initialize-collector-only-policy') {
+    emitJson(await initializeCollectorOnlyPolicyFn({ statePathOverride, environment }));
     return;
   }
   if (command === 'run' && parsed.mode === 'rehearsal') {

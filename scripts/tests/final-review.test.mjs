@@ -111,19 +111,19 @@ test('init I6 binds the exact current control surface without mutable projection
     'scripts/verify-phase1-reproducibility.mjs',
     'scripts/release/build-local-candidate.mjs',
   ]);
-  function filesUnder(relativeDirectory, extension) {
+  function filesUnder(relativeDirectory, extension = null) {
     return readdirSync(join(templateRoot, relativeDirectory), { withFileTypes: true })
       .flatMap(entry => {
         const path = `${relativeDirectory}/${entry.name}`;
         if (entry.isDirectory()) return filesUnder(path, extension);
-        return entry.isFile() && path.endsWith(extension) ? [path] : [];
+        return entry.isFile() && (extension === null || path.endsWith(extension)) ? [path] : [];
       });
   }
 
   const gateDefinitions = readdirSync(join(templateRoot, 'gates'), { withFileTypes: true })
     .filter(entry => entry.isFile() && entry.name.endsWith('.json') && entry.name !== 'init.json')
     .map(entry => `gates/${entry.name}`);
-  const expectedInputs = [
+  const expectedInputs = [...new Set([
     '.github/workflows/control-gate.yml',
     '.github/workflows/fork-pin-canary.yml',
     '.github/workflows/fork-proof.yml',
@@ -140,9 +140,12 @@ test('init I6 binds the exact current control surface without mutable projection
     'policy/policy.json',
     'product/delivery-boundary.json',
     ...filesUnder('docs/modules', '.md'),
+    ...filesUnder('packages/adapters/rehearsal/collector-policy'),
     ...filesUnder('scripts', '.mjs').filter(input => !excludedFromInitControlSurface.has(input)),
+    ...filesUnder('scripts/ci'),
+    ...filesUnder('scripts/programmable/vendor'),
     ...gateDefinitions,
-  ].sort();
+  ])].sort();
   const definition = JSON.parse(readFileSync(join(templateRoot, 'gates', 'init.json'), 'utf8'));
   const policy = definition.items.find(item => item.id === 'I6').evidencePolicy;
   const trackedInputs = new Set(

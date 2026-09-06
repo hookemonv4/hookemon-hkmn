@@ -76,8 +76,8 @@ async function generateWallet(keychain, identity) {
   return JSON.parse(result.stdout);
 }
 
-async function invokeSigner(keychain, { operation, role, account, payload, request, env }) {
-  return runProcess(SIGNER_BIN_PATH, [operation, '--role', role, '--account', account], {
+async function invokeSigner(keychain, { operation, role, account, payload, request, env, args = [] }) {
+  return runProcess(SIGNER_BIN_PATH, [operation, '--role', role, '--account', account, ...args], {
     env: signerEnvironment(keychain, env),
     input: wireInput({ operation, role, account, payload, request }),
   });
@@ -118,6 +118,23 @@ test('keychain signer accepts the generic command operation, role, and account l
   );
 });
 
+test('keychain signer accepts the internal parent-policy marker only for Solana signing', async () => {
+  const { parseWireArgs } = await loadSignerBinary();
+  assert.deepEqual(
+    parseWireArgs(['sign', '--role', 'operator-solana', '--account', 'operator-solana', '--parent-policy-evaluated']),
+    {
+      operation: 'sign',
+      role: 'operator-solana',
+      account: 'operator-solana',
+      parentPolicyEvaluated: true,
+    },
+  );
+  assert.throws(
+    () => parseWireArgs(['probe', '--role', 'operator-solana', '--account', 'operator-solana', '--parent-policy-evaluated']),
+    /parent-policy marker only applies to Solana sign operations/i,
+  );
+});
+
 test('keychain signer probe returns exactly the generic ready result after an EVM sign-only check', async t => {
   const keychain = await createTestKeychain(t);
   await generateWallet(keychain, 'operations-evm');
@@ -133,7 +150,7 @@ test('keychain signer probe returns exactly the generic ready result after an EV
 
 test('keychain signer probe returns exactly the generic ready result after a Solana sign-only check', async t => {
   const keychain = await createTestKeychain(t);
-  await generateWallet(keychain, 'operations-solana');
+  const wallet = await generateWallet(keychain, 'operations-solana');
   const result = await invokeSigner(keychain, {
     operation: 'probe',
     role: 'operator-solana',
@@ -141,7 +158,7 @@ test('keychain signer probe returns exactly the generic ready result after a Sol
     payload: { kind: 'hookemon-keychain-sign-only-readiness.v1' },
   });
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), { ready: true });
+  assert.deepEqual(JSON.parse(result.stdout), { ready: true, publicKey: wallet.publicKey });
 });
 
 test('keychain signer returns a recoverable EVM transaction only after child policy evaluation', async t => {
@@ -244,6 +261,32 @@ test('keychain signer refuses a serialized live Solana policy without trusted pa
   });
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /parent transaction policy evaluation with trusted chain resolvers/i);
+});
+
+test('keychain signer signs a live Solana transaction only after the parent-policy marker', async t => {
+  const keychain = await createTestKeychain(t);
+  const wallet = await generateWallet(keychain, 'operations-solana');
+  const operator = new PublicKey(wallet.publicKey);
+  const transaction = new Transaction({
+    feePayer: operator,
+    recentBlockhash: SystemProgram.programId.toBase58(),
+  }).add(SystemProgram.transfer({
+    fromPubkey: operator,
+    toPubkey: operator,
+    lamports: 0,
+  }));
+  const bytes = transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
+  const result = await invokeSigner(keychain, {
+    operation: 'sign',
+    role: 'operator-solana',
+    account: 'operator-solana',
+    payload: bytes,
+    request: { encoding: 'base64', data: Buffer.from(bytes).toString('base64') },
+    args: ['--parent-policy-evaluated'],
+    env: { HOOKEMON_SIGNER_LIVE_MODE: 'true' },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(Transaction.from(Buffer.from(JSON.parse(result.stdout).signedTxBase64, 'base64')).verifySignatures(), true);
 });
 
 test('keychain signer returns its bounded Keychain timeout to the caller', { timeout: 1_000 }, async t => {

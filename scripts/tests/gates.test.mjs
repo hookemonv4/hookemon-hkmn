@@ -106,6 +106,20 @@ function integrationSpikeProject(integrationSpikes) {
   return root;
 }
 
+function redteamFindingSetProject() {
+  const root = mkdtempSync(join(tmpdir(), 'v4-redteam-'));
+  const redteam = JSON.parse(readFileSync(join(projectRoot, 'gates', 'redteam.json'), 'utf8'));
+  writeJson(join(root, 'gates', 'redteam.json'), {
+    ...redteam,
+    items: [redteam.items.find(item => item.id === 'R2')],
+  });
+  cpSync(
+    join(projectRoot, 'decisions', 'redteam', 'findings.json'),
+    join(root, 'decisions', 'redteam', 'findings.json'),
+  );
+  return root;
+}
+
 function moduleIndexProject() {
   const root = mkdtempSync(join(tmpdir(), 'v4-module-index-'));
   const architecture = JSON.parse(readFileSync(join(projectRoot, 'gates', 'architecture.json'), 'utf8'));
@@ -633,6 +647,20 @@ test('feasibility gate check rejects forged F3 evidence for blocked spikes', () 
 
   assert.equal(checked.result, 'FAILED');
   assert.match(checked.problems.join('\n'), /feasibility\/F3 cannot pass/);
+});
+
+test('redteam R2 rejects a current findings artifact that omits RT-R65-01', () => {
+  const root = redteamFindingSetProject();
+  const findingsPath = join(root, 'decisions', 'redteam', 'findings.json');
+  const findings = JSON.parse(readFileSync(findingsPath, 'utf8'));
+  findings.findings = findings.findings.filter(finding => finding.id !== 'RT-R65-01');
+  writeJson(findingsPath, findings);
+
+  assert.throws(
+    () => recordGateEvidence(root, 'redteam', 'R2', ['decisions/redteam/findings.json']),
+    /redteam\/R2 findings must contain exactly the current required finding ids/,
+  );
+  assert.deepEqual(listReceipts(root), []);
 });
 
 test('feasibility F4 rejects an internally incompatible build-only freeze', () => {

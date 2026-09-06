@@ -2,8 +2,8 @@
 // The control service behind https://hookemon.com (WP-17 goal). A dependency-free `node:http` server
 // (packages/dashboard has no npm dependencies) exposing:
 //   GET  /healthz
-//   GET  /public/api/cycle-status         (unauthenticated, schemaVersion 3)
-//   GET  /public/api/community-dashboard  (unauthenticated, schemaVersion 5)
+//   GET  /public/api/cycle-status         (unauthenticated, schemaVersion 5)
+//   GET  /public/api/community-dashboard  (unauthenticated, schemaVersion 7)
 //   GET  /operator/api/bootstrap          (x-hookemon-proxy-credential [+ Access JWT])
 //   GET  /operator/api/dashboard          (            "                          )
 //   GET  /operator/api/cards              (            "                          )
