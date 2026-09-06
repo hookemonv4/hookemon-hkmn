@@ -36,7 +36,7 @@
 // `buybackMicroUsdg`/`packGainMicroUsdg`/`packLossMicroUsdg` describe pack economics and have no
 // same-asset USDG producer today — the only settled USDG amounts available are bridge *movements*
 // (`outboundBridgeDebit`/`inboundBridgeProceeds`, kept as separately named typed fields), and the
-// actual Collector Crypt purchase/buyback debit is a different asset (Solana USDC,
+// actual Collector Crypt purchase/buyback debit is a different asset (Solana Circle USD,
 // `collectorPurchaseDebit`/`collectorBuybackProceeds`). Neither may be relabeled as the other's
 // asset or subtracted against it — see `outboundBridgeFee`'s and `projectCycleAccounting`'s own
 // comments for the two concrete anti-patterns this module previously had and no longer has.
@@ -59,7 +59,7 @@ function subtractAtZero(a, b) {
   return result > 0n ? result.toString() : '0';
 }
 
-/** The outbound bridge's quoted origin (USDG) and destination (Solana USDC) amounts are two
+/** The outbound bridge's quoted origin (USDG) and destination (Solana Circle USD) amounts are two
  * different assets on two different chains. Equal decimals and an approximate peg are not a
  * same-asset fee: `origin - destination` would silently mix a USDG figure with a settlement-asset figure and
  * report the difference as if it were a USDG cost. No same-asset bridge-fee evidence exists
@@ -466,7 +466,7 @@ function distributionStatus(returnStage, distributionStage, payoutStage) {
  *   economics in USDG and have no honest producer today: the only settled USDG-denominated amounts
  *   available are bridge movements (`outboundBridgeDebit`/`inboundBridgeProceeds`, typed and kept
  *   separately), not the actual Collector Crypt purchase/buyback debit (which is denominated in
- *   Solana USDC — `collectorPurchaseDebit`/`collectorBuybackProceeds`). Reporting a bridge amount or
+ *   Solana Circle USD — `collectorPurchaseDebit`/`collectorBuybackProceeds`). Reporting a bridge amount or
  *   a cross-asset figure under a `MicroUsdg`-labeled pack-economics field would misrepresent it, so
  *   these four stay `null` until a same-asset USDG pack-economics producer exists.
  */

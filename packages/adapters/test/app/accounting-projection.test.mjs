@@ -356,7 +356,7 @@ test('outboundBridgeDebit stays null when more than one settled outbound leg exi
   assert.equal(accounting.outboundBridgeDebit, null);
 });
 
-test('quotedCosts.outboundBridgeMicroUsdg is always null: the quoted origin (USDG) and destination (Solana USDC) are different assets, never subtracted', async t => {
+test('quotedCosts.outboundBridgeMicroUsdg is always null: the quoted origin (USDG) and destination (Solana Circle USD) are different assets, never subtracted', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
   await completeStageInOrder(repository, cycleId, 'outbound', {
@@ -435,13 +435,13 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
       purchase: {
         status: 'COMPLETE',
         evidence: {
-          packCost: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '49' },
+          packCost: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '49' },
         },
       },
       buyback: {
         status: 'COMPLETE',
         evidence: {
-          proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '47' },
+          proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '47' },
         },
       },
     },
@@ -449,11 +449,11 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
   assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '50' });
   assert.deepEqual(accounting.collectorPurchaseDebit, {
-    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '49',
+    chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, units: '49',
   });
   assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '48' });
   assert.deepEqual(accounting.collectorBuybackProceeds, {
-    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '47',
+    chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, units: '47',
   });
   // The bridge amount and the Collector amount are genuinely different real numbers (bridge
   // fees/slippage) - never equated, and packSpendMicroUsdg never reports either as pack economics.
@@ -461,7 +461,7 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
   assert.equal(accounting.packSpendMicroUsdg, null);
 });
 
-const SOLANA_SETTLEMENT_ASSET = { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6 };
+const SOLANA_SETTLEMENT_ASSET = { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6 };
 function solAmount(amountAtomic) { return { ...SOLANA_SETTLEMENT_ASSET, amountAtomic }; }
 
 test('collectorPurchaseDebit sums an N-pack purchase batch: verified purchased packs plus genuinely zero-cost not_purchased packs', async () => {

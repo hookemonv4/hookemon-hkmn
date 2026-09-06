@@ -9,9 +9,9 @@ import { assertPolicyAdmission, createTestOnlyAdmissionIdentity } from '../../sr
 const OPERATIONS_EVM = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
 const OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
-const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const CIRCLE_USD_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const FUNDING = Object.freeze({ chainId: '4663', assetId: USDG, decimals: 6 });
-const SETTLEMENT = Object.freeze({ chainId: '792703809', assetId: USDC_MINT, decimals: 6 });
+const SETTLEMENT = Object.freeze({ chainId: '792703809', assetId: CIRCLE_USD_MINT, decimals: 6 });
 const DEADLINE = 2_000_000_000;
 
 function typed(asset, amountAtomic) {
@@ -27,7 +27,7 @@ function rawQuote({ requestId, orderId, originAmount, destinationAmount, sender,
       recipient,
       currencyIn: { currency: { chainId: 4663, address: USDG, symbol: 'USDG', decimals: 6 }, amount: originAmount },
       currencyOut: {
-        currency: { chainId: 792703809, address: USDC_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
+        currency: { chainId: 792703809, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
         amount: destinationAmount,
         minimumAmount: destinationAmount,
       },
@@ -40,7 +40,7 @@ function rawQuote({ requestId, orderId, originAmount, destinationAmount, sender,
             chainId: 'solana',
             deadline: DEADLINE,
             calls: [],
-            payments: [{ recipient, currency: USDC_MINT, expectedAmount: destinationAmount, minimumAmount: destinationAmount }],
+            payments: [{ recipient, currency: CIRCLE_USD_MINT, expectedAmount: destinationAmount, minimumAmount: destinationAmount }],
           },
           inputs: [{
             payment: { chainId: 'robinhood', currency: USDG, amount: originAmount },
@@ -69,7 +69,7 @@ function parsedQuote({ requestId, orderId, originAmount, destinationAmount, send
     deadlineUnixSeconds: DEADLINE,
     origin: { chainId: 4663, address: USDG, symbol: 'USDG', decimals: 6, amount: originAmount, amountFormatted: null, minimumAmount: null },
     destination: {
-      chainId: 792703809, address: USDC_MINT, symbol: 'CIRCLE_USD', decimals: 6,
+      chainId: 792703809, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD', decimals: 6,
       amount: destinationAmount, amountFormatted: null, minimumAmount: destinationAmount,
     },
     stepCount: raw.steps.length,

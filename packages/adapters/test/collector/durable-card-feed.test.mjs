@@ -60,7 +60,7 @@ test('buildDurableCardFeed uses a caller-supplied real timestamp for a post-purc
       purchase: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'sig-0' }] } },
       open: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', decision: 'opened', signature: 'open-sig-0', mint: 'mint-0', assetKind: 'spl' }] } },
       epicGate: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sell', offer: null, insuredValue: null, rawInsuredValue: null, insuredValueUnit: null, instantBuybackPercent: null, matchedBuybackPercent: null, prizeTier: null, rarity: null }] } },
-      buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [{ packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '40' } }] } },
+      buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [{ packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '40' } }] } },
     },
     observedAtByOperationId: new Map([
       ['pack:cycle-1:0', { observedAt: '2026-01-01T00:05:00.000Z', finalizedAt: '2026-01-01T00:06:00.000Z' }],
@@ -71,7 +71,7 @@ test('buildDurableCardFeed uses a caller-supplied real timestamp for a post-purc
   assert.equal(observation.state, 'finalized');
   assert.equal(observation.mint, 'mint-0');
   assert.equal(observation.transactionId, 'sale-sig-0');
-  assert.deepEqual(observation.proceeds, { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '40' });
+  assert.deepEqual(observation.proceeds, { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, units: '40' });
   assert.equal(observation.observedAt, '2026-01-01T00:05:00.000Z');
   assert.equal(observation.finalizedAt, '2026-01-01T00:06:00.000Z');
 });
@@ -121,7 +121,7 @@ test('buildDurableCardFeed: an out-of-order later observation never regresses an
       purchase: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'sig-0' }] } },
       open: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', decision: 'opened', signature: 'open-sig-0', mint: 'mint-0', assetKind: 'spl' }] } },
       epicGate: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sell', offer: null, insuredValue: null, rawInsuredValue: null, insuredValueUnit: null, instantBuybackPercent: null, matchedBuybackPercent: null, prizeTier: null, rarity: null }] } },
-      buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [{ packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '40' } }] } },
+      buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [{ packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '40' } }] } },
     },
     observedAtByOperationId: new Map([
       ['pack:cycle-1:0', { observedAt: '2026-01-01T00:05:00.000Z', finalizedAt: '2026-01-01T00:06:00.000Z' }],
@@ -155,7 +155,7 @@ test('F9-sol-verification repro: a corrupt COMPLETE stage with a foreign memo re
       // A buyback entry at the same packIndex but a DIFFERENT memo -- a broken/foreign cross-stage
       // ledger, never trusted as this pack's own SOLD outcome.
       buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [
-        { packIndex: 0, memo: 'foreign-memo', mint: 'foreign-mint', decision: 'sold', signature: 'foreign-sig', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '999' } },
+        { packIndex: 0, memo: 'foreign-memo', mint: 'foreign-mint', decision: 'sold', signature: 'foreign-sig', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '999' } },
       ] } },
     },
   });
@@ -194,8 +194,8 @@ function completeLifecycle() {
       { packIndex: 1, memo: 'memo-1', decision: 'sell', mint: 'mint-1' },
     ] } },
     buyback: { status: 'COMPLETE', evidence: { soldCount: 2, packs: [
-      { packIndex: 0, memo: 'memo-0', decision: 'sold', mint: 'mint-0', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '40' } },
-      { packIndex: 1, memo: 'memo-1', decision: 'sold', mint: 'mint-1', signature: 'sale-sig-1', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '30' } },
+      { packIndex: 0, memo: 'memo-0', decision: 'sold', mint: 'mint-0', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '40' } },
+      { packIndex: 1, memo: 'memo-1', decision: 'sold', mint: 'mint-1', signature: 'sale-sig-1', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '30' } },
     ] } },
   };
 }
@@ -217,7 +217,7 @@ test('F9-sol-verification repro: sold rows require a signature and a typed proce
   for (const change of [
     stages => { delete stages.buyback.evidence.packs[0].signature; },
     stages => { delete stages.buyback.evidence.packs[0].proceeds; },
-    stages => { stages.buyback.evidence.packs[1] = { ...stages.buyback.evidence.packs[1], decision: 'held', signature: 'contradictory-sig', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '30' } }; stages.buyback.evidence.soldCount = 1; },
+    stages => { stages.buyback.evidence.packs[1] = { ...stages.buyback.evidence.packs[1], decision: 'held', signature: 'contradictory-sig', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '30' } }; stages.buyback.evidence.soldCount = 1; },
   ]) {
     const stages = completeLifecycle();
     change(stages);

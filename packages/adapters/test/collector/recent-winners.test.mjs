@@ -45,7 +45,7 @@ test('assertPublicCardEvent rejects a non-canonical (zero-padded) sequence', () 
 
 test('assertPublicCardEvent rejects a present proceeds Amount whose units is null (entire Amount must be null instead)', () => {
   assert.throws(
-    () => assertPublicCardEvent(event({ proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: null } })),
+    () => assertPublicCardEvent(event({ proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, units: null } })),
     /units/,
   );
 });
