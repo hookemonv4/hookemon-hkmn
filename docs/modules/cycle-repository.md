@@ -56,11 +56,16 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   immediately after a delete-and-recreate (observed on Linux ext4/tmpfs), so it alone cannot tell a
   genuine reopen from a replacement directory with a byte-copied marker; the sibling hard link
   outside the state directory closes that gap, since its target inode cannot be reused elsewhere
-  while the link survives. A store bootstrapped before this witness existed gets it backfilled on
-  its next successful open once every prior check already establishes continuity; no owner decision
-  is required for that migration. A missing, changed, copied, or replacement directory, or a sibling
-  witness link that stops pointing at the current in-directory marker, produces a durable, read-only
-  `HELD_DATA_UNVERIFIED` recovery facade rather than a fresh cycle.
+  while the link survives. The witness link is created only once, at first bootstrap of a genuinely
+  new (empty) state directory. There is no automatic backfill for a store that lacks it: a missing
+  witness link is indistinguishable from a store that was just attacked this way, so it fails closed
+  identically to a mismatched one, with no owner-decision-free migration path. A missing, changed,
+  copied, or replacement directory, or a sibling witness link that is absent or stops pointing at the
+  current in-directory marker, produces a durable, read-only `HELD_DATA_UNVERIFIED` recovery facade
+  rather than a fresh cycle. Bootstrap itself refuses to overwrite or delete a witness link that
+  already exists and does not match the marker it just wrote (a crash-retry artifact or tampering,
+  which it cannot tell apart); it raises a bootstrap error and preserves the orphan link for review
+  instead.
 - The backing durable store serializes cross-process writes with a private 0700
   `.store-lock/lease.sqlite` file and a SQLite `BEGIN EXCLUSIVE` transaction. Once it owns that
   lease, each acquisition creates `store.lock` with exclusive creation, records its PID and random
@@ -240,8 +245,9 @@ node --test --test-timeout=120000 packages/runner/test/cycle/money-schemas.test.
 - A recovery context that is absent, changed, or bound to different bytes leaves the chain attempt
   unresolved. Recovery never manufactures a replacement signature.
 - If the sibling identity, in-directory device-and-inode witness, or sibling identity-witness hard
-  link is absent (aside from the one-time backfill of a pre-existing store's witness link) or
-  changed, use the durable recovery facade instead of recreating the directory. It records the loss
+  link is absent or changed, use the durable recovery facade instead of recreating the directory.
+  There is no supported way to mint or restore a missing witness link for an existing store; doing
+  so would just re-derive trust from the checks the link exists to cover for. It records the loss
   reason and refuses `createCycle` and stage preparation until an owner reviews restored journal and
   custody evidence.
 - On durable-store lock contention, do not delete `.store-lock/lease.sqlite`, its rollback journal,

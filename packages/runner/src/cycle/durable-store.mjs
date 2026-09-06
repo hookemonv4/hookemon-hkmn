@@ -165,8 +165,13 @@ async function linkStateDirectoryWitness(markerPath, witnessPath) {
         lstat(witnessPath, { bigint: true }),
       ]);
       if (markerStat.dev === witnessStat.dev && markerStat.ino === witnessStat.ino) return;
-      await unlink(witnessPath);
-      await link(markerPath, witnessPath);
+      // A witness that already exists and does not point at the marker this
+      // bootstrap just wrote is either a genuine crash-retry artifact or
+      // evidence of tampering; either way this bootstrap cannot tell which,
+      // so it must not delete or replace it. Deleting it would erase the
+      // only evidence of the mismatch and let a forged witness be silently
+      // replaced by whichever bootstrap runs last.
+      throw new Error('durable cycle store identity witness already exists and does not match the current marker; bootstrap is ambiguous, preserve the orphan witness for review');
     } else if (error?.code === 'EXDEV') {
       throw new Error('durable cycle store state directory and its parent must share one filesystem for the identity witness link');
     } else {
@@ -281,13 +286,17 @@ async function stateDirectoryAvailability(directory, expectedIdentity) {
     if (stateIdentity.directoryDevice !== witness.directoryDevice || stateIdentity.directoryInode !== witness.directoryInode) {
       return 'identity-directory-mismatch';
     }
-    // A missing witness link means this store was bootstrapped before this
-    // guard existed; DurableCycleStore.open backfills it once the checks
-    // above already establish continuity. A present-but-different-inode
-    // witness is definitive replacement evidence independent of directory
-    // inode reuse and fails closed the same as any other identity mismatch.
+    // The directory-level (device, inode) check above is exactly what a
+    // filesystem reusing a deleted directory's inode defeats, so it cannot
+    // by itself prove continuity. The sibling witness link is the only
+    // check immune to that reuse; a store with no witness cannot be told
+    // apart from one that was just attacked this way, so a missing link
+    // fails closed the same as a mismatched one rather than falling back
+    // to the weaker checks already evaluated above. There is no automatic
+    // backfill: minting a witness from an unverified marker would simply
+    // re-derive trust from the same checks this closes the gap in.
     const linkStatus = await stateDirectoryWitnessLinkStatus(markerPath, stateDirectoryWitnessLinkPath(directory));
-    if (linkStatus === 'mismatch') return 'identity-directory-mismatch';
+    if (linkStatus !== 'linked') return 'identity-directory-mismatch';
     await readdir(directory);
     return 'available';
   } catch (error) {
@@ -1592,13 +1601,12 @@ export class DurableCycleStore {
           lockedRecovery.identityPath,
           serializeStoreIdentity(identity),
         );
-      } else {
-        const markerPath = stateDirectoryIdentityPath(directory);
-        const witnessPath = stateDirectoryWitnessLinkPath(directory);
-        if (await stateDirectoryWitnessLinkStatus(markerPath, witnessPath) === 'missing') {
-          await linkStateDirectoryWitness(markerPath, witnessPath);
-        }
       }
+      // No else branch backfills a missing witness for an already-identified
+      // store: readStateDirectoryRecovery/stateDirectoryAvailability already
+      // reject that case (STATE_DIRECTORY_LOSS thrown above), and a store
+      // that reaches here with identity !== null therefore already has a
+      // verified witness link.
       store.#index = await store.#loadIndex();
       const cycles = await store.#loadActiveCycles();
       store.#activeCycleIds = new Set(cycles.map(cycle => cycle.cycleId));

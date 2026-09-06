@@ -573,24 +573,92 @@ test('refuses to mint a replacement identity over a nonempty existing cycle stor
   assert.equal((await readdir(parent)).includes('cycles.identity.json'), false);
 });
 
-test('backfills the sibling identity witness link for a store bootstrapped before it existed, and normal reopen keeps working', async t => {
+test('a store missing its sibling identity witness link fails closed instead of being backfilled', async t => {
   const parent = await temporaryDirectory(t);
   const directory = join(parent, 'cycles');
   await DurableCycleStore.open(directory);
   const witnessPath = join(parent, 'cycles.identity-witness.json');
   const markerStatBefore = await stat(join(directory, '.store-identity.json'));
   assert.equal((await stat(witnessPath)).ino, markerStatBefore.ino);
+  // Simulates a store that predates this guard (or one whose witness link
+  // was otherwise lost): there is no way to tell that apart from a store
+  // that was just attacked, so this must hold rather than silently mint a
+  // fresh witness from the current (unverifiable) marker.
   await unlink(witnessPath);
 
+  const recovery = await readStateDirectoryRecovery(directory);
+  assert.equal(recovery.detected, true);
+  assert.equal(recovery.reason, 'identity-directory-mismatch');
+  await assert.rejects(
+    DurableCycleStore.open(directory),
+    error => error instanceof StateDirectoryLossError
+      && error.code === 'STATE_DIRECTORY_LOSS'
+      && error.recovery.reason === 'identity-directory-mismatch',
+  );
+  assert.equal(await stat(witnessPath).catch(() => null), null);
+});
+
+test('rejects a copied-marker replacement of a legacy store that never had a witness link, even when the root inode is reused', async t => {
+  const parent = await temporaryDirectory(t);
+  const directory = join(parent, 'cycles');
   await DurableCycleStore.open(directory);
-  const witnessStatAfter = await stat(witnessPath);
-  const markerStatAfter = await stat(join(directory, '.store-identity.json'));
-  assert.equal(witnessStatAfter.dev, markerStatAfter.dev);
-  assert.equal(witnessStatAfter.ino, markerStatAfter.ino);
+  const witnessPath = join(parent, 'cycles.identity-witness.json');
+  const marker = await readFile(join(directory, '.store-identity.json'), 'utf8');
+  // Drop the witness link first so this directory now looks exactly like a
+  // pre-existing store bootstrapped before the witness guard existed, then
+  // run the same delete/recreate/copy-marker replacement against it.
+  await unlink(witnessPath);
+  await rm(directory, { recursive: true, force: true });
+  for (const child of ['active', 'archive', 'payout']) {
+    await mkdir(join(directory, child), { recursive: true, mode: 0o700 });
+  }
+  await writeFile(join(directory, '.store-identity.json'), marker, { mode: 0o600 });
+
+  const recovery = await readStateDirectoryRecovery(directory);
+  assert.equal(recovery.detected, true);
+  assert.equal(recovery.reason, 'identity-directory-mismatch');
+  await assert.rejects(
+    DurableCycleStore.open(directory),
+    error => error instanceof StateDirectoryLossError
+      && error.code === 'STATE_DIRECTORY_LOSS'
+      && error.recovery.reason === 'identity-directory-mismatch',
+  );
+  assert.equal(await stat(witnessPath).catch(() => null), null);
+});
+
+test('bootstrap of a genuinely new store still creates its witness link and normal reopen keeps working', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  await createAndCloseCycle(store, 'cycle-witness-bootstrap', 1);
+  const witnessPath = `${directory}.identity-witness.json`;
+  const markerStat = await stat(join(directory, '.store-identity.json'));
+  const witnessStat = await stat(witnessPath);
+  assert.equal(witnessStat.dev, markerStat.dev);
+  assert.equal(witnessStat.ino, markerStat.ino);
 
   const recovery = await readStateDirectoryRecovery(directory);
   assert.equal(recovery.detected, false);
-  await DurableCycleStore.open(directory);
+  const reopened = await DurableCycleStore.open(directory);
+  assert.deepEqual(reopened.activeCycleIds, ['cycle-witness-bootstrap']);
+});
+
+test('bootstrap rejects rather than replaces an orphan witness link left at the target path', async t => {
+  const parent = await temporaryDirectory(t);
+  const directory = join(parent, 'cycles');
+  const witnessPath = join(parent, 'cycles.identity-witness.json');
+  await writeFile(witnessPath, 'unrelated orphan content\n', { mode: 0o600 });
+  const orphanStat = await stat(witnessPath);
+
+  await assert.rejects(
+    DurableCycleStore.open(directory),
+    /identity witness already exists and does not match the current marker/,
+  );
+  // The orphan witness is preserved untouched as evidence, not deleted or
+  // silently replaced by whichever bootstrap attempt runs.
+  const afterStat = await stat(witnessPath);
+  assert.equal(afterStat.dev, orphanStat.dev);
+  assert.equal(afterStat.ino, orphanStat.ino);
+  assert.equal(await readFile(witnessPath, 'utf8'), 'unrelated orphan content\n');
 });
 
 test('rejects a store whose sibling identity witness link points away from the current marker', async t => {

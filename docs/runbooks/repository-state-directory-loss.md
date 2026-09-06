@@ -18,8 +18,12 @@ replacement (observed on Linux); the sibling hard link is immune to that reuse, 
 inode cannot be handed to an unrelated new file while the link survives. A missing, copied, or
 mismatched witness (in-directory or sibling link) creates a private sibling recovery hold and
 refuses cycle creation and stage preparation until the preserved journal and custody evidence can be
-restored and reviewed. A store predating the sibling link gets it backfilled automatically on its
-next successful open once every other check already confirms continuity.
+restored and reviewed. There is no automatic backfill for a missing sibling link: a store that never
+had one is indistinguishable from one that was just attacked this way, so it fails closed the same
+as any other identity mismatch rather than being trusted on the strength of the older, weaker checks
+alone. Bootstrap of a genuinely new state directory creates the sibling link once; if that bootstrap
+finds a sibling link already present and pointing elsewhere, it raises an error and leaves the orphan
+link in place rather than deleting or replacing it, since it cannot tell a crash-retry from tampering.
 
 `.store-lock/lease.sqlite` is not a replacement state directory and is normally retained after a
 clean store release. A store owner first acquires SQLite's exclusive lease, then creates `store.lock`
@@ -31,10 +35,11 @@ A live, inaccessible, or changed fence remains contention.
 
 ## Operator recovery
 
-No supported command reconstructs a lost state directory. A normal repository reopen reclaims only
-the verified dead-owner fence described above. Preserve the state directory, journal digest, and
-prior-owner evidence for review when a fence belongs to a live or inaccessible process, or its
-inode or token has changed.
+No supported command reconstructs a lost state directory or mints a missing sibling identity-witness
+link for an existing store. A normal repository reopen reclaims only the verified dead-owner fence
+described above. Preserve the state directory, journal digest, and prior-owner evidence for review
+when a fence belongs to a live or inaccessible process, or its inode or token has changed, or a store
+is held solely because its sibling witness link is absent or ambiguous.
 
 ## Escalation
 
