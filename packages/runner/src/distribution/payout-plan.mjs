@@ -12,13 +12,22 @@ const PREVIOUS_DUST_SOURCE_FIELDS = ['cycleId', 'digest', 'planDigest'];
 const FORBIDDEN_CANONICAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const MAX_UINT256 = (1n << 256n) - 1n;
 
-// A hard technical ceiling protecting the canonical-JSON and in-memory bounds below, not a
-// payout-capacity business rule: real admission is feasibility-gated (gas budget computed from
-// the actual recipient count) in eligibility-snapshot.mjs. Durable paged storage and bounded
-// in-flight dispatch (packages/adapters/src/app/stages/payout.mjs) are what make recipient counts
-// well above 1,025 practical; this constant only stops a pathological count from ever reaching
-// that machinery.
-export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 50_000;
+// A hard technical ceiling protecting the canonical-JSON/in-memory bounds below AND the durable
+// payout store's real capacity: this is the acceptance boundary for compileDirectPayoutPlan and
+// eligibility-snapshot.mjs's feasibility gate, so a plan admitted here must survive its full
+// on-disk lifecycle, not just initial persistence.
+//
+// The durable store (packages/runner/src/cycle/durable-store.mjs, journal.mjs -- owned by the
+// storage-scale task, not this module) enforces a 20,000-object canonical budget per persisted
+// payout state. A recipient's object footprint grows as it progresses (SIGNED/FINALIZED add an
+// approvalContext and a finalizedTransfer object each), so the *worst case* terminal state is the
+// real ceiling, not the smaller initial-admission footprint. Measured against the unmodified store
+// on 2026-09-06: initial admission survives up to 3,995 recipients; a fully-finalized state survives
+// up to 2,854. This constant is set below both with margin for held-position-exclusion and
+// quarantine objects that add further overhead. Raising it requires a coordinated object-count (or
+// paging-scheme) increase in the durable store, not just this constant -- see D-inbox/E-inbox for
+// the handoff.
+export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 2_500;
 
 const PAYOUT_PLAN_CANONICAL_LIMITS = Object.freeze({
   objects: 200_000,
