@@ -245,7 +245,7 @@ function decodedBindsBuyback({ decoded, owner, mint, buyback, proceedsAccount = 
   if (!hasProceedsAccount) throw new Error('buyback provider transaction does not bind the dedicated proceeds account');
 }
 
-async function decodeAndSign({ transaction, mint, adapters, config, money, signerClient, beforeSign = null }) {
+async function decodeAndSign({ transaction, mint, adapters, config, money, signerClient, beforeSign = null, preflightAuthority }) {
   if (!adapters?.solana?.client || !signerClient?.solana || typeof signerClient.solana.sign !== 'function') {
     throw new Error('buyback requires a Solana RPC client and signerClient.solana.sign');
   }
@@ -277,7 +277,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(request) {
         if (beforeSign !== null) await beforeSign();
-        requireCollectorOnlyMutationAuthority(config);
+        requireCollectorOnlyMutationAuthority(config, preflightAuthority);
         return signerClient.solana.sign(request);
       },
     },
@@ -287,7 +287,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
         throw new Error('buyback provider transaction blockhash expired before submission');
       }
-      requireCollectorOnlyMutationAuthority(config);
+      requireCollectorOnlyMutationAuthority(config, preflightAuthority);
       return adapters.collectorCrypt.submitTransaction({ signedTransaction: signed.signedTxBase64 });
     },
   });
@@ -373,7 +373,7 @@ async function prepareSale({ adapters, config, pack }) {
 }
 
 /** Requests, signs, and broadcasts one pack's buyback. Any failure carves it out as held. */
-async function sellPack({ adapters, config, signerClient, cycleRepository, context, pack }) {
+async function sellPack({ adapters, config, signerClient, cycleRepository, context, pack, preflightAuthority }) {
   if (pack.decision === 'held') return pack;
   let prepared;
   try {
@@ -398,7 +398,7 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
   // server-side. This pack is marked "unknown", not held — reconciliation resolves it from
   // durable provider state using its own already-known memo, holding only past its deadline.
   try {
-    requireCollectorOnlyMutationAuthority(config);
+    requireCollectorOnlyMutationAuthority(config, preflightAuthority);
     const built = await adapters.collectorCrypt.buyback(buildCollectorBuybackRequest({ config, mint: pack.mint }));
     const refundAmount = typedBuybackAmount(built.refundAmount, 'buyback refund amount');
     if (built.memo !== pack.memo || !sameAmount(refundAmount, quote)) {
@@ -413,6 +413,7 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
       config,
       money,
       signerClient,
+      preflightAuthority,
       beforeSign: async () => {
         await context.assertLease?.();
         const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: pack.mint, wallet: config.accounts.solana });
@@ -443,12 +444,12 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
   }
 }
 
-export async function mutateBuyback({ liveMode, adapters, config, signerClient, cycleRepository, context, request }) {
+export async function mutateBuyback({ liveMode, adapters, config, signerClient, cycleRepository, context, request, preflightAuthority }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateBuyback reached without liveMode');
   if (!adapters?.collectorCrypt) throw new Error('buyback requires a configured collector-crypt client');
   const prepared = request ?? context?.request ?? await prepareBuybackRequest({ cycleRepository, context });
   const outcomes = [];
-  for (const pack of prepared.packs) outcomes.push(await sellPack({ adapters, config, signerClient, cycleRepository, context, pack }));
+  for (const pack of prepared.packs) outcomes.push(await sellPack({ adapters, config, signerClient, cycleRepository, context, pack, preflightAuthority }));
   return { packs: outcomes };
 }
 

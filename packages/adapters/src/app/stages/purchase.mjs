@@ -131,7 +131,7 @@ function trustedSolanaDecodeOptions({ adapters, config, stage }) {
   });
 }
 
-async function decodeAndSignProviderTransaction({ transaction, stage, adapters, config, money, signerClient, policy = null }) {
+async function decodeAndSignProviderTransaction({ transaction, stage, adapters, config, money, signerClient, policy = null, preflightAuthority }) {
   const decodeOptions = trustedSolanaDecodeOptions({ adapters, config, stage });
   const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction });
   if (!decoded.blockhash || !(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
@@ -154,7 +154,7 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
     client: {
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(request) {
-        requireCollectorOnlyMutationAuthority(config);
+        requireCollectorOnlyMutationAuthority(config, preflightAuthority);
         return signerClient.solana.sign(request);
       },
     },
@@ -164,7 +164,7 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
         throw new Error(`Collector ${stage} transaction blockhash expired before submission`);
       }
-      requireCollectorOnlyMutationAuthority(config);
+      requireCollectorOnlyMutationAuthority(config, preflightAuthority);
       return adapters.collectorCrypt.submitTransaction({ signedTransaction: signed.signedTxBase64 });
     },
   });
@@ -378,7 +378,7 @@ async function holdWholeCycle(cycleRepository, context, evidence) {
   return null;
 }
 
-export async function mutatePurchase({ liveMode, adapters, signerClient, config, cycleRepository, context, request }) {
+export async function mutatePurchase({ liveMode, adapters, signerClient, config, cycleRepository, context, request, preflightAuthority }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutatePurchase reached without liveMode');
   if (!adapters?.collectorCrypt) throw new Error('purchase mutate requires a configured collector-crypt client');
   requireSolanaConfiguration({ adapters, config, signerClient, stage: 'purchase' });
@@ -412,7 +412,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   let legacyPolicy = null;
   let admittedUnitAmountAtomic = null;
   if (batch === null) {
-    requireCollectorOnlyMutationAuthority(config);
+    requireCollectorOnlyMutationAuthority(config, preflightAuthority);
 
     // Canonical typed-money validation of the immutable admitted per-pack amount, and proof its
     // asset identity is exactly the configured native Collector settlement asset -- before the
@@ -524,6 +524,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
         money,
         signerClient,
         policy,
+        preflightAuthority,
       });
       await signer.broadcast(signed);
     }

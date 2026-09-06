@@ -231,11 +231,11 @@ export async function probeOpen({ adapters, cycleRepository, context }) {
   return { wouldOpen: true, configured: true, packs, packStatuses: statuses };
 }
 
-export async function mutateOpen({ liveMode, adapters, config, cycleRepository, context, request }) {
+export async function mutateOpen({ liveMode, adapters, config, cycleRepository, context, request, preflightAuthority }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateOpen reached without liveMode');
   if (!adapters?.collectorCrypt) throw new Error('open mutate requires a configured collector-crypt client');
   const prepared = request ?? context?.request ?? await prepareOpenRequest({ cycleRepository, context });
-  requireCollectorOnlyMutationAuthority(config);
+  requireCollectorOnlyMutationAuthority(config, preflightAuthority);
   const opened = [];
   for (const pack of prepared.packs) {
     const result = await adapters.collectorCrypt.openPack({ memo: pack.memo });

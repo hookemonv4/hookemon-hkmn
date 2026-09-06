@@ -1,7 +1,10 @@
 // Narrow mutation admission for the owner-operated Collector-only rehearsal. This replaces the
 // frozen generic production authority only for the sealed Solana-only configuration; every other
 // caller remains subject to the generic authority check.
-import { requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
+import {
+  createTestProfileMutationAuthority,
+  requireLiveMutationAuthority,
+} from '../../runner/src/cycle/preflight.mjs';
 import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
@@ -9,6 +12,7 @@ import {
 } from '../src/solana-rpc.mjs';
 
 const PACK_PRICE_ATOMIC = '25000000';
+const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 
 function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -91,8 +95,20 @@ function assertCollectorOnlyConfiguration(config) {
 /**
  * Assert the sealed Collector-only live configuration before an effect boundary. Production and
  * all other profiles preserve the generic frozen-interface authority check.
+ *
+ * `preflightAuthority` admits exactly one additional capability: the frozen singleton returned by
+ * `createTestProfileMutationAuthority()`, forwarded unchanged from `stage-driver.mjs`, and only
+ * while `NODE_TEST_CONTEXT` is present. Any other defined value -- a structural clone, an
+ * unrelated object, a serialized config flag -- refuses rather than falling back to a live path.
  */
-export function requireCollectorOnlyMutationAuthority(config) {
+export function requireCollectorOnlyMutationAuthority(config, preflightAuthority) {
+  if (preflightAuthority === TEST_PROFILE_MUTATION_AUTHORITY) {
+    if (process.env.NODE_TEST_CONTEXT === undefined) {
+      throw new Error('collector-only fixture authority is available only from the Node test runner');
+    }
+    return TEST_PROFILE_MUTATION_AUTHORITY;
+  }
+  if (preflightAuthority !== undefined) throw new Error('collector-only fixture authority is invalid');
   if (!isLiveCollectorOnlyRehearsal(config)) return requireLiveMutationAuthority();
   return assertCollectorOnlyConfiguration(config);
 }
