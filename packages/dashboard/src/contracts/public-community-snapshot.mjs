@@ -1,8 +1,15 @@
 // Clean-room re-implementation of GET /public/api/community-dashboard's contract (readSet:
 // apps/web/lib/public-community-snapshot.ts on the legacy codex/mainnet-cycle-canary branch,
-// `normalizePublicCommunitySnapshot`/schemaVersion 7). This service only ever emits schemaVersion 7;
+// `normalizePublicCommunitySnapshot`/schemaVersion 7). This service only ever emits schemaVersion 8;
 // the legacy schemaVersion-3/4 acceptance paths are ported too so the validator remains the exact
 // gate the website itself applies.
+//
+// schemaVersion 8 (F2): `latestCycle.roundAccounting.packSpendMicroUsdg`/`buybackMicroUsdg`/
+// `packGainMicroUsdg`/`packLossMicroUsdg` become nullable, plus two typed `Amount|null` fields
+// (`collectorPurchaseDebit`, `collectorBuybackProceeds`) — same evolution as
+// `public-cycle-status.mjs`'s schemaVersion 6, see that file for the rationale. `cards` becomes the
+// frozen `PublicCardEvent` shape verbatim (real recent-winners observations), replacing the legacy
+// productId/rarity card shape that had no honest source in a real provider observation.
 import { readDashboardProfile } from './dashboard-profile.mjs';
 import {
   boundedArray,
@@ -13,6 +20,8 @@ import {
   invalidWith,
   isoTimestamp,
   money,
+  nonNegativeInteger,
+  nullableAmount,
   nullableMoney,
   nullableSignedMoney,
   nullableText,
@@ -38,6 +47,7 @@ const SNAPSHOT_KEYS = new Set([
 ]);
 const SNAPSHOT_V6_KEYS = new Set([...SNAPSHOT_KEYS, 'heldPositionCount', 'heldPositions']);
 const SNAPSHOT_V7_KEYS = new Set([...SNAPSHOT_KEYS, 'heldPositionCount', 'heldPositions']);
+const SNAPSHOT_V8_KEYS = new Set([...SNAPSHOT_KEYS, 'heldPositionCount', 'heldPositions']);
 const NETWORK_KEYS = new Set(['evm', 'solana']);
 const EVM_NETWORK_KEYS = new Set(['name', 'chainId', 'label']);
 const SOLANA_NETWORK_KEYS = new Set(['name', 'genesisHash', 'label']);
@@ -53,6 +63,9 @@ const ROUND_ACCOUNTING_KEYS = new Set([
   'feeReserveTargetMicroUsdg', 'feeReserveTopUpMicroUsdg', 'feeReserveAfterMicroUsdg',
   'plannedHolderRewardsMicroUsdg', 'paidHolderRewardsMicroUsdg', 'holderRewardsStatus', 'distributionStatus',
 ]);
+// schemaVersion 8: same nullable/typed evolution as packages/dashboard/src/contracts/
+// public-cycle-status.mjs's schemaVersion 6 — see that file's header for the rationale.
+const ROUND_ACCOUNTING_V8_KEYS = new Set([...ROUND_ACCOUNTING_KEYS, 'collectorPurchaseDebit', 'collectorBuybackProceeds']);
 const LEGACY_ROUND_ACCOUNTING_KEYS = new Set([
   'packSpendMicroUsdg', 'buybackMicroUsdg', 'protectedCostsMicroUsdg', 'confirmedCostsMicroUsdg',
   'feeReserveBeforeMicroUsdg', 'feeReserveTargetMicroUsdg', 'feeReserveTopUpMicroUsdg', 'feeReserveAfterMicroUsdg',
@@ -72,6 +85,16 @@ const CARD_KEYS = new Set([
   'packPriceMicroUsdg', 'buybackMicroUsdg',
 ]);
 const LEGACY_CARD_KEYS = new Set(['cycleId', 'productId', 'rarity', 'nftAddress', 'cardName', 'setName', 'cardNumber', 'imageUrl']);
+// schemaVersion 8: the recent-winners card feed is the frozen `PublicCardEvent` shape verbatim
+// (see F-brief's frozen contracts / packages/adapters/src/collector/recent-winners.mjs), not the
+// legacy productId/rarity/setName card shape — those fields have no honest source in a real
+// provider observation, so schemaVersion 8 replaces them rather than defaulting them to a
+// fabricated value.
+const CARD_V8_KEYS = new Set([
+  'cycleId', 'operationId', 'packIndex', 'memo', 'mint',
+  'eventId', 'sequence', 'state', 'name', 'imageUrl', 'observedAt', 'finalizedAt', 'transactionId', 'proceeds',
+]);
+const CARD_STATES = new Set(['observed', 'finalized']);
 const MAX_CARDS = 12;
 const MAX_TRANSACTIONS = 24;
 const POOL_FRESHNESS_MS = 90_000;
@@ -79,13 +102,13 @@ const POOL_FRESHNESS_MS = 90_000;
 export function normalizePublicCommunitySnapshot(value, expectedProfile) {
   try {
     const source = requiredRecord(value, invalid);
-    const snapshotKeys = source.schemaVersion === 7
-      ? SNAPSHOT_V7_KEYS
-      : (source.schemaVersion === 6 ? SNAPSHOT_V6_KEYS : SNAPSHOT_KEYS);
+    const snapshotKeys = source.schemaVersion === 8
+      ? SNAPSHOT_V8_KEYS
+      : (source.schemaVersion === 7 ? SNAPSHOT_V7_KEYS : (source.schemaVersion === 6 ? SNAPSHOT_V6_KEYS : SNAPSHOT_KEYS));
     exactKeys(source, snapshotKeys, invalid);
     requiredKeys(source, snapshotKeys, invalid);
     if (
-      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6 || source.schemaVersion === 7)
+      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 || source.schemaVersion === 6 || source.schemaVersion === 7 || source.schemaVersion === 8)
       || typeof source.historyComplete !== 'boolean'
     ) invalid();
     const sourceSchemaVersion = source.schemaVersion;
@@ -111,7 +134,7 @@ export function normalizePublicCommunitySnapshot(value, expectedProfile) {
     for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key], invalid);
 
     const result = {
-      schemaVersion: sourceSchemaVersion === 7 ? 7 : (sourceSchemaVersion === 6 ? 6 : (sourceSchemaVersion === 5 ? 5 : 4)),
+      schemaVersion: sourceSchemaVersion === 8 ? 8 : (sourceSchemaVersion === 7 ? 7 : (sourceSchemaVersion === 6 ? 6 : (sourceSchemaVersion === 5 ? 5 : 4))),
       profile: selected.id,
       badge: selected.badge,
       network: readNetwork(source.network, selected.network),
@@ -138,7 +161,7 @@ export function normalizePublicCommunitySnapshot(value, expectedProfile) {
 function readHeldPositions(value, heldPositionCount, schemaVersion) {
   const positions = boundedArray(value, 1_000, invalid).map(position => {
     const source = requiredRecord(position, invalid);
-    const keys = schemaVersion === 7 ? HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS;
+    const keys = (schemaVersion === 7 || schemaVersion === 8) ? HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS;
     exactKeys(source, keys, invalid);
     requiredKeys(source, keys, invalid);
     if (typeof source.reason !== 'string' || !/^[A-Z][A-Z0-9_]{2,63}$/.test(source.reason)) invalid();
@@ -181,7 +204,7 @@ function readNetwork(value, expected) {
 function readLatestCycle(value, schemaVersion) {
   if (value === null) return null;
   const source = requiredRecord(value, invalid);
-  const currentSchema = schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7;
+  const currentSchema = schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7 || schemaVersion === 8;
   const required = currentSchema ? LATEST_CYCLE_V5_KEYS : LATEST_CYCLE_KEYS;
   exactKeys(source, required, invalid);
   requiredKeys(source, required, invalid);
@@ -208,6 +231,7 @@ function readRoundAccounting(value, schemaVersion, paidMicroUsdg) {
   if (value === null) return null;
   const source = requiredRecord(value, invalid);
   if (schemaVersion === 3) return readLegacyRoundAccounting(source, paidMicroUsdg);
+  if (schemaVersion === 8) return readRoundAccountingV8(source);
   exactKeys(source, ROUND_ACCOUNTING_KEYS, invalid);
   requiredKeys(source, ROUND_ACCOUNTING_KEYS, invalid);
   const result = {
@@ -233,6 +257,38 @@ function readRoundAccounting(value, schemaVersion, paidMicroUsdg) {
     distributionStatus: boundedText(source.distributionStatus, invalid),
   };
   assertExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
+  return result;
+}
+
+function readRoundAccountingV8(source) {
+  exactKeys(source, ROUND_ACCOUNTING_V8_KEYS, invalid);
+  requiredKeys(source, ROUND_ACCOUNTING_V8_KEYS, invalid);
+  const result = {
+    packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg, invalid),
+    buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg, invalid),
+    collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit, invalid),
+    collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds, invalid),
+    packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg, invalid),
+    packLossMicroUsdg: nullableMoney(source.packLossMicroUsdg, invalid),
+    quotedCosts: readQuotedCosts(source.quotedCosts),
+    protectedCostsMicroUsdg: nullableMoney(source.protectedCostsMicroUsdg, invalid),
+    confirmedCostsMicroUsdg: nullableSignedMoney(source.confirmedCostsMicroUsdg, invalid),
+    cycleGainMicroUsdg: nullableMoney(source.cycleGainMicroUsdg, invalid),
+    cycleLossMicroUsdg: nullableMoney(source.cycleLossMicroUsdg, invalid),
+    walletBalanceBeforeMicroUsdg: nullableMoney(source.walletBalanceBeforeMicroUsdg, invalid),
+    walletBalanceAfterMicroUsdg: nullableMoney(source.walletBalanceAfterMicroUsdg, invalid),
+    networkFees: readNetworkFees(source.networkFees),
+    feeReserveBeforeMicroUsdg: nullableMoney(source.feeReserveBeforeMicroUsdg, invalid),
+    feeReserveTargetMicroUsdg: nullableMoney(source.feeReserveTargetMicroUsdg, invalid),
+    feeReserveTopUpMicroUsdg: nullableMoney(source.feeReserveTopUpMicroUsdg, invalid),
+    feeReserveAfterMicroUsdg: nullableMoney(source.feeReserveAfterMicroUsdg, invalid),
+    plannedHolderRewardsMicroUsdg: nullableMoney(source.plannedHolderRewardsMicroUsdg, invalid),
+    paidHolderRewardsMicroUsdg: nullableMoney(source.paidHolderRewardsMicroUsdg, invalid),
+    holderRewardsStatus: boundedText(source.holderRewardsStatus, invalid),
+    distributionStatus: boundedText(source.distributionStatus, invalid),
+  };
+  assertNullableExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
   assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
   return result;
 }
@@ -337,6 +393,7 @@ function readTransaction(value) {
 }
 
 function readCard(value, schemaVersion) {
+  if (schemaVersion === 8) return readCardV8(value);
   const source = requiredRecord(value, invalid);
   const currentSchema = schemaVersion === 4 || schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7;
   exactKeys(source, currentSchema ? CARD_KEYS : LEGACY_CARD_KEYS, invalid);
@@ -352,6 +409,46 @@ function readCard(value, schemaVersion) {
     imageUrl: null,
     packPriceMicroUsdg: nullableMoney(source.packPriceMicroUsdg, invalid),
     buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg, invalid),
+  };
+  if (source.imageUrl !== undefined && source.imageUrl !== null) {
+    const url = new URL(boundedText(source.imageUrl, invalid));
+    if (url.protocol !== 'https:' || url.username || url.password) invalid();
+    card.imageUrl = url.toString();
+  }
+  return card;
+}
+
+/** schemaVersion 8: the frozen `PublicCardEvent` shape verbatim — see CARD_V8_KEYS's own comment.
+ * Sourced from `packages/adapters/src/collector/recent-winners.mjs`'s `list()` output, already
+ * deduplicated by durable identity and filtered to this project's own known operation memos before
+ * it ever reaches this validator. */
+function readCardV8(value) {
+  const source = requiredRecord(value, invalid);
+  exactKeys(source, CARD_V8_KEYS, invalid);
+  requiredKeys(source, CARD_V8_KEYS, invalid);
+  if (typeof source.cycleId !== 'string' || source.cycleId.length === 0) invalid();
+  if (typeof source.operationId !== 'string' || source.operationId.length === 0) invalid();
+  nonNegativeInteger(source.packIndex, invalid);
+  if (source.memo !== null) boundedText(source.memo, invalid);
+  if (source.mint !== null) boundedText(source.mint, invalid);
+  if (typeof source.eventId !== 'string' || source.eventId.length === 0) invalid();
+  if (typeof source.sequence !== 'string' || source.sequence.length === 0) invalid();
+  if (!CARD_STATES.has(source.state)) invalid();
+  const card = {
+    cycleId: source.cycleId,
+    operationId: source.operationId,
+    packIndex: source.packIndex,
+    memo: source.memo,
+    mint: source.mint,
+    eventId: source.eventId,
+    sequence: source.sequence,
+    state: source.state,
+    name: nullableText(source.name, invalid),
+    imageUrl: null,
+    observedAt: isoTimestamp(source.observedAt, invalid),
+    finalizedAt: optionalTimestamp(source.finalizedAt, invalid),
+    transactionId: nullableText(source.transactionId, invalid),
+    proceeds: nullableAmount(source.proceeds, invalid),
   };
   if (source.imageUrl !== undefined && source.imageUrl !== null) {
     const url = new URL(boundedText(source.imageUrl, invalid));
