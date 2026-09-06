@@ -1152,6 +1152,33 @@ function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
 }
 
 const CONTROL_PIN_BUMP_SCHEMA = 'hookemon.control-gate-pin-bump.v1';
+// v1 requires the signed record to state the exact commit SHA of the candidate tree that will
+// contain it. That commit does not exist yet when the record is authored, and adding the record
+// to product/dependency-verification.json changes that tree's own content, which changes the
+// resulting commit's own SHA -- so a v1 record can never correctly describe the commit it ships
+// in; this is a structural impossibility (finding a fixed point of a SHA-based commit hash), not
+// a workaround-able inconvenience. v2 drops the commit-SHA binding entirely and relies only on
+// deterministic approved-content digests that are already fully known before the record is
+// written: the exact bytes of product/dependency-pins.json (candidatePinsSha256) and the exact
+// enumerated control-surface digest changes (controls) -- everything the record needs to bind is
+// already true the moment it is authored, so no self-reference is possible. This intentionally
+// makes an approval reusable across any later commit with the identical pinned bytes (nothing
+// security-relevant changed), and equally unable to admit any commit whose pinned bytes differ
+// even slightly (the exact property v1 was trying, and structurally failing, to provide).
+const CONTROL_PIN_BUMP_SCHEMA_V2 = 'hookemon.control-gate-pin-bump.v2';
+// Deliberately excludes baseTree/candidateTree (the impossible self-reference) and approvalToken
+// is checked for value, not just presence, so it is still listed here for the exact-keys check.
+const CONTROL_PIN_BUMP_V2_KEYS = [
+  'schema', 'approvalToken', 'basePinsSha256', 'candidatePinsSha256', 'baseChecker', 'controls',
+];
+
+function sameKeys(object, expectedKeys) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return false;
+  const actualKeys = Object.keys(object);
+  if (actualKeys.length !== expectedKeys.length) return false;
+  const expected = new Set(expectedKeys);
+  return actualKeys.every(key => expected.has(key));
+}
 
 function controlSurfaceDescriptors(pins, errors, source) {
   const descriptors = [];
@@ -1219,23 +1246,10 @@ function sameControlChanges(actual, expected) {
   ));
 }
 
-function baseCheckerPinBumpErrors({
-  candidateVerification,
-  baseTree,
-  candidateTree,
-  basePinsSha256,
-  candidatePinsSha256,
-  baseCheckerBlob,
-  changes,
+function baseCheckerPinBumpErrorsV1({
+  bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
 }) {
   const errors = [];
-  const bump = candidateVerification?.controlGatePinBump;
-  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
-    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
-  }
-  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
-    errors.push('control pin bump must use the base-checker schema');
-  }
   if (bump.approvalToken !== 'OWNER APPROVED') {
     errors.push('control pin bump requires an explicit OWNER APPROVED token');
   }
@@ -1252,6 +1266,58 @@ function baseCheckerPinBumpErrors({
     errors.push('control pin bump must enumerate the exact control-surface digest changes');
   }
   return errors;
+}
+
+/**
+ * v2: a deterministic approved-content binding with no commit-SHA self-reference (see
+ * CONTROL_PIN_BUMP_SCHEMA_V2's own comment for why v1's binding is structurally unsatisfiable).
+ * Every field here is knowable before the record is authored and stays true for any later commit
+ * with byte-identical pinned content -- baseTree/candidateTree are deliberately not part of this
+ * schema at all, not merely unchecked.
+ */
+function baseCheckerPinBumpErrorsV2({
+  bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
+}) {
+  const errors = [];
+  if (!sameKeys(bump, CONTROL_PIN_BUMP_V2_KEYS)) {
+    errors.push(`control pin bump v2 must contain exactly ${CONTROL_PIN_BUMP_V2_KEYS.join(', ')}`);
+    return errors;
+  }
+  if (bump.approvalToken !== 'OWNER APPROVED') {
+    errors.push('control pin bump requires an explicit OWNER APPROVED token');
+  }
+  if (bump.basePinsSha256 !== basePinsSha256 || bump.candidatePinsSha256 !== candidatePinsSha256) {
+    errors.push('control pin bump must bind the exact base and candidate dependency-pin bytes');
+  }
+  if (bump.baseChecker?.path !== CONTROL_DEPENDENCY_VERIFIER_PATH || bump.baseChecker?.blobId !== baseCheckerBlob) {
+    errors.push('control pin bump must bind the protected base checker blob');
+  }
+  if (!sameControlChanges(bump.controls, changes)) {
+    errors.push('control pin bump must enumerate the exact control-surface digest changes');
+  }
+  return errors;
+}
+
+function baseCheckerPinBumpErrors({
+  candidateVerification,
+  baseTree,
+  candidateTree,
+  basePinsSha256,
+  candidatePinsSha256,
+  baseCheckerBlob,
+  changes,
+}) {
+  const bump = candidateVerification?.controlGatePinBump;
+  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
+    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
+  }
+  if (bump.schema === CONTROL_PIN_BUMP_SCHEMA_V2) {
+    return baseCheckerPinBumpErrorsV2({ bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
+  }
+  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
+    return ['control pin bump must use a supported base-checker schema'];
+  }
+  return baseCheckerPinBumpErrorsV1({ bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
 }
 
 function candidateBlob(candidateBlobs, path) {

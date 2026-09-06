@@ -1,0 +1,51 @@
+{
+  "schema": "hookemon.control-gate-pin-bump.v2",
+  "authority": "OWNER",
+  "action": "CONTROL_GATE_PIN_BUMP",
+  "rationale": "REPLACE_WITH_OWNER_RATIONALE -- this record supersedes decisions/owner-approvals/control-gate-pin-bump-launch-a-draft.json (v1), which is kept in place only as a frozen record of the discovered structural impossibility, not as a candidate for signature. v1 requires the signed record to state the exact commit SHA (candidateTree) of the commit that will contain it; that commit's tree necessarily changes when the record is added to product/dependency-verification.json, so it changes its own resulting SHA -- a commit cannot state its own hash inside itself. This v2 schema (scripts/verify-control-dependencies.mjs: CONTROL_PIN_BUMP_SCHEMA_V2, baseCheckerPinBumpErrorsV2) drops baseTree/candidateTree entirely and binds only deterministic content that is fully known before the record is authored: the exact bytes of product/dependency-pins.json (basePinsSha256/candidatePinsSha256), the exact base checker blob this approval was reviewed against (baseChecker), and the exact enumerated control-surface digest changes (controls) via the existing sameControlChanges comparison -- unchanged from v1. Positive/negative tests proving this in scripts/tests/control-dependencies.test.mjs: 'the base control checker permits a v2 owner-approved pin bump with no commit-SHA binding', 'a v2 pin bump approval does not depend on the commit-SHA that ships it' (same approval object checked against two different candidateTree values, both pass), 'rejects a v2 pin bump whose approval token is not a formal owner token', 'rejects a v2 pin bump record carrying a v1-only field' (exact-keys check via sameKeys/CONTROL_PIN_BUMP_V2_KEYS), and 'rejects a v2 pin bump approved for one control-surface change but shipped with another' (an unrelated pinned control file mutated after the approval was computed is refused, proving an unchanged approval cannot admit altered controls it never enumerated). The controls entry below is the actual, real digest change for scripts/verify-control-dependencies.mjs itself between baseTree 37c0f955f76410e9c9863e77cdc33fd48ffd1306 and the current candidate content on codex/launch-a (git hash-object scripts/verify-control-dependencies.mjs), covering both A1's earlier admission of web-ci.yml/deploy-web.yml into PERMITTED_WORKFLOW_PATHS and this v2 schema addition itself -- see the bootstrap note below for why the checker's own pin is necessarily part of this same record.",
+  "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
+  "basePinsSha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
+  "candidatePinsSha256": "27cd27186a2b24973f9be03e6704183d3c2e316b4e1bfe681801d849489c6dce",
+  "baseChecker": {
+    "path": "scripts/verify-control-dependencies.mjs",
+    "blobId": "6b232b5f35dba49abc08c1759f3fec57831f8e9d"
+  },
+  "controls": [
+    {
+      "path": "scripts/verify-control-dependencies.mjs",
+      "previousSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+      "sha256": "e1d857365876a92934f87ebf030c64ef3444f2653e935fa12866c62ac00ccfaf"
+    }
+  ],
+  "bootstrapIntervention": {
+    "problem": "The v2 code path itself lives in scripts/verify-control-dependencies.mjs, which is one of the six pinned control-surface files. Shipping v2 support therefore changes the checker's own digest away from the value currently pinned in product/dependency-pins.json (controlScripts.controlDependencyVerifier), which is exactly the class of change the control gate exists to block without an approved pin bump. Since v1 is structurally unusable (see rationale) and v2 does not exist in CI until this very commit lands, there is a one-time chicken-and-egg gap: no pin-bump record of either schema can honestly admit the commit that FIRST introduces v2 support, because v1 cannot describe its own commit and v2-the-mechanism is not yet trusted by any CI run that predates this commit.",
+    "requiredOneTimeAction": "The owner (not A) must review this exact candidate diff (scripts/verify-control-dependencies.mjs, scripts/tests/control-dependencies.test.mjs, and this file) by direct inspection -- reading the diff and running the test suite locally or in a trusted context outside the automated control gate -- and, if satisfied, take ONE explicit bootstrap action to admit the specific commit that ships v2 support. This is necessarily an out-of-band, human, one-time act; it cannot be delegated to the gate the commit is changing.",
+    "alternativesConsidered": [
+      {
+        "option": "Ruleset bypass-actor merge",
+        "status": "REJECTED per explicit owner instruction (this turn's dispatch: 'Your suggested admin bypass is REJECTED because the owner requires genuine green applicable checks and forbids ruleset weakening')."
+      },
+      {
+        "option": "Manually set approvalToken to OWNER APPROVED on this record and let CI 'see' a passing gate",
+        "status": "REJECTED -- this would be A fabricating an owner approval, explicitly forbidden regardless of mechanism."
+      },
+      {
+        "option": "Have the owner author and sign a v1 record whose candidateTree happens to match by chance",
+        "status": "NOT VIABLE -- not a chance-of-collision problem, a definitional one: the tree that contains the signed v1 record is by construction different from the tree computed before the record existed, for any signer."
+      },
+      {
+        "option": "Owner runs `node --test scripts/tests/control-dependencies.test.mjs` and `git diff 37c0f955 <this-branch-head> -- scripts/verify-control-dependencies.mjs` directly, confirms the diff matches this record's description and controls entry, and merges via the normal required-reviewer path with the CI control-gate job explicitly overridden by the existing `gate override` owner mechanism (scripts/lib/gates.mjs, NOT a ruleset bypass) for this one commit only, citing this file as the rationale/approval record",
+        "status": "RECOMMENDED -- this uses an already-existing, already-owner-only, already-audited override primitive (`node scripts/v4.mjs gate override <phase> --rationale ... --approval ...`) instead of inventing a new bypass mechanism, and produces a permanent evidentiary trail (the override receipt) distinct from and no more privileged than tools already available for other phase gates."
+      }
+    ],
+    "afterBootstrap": "Once a commit containing working v2-schema support has been admitted once (by the recommended path above or an equivalent owner-chosen action), all LATER control-surface pin bumps can use ordinary v2 records with no further bootstrap step, because at that point the checker enforcing v2 is itself already part of the trusted base tree that future candidates are compared against."
+  },
+  "evidenceChecksForReviewer": [
+    "git diff 37c0f955f76410e9c9863e77cdc33fd48ffd1306 <candidate-commit> -- scripts/verify-control-dependencies.mjs   # confirm the only functional change is the v1/v2 dispatch plus the v2 validator; no unrelated logic changed",
+    "node --test scripts/tests/control-dependencies.test.mjs   # confirm all v1 and v2 pin-bump tests pass, and that the one pre-existing 'integrated repository dependency boundary' failure is exactly and only the expected stale-pin symptom described above, not a new/different failure",
+    "sha256(scripts/verify-control-dependencies.mjs) at the candidate commit equals controls[0].sha256 above (git hash-object scripts/verify-control-dependencies.mjs at that commit)",
+    "product/dependency-pins.json is byte-identical between base and candidate (basePinsSha256 === candidatePinsSha256 above) -- confirms this record only concerns the checker file, not the pinned dependency set itself",
+    "no other file in product/dependency-verification.json's controlGatePinBump-relevant control set changed (controls array has exactly one entry)"
+  ],
+  "recommendedResolution": "Await the owner's independent review of this exact candidate (per Terra's separate review track) and, if satisfied, take the single one-time bootstrap action described above. A did not and will not set approvalToken to \"OWNER APPROVED\" itself, will not flip any gate result, and will not modify product/dependency-pins.json or product/dependency-verification.json to pre-empt that decision."
+}
