@@ -22,7 +22,7 @@ import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
-import { compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
+import { buildQuoteRefreshPlanner, compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
 import {
   CYCLE_REPOSITORY_CLIENT_INTERFACE,
   assertCycleRepositoryClientInterface,
@@ -484,6 +484,88 @@ test('the trusted Solana blockhashContextResolver refuses when the RPC latest bl
   const resolver = createTrustedSolanaBlockhashContextResolver(client);
 
   await assert.rejects(() => resolver(latestBlockhash), SolanaAdapterError);
+});
+
+test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase targets/liability evidence and prices only fresh Relay quotes', async () => {
+  const requests = [];
+  const evmAccount = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
+  const solanaAccount = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const config = {
+    accounts: { evm: evmAccount, solana: solanaAccount },
+    moneyConfiguration: productionMoneyConfiguration(),
+  };
+  const adapters = {
+    relay: {
+      async quoteOutboundBridge(request) {
+        requests.push(request);
+        const isUnit = requests.length === 1;
+        return {
+          requestId: isUnit ? 'relay-unit-refresh' : 'relay-aggregate-refresh',
+          orderId: `0x${(isUnit ? '1' : '2').repeat(64)}`,
+          deadlineUnixSeconds: 5_000_000,
+          sender: evmAccount,
+          recipient: solanaAccount,
+          origin: { amount: isUnit ? '10000000' : '20000000' },
+          destination: { amount: request.amount, minimumAmount: request.amount },
+          quoteDigest: `sha256:${(isUnit ? 'a' : 'b').repeat(64)}`,
+        };
+      },
+    },
+  };
+  const admission = {
+    quantity: 2,
+    unitPurchase: {
+      chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '5000000',
+    },
+    aggregatePurchase: {
+      chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '10000000',
+    },
+    processLiabilityEvidence: { schema: 'hookemon.process-liability-evidence.v1', marker: 'original-evidence' },
+  };
+  const planner = buildQuoteRefreshPlanner({ config, adapters });
+  const replacement = await planner.plan({
+    cycleId: 'cycle-refresh-plan',
+    packId: 'base-pack',
+    admission,
+    custody: { cycleId: 'cycle-refresh-plan' },
+  });
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0], {
+    user: evmAccount,
+    recipient: solanaAccount,
+    destinationCurrency: config.moneyConfiguration.assets.solanaStablecoin.assetId,
+    tradeType: 'EXACT_OUTPUT',
+    amount: '5000000',
+  });
+  assert.deepEqual(requests[1], { ...requests[0], amount: '10000000' });
+  assert.equal(replacement.schema, 'hookemon.policy-admission.v2');
+  assert.equal(replacement.cycleId, 'cycle-refresh-plan');
+  assert.equal(replacement.packId, 'base-pack');
+  assert.equal(replacement.quantity, 2);
+  assert.equal(replacement.unitPurchase, admission.unitPurchase);
+  assert.equal(replacement.aggregatePurchase, admission.aggregatePurchase);
+  assert.equal(replacement.processLiabilityEvidence, admission.processLiabilityEvidence);
+  assert.equal(replacement.unitFundingQuote.amountAtomic, '10000000');
+  assert.equal(replacement.aggregateFundingQuote.amountAtomic, '20000000');
+  assert.equal(replacement.relay.requestId, 'relay-aggregate-refresh');
+  assert.equal(replacement.unitRelay.requestId, 'relay-unit-refresh');
+  assert.equal(replacement.quoteDigest, `sha256:${'b'.repeat(64)}`);
+});
+
+test('buildQuoteRefreshPlanner refuses to plan without repository-owned finalized claim/custody evidence bound to this exact cycle', async () => {
+  const planner = buildQuoteRefreshPlanner({
+    config: {
+      accounts: { evm: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384', solana: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE' },
+      moneyConfiguration: productionMoneyConfiguration(),
+    },
+    adapters: { relay: { async quoteOutboundBridge() { throw new Error('must not quote without custody evidence'); } } },
+  });
+  assert.equal(await planner.plan({ cycleId: 'cycle-refresh-no-custody', packId: 'base-pack', admission: {}, custody: null }), null);
+  assert.equal(
+    await planner.plan({ cycleId: 'cycle-refresh-no-custody', packId: 'base-pack', admission: {}, custody: { cycleId: 'another-cycle' } }),
+    null,
+  );
 });
 
 /** A syntactically real, structurally valid legacy Solana transaction (deserializable by
