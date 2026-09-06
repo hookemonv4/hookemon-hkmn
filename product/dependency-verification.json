@@ -123,13 +123,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
-      "actualSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+      "expectedSha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91",
+      "actualSha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
-          "actualSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
+          "sha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91",
+          "actualSha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -198,29 +198,5 @@
       "lockfileVersion": 3,
       "resolvedEntryCount": 89
     }
-  },
-  "controlGatePinBump": {
-    "schema": "hookemon.control-gate-pin-bump.v1",
-    "approvalToken": "DRAFT_UNSIGNED",
-    "baseTree": "513e48fde602a11165a949aee2adab3bd7b2e2cb",
-    "candidateTree": "UNCOMMITTED_DRAFT",
-    "basePinsSha256": "424e759a826a06a4b42c265d4386bf0f954862659a919fb543c42a9edb05e43e",
-    "candidatePinsSha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
-    "baseChecker": {
-      "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "c9f23621ad2e5f417622f58cf1c179fd1649453f"
-    },
-    "controls": [
-      {
-        "path": ".github/workflows/fork-proof.yml",
-        "previousSha256": "98377853771897e42de785b7434e2c8b09d9fef5affdb09a0b8b1e38beafa309",
-        "sha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
-      },
-      {
-        "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "7aa86a0ca84796980bdfce068c2ebbe63e2f69f038732227542a80e94e92dbaf",
-        "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
-      }
-    ]
   }
 }

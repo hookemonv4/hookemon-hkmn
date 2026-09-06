@@ -671,6 +671,93 @@ test('the base control checker permits an owner-approved verifier pin bump with 
   assert.equal(result.result, 'PASSED', result.errors.join('\n'));
 });
 
+function v2PinBumpFixture() {
+  const basePins = readJson(join(REPO_ROOT, 'product', 'dependency-pins.json'));
+  const candidatePins = structuredClone(basePins);
+  const candidateVerifier = `${FORK_PIN_VERIFIER_SCRIPT}\nexport const ownerApprovedVerifierRefreshV2 = true;\n`;
+  candidatePins.controlScripts.forkPinVerifier.sha256 = sha256(candidateVerifier);
+  candidatePins.controlScripts.forkPinVerifier.closure[0].sha256 = sha256(candidateVerifier);
+  const basePinsSha256 = sha256(JSON.stringify(basePins));
+  const candidatePinsSha256 = sha256(JSON.stringify(candidatePins));
+  const baseTree = 'a'.repeat(40);
+  const baseCheckerBlob = 'c'.repeat(40);
+  const candidateBlobs = new Map([
+    ['.github/workflows/v4-gates.yml', { mode: '100644', type: 'blob', blobId: '1'.repeat(40), sha256: candidatePins.contentAddresses.workflow.sha256 }],
+    ['.github/workflows/fork-proof.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkProof.sha256 }],
+    ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
+    ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
+    ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
+    [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
+    ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '8'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
+    [CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '9'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[1].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_IMPORT_SCRIPT) }],
+    [ARCHIVE_FORK_PROOF_TEST_PATH, { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.archiveForkProofTest.sha256 }],
+  ]);
+  const controls = [{
+    path: 'scripts/verify-fork-pin.mjs',
+    previousSha256: basePins.controlScripts.forkPinVerifier.closure[0].sha256,
+    sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256,
+  }];
+  return { basePins, candidatePins, basePinsSha256, candidatePinsSha256, baseTree, baseCheckerBlob, candidateBlobs, controls };
+}
+
+function v2Bump(f, approvalToken = 'OWNER APPROVED') {
+  return {
+    schema: 'hookemon.control-gate-pin-bump.v2',
+    approvalToken,
+    basePinsSha256: f.basePinsSha256,
+    candidatePinsSha256: f.candidatePinsSha256,
+    baseChecker: { path: 'scripts/verify-control-dependencies.mjs', blobId: f.baseCheckerBlob },
+    controls: f.controls,
+  };
+}
+
+test('the base control checker permits a v2 owner-approved pin bump without commit-SHA binding', () => {
+  const f = v2PinBumpFixture();
+  const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
+  for (const candidateTree of ['b'.repeat(40), 'd'.repeat(40)]) {
+    const result = verifyBaseControlSurface({
+      ...f,
+      candidateTree,
+      candidateVerification: { controlGatePinBump: v2Bump(f) },
+    });
+    assert.equal(result.result, 'PASSED', result.errors.join('\n'));
+  }
+});
+
+test('the base control checker rejects an unsigned v2 pin bump', () => {
+  const f = v2PinBumpFixture();
+  const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
+  const result = verifyBaseControlSurface({
+    ...f,
+    candidateTree: 'b'.repeat(40),
+    candidateVerification: { controlGatePinBump: v2Bump(f, 'DRAFT_UNSIGNED_NOT_YET_APPROVED') },
+  });
+  assert.equal(result.result, 'FAILED');
+  assert.match(result.errors.join('\n'), /explicit OWNER APPROVED token/);
+});
+
+test('the base control checker rejects an unrelated control change after a v2 approval', () => {
+  const f = v2PinBumpFixture();
+  const verifyBaseControlSurface = controlDependencies.verifyBaseControlSurface;
+  const candidatePins = structuredClone(f.candidatePins);
+  candidatePins.contentAddresses.controlGate.sha256 = sha256('unrelated control-gate change');
+  const candidateBlobs = new Map(f.candidateBlobs);
+  candidateBlobs.set('.github/workflows/control-gate.yml', {
+    mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256,
+  });
+  const result = verifyBaseControlSurface({
+    ...f,
+    candidatePins,
+    candidatePinsSha256: sha256(JSON.stringify(candidatePins)),
+    candidateBlobs,
+    candidateTree: 'b'.repeat(40),
+    candidateVerification: { controlGatePinBump: v2Bump(f) },
+  });
+  assert.equal(result.result, 'FAILED');
+  assert.match(result.errors.join('\n'), /exact base and candidate dependency-pin bytes|exact control-surface digest changes/);
+});
+
 test('rejects a symlinked fork-pin verifier entry before it can execute', () => {
   const state = fixture();
   const verifierPath = join(state.root, 'scripts', 'verify-fork-pin.mjs');

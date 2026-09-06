@@ -1110,6 +1110,20 @@ function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
 }
 
 const CONTROL_PIN_BUMP_SCHEMA = 'hookemon.control-gate-pin-bump.v1';
+// v1 binds candidateTree, but the approval record itself changes that commit's tree and therefore
+// its SHA. v2 instead binds only deterministic content available before the record is written.
+const CONTROL_PIN_BUMP_SCHEMA_V2 = 'hookemon.control-gate-pin-bump.v2';
+const CONTROL_PIN_BUMP_V2_KEYS = [
+  'schema', 'approvalToken', 'basePinsSha256', 'candidatePinsSha256', 'baseChecker', 'controls',
+];
+
+function sameKeys(object, expectedKeys) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return false;
+  const actualKeys = Object.keys(object);
+  if (actualKeys.length !== expectedKeys.length) return false;
+  const expected = new Set(expectedKeys);
+  return actualKeys.every(key => expected.has(key));
+}
 
 function controlSurfaceDescriptors(pins, errors, source) {
   const descriptors = [];
@@ -1176,23 +1190,10 @@ function sameControlChanges(actual, expected) {
   ));
 }
 
-function baseCheckerPinBumpErrors({
-  candidateVerification,
-  baseTree,
-  candidateTree,
-  basePinsSha256,
-  candidatePinsSha256,
-  baseCheckerBlob,
-  changes,
+function baseCheckerPinBumpErrorsV1({
+  bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
 }) {
   const errors = [];
-  const bump = candidateVerification?.controlGatePinBump;
-  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
-    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
-  }
-  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
-    errors.push('control pin bump must use the base-checker schema');
-  }
   if (bump.approvalToken !== 'OWNER APPROVED') {
     errors.push('control pin bump requires an explicit OWNER APPROVED token');
   }
@@ -1209,6 +1210,51 @@ function baseCheckerPinBumpErrors({
     errors.push('control pin bump must enumerate the exact control-surface digest changes');
   }
   return errors;
+}
+
+function baseCheckerPinBumpErrorsV2({
+  bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
+}) {
+  const errors = [];
+  if (!sameKeys(bump, CONTROL_PIN_BUMP_V2_KEYS)) {
+    errors.push(`control pin bump v2 must contain exactly ${CONTROL_PIN_BUMP_V2_KEYS.join(', ')}`);
+    return errors;
+  }
+  if (bump.approvalToken !== 'OWNER APPROVED') {
+    errors.push('control pin bump requires an explicit OWNER APPROVED token');
+  }
+  if (bump.basePinsSha256 !== basePinsSha256 || bump.candidatePinsSha256 !== candidatePinsSha256) {
+    errors.push('control pin bump must bind the exact base and candidate dependency-pin bytes');
+  }
+  if (bump.baseChecker?.path !== CONTROL_DEPENDENCY_VERIFIER_PATH || bump.baseChecker?.blobId !== baseCheckerBlob) {
+    errors.push('control pin bump must bind the protected base checker blob');
+  }
+  if (!sameControlChanges(bump.controls, changes)) {
+    errors.push('control pin bump must enumerate the exact control-surface digest changes');
+  }
+  return errors;
+}
+
+function baseCheckerPinBumpErrors({
+  candidateVerification,
+  baseTree,
+  candidateTree,
+  basePinsSha256,
+  candidatePinsSha256,
+  baseCheckerBlob,
+  changes,
+}) {
+  const bump = candidateVerification?.controlGatePinBump;
+  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
+    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
+  }
+  if (bump.schema === CONTROL_PIN_BUMP_SCHEMA_V2) {
+    return baseCheckerPinBumpErrorsV2({ bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
+  }
+  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
+    return ['control pin bump must use a supported base-checker schema'];
+  }
+  return baseCheckerPinBumpErrorsV1({ bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
 }
 
 function candidateBlob(candidateBlobs, path) {
