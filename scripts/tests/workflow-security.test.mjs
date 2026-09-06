@@ -217,6 +217,18 @@ test('identity gate checks out the trusted base and executes no pull-request sou
   assert.doesNotMatch(identityWorkflow, /node scripts\/check-commit-identity\.mjs/);
 });
 
+test('base-defined gates publish the configured required check names', () => {
+  const workflows = [
+    ['control-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'control-gate.yml'), 'utf8')],
+    ['identity-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'identity-gate.yml'), 'utf8')],
+  ];
+
+  for (const [checkName, source] of workflows) {
+    assert.match(source, new RegExp(`^  pull-request:\\n    name: ${checkName}$`, 'm'));
+    assert.match(source, new RegExp(`^  push:\\n    name: ${checkName}$`, 'm'));
+  }
+});
+
 test('the canary permits only the default branch and fails closed when its endpoint is absent', () => {
   const canaryPath = join(repoRoot, '.github', 'workflows', 'fork-pin-canary.yml');
   const canary = readFileSync(canaryPath, 'utf8');
