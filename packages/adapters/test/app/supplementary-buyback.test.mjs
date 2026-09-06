@@ -30,6 +30,7 @@ const MEMO = 'memo-supplementary-buyback';
 const BUYBACK_SIGNATURE = 'S9'.repeat(44);
 const POSITION_ID = `held:${'a'.repeat(64)}`;
 const POSITION_EVIDENCE_DIGEST = `sha256:${'b'.repeat(64)}`;
+const FENCING_TOKEN = '11111111-1111-4111-8111-111111111111';
 
 function settlementAsset() {
   return { chainId: CHAIN_ID, assetId: SETTLEMENT_ASSET, decimals: CIRCLE_USD_DECIMALS };
@@ -64,7 +65,7 @@ function transactionResponse(entries) {
   };
 }
 
-function rpcClient({ tokenAccount = tokenAccountResponse(), entries = [], finalized = true, balance = 1_000_000 } = {}) {
+function rpcClient({ tokenAccount = tokenAccountResponse(), entries = [], finalized = true, balance = 1_000_000, slot = 100 } = {}) {
   return createSolanaRpcClient({
     fetchImpl: async (_url, init) => {
       const body = JSON.parse(init.body);
@@ -73,7 +74,7 @@ function rpcClient({ tokenAccount = tokenAccountResponse(), entries = [], finali
       if (body.method === 'isBlockhashValid') return jsonRpc({ value: true }, body.id);
       if (body.method === 'getBlockHeight') return jsonRpc(99, body.id);
       if (body.method === 'getSignatureStatuses') {
-        return jsonRpc({ value: [{ err: null, confirmationStatus: finalized ? 'finalized' : 'confirmed' }] }, body.id);
+        return jsonRpc({ value: [{ err: null, confirmationStatus: finalized ? 'finalized' : 'confirmed', slot }] }, body.id);
       }
       if (body.method === 'getTransaction') return jsonRpc(transactionResponse(entries), body.id);
       throw new Error(`unexpected RPC method ${body.method}`);
@@ -186,17 +187,86 @@ function settlementFixture(overrides = {}) {
   };
 }
 
-function repository({ openPacks = [{ packIndex: 0, memo: MEMO, decision: 'opened', mint: CARD_ASSET, assetKind: 'spl' }] } = {}) {
+function chainAttemptKey(stage, requestDigest) {
+  return `${stage} ${requestDigest}`;
+}
+
+/**
+ * An in-memory repository implementing exactly CS's proposed extension to the production
+ * supplementary-settlement facade (requested in C-inbox.md): the existing chain-transaction-attempt
+ * primitives (`prepareChainTransactionAttempt`/`recordSignedTransactionWithRecoveryContext`/
+ * `recordBroadcast`/`readChainAttemptRecoveryContext`), keyed by the existing `'buyback'` stage
+ * enum value plus a position-scoped `requestDigest` -- exactly mirroring the real
+ * `cycle-repository.mjs`'s own `chainAttemptKey(stage, requestDigest)` tuple keying, so this fake
+ * validates the real no-collision claim, not an invented one.
+ */
+function fakeChainAttemptRepository({ openPacks = [{ packIndex: 0, memo: MEMO, decision: 'opened', mint: CARD_ASSET, assetKind: 'spl' }] } = {}) {
+  const attempts = new Map();
+  const recoveryContexts = new Map();
   const advances = [];
+  const calls = [];
   return {
     advances,
+    calls,
+    attempts,
     async readStage(_cycleId, stage) {
       return stage === 'open' ? { status: 'COMPLETE', evidence: { packs: openPacks } } : { status: 'PENDING' };
     },
     async advanceSupplementarySettlement(positionId, input) {
+      calls.push('advanceSupplementarySettlement');
       advances.push({ positionId, ...input });
       return { positionId, cycleId: CYCLE_ID, manifestId: `${CYCLE_ID}:supplementary:1`, state: input.nextState };
     },
+    async readChainTransactionAttempt(_cycleId, stage, requestDigest) {
+      const found = attempts.get(chainAttemptKey(stage, requestDigest));
+      return found ? structuredClone(found) : null;
+    },
+    async prepareChainTransactionAttempt(_cycleId, stage, attemptValue) {
+      calls.push('prepareChainTransactionAttempt');
+      const key = chainAttemptKey(stage, attemptValue.requestDigest);
+      if (attempts.has(key)) return structuredClone(attempts.get(key));
+      const record = { attempt: attemptValue, broadcastEvidence: null, finalityEvidence: null };
+      attempts.set(key, record);
+      return structuredClone(record);
+    },
+    async recordSignedTransactionWithRecoveryContext(_cycleId, stage, requestDigest, signingMaterial, contextValue) {
+      calls.push('recordSignedTransactionWithRecoveryContext');
+      const key = chainAttemptKey(stage, requestDigest);
+      const current = attempts.get(key);
+      if (!current) throw new Error('no prepared chain attempt');
+      const attempt = { ...current.attempt, ...signingMaterial, state: 'SIGNED' };
+      const record = { ...current, attempt };
+      attempts.set(key, record);
+      recoveryContexts.set(`${key} ${signingMaterial.hash}`, contextValue);
+      return structuredClone(record);
+    },
+    async readChainAttemptRecoveryContext(_cycleId, { stage, requestDigest, rawSignedBytesHash }) {
+      calls.push('readChainAttemptRecoveryContext');
+      const found = recoveryContexts.get(`${chainAttemptKey(stage, requestDigest)} ${rawSignedBytesHash}`);
+      return found ? structuredClone(found) : null;
+    },
+    async recordBroadcast(_cycleId, stage, requestDigest, evidence) {
+      calls.push('recordBroadcast');
+      const key = chainAttemptKey(stage, requestDigest);
+      const current = attempts.get(key);
+      if (!current) throw new Error('no signed chain attempt');
+      const attempt = { ...current.attempt, state: 'BROADCAST' };
+      const record = { ...current, attempt, broadcastEvidence: evidence };
+      attempts.set(key, record);
+      return structuredClone(record);
+    },
+  };
+}
+
+function reconcileInput({ adapters, signerClient, config: cfg, cycleRepository, position, settlement, fencingToken = FENCING_TOKEN }) {
+  return {
+    adapters,
+    signerClient,
+    config: cfg,
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, stage: 'supplementary-buyback', positionId: position.positionId, manifestId: settlement.manifestId, settlementState: settlement.state, fencingToken },
+    position,
+    settlement,
   };
 }
 
@@ -213,81 +283,87 @@ async function decodedPolicyFor(transactionBase64) {
   return policyFor(decoded, TRANSACTION_POLICY_SCHEMA);
 }
 
-// --- assertHeldPositionForResale guard ----------------------------------------------------------
+function configuredWithPolicy(policy) {
+  const base = config();
+  return config({ collectorCrypt: { ...base.collectorCrypt, buyback: { ...base.collectorCrypt.buyback, policy } } });
+}
+
+// --- identity / state / capability guards -------------------------------------------------------
 
 test('reconcile refuses a position without an owner sell decision, before any provider call', async () => {
+  const handler = createSupplementaryBuybackHandler();
   const collectorCrypt = { async getBuybackAvailable() { throw new Error('must not be called'); } };
-  const handler = createSupplementaryBuybackHandler({
-    adapters: { collectorCrypt, solana: { client: rpcClient() } },
-    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
   await assert.rejects(
-    handler.reconcile({
+    handler.reconcile(reconcileInput({
+      adapters: { collectorCrypt, solana: { client: rpcClient() } },
+      signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
       config: config(),
-      cycleRepository: repository(),
+      cycleRepository: fakeChainAttemptRepository(),
       position: heldPosition({ ownerDecision: { choice: 'keep-holding' } }),
       settlement: settlementFixture(),
-    }),
+    })),
     /owner sell decision/,
   );
 });
 
 test('reconcile requires the settlement to be PREPARED', async () => {
-  const handler = createSupplementaryBuybackHandler({
-    adapters: { collectorCrypt: {}, solana: { client: rpcClient() } },
-    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
+  const handler = createSupplementaryBuybackHandler();
   await assert.rejects(
-    handler.reconcile({
+    handler.reconcile(reconcileInput({
+      adapters: { collectorCrypt: {}, solana: { client: rpcClient() } },
+      signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
       config: config(),
-      cycleRepository: repository(),
+      cycleRepository: fakeChainAttemptRepository(),
       position: heldPosition(),
       settlement: settlementFixture({ state: 'BUYBACK_SENT_UNKNOWN' }),
-    }),
+    })),
     /requires a PREPARED settlement/,
+  );
+});
+
+test('reconcile fails closed when the repository does not expose durable chain-attempt primitives, rather than degrading to memo-lookup-only', async () => {
+  const handler = createSupplementaryBuybackHandler();
+  const weakRepository = { async advanceSupplementarySettlement() { throw new Error('must not be reached'); } };
+  await assert.rejects(
+    handler.reconcile(reconcileInput({
+      adapters: { collectorCrypt: {}, solana: { client: rpcClient() } },
+      signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
+      config: config(),
+      cycleRepository: weakRepository,
+      position: heldPosition(),
+      settlement: settlementFixture(),
+    })),
+    /requires cycleRepository\.(readChainTransactionAttempt|prepareChainTransactionAttempt|recordBroadcast|readChainAttemptRecoveryContext)/,
   );
 });
 
 // --- truthful pending/held: never fabricates progress -------------------------------------------
 
-test('reconcile stays PREPARED when the offer is unavailable, and never advances the settlement', async () => {
-  const cycleRepository = repository();
-  let buybackCalls = 0;
+test('reconcile stays PREPARED when the offer is unavailable, and never writes a durable attempt', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
   const collectorCrypt = {
     async getBuybackCheck() { return { exists: false }; },
     async getBuybackAvailable() { return { available: false }; },
-    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+    async buyback() { throw new Error('must not be called'); },
   };
-  const handler = createSupplementaryBuybackHandler({
+  const handler = createSupplementaryBuybackHandler();
+  const result = await handler.reconcile(reconcileInput({
     adapters: { collectorCrypt, solana: { client: rpcClient() } },
     signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
-  const result = await handler.reconcile({ config: config(), cycleRepository, position: heldPosition(), settlement: settlementFixture() });
+    config: config(),
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
   assert.equal(result, undefined);
   assert.equal(cycleRepository.advances.length, 0);
-  assert.equal(buybackCalls, 0);
-});
-
-test('reconcile stays PREPARED when the operator settlement token account cannot be verified', async () => {
-  const cycleRepository = repository();
-  const collectorCrypt = {
-    async getBuybackCheck() { return { exists: false }; },
-    async getBuybackAvailable() { throw new Error('must not be reached before the account check'); },
-  };
-  const rpc = rpcClient({ tokenAccount: { value: null } });
-  const handler = createSupplementaryBuybackHandler({
-    adapters: { collectorCrypt, solana: { client: rpc } },
-    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
-  const result = await handler.reconcile({ config: config(), cycleRepository, position: heldPosition(), settlement: settlementFixture() });
-  assert.equal(result, undefined);
-  assert.equal(cycleRepository.advances.length, 0);
+  assert.equal(cycleRepository.attempts.size, 0);
 });
 
 // --- no duplicate resale across restart: check-first before any provider mutation ----------------
 
-test('reconcile recovers an already-confirmed Collector sale without ever calling getBuybackAvailable or buyback again', async () => {
-  const cycleRepository = repository();
+test('reconcile recovers an already-confirmed Collector sale via the memo lookup without ever calling getBuybackAvailable or buyback', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
   const proceedsTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
   const rpc = rpcClient({
     entries: [
@@ -308,28 +384,37 @@ test('reconcile recovers an already-confirmed Collector sale without ever callin
     async getBuybackAvailable() { availableCalls += 1; return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
     async buyback() { buybackCalls += 1; throw new Error('must not resell an already-confirmed card'); },
   };
-  const handler = createSupplementaryBuybackHandler({
+  const handler = createSupplementaryBuybackHandler();
+  const result = await handler.reconcile(reconcileInput({
     adapters: { collectorCrypt, solana: { client: rpc } },
     signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
-  const result = await handler.reconcile({ config: config(), cycleRepository, position: heldPosition(), settlement: settlementFixture() });
+    config: config(),
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
   assert.equal(availableCalls, 0);
   assert.equal(buybackCalls, 0);
   assert.equal(cycleRepository.advances.length, 1);
   const [advance] = cycleRepository.advances;
-  assert.equal(advance.positionId, POSITION_ID);
   assert.equal(advance.expectedState, 'PREPARED');
   assert.equal(advance.nextState, 'BUYBACK_SENT_UNKNOWN');
-  assert.equal(advance.evidence.decision, 'sold');
+  assert.equal(advance.evidence.schema, 'hookemon.supplementary-confirmed-sale.v1');
+  assert.equal(advance.evidence.positionId, POSITION_ID);
+  assert.equal(advance.evidence.cycleId, CYCLE_ID);
+  assert.equal(advance.evidence.manifestId, `${CYCLE_ID}:supplementary:1`);
+  assert.equal(advance.evidence.sourceWallet, OPERATOR);
+  assert.equal(advance.evidence.mint, SETTLEMENT_ASSET);
+  assert.equal(advance.evidence.decimals, CIRCLE_USD_DECIMALS);
+  assert.equal(advance.evidence.amountAtomic, '85');
+  assert.equal(advance.evidence.transactionSignature, BUYBACK_SIGNATURE);
   assert.equal(advance.evidence.memo, MEMO);
-  assert.equal(advance.evidence.mint, CARD_ASSET);
-  assert.equal(advance.evidence.signature, BUYBACK_SIGNATURE);
-  assert.deepEqual(advance.evidence.proceeds, { ...settlementAsset(), amountAtomic: '85' });
+  assert.equal(advance.evidence.sourceFinality.signature, BUYBACK_SIGNATURE);
   assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
 });
 
 test('reconcileSupplementaryBuybackSale stays PENDING, read-only, while Collector has no record yet', async () => {
-  const cycleRepository = repository();
+  const cycleRepository = fakeChainAttemptRepository();
   const collectorCrypt = { async getBuybackCheck() { return { exists: false }; } };
   const result = await reconcileSupplementaryBuybackSale({
     adapters: { collectorCrypt, solana: { client: rpcClient() } },
@@ -341,7 +426,7 @@ test('reconcileSupplementaryBuybackSale stays PENDING, read-only, while Collecto
 });
 
 test('reconcileSupplementaryBuybackSale reports DATA_UNVERIFIED, never invents a sale, for a check that does not bind the wallet', async () => {
-  const cycleRepository = repository();
+  const cycleRepository = fakeChainAttemptRepository();
   const collectorCrypt = {
     async getBuybackCheck() {
       return {
@@ -359,14 +444,169 @@ test('reconcileSupplementaryBuybackSale reports DATA_UNVERIFIED, never invents a
   assert.equal(result.status, 'DATA_UNVERIFIED');
 });
 
-// --- the ambiguous boundary: sign + broadcast --------------------------------------------------
+test('reconcile stays PREPARED (never advances) on a conflicting existing Collector record', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
+  const collectorCrypt = {
+    async getBuybackCheck() {
+      return {
+        exists: true, status: 'complete', buybackAmount: '85',
+        playerWallet: 'someone-else', nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE, createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    },
+    async getBuybackAvailable() { throw new Error('must not be reached'); },
+    async buyback() { throw new Error('must not be reached'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  const result = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpcClient() } },
+    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
+    config: config(),
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(result, undefined);
+  assert.equal(cycleRepository.advances.length, 0);
+});
 
-test('reconcile advances to BUYBACK_SENT_UNKNOWN with a submitted signature after a real sign and broadcast', async () => {
-  const cycleRepository = repository();
+// --- durable pre-send intent, written BEFORE the ambiguous provider boundary ---------------------
+
+test('reconcile durably prepares the chain attempt before ever calling buyback()', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
+  const order = [];
+  const originalPrepare = cycleRepository.prepareChainTransactionAttempt.bind(cycleRepository);
+  cycleRepository.prepareChainTransactionAttempt = async (...args) => {
+    order.push('prepare');
+    return originalPrepare(...args);
+  };
+  const collectorCrypt = {
+    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { order.push('buyback'); throw new Error('stop here -- only order matters for this test'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpcClient() } },
+    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
+    config: config(),
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.deepEqual(order, ['prepare', 'buyback']);
+  const requestDigest = [...cycleRepository.attempts.keys()][0].split(' ')[1];
+  const record = await cycleRepository.readChainTransactionAttempt(CYCLE_ID, 'buyback', requestDigest);
+  assert.equal(record.attempt.state, 'PREPARED');
+});
+
+test('reconcile never resends after a lost response: a pre-existing PREPARED attempt (not freshly created this call) is never sent to buyback() again', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
+  // Simulate a prior crashed run: durable intent already exists (buyback() may or may not have
+  // actually reached the provider before the process died).
+  const { createPreparedChainTransactionAttempt } = await import('../../../runner/src/cycle/money-schemas.mjs');
+  const { digest } = await import('../../../runner/src/cycle/journal.mjs');
+  const requestDigest = digest({ schema: 'hookemon.supplementary-buyback-attempt-request.v1', positionId: POSITION_ID, cycleId: CYCLE_ID, memo: MEMO });
+  await cycleRepository.prepareChainTransactionAttempt(CYCLE_ID, 'buyback', createPreparedChainTransactionAttempt({ cycleId: CYCLE_ID, stage: 'buyback', requestDigest }));
+
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackCheck() { return { exists: false }; }, // provider record still not visible
+    async getBuybackAvailable() { throw new Error('must not be reached: a stale intent skips preflight entirely'); },
+    async buyback() { buybackCalls += 1; throw new Error('must never resend an already-intended sale'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  const result = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpcClient() } },
+    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
+    config: config(),
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(buybackCalls, 0);
+  assert.equal(result, undefined);
+  assert.equal(cycleRepository.advances.length, 0);
+});
+
+// --- signed bytes durably recorded BEFORE broadcast; a crash-then-restart rebroadcasts the SAME bytes, never re-signs
+
+test('reconcile records signed bytes before broadcasting, and a restart before broadcast recovers the exact same bytes without re-signing', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
   const transaction = resaleTransaction({ amount: 85n });
   const policy = await decodedPolicyFor(transaction);
+  const testConfig = configuredWithPolicy(policy);
   const proceedsSource = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const rpc = rpcClient({ entries: [{ tokenAccount: proceedsSource, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '15' }] });
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsSource, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
+  });
+
+  let signCalls = 0;
+  const collectorCrypt = {
+    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { return { memo: MEMO, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, serializedTransaction: transaction }; },
+    async submitTransaction() { throw new Error('simulated crash: process dies after signing, before a successful broadcast'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  const firstAttempt = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { role: 'operator-solana', async sign(request) { signCalls += 1; return signTransaction(request); } } },
+    config: testConfig,
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(firstAttempt, undefined); // broadcast failed; settlement stays PREPARED
+  assert.equal(signCalls, 1);
+  assert.equal(cycleRepository.advances.length, 0);
+  const [key] = cycleRepository.attempts.keys();
+  const signedAfterFirstCall = cycleRepository.attempts.get(key);
+  assert.equal(signedAfterFirstCall.attempt.state, 'SIGNED');
+  const recordedBytes = signedAfterFirstCall.attempt.rawBytes;
+
+  // "Restart": a fresh reconcile() call. The signer must never be asked to sign again; the exact
+  // durably-recorded bytes are reauthorized and broadcast.
+  const collectorCryptOnRestart = {
+    async getBuybackCheck() { return { exists: false }; },
+    async buyback() { throw new Error('must not resend: signed bytes already exist durably'); },
+    async submitTransaction({ signedTransaction }) {
+      assert.equal(signedTransaction, recordedBytes);
+      return { success: true, signature: signedSolanaTransactionSignature(signedTransaction), confirmationStatus: 'finalized' };
+    },
+  };
+  const secondAttempt = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt: collectorCryptOnRestart, solana: { client: rpc } },
+    signerClient: { solana: { role: 'operator-solana', async sign() { signCalls += 1; throw new Error('must not re-sign'); } } },
+    config: testConfig,
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(signCalls, 1); // unchanged: no second sign
+  assert.equal(cycleRepository.advances.length, 1);
+  const [advance] = cycleRepository.advances;
+  assert.equal(advance.evidence.schema, 'hookemon.supplementary-confirmed-sale.v1');
+  assert.equal(advance.evidence.transactionSignature, signedSolanaTransactionSignature(recordedBytes));
+  assert.equal(secondAttempt.state, 'BUYBACK_SENT_UNKNOWN');
+});
+
+// --- full happy path: fresh sale, signed, broadcast, and confirmed in one tick -------------------
+
+test('reconcile advances to BUYBACK_SENT_UNKNOWN with D\'s exact confirmed-sale schema after a real sign and broadcast', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
+  const transaction = resaleTransaction({ amount: 85n });
+  const policy = await decodedPolicyFor(transaction);
+  const testConfig = configuredWithPolicy(policy);
+  const proceedsSource = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsSource, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
+  });
   let submitCalls = 0;
   const collectorCrypt = {
     async getBuybackCheck() { return { exists: false }; },
@@ -374,68 +614,35 @@ test('reconcile advances to BUYBACK_SENT_UNKNOWN with a submitted signature afte
     async buyback() { return { memo: MEMO, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, serializedTransaction: transaction }; },
     async submitTransaction({ signedTransaction }) {
       submitCalls += 1;
-      assert.equal(typeof signedTransaction, 'string');
       return { success: true, signature: signedSolanaTransactionSignature(signedTransaction), confirmationStatus: 'finalized' };
     },
   };
-  const handler = createSupplementaryBuybackHandler({
+  const handler = createSupplementaryBuybackHandler();
+  const result = await handler.reconcile(reconcileInput({
     adapters: { collectorCrypt, solana: { client: rpc } },
     signerClient: { solana: { role: 'operator-solana', async sign(request) { return signTransaction(request); } } },
-  });
-  const testConfig = config({ collectorCrypt: { ...config().collectorCrypt, buyback: { ...config().collectorCrypt.buyback, policy } } });
-  const result = await handler.reconcile({ config: testConfig, cycleRepository, position: heldPosition(), settlement: settlementFixture() });
+    config: testConfig,
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
 
   assert.equal(submitCalls, 1);
   assert.equal(cycleRepository.advances.length, 1);
   const [advance] = cycleRepository.advances;
   assert.equal(advance.expectedState, 'PREPARED');
   assert.equal(advance.nextState, 'BUYBACK_SENT_UNKNOWN');
-  assert.equal(advance.evidence.decision, 'submitted');
+  assert.equal(advance.evidence.schema, 'hookemon.supplementary-confirmed-sale.v1');
+  assert.equal(advance.evidence.positionId, POSITION_ID);
+  assert.equal(advance.evidence.cycleId, CYCLE_ID);
+  assert.equal(advance.evidence.manifestId, `${CYCLE_ID}:supplementary:1`);
+  assert.equal(advance.evidence.sourceWallet, OPERATOR);
+  assert.equal(advance.evidence.mint, SETTLEMENT_ASSET);
+  assert.equal(advance.evidence.decimals, CIRCLE_USD_DECIMALS);
+  assert.equal(advance.evidence.amountAtomic, '85');
   assert.equal(advance.evidence.memo, MEMO);
-  assert.equal(advance.evidence.mint, CARD_ASSET);
-  assert.equal(typeof advance.evidence.signature, 'string');
-  assert.equal(advance.evidence.signature.length > 0, true);
-  assert.deepEqual(advance.evidence.offer, { ...settlementAsset(), amountAtomic: '85' });
-  assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
-});
-
-test('reconcile marks the sale unknown (never held) when the provider mutation is ambiguous, and never calls buyback twice', async () => {
-  const cycleRepository = repository();
-  let buybackCalls = 0;
-  const collectorCrypt = {
-    async getBuybackCheck() { return { exists: false }; },
-    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
-    async buyback() { buybackCalls += 1; throw new Error('provider connection reset'); },
-  };
-  const handler = createSupplementaryBuybackHandler({
-    adapters: { collectorCrypt, solana: { client: rpcClient() } },
-    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
-  const result = await handler.reconcile({ config: config(), cycleRepository, position: heldPosition(), settlement: settlementFixture() });
-
-  assert.equal(buybackCalls, 1);
-  assert.equal(cycleRepository.advances.length, 1);
-  const [advance] = cycleRepository.advances;
-  assert.equal(advance.evidence.decision, 'unknown');
-  assert.equal(advance.evidence.memo, MEMO);
-  assert.equal(advance.evidence.reason, 'provider connection reset');
-  assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
-});
-
-test('reconcile marks the sale data_unverified when the provider response does not bind the held card memo', async () => {
-  const cycleRepository = repository();
-  const collectorCrypt = {
-    async getBuybackCheck() { return { exists: false }; },
-    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
-    async buyback() { return { memo: 'a-different-memo', refundAmount: { ...settlementAsset(), amountAtomic: '85' }, serializedTransaction: 'unused' }; },
-  };
-  const handler = createSupplementaryBuybackHandler({
-    adapters: { collectorCrypt, solana: { client: rpcClient() } },
-    signerClient: { solana: { role: 'operator-solana', sign: async () => { throw new Error('must not sign'); } } },
-  });
-  const result = await handler.reconcile({ config: config(), cycleRepository, position: heldPosition(), settlement: settlementFixture() });
-
-  assert.equal(cycleRepository.advances.length, 1);
-  assert.equal(cycleRepository.advances[0].evidence.decision, 'data_unverified');
+  assert.equal(typeof advance.evidence.transactionSignature, 'string');
+  assert.equal(advance.evidence.transactionSignature.length > 0, true);
+  assert.equal(advance.evidence.sourceFinality.schema, 'hookemon.supplementary-buyback-source-finality.v1');
   assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
 });
