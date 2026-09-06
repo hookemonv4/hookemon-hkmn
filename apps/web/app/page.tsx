@@ -51,8 +51,8 @@ const journeySteps = [
     number: "05",
     title: "Sell every hit",
     copy: "Turbo buybacks resolve instantly; other eligible cards are sold inside their buyback window.",
-    bubble: "Every eligible hit returns to USDC.",
-    meta: "NFT → USDC",
+    bubble: "Every eligible hit returns to the settlement account.",
+    meta: "NFT → settlement",
   },
   {
     id: "pay",

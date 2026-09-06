@@ -87,7 +87,7 @@ test("keeps operator commands auditable, concurrency-safe and execution-free", a
   assert.match(source, /\/operator\/api\/audit\?[^"'`]*cursor/);
   assert.doesNotMatch(
     source,
-    /PRIVY|signTransaction|submitTransaction|ETHEREUM_RPC_URL|SOLANA_RPC_URL/i,
+    /PRIVY|signTransaction|submitTransaction|EVM_RPC_URL|SOLANA_RPC_URL/i,
   );
 });
 

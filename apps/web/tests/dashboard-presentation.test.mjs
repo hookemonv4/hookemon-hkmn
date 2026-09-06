@@ -74,9 +74,9 @@ test('malformed, unknown, mixed-network, and legacy payloads never become dashbo
     (pair) => { delete pair.community.metrics.openedPacks; },
     (pair) => { pair.community.metrics.totalRewardsPaidMicroUsdg = '01'; },
     (pair) => { pair.community.metrics.totalRewardsPaidMicroUsdg = -1; },
-    (pair) => { pair.community.metrics.totalRewardsPaidMicroUsdc = '1'; },
+    (pair) => { pair.community.metrics.totalRewardsPaidMicroUsdg = 1; },
     (pair) => { pair.status.network.evm.chainId = 1; },
-    (pair) => { pair.status.network.ethereum = pair.status.network.evm; },
+    (pair) => { pair.status.network.legacyNetwork = pair.status.network.evm; },
     (pair) => { pair.community.profile = 'mainnet'; },
     (pair) => { pair.community.network.solana.genesisHash = 'wrong-chain'; },
     (pair) => { pair.status.schemaVersion = 2; },
@@ -121,7 +121,7 @@ test('untrusted card metadata remains data and image URLs cannot execute code or
   pair.status.cycle = completeCycle();
   pair.status.cycle.cards[0].cardName = '<img src=x onerror=alert(1)>';
   assert.doesNotThrow(() => validateDashboardPair(pair.status, pair.community));
-  for (const imageUrl of ['javascript:alert(1)', 'http://images.example/card.png', 'https://user:secret@images.example/card.png']) {
+  for (const imageUrl of ['javascript:alert(1)', 'http://images.example/card.png', 'https://-@images.invalid/card.png']) {
     pair.status.cycle.cards[0].imageUrl = imageUrl;
     assert.equal(safeCardImage(imageUrl), null);
     assert.throws(() => validateDashboardPair(pair.status, pair.community), /PUBLIC_DASHBOARD_INVALID/);
@@ -274,7 +274,7 @@ test('browser dashboard accepts the real backend schemaVersion 6/8 pair with sch
     eventId: 'evt-1', sequence: '1', state: 'finalized', name: 'Pikachu',
     imageUrl: 'https://images.example/pikachu.png',
     observedAt: '2026-09-04T11:58:00.000Z', finalizedAt: '2026-09-04T11:59:00.000Z', transactionId: null,
-    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'USDC', units: '8000000', decimals: 6 },
+    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '8000000', decimals: 6 },
   }];
   const canonical = {
     status: normalizePublicCycleStatus(pair.status, 'testnet'),
@@ -286,7 +286,7 @@ test('browser dashboard accepts the real backend schemaVersion 6/8 pair with sch
 
   const display = presentCard(validated.community.cards[0]);
   assert.equal(display.label, 'Pikachu');
-  assert.equal(display.detailLine, 'Proceeds: 8 USDC');
+  assert.equal(display.detailLine, 'Proceeds: 8 spl:usdc-mint');
 });
 
 test('standalone dashboard.mjs validates real bridge amounts, payout-liability facts, and nullable lifetime metrics at schemaVersion 8', () => {
@@ -295,7 +295,7 @@ test('standalone dashboard.mjs validates real bridge amounts, payout-liability f
     packSpendMicroUsdg: null, buybackMicroUsdg: null,
     outboundBridgeDebit: { chainId: 'eip155:4663', assetId: 'USDG', units: '5000000', decimals: 6 },
     inboundBridgeProceeds: null,
-    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'USDC', units: '10000000', decimals: 6 },
+    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '10000000', decimals: 6 },
     collectorBuybackProceeds: null,
     packGainMicroUsdg: null, packLossMicroUsdg: null,
     quotedCosts: {

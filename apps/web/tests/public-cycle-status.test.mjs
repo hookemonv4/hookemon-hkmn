@@ -302,7 +302,7 @@ function schemaVersion6Fixture() {
         buybackMicroUsdg: null,
         outboundBridgeDebit: null,
         inboundBridgeProceeds: null,
-        collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6 },
+        collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "spl:usdc-mint", units: "10000000", decimals: 6 },
         collectorBuybackProceeds: null,
         packGainMicroUsdg: null,
         packLossMicroUsdg: null,
@@ -346,7 +346,7 @@ test("accepts schemaVersion 6 with held positions, scheduler, and typed nullable
   assert.equal(result.scheduler.nextReconcileAt, null);
   assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, null);
   assert.deepEqual(result.cycle.roundAccounting.collectorPurchaseDebit, {
-    chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6,
+    chainId: "solana:mainnet-beta", assetId: "spl:usdc-mint", units: "10000000", decimals: 6,
   });
 });
 
