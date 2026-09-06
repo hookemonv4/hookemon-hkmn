@@ -100,11 +100,11 @@ const APPROVED_CURRENT_REPO_URL_TOKENS = Object.freeze([
   Object.freeze({ prefixLength: 'github\\.com\\/hookemonv4\\/'.length, digest: '813a3fd959ccc41567501e603274fd93190126303586062ef39ae7164b09204e' }),
 ]);
 // The historical-architecture rule below (length 4) also matches the tail of a legacy wire-field
-// identifier, "priceMicroUsdc", that apps/web/app/operator/OperatorControlPanel.tsx must keep
-// reading unrenamed: per operator-pack-wire-contract.md, it is a documented legacy compatibility
-// input for a protected, out-of-repository backend whose actual current response schema is
-// unverified from here, so renaming the wire key could silently break real price data. This does
-// not broadly exempt "usdc" -- it requires the exact, complete identifier token (expanded to its
+// identifier that apps/web/app/operator/OperatorControlPanel.tsx must keep reading unrenamed: per
+// operator-pack-wire-contract.md, it is a documented legacy compatibility input for a protected,
+// out-of-repository backend whose actual current response schema is unverified from here, so
+// renaming the wire key could silently break real price data. This does not broadly exempt the
+// flagged ticker substring -- it requires the exact, complete identifier token (expanded to its
 // full alphanumeric boundary, not just the 4-char match) and only in this one file.
 const RETIRED_ASSET_TICKER_DIGEST = 'a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966';
 const APPROVED_LEGACY_WIRE_FIELD_PATH = 'apps/web/app/operator/OperatorControlPanel.tsx';

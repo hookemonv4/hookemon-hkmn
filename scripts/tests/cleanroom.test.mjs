@@ -379,15 +379,33 @@ test('current repository URL exception only exempts the exact reviewed token on 
 });
 
 test('legacy wire-field exception only exempts the exact identifier in the one approved operator file', () => {
-  const ticker = ['usd', 'c'].join('');
-  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
-    candidate.id === 'historical-architecture' && candidate.length === ticker.length
-    && candidate.sha256 === createHash('sha256').update(ticker).digest('hex')
-  ));
-  assert.ok(rule);
-
+  // Never spell out the flagged wire-field identifier as a literal here (neither directly nor via
+  // Array.join/char-code reconstruction, which the scanner does not police). Instead, read it
+  // from the real, currently-approved source file and locate it by digest, the same way the
+  // scanner's own exception does -- an honest fixture derived from verified source, not hidden text.
   const approvedPath = 'apps/web/app/operator/OperatorControlPanel.tsx';
-  const wireField = ['price', 'Micro', 'Usdc'].join('');
+  const source = readFileSync(join(repoRoot, ...approvedPath.split('/')), 'utf8');
+  const identifierChar = /[A-Za-z0-9_$]/;
+
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.id === 'historical-architecture' && candidate.length === 4
+    && scanDigestMarkers(source, [candidate], null).length > 0
+  ));
+  assert.ok(rule, 'expected the legacy wire-field ticker rule to actually match the approved source');
+
+  const findings = scanDigestMarkers(source, [rule], null);
+  assert.ok(findings.length > 0);
+  const fullToken = offset => {
+    let start = offset;
+    let end = offset + rule.length;
+    while (start > 0 && identifierChar.test(source[start - 1])) start -= 1;
+    while (end < source.length && identifierChar.test(source[end])) end += 1;
+    return source.slice(start, end);
+  };
+  const tokens = new Set(findings.map(finding => fullToken(finding.offset)));
+  assert.equal(tokens.size, 1, 'expected exactly one distinct legacy wire-field identifier in the approved source');
+  const [wireField] = tokens;
+  const ticker = wireField.slice(-rule.length);
 
   assert.deepEqual(scanDigestMarkers(`pack.${wireField}`, [rule], approvedPath), []);
   assert.deepEqual(scanDigestMarkers(`  ${wireField}: string;`, [rule], approvedPath), []);
@@ -396,7 +414,10 @@ test('legacy wire-field exception only exempts the exact identifier in the one a
   assert.equal(scanDigestMarkers(`pack.${wireField}`, [rule], null).length, 1);
   assert.equal(scanDigestMarkers(`const value = "${ticker}"`, [rule], approvedPath).length, 1);
   assert.equal(scanDigestMarkers(`${wireField}Extra`, [rule], approvedPath).length, 1);
-  assert.equal(scanDigestMarkers(`total${wireField.slice('price'.length)}`, [rule], approvedPath).length, 1);
+  assert.equal(
+    scanDigestMarkers(`totalMicro${ticker[0].toUpperCase()}${ticker.slice(1)}`, [rule], approvedPath).length,
+    1,
+  );
 });
 
 test('clean-room scanner permits the provider address enum only in Phase 3 JSON', () => {
