@@ -1114,6 +1114,333 @@ test('reconcileLiveOutbound refuses unauthenticated Relay status data before it 
   assert.equal(statusCalls, 0);
 });
 
+const APPROVAL_REQUEST_DIGEST = `sha256:${'d'.repeat(64)}`;
+const SOURCE_REQUEST_DIGEST = `sha256:${'e'.repeat(64)}`;
+
+/**
+ * The same durable shape as `outboundReconciliationRepository`, plus a second, independent
+ * "outbound"-stage chain attempt for the USDG approval that must precede the deposit. Kept
+ * separate from `outboundReconciliationRepository` (used by every other reconcile test above,
+ * which models the single-attempt case) so those tests are unaffected.
+ */
+function outboundReconciliationRepositoryWithApproval({
+  transactionHash,
+  approvalTransactionHash,
+  relayRequestId,
+  destinationAmountAtomic,
+  approvalState = 'BROADCAST',
+}) {
+  let sourceRecord = {
+    attempt: {
+      schema: 'hookemon.chain-transaction-attempt.v1',
+      cycleId: 'cycle-outbound-reconcile',
+      stage: 'outbound',
+      state: 'BROADCAST',
+      requestDigest: SOURCE_REQUEST_DIGEST,
+      rawBytes: '0x1234',
+      nonce: '9',
+      blockhash: null,
+      hash: transactionHash,
+    },
+  };
+  let approvalRecord = {
+    attempt: {
+      schema: 'hookemon.chain-transaction-attempt.v1',
+      cycleId: 'cycle-outbound-reconcile',
+      stage: 'outbound',
+      state: approvalState,
+      requestDigest: APPROVAL_REQUEST_DIGEST,
+      rawBytes: '0x5678',
+      nonce: '8',
+      blockhash: null,
+      hash: approvalTransactionHash,
+    },
+  };
+  const leg = {
+    schema: 'hookemon.relay-leg.v1',
+    cycleId: 'cycle-outbound-reconcile',
+    direction: 'outbound',
+    relayRequestId,
+    quoteDigest: `sha256:${'f'.repeat(64)}`,
+    sourceChainId: '4663',
+    sourceTxHash: transactionHash,
+    sourceAssetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
+    sourceDecimals: 6,
+    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
+    destinationChainId: '792703809',
+    destinationTxHash: null,
+    destinationAssetId: SOLANA_MINT,
+    destinationDecimals: 6,
+    destinationAmountAtomic,
+    finalizedAtSource: null,
+    finalizedAtDestination: null,
+    netDeltaAtomic: null,
+    state: 'RECORDED',
+  };
+  const finalities = [];
+  const approvalFinalities = [];
+  const settlements = [];
+  const walletReleases = [];
+  return {
+    get finalities() { return structuredClone(finalities); },
+    get approvalFinalities() { return structuredClone(approvalFinalities); },
+    get settlements() { return structuredClone(settlements); },
+    get walletReleases() { return structuredClone(walletReleases); },
+    get sourceAttemptState() { return sourceRecord.attempt.state; },
+    get approvalAttemptState() { return approvalRecord.attempt.state; },
+    async describeCycle() {
+      return {
+        relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
+        chainAttempts: new Map([
+          [`outbound ${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)],
+          [`outbound ${approvalRecord.attempt.requestDigest}`, structuredClone(approvalRecord)],
+        ]),
+      };
+    },
+    async recordBroadcast() {
+      throw new Error('a broadcast attempt must not be rebroadcast during finality reconciliation');
+    },
+    async recordFinality(_cycleId, stage, requestDigest, evidence) {
+      assert.equal(stage, 'outbound');
+      if (requestDigest === approvalRecord.attempt.requestDigest) {
+        approvalFinalities.push(structuredClone(evidence));
+        approvalRecord = { ...approvalRecord, attempt: { ...approvalRecord.attempt, state: 'FINALIZED' } };
+        return structuredClone(approvalRecord);
+      }
+      assert.equal(requestDigest, sourceRecord.attempt.requestDigest);
+      finalities.push(structuredClone(evidence));
+      sourceRecord = { ...sourceRecord, attempt: { ...sourceRecord.attempt, state: 'FINALIZED' } };
+      return structuredClone(sourceRecord);
+    },
+    async settleRelayLeg(cycleId, requestId, settlement) {
+      assert.equal(cycleId, 'cycle-outbound-reconcile');
+      assert.equal(requestId, relayRequestId);
+      const { destinationObservation } = settlement;
+      if (destinationObservation.mint !== leg.destinationAssetId
+        || destinationObservation.netDeltaAtomic !== leg.destinationAmountAtomic) {
+        throw new Error('test only models the exact-credit settlement path');
+      }
+      const normalizedSettlement = {
+        destinationTxHash: destinationObservation.transactionHash,
+        finalizedAtDestination: destinationObservation.finality,
+        netDeltaAtomic: destinationObservation.netDeltaAtomic,
+        terminalState: 'SETTLED',
+      };
+      settlements.push(structuredClone(normalizedSettlement));
+      Object.assign(leg, {
+        destinationTxHash: normalizedSettlement.destinationTxHash,
+        finalizedAtDestination: normalizedSettlement.finalizedAtDestination,
+        netDeltaAtomic: normalizedSettlement.netDeltaAtomic,
+        state: normalizedSettlement.terminalState,
+      });
+      return structuredClone(leg);
+    },
+    async readChainAttemptRecoveryContext() {
+      return { relayQuoteDeadlineUnixSeconds: '1700000200' };
+    },
+    async releaseWalletNonce(cycleId, reservation) {
+      walletReleases.push({ cycleId, reservation: structuredClone(reservation) });
+    },
+  };
+}
+
+/**
+ * One Robinhood RPC client that answers for both outbound EVM transactions on their own hashes:
+ * the deposit (source, using the same finalized-and-successful shape as `finalizedOutboundSourceClient`)
+ * and the approval (prerequisite), independently parameterized so a test can make the approval's
+ * own receipt missing, reverted, or non-canonical without touching the deposit's evidence at all.
+ */
+function outboundClientWithApproval({
+  sourceTransactionHash,
+  sourceAmountAtomic,
+  approvalTransactionHash,
+  approvalIncluded = true,
+  approvalStatus = 'success',
+  approvalBlockNumber = 90n,
+  approvalReceiptBlockHash = `0x${'7'.repeat(64)}`,
+  approvalCanonicalBlockHash = approvalReceiptBlockHash,
+}) {
+  const sourceReceiptBlockHash = `0x${'a'.repeat(64)}`;
+  const sourceParentBlockHash = `0x${'b'.repeat(64)}`;
+  const finalizedBlockHash = `0x${'c'.repeat(64)}`;
+  const amount = BigInt(sourceAmountAtomic);
+  const sourceReceipt = {
+    transactionHash: sourceTransactionHash,
+    blockNumber: 100n,
+    blockHash: sourceReceiptBlockHash,
+    status: 'success',
+    logs: [{
+      address: quoteFixture.details.currencyIn.currency.address,
+      topics: [ERC20_TRANSFER_TOPIC, addressTopic(EVM_ACCOUNT), addressTopic(RELAY_DEPOSITORY)],
+      data: `0x${amount.toString(16).padStart(64, '0')}`,
+      logIndex: 0n,
+    }],
+  };
+  const approvalReceipt = approvalIncluded
+    ? {
+      transactionHash: approvalTransactionHash,
+      blockNumber: approvalBlockNumber,
+      blockHash: approvalReceiptBlockHash,
+      status: approvalStatus,
+      logs: [],
+    }
+    : { transactionHash: approvalTransactionHash, blockNumber: null, blockHash: null, status: null, logs: [] };
+  const calls = [];
+  return {
+    calls,
+    async getTransactionReceipt({ hash }) {
+      calls.push(`receipt:${hash}`);
+      if (hash === sourceTransactionHash) return structuredClone(sourceReceipt);
+      if (hash === approvalTransactionHash) return structuredClone(approvalReceipt);
+      throw new Error(`unexpected transaction receipt ${hash}`);
+    },
+    async getBlock({ blockTag, blockNumber }) {
+      calls.push(`block:${blockTag ?? blockNumber}`);
+      if (blockTag === 'finalized') return { number: 101n, hash: finalizedBlockHash, timestamp: 1_700_000_090n };
+      if (blockNumber === 100n) return { number: 100n, hash: sourceReceiptBlockHash, parentHash: sourceParentBlockHash, timestamp: 1_700_000_080n };
+      if (blockNumber === 99n) return { number: 99n, hash: sourceParentBlockHash, parentHash: `0x${'d'.repeat(64)}`, timestamp: 1_700_000_070n };
+      if (blockNumber === approvalBlockNumber) return { number: approvalBlockNumber, hash: approvalCanonicalBlockHash, timestamp: 1_700_000_060n };
+      throw new Error(`unexpected outbound block read ${String(blockTag ?? blockNumber)}`);
+    },
+  };
+}
+
+function throwingRobinhoodClient() {
+  return {
+    async getTransactionReceipt() { throw new Error('no EVM receipt read is expected once the outbound leg is durably SETTLED'); },
+    async getBlock() { throw new Error('no EVM block read is expected once the outbound leg is durably SETTLED'); },
+  };
+}
+
+test('reconcileLiveOutbound never treats the deposit\'s own success as proof the prerequisite approval succeeded', async () => {
+  const sourceTransactionHash = `0x${'6'.repeat(64)}`;
+  const approvalTransactionHash = `0x${'2'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-missing';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  const cases = [
+    { name: 'approval receipt missing (not yet included)', approvalIncluded: false },
+    { name: 'approval receipt reverted', approvalStatus: 'reverted' },
+    { name: 'approval receipt not canonical', approvalCanonicalBlockHash: `0x${'9'.repeat(64)}` },
+  ];
+
+  for (const fixtureCase of cases) {
+    const cycleRepository = outboundReconciliationRepositoryWithApproval({
+      transactionHash: sourceTransactionHash,
+      approvalTransactionHash,
+      relayRequestId,
+      destinationAmountAtomic,
+    });
+    const client = outboundClientWithApproval({
+      sourceTransactionHash,
+      sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
+      approvalTransactionHash,
+      ...fixtureCase,
+    });
+    const destination = discoveredOutboundDestinationClient({
+      relayRequestId,
+      mint: SOLANA_MINT,
+      amountAtomic: destinationAmountAtomic,
+    });
+
+    // eslint-disable-next-line no-await-in-loop
+    const result = await reconcileLiveOutbound({
+      adapters: {
+        robinhood: { client, historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount }) },
+        solana: { client: destination.client },
+      },
+      config: {
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+      },
+      cycleRepository,
+      context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+    });
+
+    assert.equal(result, null, fixtureCase.name);
+    assert.equal(cycleRepository.approvalAttemptState, 'BROADCAST', fixtureCase.name);
+    assert.equal(cycleRepository.sourceAttemptState, 'BROADCAST', fixtureCase.name);
+    assert.deepEqual(cycleRepository.approvalFinalities, [], fixtureCase.name);
+    assert.deepEqual(cycleRepository.finalities, [], fixtureCase.name);
+    assert.deepEqual(cycleRepository.settlements, [], fixtureCase.name);
+    assert.deepEqual(cycleRepository.walletReleases, [], fixtureCase.name);
+    assert.equal(client.calls.includes(`receipt:${approvalTransactionHash}`), true, fixtureCase.name);
+    // The deposit's own (independently successful) evidence is never read once the approval's own
+    // receipt fails to establish finality -- proving the deposit's success is not substituted in.
+    assert.equal(client.calls.includes(`receipt:${sourceTransactionHash}`), false, fixtureCase.name);
+    assert.equal(destination.calls.length, 0, fixtureCase.name);
+  }
+});
+
+test('reconcileLiveOutbound independently finalizes the approval and deposit before settling, and is restart-idempotent', async () => {
+  const sourceTransactionHash = `0x${'6'.repeat(64)}`;
+  const approvalTransactionHash = `0x${'2'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-success';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  const cycleRepository = outboundReconciliationRepositoryWithApproval({
+    transactionHash: sourceTransactionHash,
+    approvalTransactionHash,
+    relayRequestId,
+    destinationAmountAtomic,
+  });
+  const destination = discoveredOutboundDestinationClient({
+    relayRequestId,
+    mint: SOLANA_MINT,
+    amountAtomic: destinationAmountAtomic,
+  });
+  const client = outboundClientWithApproval({
+    sourceTransactionHash,
+    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
+    approvalTransactionHash,
+  });
+
+  const result = await reconcileLiveOutbound({
+    adapters: {
+      robinhood: { client, historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount }) },
+      solana: { client: destination.client },
+    },
+    config: {
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+    },
+    cycleRepository,
+    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+  });
+
+  assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(result.relayLeg.state, 'SETTLED');
+  assert.equal(cycleRepository.approvalAttemptState, 'FINALIZED');
+  assert.equal(cycleRepository.sourceAttemptState, 'FINALIZED');
+  assert.equal(cycleRepository.approvalFinalities.length, 1);
+  assert.equal(cycleRepository.approvalFinalities[0].transactionHash, approvalTransactionHash.toLowerCase());
+  assert.deepEqual(cycleRepository.approvalFinalities[0].finalizedAt, { height: '90', hash: `0x${'7'.repeat(64)}`, timestampUnixSeconds: '1700000060' });
+  assert.equal(cycleRepository.finalities.length, 1);
+  assert.equal(cycleRepository.settlements.length, 1);
+  assert.equal(cycleRepository.settlements[0].terminalState, 'SETTLED');
+  assert.equal(client.calls.includes(`receipt:${approvalTransactionHash}`), true);
+  assert.equal(client.calls.includes(`receipt:${sourceTransactionHash}`), true);
+
+  // Restart: the durable repository already reflects FINALIZED/SETTLED. No EVM read of any kind
+  // -- not even a re-check of the already-proven approval -- may happen, and nothing is recorded
+  // or settled a second time.
+  const replay = await reconcileLiveOutbound({
+    adapters: {
+      robinhood: { client: throwingRobinhoodClient(), historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount }) },
+      solana: { client: destination.client },
+    },
+    config: {
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+    },
+    cycleRepository,
+    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+  });
+  assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(replay.relayLeg.state, 'SETTLED');
+  assert.equal(cycleRepository.approvalFinalities.length, 1);
+  assert.equal(cycleRepository.finalities.length, 1);
+  assert.equal(cycleRepository.settlements.length, 1);
+});
+
 function moneyConfiguration({ solanaMint = SOLANA_MINT } = {}) {
   return {
     schema: 'hookemon.money-configuration.v1',

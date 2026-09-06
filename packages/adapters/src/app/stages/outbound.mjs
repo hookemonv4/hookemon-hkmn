@@ -1109,6 +1109,60 @@ export async function readOutboundOriginRefundProof({ client, pointer, leg, sour
   return proof;
 }
 
+/**
+ * Independently proves one prerequisite (non-source) outbound EVM transaction -- the USDG
+ * approval that must precede the Relay depository deposit -- is canonically finalized and
+ * succeeded, from its own hash alone. The deposit's own finality (an independent ERC20 transfer
+ * proof against a different hash) is never accepted as evidence for this transaction: a caller
+ * must supply this attempt's own durably recorded hash, never the leg's `sourceTxHash`.
+ */
+async function readOutboundPrerequisiteFinality(client, hash) {
+  const observation = await readFinalizedTransactionReceipt(client, hash);
+  if (!observation.finalized || !successfulEvmReceipt(observation.receipt)
+    || observation.receiptBlockNumber === null || observation.receiptBlockHash === null) {
+    return null;
+  }
+  const receiptBlock = await readBlockByNumber(client, observation.receiptBlockNumber);
+  if (receiptBlock.hash !== observation.receiptBlockHash) return null;
+  const timestampUnixSeconds = canonicalUnixSeconds(String(receiptBlock.timestamp));
+  if (timestampUnixSeconds === null) return null;
+  return Object.freeze({
+    transactionHash: hash.toLowerCase(),
+    finalizedAt: Object.freeze({ height: receiptBlock.number.toString(), hash: receiptBlock.hash, timestampUnixSeconds }),
+  });
+}
+
+/**
+ * Finalizes every durable outbound chain attempt other than the one bound to the leg's own
+ * `sourceTxHash`. Each is read and validated on its own transaction hash; a missing, unfinalized,
+ * reverted, or non-canonical prerequisite receipt leaves that attempt -- and therefore the whole
+ * stage -- unresolved rather than fabricating success from the source leg's separate evidence.
+ * Restart-safe: `recordFinality` itself is idempotent against identical evidence and refuses
+ * conflicting evidence, so re-deriving the same finalized receipt after a restart is a no-op.
+ */
+async function finalizeOutboundPrerequisites({ cycleRepository, context, client, prerequisites }) {
+  let allFinalized = true;
+  for (const entry of prerequisites) {
+    if (entry.attempt.state === 'FINALIZED') continue;
+    if (entry.attempt.state !== 'BROADCAST') {
+      allFinalized = false;
+      continue;
+    }
+    let finality;
+    try {
+      finality = await readOutboundPrerequisiteFinality(client, entry.attempt.hash);
+    } catch {
+      finality = null;
+    }
+    if (finality === null) {
+      allFinalized = false;
+      continue;
+    }
+    await cycleRepository.recordFinality(context.cycleId, 'outbound', entry.attempt.requestDigest, finality);
+  }
+  return allFinalized;
+}
+
 function isExactOutboundDestinationCredit(leg, observation) {
   return observation.mint === leg.destinationAssetId
     && BigInt(observation.netDeltaAtomic) === BigInt(leg.destinationAmountAtomic);
@@ -1194,6 +1248,17 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
   const robinhoodClient = adapters?.robinhood?.client;
   const solanaClient = adapters?.solana?.client;
   if (!robinhoodClient) return null;
+
+  // Every other durable outbound chain attempt (the USDG approval that must precede the deposit)
+  // must independently finalize on its own hash before this stage may complete --
+  // `assertReconciledCompletion` (cycle-repository.mjs) requires every chain attempt for a stage to
+  // be FINALIZED, and the deposit's own success below is never treated as proof the approval
+  // succeeded.
+  const prerequisites = stateValues(cycle?.chainAttempts)
+    .filter(candidate => candidate?.attempt?.stage === 'outbound' && candidate.attempt.requestDigest !== record.attempt.requestDigest);
+  if (!(await finalizeOutboundPrerequisites({ cycleRepository, context, client: robinhoodClient, prerequisites }))) {
+    return null;
+  }
 
   let sourceProof;
   try {
