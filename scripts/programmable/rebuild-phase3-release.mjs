@@ -161,7 +161,7 @@ function portableStandardJsonEvidence(buildInfoPath, records) {
 function compiledTargets() {
   const directory = mkdtempSync(resolve(tmpdir(), 'hookemon-phase3-release-'));
   const result = spawnSync(forge, [
-    'build', '--root', contractsDirectory, '--no-cache', '--build-info',
+    'build', '--root', contractsDirectory, '--no-cache', '--build-info', '--threads', '1',
     '--out', resolve(directory, 'out'), '--build-info-path', resolve(directory, 'build-info'),
     'src/HookemonHook.sol', 'src/launch/HKMNToken.sol', 'src/bindings/RobinhoodBindings.sol',
   ], {

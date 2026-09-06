@@ -59,7 +59,7 @@ function releasePlanConstants() {
 function compilePinnedTargets() {
   const buildDirectory = mkdtempSync(resolve(tmpdir(), 'hookemon-phase3-bytecode-'));
   const result = spawnSync(forge, [
-    'build', '--root', contractsRoot, '--no-cache', '--build-info',
+    'build', '--root', contractsRoot, '--no-cache', '--build-info', '--threads', '1',
     '--out', resolve(buildDirectory, 'out'), '--build-info-path', resolve(buildDirectory, 'build-info'),
     'src/HookemonHook.sol', 'src/launch/HKMNToken.sol', 'src/bindings/RobinhoodBindings.sol',
   ], {
