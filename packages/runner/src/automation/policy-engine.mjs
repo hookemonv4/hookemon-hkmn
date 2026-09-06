@@ -9,6 +9,10 @@ const LEGACY_POLICY_DIGEST_REVISION_SEARCH_LIMIT = 10_000;
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
+const USDG_ROUTE = Object.freeze({ chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 });
+const USDC_ROUTE = Object.freeze({ chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 });
+const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
+const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
 const mutationBoundaries = new Set(['claim-process', 'purchase', 'signature', 'broadcast', 'mutation']);
 const executionBoundaries = new Set(['signature', 'broadcast', 'mutation']);
 
@@ -86,6 +90,12 @@ function assertPolicyAdmissionAmount(value, label) {
   });
 }
 
+function assertAdmissionRoute(amount, expected, label) {
+  if (amount.chainId !== expected.chainId || amount.assetId.toLowerCase() !== expected.assetId.toLowerCase() || amount.decimals !== expected.decimals) {
+    throw new Error(`${label} does not match the canonical asset route`);
+  }
+}
+
 /**
  * Normalizes the quote-bound monetary record produced before a live cycle exists. The policy
  * engine deliberately does not infer a unit quote from an aggregate quote: they are separate
@@ -97,12 +107,17 @@ function normalizePolicyAdmission(value) {
     throw new Error('policy admission must use hookemon.policy-admission.v2');
   }
   assertCycleId(value.cycleId);
+  assertPackId(value.packId);
   if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error('policy admission quantity is invalid');
   if (typeof value.quoteDigest !== 'string' || !digestPattern.test(value.quoteDigest)) throw new Error('policy admission quoteDigest is invalid');
   const unitPurchase = assertPolicyAdmissionAmount(value.unitPurchase, 'policy admission unitPurchase');
   const aggregatePurchase = assertPolicyAdmissionAmount(value.aggregatePurchase, 'policy admission aggregatePurchase');
   const unitFundingQuote = assertPolicyAdmissionAmount(value.unitFundingQuote, 'policy admission unitFundingQuote');
   const aggregateFundingQuote = assertPolicyAdmissionAmount(value.aggregateFundingQuote, 'policy admission aggregateFundingQuote');
+  assertAdmissionRoute(unitPurchase, USDC_ROUTE, 'policy admission unitPurchase');
+  assertAdmissionRoute(aggregatePurchase, USDC_ROUTE, 'policy admission aggregatePurchase');
+  assertAdmissionRoute(unitFundingQuote, USDG_ROUTE, 'policy admission unitFundingQuote');
+  assertAdmissionRoute(aggregateFundingQuote, USDG_ROUTE, 'policy admission aggregateFundingQuote');
   if (unitPurchase.chainId !== aggregatePurchase.chainId || unitPurchase.assetId !== aggregatePurchase.assetId
     || unitPurchase.decimals !== aggregatePurchase.decimals
     || BigInt(unitPurchase.amountAtomic) * BigInt(value.quantity) !== BigInt(aggregatePurchase.amountAtomic)) {
@@ -116,14 +131,27 @@ function normalizePolicyAdmission(value) {
   if (!relay || relay.tradeType !== 'EXACT_OUTPUT' || typeof relay.requestId !== 'string' || relay.requestId.length === 0
     || typeof relay.orderId !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId)
     || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
-    || typeof relay.sender !== 'string' || relay.sender.length === 0 || typeof relay.recipient !== 'string' || relay.recipient.length === 0
+    || typeof relay.sender !== 'string' || relay.sender.toLowerCase() !== OPERATIONS_EVM || relay.recipient !== OPERATIONS_SOLANA
     || assertAmount(relay.destinationAmount, 'policy admission relay destinationAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic
     || assertAmount(relay.destinationMinimumAmount, 'policy admission relay destinationMinimumAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic) {
     throw new Error('policy admission Relay exact-output identity is invalid');
   }
+  const unitRelay = value.unitRelay;
+  if (!unitRelay || unitRelay.tradeType !== 'EXACT_OUTPUT' || typeof unitRelay.requestId !== 'string' || unitRelay.requestId.length === 0
+    || !/^0x[0-9a-fA-F]{64}$/.test(unitRelay.orderId ?? '') || !Number.isSafeInteger(unitRelay.deadlineUnixSeconds)
+    || unitRelay.deadlineUnixSeconds <= 0 || unitRelay.sender?.toLowerCase() !== OPERATIONS_EVM || unitRelay.recipient !== OPERATIONS_SOLANA
+    || assertAmount(unitRelay.destinationAmount, 'policy admission unitRelay destinationAmount', { positive: true }).toString() !== unitPurchase.amountAtomic
+    || assertAmount(unitRelay.destinationMinimumAmount, 'policy admission unitRelay destinationMinimumAmount', { positive: true }).toString() !== unitPurchase.amountAtomic
+    || typeof unitRelay.quoteDigest !== 'string' || !digestPattern.test(unitRelay.quoteDigest)) {
+    throw new Error('policy admission unit exact-output Relay evidence is invalid');
+  }
+  if (typeof relay.quoteDigest !== 'string' || relay.quoteDigest !== value.quoteDigest) {
+    throw new Error('policy admission aggregate Relay quote digest is invalid');
+  }
   return Object.freeze({
     schema: value.schema,
     cycleId: value.cycleId,
+    packId: value.packId,
     quantity: value.quantity,
     quoteDigest: value.quoteDigest,
     unitPurchase,
@@ -131,6 +159,7 @@ function normalizePolicyAdmission(value) {
     unitFundingQuote,
     aggregateFundingQuote,
     relay: Object.freeze({ ...relay }),
+    unitRelay: Object.freeze({ ...unitRelay }),
   });
 }
 
@@ -512,6 +541,15 @@ function admissionContext(input) {
     if (releaseAmount !== BigInt(admission.aggregateFundingQuote.amountAtomic)) {
       throw new Error('policy release amount does not match admitted aggregate funding quote');
     }
+    if (input.packId !== undefined && input.packId !== admission.packId) {
+      throw new Error('policy admission packId does not match policy context');
+    }
+    if (input.requestedOrders !== undefined && input.requestedOrders !== admission.quantity) {
+      throw new Error('policy admission quantity does not match requested orders');
+    }
+    if (now >= admission.relay.deadlineUnixSeconds * 1000 || now >= admission.unitRelay.deadlineUnixSeconds * 1000) {
+      return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission.cycleId, packId: input.packId ?? admission.packId, admission, expiredAdmission: true };
+    }
   }
   return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission?.cycleId ?? null, packId: input.packId ?? null, admission };
 }
@@ -520,6 +558,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
   const context = admissionContext(input);
   const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
   const custodyState = normalizeCustody(custody);
+  if (context.expiredAdmission) return refused('QUOTE_EXPIRED');
   if (normalized.liveMode !== context.liveMode) return refused('EXECUTION_MODE_MISMATCH');
 
   const requiresImmediateExecutionGate = context.boundary === 'cycle-start' || mutationBoundaries.has(context.boundary);
@@ -564,6 +603,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
     }
     if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
     if (normalized.requestedOrders === 0) return refused('NO_ORDERS_REQUESTED');
+    if (context.admission !== null && context.admission.quantity !== normalized.requestedOrders) return refused('QUANTITY_MISMATCH');
     if (context.releaseAmount > effectiveCycleCap(normalized, context)) return refused('PER_CYCLE_CAP');
     if (context.releaseAmount > BigInt(normalized.maxCycleBudgetMicroUsdg)) return refused('PER_CYCLE_CAP');
 
@@ -651,6 +691,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
     if (expectedDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
     const reservation = normalized.spendLedger.find(entry => entry.cycleDigest === expectedDigest);
     if (!reservation || context.releaseAmount > BigInt(reservation.amountMicroUsdg)) return refused('SPEND_RESERVATION_MISSING');
+    if (!withinTrailingWindow([reservation], 'reservedAtMs', context.now).length) return refused('SPEND_RESERVATION_EXPIRED');
     if (context.releaseAmount > effectiveCycleCap(normalized, context)) return refused('PER_CYCLE_CAP');
     if (custodyState.realizedLossMicroUsdg + custodyState.atRiskMicroUsdg > BigInt(normalized.lossCapMicroUsdg)) {
       return refused('LOSS_CAP');

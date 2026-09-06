@@ -60,7 +60,9 @@ canonical micro-USDG integer strings.
   asset identity, and the reservation covers totalAtomic plus boundedOverheadAtomic.
 - A `policy-admission.v2` binds one typed catalog unit target, its checked aggregate target, a
   separate N=1 source funding quote, an aggregate source funding quote, and the `EXACT_OUTPUT`
-  Relay identity. The unit rail compares only `unitFundingQuote.amountAtomic`; per-cycle and
+  Relay identity. Both the unit and aggregate quotes carry independently identified `EXACT_OUTPUT`
+  Relay evidence, deadlines, and quote digests. The canonical USDG/USDC routes and Operations
+  sender/recipient are required. The unit rail compares only `unitFundingQuote.amountAtomic`; per-cycle and
   trailing-24-hour reservations compare only `aggregateFundingQuote.amountAtomic` once. The
   aggregate quote is never divided by quantity and no USDG/USDC conversion is inferred.
 - The current digest excludes the generic configuration revision and binds every economic-policy
@@ -120,6 +122,9 @@ node --test packages/runner/test/automation/policy-engine.test.mjs \
 - A changed admission, target, route, deadline, or quote digest changes the cycle digest and is
   refused under the prior reservation. The caller must create a new admission rather than reuse
   the prior authorization.
+- Admission refuses a quote at its exact deadline. Purchase also refuses after its durable spend
+  reservation leaves the trailing 24-hour window, even if a separately recorded quote would still
+  be valid.
 - OPEN FACT: No frozen conversion quote binds a Collector Solana stablecoin insured amount to USDG.
   Resolve it by adding a quoted, digest-bound USDG conversion to the held-position contract and
   tests that reject a substituted quote. Verified safe alternative: use the cycle-attributed USDG

@@ -540,19 +540,27 @@ test('claim admission rejects configuration values above the fixed operator ceil
 // derived multiple or a round USD guess.
 const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
 
-function exactOutputAdmission({ cycleId, unitFunding = '25000000', aggregateFunding = VERIFIED_N2_QUOTE_INPUT_MICRO_USDG } = {}) {
+function exactOutputAdmission({ cycleId, unitFunding = '25000000', aggregateFunding = VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, deadlineUnixSeconds = 1_000_000 } = {}) {
   return {
     schema: 'hookemon.policy-admission.v2',
     cycleId,
+    packId: 'base-pack',
     quantity: 2,
     quoteDigest: `sha256:${'b'.repeat(64)}`,
     unitPurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '25000000' },
     aggregatePurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '50000000' },
     unitFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: unitFunding },
     aggregateFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: aggregateFunding },
+    unitRelay: {
+      tradeType: 'EXACT_OUTPUT', requestId: `relay-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`,
+      quoteDigest: `sha256:${'c'.repeat(64)}`, deadlineUnixSeconds,
+      sender: '0x000000000000000000000000000000000000dEaD', recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto',
+      destinationAmount: '25000000', destinationMinimumAmount: '25000000',
+    },
     relay: {
       tradeType: 'EXACT_OUTPUT', requestId: 'relay-n2', orderId: `0x${'2'.repeat(64)}`,
-      deadlineUnixSeconds: 2_000, sender: '0x000000000000000000000000000000000000dEaD',
+      quoteDigest: `sha256:${'b'.repeat(64)}`,
+      deadlineUnixSeconds, sender: '0x000000000000000000000000000000000000dEaD',
       recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto', destinationAmount: '50000000', destinationMinimumAmount: '50000000',
     },
   };
@@ -565,9 +573,10 @@ test('N2 admission keeps the independent unit quote on the unit rail and reserve
     maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
     perCycleCapMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, max24HourBudgetMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
     lossCapMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, maxOutstandingCustodyMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
-    maxCyclesPerDay: 1, manualApprovalCycles: 0,
+    maxCyclesPerDay: 1, manualApprovalCycles: 0, requestedOrders: 2, maxBoostersPerCycle: 2,
   });
-  const { engine, readConfiguration } = policyFixture({ configuration });
+  let timestamp = 1_000;
+  const { engine, readConfiguration } = policyFixture({ configuration, now: () => timestamp });
   const request = {
     boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
     packId: 'base-pack', liveMode: true, admission,
@@ -581,6 +590,8 @@ test('N2 admission keeps the independent unit quote on the unit rail and reserve
   const unitOver = exactOutputAdmission({ cycleId, unitFunding: '25000001' });
   assert.deepEqual(await engine.evaluatePurchase({ ...request, admission: unitOver }), { allowed: false, reason: 'UNIT_PRICE_CAP' });
   assert.deepEqual(await engine.admit({ ...request, cycleId: 'cycle-n2-over-cap', admission: exactOutputAdmission({ cycleId: 'cycle-n2-over-cap', aggregateFunding: '50309870' }), releaseAmountMicroUsdg: '50309870' }), { allowed: false, reason: 'PER_CYCLE_CAP' });
+  timestamp += POLICY_WINDOW_MS;
+  assert.deepEqual(await engine.evaluatePurchase(request), { allowed: false, reason: 'SPEND_RESERVATION_EXPIRED' });
 });
 
 test('the verified N2 two-pack USDG quote is admitted under an explicit configuration sized exactly to it, and one atomic unit above the same rail is refused', async () => {
