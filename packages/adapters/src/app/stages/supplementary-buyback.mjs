@@ -389,7 +389,14 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
   }
   evaluateTransactionPolicy(buyback.policy, decoded);
   decodedBindsResale({ decoded, owner: config.accounts.solana, mint: position.mint, buyback, proceedsAccount });
-  await assertSolanaSignerFeeEnvelope({ client: adapters.solana.client, owner: config.accounts.solana, money, decoded, stage: 'buyback' });
+  await assertSolanaSignerFeeEnvelope({
+    client: adapters.solana.client,
+    owner: config.accounts.solana,
+    money,
+    decoded,
+    nativeChainId: config.solana.chainId,
+    stage: 'buyback',
+  });
 
   const signer = createPolicySigner({
     backend: {

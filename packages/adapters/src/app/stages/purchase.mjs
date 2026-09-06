@@ -94,6 +94,7 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
     owner: config.accounts?.solana,
     money,
     decoded,
+    nativeChainId: config.solana.chainId,
     stage: `Collector ${stage}`,
   });
   const signer = wrapTransactionPolicySignerClient({

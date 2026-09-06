@@ -269,6 +269,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
     owner: config.accounts?.solana,
     money,
     decoded,
+    nativeChainId: config.solana.chainId,
     stage: 'buyback',
   });
   const signer = wrapTransactionPolicySignerClient({
