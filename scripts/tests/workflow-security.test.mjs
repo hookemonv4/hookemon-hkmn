@@ -83,18 +83,13 @@ test('CI installs the pinned Foundry release and runs the Phase 1 contract proof
   assert.match(workflow, /node feasibility\/verify-robinhood-binding\.mjs bindings\/robinhood-chain\.json --offline/);
   assert.ok(
     workflow.indexOf('git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery')
-      < workflow.indexOf('node --input-type=module --eval'),
-    'top-level Gitlinks must be initialized before validating nested pins',
-  );
-  assert.ok(
-    workflow.indexOf('node --input-type=module --eval')
       < workflow.indexOf('git -C packages/contracts/lib/v4-core submodule update --init --recursive'),
-    'build pins must be validated before initializing the dependency closure',
+    'top-level v4 Gitlinks must be initialized before the v4 nested closure',
   );
   assert.ok(
-    workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory')
-      < workflow.indexOf('forge fmt --check --root packages/contracts'),
-    'launch dependencies must be initialized before compiling the contracts',
+    workflow.indexOf('git -C packages/contracts/lib/v4-core submodule update --init --recursive')
+      < workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory'),
+    'the v4 nested closure must be initialized before the top-level launch Gitlinks',
   );
   assert.ok(
     workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory')
@@ -103,8 +98,13 @@ test('CI installs the pinned Foundry release and runs the Phase 1 contract proof
   );
   assert.ok(
     workflow.indexOf('git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts')
+      < workflow.indexOf('node --input-type=module --eval'),
+    'all four pinned dependency init stages must complete before validateBuildPins reads any Gitlink OID',
+  );
+  assert.ok(
+    workflow.indexOf('node --input-type=module --eval')
       < workflow.indexOf('forge fmt --check --root packages/contracts'),
-    'nested launch compile dependencies must be initialized before compiling the contracts',
+    'build pins must be validated before compiling the contracts',
   );
 });
 

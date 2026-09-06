@@ -112,7 +112,9 @@ const EXPECTED_DEPENDENCY_GITLINK_PATHS = [
   "packages/contracts/lib/uerc20-factory",
   "packages/contracts/lib/v4-core/lib/solmate",
   "packages/contracts/lib/v4-periphery/lib/permit2",
-  "packages/contracts/lib/v4-core/lib/openzeppelin-contracts"
+  "packages/contracts/lib/v4-core/lib/openzeppelin-contracts",
+  "packages/contracts/lib/uerc20-factory/lib/solady",
+  "packages/contracts/lib/uerc20-factory/lib/openzeppelin-contracts"
 ];
 const EXPECTED_LOCAL_PROOF_PATHS = [
   "feasibility/model.mjs",
@@ -1410,7 +1412,7 @@ export function validateBuildPins(projectRoot) {
   const gitlinks = pins.uniswap?.dependencyGitlinks;
   validateDeclaredGitlinkCoverage(gitlinks);
   for (const pin of gitlinks) {
-    const nested = /^packages\/contracts\/lib\/(v4-core|v4-periphery)\/(.+)$/.exec(pin.path);
+    const nested = /^packages\/contracts\/lib\/(v4-core|v4-periphery|uerc20-factory)\/(.+)$/.exec(pin.path);
     const repositoryRoot = nested
       ? path.join(projectRoot, "packages/contracts/lib", nested[1])
       : projectRoot;

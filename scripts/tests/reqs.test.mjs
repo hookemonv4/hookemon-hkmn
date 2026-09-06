@@ -20,6 +20,7 @@ import {
   resolveReleaseManifestCheckout,
   validateInterfaceFreeze,
   parseVerifierInvocation,
+  validateBuildPins,
   validateDeclaredGitlinkCoverage,
   validateDistinctBuildCheckouts,
   validateCustodyArtifact,
@@ -325,6 +326,8 @@ test('Robinhood build pin declarations require every root and nested Gitlink exa
     'packages/contracts/lib/v4-core/lib/solmate',
     'packages/contracts/lib/v4-periphery/lib/permit2',
     'packages/contracts/lib/v4-core/lib/openzeppelin-contracts',
+    'packages/contracts/lib/uerc20-factory/lib/solady',
+    'packages/contracts/lib/uerc20-factory/lib/openzeppelin-contracts',
   ];
   assert.doesNotThrow(() => validateDeclaredGitlinkCoverage(paths.map((path) => ({ path }))));
   assert.throws(
@@ -334,6 +337,105 @@ test('Robinhood build pin declarations require every root and nested Gitlink exa
   assert.throws(
     () => validateDeclaredGitlinkCoverage([...paths, 'packages/contracts/lib/v4-core/lib/forge-std'].map((path) => ({ path }))),
     /Gitlink declarations must be exactly/,
+  );
+});
+
+function addGitlinkIndexEntry(root, relativePath, oid) {
+  execFileSync('git', ['-C', root, 'update-index', '--add', '--cacheinfo', `160000,${oid},${relativePath}`]);
+}
+
+function buildPinsFixture({ declaredUerc20FactorySoladyCommit } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'v4-build-pins-'));
+  const rootOids = {
+    'packages/contracts/lib/v4-core': 'a'.repeat(40),
+    'packages/contracts/lib/v4-periphery': 'b'.repeat(40),
+    'packages/contracts/lib/liquidity-launcher': 'c'.repeat(40),
+    'packages/contracts/lib/uerc20-factory': 'd'.repeat(40),
+  };
+  // The actual factory checkout always has solady pinned at '2'.repeat(40); a caller can
+  // declare a different (wrong) commit in dependency-pins.json to prove the check reads
+  // the real factory tree rather than trusting the declaration.
+  const actualUerc20FactorySoladyCommit = '2'.repeat(40);
+  const nestedOids = {
+    'packages/contracts/lib/v4-core/lib/solmate': 'e'.repeat(40),
+    'packages/contracts/lib/v4-periphery/lib/permit2': 'f'.repeat(40),
+    'packages/contracts/lib/v4-core/lib/openzeppelin-contracts': '1'.repeat(40),
+    'packages/contracts/lib/uerc20-factory/lib/solady': actualUerc20FactorySoladyCommit,
+    'packages/contracts/lib/uerc20-factory/lib/openzeppelin-contracts': '3'.repeat(40),
+  };
+
+  execFileSync('git', ['-C', root, 'init', '--quiet']);
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Hookemon']);
+  execFileSync('git', ['-C', root, 'config', 'user.email', '312745360+hookemonv4@users.noreply.github.com']);
+  for (const [relativePath, oid] of Object.entries(rootOids)) addGitlinkIndexEntry(root, relativePath, oid);
+
+  for (const nestedRoot of ['packages/contracts/lib/v4-core', 'packages/contracts/lib/v4-periphery', 'packages/contracts/lib/uerc20-factory']) {
+    const nestedPath = join(root, nestedRoot);
+    mkdirSync(nestedPath, { recursive: true });
+    execFileSync('git', ['-C', nestedPath, 'init', '--quiet']);
+  }
+  addGitlinkIndexEntry(join(root, 'packages/contracts/lib/v4-core'), 'lib/solmate', nestedOids['packages/contracts/lib/v4-core/lib/solmate']);
+  addGitlinkIndexEntry(join(root, 'packages/contracts/lib/v4-periphery'), 'lib/permit2', nestedOids['packages/contracts/lib/v4-periphery/lib/permit2']);
+  addGitlinkIndexEntry(join(root, 'packages/contracts/lib/v4-core'), 'lib/openzeppelin-contracts', nestedOids['packages/contracts/lib/v4-core/lib/openzeppelin-contracts']);
+  addGitlinkIndexEntry(join(root, 'packages/contracts/lib/uerc20-factory'), 'lib/solady', actualUerc20FactorySoladyCommit);
+  addGitlinkIndexEntry(join(root, 'packages/contracts/lib/uerc20-factory'), 'lib/openzeppelin-contracts', nestedOids['packages/contracts/lib/uerc20-factory/lib/openzeppelin-contracts']);
+
+  const declaredCommits = {
+    ...rootOids,
+    ...nestedOids,
+    'packages/contracts/lib/uerc20-factory/lib/solady': declaredUerc20FactorySoladyCommit ?? actualUerc20FactorySoladyCommit,
+  };
+  mkdirSync(join(root, 'product'), { recursive: true });
+  writeJson(join(root, 'product', 'dependency-pins.json'), {
+    phase1Toolchain: {
+      status: 'FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING',
+      foundry: { version: 'fixture-1.0.0', commit: '9'.repeat(40) },
+      solidity: { solcVersion: '0.8.99', evmVersion: 'fixture-evm', optimizer: true, optimizerRuns: 1 },
+      uniswap: {
+        dependencyGitlinks: Object.entries(declaredCommits).map(([path, commit]) => ({ path, commit })),
+      },
+    },
+  });
+
+  const fakeForgeBin = join(root, 'fake-forge.sh');
+  writeFileSync(fakeForgeBin, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "forge Version: fixture-1.0.0"
+  echo "Commit SHA: ${'9'.repeat(40)}"
+elif [ "$1" = "config" ]; then
+  echo '{"solc":"0.8.99","evm_version":"fixture-evm","optimizer":true,"optimizer_runs":1,"auto_detect_remappings":false}'
+fi
+`, { mode: 0o755 });
+  return { root, fakeForgeBin };
+}
+
+function withFakeForge(fakeForgeBin, fn) {
+  const previousForgeBin = process.env.FORGE_BIN;
+  process.env.FORGE_BIN = fakeForgeBin;
+  try {
+    return fn();
+  } finally {
+    if (previousForgeBin === undefined) delete process.env.FORGE_BIN;
+    else process.env.FORGE_BIN = previousForgeBin;
+  }
+}
+
+test('Robinhood build pins read the uerc20-factory nested Gitlink OID from the factory checkout, not the top-level project', () => {
+  const { root, fakeForgeBin } = buildPinsFixture();
+  mkdirSync(join(root, 'packages', 'contracts'), { recursive: true });
+  const result = withFakeForge(fakeForgeBin, () => validateBuildPins(root));
+  assert.deepEqual(
+    result.gitlinks.find((entry) => entry.path === 'packages/contracts/lib/uerc20-factory/lib/solady'),
+    { path: 'packages/contracts/lib/uerc20-factory/lib/solady', commit: '2'.repeat(40) },
+  );
+});
+
+test('Robinhood build pins reject a uerc20-factory nested Gitlink pin that does not match the factory checkout', () => {
+  const { root, fakeForgeBin } = buildPinsFixture({ declaredUerc20FactorySoladyCommit: '7'.repeat(40) });
+  mkdirSync(join(root, 'packages', 'contracts'), { recursive: true });
+  assert.throws(
+    () => withFakeForge(fakeForgeBin, () => validateBuildPins(root)),
+    /Gitlink pin mismatch: packages\/contracts\/lib\/uerc20-factory\/lib\/solady/,
   );
 });
 

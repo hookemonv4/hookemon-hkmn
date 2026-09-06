@@ -191,11 +191,6 @@ jobs:
           node --test --test-timeout=120000 $files
       - name: Initialize pinned top-level contract dependencies
         run: git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery
-      - name: Verify Phase 1 build pins
-        run: >-
-          node --input-type=module --eval
-          'import { validateBuildPins } from "./feasibility/verify-robinhood-binding.mjs";
-          console.log(JSON.stringify({ status: "VERIFIED_BUILD_PINS", buildPins: validateBuildPins(process.cwd()) }, null, 2));'
       - name: Initialize pinned contract dependency closure
         run: |
           git -C packages/contracts/lib/v4-core submodule update --init --recursive
@@ -204,6 +199,11 @@ jobs:
         run: git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory
       - name: Initialize pinned launch dependency closure
         run: git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts
+      - name: Verify Phase 1 build pins
+        run: >-
+          node --input-type=module --eval
+          'import { validateBuildPins } from "./feasibility/verify-robinhood-binding.mjs";
+          console.log(JSON.stringify({ status: "VERIFIED_BUILD_PINS", buildPins: validateBuildPins(process.cwd()) }, null, 2));'
       - name: Verify Phase 1 contracts
         run: |
           FOUNDRY_LIBS='["lib/v4-core"]' forge fmt --check --root packages/contracts

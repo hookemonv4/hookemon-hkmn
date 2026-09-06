@@ -27,6 +27,7 @@ The module has no Phase 3 runtime state transition. Any attempted deployment or 
 - Verify that the deployment manifest excludes this module and that launch evidence names Launch Orchestration as the only launch authority.
 - `FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/contracts --match-path 'test/launch/vendor/RealLauncherFactoryComposition.t.sol' -vvv` runs the retained launcher/factory composition test.
 - `packages/contracts/remappings.txt` scopes the factory's `@openzeppelin/` imports to `lib/uerc20-factory/lib/openzeppelin-contracts/` and its `@solady/` imports to `lib/uerc20-factory/lib/solady/`. This leaves v4-core's OpenZeppelin mapping intact for other package imports. Root `foundry.toml` and `remappings.txt` carry the unscoped mappings required by the Programmable scanner.
+- `feasibility/verify-robinhood-binding.mjs`'s `validateBuildPins` pins both nested factory Gitlinks (`packages/contracts/lib/uerc20-factory/lib/solady` and `.../lib/openzeppelin-contracts`) alongside the seven prior Gitlinks and reads each nested commit from its own checkout (`v4-core`, `v4-periphery`, or `uerc20-factory`), not the top-level project tree.
 
 ## Recovery pointers
 
