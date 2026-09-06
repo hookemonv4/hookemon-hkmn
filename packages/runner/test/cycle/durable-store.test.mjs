@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { FixtureCycleStore } from '../../src/cycle/cycle-store.mjs';
 import * as durableStore from '../../src/cycle/durable-store.mjs';
-import { CycleJournal, RECOVERY_LIMITS, canonicalJson } from '../../src/cycle/journal.mjs';
+import { CycleJournal, RECOVERY_LIMITS, canonicalJson, digest } from '../../src/cycle/journal.mjs';
 
 const { DurableCycleStore, StateDirectoryLossError, readStateDirectoryRecovery } = durableStore;
 const lockRaceChildPath = fileURLToPath(new URL('./durable-store-lock-race-child.mjs', import.meta.url));
@@ -930,6 +930,101 @@ test('readPagedStageEvidence treats a missing blob as a hard failure once a call
     }),
     /durable cycle store stage evidence is missing/,
   );
+});
+
+test('a >64-item array and a hand-crafted short array of its chunk hashes are not treated as the same evidence', async t => {
+  // Regression for a since-fixed non-injective digest: an earlier evidenceDigest implementation
+  // chunked any array over one page into an untagged array of per-chunk digest strings, which a
+  // conflicting 2-item array containing exactly those two strings would serialize identically to.
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-digest-alias';
+  const stage = 'eligibility-snapshot';
+  const longEntries = Array.from({ length: 65 }, (_, index) => `entry-${index}`);
+  const aliasEntries = [
+    digest(longEntries.slice(0, 64)),
+    digest(longEntries.slice(64)),
+  ];
+  await store.persistPagedStageEvidence(cycleId, stage, { schema: 'evidence.v1', cycleId, entries: longEntries });
+  await assert.rejects(
+    store.persistPagedStageEvidence(cycleId, stage, { schema: 'evidence.v1', cycleId, entries: aliasEntries }),
+    /already persisted with different evidence/,
+  );
+});
+
+test('a self-consistent page-plus-page-reference-digest mutation still fails closed on the recomputed whole-evidence digest', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-self-consistent-replacement';
+  const stage = 'eligibility-snapshot';
+  const original = { schema: 'evidence.v1', cycleId, entries: Array.from({ length: 65 }, (_, index) => `entry-${index}`) };
+  const handle = await store.persistPagedStageEvidence(cycleId, stage, original);
+
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent(stage));
+  const manifestPath = join(stageDirectory, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const reference = manifest.state.entries.pages[0];
+  const pagePath = join(stageDirectory, handle.generation, `${String(reference.id).padStart(4, '0')}.json`);
+  const page = JSON.parse(await readFile(pagePath, 'utf8'));
+  page.entries[0] = 'replacement';
+  await writeFile(pagePath, `${canonicalJson(page)}\n`);
+  // An attacker who also recomputes the per-page reference digest so the tampered page still matches
+  // its own manifest reference -- but leaves the manifest's separate whole-evidence `evidenceDigest`
+  // field untouched -- must still be rejected: readPagedStageEvidence recomputes that whole-evidence
+  // digest from the actually-decoded content, it never trusts the stored field alone.
+  reference.digest = digest(page);
+  await writeFile(manifestPath, `${canonicalJson(manifest)}\n`);
+
+  await assert.rejects(
+    store.readPagedStageEvidence(cycleId, stage, handle),
+    /durable cycle store stage evidence does not match its own manifest digest/,
+  );
+});
+
+test('a same-payload retry over a generation with a deleted page fails closed instead of minting a handle', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-corrupt-adoption';
+  const stage = 'eligibility-snapshot';
+  const evidence = { schema: 'evidence.v1', cycleId, entries: Array.from({ length: 65 }, (_, index) => `entry-${index}`) };
+  const handle = await store.persistPagedStageEvidence(cycleId, stage, evidence);
+
+  const generationDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent(stage), handle.generation);
+  const pageFiles = await readdir(generationDirectory);
+  await unlink(join(generationDirectory, pageFiles[0]));
+
+  await assert.rejects(
+    store.persistPagedStageEvidence(cycleId, stage, evidence),
+    /page is missing/,
+  );
+  await assert.rejects(
+    store.readPagedStageEvidence(cycleId, stage, handle),
+    /page is missing/,
+  );
+});
+
+test('a single array beyond the real per-array page-reference ceiling is refused up front, and exactly at the ceiling round-trips', async t => {
+  const stage = 'eligibility-snapshot';
+
+  {
+    const directory = await temporaryDirectory(t);
+    const store = await DurableCycleStore.open(directory);
+    const cycleId = 'cycle-hidden-digest-cap';
+    const evidence = { schema: 'evidence.v1', cycleId, entries: Array.from({ length: 32_769 }, (_, index) => `e${index}`) };
+    await assert.rejects(
+      store.persistPagedStageEvidence(cycleId, stage, evidence),
+      /array item limit exceeded/,
+    );
+  }
+
+  {
+    const directory = await temporaryDirectory(t);
+    const store = await DurableCycleStore.open(directory);
+    const cycleId = 'cycle-at-array-item-cap';
+    const evidence = { schema: 'evidence.v1', cycleId, entries: Array.from({ length: 32_768 }, (_, index) => `e${index}`) };
+    const handle = await store.persistPagedStageEvidence(cycleId, stage, evidence);
+    assert.deepEqual(await store.readPagedStageEvidence(cycleId, stage, handle), evidence);
+  }
 });
 
 test('serializes a global reservation across separately opened durable stores', async t => {

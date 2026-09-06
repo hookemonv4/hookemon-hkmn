@@ -32,14 +32,17 @@ the cross-process write lock; it holds no domain knowledge of cycles, packs, or 
   immutable `{schema, cycleId, stage, generation, evidenceDigest}` handle a caller durably records
   (e.g. as the compact marker C's journal event stores in place of the full evidence). `evidenceDigest`
   is a pure content address of the evidence value — independent of the random `generation` any one
-  persist call happens to pick for its on-disk layout — computed via `evidenceContentDigest`, which
-  chunks any array longer than one page before hashing so it never hits `digest()`'s fixed default
-  bound (unlike this module's own paged ceilings, that bound cannot be overridden per call). A retry
-  with byte-identical evidence recomputes the identical `evidenceDigest`, matches the existing
-  manifest, and returns the existing handle without writing a new generation or any new page files. A
-  retry with different evidence for the same `(cycleId, stage)` throws
+  persist call happens to pick for its on-disk layout — computed by `wholeEvidenceDigest`, which hashes
+  the full canonical JSON text of the *entire, untruncated* validated evidence value in one pass (see
+  Invariants below for why this must never chunk or otherwise transform the value first). A retry with
+  byte-identical evidence recomputes the identical `evidenceDigest`, and — only after that existing
+  generation's complete evidence is re-read, re-decoded, and its own digest independently recomputed
+  and confirmed to still match — returns the existing handle without writing a new generation or any
+  new page files. A retry with different evidence for the same `(cycleId, stage)` throws
   `'durable cycle store stage evidence is already persisted with different evidence'` rather than
-  silently replacing the existing reference.
+  silently replacing the existing reference. A same-payload retry over a generation whose blob has gone
+  missing or no longer matches its own manifest digest fails closed (propagates the read error) instead
+  of minting a handle over evidence that can no longer be proven intact.
 - `readPagedStageEvidence`'s third argument, `expected`, distinguishes "nothing has been persisted"
   from "something should exist but its blob is missing or does not match": with `expected` omitted (or
   `null`), a caller has no durable reference yet, so a missing stage-evidence directory or manifest
@@ -48,7 +51,14 @@ the cross-process write lock; it holds no domain knowledge of cycles, packs, or 
   `evidenceDigest` do not match `expected` — is a hard failure (thrown error), never `null`: a journal
   that already committed a reference to this evidence describes a fact that must still be true, and a
   missing or altered blob under that fact is corruption to raise or hold on, not a value to silently
-  treat as "never happened."
+  treat as "never happened." Every read — with or without `expected` — decodes the full evidence and
+  recomputes its whole-evidence digest against the manifest's own stored `evidenceDigest` field before
+  returning anything; a manifest and its pages can be self-consistently altered together (a mutated
+  page whose per-page reference digest is also updated to match), but the recomputed whole-evidence
+  digest exposes that alteration unless the manifest's `evidenceDigest` field is *also* updated to the
+  new (different) value — at which point it not only differs from the stored `evidenceDigest`
+  metadata-comparison never would have caught, but also fails any `expected.evidenceDigest` a prior
+  caller already holds.
 
 ## Invariants
 
@@ -82,6 +92,36 @@ the cross-process write lock; it holds no domain knowledge of cycles, packs, or 
   a finality record's `logIndexes`, count separately from array *items*). These are a justified
   10,000-recipient/10,000-entry acceptance ceiling, not an unbounded allowance and not a promise of
   50,000.
+- `maximumPagedArrayItems` (64 × `RECOVERY_LIMITS.canonicalArrayItems` = 32,768) bounds any *single*
+  array independently of `maximumPagedPages`'s shared-across-a-state budget: `serializePagedManifest`/
+  `serializePagedStageEvidenceManifest` still serialize the whole manifest — including every array's
+  own page-reference list — through journal.mjs's exported, bound-checked `canonicalJson()`, which
+  enforces its own fixed default `canonicalArrayItems` (512) regardless of this module's wider
+  `maximumPagedPages` override; durable-store.mjs cannot widen that specific check itself (journal.mjs
+  is C-owned and exports no unbounded variant of it). A review found that a value inside the
+  previously-advertised 64 × 1,024 = 65,536-item ceiling could still be rejected deep inside manifest
+  serialization once its own array needed more than 512 pages, with a confusing error unrelated to the
+  real cause. `maximumPagedArrayItems` is the declared ceiling actually enforced up front (in
+  `assertPagedPayoutState`/`assertPagedStageEvidence`'s own `assertBoundedCanonicalValue` call) instead,
+  so a value that will not survive serialization is refused immediately with a clear diagnosis, not
+  three layers deep. It leaves ample headroom over the justified 10,000-recipient/10,000-entry
+  acceptance target and is not a promise of 65,536.
+- `wholeEvidenceDigest`'s content hash is computed over the full, untruncated canonical JSON text of an
+  already-`assertPagedStageEvidence`-validated value in one pass — never chunked. An earlier version
+  chunked any array over one page into per-`digest()`-hashed slices and assembled an untagged array of
+  those hash strings; that representation was **not injective**: a 65-item array and a hand-crafted
+  2-item array containing exactly the two chunk-digest strings the first array would have produced
+  serialize identically, so persisting the second after the first was treated as a no-op retry of the
+  *same* evidence instead of a rejected conflicting payload. Hashing the full canonical text has no
+  such ambiguity — two different evidence values can only collide via an actual SHA-256 collision, not
+  a structural encoding coincidence. Because journal.mjs's exported `canonicalJson()`/`digest()` always
+  bound-check against its own fixed default limits (independent of whatever wider, justified ceiling
+  this module's own `assertBoundedCanonicalValue` call already proved the value satisfies),
+  `wholeEvidenceDigest` uses a local serializer (`unboundedCanonicalJson`) that produces the same
+  canonical text `canonicalJson` would, but skips redoing that default-limit check — it must only ever
+  be called on a value that has already passed `assertPagedStageEvidence` (which itself calls
+  `assertCanonicalPayoutValue` for structural canonicality and `assertBoundedCanonicalValue` with this
+  module's own wider limits for size), never on unvalidated input.
 - An array that already fits in one page (`length <= 64`) is written inline in the manifest rather
   than as a page reference: paging every array regardless of size (the original behavior) exhausted
   the shared page budget on realistic records with several small nested arrays long before reaching
