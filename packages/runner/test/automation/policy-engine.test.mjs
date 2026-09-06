@@ -540,28 +540,74 @@ test('claim admission rejects configuration values above the fixed operator ceil
 // derived multiple or a round USD guess.
 const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
 
-function exactOutputAdmission({ cycleId, unitFunding = '25000000', aggregateFunding = VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, deadlineUnixSeconds = 1_000_000 } = {}) {
+function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds }) {
+  const sender = '0x000000000000000000000000000000000000dEaD';
+  const recipient = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+  const origin = {
+    chainId: 4663, address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amount: unitFunding,
+  };
+  const destination = {
+    chainId: 792703809, address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6,
+    amount: unitPurchase, minimumAmount: unitPurchase,
+  };
+  const requestId = `relay-unit-${cycleId}`;
+  const orderId = `0x${'1'.repeat(64)}`;
+  const raw = {
+    requestId,
+    details: {
+      sender,
+      recipient,
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
+    },
+    protocol: { v2: { orderId, orderData: {
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
+    } } },
+    steps: [],
+  };
+  const quote = {
+    direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender, recipient,
+    deadlineUnixSeconds, origin, destination, stepCount: raw.steps.length, raw,
+  };
+  return {
+    ...quote,
+    quoteDigest: digest({
+      schema: 'hookemon.relay-quote.v1', direction: quote.direction, tradeType: quote.tradeType,
+      requestId: quote.requestId, orderId: quote.orderId, sender: quote.sender, recipient: quote.recipient,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds, origin: quote.origin, destination: quote.destination, raw: quote.raw,
+    }),
+  };
+}
+
+function exactOutputAdmission({
+  cycleId, quantity = 2, unitPurchase = '25000000', unitFunding = '25000000',
+  aggregateFunding = quantity === 1 ? unitFunding : VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, deadlineUnixSeconds = 1_000_000,
+} = {}) {
+  const aggregatePurchase = (BigInt(unitPurchase) * BigInt(quantity)).toString();
+  const unitRelayQuote = parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds });
   return {
     schema: 'hookemon.policy-admission.v2',
     cycleId,
     packId: 'base-pack',
-    quantity: 2,
+    quantity,
     quoteDigest: `sha256:${'b'.repeat(64)}`,
-    unitPurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '25000000' },
-    aggregatePurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '50000000' },
+    unitPurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: unitPurchase },
+    aggregatePurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: aggregatePurchase },
     unitFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: unitFunding },
     aggregateFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: aggregateFunding },
     unitRelay: {
       tradeType: 'EXACT_OUTPUT', requestId: `relay-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`,
-      quoteDigest: `sha256:${'c'.repeat(64)}`, deadlineUnixSeconds,
+      quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds,
       sender: '0x000000000000000000000000000000000000dEaD', recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto',
-      destinationAmount: '25000000', destinationMinimumAmount: '25000000',
+      destinationAmount: unitPurchase, destinationMinimumAmount: unitPurchase,
     },
+    unitRelayQuote,
     relay: {
       tradeType: 'EXACT_OUTPUT', requestId: 'relay-n2', orderId: `0x${'2'.repeat(64)}`,
       quoteDigest: `sha256:${'b'.repeat(64)}`,
       deadlineUnixSeconds, sender: '0x000000000000000000000000000000000000dEaD',
-      recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto', destinationAmount: '50000000', destinationMinimumAmount: '50000000',
+      recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto', destinationAmount: aggregatePurchase, destinationMinimumAmount: aggregatePurchase,
     },
   };
 }
@@ -592,6 +638,62 @@ test('N2 admission keeps the independent unit quote on the unit rail and reserve
   assert.deepEqual(await engine.admit({ ...request, cycleId: 'cycle-n2-over-cap', admission: exactOutputAdmission({ cycleId: 'cycle-n2-over-cap', aggregateFunding: '50309870' }), releaseAmountMicroUsdg: '50309870' }), { allowed: false, reason: 'PER_CYCLE_CAP' });
   timestamp += POLICY_WINDOW_MS;
   assert.deepEqual(await engine.evaluatePurchase(request), { allowed: false, reason: 'SPEND_RESERVATION_EXPIRED' });
+});
+
+test('N1 requires immutable parsed Relay quote evidence before it can satisfy the unit-price rail', async () => {
+  const cycleId = 'cycle-unit-raw-evidence';
+  const forged = exactOutputAdmission({ cycleId, unitFunding: '1', aggregateFunding: '50309869' });
+  delete forged.unitRelayQuote;
+  const configuration = configuredPolicy({
+    requestedOrders: 2, maxBoostersPerCycle: 2, maxUnitPriceMicroUsdg: '1',
+    maxCycleBudgetMicroUsdg: '50309869', perCycleCapMicroUsdg: '50309869', max24HourBudgetMicroUsdg: '50309869',
+    lossCapMicroUsdg: '50309869', maxOutstandingCustodyMicroUsdg: '50309869', maxCyclesPerDay: 1, manualApprovalCycles: 0,
+  });
+  const { engine } = policyFixture({ configuration });
+  await assert.rejects(
+    () => engine.admit({
+      boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: '50309869', packId: 'base-pack', liveMode: true, admission: forged,
+    }),
+    /unitRelayQuote must be a parsed Relay quote/,
+  );
+});
+
+test('N1 admission accepts independently parsed unit and aggregate Relay evidence', async () => {
+  const cycleId = 'cycle-n1-parsed-evidence';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine, readConfiguration } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  const decision = await engine.admit(request);
+  assert.equal(decision.allowed, true);
+  assert.deepEqual(await engine.evaluatePurchase(request), { allowed: true, cycleDigest: decision.cycleDigest });
+  assert.equal(readConfiguration().spendLedger[0].amountMicroUsdg, admission.aggregateFundingQuote.amountAtomic);
+});
+
+test('N1 rejects a parsed Relay quote whose canonical digest or raw origin amount changes', async () => {
+  const cycleId = 'cycle-unit-evidence-mutation';
+  const admission = exactOutputAdmission({ cycleId });
+  const configuration = configuredPolicy({ requestedOrders: 2, maxBoostersPerCycle: 2, manualApprovalCycles: 0 });
+  const { engine } = policyFixture({ configuration });
+  const digestMutation = structuredClone(admission);
+  digestMutation.unitRelayQuote.raw.details.operation = 'changed';
+  await assert.rejects(
+    () => engine.admit({ boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, packId: 'base-pack', liveMode: true, admission: digestMutation }),
+    /unitRelayQuote digest does not match/,
+  );
+  const originMutation = structuredClone(admission);
+  originMutation.unitRelayQuote.raw.details.currencyIn.amount = '1';
+  await assert.rejects(
+    () => engine.admit({ boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, packId: 'base-pack', liveMode: true, admission: originMutation }),
+    /raw origin does not bind/,
+  );
 });
 
 test('the verified N2 two-pack USDG quote is admitted under an explicit configuration sized exactly to it, and one atomic unit above the same rail is refused', async () => {
