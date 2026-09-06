@@ -85,20 +85,20 @@
     {
       "system": "Relay quote",
       "failureClass": "expired-quote",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": null,
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "refresh-after-readmission",
       "owningWp": "WP07",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired Relay quote before any request or broadcast"
+      "test": "OPEN FACT (WP07): evidence=packages/adapters/test/app/stage-driver.test.mjs:2012; resolution=implement a policy/admission-boundary quote-refresh that proves no signed or broadcast attempt exists before atomically admitting one replacement quote for the same claimed principal; verified alternative=the current build retries the same immutable expired quote under generic scheduler outage backoff, which makes no progress but also creates no effect"
     },
     {
       "system": "Chain transaction",
       "failureClass": "expired-blockhash",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": "BROADCAST",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "reconcile-then-replace",
       "owningWp": "WP08a",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired return blockhash while retaining a broadcast attempt after reopen"
+      "test": "OPEN FACT (WP08a): evidence=packages/adapters/test/app/stage-driver.test.mjs:2155; resolution=reconcile the original broadcast signature to finalized or to canonical expired-and-unlanded proof, then create exactly one linked replacement attempt with a fresh blockhash while retaining the original signed bytes and signature permanently; verified alternative=the current build keeps the attempt BROADCAST and observation-only, returning pending without a second effect"
     },
     {
       "system": "EVM transaction",
@@ -121,11 +121,11 @@
     {
       "system": "Wallet lease",
       "failureClass": "lost-lease",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": "NOT_SENT",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "retry-same-request-under-new-lease",
       "owningWp": "WP07",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease before a provider effect and retains a NOT_SENT retry record"
+      "test": "OPEN FACT (WP07): evidence=packages/adapters/test/app/stage-driver.test.mjs:2058; resolution=let a newly fenced owner retry the identical prepared request digest exactly once, and reclassify capability-boundary loss as SENT_UNKNOWN for reconciliation instead of retry; verified alternative=the current build records NOT_SENT with zero effect and lets the scheduler reacquire the lease on a later run without an automatic same-digest retry"
     },
     {
       "system": "Repository recovery",
@@ -139,18 +139,18 @@
     {
       "system": "Open result",
       "failureClass": "missing-mint-response-recorded",
-      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedTerminalState": null,
       "expectedAttemptState": "RESPONSE_RECORDED",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "held-position-owner-decision",
       "owningWp": "WP08b",
       "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — open response missing its memo-bound mint holds durably without a retry"
     },
     {
       "system": "Open result",
       "failureClass": "missing-mint-sent-unknown-retry",
-      "expectedTerminalState": "HELD_DATA_UNVERIFIED",
+      "expectedTerminalState": null,
       "expectedAttemptState": "SENT_UNKNOWN",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "held-position-owner-decision",
       "owningWp": "WP08b",
       "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — open SENT_UNKNOWN retry missing mint holds durably after reopen"
     },
@@ -166,11 +166,11 @@
     {
       "system": "Buyback API",
       "failureClass": "unavailable",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": null,
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "held-position-owner-decision",
       "owningWp": "WP08b",
-      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — holds unavailable buyback durably after reopen before its sole owner decision"
+      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — records unavailable buyback as a durable held position without terminalizing the cycle"
     },
     {
       "system": "Snapshot",
@@ -238,11 +238,11 @@
     {
       "system": "External signer",
       "failureClass": "keychain-interaction",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": "NOT_SENT",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "retry-after-signer-readiness",
       "owningWp": "WP08a",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a keychain interaction denial with redacted OS text before any broadcast"
+      "test": "OPEN FACT (WP08a): evidence=packages/adapters/test/app/stage-driver.test.mjs:1950; resolution=persist a durable redacted signer-unavailable reason and next retry time, probe the same approved signer identity after bounded backoff, then retry the identical request once readiness returns; verified alternative=the current build records a redacted NOT_SENT denial while the scheduler applies generic outage backoff under a TICK_FAILED reason that is not durable or UI-visible after restart"
     },
     {
       "system": "Standing authority",
@@ -252,6 +252,78 @@
       "expectedNextStage": "reconcile",
       "owningWp": "WP07",
       "test": "packages/adapters/test/app/stage-driver.test.mjs — production signing replays a stored authority after expiry with one signer and a reopened reconciliation attempt"
+    },
+    {
+      "system": "Held position",
+      "failureClass": "card-carved-out-cycle-completes",
+      "expectedTerminalState": "COMPLETED",
+      "expectedAttemptState": null,
+      "expectedNextStage": "return-and-payout",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/multi-pack-recovery.test.mjs — mixed batch: one purchased pack that never opens is held, the other pack still opens, gates, and sells"
+    },
+    {
+      "system": "Claim admission",
+      "failureClass": "held-position-count-limit",
+      "expectedTerminalState": null,
+      "expectedAttemptState": null,
+      "expectedNextStage": "claim-refused",
+      "owningWp": "WP10a",
+      "test": "packages/runner/test/automation/policy-engine.test.mjs — claim admission refuses at the held-position count or value limit"
+    },
+    {
+      "system": "Claim admission",
+      "failureClass": "held-position-value-limit",
+      "expectedTerminalState": null,
+      "expectedAttemptState": null,
+      "expectedNextStage": "claim-refused",
+      "owningWp": "WP10a",
+      "test": "packages/runner/test/automation/policy-engine.test.mjs — claim admission refuses at the held-position count or value limit"
+    },
+    {
+      "system": "Supplementary payout",
+      "failureClass": "restart-between-broadcast-and-finality",
+      "expectedTerminalState": "COMPLETED",
+      "expectedAttemptState": "BROADCAST",
+      "expectedNextStage": "reconcile",
+      "owningWp": "WP09b",
+      "test": "packages/adapters/test/app/supplementary-payout.test.mjs — pays the original supplementary snapshot recipients once when finality resumes after a restart"
+    },
+    {
+      "system": "Card mutation",
+      "failureClass": "sent-unknown-deadline",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "SENT_UNKNOWN",
+      "expectedNextStage": "held-position-owner-decision-or-reconcile",
+      "owningWp": "WP08b",
+      "test": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs — reconcileLiveOpen holds a SENT_UNKNOWN pack past its deadline as HELD_UNRESOLVED without resubmitting"
+    },
+    {
+      "system": "Held position",
+      "failureClass": "sent-unknown-late-resolution",
+      "expectedTerminalState": "COMPLETED",
+      "expectedAttemptState": "SENT_UNKNOWN",
+      "expectedNextStage": "supplementary-settlement-or-close",
+      "owningWp": "WP09b",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — resolves a deadline-held position as sold, refunded, or never sent only on its attributable path"
+    },
+    {
+      "system": "Cycle settlement",
+      "failureClass": "all-cards-held-zero-proceeds",
+      "expectedTerminalState": "COMPLETED",
+      "expectedAttemptState": null,
+      "expectedNextStage": "zero-payout",
+      "owningWp": "WP09b",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — all held cards complete a cycle with zero main settlement"
+    },
+    {
+      "system": "Cycle custody",
+      "failureClass": "interleaved-held-position-isolation",
+      "expectedTerminalState": "COMPLETED",
+      "expectedAttemptState": null,
+      "expectedNextStage": "independent-settlement",
+      "owningWp": "WP07-0",
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — keeps interleaved held positions and attributed proceeds in their original cycles"
     }
   ]
 }

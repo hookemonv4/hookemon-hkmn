@@ -45,3 +45,23 @@ Expected outcome: terminal=HELD_UNAVAILABLE; attempt=BROADCAST; next=owner-decis
 Test: packages/adapters/test/app/stage-driver.test.mjs — holds an expired return blockhash while retaining a broadcast attempt after reopen
 Alarm reason/code: `SOLANA_BLOCKHASH_STALE`
 Resume command: none supported; reconcile the original signed bytes and signature before any replacement is considered.
+
+## Proposed revision 66 (draft, pending owner approval)
+
+`transient-recovery-contract-review.md` classifies an expired blockhash as
+effect-ambiguous, not semantic-invalid: the original signature may or may not
+have landed, so a mechanical hold-and-owner-decision cannot safely be resolved
+by a person either. The draft proposes `terminal=null`, `attempt=BROADCAST`,
+`next=reconcile-then-replace`: keep the original attempt nonterminal and
+observation-only, reconcile its signature until finalized or until canonical
+validity/status evidence proves it expired and unlanded, and only then create
+exactly one linked replacement attempt with a fresh blockhash/signature. The
+original bytes and signature are retained forever; no replacement is created
+from timeout, a missing response, or block height alone.
+
+OPEN FACT (WP08a): no implementation exists yet; the current build (evidenced
+above) keeps the attempt `BROADCAST` and observation-only, returning
+pending/thrown without a second effect, but has no demonstrated production
+transition that proves the old signature unlanded and installs a replacement.
+This section is a draft citation only — do not resume a held cycle against it
+until the revision is approved and implemented.

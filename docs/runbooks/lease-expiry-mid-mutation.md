@@ -45,3 +45,23 @@ Expected outcome: terminal=HELD_UNAVAILABLE; attempt=NOT_SENT; next=owner-decisi
 Test: packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease before a provider effect and retains a NOT_SENT retry record
 Alarm reason/code: `LEASE_CONTENTION`
 Resume command: none supported; no action may resume until the prior effect is reconciled.
+
+## Proposed revision 66 (draft, pending owner approval)
+
+`transient-recovery-contract-review.md` classifies a lease lost strictly before
+the provider/signature capability boundary as proven-pre-effect-transient: no
+effect occurred, so an owner decision is not required to make progress. The
+draft proposes `terminal=null`, `attempt=NOT_SENT`,
+`next=retry-same-request-under-new-lease`: a newly, later-fenced owner may
+retry the identical prepared request digest exactly once; CAS/fencing must
+still prevent the stale owner from performing any effect after fence failure.
+If the capability boundary was already reached when the lease was lost, the
+attempt is instead effect-ambiguous and reclassified `SENT_UNKNOWN` for
+reconciliation, never blindly retried.
+
+OPEN FACT (WP07): no implementation exists yet; the current build (evidenced
+above) records `NOT_SENT` with zero effect and lets the scheduler reacquire
+the lease on a later run, without an automatic same-digest retry or the
+post-boundary `SENT_UNKNOWN` reclassification. This section is a draft
+citation only — do not resume a held cycle against it until the revision is
+approved and implemented.

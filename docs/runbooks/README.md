@@ -1,12 +1,18 @@
 # Phase 3 incident runbooks
 
-Use these runbooks before resuming a held cycle. Each one records the detection
-signal, safe stop, automatic runner behavior, operator recovery boundary,
-escalation point, and the evidence that proves the expected result.
+Use these runbooks before resuming a held cycle or resolving a held position.
+Each one records the detection signal, safe stop, automatic runner behavior,
+operator recovery boundary, escalation point, and the evidence that proves the
+expected result.
 
 Current controls are named exactly. A control marked `planned (WP12)` or
 `planned (WP10b)` does not exist yet and must not be substituted with an
 ad-hoc transaction or dashboard action.
+
+A runbook's own body describes the current, implemented behavior. A "Proposed
+revision 66 (draft, pending owner approval)" section, where present, describes
+an unapproved spec-revision-66 candidate only; it is not yet implemented and
+must not be treated as the current control.
 
 ## CI
 
@@ -67,3 +73,44 @@ ad-hoc transaction or dashboard action.
 - [Frozen payout recipient](payout-recipient-frozen.md)
 - [Holder count above payout envelope](payout-holder-envelope.md)
 - [Unattributed deposit](unattributed-deposit.md)
+
+## Held positions (proposed revision 66, pending owner approval)
+
+The current, implemented control for an unresolved card remains the whole-cycle
+`HELD_*` hold described above (Held epic card, Collector missing mint, and the
+Buyback API stanza of Collector timeout). Draft requirements revision 66
+proposes carving each unresolved card into its own attributed held position so
+that a held or unknown card no longer blocks the settled portion of the same
+cycle's return and payout, per `authoritative-launch-handoff.md:197-201,283`.
+This section previews that draft; do not use it as the current control until
+the revision is owner-approved and the runtime, matrix, and this section's
+citations are reconciled.
+
+- Detection: an open held position shows its reason class, terminal state,
+  age, attributed cycle, evidence digest, and position revision. A cycle can
+  legitimately be `COMPLETED` while a held position remains open and its
+  settled cards have already paid out.
+- Limit refusal: `HELD_LIMIT` means the open-position count has reached
+  `maxHeldPositions` or the attributed USDG control value exceeds
+  `maxHeldValueMicroUsdg`. Do not bypass the refusal with a new claim; resolve
+  a position or adjust the owner-controlled limit configuration instead.
+- Decision: request `sell` or `keep-holding` for one position, bound to its
+  evidence digest and position revision. `keep-holding` leaves the position
+  counted against the limits without releasing custody. `sell` starts that
+  position's own supplementary settlement; it never authorizes a manual
+  provider request or transfer.
+- Supplementary payout: the position-scoped settlement reuses the original
+  cycle's frozen eligibility snapshot and pays from a manifest distinct from
+  the main cycle's payout. It becomes immutable at its first broadcast.
+- Late resolution: a position whose provider mutation stayed `SENT_UNKNOWN`
+  past the configured deadline can later be recorded sold, refunded, or never
+  sent from durable evidence. OPEN FACT: no production observation-only
+  provider reconciler yet collects that evidence automatically; until it
+  exists, keep the position open and do not resend the provider mutation.
+- Escalation: escalate a missing, conflicting, or stale evidence record, or an
+  unexpected cross-cycle attribution, to the cycle owner with the position ID,
+  cycle ID, and durable evidence references.
+
+Wrong-asset and wrong-recipient transaction-policy holds are unrelated to card
+separation and are not part of this proposal; they keep their existing
+whole-cycle `HELD_DATA_UNVERIFIED` owner-decision runbooks unchanged.

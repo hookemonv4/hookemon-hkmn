@@ -40,3 +40,23 @@ Expected outcome: terminal=HELD_UNAVAILABLE; attempt=NOT_SENT; next=owner-decisi
 Test: packages/adapters/test/app/stage-driver.test.mjs — holds a keychain interaction denial with redacted OS text before any broadcast
 Alarm reason/code: OPEN FACT (WP08a): no dedicated alert code is emitted for a signing error.
 Resume command: none supported; restore signer readiness before a new signature is prepared.
+
+## Proposed revision 66 (draft, pending owner approval)
+
+`transient-recovery-contract-review.md` classifies a pre-signature Keychain
+denial or timeout as proven-pre-effect-transient: no broadcast occurred, so an
+owner decision is not required to make progress. The draft proposes
+`terminal=null`, `attempt=NOT_SENT`, `next=retry-after-signer-readiness`:
+persist a bounded, redacted signer-unavailable reason and next retry time,
+probe the same approved signer identity after bounded backoff, then retry the
+identical request once readiness returns. This never exports a key,
+substitutes a signer, or creates a new request; if a signature might have been
+returned, the attempt stays in the effect-ambiguous class and reconciles the
+durable chain attempt instead of retrying.
+
+OPEN FACT (WP08a): no implementation exists yet; the current build (evidenced
+above) records a redacted `NOT_SENT` denial while the scheduler treats the
+thrown error as generic `TICK_FAILED` with 5s-to-300s outage backoff, and the
+specific reason is not durable or UI-visible after restart. This section is a
+draft citation only — do not resume a held cycle against it until the revision
+is approved and implemented.
