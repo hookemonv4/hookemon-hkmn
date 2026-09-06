@@ -1,7 +1,7 @@
 {
   "schema": "hookemon.failure-matrix-transient-proposal.v1-DRAFT-NONCANONICAL",
   "status": "PROPOSED_PENDING_OWNER_APPROVAL_AND_IMPLEMENTATION",
-  "note": "This file is NOT the canonical failure matrix and is not read by packages/runner/test/cycle/failure-matrix.test.mjs, any CI gate, or any other conformance check. docs/audit/2026-09-04/failure-matrix.json is unchanged for every row named here and remains the sole conformance authority until a row below has a real runtime change and an exact passing test citation. A row here must not be copied into the canonical file, and its owningWp must not be added to that file's OPEN_FACT_CELL_KEYS, until then. See decisions/ADR-0025-bounded-transient-recovery-classification.md for the rationale and decisions/ADR-0024-held-position-carve-out.md:64-71 for the exhaustive list of semantic-invalid classes this proposal does not touch.",
+  "note": "This file is NOT the canonical failure matrix and is not read by packages/runner/test/cycle/failure-matrix.test.mjs, any CI gate, or any other conformance check. docs/audit/2026-09-04/failure-matrix.json is unchanged for every row named here and remains the sole conformance authority (the currently deployed fallback contract) until a row below has a real runtime change and an exact passing test citation. A row here must not be copied into the canonical file, and its owningWp must not be added to that file's OPEN_FACT_CELL_KEYS, until then. currentBehaviorEvidence below describes exactly what the cited test asserts today, not the frozen canonical outcome and not the proposed outcome; do not read either citation as proof of the canonical hold. See decisions/ADR-0025-bounded-transient-recovery-classification.md for the full rationale and decisions/ADR-0024-held-position-carve-out.md:93-102 for the exhaustive list of semantic-invalid classes this proposal does not touch.",
   "rows": [
     {
       "canonicalCell": "Relay quote:expired-quote",
@@ -9,8 +9,8 @@
       "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": null, "expectedNextStage": "refresh-after-readmission" },
       "class": "proven-pre-effect-transient",
       "owningWp": "WP07",
-      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:2012 — keeps an expired Relay quote retryable before any request or broadcast (proves the current whole-cycle hold, not the proposed refresh)",
-      "requiredBeforePromotion": "Implement a policy/admission-boundary quote-refresh that proves no signed or broadcast attempt exists before atomically admitting one replacement quote for the same claimed principal; add a focused test that exercises the refresh and cite it in place of this row."
+      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:2012 — keeps an expired Relay quote retryable before any request or broadcast. Asserts terminalState=null, zero requests/broadcasts, no persisted operational-stage attempt, and the cycle remains the active/retryable cycle after reopen, at the low-level createStageDriver primitive. This is the nonterminal, no-attempt shape the proposed row already needs; it does not prove the frozen canonical HELD_UNAVAILABLE contract is exercised end-to-end (no source path was found calling holdCycle for this error), nor does it prove the proposed refresh-after-readmission classification, scheduler wiring, or alert reason, which remain unimplemented.",
+      "requiredBeforePromotion": "Implement a policy/admission-boundary quote-refresh that proves no signed or broadcast attempt exists before atomically admitting one replacement quote for the same claimed principal, wire the durable classification/reason and scheduler transition, add a focused test that exercises the refresh end-to-end, and cite it in place of this row."
     },
     {
       "canonicalCell": "Chain transaction:expired-blockhash",
@@ -18,28 +18,28 @@
       "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": "BROADCAST", "expectedNextStage": "reconcile-then-replace" },
       "class": "effect-ambiguous",
       "owningWp": "WP08a",
-      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:2155 — keeps an expired return blockhash retryable while retaining a broadcast attempt after reopen (proves the current whole-cycle hold, not the proposed replacement)",
+      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:2155 — keeps an expired return blockhash retryable while retaining a broadcast attempt after reopen. Asserts terminalState=null, the chain attempt persists as BROADCAST, and the cycle remains active/retryable, at the low-level createStageDriver primitive. This matches the proposed row's terminal/attempt shape already; it does not prove the frozen canonical HELD_UNAVAILABLE contract is exercised end-to-end, and no demonstrated production transition proves the old signature unlanded or installs a replacement, which remains unimplemented.",
       "requiredBeforePromotion": "Reconcile the original broadcast signature to finalized or to canonical expired-and-unlanded proof, then create exactly one linked replacement attempt with a fresh blockhash while retaining the original signed bytes and signature permanently; add a focused test and cite it in place of this row."
     },
     {
       "canonicalCell": "Wallet lease:lost-lease",
-      "note": "Proposed split #1 of 2 — the pre-capability-boundary half. This keeps the existing canonical failureClass name for promotion.",
+      "note": "Proposed split #1 of 2 — the pre-provider-mutation-capability-boundary half. This keeps the existing canonical failureClass name for promotion. A lease lost after a signing (not provider-mutation) capability boundary is out of scope for this row; see decisions/ADR-0025-bounded-transient-recovery-classification.md, which routes that case through the chain-attempt state machine instead.",
       "currentCanonicalOutcome": { "expectedTerminalState": "HELD_UNAVAILABLE", "expectedAttemptState": "NOT_SENT", "expectedNextStage": "owner-decision" },
       "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": "NOT_SENT", "expectedNextStage": "retry-same-request-under-new-lease" },
       "class": "proven-pre-effect-transient",
       "owningWp": "WP07",
-      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:2058 — keeps a lost lease retryable before a provider effect and retains a NOT_SENT retry record (proves the current whole-cycle hold, not the proposed same-digest retry)",
+      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:2058 — keeps a lost lease retryable before a provider effect and retains a NOT_SENT retry record. Asserts terminalState=null, terminalEvidence=null, the operational attempt persists as NOT_SENT, and the cycle remains active/retryable, at the low-level createStageDriver primitive. This matches the proposed row's terminal/attempt shape already; it does not prove the frozen canonical HELD_UNAVAILABLE contract is exercised end-to-end, and it does not prove the proposed same-fence, same-digest retry, which remains unimplemented.",
       "requiredBeforePromotion": "Let a newly, later-fenced owner retry the identical prepared request digest exactly once, with CAS/fencing preventing the stale owner from any effect after fence failure; add a focused test and cite it in place of this row."
     },
     {
       "canonicalCell": "Wallet lease:lost-lease-after-capability",
-      "note": "Proposed split #2 of 2 — new failureClass, does not exist in the canonical matrix today. Lease loss discovered after the capability boundary was reached (the provider mutation may already have been sent) is not the same evidence class as pre-boundary loss and must not share its retry tuple.",
+      "note": "Proposed split #2 of 2 — new failureClass, does not exist in the canonical matrix today. Lease loss discovered after a provider-mutation capability boundary was reached (the provider mutation may already have been sent) is not the same evidence class as pre-boundary loss and must not share its retry tuple. Lease loss discovered after a signing capability boundary was reached is a third, distinct case governed by the existing chain-attempt PREPARED/SIGNED/BROADCAST/REFUSED states, not by this row.",
       "currentCanonicalOutcome": null,
       "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": "SENT_UNKNOWN", "expectedNextStage": "reconcile-before-retry" },
       "class": "effect-ambiguous",
       "owningWp": "WP07",
       "currentBehaviorEvidence": "No lease-specific post-capability test exists at this head. The nearest existing analog for the general SENT_UNKNOWN/reconcile pattern used elsewhere in this repository is packages/adapters/test/app/stage-driver.test.mjs:2673 — keeps a Collector committed-then-503 attempt SENT_UNKNOWN after reopen until reconciliation (a different failure class; cited only to show the pattern this row would reuse, not as evidence this case is already covered).",
-      "requiredBeforePromotion": "Classify lease loss discovered after the capability boundary as SENT_UNKNOWN, forbid any automatic retry or provider mutation until canonical reconciliation resolves the prior attempt, add a lease-specific focused test, and cite it in place of this row."
+      "requiredBeforePromotion": "Classify lease loss discovered after a provider-mutation capability boundary as SENT_UNKNOWN, forbid any automatic retry or provider mutation until canonical reconciliation resolves the prior attempt, add a lease-specific focused test, and cite it in place of this row."
     },
     {
       "canonicalCell": "External signer:keychain-interaction",
@@ -48,18 +48,18 @@
       "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": "NOT_SENT", "expectedNextStage": "retry-after-signer-readiness" },
       "class": "proven-pre-effect-transient",
       "owningWp": "WP08a",
-      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:1950 — keeps a keychain interaction denial retryable with redacted OS text before any broadcast (proves the current whole-cycle hold, not the proposed readiness retry)",
+      "currentBehaviorEvidence": "packages/adapters/test/app/stage-driver.test.mjs:1950 — keeps a keychain interaction denial retryable with redacted OS text before any broadcast. Asserts terminalState=null, terminalEvidence=null, the operational attempt persists as NOT_SENT, and the cycle remains active/retryable, at the low-level createStageDriver primitive, for a synchronous helper-process denial (exit code, no signature). This matches the proposed row's terminal/attempt shape already; it does not prove the frozen canonical HELD_UNAVAILABLE contract is exercised end-to-end, and it does not prove the proposed durable reason/backoff/readiness-retry, which remain unimplemented.",
       "requiredBeforePromotion": "Persist a durable redacted signer-unavailable reason and next retry time, probe the same approved signer identity after bounded backoff, then retry the identical request once readiness returns; add a focused test and cite it in place of this row."
     },
     {
       "canonicalCell": "External signer:keychain-interaction-timeout",
-      "note": "Proposed split #2 of 2 — new failureClass, does not exist in the canonical matrix today. A timeout during signing cannot prove a signature was not returned, unlike the provable denial above, and must not share its retry tuple.",
+      "note": "Proposed split #2 of 2 — new failureClass, does not exist in the canonical matrix today. Scoped ONLY to the verified owned Keychain sign-only broker per decisions/ADR-0025-bounded-transient-recovery-classification.md's 'Sign-only bounded retry' section (source-cited there against packages/adapters/src/signing/keychain-signer.mjs, packages/adapters/bin/hookemon-keychain-signer.mjs, and related files); an opaque or external-module signer's timeout keeps the current no-automatic-retry, terminal whole-cycle class and is NOT covered by this row. This is not the same mechanism as the effect-ambiguous rows above: it is a proven-pre-effect-transient retry made safe by durably binding identical unsigned bytes/identity/digests before invocation and deduplicating any resulting signature, not by proving no signature was returned.",
       "currentCanonicalOutcome": null,
-      "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": "NOT_SENT", "expectedNextStage": "reconcile-before-retry" },
-      "class": "effect-ambiguous",
+      "proposedOutcome": { "expectedTerminalState": null, "expectedAttemptState": "NOT_SENT", "expectedNextStage": "retry-sign-only-with-durable-binding" },
+      "class": "proven-pre-effect-transient (sign-only bounded retry)",
       "owningWp": "WP08a",
-      "currentBehaviorEvidence": "No timeout-specific test exists at this head; packages/adapters/test/app/stage-driver.test.mjs:1950 covers only a synchronous denial and is cited here only to show that the current build's single keychain-failure pathway does not yet distinguish a timeout from a provable denial.",
-      "requiredBeforePromotion": "Determine whether a signing timeout can prove no signature was returned; if it cannot, forbid automatic re-signing or a new provider mutation until canonical reconciliation resolves the prior attempt, add a timeout-specific focused test, and cite it in place of this row."
+      "currentBehaviorEvidence": "No timeout-specific test exists at this head. packages/adapters/bin/hookemon-keychain-signer.mjs:203-215 proves the checked-in broker refuses a broadcast operation and its sign operation therefore cannot itself submit a transaction; packages/adapters/test/app/stage-driver.test.mjs:1950 exercises only a synchronous denial, not a timeout, and the current build does not distinguish the two. No durable pre-invocation binding of unsigned bytes/identity/digest/validity-context exists yet (Collector purchase keeps generated unsigned bytes only in process memory), so the proposed retry cannot be safely enabled until that durable binding is implemented and a focused test proves identical-byte, idempotent-retry-with-dedup behavior for this exact broker.",
+      "requiredBeforePromotion": "Durably persist the exact unsigned wire bytes, signer role/account identity, request digest, policy/authorization digest, and validity context before invoking the Keychain broker's sign-only operation; on timeout, retry only against those exact values without regenerating the provider transaction, blockhash, nonce, memo, or policy; rely on the existing signed-bytes recovery record to deduplicate a signature from either attempt; add a focused test proving this exact contract for the Keychain broker specifically (not a generic signer); and cite it in place of this row. Do not apply this row's outcome to any opaque or external-module signer."
     }
   ]
 }

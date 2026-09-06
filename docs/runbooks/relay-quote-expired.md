@@ -33,7 +33,7 @@ Test: packages/adapters/test/app/stage-driver.test.mjs — holds an expired Rela
 Alarm reason/code: OPEN FACT (WP07): no dedicated alert code is emitted for quote expiry.
 Resume command: none supported; an approved reconciliation must resolve the original held cycle first.
 
-## Proposed revision 66 (not implemented; not canonical)
+## Proposed revision 66
 
 `decisions/ADR-0025-bounded-transient-recovery-classification.md` classifies a
 pre-request, pre-signature expired quote as proven-pre-effect-transient, not
@@ -46,13 +46,21 @@ replacement quote for the same claimed principal, re-running full admission
 and ceilings. A quote is never silently substituted once signed bytes exist
 for it.
 
-No implementation exists yet; the current, canonical control above (recorded
-unchanged in `docs/audit/2026-09-04/failure-matrix.json`) instead retries the
-same immutable expired quote under generic scheduler outage backoff, which
-cannot make progress but also creates no effect. The proposed row is recorded
-in the non-canonical
-`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`,
-not in the canonical matrix. This section is a draft citation only — do not
-resume a held cycle against it until the revision is owner-approved through
-`gates/spec.json`'s `S5` item and this specific behavior is implemented and
-tested.
+The "Recovery contract" above is the frozen revision-65 contract and the
+currently deployed fallback: it is binding today and stays binding regardless
+of whether this proposal is later owner-approved, until an implementation and
+a promoted matrix cell supersede it. Its cited test itself proves only that
+the low-level `createStageDriver` primitive leaves `terminalState=null`, no
+attempt persisted, and the cycle active/retryable when this error is thrown
+— not that the frozen whole-cycle hold above is exercised end-to-end, and not
+the proposed refresh. Treat that gap as documented contract/evidence drift,
+not as proof either way. The proposed row lives only in the non-canonical
+`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`
+and is not implemented.
+
+This section is authoritative only once both hold: (a) a
+`decisions/owner-approvals/*` receipt approves the exact current
+`specs/requirements.json` hash under `gates/spec.json`'s `S5` item, and (b)
+this behavior has an implemented, passing, non-`OPEN FACT` citation promoted
+into the canonical matrix. Check both directly; do not infer either from this
+document's wording.

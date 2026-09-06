@@ -46,33 +46,10 @@ Test: packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease be
 Alarm reason/code: `LEASE_CONTENTION`
 Resume command: none supported; no action may resume until the prior effect is reconciled.
 
-## Proposed revision 66 (not implemented; not canonical)
+## Proposed revision 66
 
-`decisions/ADR-0025-bounded-transient-recovery-classification.md` splits this
-single canonical cell into two proposed cases that must not share one tuple:
+`decisions/ADR-0025-bounded-transient-recovery-classification.md` splits this single canonical cell into three cases that must not share one tuple. **Before a provider-mutation capability boundary** (proven-pre-effect-transient): no effect occurred; proposed `terminal=null`, `attempt=NOT_SENT`, `next=retry-same-request-under-new-lease` — a newly, later-fenced owner retries the identical prepared request digest exactly once, and CAS/fencing still prevents the stale owner from any effect after fence failure. **After a provider-mutation capability boundary was already reached** (effect-ambiguous, new proposed cell `Wallet lease:lost-lease-after-capability`): the mutation may already have been sent; proposed `terminal=null`, `attempt=SENT_UNKNOWN`, `next=reconcile-before-retry` — observation-only, no automatic retry or new provider mutation until canonical reconciliation resolves the prior attempt. **After a *signing* capability boundary was already reached**: this is a third, distinct case that this matrix cell does not cover at all — it is instead governed by the durable chain-attempt `PREPARED`/`SIGNED`/`BROADCAST`/`REFUSED` states from `specs/requirements.json`'s `REQ-cycle-repository-1`, not by `SENT_UNKNOWN`.
 
-- **Before the capability boundary** (proven-pre-effect-transient): no effect
-  occurred, so an owner decision is not required to make progress. Proposed
-  target: `terminal=null`, `attempt=NOT_SENT`,
-  `next=retry-same-request-under-new-lease` — a newly, later-fenced owner may
-  retry the identical prepared request digest exactly once; CAS/fencing must
-  still prevent the stale owner from performing any effect after fence
-  failure.
-- **After the capability boundary was already reached** (effect-ambiguous,
-  new proposed cell `Wallet lease:lost-lease-after-capability`): the provider
-  mutation may already have been sent, so this is not the same evidence class.
-  Proposed target: `terminal=null`, `attempt=SENT_UNKNOWN`,
-  `next=reconcile-before-retry` — observation-only, no automatic retry or new
-  provider mutation until canonical reconciliation resolves the prior attempt.
+The "Recovery contract" above is the frozen revision-65 contract and the currently deployed fallback: it is binding today and stays binding regardless of whether this proposal is later owner-approved, until an implementation and promoted matrix cells supersede it. Its cited test itself proves only that the low-level `createStageDriver` primitive leaves `terminalState=null`, `NOT_SENT`, and the cycle active/retryable when a pre-effect lease loss is thrown — not that the frozen whole-cycle hold above is exercised end-to-end for either proposed case, and it does not cover the post-boundary cases at all. Both unimplemented proposed rows live only in the non-canonical `docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`.
 
-No implementation exists yet for either case; the current, canonical control
-above (recorded unchanged in `docs/audit/2026-09-04/failure-matrix.json`)
-records `NOT_SENT` with zero effect and lets the scheduler reacquire the
-lease on a later run, without an automatic same-digest retry or the
-post-boundary `SENT_UNKNOWN` reclassification, and does not distinguish the
-two cases at all. Both proposed rows are recorded in the non-canonical
-`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`,
-not in the canonical matrix. This section is a draft citation only — do not
-resume a held cycle against it until the revision is owner-approved through
-`gates/spec.json`'s `S5` item and this specific behavior is implemented and
-tested.
+This section is authoritative only once a `decisions/owner-approvals/*` receipt approves the exact current `specs/requirements.json` hash under `gates/spec.json`'s `S5` item AND each case has an implemented, passing, non-`OPEN FACT` citation promoted into the canonical matrix; check both directly rather than inferring either from this document's wording.

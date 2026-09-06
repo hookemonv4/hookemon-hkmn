@@ -2,13 +2,15 @@
 
 ## Status
 
-PROPOSED_PENDING_OWNER_APPROVAL. Drafted for requirements revision 66. This
-decision grants no deployment, credential use, signing, broadcast, asset
-movement, spending, or publication authority, and is not itself an owner
-approval of revision 66. Formal approval of the exact revision-66
-`specs/requirements.json` bytes is the `S5` item defined in `gates/spec.json`;
-no `decisions/owner-approvals/*` record for it exists yet, and this ADR does
-not create one.
+Proposed. Drafted for requirements revision 66. This decision grants no deployment,
+credential use, signing, broadcast, asset movement, spending, or publication
+authority, and is not itself an owner approval of revision 66 — that remains
+true regardless of approval state. Formal approval of the exact revision-66
+`specs/requirements.json` bytes is the `S5` item defined in `gates/spec.json`,
+evidenced solely by a `decisions/owner-approvals/*` receipt bound to that
+exact current hash; check that directory and `gates/runs/spec.json` directly
+for the current state rather than inferring it from this document. This ADR
+does not itself grant or record that approval.
 
 ## Context
 
@@ -121,6 +123,7 @@ dashboard, and operator controls must keep using the same held-position
 authority records this ADR describes. No held-position bucket may fund a
 different cycle. Recovery reuses durable attempts and never sends a provider
 mutation again merely because a process restarted. This ADR does not itself
-authorize anything; `specs/requirements.json` revision 66, the failure
-matrix, and the runbooks are a proposal pending the owner's `S5` approval of
-the exact requirements hash through `gates/spec.json`.
+authorize anything; treat `specs/requirements.json` revision 66, the failure
+matrix, and the runbooks as authoritative only once a
+`decisions/owner-approvals/*` receipt approves this exact requirements hash
+under the `S5` item in `gates/spec.json`.

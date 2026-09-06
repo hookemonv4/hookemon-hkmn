@@ -41,38 +41,12 @@ Test: packages/adapters/test/app/stage-driver.test.mjs — holds a keychain inte
 Alarm reason/code: OPEN FACT (WP08a): no dedicated alert code is emitted for a signing error.
 Resume command: none supported; restore signer readiness before a new signature is prepared.
 
-## Proposed revision 66 (not implemented; not canonical)
+## Proposed revision 66
 
-`decisions/ADR-0025-bounded-transient-recovery-classification.md` splits this
-single canonical cell into two proposed cases that must not share one tuple,
-because a timeout cannot prove a signature was not returned the way a
-synchronous denial can:
+`decisions/ADR-0025-bounded-transient-recovery-classification.md` splits this single canonical cell into two proposed cases that must not share one tuple, because a timeout cannot prove a signature was not returned the way a synchronous denial can. **Provable denial before any signature could exist** (proven-pre-effect-transient): no broadcast occurred; proposed `terminal=null`, `attempt=NOT_SENT`, `next=retry-after-signer-readiness` — persist a bounded, redacted signer-unavailable reason and next retry time, probe the same approved signer identity after bounded backoff, then retry the identical request once readiness returns; never export a key, substitute a signer, or create a new request.
 
-- **Provable denial before any signature could exist**
-  (proven-pre-effect-transient): no broadcast occurred, so an owner decision
-  is not required to make progress. Proposed target: `terminal=null`,
-  `attempt=NOT_SENT`, `next=retry-after-signer-readiness` — persist a
-  bounded, redacted signer-unavailable reason and next retry time, probe the
-  same approved signer identity after bounded backoff, then retry the
-  identical request once readiness returns. This never exports a key,
-  substitutes a signer, or creates a new request.
-- **Timeout, or any outcome that cannot prove no signature was returned**
-  (effect-ambiguous, new proposed cell
-  `External signer:keychain-interaction-timeout`): a signature might have
-  been produced. Proposed target: `terminal=null`, `attempt=NOT_SENT`,
-  `next=reconcile-before-retry` — observation-only, no new signature or
-  provider mutation until canonical reconciliation resolves the durable chain
-  attempt.
+**Timeout, or any outcome that cannot prove no signature was returned** (new proposed cell `External signer:keychain-interaction-timeout`): proposed `terminal=null`, `attempt=NOT_SENT`, `next=retry-sign-only-with-durable-binding`, scoped **only** to the verified owned Keychain sign-only broker — the checked-in source proves its `sign` operation only deserializes/signs/re-serializes bytes (`packages/adapters/src/signing/keychain-signer.mjs:171-243`, `operations-wallet-keychain-child.mjs:138-206`, `keychain-child-evm.mjs:133-197`) and that a `broadcast` operation sent to the same broker is explicitly refused (`packages/adapters/bin/hookemon-keychain-signer.mjs:203-215`), with every real broadcast wired as a separate later step the broker's `sign()` never reaches (`signer-client.mjs:565-595`, `stages/purchase.mjs:99-117,329-338`). Given that proof, a timeout may retry the identical signing attempt only once the exact unsigned wire bytes, signer role/account identity, request digest, policy/authorization digest, and validity context were durably persisted **before** the sign-only call, reusing those exact values unchanged — never regenerating the provider transaction, blockhash, nonce, memo, or policy — and never asserting the prior attempt produced no signature; a signature from either attempt is deduplicated exactly once by the existing signed-bytes recovery record. This is a bounded-retry guarantee made safe by construction, not a claim that reconciliation can discover an unbroadcast signature — no signer idempotency key or read-by-key API exists anywhere in this repository. It grants no broadcast authority; a subsequent broadcast/provider-send outcome that cannot be distinguished stays its own observation-only `SENT_UNKNOWN` or chain-attempt state. An opaque or external-module signer does **not** inherit this guarantee and keeps the current no-automatic-retry, terminal whole-cycle class, because canonical chain observation cannot recover or rule out an unbroadcast signature for it.
 
-No implementation exists yet for either case, and the current build does not
-distinguish them; the current, canonical control above (recorded unchanged in
-`docs/audit/2026-09-04/failure-matrix.json`) records a redacted `NOT_SENT`
-denial for both while the scheduler treats the thrown error as generic
-`TICK_FAILED` with 5s-to-300s outage backoff, and the specific reason is not
-durable or UI-visible after restart. Both proposed rows are recorded in the
-non-canonical
-`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`,
-not in the canonical matrix. This section is a draft citation only — do not
-resume a held cycle against it until the revision is owner-approved through
-`gates/spec.json`'s `S5` item and this specific behavior is implemented and
-tested.
+The "Recovery contract" above is the frozen revision-65 contract and the currently deployed fallback: it is binding today and stays binding regardless of whether this proposal is later owner-approved, until an implementation and promoted matrix cells supersede it. Its cited test itself proves only that the low-level `createStageDriver` primitive leaves `terminalState=null`, `NOT_SENT`, and the cycle active/retryable for a synchronous helper denial — not that the frozen whole-cycle hold above is exercised end-to-end, and it does not cover a timeout at all; the current build has no durable pre-invocation binding (Collector purchase keeps unsigned bytes only in process memory), so the sign-only retry above is not implemented. Both unimplemented proposed rows live only in the non-canonical `docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`.
+
+This section is authoritative only once a `decisions/owner-approvals/*` receipt approves the exact current `specs/requirements.json` hash under `gates/spec.json`'s `S5` item AND each case has an implemented, passing, non-`OPEN FACT` citation promoted into the canonical matrix; check both directly rather than inferring either from this document's wording.

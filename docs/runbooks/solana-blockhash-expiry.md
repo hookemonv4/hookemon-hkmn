@@ -46,7 +46,7 @@ Test: packages/adapters/test/app/stage-driver.test.mjs — holds an expired retu
 Alarm reason/code: `SOLANA_BLOCKHASH_STALE`
 Resume command: none supported; reconcile the original signed bytes and signature before any replacement is considered.
 
-## Proposed revision 66 (not implemented; not canonical)
+## Proposed revision 66
 
 `decisions/ADR-0025-bounded-transient-recovery-classification.md` classifies
 an expired blockhash as effect-ambiguous, not semantic-invalid: the original
@@ -60,14 +60,20 @@ with a fresh blockhash/signature. The original bytes and signature are
 retained forever; no replacement is created from timeout, a missing response,
 or block height alone.
 
-No implementation exists yet; the current, canonical control above (recorded
-unchanged in `docs/audit/2026-09-04/failure-matrix.json`) keeps the attempt
-`BROADCAST` and observation-only, returning pending/thrown without a second
-effect, but has no demonstrated production transition that proves the old
-signature unlanded and installs a replacement. The proposed row is recorded
-in the non-canonical
-`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`,
-not in the canonical matrix. This section is a draft citation only — do not
-resume a held cycle against it until the revision is owner-approved through
-`gates/spec.json`'s `S5` item and this specific behavior is implemented and
-tested.
+The "Recovery contract" above is the frozen revision-65 contract and the
+currently deployed fallback: it is binding today and stays binding regardless
+of whether this proposal is later owner-approved, until an implementation and
+a promoted matrix cell supersede it. Its cited test itself proves only that
+the low-level `createStageDriver` primitive leaves `terminalState=null` while
+the chain attempt persists `BROADCAST` when this error is thrown on
+reconcile — not that the frozen whole-cycle hold above is exercised
+end-to-end, and not the proposed replacement. Treat that gap as documented
+contract/evidence drift, not as proof either way. The unimplemented proposed
+row lives only in the non-canonical
+`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`.
+
+This section is authoritative only once a `decisions/owner-approvals/*`
+receipt approves the exact current `specs/requirements.json` hash under
+`gates/spec.json`'s `S5` item AND this behavior has an implemented, passing,
+non-`OPEN FACT` citation promoted into the canonical matrix; check both
+directly rather than inferring either from this document's wording.
