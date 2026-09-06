@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +19,8 @@ import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
 import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
 import { MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { createDefaultOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
+import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
 
 const SETTLEMENT_SOURCE_ASSET = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const SETTLEMENT_SOURCE_ACCOUNT = '0x000000000000000000000000000000000000dEaD';
@@ -68,6 +71,106 @@ function preparedChainAttempt(cycleId, stage = 'claim-process', requestDigest = 
     nonce: null,
     blockhash: null,
     hash: null,
+  };
+}
+
+// The recorded production Operations identity `assertDurableCycleAdmission` validates a stored
+// admission against by default (operations: null resolves to it on both write and replay).
+const ADMISSION_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
+const ADMISSION_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+const ADMISSION_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const ADMISSION_SETTLEMENT_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+function onchainCycleIdFor(cycleId) {
+  return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
+}
+
+function parsedAdmissionRelayQuote({ requestId, orderId, amountAtomic, purchaseAtomic }) {
+  const origin = { chainId: 4663, address: ADMISSION_USDG, decimals: 6, amount: amountAtomic };
+  const destination = { chainId: 792703809, address: ADMISSION_SETTLEMENT_MINT, decimals: 6, amount: purchaseAtomic, minimumAmount: purchaseAtomic };
+  const raw = {
+    requestId,
+    details: {
+      sender: ADMISSION_EVM,
+      recipient: ADMISSION_SOLANA,
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
+    },
+    protocol: { v2: { orderId, orderData: {
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      output: { chainId: 'solana', deadline: 2_000_000_000, calls: [], payments: [{ recipient: ADMISSION_SOLANA, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
+    } } },
+    steps: [],
+  };
+  const quote = {
+    direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender: ADMISSION_EVM, recipient: ADMISSION_SOLANA,
+    deadlineUnixSeconds: 2_000_000_000, origin, destination, stepCount: raw.steps.length, raw,
+  };
+  return {
+    ...quote,
+    quoteDigest: digest({
+      schema: 'hookemon.relay-quote.v1', direction: quote.direction, tradeType: quote.tradeType,
+      requestId: quote.requestId, orderId: quote.orderId, sender: quote.sender, recipient: quote.recipient,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds, origin: quote.origin, destination: quote.destination, raw: quote.raw,
+    }),
+  };
+}
+
+/** A finalized hook process-liability evidence record covering exactly `ceilingAtomic`. */
+function admissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
+  return {
+    schema: 'hookemon.process-liability-evidence.v1',
+    chainId: '4663',
+    assetId: ADMISSION_USDG,
+    decimals: 6,
+    hook: `0x${'7'.repeat(40)}`,
+    cycleId,
+    onchainCycleId: onchainCycleIdFor(cycleId),
+    blockNumber: '12345',
+    blockHash: `0x${'3'.repeat(64)}`,
+    finalized: true,
+    processLiability: ceilingAtomic,
+    remainingProcessClaimCapacity: ceilingAtomic,
+    processClaimsPaused: false,
+    processClaimCycleUsed: false,
+    activeProcessClaimLimit: ceilingAtomic,
+    totalLiability: ceilingAtomic,
+    hookUsdgBalance: ceilingAtomic,
+    isSolvent: true,
+    operations: ADMISSION_EVM,
+    ceilingAtomic,
+  };
+}
+
+/** A complete, self-consistent quantity-1 admission, carrying finalized process liability evidence. */
+function admissionWithEvidence(cycleId, { amountAtomic = '1000000', purchaseAtomic = '500000' } = {}) {
+  const unitRelayQuote = parsedAdmissionRelayQuote({ requestId: `req-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`, amountAtomic, purchaseAtomic });
+  const relayQuote = parsedAdmissionRelayQuote({ requestId: `req-aggregate-${cycleId}`, orderId: `0x${'2'.repeat(64)}`, amountAtomic, purchaseAtomic });
+  const asset = (address) => ({ chainId: '4663', assetId: address, decimals: 6 });
+  const settlementAsset = (address) => ({ chainId: '792703809', assetId: address, decimals: 6 });
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    packId: 'base-pack',
+    quantity: 1,
+    quoteDigest: relayQuote.quoteDigest,
+    unitPurchase: { ...settlementAsset(ADMISSION_SETTLEMENT_MINT), amountAtomic: purchaseAtomic },
+    aggregatePurchase: { ...settlementAsset(ADMISSION_SETTLEMENT_MINT), amountAtomic: purchaseAtomic },
+    unitFundingQuote: { ...asset(ADMISSION_USDG), amountAtomic },
+    aggregateFundingQuote: { ...asset(ADMISSION_USDG), amountAtomic },
+    unitRelay: {
+      tradeType: 'EXACT_OUTPUT', requestId: unitRelayQuote.requestId, orderId: unitRelayQuote.orderId,
+      quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds: unitRelayQuote.deadlineUnixSeconds,
+      sender: ADMISSION_EVM, recipient: ADMISSION_SOLANA, destinationAmount: purchaseAtomic, destinationMinimumAmount: purchaseAtomic,
+    },
+    unitRelayQuote,
+    relayQuote,
+    relay: {
+      tradeType: 'EXACT_OUTPUT', requestId: relayQuote.requestId, orderId: relayQuote.orderId,
+      quoteDigest: relayQuote.quoteDigest, deadlineUnixSeconds: relayQuote.deadlineUnixSeconds,
+      sender: ADMISSION_EVM, recipient: ADMISSION_SOLANA, destinationAmount: purchaseAtomic, destinationMinimumAmount: purchaseAtomic,
+    },
+    processLiabilityEvidence: admissionProcessLiabilityEvidence(cycleId, amountAtomic),
   };
 }
 
@@ -817,6 +920,33 @@ test('createCycle preserves a rehearsal provider mode and session identity acros
   });
   assert.equal((await after.describeCycle(created.cycleId)).providerMode, 'fake');
   assert.equal((await after.describeCycle(created.cycleId)).rehearsalSessionId, 'rehearsal-11111111-1111-4111-8111-111111111111');
+});
+
+test('createCycle persists finalized process liability evidence and replay reproduces the same admission and policy digest', async t => {
+  const directory = await tempDirectory(t);
+  const cycleId = 'cycle-admission-evidence-roundtrip';
+  const admission = admissionWithEvidence(cycleId);
+  const configuration = createDefaultOperatorConfiguration();
+  const expectedDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: admission.packId, liveMode: true, mode: 'production', admission,
+  });
+
+  const before = await CycleRepository.open(directory);
+  const created = await before.createCycle({
+    releaseAmount: admission.aggregateFundingQuote.amountAtomic, mode: 'production', cycleId, admission,
+  });
+  assert.deepEqual(created.admission.processLiabilityEvidence, admission.processLiabilityEvidence);
+
+  const after = await CycleRepository.open(directory);
+  const active = await after.readActiveCycle();
+  assert.deepEqual(active.admission, created.admission);
+  const replayedDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg: active.admission.aggregateFundingQuote.amountAtomic,
+    packId: active.admission.packId, liveMode: true, mode: 'production', admission: active.admission,
+  });
+  assert.equal(replayedDigest, expectedDigest, 'replayed evidence must still determine the same policy digest');
+  assert.equal((await after.describeCycle(cycleId)).admission.processLiabilityEvidence.ceilingAtomic, admission.processLiabilityEvidence.ceilingAtomic);
 });
 
 test('createCycle persists an explicit fake-provider production dry run across a repository reopen', async t => {

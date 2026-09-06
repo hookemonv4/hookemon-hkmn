@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { assertOperatorConfiguration } from '../config/state-schema.mjs';
 import { canonicalJson, digest } from '../cycle/journal.mjs';
 import { assertStandingAuthorityDecision } from '../cycle/money-schemas.mjs';
@@ -279,6 +281,80 @@ function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRe
 }
 
 /**
+ * Deliberately duplicated from `deriveOnchainCycleId` in
+ * `packages/adapters/src/app/stages/action-builder.mjs` rather than imported: adapters already
+ * imports this module, so importing back would cycle the two packages. Both compute the identical
+ * sha256 of the plain cycleId string; a change to one must change the other.
+ */
+function deriveOnchainCycleIdForEvidence(cycleId) {
+  return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
+}
+
+const UNSIGNED_DECIMAL_STRING = /^(0|[1-9][0-9]*)$/;
+
+/**
+ * Normalizes the optional finalized hook process-liability evidence an admission may carry.
+ *
+ * Absent evidence normalizes to `null` unchanged: not every admission this engine has ever accepted
+ * is quote-bound to a live hook read (rehearsal and pre-evidence fixtures are not), so this does not
+ * retroactively demand one. When evidence is present, every getter and control flag is re-validated
+ * against the resolved deployment identity's funding route -- independent of however the caller
+ * produced it -- and the aggregate funding quote it accompanies must not exceed its ceiling. A
+ * one-field mutation to a validated record either fails one of these checks or survives into the
+ * returned object, which durable replay persists and the cycle policy digest covers.
+ */
+function normalizeProcessLiabilityEvidence(value, { cycleId, fundingRoute, operations }) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('policy admission processLiabilityEvidence must be a plain object');
+  }
+  if (value.schema !== 'hookemon.process-liability-evidence.v1') {
+    throw new Error('policy admission processLiabilityEvidence must use hookemon.process-liability-evidence.v1');
+  }
+  if (value.finalized !== true) throw new Error('policy admission processLiabilityEvidence must be finalized');
+  if (value.chainId !== fundingRoute.chainId || value.assetId?.toLowerCase() !== fundingRoute.assetId.toLowerCase()
+    || value.decimals !== fundingRoute.decimals) {
+    throw new Error('policy admission processLiabilityEvidence is not denominated in the configured funding asset');
+  }
+  if (typeof value.hook !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value.hook)) {
+    throw new Error('policy admission processLiabilityEvidence hook is invalid');
+  }
+  if (value.cycleId !== cycleId) throw new Error('policy admission processLiabilityEvidence cycleId does not match the admitted cycle');
+  if (typeof value.onchainCycleId !== 'string' || value.onchainCycleId !== deriveOnchainCycleIdForEvidence(cycleId)) {
+    throw new Error('policy admission processLiabilityEvidence onchainCycleId does not match its cycleId');
+  }
+  if (typeof value.blockNumber !== 'string' || !UNSIGNED_DECIMAL_STRING.test(value.blockNumber)
+    || typeof value.blockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value.blockHash)) {
+    throw new Error('policy admission processLiabilityEvidence must bind the exact finalized block number and hash');
+  }
+  for (const field of [
+    'processLiability', 'remainingProcessClaimCapacity', 'activeProcessClaimLimit',
+    'totalLiability', 'hookUsdgBalance', 'ceilingAtomic',
+  ]) {
+    if (typeof value[field] !== 'string' || !UNSIGNED_DECIMAL_STRING.test(value[field])) {
+      throw new Error(`policy admission processLiabilityEvidence ${field} is invalid`);
+    }
+  }
+  if (value.processClaimsPaused !== false) {
+    throw new Error('policy admission processLiabilityEvidence refuses while hook process claims are paused');
+  }
+  if (value.processClaimCycleUsed !== false) {
+    throw new Error('policy admission processLiabilityEvidence refuses a cycle id the hook already used');
+  }
+  if (value.isSolvent !== true) throw new Error('policy admission processLiabilityEvidence refuses while the hook is not solvent');
+  if (typeof value.operations !== 'string' || value.operations !== operations.evm) {
+    throw new Error('policy admission processLiabilityEvidence Operations role does not match the approved deployment identity');
+  }
+  const ceiling = BigInt(value.processLiability) < BigInt(value.remainingProcessClaimCapacity)
+    ? BigInt(value.processLiability)
+    : BigInt(value.remainingProcessClaimCapacity);
+  if (ceiling.toString() !== value.ceilingAtomic) {
+    throw new Error('policy admission processLiabilityEvidence ceilingAtomic does not equal min(processLiability, remainingProcessClaimCapacity)');
+  }
+  return Object.freeze({ ...value });
+}
+
+/**
  * Normalizes the quote-bound monetary record produced before a live cycle exists. The policy
  * engine deliberately does not infer a unit quote from an aggregate quote: they are separate
  * source-asset facts, while purchase targets remain separately typed destination-asset facts.
@@ -314,6 +390,12 @@ function normalizePolicyAdmission(value, operationsAccounts) {
   if (unitFundingQuote.chainId !== aggregateFundingQuote.chainId || unitFundingQuote.assetId !== aggregateFundingQuote.assetId
     || unitFundingQuote.decimals !== aggregateFundingQuote.decimals) {
     throw new Error('policy admission funding quotes do not share one source asset identity');
+  }
+  const processLiabilityEvidence = normalizeProcessLiabilityEvidence(value.processLiabilityEvidence, {
+    cycleId: value.cycleId, fundingRoute: operations.fundingRoute, operations,
+  });
+  if (processLiabilityEvidence !== null && BigInt(aggregateFundingQuote.amountAtomic) > BigInt(processLiabilityEvidence.ceilingAtomic)) {
+    throw new Error('policy admission aggregateFundingQuote exceeds the persisted process liability ceiling');
   }
   const relay = value.relay;
   if (!relay || relay.tradeType !== 'EXACT_OUTPUT' || typeof relay.requestId !== 'string' || relay.requestId.length === 0
@@ -368,6 +450,7 @@ function normalizePolicyAdmission(value, operationsAccounts) {
     unitRelay: Object.freeze({ ...unitRelay }),
     unitRelayQuote,
     relayQuote,
+    ...(processLiabilityEvidence === null ? {} : { processLiabilityEvidence }),
   });
 }
 

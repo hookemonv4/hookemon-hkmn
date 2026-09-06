@@ -36,6 +36,7 @@ import {
   deriveAssociatedTokenAddress,
 } from '../../src/solana-rpc.mjs';
 import { MoneyConfigurationRejected } from '../../src/app/environment.mjs';
+import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
@@ -48,20 +49,35 @@ import { privateKeyToAccount, serializeSignature, sign as signSecp256k1 } from '
 const DASHBOARD_CREDENTIAL = 'd'.repeat(40);
 const SOLANA_MAINNET_GENESIS_HASH = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 
-// Isolated, test-only attributable process liability. Production has no such reader, so live
-// admission fails closed there; a test that needs a live cycle supplies this explicitly rather than
-// letting a wallet balance or a configured figure stand in for attribution evidence.
+// Isolated, test-only attributable process liability, standing in for the production hook reader
+// wired at composition. A test that needs a live cycle supplies this explicitly rather than
+// exercising the real archive client; nothing here lets a wallet balance or a configured figure
+// stand in for attribution evidence -- the planner validates this shape exactly as it validates the
+// real reader's output.
 function testProcessLiabilityReader(amountAtomic = '1000000') {
   return {
-    async read() {
+    async read({ cycleId }) {
       return {
-        amountAtomic,
+        schema: 'hookemon.process-liability-evidence.v1',
         chainId: '4663',
         assetId: FULL_USDG,
         decimals: 6,
+        hook: FULL_HOOK,
+        cycleId,
+        onchainCycleId: deriveOnchainCycleId(cycleId),
         blockNumber: '10',
         blockHash: `0x${'1'.repeat(64)}`,
         finalized: true,
+        processLiability: amountAtomic,
+        remainingProcessClaimCapacity: amountAtomic,
+        processClaimsPaused: false,
+        processClaimCycleUsed: false,
+        activeProcessClaimLimit: amountAtomic,
+        totalLiability: amountAtomic,
+        hookUsdgBalance: amountAtomic,
+        isSolvent: true,
+        operations: FULL_EVM_ACCOUNT.toLowerCase(),
+        ceilingAtomic: amountAtomic,
       };
     },
   };

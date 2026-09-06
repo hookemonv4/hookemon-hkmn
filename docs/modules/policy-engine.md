@@ -16,6 +16,10 @@ canonical micro-USDG integer strings.
   `admit`, `recordManualApproval`, and `assertExecutionAllowed`.
 - `recordManualApproval` accepts an optional `expectedRevision` and forwards it to the durable
   configuration mutation as an atomic compare-and-swap condition.
+- `assertPolicyAdmission(admission, operations?)` normalizes a quote-bound `hookemon.policy-admission.v2`
+  record, including its optional `processLiabilityEvidence`. `CycleRepository` and
+  `deriveCyclePolicyDigest` both call it, so the durable record, its replay, and the cycle policy
+  digest all bind exactly the evidence this normalizer accepted.
 
 ## Invariants
 
@@ -34,6 +38,11 @@ canonical micro-USDG integer strings.
 - A reservation at or beyond the trailing-24-hour boundary is refused. A current reservation counts
   as pending principal for loss and outstanding-custody limits; this policy state has no
   execution-evidence release path, so an incomplete reservation remains conservative until expiry.
+- An admission's `processLiabilityEvidence` is optional (absent for rehearsal and legacy callers),
+  but when present every getter, control flag, and its `ceilingAtomic` are re-validated against the
+  resolved deployment identity's funding route, independent of whichever reader produced it, and the
+  aggregate funding quote must not exceed that ceiling. A one-field mutation to a validated record
+  either fails one of these checks or survives into the normalized result the policy digest covers.
 - Purchases require the exact existing cycle digest and reservation. Before signing, policy checks
   typed unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string
   quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share one

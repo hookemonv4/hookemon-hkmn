@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createDefaultOperatorConfiguration } from '../../src/config/state-schema.mjs';
 import {
   assertCollectorOnlyRehearsalPolicy,
+  assertPolicyAdmission,
   createPolicyEngine,
   deriveCyclePolicyDigest,
   POLICY_WINDOW_MS,
@@ -580,6 +582,41 @@ function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnix
   };
 }
 
+// Same sha256-of-the-plain-cycleId formula as `deriveOnchainCycleId` in
+// packages/adapters/src/app/stages/action-builder.mjs, duplicated to keep this package boundary
+// clean; the policy engine's own evidence normalizer computes it the same way.
+function onchainCycleIdFor(cycleId) {
+  return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
+}
+
+const PRODUCTION_HOOK = `0x${'7'.repeat(40)}`;
+
+/** A finalized hook process-liability evidence record covering exactly `ceilingAtomic`. */
+function processLiabilityEvidenceFixture({ cycleId, ceilingAtomic }) {
+  return {
+    schema: 'hookemon.process-liability-evidence.v1',
+    chainId: '4663',
+    assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    decimals: 6,
+    hook: PRODUCTION_HOOK,
+    cycleId,
+    onchainCycleId: onchainCycleIdFor(cycleId),
+    blockNumber: '12345',
+    blockHash: `0x${'3'.repeat(64)}`,
+    finalized: true,
+    processLiability: ceilingAtomic,
+    remainingProcessClaimCapacity: ceilingAtomic,
+    processClaimsPaused: false,
+    processClaimCycleUsed: false,
+    activeProcessClaimLimit: ceilingAtomic,
+    totalLiability: ceilingAtomic,
+    hookUsdgBalance: ceilingAtomic,
+    isSolvent: true,
+    operations: '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384',
+    ceilingAtomic,
+  };
+}
+
 function exactOutputAdmission({
   cycleId, quantity = 2, unitPurchase = '25000000', unitFunding = '25000000',
   aggregateFunding = quantity === 1 ? unitFunding : VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, deadlineUnixSeconds = 1_000_000,
@@ -620,6 +657,7 @@ function exactOutputAdmission({
       deadlineUnixSeconds, sender: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384',
       recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE', destinationAmount: aggregatePurchase, destinationMinimumAmount: aggregatePurchase,
     },
+    processLiabilityEvidence: processLiabilityEvidenceFixture({ cycleId, ceilingAtomic: aggregateFunding }),
   };
 }
 
@@ -705,6 +743,65 @@ test('N1 rejects a parsed Relay quote whose canonical digest or raw origin amoun
     () => engine.admit({ boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, packId: 'base-pack', liveMode: true, admission: originMutation }),
     /raw origin does not bind/,
   );
+});
+
+test('an admission without process liability evidence normalizes exactly as before (legacy and rehearsal callers)', () => {
+  const cycleId = 'cycle-evidence-absent';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  delete admission.processLiabilityEvidence;
+  const normalized = assertPolicyAdmission(admission);
+  assert.equal(Object.hasOwn(normalized, 'processLiabilityEvidence'), false);
+});
+
+test('a valid process liability evidence record survives normalization unchanged and binds the cycle policy digest', () => {
+  const cycleId = 'cycle-evidence-roundtrip';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const normalized = assertPolicyAdmission(admission);
+  assert.deepEqual(normalized.processLiabilityEvidence, admission.processLiabilityEvidence);
+
+  const configuration = configuredPolicy();
+  const baseDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  });
+  const mutated = structuredClone(admission);
+  mutated.processLiabilityEvidence.totalLiability = (BigInt(mutated.processLiabilityEvidence.totalLiability) + 1n).toString();
+  const mutatedDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission: mutated,
+  });
+  assert.notEqual(mutatedDigest, baseDigest, 'a one-field evidence mutation must change the cycle policy digest');
+});
+
+test('an aggregate funding quote above the persisted process liability ceiling is refused', () => {
+  const cycleId = 'cycle-evidence-over-ceiling';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const shrunk = structuredClone(admission);
+  for (const field of ['processLiability', 'remainingProcessClaimCapacity', 'ceilingAtomic']) {
+    shrunk.processLiabilityEvidence[field] = '1';
+  }
+  assert.throws(() => assertPolicyAdmission(shrunk), /exceeds the persisted process liability ceiling/);
+});
+
+test('each independent process liability evidence control refuses the admission', () => {
+  const cycleId = 'cycle-evidence-controls';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const cases = [
+    [{ processClaimsPaused: true }, /refuses while hook process claims are paused/],
+    [{ processClaimCycleUsed: true }, /refuses a cycle id the hook already used/],
+    [{ isSolvent: false }, /refuses while the hook is not solvent/],
+    [{ operations: `0x${'9'.repeat(40)}` }, /Operations role does not match the approved deployment identity/],
+    [{ cycleId: 'a-different-cycle' }, /cycleId does not match the admitted cycle/],
+    [{ onchainCycleId: `0x${'9'.repeat(64)}` }, /onchainCycleId does not match its cycleId/],
+    [{ ceilingAtomic: (BigInt(admission.processLiabilityEvidence.ceilingAtomic) + 1n).toString() }, /ceilingAtomic does not equal min/],
+    [{ chainId: '1' }, /not denominated in the configured funding asset/],
+    [{ schema: 'hookemon.process-liability-evidence.v0' }, /must use hookemon\.process-liability-evidence\.v1/],
+  ];
+  for (const [override, pattern] of cases) {
+    const tampered = structuredClone(admission);
+    Object.assign(tampered.processLiabilityEvidence, override);
+    assert.throws(() => assertPolicyAdmission(tampered), pattern, JSON.stringify(override));
+  }
 });
 
 test('the verified N2 two-pack USDG quote is admitted under an explicit configuration sized exactly to it, and one atomic unit above the same rail is refused', async () => {

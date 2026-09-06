@@ -606,7 +606,7 @@ function admittedRelayIdentity(quote) {
  * Returns `null` when the configuration cannot admit a cycle at all, which the service reports as
  * WAITING_FOR_ADMISSION. Anything malformed throws instead of degrading into a cheaper cycle.
  */
-function buildAdmissionPlanner({ config, adapters, readConfiguration, processLiabilityReader = null }) {
+export function buildAdmissionPlanner({ config, adapters, readConfiguration, processLiabilityReader = null }) {
   return {
     async plan({ cycleId, packId }) {
       const configuration = await readConfiguration();
@@ -624,10 +624,11 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
       const fundingAsset = config.moneyConfiguration.assets.usdg;
       // Fails closed: with no attributable finalized process liability there is nothing that shows
       // this cycle may spend process money, and a wallet balance or configured figure is not a
-      // substitute. Live production has no such reader yet, so no live cycle is admitted.
+      // substitute.
       const liability = assertProcessLiabilityEvidence(
         typeof processLiabilityReader?.read === 'function' ? await processLiabilityReader.read({ cycleId, packId }) : null,
         fundingAsset,
+        { hook: config.contracts?.hook ?? null, cycleId, operations: config.accounts.evm.toLowerCase() },
       );
       if (liability === null) return null;
       const unitAtomic = admittedCatalogUnit({
@@ -652,7 +653,7 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
       if (quantity > 1 && unitQuote.requestId === aggregateQuote.requestId) {
         throw new Error('admission planner received one Relay quote for both the unit and aggregate targets');
       }
-      if (BigInt(aggregateQuote.origin.amount) > BigInt(liability)) {
+      if (BigInt(aggregateQuote.origin.amount) > BigInt(liability.ceilingAtomic)) {
         throw new Error('admission planner refuses an aggregate quote above the attributable process liability');
       }
       return Object.freeze({
@@ -669,6 +670,7 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
         unitRelay: admittedRelayIdentity(unitQuote),
         unitRelayQuote: unitQuote,
         relayQuote: aggregateQuote,
+        processLiabilityEvidence: liability,
       });
     },
   };
@@ -683,14 +685,16 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
  * accepted as process money -- authorizing a spend of funds never attributed to the process. Nor is
  * a configured figure evidence of anything.
  *
- * The evidence this accepts is a finalized, attributed claimable amount for this process, carrying
- * the asset it is denominated in and the exact block number and hash it was read at. A value read at
- * `latest` and merely compared against a separately observed finalized head does not qualify: those
- * are two unrelated reads and the balance carries no block identity of its own.
+ * The evidence this accepts is the full normalized reading of the hook's process-liability ledger:
+ * every control getter alongside the derived ceiling, the asset it is denominated in, the hook and
+ * cycle identity it was read against, and the exact block number and hash it was read at. A value
+ * read at `latest` and merely compared against a separately observed finalized head does not
+ * qualify: those are two unrelated reads and the balance carries no block identity of its own. The
+ * bare ceiling alone does not qualify either: without the getters that produced it, nothing durable
+ * can re-derive or re-authenticate which hook observation authorized the principal.
  *
- * No production reader exists yet -- the deployed hook exposes no claimable-process-liability view,
- * and inventing one is not available to this composition -- so live admission fails closed here
- * rather than substituting a weaker proof.
+ * The production reader below is wired at composition; this validates whatever reader is supplied,
+ * so a test may substitute an isolated reader without weakening the check the real one is held to.
  */
 /**
  * The production process-liability reader: the deployed hook's own accrued ledger, read at one
@@ -707,7 +711,7 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
  * Operations USDG balance is post-claim custody and can include unrelated deposits, so it cannot
  * authorize a new claim.
  */
-function buildProcessLiabilityReader({ config, adapters }) {
+export function buildProcessLiabilityReader({ config, adapters }) {
   const publicClient = adapters?.robinhood?.client ?? null;
   const archive = adapters?.robinhood?.historicalEvidenceClient ?? null;
   const hook = config.contracts?.hook ?? null;
@@ -718,10 +722,11 @@ function buildProcessLiabilityReader({ config, adapters }) {
         || typeof archive?.readHookProcessStateAtBlock !== 'function') {
         return null;
       }
+      const onchainCycleId = deriveOnchainCycleId(cycleId);
       const finalized = await readFinalizedBlock(publicClient);
       const state = await archive.readHookProcessStateAtBlock({
         hook,
-        onchainCycleId: deriveOnchainCycleId(cycleId),
+        onchainCycleId,
         blockNumber: finalized.number,
         blockHash: finalized.hash,
       });
@@ -740,37 +745,85 @@ function buildProcessLiabilityReader({ config, adapters }) {
         ? state.processLiability
         : state.remainingProcessClaimCapacity;
       return {
-        amountAtomic: ceiling.toString(),
+        schema: 'hookemon.process-liability-evidence.v1',
         chainId: fundingAsset.chainId,
         assetId: fundingAsset.assetId,
         decimals: fundingAsset.decimals,
+        hook: hook.toLowerCase(),
+        cycleId,
+        onchainCycleId,
         blockNumber: state.blockNumber.toString(),
         blockHash: state.blockHash,
         finalized: true,
+        processLiability: state.processLiability.toString(),
+        remainingProcessClaimCapacity: state.remainingProcessClaimCapacity.toString(),
+        processClaimsPaused: state.processClaimsPaused,
+        processClaimCycleUsed: state.processClaimCycleUsed,
+        activeProcessClaimLimit: state.activeProcessClaimLimit.toString(),
+        totalLiability: state.totalLiability.toString(),
+        hookUsdgBalance: state.hookUsdgBalance.toString(),
+        isSolvent: state.isSolvent,
+        operations: state.operations,
+        ceilingAtomic: ceiling.toString(),
       };
     },
   };
 }
 
-function assertProcessLiabilityEvidence(value, fundingAsset) {
+const UNSIGNED_DECIMAL = /^(0|[1-9][0-9]*)$/;
+
+/**
+ * Validates the exact normalized shape `buildProcessLiabilityReader` produces, against this specific
+ * admission's hook, cycle and funding asset -- whichever reader supplied it. Every control getter is
+ * re-checked here, not only re-read by the production reader, so a fake reader that skips a real
+ * chain read cannot hand the planner evidence a real one would have refused; that is what lets a
+ * planner-level test exercise each independent control refusal without touching a provider.
+ */
+function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, operations }) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('process liability evidence must be a plain object');
   }
-  const { amountAtomic, chainId, assetId, decimals, blockNumber, blockHash, finalized } = value;
-  if (finalized !== true) throw new Error('process liability evidence must be finalized');
-  if (typeof amountAtomic !== 'string' || !/^(0|[1-9][0-9]*)$/.test(amountAtomic)) {
-    throw new Error('process liability evidence amount is invalid');
+  if (value.schema !== 'hookemon.process-liability-evidence.v1') {
+    throw new Error('process liability evidence must use hookemon.process-liability-evidence.v1');
   }
-  if (chainId !== fundingAsset.chainId || assetId?.toLowerCase() !== fundingAsset.assetId.toLowerCase()
-    || decimals !== fundingAsset.decimals) {
+  if (value.finalized !== true) throw new Error('process liability evidence must be finalized');
+  if (value.chainId !== fundingAsset.chainId || value.assetId?.toLowerCase() !== fundingAsset.assetId.toLowerCase()
+    || value.decimals !== fundingAsset.decimals) {
     throw new Error('process liability evidence is not denominated in the configured funding asset');
   }
-  if (typeof blockNumber !== 'string' || !/^(0|[1-9][0-9]*)$/.test(blockNumber)
-    || typeof blockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(blockHash)) {
+  if (typeof hook !== 'string' || typeof value.hook !== 'string' || value.hook.toLowerCase() !== hook.toLowerCase()) {
+    throw new Error('process liability evidence hook does not match the configured hook');
+  }
+  if (value.cycleId !== cycleId) throw new Error('process liability evidence cycleId does not match the admitted cycle');
+  if (typeof value.onchainCycleId !== 'string' || value.onchainCycleId !== deriveOnchainCycleId(cycleId)) {
+    throw new Error('process liability evidence onchainCycleId does not match its cycleId');
+  }
+  if (typeof value.blockNumber !== 'string' || !UNSIGNED_DECIMAL.test(value.blockNumber)
+    || typeof value.blockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value.blockHash)) {
     throw new Error('process liability evidence must bind the exact finalized block number and hash');
   }
-  return amountAtomic;
+  for (const field of [
+    'processLiability', 'remainingProcessClaimCapacity', 'activeProcessClaimLimit',
+    'totalLiability', 'hookUsdgBalance', 'ceilingAtomic',
+  ]) {
+    if (typeof value[field] !== 'string' || !UNSIGNED_DECIMAL.test(value[field])) {
+      throw new Error(`process liability evidence ${field} is invalid`);
+    }
+  }
+  if (value.processClaimsPaused !== false) throw new Error('process liability evidence refuses while hook process claims are paused');
+  if (value.processClaimCycleUsed !== false) throw new Error('process liability evidence refuses a cycle id the hook already used');
+  if (value.isSolvent !== true) throw new Error('process liability evidence refuses while the hook is not solvent');
+  if (typeof value.operations !== 'string' || value.operations !== operations) {
+    throw new Error('process liability evidence Operations role does not match the configured Operations account');
+  }
+  const ceiling = BigInt(value.processLiability) < BigInt(value.remainingProcessClaimCapacity)
+    ? BigInt(value.processLiability)
+    : BigInt(value.remainingProcessClaimCapacity);
+  if (ceiling.toString() !== value.ceilingAtomic) {
+    throw new Error('process liability evidence ceilingAtomic does not equal min(processLiability, remainingProcessClaimCapacity)');
+  }
+  return Object.freeze({ ...value });
 }
 
 function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMode }) {

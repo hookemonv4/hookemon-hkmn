@@ -101,6 +101,14 @@ repository client.
   dependencies.
 - The policy engine rereads the persisted operator configuration for each decision. Its production
   reservations are written through the operator-state mutation lock, not an in-memory cache.
+- The live admission planner (`buildAdmissionPlanner`) admits a cycle only against a full normalized
+  reading of the hook's process-liability ledger -- every control getter, the hook and cycle
+  identity it was read against, and `ceilingAtomic = min(processLiability,
+  remainingProcessClaimCapacity)` -- never a wallet balance or a configured figure. The production
+  reader (`buildProcessLiabilityReader`) selects the public finalized block, binds the archive read
+  to it, and re-reads the same height from the public client before returning, refusing on a hash
+  mismatch. The planner validates that same shape and each control independently of the reader that
+  supplied it, so a test reader cannot hand it evidence a real one would have refused.
 - A cycle stores one immutable mode, `production` or `rehearsal`, at creation. Production services
   refuse rehearsal cycles and rehearsal services refuse production cycles.
 - `readEnvironment` resolves the EVM USDG address and decimals from the frozen binding. The
