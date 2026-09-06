@@ -488,6 +488,18 @@ test('collectorPurchaseDebit sums an N-pack purchase batch: verified purchased p
 test('collectorBuybackProceeds sums only sold packs; held (never-sold) packs are a real verified zero, not unknown', async () => {
   const repository = relayLegRepository({
     stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 3,
+          purchasedCount: 3,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 2, memo: 'memo-2', status: 'purchased', packCost: solAmount('10') },
+          ],
+        },
+      },
       buyback: {
         status: 'COMPLETE',
         evidence: {
@@ -528,6 +540,17 @@ test('collectorPurchaseDebit fails closed to null when a purchased pack is missi
 test('collectorBuybackProceeds fails closed to null on a mixed-denomination pack batch instead of silently double-mixing assets', async () => {
   const repository = relayLegRepository({
     stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+          ],
+        },
+      },
       buyback: {
         status: 'COMPLETE',
         evidence: {
@@ -562,6 +585,97 @@ test('collectorPurchaseDebit fails closed to null on a duplicate packIndex inste
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
   assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('F8-sol-verification repro: quantity/purchasedCount claim 2 packs but only one pack entry is present -- fails closed, never a partial sum over the incomplete batch', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('F8-sol-verification repro: soldCount claims a sale but buyback\'s own packs are fewer than the purchase batch actually produced -- fails closed on the missing predecessor coverage', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+          ],
+        },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          soldCount: 1,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('F8-sol-verification repro: a new-shape purchase record (carries quantity/purchasedCount) missing its own packs array never falls back to a legacy top-level packCost', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: { quantity: 2, purchasedCount: 2, packCost: solAmount('30') },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('F8-sol-verification repro: a new-shape buyback record (carries soldCount) missing its own packs array never falls back to a legacy top-level proceeds', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      buyback: {
+        status: 'COMPLETE',
+        evidence: { soldCount: 1, proceeds: solAmount('40') },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('F8-sol-verification repro: a sold pack missing its own memo and mint never contributes proceeds -- canonical identity is required, not just amount presence', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: { quantity: 1, purchasedCount: 1, packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') }] },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: { soldCount: 1, packs: [{ packIndex: 0, decision: 'sold', proceeds: solAmount('40') }] },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
 });
 
 // The configured USDG token address, standing in for `config.contracts.usdg` at composition time.
