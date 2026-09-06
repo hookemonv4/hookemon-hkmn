@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { createTestKeychain } from './fixtures/keychain/fixture.mjs';
+import { createTestKeychain, keychainLookupTimeoutStage } from './fixtures/keychain/fixture.mjs';
 
 const BIN_PATH = fileURLToPath(new URL('../bin/hookemon-wallet.mjs', import.meta.url));
 const DEFAULT_SERVICE = 'hookemon-operations';
@@ -242,7 +242,11 @@ test('EVM Keychain child wrapper surfaces its parent-envelope timeout when the c
 
 // Spawns operations-wallet-keychain-child.mjs directly with its own internal spawn flag,
 // bypassing runSolanaWalletKeychainChildProcess (and therefore its 550ms parent envelope)
-// entirely, so only the child's own request-level 50ms enforcement can resolve the call.
+// entirely, so only the child's own request-level 50ms enforcement can resolve the call -
+// but that enforcement runs three labeled lookups at the same 50ms budget (default-keychain
+// and login-keychain discovery, then find-generic-password), and under cold-start
+// contention any one of the three can legitimately be the stage that exceeds it first; this
+// asserts the failure is exactly one of those three known 50ms outcomes, not a specific one.
 test('Solana wallet keychain child enforces its own 50ms Keychain deadline with no parent envelope racing it', { timeout: 2_000 }, async t => {
   const keychain = await createTestKeychain(t, { mode: 'hang' });
   const result = await runProcess(process.execPath, [OPERATIONS_WALLET_KEYCHAIN_CHILD_PATH, SOLANA_WALLET_KEYCHAIN_CHILD_FLAG], {
@@ -256,14 +260,14 @@ test('Solana wallet keychain child enforces its own 50ms Keychain deadline with 
     })}\n`,
   });
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), {
-    ok: false,
-    error: 'macOS Keychain lookup timed out after 50ms',
-  });
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, false);
+  const stageCommand = keychainLookupTimeoutStage(parsed.error, 50);
+  assert.ok(stageCommand, `expected an exact 50ms Keychain-lookup timeout, got: ${parsed.error}`);
   const records = await keychain.readRecords();
   assert.ok(
-    records.some(record => record.argv[0] === 'find-generic-password'),
-    'expected the fake Keychain command to actually be reached',
+    records.some(record => record.argv[0] === stageCommand),
+    `expected the fake ${stageCommand} Keychain command to actually be reached`,
   );
 });
 
