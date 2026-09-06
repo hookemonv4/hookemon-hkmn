@@ -278,15 +278,17 @@ test('accounting projection does not reconstruct retired rehearsal evidence at r
   assert.doesNotMatch(source, /String\.fromCharCode/);
 });
 
-test('a fresh cycle with no completed stages reports the honest all-zero/all-null shape', async t => {
+test('a fresh cycle with no completed stages reports the honest all-null shape (never an invented zero)', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
 
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.packSpendMicroUsdg, '0', 'nothing was spent before purchase completes');
-  assert.equal(accounting.buybackMicroUsdg, '0');
-  assert.equal(accounting.packGainMicroUsdg, '0');
-  assert.equal(accounting.packLossMicroUsdg, '0');
+  assert.equal(accounting.packSpendMicroUsdg, null, 'nothing was spent before the outbound bridge leg settles');
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.collectorPurchaseDebit, null);
+  assert.equal(accounting.collectorBuybackProceeds, null);
+  assert.equal(accounting.packGainMicroUsdg, null);
+  assert.equal(accounting.packLossMicroUsdg, null);
   assert.equal(accounting.quotedCosts.outboundBridgeMicroUsdg, null);
   assert.equal(accounting.holderRewardsStatus, 'not-started');
   assert.equal(accounting.distributionStatus, 'not-started');
@@ -314,20 +316,23 @@ test('packSpendMicroUsdg is the settled outbound bridge amount, never the alloca
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
   assert.equal(accounting.packSpendMicroUsdg, '50', 'real settled spend, not the budget of 100');
-  assert.equal(accounting.packLossMicroUsdg, '50', 'no buyback proceeds yet, so the full spend is currently a loss');
-  assert.equal(accounting.packGainMicroUsdg, '0');
+  // No return leg is settled yet, so buyback (and anything derived from comparing it to spend) is
+  // honestly unknown, never a fabricated zero.
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.packGainMicroUsdg, null);
+  assert.equal(accounting.packLossMicroUsdg, null);
 });
 
-test('packSpendMicroUsdg stays 0 until the outbound leg is durably settled', async () => {
+test('packSpendMicroUsdg stays null (unknown) until the outbound leg is durably settled', async () => {
   const repository = relayLegRepository({
     releaseAmount: '100',
     relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', state: 'RECORDED', sourceAmountAtomic: '50' })]]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.packSpendMicroUsdg, '0');
+  assert.equal(accounting.packSpendMicroUsdg, null);
 });
 
-test('packSpendMicroUsdg stays 0 when more than one settled outbound leg exists (ambiguous, never guessed)', async () => {
+test('packSpendMicroUsdg stays null when more than one settled outbound leg exists (ambiguous, never guessed)', async () => {
   const repository = relayLegRepository({
     releaseAmount: '100',
     relayLegs: new Map([
@@ -336,7 +341,7 @@ test('packSpendMicroUsdg stays 0 when more than one settled outbound leg exists 
     ]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.packSpendMicroUsdg, '0');
+  assert.equal(accounting.packSpendMicroUsdg, null);
 });
 
 test('quotedCosts.outboundBridgeMicroUsdg is derived from the outbound stage evidence real quote amounts when present', async t => {
@@ -409,5 +414,47 @@ test('a completed production payout stage carrying only rehearsal Solana proceed
     proceedsMicroSolanaStable: '4995000',
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.buybackMicroUsdg, '0', 'no settled return bridge leg exists, so this is honestly 0, not a rehearsal-derived figure');
+  assert.equal(accounting.buybackMicroUsdg, null, 'no settled return bridge leg exists, so this is honestly unknown, not a rehearsal-derived figure');
+});
+
+test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-Crypt-side (Solana) typed amounts, distinct from the EVM bridge amounts', async () => {
+  const repository = relayLegRepository({
+    relayLegs: new Map([
+      ['out', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })],
+      ['ret', relayLeg({ direction: 'return', destinationAmountAtomic: '48' })],
+    ]),
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          packCost: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '49' },
+        },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '47' },
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.packSpendMicroUsdg, '50');
+  assert.deepEqual(accounting.collectorPurchaseDebit, {
+    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '49',
+  });
+  assert.equal(accounting.buybackMicroUsdg, '48');
+  assert.deepEqual(accounting.collectorBuybackProceeds, {
+    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '47',
+  });
+  // The two are genuinely different real amounts (bridge fees/slippage) - never equated.
+  assert.notEqual(accounting.packSpendMicroUsdg, accounting.collectorPurchaseDebit.units);
+});
+
+test('collectorPurchaseDebit stays null while the purchase stage has not durably completed', async () => {
+  const repository = relayLegRepository({
+    stages: { purchase: { status: 'PENDING' } },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
 });

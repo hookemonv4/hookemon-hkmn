@@ -1,7 +1,7 @@
 // Projects one cycle's real per-cycle accounting from `cycleRepository`'s durable stage evidence
 // (this package's own journal — see cycle-repository.mjs's header for why it is a fresh, independent
 // journal rather than a wrapper around CycleRunner) into the exact `RoundAccounting` shape
-// packages/dashboard/src/contracts/public-cycle-status.mjs's `readRoundAccounting` (schemaVersion 3)
+// packages/dashboard/src/contracts/public-cycle-status.mjs's `readRoundAccounting` (schemaVersion 6)
 // requires. Consumed as an injected `readAccounting(cycleId)` function — never imported by
 // packages/runner or packages/dashboard directly, so neither package gains a dependency on this one
 // (see compose.mjs's dashboard composition, which is the only real caller, and routes/public.mjs's
@@ -10,11 +10,12 @@
 //
 // Honesty rule (AGENTS.md R4/R5 — never guess a money-relevant value): every field below is either a
 // real amount actually read back from a stage's own durably-recorded evidence, a value derived from
-// two such real amounts by plain arithmetic (never assumed), or the schema's own documented "nothing
-// observed yet" default (`null`, or `'0'` for the four fields the contract requires to be present).
-// Nothing here is invented to make a field "look complete" — most fields stay `null` today because no
-// stage's real mutation evidence produces them yet (see stage-driver.mjs's header for exactly which
-// six of the eight stages still refuse under liveMode:true, and why).
+// two such real amounts by plain arithmetic (never assumed), or `null` ("nothing observed yet").
+// Nothing here is invented to make a field "look complete," and nothing is reported as `'0'` merely
+// because it hasn't happened yet — an unknown amount is `null`, exactly as the frozen `Amount`
+// contract requires. Most fields stay `null` today because no stage's real mutation evidence
+// produces them yet (see stage-driver.mjs's header for exactly which six of the eight stages still
+// refuse under liveMode:true, and why).
 //
 // Units: every `*MicroUsdg` field here is the same six-decimal atomic USDG unit
 // `packages/runner/src/automation/budget-gate.mjs`'s `parseAtomicUsdg` validates (its own name for
@@ -66,6 +67,21 @@ function settledRelayLeg(relayLegs, direction) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+/** Projects a `money-schemas.mjs` `TypedAmount` (`{chainId, assetId, decimals, amountAtomic}`) into
+ * the frozen public `Amount` shape (`{chainId, assetId, decimals, units}`) — a field rename at the
+ * public boundary only, never a value conversion. Returns `null` for anything not shaped like a
+ * typed amount, so a missing/malformed evidence field degrades to "unknown," never a fabricated
+ * zero. */
+function publicAmount(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { chainId, assetId, decimals, amountAtomic } = value;
+  if (typeof chainId !== 'string' || chainId.length === 0) return null;
+  if (typeof assetId !== 'string' || assetId.length === 0) return null;
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) return null;
+  if (typeof amountAtomic !== 'string' || !/^(0|[1-9][0-9]*)$/.test(amountAtomic)) return null;
+  return Object.freeze({ chainId, assetId, decimals, units: amountAtomic });
+}
+
 /** Workflow-state labels derived directly from which stages are durably COMPLETE — never a
  * fabricated dollar figure, just an honest description of where the cycle's holder-reward path
  * actually is. Distribution/payout never durably complete today (both still refuse under
@@ -89,8 +105,13 @@ function distributionStatus(returnStage, distributionStage, payoutStage) {
  * @param {object} input.cycleRepository - a `CycleRepository`-shaped object (`readStage`/
  *   `describeCycle`); see cycle-repository.mjs.
  * @param {string} input.cycleId
- * @returns {Promise<object>} the exact `RoundAccounting` shape
- *   `packages/dashboard/src/contracts/public-cycle-status.mjs`'s `readRoundAccounting` requires.
+ * @returns {Promise<object>} the exact schemaVersion-6 `RoundAccounting` shape
+ *   `packages/dashboard/src/contracts/public-cycle-status.mjs`'s `readRoundAccounting` requires:
+ *   `packSpendMicroUsdg`/`buybackMicroUsdg`/`packGainMicroUsdg`/`packLossMicroUsdg` are now
+ *   nullable (an unknown amount is `null`, never an invented `'0'`), and two typed, independently
+ *   nullable `Amount` fields (`collectorPurchaseDebit`, `collectorBuybackProceeds`) carry the real
+ *   Collector-Crypt-side (Solana) debit/proceeds — a different chain and asset than the EVM USDG
+ *   bridge amounts, and never assumed to equal them at any parity.
  */
 export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   if (!cycleRepository || typeof cycleRepository.readStage !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
@@ -104,29 +125,50 @@ export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   ]);
   const [funding, outbound, purchase, buyback, returnStage, distribution, payout] = stages;
   void funding; // read for symmetry/future use; funding carries no accounting amount today.
-  void purchase; // the real spend evidence is the settled outbound bridge leg, not this stage.
-  void buyback; // the real proceeds evidence is the settled return bridge leg, not this stage.
 
   // The cycle's allocated release amount (`description.releaseAmount`) is a budget, not a spend —
-  // reporting it here would equate "authorized to spend up to" with "actually spent" (see
-  // docs/modules/dashboard.md). The real spend is the amount of USDG that durably left operator
-  // custody to fund this cycle's purchase: the settled outbound bridge leg's own source amount.
-  // Nothing has been spent until that leg settles, so this honestly stays '0' until then.
+  // reporting it here would equate "authorized to spend up to" with "actually spent." The real
+  // *bridge* spend is the amount of USDG that durably left operator custody on the Robinhood Chain
+  // to fund this cycle's purchase: the settled outbound bridge leg's own source amount. This is
+  // genuinely unknown (not zero) until that leg settles.
   const outboundLeg = settledRelayLeg(description.relayLegs, 'outbound');
-  const packSpendMicroUsdg = outboundLeg !== null ? outboundLeg.sourceAmountAtomic : '0';
+  const packSpendMicroUsdg = outboundLeg !== null ? outboundLeg.sourceAmountAtomic : null;
 
   // The real USDG the operator's treasury actually received back is the settled return bridge
-  // leg's own destination amount — never the Solana-side Circle USD buyback proceeds taken at an
-  // assumed 1:1 parity with USDG (a different asset on a different chain). Nothing has returned
-  // until that leg settles, so this honestly stays '0' until then.
+  // leg's own destination amount — never the Solana-side Collector Crypt proceeds taken at an
+  // assumed 1:1 parity with USDG (a different asset on a different chain). Genuinely unknown until
+  // that leg settles.
   const returnLeg = settledRelayLeg(description.relayLegs, 'return');
-  const buybackMicroUsdg = returnLeg !== null ? returnLeg.destinationAmountAtomic : '0';
+  const buybackMicroUsdg = returnLeg !== null ? returnLeg.destinationAmountAtomic : null;
+
+  // The bridge amounts above answer "how much USDG moved"; they do not answer "how much did the
+  // pack actually cost on Collector Crypt" (bridging fees/slippage/unspent USDC can make the two
+  // differ) — that real, chain/asset-tagged fact is the purchase stage's own finalized settlement
+  // debit (see stages/purchase.mjs's reconcileLivePurchase `packCost`), kept as a distinct typed
+  // Amount rather than folded into packSpendMicroUsdg at an assumed parity.
+  const collectorPurchaseDebit = isCompleteStage(purchase) ? publicAmount(purchase?.evidence?.packCost) : null;
+
+  // Symmetrically, the buyback stage's own finalized settlement credit (see stages/buyback.mjs's
+  // `proceeds`) is the real Collector-Crypt-side (Solana) sale proceeds, before any bridge-back —
+  // kept distinct from buybackMicroUsdg (the EVM-side return amount) for the same reason.
+  const collectorBuybackProceeds = isCompleteStage(buyback) ? publicAmount(buyback?.evidence?.proceeds) : null;
+
+  // Gain/loss are a comparison between two amounts; if either side is unknown the comparison itself
+  // is unknown, never derived from a fabricated stand-in.
+  const packGainMicroUsdg = packSpendMicroUsdg === null || buybackMicroUsdg === null
+    ? null
+    : subtractAtZero(buybackMicroUsdg, packSpendMicroUsdg);
+  const packLossMicroUsdg = packSpendMicroUsdg === null || buybackMicroUsdg === null
+    ? null
+    : subtractAtZero(packSpendMicroUsdg, buybackMicroUsdg);
 
   return Object.freeze({
     packSpendMicroUsdg,
     buybackMicroUsdg,
-    packGainMicroUsdg: subtractAtZero(buybackMicroUsdg, packSpendMicroUsdg),
-    packLossMicroUsdg: subtractAtZero(packSpendMicroUsdg, buybackMicroUsdg),
+    collectorPurchaseDebit,
+    collectorBuybackProceeds,
+    packGainMicroUsdg,
+    packLossMicroUsdg,
     quotedCosts: Object.freeze({
       outboundBridgeMicroUsdg: outboundBridgeFee(outbound),
       inboundBridgeMicroUsdg: null, // return never quotes today — see stage-driver.mjs's probeReturn.
