@@ -57,16 +57,31 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPERATOR_CONTROL_SERVICE_URL: ${{ secrets.OPERATOR_CONTROL_SERVICE_URL }}
+          OPERATOR_CONTROL_PROXY_CREDENTIAL: ${{ secrets.OPERATOR_CONTROL_PROXY_CREDENTIAL }}
           PUBLIC_DASHBOARD_PROFILE: ${{ secrets.PUBLIC_DASHBOARD_PROFILE }}
+          PUBLIC_CYCLE_STATUS_URL: ${{ secrets.PUBLIC_CYCLE_STATUS_URL }}
           PUBLIC_COMMUNITY_SNAPSHOT_URL: ${{ secrets.PUBLIC_COMMUNITY_SNAPSHOT_URL }}
           FORCE_COLOR: "0"
           WRANGLER_LOG_SANITIZE: "true"
           WRANGLER_SEND_METRICS: "false"
         run: |
+          test -n "$OPERATOR_CONTROL_SERVICE_URL"
+          test -n "$OPERATOR_CONTROL_PROXY_CREDENTIAL"
           test -n "$PUBLIC_DASHBOARD_PROFILE"
+          test -n "$PUBLIC_CYCLE_STATUS_URL"
           test -n "$PUBLIC_COMMUNITY_SNAPSHOT_URL"
+          printf '%s' "$OPERATOR_CONTROL_SERVICE_URL" |
+            npx --no-install wrangler secret put OPERATOR_CONTROL_SERVICE_URL \
+              --config dist/server/wrangler.json
+          printf '%s' "$OPERATOR_CONTROL_PROXY_CREDENTIAL" |
+            npx --no-install wrangler secret put OPERATOR_CONTROL_PROXY_CREDENTIAL \
+              --config dist/server/wrangler.json
           printf '%s' "$PUBLIC_DASHBOARD_PROFILE" |
             npx --no-install wrangler secret put PUBLIC_DASHBOARD_PROFILE \
+              --config dist/server/wrangler.json
+          printf '%s' "$PUBLIC_CYCLE_STATUS_URL" |
+            npx --no-install wrangler secret put PUBLIC_CYCLE_STATUS_URL \
               --config dist/server/wrangler.json
           printf '%s' "$PUBLIC_COMMUNITY_SNAPSHOT_URL" |
             npx --no-install wrangler secret put PUBLIC_COMMUNITY_SNAPSHOT_URL \
