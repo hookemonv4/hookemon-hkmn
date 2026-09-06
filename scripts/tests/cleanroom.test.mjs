@@ -351,6 +351,42 @@ test('previous-chain path exception requires the exact bounded path token', () =
   assert.equal(scanDigestMarkers(`${canonicalPath}é`, [rule]).length, 1);
 });
 
+test('clean-room scanner permits a retired chain name only inside a negative key-absence assertion', () => {
+  const chainName = ['ethe', 'reum'].join('');
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.sha256 === createHash('sha256').update(chainName).digest('hex')
+  ));
+  assert.ok(rule);
+
+  assert.deepEqual(scanDigestMarkers(`Object.hasOwn(network, "${chainName}"), false)`, [rule]), []);
+  assert.deepEqual(scanDigestMarkers(`hasOwn(x, "${chainName}") === false`, [rule]), []);
+  assert.equal(
+    scanDigestMarkers(`assert.equal(Object.hasOwn(network, "${chainName}"), false);`, [rule]).length,
+    0,
+  );
+  assert.deepEqual(scanDigestMarkers(`hasOwn(x, "${chainName}") !== true`, [rule]), []);
+  // A positive claim, an unquoted mention, or a mention outside a hasOwn(...) call must still fail,
+  // and so must a hasOwn(...) call that is not itself compared against absence.
+  assert.equal(scanDigestMarkers(`network.${chainName} still exists`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`Object.hasOwn(network, "${chainName}") === true`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`Object.hasOwn(network, "${chainName}")`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`the network uses ${chainName} for settlement`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`"${chainName}"`, [rule]).length, 1);
+});
+
+test('clean-room scanner permits the exact "legacy <chain> key" phrase, not a looser paraphrase', () => {
+  const chainName = ['ethe', 'reum'].join('');
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.sha256 === createHash('sha256').update(chainName).digest('hex')
+  ));
+  assert.ok(rule);
+
+  assert.deepEqual(scanDigestMarkers(`the legacy ${chainName} key`, [rule]), []);
+  assert.deepEqual(scanDigestMarkers(`network shape uses evm, not the legacy ${chainName} key`, [rule]), []);
+  assert.equal(scanDigestMarkers(`the legacy ${chainName} field`, [rule]).length, 1);
+  assert.equal(scanDigestMarkers(`the ${chainName} key`, [rule]).length, 1);
+});
+
 test('clean-room scanner permits the provider address enum only in Phase 3 JSON', () => {
   const root = fixture();
   try {
