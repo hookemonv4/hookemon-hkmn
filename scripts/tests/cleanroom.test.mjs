@@ -407,6 +407,50 @@ test('clean-room scanner permits the exact "legacy <chain> key" phrase, not a lo
   assert.equal(scanDigestMarkers(`the ${chainName} key`, [rule]).length, 1);
 });
 
+test('clean-room scanner permits only audited typed and legacy stablecoin contexts', () => {
+  const stablecoin = ['us', 'dc'].join('');
+  const stablecoinRule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.length === stablecoin.length
+    && candidate.sha256 === createHash('sha256').update(stablecoin).digest('hex')
+  ));
+  assert.ok(stablecoinRule);
+
+  const typedAsset = `chainId: 'solana:mainnet-beta', assetId: 'spl:${stablecoin}-mint'`;
+  assert.deepEqual(scanDigestMarkers(typedAsset, [stablecoinRule]), []);
+  assert.equal(scanDigestMarkers(typedAsset.replace('-mint', '-other'), [stablecoinRule]).length, 1);
+  assert.equal(scanDigestMarkers(typedAsset.replace('solana:mainnet-beta', 'solana:devnet'), [stablecoinRule]).length, 1);
+  assert.equal(scanDigestMarkers(stablecoin, [stablecoinRule]).length, 1);
+
+  const stablecoinTitleCase = `${stablecoin[0].toUpperCase()}${stablecoin.slice(1)}`;
+  const legacyField = `grossPackDebitMicro${stablecoinTitleCase}`;
+  assert.deepEqual(scanDigestMarkers(legacyField, [stablecoinRule], 'packages/domain/src/cycle-status.js'), []);
+  assert.equal(
+    scanDigestMarkers(`${legacyField}Backup`, [stablecoinRule], 'packages/domain/src/cycle-status.js').length,
+    1,
+  );
+  assert.equal(scanDigestMarkers(legacyField, [stablecoinRule], 'packages/adapters/src/app/accounting-projection.mjs').length, 1);
+
+  assert.deepEqual(scanDigestMarkers(`Solana ${stablecoin}`, [stablecoinRule]), []);
+  assert.deepEqual(scanDigestMarkers(`no SOLANA ${stablecoinTitleCase} ATA yet`, [stablecoinRule]), []);
+  assert.equal(scanDigestMarkers(`old-chain ${stablecoin}`, [stablecoinRule]).length, 1);
+  assert.equal(scanDigestMarkers(`Solana  ${stablecoin}`, [stablecoinRule]).length, 1);
+  assert.equal(scanDigestMarkers(`Solana${stablecoin}`, [stablecoinRule]).length, 1);
+  assert.equal(scanDigestMarkers(`${stablecoin} Solana`, [stablecoinRule]).length, 1);
+
+  const catalogFormatterFile = 'apps/web/app/operator/OperatorControlPanel.tsx';
+  const formatterCall = `formatMicro${stablecoinTitleCase}(value)`;
+  assert.deepEqual(scanDigestMarkers(formatterCall, [stablecoinRule], catalogFormatterFile), []);
+  assert.equal(scanDigestMarkers(formatterCall, [stablecoinRule], 'apps/web/app/other/File.tsx').length, 1);
+  assert.equal(
+    scanDigestMarkers(`renderMicro${stablecoinTitleCase}(value)`, [stablecoinRule], catalogFormatterFile).length,
+    1,
+  );
+  assert.equal(
+    scanDigestMarkers(`formatMicro${stablecoinTitleCase}`, [stablecoinRule], catalogFormatterFile).length,
+    1,
+  );
+});
+
 test('clean-room scanner permits the provider address enum only in Phase 3 JSON', () => {
   const root = fixture();
   try {

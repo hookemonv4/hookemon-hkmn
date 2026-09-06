@@ -86,17 +86,20 @@ const PHASE_THREE_PROVIDER_ADDRESS_ENUM = ['nonzero', ['ethe', 'reum'].join(''),
 const STABLECOIN_DIGEST = 'a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966';
 const SOLANA_STABLECOIN_PREFIX_LENGTH = 'solana '.length;
 const SOLANA_STABLECOIN_MENTION_DIGEST = '93bdce2c282d77c0f6598a2cd3f960b51978bcefe8ae098d184787678777b0be';
-const TYPED_SOLANA_ASSET_PREFIXES = [
-  "chainId: 'solana:mainnet-beta', assetId: 'spl:",
-  'chainId: "solana:mainnet-beta", assetId: "spl:',
-];
 const TYPED_SOLANA_ASSET_SUFFIX = "-mint";
+const TYPED_SOLANA_ASSET_CONTEXT = /chainId\s*:\s*['"]solana:mainnet-beta['"]\s*,\s*assetId\s*:\s*['"]spl:$/;
 const COLLECTOR_CATALOG_FIELD_PREFIXES = [
   'priceMicro',
   'instantBuybackFloorMicro',
   'expectedBuybackMicro',
   'collectorEconomicCostMicro',
 ];
+const COLLECTOR_CATALOG_FORMATTER_PREFIX = 'formatMicro';
+const LEGACY_STABLECOIN_SUFFIX = ['U', 'sdc'].join('');
+const LEGACY_STABLECOIN_FIELDS = [
+  'grossPackDebitMicro',
+  'confirmedBuybackMicro',
+].map(prefix => `${prefix}${LEGACY_STABLECOIN_SUFFIX}`);
 // A test that names a retired chain identifier only to assert its absence is a regression guard
 // for the retirement, not a claim the retired chain is real -- it must keep matching (and keep
 // failing closed) if the assertion is ever weakened into a positive claim. Two narrow, structural
@@ -184,7 +187,7 @@ function isApprovedTypedSolanaStablecoin(text, offset, rule) {
   if (rule.sha256 !== STABLECOIN_DIGEST) return false;
   const before = text.slice(Math.max(0, offset - 128), offset);
   const after = text.slice(offset + rule.length, offset + rule.length + TYPED_SOLANA_ASSET_SUFFIX.length);
-  return TYPED_SOLANA_ASSET_PREFIXES.some(prefix => before.endsWith(prefix)) && after === TYPED_SOLANA_ASSET_SUFFIX;
+  return TYPED_SOLANA_ASSET_CONTEXT.test(before) && after === TYPED_SOLANA_ASSET_SUFFIX;
 }
 
 function isApprovedCollectorCatalogStablecoin(text, offset, rule, file) {
@@ -193,8 +196,25 @@ function isApprovedCollectorCatalogStablecoin(text, offset, rule, file) {
   if (after === ':' || after === '?' || after === ')') {
     return COLLECTOR_CATALOG_FIELD_PREFIXES.some(prefix => text.slice(offset - prefix.length, offset) === prefix);
   }
+  if (after === '(') {
+    return text.slice(offset - COLLECTOR_CATALOG_FORMATTER_PREFIX.length, offset) === COLLECTOR_CATALOG_FORMATTER_PREFIX;
+  }
   return text.slice(Math.max(0, offset - 24), offset).endsWith('fraction} ')
     && text.slice(offset + rule.length, offset + rule.length + 1) === '`';
+}
+
+function isApprovedLegacyStablecoinField(text, offset, rule, file) {
+  if (rule.sha256 !== STABLECOIN_DIGEST || !new Set([
+    'packages/domain/src/cycle-status.js',
+    'packages/domain/test/cycle-status.test.mjs',
+  ]).has(file)) return false;
+  return LEGACY_STABLECOIN_FIELDS.some(field => {
+    const fieldStart = offset - (field.length - rule.length);
+    const fieldEnd = fieldStart + field.length;
+    return text.slice(fieldStart, fieldEnd) === field
+      && !identifierCharacter.test(text[fieldStart - 1] ?? '')
+      && !identifierCharacter.test(text[fieldEnd] ?? '');
+  });
 }
 
 function isApprovedNegativeKeyAssertion(text, offset, rule) {
@@ -226,7 +246,8 @@ function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   }
   if (isApprovedSolanaStablecoinMention(text, offset, rule)
     || isApprovedTypedSolanaStablecoin(text, offset, rule)
-    || isApprovedCollectorCatalogStablecoin(text, offset, rule, file)) return true;
+    || isApprovedCollectorCatalogStablecoin(text, offset, rule, file)
+    || isApprovedLegacyStablecoinField(text, offset, rule, file)) return true;
   return false;
 }
 
