@@ -27,38 +27,24 @@ function imageUrl(value: unknown): string | null {
   } catch { return null; }
 }
 
-/** Maps a caught value to a fixed, safe diagnostic tag. Never returns the raw error name/message. */
-function safeCode(error: unknown): string {
-  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) return "timeout";
-  if (error instanceof Error && error.name === "TypeError") {
-    if (/illegal invocation/i.test(error.message)) return "illegal_invocation";
-    if (/cannot perform i\/o on behalf of a different request/i.test(error.message)) return "request_context";
-    return "type_error";
-  }
-  return "other";
-}
-
-async function read(path: string, fetcher: typeof fetch, scope?: string): Promise<unknown> {
-  const tag = (stage: string) => scope ? `${scope}_${stage}` : stage;
+async function read(path: string, fetcher: typeof fetch): Promise<unknown> {
   let url: URL, signal: AbortSignal;
   try {
     url = new URL(path, provider.origin);
     signal = AbortSignal.timeout(6500);
   } catch {
-    throw new ProviderError(tag("request_setup"), "Provider request failed");
-  }
-  let responsePromise: Promise<Response>;
-  try {
-    responsePromise = fetcher(url, { method: "GET", redirect: "error", headers: { accept: "application/json" }, signal });
-  } catch (error) {
-    throw new ProviderError(tag(`fetch_call_${safeCode(error)}`), "Provider request failed");
+    throw new ProviderError("request_setup", "Provider request failed");
   }
   let response: Response;
   try {
-    response = await responsePromise;
+    // Cloudflare's edge runtime rejects redirect:"error" outright (TypeError), unlike
+    // documented/local fetch behaviour, so redirects must be intercepted manually below.
+    response = await fetcher(url, { method: "GET", redirect: "manual", headers: { accept: "application/json" }, signal });
   } catch (error) {
-    throw new ProviderError(tag(`fetch_reject_${safeCode(error)}`), "Provider request failed");
+    const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    throw new ProviderError(timeout ? "timeout" : "fetch_failed", "Provider request failed");
   }
+  if (response.status >= 300 && response.status < 400) { await cancelResponseBody(response); throw new ProviderError("redirect", "Provider unavailable"); }
   if (!response.ok) { await cancelResponseBody(response); throw new ProviderError(`http_${response.status}`, "Provider unavailable"); }
   const contentLength = response.headers.get("content-length");
   if (contentLength && Number(contentLength) > 2_000_000) { await cancelResponseBody(response); throw new ProviderError("oversize", "Provider response too large"); }
@@ -143,7 +129,7 @@ export async function handlePackCatalog(request: Request, fetcher: typeof fetch 
   const page = Number(pageText);
   if (inventory && (!validCode(code) || (rarity !== null && !rarities.includes(rarity as typeof rarities[number])) || !/^[1-9][0-9]{0,3}$/.test(pageText) || page > 1000)) return reply({ error: "Invalid query" }, 400);
   try {
-    const [catalogue, statuses] = await Promise.all([read("/api/gachas/all", fetcher, "catalogue"), read("/api/status", fetcher, "status")]);
+    const [catalogue, statuses] = await Promise.all([read("/api/gachas/all", fetcher), read("/api/status", fetcher)]);
     const packs = normalizePacks(catalogue, statuses);
     const metadata = { provider: provider.name, sourceUrl: provider.source, fetchedAt: new Date().toISOString(), valueType: "provider-insured-value", availabilityNotice: "Provider inventory snapshot. Cards may change before the next purchase. These are not Hookemon pulls or promised pack contents." };
     if (!inventory) return reply({ ...metadata, packs });

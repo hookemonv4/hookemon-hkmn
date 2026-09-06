@@ -33,7 +33,7 @@ test("inventory pagination uses the fixed HTTPS provider and bounded GET request
   const response = await handlePackCatalog(request("/api/packs/inventory?code=pokemon_50&rarity=epic&page=1"), fetcher);
   assert.equal(response.status, 200); const body = await response.json(); assert.equal(body.cards.length, 1); assert.equal(body.pageSize, 24); assert.equal(body.hasMore, true);
   assert.equal(body.valueType, "provider-insured-value"); assert.ok(Date.parse(body.fetchedAt));
-  assert.ok(calls.every(({ url, init }) => url.origin === "https://gacha.collectorcrypt.com" && init.method === "GET" && init.redirect === "error"));
+  assert.ok(calls.every(({ url, init }) => url.origin === "https://gacha.collectorcrypt.com" && init.method === "GET" && init.redirect === "manual"));
   assert.equal(calls.at(-1).url.searchParams.get("limit"), "24"); assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
@@ -45,10 +45,10 @@ test("refuses unlisted packs and invalid queries before inventory fetch", async 
 });
 
 test("provider failure has no stale or showcase fallback", async () => {
-  const { fetcher } = upstream({ "/api/status": new Error("timeout") });
+  const { fetcher } = upstream({ "/api/status": new Error("network down") });
   const response = await handlePackCatalog(request("/api/packs"), fetcher); assert.equal(response.status, 503);
   const body = await response.json(); assert.equal(body.fetchedAt, null); assert.equal(body.packs, undefined); assert.equal(body.cards, undefined);
-  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "status_fetch_reject_other");
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "fetch_failed");
   assert.equal((await handlePackCatalog(new Request("https://hookemon.com/api/packs", { method: "POST" }), fetcher)).status, 405);
 });
 
@@ -74,7 +74,7 @@ test("classifies a timed-out provider request distinctly from a network failure"
   const timeout = new DOMException("The operation was aborted due to timeout", "TimeoutError");
   const { fetcher } = upstream({ "/api/status": timeout });
   const response = await handlePackCatalog(request("/api/packs"), fetcher);
-  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "status_fetch_reject_timeout");
+  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "timeout");
 });
 
 test("classifies a request-setup failure (URL/AbortSignal construction) before any fetcher call", async () => {
@@ -84,40 +84,44 @@ test("classifies a request-setup failure (URL/AbortSignal construction) before a
     const { calls, fetcher } = upstream();
     const response = await handlePackCatalog(request("/api/packs"), fetcher);
     assert.equal(response.status, 503);
-    assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "catalogue_request_setup");
+    assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "request_setup");
     assert.equal(calls.length, 0);
   } finally {
     AbortSignal.timeout = original;
   }
 });
 
-test("classifies a synchronous throw from calling fetcher(...) distinctly from an awaited rejection", async () => {
+test("classifies a synchronous throw from calling fetcher(...) without leaking the message", async () => {
   const { fetcher } = upstream();
   const response = await handlePackCatalog(request("/api/packs"), (url, init) => {
     if (new URL(url).pathname === "/api/status") throw new TypeError("boom during invocation");
     return fetcher(url, init);
   });
   assert.equal(response.status, 503);
-  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "status_fetch_call_type_error");
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "fetch_failed");
   assert.ok(!JSON.stringify(await response.json()).includes("boom during invocation"));
 });
 
-test("classifies a synchronous illegal-invocation throw from fetcher distinctly from a rejection", async () => {
-  const { fetcher } = upstream();
-  const patched = (url, init) => new URL(url).pathname === "/api/gachas/all"
-    ? (() => { throw new TypeError("Illegal invocation"); })()
-    : fetcher(url, init);
-  const response = await handlePackCatalog(request("/api/packs"), patched);
-  assert.equal(response.status, 503);
-  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "catalogue_fetch_call_illegal_invocation");
-});
-
-test("classifies an asynchronously rejected TypeError distinctly from a synchronous throw", async () => {
+test("classifies an asynchronously rejected transport failure without leaking the message", async () => {
   const { fetcher } = upstream({ "/api/gachas/all": new TypeError("some other transport failure") });
   const response = await handlePackCatalog(request("/api/packs"), fetcher);
   assert.equal(response.status, 503);
-  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "catalogue_fetch_reject_type_error");
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "fetch_failed");
   assert.ok(!JSON.stringify(await response.json()).includes("some other transport failure"));
+});
+
+test("rejects a redirected provider response, cancels its body, and never follows Location", async () => {
+  let cancelled = false;
+  const fetcher = async url => url.pathname === "/api/status" ? Response.json(state) : new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array([1])); controller.close(); },
+    cancel() { cancelled = true; },
+  }), { status: 302, headers: { location: "https://evil.test/redirected" } });
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503); assert.equal(cancelled, true);
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "redirect");
+  const body = await response.json();
+  assert.deepEqual(body, { error: "Provider inventory is temporarily unavailable. Please try again or view Collector Crypt.", provider: "Collector Crypt", sourceUrl: body.sourceUrl, fetchedAt: null });
+  assert.ok(!JSON.stringify(body).includes("evil.test"));
 });
 
 test("classifies a non-JSON provider body distinctly from a schema rejection", async () => {
