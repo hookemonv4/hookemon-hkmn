@@ -29,7 +29,7 @@ function fixture(name) {
 const chains = fixture('chains.json');
 const quoteFixture = fixture('quote-outbound.json');
 // This fixture remains a deterministic recorded EVM envelope, but the admission path below
-// models an EXACT_OUTPUT quote: the requested USDC target and the minimum are both 25 USDC.
+// models an EXACT_OUTPUT quote: the requested settlement target and minimum are both 25 atomic units.
 quoteFixture.details.currencyOut.amount = '25000000';
 quoteFixture.details.currencyOut.minimumAmount = '25000000';
 quoteFixture.protocol.v2.orderData.output.payments[0].expectedAmount = '25000000';
@@ -79,7 +79,7 @@ function admittedQuote(raw = quoteFixture) {
 
 function admission(cycleId, quote = admittedQuote()) {
   const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: quote.origin.amount };
-  const usdc = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: quote.destination.amount };
+  const destinationAsset = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: quote.destination.amount };
   return {
     schema: 'hookemon.policy-admission.v2',
     cycleId,
@@ -87,7 +87,7 @@ function admission(cycleId, quote = admittedQuote()) {
     quantity: 1,
     unitFundingQuote: usdg,
     aggregateFundingQuote: usdg,
-    aggregatePurchase: usdc,
+    aggregatePurchase: destinationAsset,
     relay: {
       tradeType: 'EXACT_OUTPUT',
       requestId: quote.requestId,
@@ -95,8 +95,8 @@ function admission(cycleId, quote = admittedQuote()) {
       deadlineUnixSeconds: quote.deadlineUnixSeconds,
       sender: quote.sender,
       recipient: quote.recipient,
-      destinationAmount: usdc.amountAtomic,
-      destinationMinimumAmount: usdc.amountAtomic,
+      destinationAmount: destinationAsset.amountAtomic,
+      destinationMinimumAmount: destinationAsset.amountAtomic,
     },
     relayQuote: quote,
   };

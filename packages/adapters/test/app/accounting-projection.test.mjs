@@ -461,8 +461,8 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
   assert.equal(accounting.packSpendMicroUsdg, null);
 });
 
-const SOLANA_USDC = { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6 };
-function solAmount(amountAtomic) { return { ...SOLANA_USDC, amountAtomic }; }
+const SOLANA_SETTLEMENT_ASSET = { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6 };
+function solAmount(amountAtomic) { return { ...SOLANA_SETTLEMENT_ASSET, amountAtomic }; }
 
 test('collectorPurchaseDebit sums an N-pack purchase batch: verified purchased packs plus genuinely zero-cost not_purchased packs', async () => {
   const repository = relayLegRepository({
@@ -482,7 +482,7 @@ test('collectorPurchaseDebit sums an N-pack purchase batch: verified purchased p
     },
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.deepEqual(accounting.collectorPurchaseDebit, { ...SOLANA_USDC, units: '50' });
+  assert.deepEqual(accounting.collectorPurchaseDebit, { ...SOLANA_SETTLEMENT_ASSET, units: '50' });
 });
 
 test('collectorBuybackProceeds sums only sold packs; held (never-sold) packs are a real verified zero, not unknown', async () => {
@@ -514,7 +514,7 @@ test('collectorBuybackProceeds sums only sold packs; held (never-sold) packs are
     },
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.deepEqual(accounting.collectorBuybackProceeds, { ...SOLANA_USDC, units: '75' });
+  assert.deepEqual(accounting.collectorBuybackProceeds, { ...SOLANA_SETTLEMENT_ASSET, units: '75' });
 });
 
 test('collectorPurchaseDebit fails closed to null when a purchased pack is missing its own packCost (never a fabricated zero or a silently dropped pack)', async () => {
