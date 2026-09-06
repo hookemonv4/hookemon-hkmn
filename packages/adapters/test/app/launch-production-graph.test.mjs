@@ -910,13 +910,32 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   // next automatic tick durably reaches the purchase operation boundary.
   //
   // Purchase/open/epic-gate/buyback/return/payout completion are the next bounded steps and are
-  // deliberately not asserted here yet. Reaching them is currently blocked by two open production
-  // defects outside this file's write-set (see coordinator's bot-graph-attention.md):
-  // stage-driver.mjs's non-chain-journal preparation path never supplies `adapters` to a
-  // non-rehearsal production stage (`preparePurchaseRequest` throws "requires collector-crypt
-  // machine data" on every live tick), and the checked-in Collector policy bundle
-  // (rehearsal/collector-policy/bundle.json) is deliberately `evidence-only` for the current
-  // pinned operator, so `mutatePurchase` would refuse even once the first defect is fixed.
+  // deliberately not asserted here yet. The two defects this comment previously named are now
+  // resolved: stage-driver.mjs's collector-production preparation path supplies real
+  // collector-crypt adapters to a non-rehearsal `preparePurchaseRequest`
+  // (collector-integration-report.md), so this fixture's two-pack policy above (`activateTwoPackPolicy`)
+  // reaches purchase's PREPARED boundary.
+  //
+  // The verified next blocker (reproduced 2026-09-06 with this exact env/config; not yet fixed,
+  // outside this file's write-set) is a real config-wiring gap rather than the Collector-policy
+  // bundle: `environment.mjs` never reads any pack-quantity variable into `config.pack`
+  // (`pack: Object.freeze({ code: packCode })`, packages/adapters/src/app/environment.mjs:1013),
+  // so `assertConfiguredPackQuantity(config?.pack?.quantity)` in
+  // packages/adapters/src/app/stages/purchase.mjs:147-148 always defaults `quantity` to 1 in a
+  // real production run, no matter how many packs the operator's `requestedOrders` admits the
+  // cycle for. `admittedPurchaseBounds` (purchase.mjs:201-213) then cross-checks that defaulted 1
+  // against the durable admission's own quantity (2, from `configuration.requestedOrders` at
+  // compose.mjs:614) and throws `purchase prepareRequest quantity does not match the admitted
+  // quantity` (purchase.mjs:206) on every later tick's re-`prepareRequest` call
+  // (stage-driver.mjs prepareRequestForMutation, packages/adapters/src/app/stage-driver.mjs:943),
+  // even though the cycle's first prepare call already durably recorded a PREPARED digest. The
+  // Collector policy bundle question (rehearsal/collector-policy/bundle.json, checked-in
+  // `evidence-only`) is a distinct, separately real gap for later once purchase's own quantity
+  // wiring is fixed: `compose.mjs`'s `attachCollectorPolicyBundle` call is gated on
+  // `isLiveCollectorOnlyRehearsal` (compose.mjs:101-105,1187), which is false for this fixture's
+  // `--mode production` run, and no other production path assembles a per-stage
+  // `config.collectorCrypt.<stage>.policy`, so `requirePolicy` (purchase.mjs:54-60) has nothing to
+  // return in either case.
   assert.equal(cycle.stages.get('outbound')?.status, 'COMPLETE', `outbound must durably settle from Solana destination-chain evidence; ${await diagnostics()}`);
   const purchase = cycle.preparedStages.get('purchase') ?? null;
   assert.ok(purchase, `purchase must durably reach the PREPARED operation boundary once outbound settles; ${await diagnostics()}`);
