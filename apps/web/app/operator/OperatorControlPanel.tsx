@@ -327,16 +327,19 @@ export default function OperatorControlPanel() {
       });
       const body = await readJson<DecisionResponse>(response);
       if (!response.ok) throw new Error(stableMessage(body.code));
-      setMessage(successMessage);
+      // The refresh below sets its own transient "wird geladen"/"ist geladen" status message;
+      // setting the command's own success message afterwards keeps it as the one the operator
+      // actually sees, instead of it flashing for a moment and then being overwritten.
       await Promise.all([
         loadBootstrap({ replaceForm: command.type === "update-configuration" }),
         loadAudit(),
         loadDashboard(),
       ]);
+      setMessage(successMessage);
     } catch (commandError) {
       setError(errorMessage(commandError));
-      setMessage("Entscheidung wurde nicht angenommen.");
       await loadBootstrap({ replaceForm: false });
+      setMessage("Entscheidung wurde nicht angenommen.");
     } finally {
       setBusy(false);
     }

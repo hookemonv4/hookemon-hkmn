@@ -33,6 +33,23 @@ test("keeps German next-cycle form values separate from canonical decision paylo
   assert.match(source, /command\.type === "update-configuration"/);
   assert.match(source, /Nach diesem Zyklus pausieren/);
   assert.doesNotMatch(source, /abort-active-cycle|cancel-active-cycle/);
+
+  // Regression: loadBootstrap's own transient "wird geladen"/"ist geladen" status message must
+  // never be allowed to overwrite the command's own outcome message -- it must be set after the
+  // post-decision refresh settles, not before, or the operator never actually sees it (a real
+  // browser test caught this: the message flashed and was immediately replaced).
+  const submitCommandBody = source.slice(
+    source.indexOf("async function submitCommand"),
+    source.indexOf("function saveConfiguration"),
+  );
+  assert.match(
+    submitCommandBody,
+    /await Promise\.all\(\[\s*loadBootstrap[\s\S]*?\]\);\s*setMessage\(successMessage\);/,
+  );
+  assert.match(
+    submitCommandBody,
+    /await loadBootstrap\(\{ replaceForm: false \}\);\s*setMessage\("Entscheidung wurde nicht angenommen\."\);/,
+  );
 });
 
 test("persists the exact website control flow through pause, pack changes, and reactivation", async () => {
