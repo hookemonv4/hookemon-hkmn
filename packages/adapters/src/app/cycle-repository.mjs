@@ -141,11 +141,15 @@ export const CYCLE_REPOSITORY_CLIENT_INTERFACE = Object.freeze([
   'listHeldPositions',
   'readSupplementarySettlement',
   'listKnownCycleIds',
+  'readOutboundQuoteRefresh',
+  'readFinalizedClaimCustodyEvidence',
 ]);
 
 export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   ...CYCLE_REPOSITORY_CLIENT_INTERFACE,
   'createCycle',
+  'recordOutboundQuoteExpired',
+  'selectOutboundQuoteRefresh',
   'prepareStage',
   'completeStage',
   'completeCycle',
@@ -618,6 +622,83 @@ function assertDurableCycleAdmission(value, cycleId, operations, label = 'cycle-
   if (normalized.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
   canonicalJson(normalized);
   return Object.freeze(structuredClone(normalized));
+}
+
+/**
+ * REQ-cycle-repository-2 / ADR-0025 `refresh-after-readmission`: durable evidence that a Relay
+ * quote expired before any outbound request or signature existed. Deliberately narrow -- only the
+ * identities and deadlines the policy engine already normalized into the durable admission, plus
+ * the observation itself -- so this record can never carry executable Relay steps a check never
+ * saw.
+ */
+const OUTBOUND_QUOTE_EXPIRY_EVIDENCE_SCHEMA = 'hookemon.outbound-quote-expiry-evidence.v1';
+
+function assertOutboundQuoteIdentity(value, label) {
+  exactObject(value, ['requestId', 'deadlineUnixSeconds', 'quoteDigest'], label);
+  if (typeof value.requestId !== 'string' || value.requestId.length === 0) throw new Error(`${label} requestId is invalid`);
+  if (!Number.isSafeInteger(value.deadlineUnixSeconds) || value.deadlineUnixSeconds <= 0) {
+    throw new Error(`${label} deadlineUnixSeconds is invalid`);
+  }
+  assertDigest(value.quoteDigest, `${label} quoteDigest`);
+  return Object.freeze({ requestId: value.requestId, deadlineUnixSeconds: value.deadlineUnixSeconds, quoteDigest: value.quoteDigest });
+}
+
+function assertOutboundQuoteExpiryEvidence(value, cycleId) {
+  const label = 'cycle-repository outbound quote expiry evidence';
+  exactObject(value, ['schema', 'cycleId', 'admissionDigest', 'aggregateQuote', 'unitQuote', 'observedAtMs'], label);
+  if (value.schema !== OUTBOUND_QUOTE_EXPIRY_EVIDENCE_SCHEMA) throw new Error(`${label} schema is invalid`);
+  if (value.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
+  assertDigest(value.admissionDigest, `${label} admissionDigest`);
+  const aggregateQuote = assertOutboundQuoteIdentity(value.aggregateQuote, `${label} aggregateQuote`);
+  const unitQuote = assertOutboundQuoteIdentity(value.unitQuote, `${label} unitQuote`);
+  if (!Number.isSafeInteger(value.observedAtMs) || value.observedAtMs <= 0) throw new Error(`${label} observedAtMs is invalid`);
+  const observedUnixSeconds = Math.floor(value.observedAtMs / 1000);
+  if (observedUnixSeconds < aggregateQuote.deadlineUnixSeconds && observedUnixSeconds < unitQuote.deadlineUnixSeconds) {
+    throw new Error(`${label} requires the aggregate or unit quote to actually be expired at the observed time`);
+  }
+  return Object.freeze({
+    schema: value.schema,
+    cycleId,
+    admissionDigest: value.admissionDigest,
+    aggregateQuote,
+    unitQuote,
+    observedAtMs: value.observedAtMs,
+  });
+}
+
+/**
+ * The expiry evidence must name *this cycle's actual* admission and quotes -- never an arbitrary
+ * or stale digest a caller happens to supply -- so a fabricated or mismatched expiry record can
+ * never open the door to refresh for a quote this cycle was never bound to.
+ */
+function assertOutboundQuoteExpiryEvidenceMatchesAdmission(evidence, admission) {
+  if (!admission) throw new Error('cycle-repository outbound quote expiry evidence: this cycle has no original durable admission to bind against');
+  if (evidence.admissionDigest !== digest(admission)) {
+    throw new Error('cycle-repository outbound quote expiry evidence: admissionDigest does not match this cycle\'s admission');
+  }
+  if (evidence.aggregateQuote.requestId !== admission.relay.requestId
+    || evidence.aggregateQuote.deadlineUnixSeconds !== admission.relay.deadlineUnixSeconds
+    || evidence.aggregateQuote.quoteDigest !== admission.relay.quoteDigest) {
+    throw new Error('cycle-repository outbound quote expiry evidence: aggregateQuote does not match this cycle\'s admitted aggregate quote');
+  }
+  if (evidence.unitQuote.requestId !== admission.unitRelay.requestId
+    || evidence.unitQuote.deadlineUnixSeconds !== admission.unitRelay.deadlineUnixSeconds
+    || evidence.unitQuote.quoteDigest !== admission.unitRelay.quoteDigest) {
+    throw new Error('cycle-repository outbound quote expiry evidence: unitQuote does not match this cycle\'s admitted unit quote');
+  }
+}
+
+/** Any outbound stage request digest, Relay leg, or chain attempt of any state blocks refresh. */
+function hasOutboundEffectRecords(state) {
+  const requestDigests = state.stageRequestDigests.get('outbound') ?? [];
+  if (requestDigests.length > 0) return true;
+  for (const record of state.chainAttempts.values()) {
+    if (record?.attempt?.stage === 'outbound') return true;
+  }
+  for (const leg of state.relayLegs.values()) {
+    if (leg.direction === 'outbound') return true;
+  }
+  return false;
 }
 
 function custodyLedgerKey(ledger) {
@@ -2595,6 +2676,10 @@ export class CycleRepository {
     const packBatchIntents = new Map();
     const supplementaryChainAttempts = new Map();
     const supplementaryChainAttemptRecoveryContexts = new Map();
+    // REQ-cycle-repository-2 `refresh-after-readmission`: a single per-cycle projection, never a
+    // map, because the approved scope permits exactly one durable expiry record and at most one
+    // selected replacement for the cycle's whole lifetime.
+    let outboundQuoteRefresh = null;
     const replayState = {
       stages,
       preparedStages,
@@ -3218,6 +3303,42 @@ export class CycleRepository {
         const digests = stageRequestDigests.get(entry.payload.stage) ?? [];
         if (!digests.includes(entry.payload.requestDigest)) digests.push(entry.payload.requestDigest);
         stageRequestDigests.set(entry.payload.stage, digests);
+      } else if (entry.kind === 'outbound-quote-expired') {
+        const evidence = assertOutboundQuoteExpiryEvidence(entry.payload.evidence, cycleId);
+        assertOutboundQuoteExpiryEvidenceMatchesAdmission(evidence, admission);
+        if (outboundQuoteRefresh) {
+          if (outboundQuoteRefresh.state !== 'REFRESH_REQUIRED'
+            || canonicalJson(outboundQuoteRefresh.expiry) !== canonicalJson(evidence)) {
+            throw new Error('stored cycle has conflicting outbound quote expiry evidence');
+          }
+        } else {
+          outboundQuoteRefresh = Object.freeze({ state: 'REFRESH_REQUIRED', expiry: evidence, expiryDigest: entry.digest });
+        }
+      } else if (entry.kind === 'outbound-quote-refresh-selected') {
+        if (!outboundQuoteRefresh || outboundQuoteRefresh.state !== 'REFRESH_REQUIRED') {
+          throw new Error('stored cycle has a replacement selection without an exact REFRESH_REQUIRED predecessor');
+        }
+        if (entry.payload.predecessorExpiryDigest !== outboundQuoteRefresh.expiryDigest) {
+          throw new Error('stored cycle replacement selection does not bind the exact expiry predecessor');
+        }
+        assertDigest(entry.payload.replacementDigest, 'stored outbound quote refresh replacementDigest');
+        assertDigest(entry.payload.refreshPolicyDecisionDigest, 'stored outbound quote refresh refreshPolicyDecisionDigest');
+        const replacement = assertDurableCycleAdmission(entry.payload.replacement, cycleId, null, 'stored outbound quote refresh replacement admission');
+        if (digest(replacement) !== entry.payload.replacementDigest) {
+          throw new Error('stored outbound quote refresh replacementDigest does not match the replacement admission');
+        }
+        if (!Number.isSafeInteger(entry.payload.selectedAtMs) || entry.payload.selectedAtMs <= 0) {
+          throw new Error('stored outbound quote refresh selectedAtMs is invalid');
+        }
+        outboundQuoteRefresh = Object.freeze({
+          state: 'ACTIVE',
+          expiry: outboundQuoteRefresh.expiry,
+          expiryDigest: outboundQuoteRefresh.expiryDigest,
+          replacement,
+          replacementDigest: entry.payload.replacementDigest,
+          refreshPolicyDecisionDigest: entry.payload.refreshPolicyDecisionDigest,
+          selectedAtMs: entry.payload.selectedAtMs,
+        });
       } else if (entry.kind === 'evm-nonce-lock-acquired') {
         const lock = assertEvmNonceLock(entry.payload.lock, 'stored EVM nonce lock');
         if (lock.cycleId !== cycleId) throw new Error('stored EVM nonce lock cycleId is invalid');
@@ -3299,6 +3420,7 @@ export class CycleRepository {
       evmNonceLocks,
       packBatchRequests,
       packBatchIntents,
+      outboundQuoteRefresh,
       completed,
       terminalState,
       heldEvidenceDigest,
@@ -3492,6 +3614,162 @@ export class CycleRepository {
     const state = await this.#replay(cycleId);
     if ((state.stageRequestDigests.get(stage) ?? []).includes(requestDigest)) return;
     await this.#append(cycleId, 'stage-request-prepared', { stage, requestDigest });
+  }
+
+  /**
+   * REQ-cycle-repository-2 `refresh-after-readmission` projection accessor. Returns `null` before
+   * any expiry is recorded, `{ state: 'REFRESH_REQUIRED', expiry, expiryDigest }` after the first
+   * event, or `{ state: 'ACTIVE', expiry, expiryDigest, replacement, replacementDigest,
+   * refreshPolicyDecisionDigest, selectedAtMs }` once exactly one replacement has been selected.
+   */
+  async readOutboundQuoteRefresh(cycleId) {
+    const state = await this.#replay(cycleId);
+    return state.outboundQuoteRefresh ? structuredClone(state.outboundQuoteRefresh) : null;
+  }
+
+  /**
+   * ADR-0025 proven-pre-effect-transient recovery for a Relay quote that expired before any
+   * outbound request or signature existed. Allowed only while outbound has zero effect records of
+   * any kind (no stage request digest, Relay leg, or chain attempt in any state -- PREPARED,
+   * SIGNED, BROADCAST, and FINALIZED all block it identically). Idempotent for byte-identical
+   * evidence; conflicts the moment any field differs, including the admission digest, either
+   * quote's requestId/deadline/digest, or the observed time.
+   */
+  async recordOutboundQuoteExpired(cycleId, evidenceValue) {
+    let lastContention = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const state = await this.#replay(cycleId);
+      if (state.terminalState) throw new Error(`cycle-repository recordOutboundQuoteExpired: cycle is terminal as ${state.terminalState}`);
+      const evidence = assertOutboundQuoteExpiryEvidence(evidenceValue, cycleId);
+      assertOutboundQuoteExpiryEvidenceMatchesAdmission(evidence, state.admission);
+      if (hasOutboundEffectRecords(state)) {
+        throw new Error('cycle-repository recordOutboundQuoteExpired: an outbound stage request, Relay leg, or chain attempt already exists');
+      }
+      if (state.outboundQuoteRefresh) {
+        if (canonicalJson(state.outboundQuoteRefresh.expiry) === canonicalJson(evidence)) {
+          return structuredClone(state.outboundQuoteRefresh);
+        }
+        throw new Error('cycle-repository recordOutboundQuoteExpired: conflicting expiry evidence is already recorded');
+      }
+      try {
+        await this.#append(cycleId, 'outbound-quote-expired', { evidence }, {
+          operation: 'recordOutboundQuoteExpired',
+          assertState: currentState => {
+            if (hasOutboundEffectRecords(currentState)) {
+              throw new Error('cycle-repository recordOutboundQuoteExpired: an outbound effect record appeared while recording expiry');
+            }
+            if (currentState.outboundQuoteRefresh) {
+              throw new Error('cycle-repository recordOutboundQuoteExpired: expiry evidence was recorded concurrently');
+            }
+          },
+        });
+        const after = await this.#replay(cycleId);
+        return structuredClone(after.outboundQuoteRefresh);
+      } catch (error) {
+        if (!/was recorded concurrently|effect record appeared while recording|expected version|journal head|durable cycle store lock contention/.test(error?.message ?? '')) {
+          throw error;
+        }
+        lastContention = error;
+      }
+    }
+    throw lastContention ?? new Error('cycle-repository recordOutboundQuoteExpired: contention did not resolve');
+  }
+
+  /**
+   * ADR-0025 `refresh-after-readmission`'s single atomic replacement selection. The compare-and-set
+   * re-proves the exact `REFRESH_REQUIRED` predecessor (by expiry digest), that no outbound effect
+   * record exists, and that no competing replacement is already active -- a race between two
+   * selectors leaves exactly one winner and the loser observes the predecessor failure directly,
+   * never a silent overwrite. The replacement must preserve this cycle's identity, pack, quantity,
+   * route/asset targets, and exactly the original claimed principal (`cycle.releaseAmount`): the
+   * minimal compatible version refuses both a greater and a smaller replacement source amount.
+   */
+  async selectOutboundQuoteRefresh(cycleId, {
+    predecessorExpiryDigest, replacement, refreshPolicyDecisionDigest, operations = null,
+  }) {
+    assertDigest(predecessorExpiryDigest, 'cycle-repository selectOutboundQuoteRefresh predecessorExpiryDigest');
+    assertDigest(refreshPolicyDecisionDigest, 'cycle-repository selectOutboundQuoteRefresh refreshPolicyDecisionDigest');
+    let lastContention = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const state = await this.#replay(cycleId);
+      if (state.terminalState) throw new Error(`cycle-repository selectOutboundQuoteRefresh: cycle is terminal as ${state.terminalState}`);
+      if (!state.outboundQuoteRefresh || state.outboundQuoteRefresh.state !== 'REFRESH_REQUIRED') {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: requires an exact REFRESH_REQUIRED predecessor');
+      }
+      if (state.outboundQuoteRefresh.expiryDigest !== predecessorExpiryDigest) {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: predecessor expiry digest does not match');
+      }
+      if (hasOutboundEffectRecords(state)) {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: an outbound stage request, Relay leg, or chain attempt already exists');
+      }
+      const normalized = assertDurableCycleAdmission(
+        replacement,
+        cycleId,
+        operations,
+        'cycle-repository selectOutboundQuoteRefresh replacement admission',
+      );
+      if (!state.admission) {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: this cycle has no original durable admission to bind against');
+      }
+      if (normalized.packId !== state.admission.packId || normalized.quantity !== state.admission.quantity) {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: replacement pack/quantity does not match the original admission');
+      }
+      if (canonicalJson(normalized.aggregatePurchase) !== canonicalJson(state.admission.aggregatePurchase)
+        || canonicalJson(normalized.unitPurchase) !== canonicalJson(state.admission.unitPurchase)) {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: replacement destination target does not match the original admission');
+      }
+      if (normalized.aggregateFundingQuote.amountAtomic !== state.releaseAmount) {
+        throw new Error('cycle-repository selectOutboundQuoteRefresh: replacement source amount does not exactly equal the immutable release amount');
+      }
+      const replacementDigest = digest(normalized);
+      try {
+        const selectedAtMs = currentRepositoryTime(this.#now);
+        await this.#append(cycleId, 'outbound-quote-refresh-selected', {
+          predecessorExpiryDigest,
+          replacement: normalized,
+          replacementDigest,
+          refreshPolicyDecisionDigest,
+          selectedAtMs,
+        }, {
+          operation: 'selectOutboundQuoteRefresh',
+          assertState: currentState => {
+            if (!currentState.outboundQuoteRefresh || currentState.outboundQuoteRefresh.state !== 'REFRESH_REQUIRED') {
+              throw new Error('cycle-repository selectOutboundQuoteRefresh: a replacement was already selected concurrently');
+            }
+            if (currentState.outboundQuoteRefresh.expiryDigest !== predecessorExpiryDigest) {
+              throw new Error('cycle-repository selectOutboundQuoteRefresh: predecessor changed concurrently');
+            }
+            if (hasOutboundEffectRecords(currentState)) {
+              throw new Error('cycle-repository selectOutboundQuoteRefresh: an outbound effect record appeared while selecting');
+            }
+          },
+        });
+        const after = await this.#replay(cycleId);
+        return structuredClone(after.outboundQuoteRefresh);
+      } catch (error) {
+        if (!/already selected concurrently|predecessor changed concurrently|effect record appeared while selecting|expected version|journal head|durable cycle store lock contention/.test(error?.message ?? '')) {
+          throw error;
+        }
+        lastContention = error;
+      }
+    }
+    throw lastContention ?? new Error('cycle-repository selectOutboundQuoteRefresh: contention did not resolve');
+  }
+
+  /**
+   * Repository-owned finalized claim/custody evidence for this exact cycle -- never a wallet
+   * balance, and never the pre-claim hook liability re-read as though it were still claimable.
+   * Returns `null` until this cycle's own `claim-process` stage is durably COMPLETE.
+   */
+  async readFinalizedClaimCustodyEvidence(cycleId) {
+    const state = await this.#replay(cycleId);
+    const claimStage = state.stages.get('claim-process');
+    if (!claimStage || claimStage.status !== 'COMPLETE') return null;
+    return Object.freeze({
+      cycleId,
+      claimEvidence: structuredClone(claimStage.evidence),
+      custodyLedgers: Object.freeze([...state.custodyLedgers.values()].map(ledger => structuredClone(ledger))),
+    });
   }
 
   /** @returns {Promise<{status: 'COMPLETE', evidence: unknown}|{status: 'PENDING'}>} */
