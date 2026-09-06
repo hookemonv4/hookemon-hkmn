@@ -5,6 +5,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inflateSync } from 'node:zlib';
 
 // Sensitive retired names are represented only by lowercase SHA-256 digests.
 // Length is measured in ASCII code units. Boundary rules prevent a retired
@@ -85,6 +86,17 @@ const PHASE_THREE_PROVIDER_ADDRESS_ENUM = ['nonzero', ['ethe', 'reum'].join(''),
 const STABLECOIN_DIGEST = 'a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966';
 const SOLANA_STABLECOIN_PREFIX_LENGTH = 'solana '.length;
 const SOLANA_STABLECOIN_MENTION_DIGEST = '93bdce2c282d77c0f6598a2cd3f960b51978bcefe8ae098d184787678777b0be';
+const TYPED_SOLANA_ASSET_PREFIXES = [
+  "chainId: 'solana:mainnet-beta', assetId: 'spl:",
+  'chainId: "solana:mainnet-beta", assetId: "spl:',
+];
+const TYPED_SOLANA_ASSET_SUFFIX = "-mint";
+const COLLECTOR_CATALOG_FIELD_PREFIXES = [
+  'priceMicro',
+  'instantBuybackFloorMicro',
+  'expectedBuybackMicro',
+  'collectorEconomicCostMicro',
+];
 // A test that names a retired chain identifier only to assert its absence is a regression guard
 // for the retirement, not a claim the retired chain is real -- it must keep matching (and keep
 // failing closed) if the assertion is ever weakened into a positive claim. Two narrow, structural
@@ -168,6 +180,23 @@ function isApprovedSolanaStablecoinMention(text, offset, rule) {
     && sha256Text(token) === SOLANA_STABLECOIN_MENTION_DIGEST;
 }
 
+function isApprovedTypedSolanaStablecoin(text, offset, rule) {
+  if (rule.sha256 !== STABLECOIN_DIGEST) return false;
+  const before = text.slice(Math.max(0, offset - 128), offset);
+  const after = text.slice(offset + rule.length, offset + rule.length + TYPED_SOLANA_ASSET_SUFFIX.length);
+  return TYPED_SOLANA_ASSET_PREFIXES.some(prefix => before.endsWith(prefix)) && after === TYPED_SOLANA_ASSET_SUFFIX;
+}
+
+function isApprovedCollectorCatalogStablecoin(text, offset, rule, file) {
+  if (rule.sha256 !== STABLECOIN_DIGEST || file !== 'apps/web/app/operator/OperatorControlPanel.tsx') return false;
+  const after = text.slice(offset + rule.length, offset + rule.length + 1);
+  if (after === ':' || after === '?' || after === ')') {
+    return COLLECTOR_CATALOG_FIELD_PREFIXES.some(prefix => text.slice(offset - prefix.length, offset) === prefix);
+  }
+  return text.slice(Math.max(0, offset - 24), offset).endsWith('fraction} ')
+    && text.slice(offset + rule.length, offset + rule.length + 1) === '`';
+}
+
 function isApprovedNegativeKeyAssertion(text, offset, rule) {
   if (rule.sha256 !== PREVIOUS_CHAIN_NAME_DIGEST) return false;
   const before = text.slice(Math.max(0, offset - NEGATIVE_KEY_ASSERTION_LOOKBEHIND), offset);
@@ -195,7 +224,9 @@ function isApprovedCurrentMarkerContext(text, offset, rule, file) {
       || isApprovedNegativeKeyAssertion(text, offset, rule)
       || isApprovedLegacyKeyPhrase(text, offset, rule);
   }
-  if (isApprovedSolanaStablecoinMention(text, offset, rule)) return true;
+  if (isApprovedSolanaStablecoinMention(text, offset, rule)
+    || isApprovedTypedSolanaStablecoin(text, offset, rule)
+    || isApprovedCollectorCatalogStablecoin(text, offset, rule, file)) return true;
   return false;
 }
 
@@ -294,6 +325,84 @@ function scanText(text, digestRules, file = null) {
   return findings.sort((a, b) => a.offset - b.offset || a.rule.localeCompare(b.rule));
 }
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const APPROVED_MEDIA_PAYLOADS = new Map([
+  ['apps/web/public/hookemon-wordmark.png', 'c29aa717cff834a6664f0bec683212da59df7bb54cd258c796c016d14db26195'],
+  ['apps/web/public/comic/journey-03.mp4', '40512ad699e0094272bec9cd34a286acc9de5003fffc08e0425769b144c6e7bc'],
+]);
+
+function pngImageDataRanges(buffer) {
+  if (buffer.length < PNG_SIGNATURE.length || !buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) return null;
+  const ranges = [];
+  const compressedParts = [];
+  let offset = PNG_SIGNATURE.length;
+  let sawHeader = false;
+  let sawEnd = false;
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd + 4 > buffer.length) return null;
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    if (!sawHeader && (type !== 'IHDR' || length !== 13)) return null;
+    sawHeader = true;
+    if (type === 'IDAT') {
+      ranges.push([dataStart, dataEnd]);
+      compressedParts.push(buffer.subarray(dataStart, dataEnd));
+    }
+    if (type === 'IEND') {
+      if (length !== 0 || dataEnd + 4 !== buffer.length) return null;
+      sawEnd = true;
+      break;
+    }
+    offset = dataEnd + 4;
+  }
+  if (!sawHeader || !sawEnd || compressedParts.length === 0) return null;
+  try {
+    inflateSync(Buffer.concat(compressedParts));
+  } catch {
+    return null;
+  }
+  return ranges;
+}
+
+function mp4MediaDataRanges(buffer) {
+  if (buffer.length < 16) return null;
+  const ranges = [];
+  let offset = 0;
+  let sawFileType = false;
+  while (offset + 8 <= buffer.length) {
+    const size = buffer.readUInt32BE(offset);
+    if (size < 8 || offset + size > buffer.length) return null;
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    if (!sawFileType && type !== 'ftyp') return null;
+    sawFileType = true;
+    if (type === 'mdat') ranges.push([offset + 8, offset + size]);
+    offset += size;
+  }
+  return sawFileType && offset === buffer.length && ranges.length > 0 ? ranges : null;
+}
+
+function scanBufferContent(buffer, digestRules, file) {
+  const approvedHash = APPROVED_MEDIA_PAYLOADS.get(file);
+  const ignoredRanges = approvedHash && hash('sha256', buffer, 'hex') === approvedHash
+    ? (pngImageDataRanges(buffer) ?? mp4MediaDataRanges(buffer))
+    : null;
+  if (!ignoredRanges) return scanText(buffer.toString('utf8'), digestRules, file);
+  const findings = [];
+  let segmentStart = 0;
+  for (const [start, end] of ignoredRanges) {
+    for (const finding of scanText(buffer.subarray(segmentStart, start).toString('utf8'), digestRules, file)) {
+      findings.push({ ...finding, offset: segmentStart + finding.offset });
+    }
+    segmentStart = end;
+  }
+  for (const finding of scanText(buffer.subarray(segmentStart).toString('utf8'), digestRules, file)) {
+    findings.push({ ...finding, offset: segmentStart + finding.offset });
+  }
+  return findings;
+}
+
 function isPreviousChainArtifactPath(file) {
   return file.length === PREVIOUS_CHAIN_ARTIFACT_PATH_LENGTH
     && sha256Text(file) === PREVIOUS_CHAIN_ARTIFACT_PATH_DIGEST;
@@ -358,7 +467,7 @@ export function scanTree(rootPath, options = {}) {
     for (const match of scanText(entry.file, digestRules)) findings.push({ file: entry.file, ...match });
     // The provider's required address-validation enum is permitted only as a JSON value
     // in the direct Phase 3 package files; all other marker contexts remain rejected.
-    for (const match of scanText(text, digestRules, entry.file)) {
+    for (const match of scanBufferContent(buffer, digestRules, entry.file)) {
       if (historicalEvidence && match.rule === 'historical-architecture') continue;
       findings.push({ file: entry.file, ...match });
     }

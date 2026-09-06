@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_DIGEST_RULES, scanDigestMarkers, scanTree } from '../check-cleanroom.mjs';
 
@@ -55,6 +56,25 @@ function sourceFromDynamicFunction(body) {
 
 function sourceFromEval(body) {
   return ['const value = ev', 'al(', JSON.stringify(body), ');'].join('');
+}
+
+function pngChunk(type, data) {
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(data.length, 0);
+  header.write(type, 4, 'ascii');
+  return Buffer.concat([header, data, Buffer.alloc(4)]);
+}
+
+function pngWithImageData(data, text = null) {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(1, 0);
+  header.writeUInt32BE(1, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const chunks = [pngChunk('IHDR', header)];
+  if (text !== null) chunks.push(pngChunk('tEXt', Buffer.from(text)));
+  chunks.push(pngChunk('IDAT', deflateSync(data)), pngChunk('IEND', Buffer.alloc(0)));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ...chunks]);
 }
 
 test('clean-room scanner accepts neutral project files', () => {
@@ -470,6 +490,18 @@ test('clean-room scanner checks filenames and NUL-containing tracked blobs', () 
     assert.deepEqual(result.findings, [
       { file: 'binary.dat', rule: retiredRule.id, offset: 1 },
       { file: `${retiredMarker}).md`, rule: retiredRule.id, offset: 0 },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('clean-room scanner checks PNG metadata outside approved media payloads', () => {
+  const root = fixture();
+  try {
+    writeFileSync(join(root, 'metadata.png'), pngWithImageData(Buffer.from([0]), `${retiredMarker})`));
+    assert.deepEqual(scanTree(root, { digestRules: [retiredRule] }).findings, [
+      { file: 'metadata.png', rule: retiredRule.id, offset: 41 },
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

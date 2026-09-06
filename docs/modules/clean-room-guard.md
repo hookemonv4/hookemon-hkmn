@@ -14,7 +14,7 @@ The clean-room guard keeps the active repository limited to the approved Hookemo
 - Retired project markers are stored only as lowercase SHA-256 digests with lengths and boundary rules.
 - Revision-56 vault identifiers pass only when the complete case-sensitive ASCII identifier matches the explicit digest allowlist. A substring or case variant never inherits the exception.
 - The previous-chain comparison artifact is accepted only at its exact digest-bound path with its exact content digest. Path prefixes, suffixes, copies, renames, and byte drift fail closed.
-- The scanner checks paths, filenames, text, NUL-containing blobs, and tracked symlink targets without following them.
+- The scanner checks paths, filenames, text, NUL-containing blobs, and tracked symlink targets without following them. Two hash-bound approved visual files exclude only their validated compressed image (`IDAT`) and media (`mdat`) payload bytes; filenames and container metadata remain checked. Any path or byte change restores a full scan.
 - Static source reconstructions through `String.fromCharCode`, character-code arrays, literal hex/base64 `Buffer.from(...).toString`, `new Function`, and `eval` fail when their reconstructed value or code-unit length matches a protected digest rule. The guard never executes scanned source.
 - Local home paths, private email addresses, attribution trailers, and Programmable live-key shapes are rejected.
 - Only the exact Hookemon project noreply identity is allowed in repository text and commit metadata.
