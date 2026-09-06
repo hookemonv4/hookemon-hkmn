@@ -18,6 +18,7 @@ import {
   overrideSubjectInputs, writeOwnerApproval as writeBoundOwnerApproval,
 } from './helpers/owner-approval.mjs';
 import { writeRawReceipt } from './helpers/raw-receipt.mjs';
+import { interfaceFreezeInputDigest } from '../../feasibility/verify-robinhood-binding.mjs';
 
 const OWNER_NOT_APPLICABLE_RECEIPT_TYPE = 'owner-not-applicable-authorized';
 const projectRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -80,7 +81,7 @@ function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = t
   const freezePath = join(root, 'feasibility', 'interface-freeze.json');
   const freeze = JSON.parse(readFileSync(freezePath, 'utf8'));
   for (const input of Object.keys(freeze.inputHashes)) {
-    freeze.inputHashes[input] = `sha256:${hashFile(join(root, input))}`;
+    freeze.inputHashes[input] = interfaceFreezeInputDigest(root, input);
   }
   if (!compatible) {
     freeze.compatibilityVerdict.status = 'FAILED';
@@ -691,6 +692,37 @@ test('feasibility F4 accepts the current fail-closed build-only freeze after arc
   ]);
 
   assert.equal(evidence.result, 'PASSED');
+});
+
+test('feasibility F4 still passes after CI-tool-only dependency-pin churn', () => {
+  const root = feasibilityEvidenceProject();
+  const pinsPath = join(root, 'product', 'dependency-pins.json');
+  const pins = JSON.parse(readFileSync(pinsPath, 'utf8'));
+  pins.securityTools.gitleaks.version = '9.99.9';
+  writeJson(pinsPath, pins);
+
+  const evidence = recordGateEvidence(root, 'feasibility', 'F4', [
+    'architecture/interfaces.json',
+    'feasibility/interface-freeze.json',
+  ]);
+
+  assert.equal(evidence.result, 'PASSED');
+});
+
+test('feasibility F4 rejects a stale freeze after a real phase1Toolchain pin change', () => {
+  const root = feasibilityEvidenceProject();
+  const pinsPath = join(root, 'product', 'dependency-pins.json');
+  const pins = JSON.parse(readFileSync(pinsPath, 'utf8'));
+  pins.phase1Toolchain.foundry.version = '9.9.9';
+  writeJson(pinsPath, pins);
+
+  assert.throws(
+    () => recordGateEvidence(root, 'feasibility', 'F4', [
+      'architecture/interfaces.json',
+      'feasibility/interface-freeze.json',
+    ]),
+    /feasibility\/F4 interface freeze invalid/,
+  );
 });
 
 test('unrelated SYSTEM gate evidence keeps the generic recording behavior', () => {

@@ -505,7 +505,7 @@ test('GitHub gate installs content-addressed Gitleaks without a remote action', 
   assert.match(workflow, /gitleaks_version='8\.30\.1'/);
   assert.match(workflow, /551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb/);
   assert.match(workflow, /88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509/);
-  assert.match(workflow, /gitleaks_config_sha256='b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029'/);
+  assert.match(workflow, /gitleaks_config_sha256='bd9a27202141d885852a67fa4f37aee06aaa3101909eee9ec8b9e07078a634c7'/);
   assert.doesNotMatch(workflow, /GITLEAKS_ENABLE_COMMENTS|GITLEAKS_ENABLE_UPLOAD_ARTIFACT|GITHUB_TOKEN/);
 });
 
@@ -515,11 +515,16 @@ test('GitHub gate verifies the control dependency pins', () => {
 });
 
 test('GitHub gate enforces deterministic state and strict trace checks', () => {
-  const workflow = readFileSync(join(repoRoot, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
-  assert.match(workflow, /node scripts\/v4\.mjs status --check/);
-  assert.match(workflow, /git diff --exit-code -- STATE\.md state\.json/);
-  assert.match(workflow, /node scripts\/v4\.mjs trace check/);
-  assert.doesNotMatch(workflow, /trace check\s*\|\|/);
+  const launchGate = readFileSync(join(repoRoot, '.github', 'workflows', 'launch-gate.yml'), 'utf8');
+  assert.match(launchGate, /node scripts\/v4\.mjs status --check/);
+  assert.match(launchGate, /git diff --exit-code -- STATE\.md state\.json/);
+  assert.match(launchGate, /node scripts\/v4\.mjs trace check/);
+  assert.doesNotMatch(launchGate, /status --check\s*\|\|/);
+  assert.doesNotMatch(launchGate, /trace check\s*\|\|/);
+
+  const gatesWorkflow = readFileSync(join(repoRoot, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
+  assert.doesNotMatch(gatesWorkflow, /node scripts\/v4\.mjs status --check/);
+  assert.doesNotMatch(gatesWorkflow, /node scripts\/v4\.mjs trace check/);
 });
 
 test('identity gate checks commit identity from base-defined workflow code', () => {
