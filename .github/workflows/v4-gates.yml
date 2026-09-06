@@ -77,7 +77,64 @@ jobs:
             exit 1
           fi
       - name: Verify Phase 3 bytecode binding
-        run: node --test --test-timeout=120000 scripts/tests/phase3-bytecode-binding.test.mjs
+        shell: bash
+        run: |
+          child_pid=""
+          child_status=""
+          emit() {
+            printf '[phase3-bytecode-evidence] %s\n' "$1"
+          }
+          process_snapshot() {
+            emit "$1 process snapshot at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            ps -eo pid,ppid,pgid,stat,rss,etimes,comm 2>/dev/null | awk 'NR==1 || $7=="node" || $7=="forge" || $7=="solc" || $7 ~ /^solc-/' || true
+          }
+          memory_events() {
+            if [ -r /sys/fs/cgroup/memory.events ]; then
+              emit "$1 /sys/fs/cgroup/memory.events:"
+              cat /sys/fs/cgroup/memory.events || true
+            else
+              emit "$1 /sys/fs/cgroup/memory.events unavailable"
+            fi
+          }
+          on_term() {
+            emit "received TERM at $(date -u +%Y-%m-%dT%H:%M:%SZ); child_pid=${child_pid:-none} child_status=${child_status:-unknown}"
+            process_snapshot "term" || true
+            memory_events "term" || true
+            exit 143
+          }
+          on_int() {
+            emit "received INT at $(date -u +%Y-%m-%dT%H:%M:%SZ); child_pid=${child_pid:-none} child_status=${child_status:-unknown}"
+            process_snapshot "int" || true
+            memory_events "int" || true
+            exit 130
+          }
+          on_exit() {
+            final_status=$?
+            emit "EXIT trap fired at $(date -u +%Y-%m-%dT%H:%M:%SZ); child_pid=${child_pid:-none} child_status=${child_status:-unknown} shell_status=$final_status"
+            process_snapshot "exit" || true
+            memory_events "exit" || true
+            exit "$final_status"
+          }
+          # A process-group SIGKILL is uncatchable and can terminate this shell and its
+          # node/forge children before any trap below runs; that case leaves no
+          # trap-recorded evidence and is a documented limitation, not a bug in this step.
+          trap on_term TERM
+          trap on_int INT
+          trap on_exit EXIT
+          set -euo pipefail
+          process_snapshot "pre-launch" || true
+          memory_events "pre-launch" || true
+          /usr/bin/time -v node --test --test-reporter=tap --test-timeout=120000 scripts/tests/phase3-bytecode-binding.test.mjs &
+          child_pid=$!
+          emit "launched node child pid=$child_pid at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          set +e
+          wait "$child_pid"
+          child_status=$?
+          set -e
+          emit "node child pid=$child_pid exited status=$child_status at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          process_snapshot "post-exit" || true
+          memory_events "post-exit" || true
+          exit "$child_status"
   gates:
     needs: [phase3-bytecode]
     if: ${{ always() }}

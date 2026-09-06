@@ -159,9 +159,14 @@ test('CI isolates the Phase 3 bytecode-binding test in its own required job with
     requireIndex < firstCheckoutInGates,
     'the fail-closed dependency check must be the earliest step in gates, before any checkout',
   );
+  // The step is a fail-closed bash wrapper that emits process-metadata evidence around the
+  // command, but must still launch the same test selection and timeout exactly once, as a
+  // tracked child (time-wrapped for resource/termination metadata, tap-reported for
+  // presentation only), and propagate (not swallow) its real exit status. Individual
+  // diagnostic lines are intentionally not mirrored here.
   assert.match(
     workflow,
-    /name: Verify Phase 3 bytecode binding\n {8}run: node --test --test-timeout=120000 scripts\/tests\/phase3-bytecode-binding\.test\.mjs/,
+    /name: Verify Phase 3 bytecode binding\n {8}shell: bash\n {8}run: \|\n[\s\S]*?\n {10}\/usr\/bin\/time -v node --test --test-reporter=tap --test-timeout=120000 scripts\/tests\/phase3-bytecode-binding\.test\.mjs &\n {10}child_pid=\$!\n[\s\S]*?\n {10}wait "\$child_pid"\n {10}child_status=\$\?\n[\s\S]*?\n {10}exit "\$child_status"\n/,
   );
   // The isolated job must reuse the identical pinned checkout action, Node, and Foundry
   // versions as gates, not a drifted or unpinned copy.

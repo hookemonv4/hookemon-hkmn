@@ -384,9 +384,14 @@ test('the isolated phase3-bytecode job asserts exact-once manifest membership an
     workflow.includes(membershipStep),
     'the isolated job must independently assert phase3-bytecode-binding.test.mjs occurs exactly once in the scripts manifest before running it',
   );
+  // The step is a fail-closed bash wrapper that emits process-metadata evidence, but it must
+  // still launch the same test selection and timeout exactly once, as a tracked child (time-
+  // wrapped for resource/termination metadata, tap-reported for presentation only), and
+  // propagate (not swallow) its real exit status; individual diagnostic lines are not
+  // mirrored here.
   assert.match(
     workflow,
-    /name: Verify Phase 3 bytecode binding\n {8}run: node --test --test-timeout=120000 scripts\/tests\/phase3-bytecode-binding\.test\.mjs$/m,
+    /name: Verify Phase 3 bytecode binding\n {8}shell: bash\n {8}run: \|\n[\s\S]*?\n {10}\/usr\/bin\/time -v node --test --test-reporter=tap --test-timeout=120000 scripts\/tests\/phase3-bytecode-binding\.test\.mjs &\n {10}child_pid=\$!\n[\s\S]*?\n {10}wait "\$child_pid"\n {10}child_status=\$\?\n[\s\S]*?\n {10}exit "\$child_status"\n/,
   );
   // The isolated job references the file 3 times (membership check, its error message, and
   // its own node --test invocation) and the scripts-suite job references it once (its
