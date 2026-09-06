@@ -58,47 +58,99 @@ function publicProceeds(value) {
   return Object.freeze({ chainId: String(chainId), assetId, decimals, units: amountAtomic });
 }
 
-/**
- * Finds `packIndex`'s own entry in one stage's `packs` array, requiring it to attribute to
- * `expectedMemo` — the trusted memo the purchase batch-request ledger itself durably assigned to
- * that `packIndex`. A later stage's entry at the same `packIndex` but a DIFFERENT memo is a broken
- * or spoofed cross-stage ledger, never trusted: this returns `null` (as if the pack never reached
- * this stage at all) rather than silently rebinding that entry's signature/mint/proceeds onto the
- * trusted identity — the caller falls through to check the previous stage instead.
- */
-function findPack(stage, packIndex, expectedMemo) {
-  if (stage?.status !== 'COMPLETE' || !Array.isArray(stage.evidence?.packs)) return null;
-  const pack = stage.evidence.packs.find(entry => entry && typeof entry === 'object' && entry.packIndex === packIndex);
-  if (!pack || pack.memo !== expectedMemo) return null;
-  return pack;
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
 }
 
-/**
- * Resolves one pack's current lifecycle fact from the latest stage that actually reached it —
- * `buyback` overrides `epicGate` overrides `open` overrides `purchase`. Every stage's own entry must
- * attribute to `expectedMemo` (see `findPack`'s own doc) — a stage skipped this way because its
- * entry's memo doesn't match falls through exactly as if that stage had no entry for this pack at
- * all. Returns `null` when the pack has no publicly-showable fact yet: never purchased, or a
- * pending/ambiguous provider decision (`buyback`'s pre-reconcile `'submitted'`/`'unknown'`) that is
- * never surfaced as a public card state (see C-interface.json's own
- * `publicCardEventProducerShape.perPackFieldsAvailableToF.state`). A `'not_purchased'` pack is
- * deliberately excluded too: no card was ever created for it, so it is never shown, not even under a
- * `'PURCHASED'` label (a bounded clarification on this exact point is requested in C-inbox.md; this
- * is the conservative reading pending C's answer).
- */
-function resolvePackLifecycle(packIndex, expectedMemo, { purchase, open, epicGate, buyback } = {}) {
-  const buybackPack = findPack(buyback, packIndex, expectedMemo);
+function stagePacks(stage) {
+  if (stage?.status !== 'COMPLETE') return null;
+  return Array.isArray(stage.evidence?.packs) ? stage.evidence.packs : undefined;
+}
+
+function mapStagePacks(packs, expected, validate) {
+  if (!Array.isArray(packs) || packs.length !== expected.size) return null;
+  const result = new Map();
+  for (const pack of packs) {
+    if (!pack || typeof pack !== 'object' || Array.isArray(pack)) return null;
+    const predecessor = expected.get(pack.packIndex);
+    if (!predecessor || result.has(pack.packIndex) || pack.memo !== predecessor.memo || !validate(pack, predecessor)) return null;
+    result.set(pack.packIndex, pack);
+  }
+  return result.size === expected.size ? result : null;
+}
+
+/** Validates every COMPLETE stage as one full transition before resolving an individual pack. A
+ * corrupt later stage must reject the feed, not quietly fall back to an earlier lifecycle fact. */
+function validateCompleteStages(requests, stages = {}) {
+  const requestByIndex = new Map(requests.map(request => [request.packIndex, request]));
+  const purchasePacks = stagePacks(stages.purchase);
+  let purchase = null;
+  if (purchasePacks !== null) {
+    purchase = mapStagePacks(purchasePacks, requestByIndex, pack => (
+      pack.status === 'purchased'
+      || (pack.status === 'not_purchased' && !Object.hasOwn(pack, 'packCost') && !Object.hasOwn(pack, 'signature'))
+    ));
+    if (purchase === null) return null;
+  }
+
+  const purchased = purchase === null ? new Map() : new Map([...purchase].filter(([, pack]) => pack.status === 'purchased'));
+  const openPacks = stagePacks(stages.open);
+  let open = null;
+  if (openPacks !== null) {
+    if (purchase === null) return null;
+    open = mapStagePacks(openPacks, purchased, pack => {
+      if (pack.decision === 'held') return true;
+      return pack.decision === 'opened' && nonEmptyString(pack.mint) && nonEmptyString(pack.signature);
+    });
+    if (open === null) return null;
+  }
+
+  const opened = open === null ? new Map() : new Map([...open].filter(([, pack]) => pack.decision === 'opened'));
+  const epicGatePacks = stagePacks(stages.epicGate);
+  let epicGate = null;
+  if (epicGatePacks !== null) {
+    if (open === null) return null;
+    epicGate = mapStagePacks(epicGatePacks, opened, (pack, predecessor) => {
+      if (pack.mint !== predecessor.mint) return false;
+      return pack.decision === 'sell' || pack.decision === 'held';
+    });
+    if (epicGate === null) return null;
+  }
+
+  const saleCandidates = epicGate === null ? new Map() : new Map([...epicGate].filter(([, pack]) => pack.decision === 'sell'));
+  const buybackPacks = stagePacks(stages.buyback);
+  let buyback = null;
+  if (buybackPacks !== null) {
+    if (epicGate === null || !Number.isInteger(stages.buyback.evidence.soldCount)) return null;
+    buyback = mapStagePacks(buybackPacks, saleCandidates, (pack, predecessor) => {
+      if (pack.mint !== predecessor.mint) return false;
+      if (pack.decision === 'held') return !Object.hasOwn(pack, 'proceeds') && !Object.hasOwn(pack, 'signature');
+      return pack.decision === 'sold'
+        && nonEmptyString(pack.signature)
+        && publicProceeds(pack.proceeds) !== null;
+    });
+    if (buyback === null) return null;
+    const soldCount = [...buyback.values()].filter(pack => pack.decision === 'sold').length;
+    if (soldCount !== stages.buyback.evidence.soldCount) return null;
+  }
+
+  return { purchase, open, epicGate, buyback };
+}
+
+/** Resolves a lifecycle only after `validateCompleteStages` has verified all available COMPLETE
+ * evidence. Pending stages are absent from the maps; malformed complete stages never reach here. */
+function resolvePackLifecycle(packIndex, { purchase, open, epicGate, buyback }) {
+  const buybackPack = buyback?.get(packIndex) ?? null;
   if (buybackPack) {
     if (buybackPack.decision === 'sold') {
-      if (typeof buybackPack.mint !== 'string' || buybackPack.mint.length === 0) return null;
-      return { state: 'SOLD', publicState: 'finalized', mint: buybackPack.mint, transactionId: buybackPack.signature ?? null, proceeds: publicProceeds(buybackPack.proceeds) };
+      return { state: 'SOLD', publicState: 'finalized', mint: buybackPack.mint, transactionId: buybackPack.signature, proceeds: publicProceeds(buybackPack.proceeds) };
     }
     if (buybackPack.decision === 'held') {
       return { state: 'HELD', publicState: 'finalized', mint: buybackPack.mint ?? null, transactionId: null, proceeds: null };
     }
     return null;
   }
-  const epicGatePack = findPack(epicGate, packIndex, expectedMemo);
+  const epicGatePack = epicGate?.get(packIndex) ?? null;
   if (epicGatePack) {
     if (epicGatePack.decision === 'sell') {
       if (typeof epicGatePack.mint !== 'string' || epicGatePack.mint.length === 0) return null;
@@ -109,18 +161,18 @@ function resolvePackLifecycle(packIndex, expectedMemo, { purchase, open, epicGat
     }
     return null;
   }
-  const openPack = findPack(open, packIndex, expectedMemo);
+  const openPack = open?.get(packIndex) ?? null;
   if (openPack) {
     if (openPack.decision === 'opened') {
       if (typeof openPack.mint !== 'string' || openPack.mint.length === 0) return null;
-      return { state: 'OPENED', publicState: 'observed', mint: openPack.mint, transactionId: openPack.signature ?? null, proceeds: null };
+      return { state: 'OPENED', publicState: 'observed', mint: openPack.mint, transactionId: openPack.signature, proceeds: null };
     }
     if (openPack.decision === 'held') {
       return { state: 'HELD', publicState: 'finalized', mint: openPack.mint ?? null, transactionId: null, proceeds: null };
     }
     return null;
   }
-  const purchasePack = findPack(purchase, packIndex, expectedMemo);
+  const purchasePack = purchase?.get(packIndex) ?? null;
   if (purchasePack && purchasePack.status === 'purchased') {
     return { state: 'PURCHASED', publicState: 'observed', mint: null, transactionId: purchasePack.signature ?? null, proceeds: null };
   }
@@ -129,7 +181,7 @@ function resolvePackLifecycle(packIndex, expectedMemo, { purchase, open, epicGat
 
 /**
  * Validates the ENTIRE purchase batch-request ledger before trusting any single entry in it: every
- * `packIndex` must be a unique non-negative integer, every `memo` a unique non-empty string. A
+ * `packIndex` must be the request array's dense zero-based position, every `memo` a unique non-empty string. A
  * request ledger that itself contains a duplicate or contradictory identity is a broken or corrupted
  * durable record — the whole batch is rejected (no trusted operations, no observations for any pack
  * in it), never a partial publication that trusts the non-conflicting subset while silently dropping
@@ -140,8 +192,8 @@ function packBatchRequestPacksValid(packBatchRequestPacks) {
   if (!Array.isArray(packBatchRequestPacks) || packBatchRequestPacks.length === 0) return false;
   const seenIndexes = new Set();
   const seenMemos = new Set();
-  for (const request of packBatchRequestPacks) {
-    if (!request || typeof request !== 'object' || !Number.isInteger(request.packIndex) || request.packIndex < 0) return false;
+  for (const [index, request] of packBatchRequestPacks.entries()) {
+    if (!request || typeof request !== 'object' || request.packIndex !== index) return false;
     if (seenIndexes.has(request.packIndex)) return false;
     seenIndexes.add(request.packIndex);
     if (typeof request.memo !== 'string' || request.memo.length === 0 || seenMemos.has(request.memo)) return false;
@@ -179,10 +231,12 @@ export function buildDurableCardFeed({
   const trustedOperations = new Map();
   const observations = [];
   if (!packBatchRequestPacksValid(packBatchRequestPacks)) return { trustedOperations, observations };
+  const validatedStages = validateCompleteStages(packBatchRequestPacks, stages);
+  if (validatedStages === null) return { trustedOperations, observations };
 
   for (const request of packBatchRequestPacks) {
     const operationId = `pack:${cycleId}:${request.packIndex}`;
-    const lifecycle = resolvePackLifecycle(request.packIndex, request.memo, stages);
+    const lifecycle = resolvePackLifecycle(request.packIndex, validatedStages);
 
     trustedOperations.set(request.memo, Object.freeze({
       cycleId,

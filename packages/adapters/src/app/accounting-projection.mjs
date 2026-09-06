@@ -163,7 +163,12 @@ function sumPackAmounts(packs, select) {
  * closed rather than silently skip it. */
 function purchasePackAmount(pack) {
   if (pack.status === 'purchased') return pack.packCost ?? undefined;
-  if (pack.status === 'not_purchased') return null;
+  if (pack.status === 'not_purchased') {
+    // A declined purchase has no transaction or debit.  Accepting either field would hide a
+    // contradictory durable record behind a zero contribution.
+    if (Object.hasOwn(pack, 'packCost') || Object.hasOwn(pack, 'signature')) return undefined;
+    return null;
+  }
   return undefined;
 }
 
@@ -179,7 +184,11 @@ function buybackPackAmount(pack) {
     if (typeof pack.mint !== 'string' || pack.mint.length === 0) return undefined;
     return pack.proceeds ?? undefined;
   }
-  if (pack.decision === 'held') return null;
+  if (pack.decision === 'held') {
+    // A held card was never sold, so it cannot carry sale proceeds or a sale signature.
+    if (Object.hasOwn(pack, 'proceeds') || Object.hasOwn(pack, 'signature')) return undefined;
+    return null;
+  }
   return undefined;
 }
 
@@ -191,6 +200,7 @@ function buybackPackAmount(pack) {
 function purchaseCoverageValid(evidence) {
   if (!Number.isInteger(evidence.quantity) || evidence.quantity !== evidence.packs.length) return false;
   if (!Number.isInteger(evidence.purchasedCount)) return false;
+  if (!evidence.packs.every((pack, index) => pack && typeof pack === 'object' && pack.packIndex === index)) return false;
   const actualPurchased = evidence.packs.filter(pack => pack && typeof pack === 'object' && pack.status === 'purchased').length;
   return actualPurchased === evidence.purchasedCount;
 }
@@ -209,7 +219,21 @@ function buybackCoverageValid(evidence, purchase) {
     || !Array.isArray(purchase.evidence.packs) || !purchaseCoverageValid(purchase.evidence)) {
     return false;
   }
-  return evidence.packs.length === purchase.evidence.purchasedCount;
+  if (evidence.packs.length !== purchase.evidence.purchasedCount) return false;
+
+  const purchasedByIndex = new Map();
+  for (const pack of purchase.evidence.packs) {
+    if (pack.status === 'purchased') purchasedByIndex.set(pack.packIndex, pack.memo);
+  }
+  if (purchasedByIndex.size !== purchase.evidence.purchasedCount) return false;
+
+  const seenIndexes = new Set();
+  for (const pack of evidence.packs) {
+    if (!pack || typeof pack !== 'object' || Array.isArray(pack)) return false;
+    if (seenIndexes.has(pack.packIndex) || purchasedByIndex.get(pack.packIndex) !== pack.memo) return false;
+    seenIndexes.add(pack.packIndex);
+  }
+  return seenIndexes.size === purchasedByIndex.size;
 }
 
 /** `true` when `evidence` carries one of Task C's new multi-pack batch-level counter fields
