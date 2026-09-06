@@ -20,7 +20,11 @@ import {
   decodeProviderTransaction,
   readTransactionPolicyRules,
 } from '../../signing/transaction-policy.mjs';
-import { assertMoneyConfiguration, createPreparedChainTransactionAttempt } from '../../../../runner/src/cycle/money-schemas.mjs';
+import {
+  assertMoneyConfiguration,
+  createPreparedChainTransactionAttempt,
+  CUSTODY_LEDGER_BUCKETS,
+} from '../../../../runner/src/cycle/money-schemas.mjs';
 import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
@@ -33,21 +37,6 @@ const USDG_DECIMALS = 6;
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_HASH = /^0x[0-9a-fA-F]{64}$/;
 const EVM_BYTES = /^0x(?:[0-9a-fA-F]{2})+$/;
-const CUSTODY_BUCKETS = Object.freeze([
-  'claimed',
-  'bridgeOut',
-  'bridgeIn',
-  'packCost',
-  'buybackProceeds',
-  'returnInput',
-  'returnReceived',
-  'refunds',
-  'residual',
-  'heldAssets',
-  'payoutLiability',
-  'dust',
-  'unattributed',
-]);
 const CLAIM_EVENT_ABI = parseAbi([
   'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountAtomicUsdg, address indexed destination, uint256 timestamp, uint256 cap, uint256 usedAfter)',
 ]);
@@ -623,7 +612,7 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
       schema: 'hookemon.custody-ledger.v1',
       cycleId: request.cycleId,
       ...asset,
-      ...Object.fromEntries(CUSTODY_BUCKETS.map(bucket => [bucket, bucket === 'claimed' ? amountAtomic : '0'])),
+      ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [bucket, bucket === 'claimed' ? amountAtomic : '0'])),
     }),
   );
 }
