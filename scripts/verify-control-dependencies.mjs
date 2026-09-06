@@ -28,6 +28,8 @@ const FORK_PIN_CANARY_WORKFLOW_PATH = '.github/workflows/fork-pin-canary.yml';
 const IDENTITY_GATE_WORKFLOW_PATH = '.github/workflows/identity-gate.yml';
 const CONTROL_GATE_WORKFLOW_PATH = '.github/workflows/control-gate.yml';
 const LAUNCH_GATE_WORKFLOW_PATH = '.github/workflows/launch-gate.yml';
+const WEB_CI_WORKFLOW_PATH = '.github/workflows/web-ci.yml';
+const DEPLOY_WEB_WORKFLOW_PATH = '.github/workflows/deploy-web.yml';
 const PERMITTED_WORKFLOW_PATHS = new Set([
   V4_GATES_WORKFLOW_PATH,
   FORK_PROOF_WORKFLOW_PATH,
@@ -35,6 +37,8 @@ const PERMITTED_WORKFLOW_PATHS = new Set([
   IDENTITY_GATE_WORKFLOW_PATH,
   CONTROL_GATE_WORKFLOW_PATH,
   LAUNCH_GATE_WORKFLOW_PATH,
+  WEB_CI_WORKFLOW_PATH,
+  DEPLOY_WEB_WORKFLOW_PATH,
 ]);
 const COMMIT_IDENTITY_ALLOWLIST_PATH = 'scripts/check-commit-identity.mjs';
 const FORK_PIN_VERIFIER_PATH = 'scripts/verify-fork-pin.mjs';
@@ -49,6 +53,8 @@ const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
 const SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256 = 'fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4';
+const SUPPORTED_WEB_CI_WORKFLOW_SHA256 = '49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc';
+const SUPPORTED_DEPLOY_WEB_WORKFLOW_SHA256 = 'b3a588c4f8ec1495d179fb079862b4660f3e68812d98385f37233e2168e3bda3';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_MANIFEST_SHA256 = 'd3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b';
@@ -663,6 +669,139 @@ function verifyLaunchGateIntegrity(root, pins, errors) {
     expectedSha256: pin.sha256 ?? null,
     actualSha256,
   };
+}
+
+function verifyWebCiIntegrity(root, pins, errors) {
+  const pin = pins.contentAddresses?.webCi ?? {};
+  const path = join(root, WEB_CI_WORKFLOW_PATH);
+  let actualSha256 = null;
+  try {
+    actualSha256 = hashFile(path);
+  } catch {
+    errors.push('web-ci workflow could not be read');
+  }
+  if (pin.path !== WEB_CI_WORKFLOW_PATH) {
+    errors.push(`web-ci path must be ${WEB_CI_WORKFLOW_PATH}`);
+  }
+  if (pin.sha256 !== SUPPORTED_WEB_CI_WORKFLOW_SHA256) {
+    errors.push('web-ci digest must match the supported release');
+  }
+  if (actualSha256 !== null && actualSha256 !== pin.sha256) {
+    errors.push(`web-ci digest mismatch: expected ${pin.sha256 ?? '(missing)'}, got ${actualSha256}`);
+  }
+  if (actualSha256 !== null && actualSha256 !== SUPPORTED_WEB_CI_WORKFLOW_SHA256) {
+    errors.push('web-ci content mismatch: workflow must match the supported release');
+  }
+  return {
+    path: WEB_CI_WORKFLOW_PATH,
+    expectedSha256: pin.sha256 ?? null,
+    actualSha256,
+  };
+}
+
+function verifyDeployWebIntegrity(root, pins, errors) {
+  const pin = pins.contentAddresses?.deployWeb ?? {};
+  const path = join(root, DEPLOY_WEB_WORKFLOW_PATH);
+  let actualSha256 = null;
+  try {
+    actualSha256 = hashFile(path);
+  } catch {
+    errors.push('deploy-web workflow could not be read');
+  }
+  if (pin.path !== DEPLOY_WEB_WORKFLOW_PATH) {
+    errors.push(`deploy-web path must be ${DEPLOY_WEB_WORKFLOW_PATH}`);
+  }
+  if (pin.sha256 !== SUPPORTED_DEPLOY_WEB_WORKFLOW_SHA256) {
+    errors.push('deploy-web digest must match the supported release');
+  }
+  if (actualSha256 !== null && actualSha256 !== pin.sha256) {
+    errors.push(`deploy-web digest mismatch: expected ${pin.sha256 ?? '(missing)'}, got ${actualSha256}`);
+  }
+  if (actualSha256 !== null && actualSha256 !== SUPPORTED_DEPLOY_WEB_WORKFLOW_SHA256) {
+    errors.push('deploy-web content mismatch: workflow must match the supported release');
+  }
+  return {
+    path: DEPLOY_WEB_WORKFLOW_PATH,
+    expectedSha256: pin.sha256 ?? null,
+    actualSha256,
+  };
+}
+
+const REQUIRED_WEB_CI_COMMANDS = Object.freeze([
+  'npm ci',
+  'npm test',
+  'npm run lint',
+]);
+
+function verifyWebCiSemantics(workflow, errors) {
+  if (!/^name:\s*Hookemon CI\s*$/m.test(workflow)) {
+    errors.push('web-ci workflow must be named Hookemon CI, which deploy-web binds to by name');
+  }
+  for (const command of REQUIRED_WEB_CI_COMMANDS) {
+    if (!workflow.includes(command)) {
+      errors.push(`web-ci workflow must run: ${command}`);
+    }
+  }
+  if (!/^permissions:\n\s+contents:\s*read\s*$/m.test(workflow)) {
+    errors.push('web-ci workflow must declare least-privilege read-only contents permission and nothing else');
+  }
+  if (/^\s*pull_request_target:/m.test(workflow)) {
+    errors.push('web-ci workflow must never trigger on pull_request_target');
+  }
+  if (/\bwrangler\b/.test(workflow) || /secrets\./.test(workflow)) {
+    errors.push('web-ci workflow must never deploy or read secrets; deployment belongs only to deploy-web');
+  }
+}
+
+const REQUIRED_DEPLOY_WEB_COMMANDS = Object.freeze([
+  'npm run build',
+  'verify-cloudflare-deploy.mjs config dist/server/wrangler.json',
+  'wrangler versions upload',
+  'verify-cloudflare-deploy.mjs version-id',
+  'wrangler versions deploy',
+  'verify-cloudflare-deploy.mjs output',
+]);
+
+function verifyDeployWebSemantics(workflow, errors) {
+  for (const command of REQUIRED_DEPLOY_WEB_COMMANDS) {
+    if (!workflow.includes(command)) {
+      errors.push(`deploy-web workflow must run: ${command}`);
+    }
+  }
+  const triggerStart = workflow.indexOf('on:\n');
+  const triggerEnd = workflow.indexOf('\njobs:\n', triggerStart);
+  const triggerBlock = triggerStart === -1 || triggerEnd === -1 ? workflow : workflow.slice(triggerStart, triggerEnd);
+  if (!triggerBlock.includes('workflow_run')
+      || /^ {2}(?:pull_request|push|workflow_dispatch):/m.test(triggerBlock)) {
+    errors.push('deploy-web workflow must trigger only from a completed workflow_run, never directly');
+  }
+  if (!triggerBlock.includes('workflows:') || !triggerBlock.includes('Hookemon CI')) {
+    errors.push('deploy-web workflow must be scoped to the completed Hookemon CI run');
+  }
+  if (!triggerBlock.includes('branches:') || !triggerBlock.includes('main')) {
+    errors.push('deploy-web workflow must restrict the triggering workflow_run to main');
+  }
+  if (!workflow.includes("workflow_run.conclusion == 'success'")) {
+    errors.push('deploy-web workflow must require the triggering Hookemon CI run to have succeeded');
+  }
+  if (!workflow.includes("workflow_run.event == 'push'")) {
+    errors.push('deploy-web workflow must require the triggering Hookemon CI run to be a push run');
+  }
+  if (!workflow.includes("workflow_run.head_branch == 'main'")) {
+    errors.push('deploy-web workflow must require the triggering Hookemon CI run to have run on main');
+  }
+  if (!workflow.includes('github.event.workflow_run.head_sha')) {
+    errors.push('deploy-web workflow must check out the exact commit the triggering Hookemon CI run validated');
+  }
+  if (!/^permissions:\n\s+contents:\s*read\s*$/m.test(workflow)) {
+    errors.push('deploy-web workflow must declare least-privilege read-only contents permission and nothing else');
+  }
+  if (!/environment:\n\s+name:\s*production\b/.test(workflow)) {
+    errors.push('deploy-web workflow must deploy through the protected production environment');
+  }
+  if (!/cancel-in-progress:\s*false/.test(workflow)) {
+    errors.push('deploy-web workflow must not cancel an in-flight production deployment');
+  }
 }
 
 const REQUIRED_LAUNCH_GATE_COMMANDS = Object.freeze([
@@ -1306,6 +1445,8 @@ function controlSurfaceDescriptors(pins, errors, source) {
   add('identity-gate workflow', IDENTITY_GATE_WORKFLOW_PATH, pins.contentAddresses?.identityGate);
   add('control-gate workflow', CONTROL_GATE_WORKFLOW_PATH, pins.contentAddresses?.controlGate);
   add('launch-gate workflow', LAUNCH_GATE_WORKFLOW_PATH, pins.contentAddresses?.launchGate);
+  add('web-ci workflow', WEB_CI_WORKFLOW_PATH, pins.contentAddresses?.webCi);
+  add('deploy-web workflow', DEPLOY_WEB_WORKFLOW_PATH, pins.contentAddresses?.deployWeb);
   const forkPinVerifier = pins.controlScripts?.forkPinVerifier ?? {};
   const closure = forkPinVerifier.closure;
   if (!Array.isArray(closure) || closure.length !== 2) {
@@ -1533,6 +1674,8 @@ function controlSurfacePaths() {
     IDENTITY_GATE_WORKFLOW_PATH,
     CONTROL_GATE_WORKFLOW_PATH,
     LAUNCH_GATE_WORKFLOW_PATH,
+    WEB_CI_WORKFLOW_PATH,
+    DEPLOY_WEB_WORKFLOW_PATH,
     FORK_PIN_VERIFIER_PATH,
     FORK_PIN_VERIFIER_IMPORT_PATH,
     CONTROL_DEPENDENCY_VERIFIER_PATH,
@@ -1915,6 +2058,18 @@ export function verifyControlDependencies(rootPath, options = {}) {
   } catch {
     // The integrity check below records the missing workflow.
   }
+  let webCiWorkflow = '';
+  try {
+    webCiWorkflow = readFileSync(join(root, WEB_CI_WORKFLOW_PATH), 'utf8');
+  } catch {
+    // The integrity check below records the missing workflow.
+  }
+  let deployWebWorkflow = '';
+  try {
+    deployWebWorkflow = readFileSync(join(root, DEPLOY_WEB_WORKFLOW_PATH), 'utf8');
+  } catch {
+    // The integrity check below records the missing workflow.
+  }
 
   errors.push(...actionScan.syntaxErrors);
   const workflowIntegrity = verifyWorkflowIntegrity(workflowSet.canonicalPath, pins, errors);
@@ -1924,6 +2079,10 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const controlGate = verifyControlGateIntegrity(root, pins, errors);
   const launchGate = verifyLaunchGateIntegrity(root, pins, errors);
   verifyLaunchGateSemantics(launchGateWorkflow, errors);
+  const webCi = verifyWebCiIntegrity(root, pins, errors);
+  verifyWebCiSemantics(webCiWorkflow, errors);
+  const deployWeb = verifyDeployWebIntegrity(root, pins, errors);
+  verifyDeployWebSemantics(deployWebWorkflow, errors);
   const commitIdentityAllowlist = verifyCommitIdentityAllowlistIntegrity(root, pins, errors);
   const forkPinVerifier = verifyForkPinVerifierIntegrity(root, pins, errors);
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
@@ -2029,6 +2188,8 @@ export function verifyControlDependencies(rootPath, options = {}) {
     identityGate,
     controlGate,
     launchGate,
+    webCi,
+    deployWeb,
     controlScripts: {
       commitIdentityAllowlist,
       forkPinVerifier,

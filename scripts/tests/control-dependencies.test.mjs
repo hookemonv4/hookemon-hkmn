@@ -13,8 +13,9 @@ import * as controlDependencies from '../verify-control-dependencies.mjs';
 const { verifyControlDependencies } = controlDependencies;
 
 const CHECKOUT_SHA = 'd23441a48e516b6c34aea4fa41551a30e30af803';
+const SETUP_NODE_SHA = '820762786026740c76f36085b0efc47a31fe5020';
 const OTHER_SHA = '0123456789abcdef0123456789abcdef01234567';
-const ACTIONS = { 'actions/checkout': CHECKOUT_SHA };
+const ACTIONS = { 'actions/checkout': CHECKOUT_SHA, 'actions/setup-node': SETUP_NODE_SHA };
 const NODE_VERSION = '24.19.0';
 const NODE_LINUX_URL = 'https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz';
 const NODE_LINUX_ARCHIVE_SHA256 = '14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647';
@@ -179,6 +180,8 @@ const CANONICAL_FORK_PROOF = readFileSync(join(REPO_ROOT, '.github', 'workflows'
 const CANONICAL_IDENTITY_GATE = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'identity-gate.yml'), 'utf8');
 const CANONICAL_CONTROL_GATE = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'control-gate.yml'), 'utf8');
 const CANONICAL_LAUNCH_GATE = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'launch-gate.yml'), 'utf8');
+const CANONICAL_WEB_CI = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'web-ci.yml'), 'utf8');
+const CANONICAL_DEPLOY_WEB = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'deploy-web.yml'), 'utf8');
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -228,6 +231,8 @@ function fixture() {
   writeFileSync(join(root, '.github', 'workflows', 'identity-gate.yml'), CANONICAL_IDENTITY_GATE);
   writeFileSync(join(root, '.github', 'workflows', 'control-gate.yml'), CANONICAL_CONTROL_GATE);
   writeFileSync(join(root, '.github', 'workflows', 'launch-gate.yml'), CANONICAL_LAUNCH_GATE);
+  writeFileSync(join(root, '.github', 'workflows', 'web-ci.yml'), CANONICAL_WEB_CI);
+  writeFileSync(join(root, '.github', 'workflows', 'deploy-web.yml'), CANONICAL_DEPLOY_WEB);
   writeFileSync(join(root, 'scripts', 'check-commit-identity.mjs'), COMMIT_IDENTITY_ALLOWLIST_SCRIPT);
   writeFileSync(join(root, 'scripts', 'verify-fork-pin.mjs'), FORK_PIN_VERIFIER_SCRIPT);
   cpSync(RELEASE_CLOSURE_BUILDER_ROOT, join(root, 'scripts', 'programmable', 'vendor', 'programmable-v4-hook-builder'), {
@@ -271,6 +276,8 @@ function fixture() {
       identityGate: { path: '.github/workflows/identity-gate.yml', sha256: sha256(CANONICAL_IDENTITY_GATE) },
       controlGate: { path: '.github/workflows/control-gate.yml', sha256: sha256(CANONICAL_CONTROL_GATE) },
       launchGate: { path: '.github/workflows/launch-gate.yml', sha256: sha256(CANONICAL_LAUNCH_GATE) },
+      webCi: { path: '.github/workflows/web-ci.yml', sha256: sha256(CANONICAL_WEB_CI) },
+      deployWeb: { path: '.github/workflows/deploy-web.yml', sha256: sha256(CANONICAL_DEPLOY_WEB) },
       archiveForkProofTest: { path: ARCHIVE_FORK_PROOF_TEST_PATH, sha256: ARCHIVE_FORK_PROOF_TEST_SHA256 },
       githubActions: ACTIONS,
     },
@@ -391,6 +398,7 @@ test('verifies the exact runtime executable for the selected platform distributi
     'actions/checkout': [
       { workflow: '.github/workflows/control-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/control-gate.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/deploy-web.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-pin-canary.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
@@ -398,6 +406,11 @@ test('verifies the exact runtime executable for the selected platform distributi
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/launch-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/web-ci.yml', ref: CHECKOUT_SHA },
+    ],
+    'actions/setup-node': [
+      { workflow: '.github/workflows/deploy-web.yml', ref: SETUP_NODE_SHA },
+      { workflow: '.github/workflows/web-ci.yml', ref: SETUP_NODE_SHA },
     ],
   });
   assert.deepEqual(result.forkProof, {
@@ -668,6 +681,8 @@ test('the base control checker rejects a candidate verifier import outside the p
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
     ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
+    ['.github/workflows/web-ci.yml', { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.contentAddresses.webCi.sha256 }],
+    ['.github/workflows/deploy-web.yml', { mode: '100644', type: 'blob', blobId: 'f'.repeat(40), sha256: candidatePins.contentAddresses.deployWeb.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -713,6 +728,8 @@ test('the base control checker permits an owner-approved verifier pin bump with 
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
     ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
+    ['.github/workflows/web-ci.yml', { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.contentAddresses.webCi.sha256 }],
+    ['.github/workflows/deploy-web.yml', { mode: '100644', type: 'blob', blobId: 'f'.repeat(40), sha256: candidatePins.contentAddresses.deployWeb.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -766,6 +783,8 @@ function v2PinBumpFixture() {
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
     ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
+    ['.github/workflows/web-ci.yml', { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.contentAddresses.webCi.sha256 }],
+    ['.github/workflows/deploy-web.yml', { mode: '100644', type: 'blob', blobId: 'f'.repeat(40), sha256: candidatePins.contentAddresses.deployWeb.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '8'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -907,6 +926,8 @@ test('the base control checker rejects a coordinated candidate control-surface m
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
     ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
+    ['.github/workflows/web-ci.yml', { mode: '100644', type: 'blob', blobId: 'e'.repeat(40), sha256: candidatePins.contentAddresses.webCi.sha256 }],
+    ['.github/workflows/deploy-web.yml', { mode: '100644', type: 'blob', blobId: 'f'.repeat(40), sha256: candidatePins.contentAddresses.deployWeb.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256 }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256 }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.sha256 }],
@@ -1288,7 +1309,7 @@ assertLaunchGateTamperIsRejected(
   /launch-gate workflow must assert the protected main branch/,
 );
 
-test('the launch-gate workflow is pinned to the same control surface as the other five workflows', () => {
+test('the launch-gate workflow is pinned to the same control surface as the other seven workflows', () => {
   const state = fixture();
   const result = verifyFixture(state);
 
@@ -1299,6 +1320,144 @@ test('the launch-gate workflow is pinned to the same control surface as the othe
     actualSha256: sha256(CANONICAL_LAUNCH_GATE),
   });
 });
+
+test('the web-ci and deploy-web workflows are pinned to the same control surface as the other six workflows', () => {
+  const state = fixture();
+  const result = verifyFixture(state);
+
+  assert.equal(result.result, 'PASSED', result.errors.join('\n'));
+  assert.deepEqual(result.webCi, {
+    path: '.github/workflows/web-ci.yml',
+    expectedSha256: sha256(CANONICAL_WEB_CI),
+    actualSha256: sha256(CANONICAL_WEB_CI),
+  });
+  assert.deepEqual(result.deployWeb, {
+    path: '.github/workflows/deploy-web.yml',
+    expectedSha256: sha256(CANONICAL_DEPLOY_WEB),
+    actualSha256: sha256(CANONICAL_DEPLOY_WEB),
+  });
+});
+
+function assertPinnedWorkflowTamperIsRejected(workflowName, canonical, name, transform, messagePattern) {
+  test(name, () => {
+    const state = fixture();
+    const workflowPath = join(state.root, '.github', 'workflows', workflowName);
+    const tampered = transform(canonical);
+    assert.notEqual(tampered, canonical);
+    writeFileSync(workflowPath, tampered);
+    const pinsPath = join(state.root, 'product', 'dependency-pins.json');
+    const pins = readJson(pinsPath);
+    const key = workflowName === 'web-ci.yml' ? 'webCi' : 'deployWeb';
+    pins.contentAddresses[key].sha256 = sha256(tampered);
+    writeJson(pinsPath, pins);
+
+    const result = verifyFixture(state);
+
+    assert.equal(result.result, 'FAILED', result.errors.join('\n'));
+    assert.match(result.errors.join('\n'), messagePattern);
+  });
+}
+
+function assertWebCiTamperIsRejected(name, transform, messagePattern) {
+  assertPinnedWorkflowTamperIsRejected('web-ci.yml', CANONICAL_WEB_CI, name, transform, messagePattern);
+}
+
+function assertDeployWebTamperIsRejected(name, transform, messagePattern) {
+  assertPinnedWorkflowTamperIsRejected('deploy-web.yml', CANONICAL_DEPLOY_WEB, name, transform, messagePattern);
+}
+
+assertWebCiTamperIsRejected(
+  'rejects a web-ci workflow renamed away from Hookemon CI',
+  workflow => workflow.replace('name: Hookemon CI', 'name: Website CI'),
+  /web-ci workflow must be named Hookemon CI/,
+);
+
+const REQUIRED_WEB_CI_COMMANDS_FOR_TESTS = ['npm ci', 'npm test', 'npm run lint'];
+
+for (const command of REQUIRED_WEB_CI_COMMANDS_FOR_TESTS) {
+  assertWebCiTamperIsRejected(
+    `rejects a web-ci workflow missing the mandatory step: ${command}`,
+    workflow => workflow.replace(command, 'true'),
+    /web-ci workflow must run/,
+  );
+}
+
+assertWebCiTamperIsRejected(
+  'rejects a web-ci workflow that widens its permissions',
+  workflow => workflow.replace('permissions:\n  contents: read', 'permissions:\n  contents: write'),
+  /web-ci workflow must declare least-privilege read-only contents permission/,
+);
+
+assertWebCiTamperIsRejected(
+  'rejects a web-ci workflow that adds a pull_request_target trigger',
+  workflow => workflow.replace('on:\n  pull_request:', 'on:\n  pull_request_target:\n  pull_request:'),
+  /web-ci workflow must never trigger on pull_request_target/,
+);
+
+assertWebCiTamperIsRejected(
+  'rejects a web-ci workflow that deploys instead of only testing',
+  workflow => `${workflow}\n      - run: npx wrangler deploy\n`,
+  /web-ci workflow must never deploy or read secrets/,
+);
+
+const REQUIRED_DEPLOY_WEB_COMMANDS_FOR_TESTS = [
+  'npm run build',
+  'verify-cloudflare-deploy.mjs config dist/server/wrangler.json',
+  'wrangler versions upload',
+  'verify-cloudflare-deploy.mjs version-id',
+  'wrangler versions deploy',
+  'verify-cloudflare-deploy.mjs output',
+];
+
+for (const command of REQUIRED_DEPLOY_WEB_COMMANDS_FOR_TESTS) {
+  assertDeployWebTamperIsRejected(
+    `rejects a deploy-web workflow missing the mandatory step: ${command}`,
+    workflow => workflow.replace(command, 'true'),
+    /deploy-web workflow must run/,
+  );
+}
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that adds a manual workflow_dispatch trigger',
+  workflow => workflow.replace('on:\n  workflow_run:', 'on:\n  workflow_dispatch:\n  workflow_run:'),
+  /deploy-web workflow must trigger only from a completed workflow_run/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow scoped to a different upstream workflow',
+  workflow => workflow.replace('workflows: ["Hookemon CI"]', 'workflows: ["Other CI"]'),
+  /deploy-web workflow must be scoped to the completed Hookemon CI run/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that drops the success-conclusion assertion',
+  workflow => workflow.replace("github.event.workflow_run.conclusion == 'success' &&\n      ", ''),
+  /deploy-web workflow must require the triggering Hookemon CI run to have succeeded/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that drops the exact-commit checkout',
+  workflow => workflow.replaceAll('github.event.workflow_run.head_sha', 'github.sha'),
+  /deploy-web workflow must check out the exact commit/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that widens its permissions',
+  workflow => workflow.replace('permissions:\n  contents: read', 'permissions:\n  contents: write'),
+  /deploy-web workflow must declare least-privilege read-only contents permission/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that drops the protected production environment',
+  workflow => workflow.replace('environment:\n      name: production\n      url: https://hookemon.com\n', ''),
+  /deploy-web workflow must deploy through the protected production environment/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that allows canceling an in-flight production deployment',
+  workflow => workflow.replace('cancel-in-progress: false', 'cancel-in-progress: true'),
+  /deploy-web workflow must not cancel an in-flight production deployment/,
+);
 
 test('rejects a Darwin Node example URL even with correctly shaped digests', () => {
   const state = fixture();

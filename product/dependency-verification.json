@@ -58,6 +58,10 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/deploy-web.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/fork-pin-canary.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
@@ -84,6 +88,20 @@
       {
         "workflow": ".github/workflows/v4-gates.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/web-ci.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      }
+    ],
+    "actions/setup-node": [
+      {
+        "workflow": ".github/workflows/deploy-web.yml",
+        "ref": "820762786026740c76f36085b0efc47a31fe5020"
+      },
+      {
+        "workflow": ".github/workflows/web-ci.yml",
+        "ref": "820762786026740c76f36085b0efc47a31fe5020"
       }
     ]
   },
@@ -116,6 +134,16 @@
     "path": ".github/workflows/launch-gate.yml",
     "expectedSha256": "fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4",
     "actualSha256": "fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4"
+  },
+  "webCi": {
+    "path": ".github/workflows/web-ci.yml",
+    "expectedSha256": "49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc",
+    "actualSha256": "49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc"
+  },
+  "deployWeb": {
+    "path": ".github/workflows/deploy-web.yml",
+    "expectedSha256": "b3a588c4f8ec1495d179fb079862b4660f3e68812d98385f37233e2168e3bda3",
+    "actualSha256": "b3a588c4f8ec1495d179fb079862b4660f3e68812d98385f37233e2168e3bda3"
   },
   "controlScripts": {
     "commitIdentityAllowlist": {
@@ -158,13 +186,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "477d9486bf4c22e4f0d426f3a79c2bb768a0ece5fa0a10aaa96414c9f214d113",
-      "actualSha256": "477d9486bf4c22e4f0d426f3a79c2bb768a0ece5fa0a10aaa96414c9f214d113",
+      "expectedSha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f",
+      "actualSha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "477d9486bf4c22e4f0d426f3a79c2bb768a0ece5fa0a10aaa96414c9f214d113",
-          "actualSha256": "477d9486bf4c22e4f0d426f3a79c2bb768a0ece5fa0a10aaa96414c9f214d113"
+          "sha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f",
+          "actualSha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f"
         },
         {
           "path": "scripts/lib/util.mjs",
