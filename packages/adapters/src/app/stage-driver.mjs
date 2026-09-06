@@ -174,7 +174,9 @@ const RECONCILIATION_REPOSITORY_METHODS = Object.freeze([
   'readChainAttemptRecoveryContext',
   'readRelayLeg',
   'readClaimPreconditions',
+  'readPackBatchIntent',
   'readPackBatchRequest',
+  'listHeldPositions',
   'listKnownCycleIds',
 ]);
 
@@ -634,9 +636,13 @@ async function stageConfigurationWithOperatorDeadline(config, readOperatorConfig
   const deadline = operatorConfiguration?.unresolvedCardDeadlineMinutes
     ?? base.unresolvedCardDeadlineMinutes
     ?? DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES;
+  const maxHeldPositions = operatorConfiguration?.maxHeldPositions ?? base.maxHeldPositions;
+  const maxHeldValueMicroUsdg = operatorConfiguration?.maxHeldValueMicroUsdg ?? base.maxHeldValueMicroUsdg;
   return Object.freeze({
     ...base,
     unresolvedCardDeadlineMinutes: assertUnresolvedCardDeadlineMinutes(deadline),
+    ...(maxHeldPositions === undefined ? {} : { maxHeldPositions }),
+    ...(maxHeldValueMicroUsdg === undefined ? {} : { maxHeldValueMicroUsdg }),
   });
 }
 
