@@ -320,13 +320,28 @@ async function appendCommandState(path, initial, commandState, now, appliedResul
   });
 }
 
-async function completeCommand(path, requestId, commandState, now, appliedResultCode) {
+/**
+ * Finalizes a PREPARED command — but only under the exact claimToken the caller actually ran its
+ * effect for. A claim can be reclaimed (a new claimToken) while the superseded claimant's effect call
+ * is still in flight (a lease renewal missed a beat, or the reclaim happened in the narrow window
+ * before the first renewal); that superseded claimant must never be able to overwrite whatever the new
+ * claimant durably records, whether the new claimant is still working or has already finished. This is
+ * the completion side of the same fence the heartbeat renewal (`startClaimHeartbeat`) already applies
+ * on the renewal side: both check the current durable claimToken before writing.
+ */
+async function completeCommand(path, requestId, commandState, now, appliedResultCode, claimToken) {
   return serializeWrite(path, async () => {
     const current = requestRecord(await readAllAuditEntries(path), requestId);
     if (current === null) throw new Error('audited command preparation is missing');
-    if (current.commandState !== 'PREPARED') return current;
+    // Not mine to record, either because someone already resolved it (the pre-existing case) or
+    // because a different claimToken now owns it (a reclaim raced ahead of us — the completion side
+    // of the fence startClaimHeartbeat already applies to renewals). Either way, our own outcome is
+    // not authoritative: report whatever is durably current instead of writing over it.
+    if (current.commandState !== 'PREPARED' || current.record.claimToken !== claimToken) {
+      return { initial: current.initial, record: current.record, commandState: current.commandState, mine: false };
+    }
     const record = await appendCommandState(path, current.initial, commandState, now, appliedResultCode);
-    return { initial: current.initial, record, commandState };
+    return { initial: current.initial, record, commandState, mine: true };
   });
 }
 
@@ -482,10 +497,17 @@ export async function executeAuditedCommand({
       commandState,
       now,
       completionResultCode,
+      reservation.claimToken,
     );
+    // Our claim was reclaimed before we could durably record our own outcome (a missed heartbeat
+    // while genuinely still working, or a reclaim landing in the narrow window before the first
+    // renewal). Our effect call is no longer the authoritative one for this request: report whatever
+    // the new claimant durably shows instead of asserting our own possibly-superseded result.
+    if (!completed.mine) return commandResult(completed.record, completed.commandState, true);
     return commandResult(completed.record, completed.commandState, false);
   } catch (error) {
-    const completed = await completeCommand(path, requestId, 'UNCERTAIN', now, resultCode);
+    const completed = await completeCommand(path, requestId, 'UNCERTAIN', now, resultCode, reservation.claimToken);
+    if (!completed.mine) return commandResult(completed.record, completed.commandState, true);
     throw new AuditedCommandEffectError(receiptFromEntry(completed.record), completed.commandState, error);
   } finally {
     stopHeartbeat();

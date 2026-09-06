@@ -511,6 +511,157 @@ async function executeAuditedCommandFromChild({ path, requestId, sideEffectDir, 
   };
 }
 
+test('a claimant whose slow effect resolves after its claim was reclaimed cannot finalize over the new claimant\'s outcome', async () => {
+  const path = await tempPath();
+  const requestId = 'request-superseded-completion';
+  const effectStarted = deferred();
+  const releaseEffect = deferred();
+  let effects = 0;
+
+  const claimantA = executeAuditedCommand(auditedInput(path, {
+    requestId,
+    heartbeatIntervalMs: 10_000_000, // large enough that no renewal fires during this test
+    now: () => Date.UTC(2026, 0, 1),
+    async effect() {
+      effects += 1;
+      effectStarted.resolve();
+      await releaseEffect.promise;
+      return { auditResultCode: 'CLAIMANT_A_APPLIED' };
+    },
+  }));
+  await effectStarted.promise;
+
+  // A second claimant independently decides A's claim is stale (e.g. A's renewal genuinely failed to
+  // reach shared storage even though A is still alive and working) and reclaims, then finishes first —
+  // constructed directly at the durable-log level so the test does not depend on real lease timing.
+  const initial = (await readAllAuditEntries(path))[0];
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-reclaim',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 1)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: initial.resultCode,
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'PREPARED',
+    claimToken: '22222222-2222-4222-8222-222222222222',
+  });
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-applied',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 2)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: 'CLAIMANT_B_APPLIED',
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'APPLIED',
+  });
+
+  releaseEffect.resolve();
+  const resultA = await claimantA;
+
+  assert.equal(effects, 1);
+  assert.equal(resultA.replayed, true, 'A cannot report its own effect as the authoritative outcome once superseded');
+  assert.equal(resultA.commandState, 'APPLIED');
+  assert.equal(resultA.receipt.resultCode, 'CLAIMANT_B_APPLIED', 'the durable outcome is B\'s, not A\'s');
+
+  const finalRecords = await readAllAuditEntries(path);
+  assert.deepEqual(finalRecords.map(record => record.commandState), ['PREPARED', 'PREPARED', 'APPLIED']);
+  assert.equal(finalRecords.at(-1).resultCode, 'CLAIMANT_B_APPLIED', 'A never overwrote B\'s terminal record');
+});
+
+test('a superseded claimant whose effect fails cannot overwrite the new claimant\'s outcome with UNCERTAIN either', async () => {
+  const path = await tempPath();
+  const requestId = 'request-superseded-failure';
+  const effectStarted = deferred();
+  const releaseEffect = deferred();
+
+  const claimantA = executeAuditedCommand(auditedInput(path, {
+    requestId,
+    heartbeatIntervalMs: 10_000_000,
+    now: () => Date.UTC(2026, 0, 1),
+    async effect() {
+      effectStarted.resolve();
+      await releaseEffect.promise;
+      throw new Error('claimant A failed after being superseded');
+    },
+  }));
+  await effectStarted.promise;
+
+  const initial = (await readAllAuditEntries(path))[0];
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-reclaim-2',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 1)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: initial.resultCode,
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'PREPARED',
+    claimToken: '33333333-3333-4333-8333-333333333333',
+  });
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-applied-2',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 2)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: 'CLAIMANT_B_APPLIED_2',
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'APPLIED',
+  });
+
+  releaseEffect.resolve();
+  const resultA = await claimantA;
+
+  assert.equal(resultA.replayed, true);
+  assert.equal(resultA.commandState, 'APPLIED');
+  assert.equal(resultA.receipt.resultCode, 'CLAIMANT_B_APPLIED_2');
+  const finalRecords = await readAllAuditEntries(path);
+  assert.equal(finalRecords.at(-1).commandState, 'APPLIED', 'A\'s failure never recorded a spurious UNCERTAIN over B\'s success');
+});
+
+test('a compliant idempotent authority recognizes its own durable postcondition on a recovered retry, so this log never has to prove it by itself', async () => {
+  const path = await tempPath();
+  const requestId = 'request-idempotent-authority';
+  const appliedRequestIds = new Set(); // stands in for a durable, authority-owned postcondition store
+  let sideEffects = 0;
+  await seedPreparedEntry(path, { requestId, occurredAt: new Date(0).toISOString() });
+
+  async function idempotentEffect(receipt) {
+    // The receipt already carries the stable requestId — the identity a compliant authority needs to
+    // look up its own durable postcondition instead of trusting the audit claim alone.
+    if (appliedRequestIds.has(receipt.requestId)) return { auditResultCode: 'ALREADY_APPLIED' };
+    sideEffects += 1;
+    appliedRequestIds.add(receipt.requestId);
+    return { auditResultCode: 'APPLIED_NOW' };
+  }
+
+  const recovered = await executeAuditedCommand(auditedInput(path, { requestId, effect: idempotentEffect }));
+  assert.equal(recovered.receipt.resultCode, 'APPLIED_NOW');
+  assert.equal(sideEffects, 1);
+
+  const replay = await executeAuditedCommand(auditedInput(path, { requestId, effect: idempotentEffect }));
+  assert.equal(sideEffects, 1, 'a replay never invokes the effect again once resolved');
+  assert.equal(replay.replayed, true);
+});
+
 test('two independent child processes racing to recover the same orphaned claim run the effect exactly once', async () => {
   const path = await tempPath();
   const sideEffectDir = await mkdtemp(join(tmpdir(), 'hookemon-audit-side-effect-'));
