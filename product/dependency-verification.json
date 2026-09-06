@@ -74,13 +74,13 @@
   },
   "identityGate": {
     "path": ".github/workflows/identity-gate.yml",
-    "expectedSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019",
-    "actualSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019"
+    "expectedSha256": "65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb",
+    "actualSha256": "65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb"
   },
   "controlGate": {
     "path": ".github/workflows/control-gate.yml",
-    "expectedSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50",
-    "actualSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50"
+    "expectedSha256": "cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74",
+    "actualSha256": "cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74"
   },
   "controlScripts": {
     "commitIdentityAllowlist": {
@@ -123,13 +123,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91",
-      "actualSha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91",
+      "expectedSha256": "4eae394949aec1be867a6e6f916657d101c0ad6944a127a35f5cf4dbcf9e09fa",
+      "actualSha256": "4eae394949aec1be867a6e6f916657d101c0ad6944a127a35f5cf4dbcf9e09fa",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91",
-          "actualSha256": "b23993720fe50b3488a8df840090486ae8c114647add416208d9c66a1414af91"
+          "sha256": "4eae394949aec1be867a6e6f916657d101c0ad6944a127a35f5cf4dbcf9e09fa",
+          "actualSha256": "4eae394949aec1be867a6e6f916657d101c0ad6944a127a35f5cf4dbcf9e09fa"
         },
         {
           "path": "scripts/lib/util.mjs",
