@@ -1,6 +1,7 @@
 import {
   DIRECTIONS,
   RELAY_CONSTANTS,
+  RelayQuoteExpiredError,
   assertQuoteUsable,
   relayQuoteDigest,
 } from '../../relay-client.mjs';
@@ -349,6 +350,32 @@ async function verifiedOutboundPlans({
   return Object.freeze(plans);
 }
 
+/**
+ * ADR-0025 `refresh-after-readmission` evidence: the exact, narrow record cycle-repository's
+ * `recordOutboundQuoteExpired` accepts, binding this cycle's *immutable original* admission and
+ * both its admitted quote identities to the moment a Relay quote was observed expired -- never the
+ * raw Relay steps, and never a replacement's identity, which could not match this cycle's original
+ * admission digest even if supplied.
+ */
+function outboundQuoteExpiryEvidence(admission, observedAtMs) {
+  return {
+    schema: 'hookemon.outbound-quote-expiry-evidence.v1',
+    cycleId: admission.cycleId,
+    admissionDigest: digest(admission),
+    aggregateQuote: {
+      requestId: admission.relay.requestId,
+      deadlineUnixSeconds: admission.relay.deadlineUnixSeconds,
+      quoteDigest: admission.relay.quoteDigest,
+    },
+    unitQuote: {
+      requestId: admission.unitRelay.requestId,
+      deadlineUnixSeconds: admission.unitRelay.deadlineUnixSeconds,
+      quoteDigest: admission.unitRelay.quoteDigest,
+    },
+    observedAtMs,
+  };
+}
+
 /** Builds the immutable Relay request whose digest must be persisted before any signature. */
 export async function prepareOutboundRequest({ adapters, config, cycleRepository, context, nowMs = Date.now() }) {
   if (!adapters?.relay) throw new Error('outbound requires a configured Relay client');
@@ -359,14 +386,44 @@ export async function prepareOutboundRequest({ adapters, config, cycleRepository
   if (context.admission !== undefined && digest(context.admission) !== digest(cycle.admission)) {
     throw new Error('outbound context admission conflicts with the repository-owned admission');
   }
-  const admitted = assertOutboundAdmission(cycle.admission, configured, money, context.cycleId);
+  // ADR-0025 `refresh-after-readmission`: once a replacement is durably selected, outbound signs
+  // and broadcasts that replacement -- never the original, now-expired quote -- while every other
+  // check above and below still binds to the immutable original cycle admission and releaseAmount.
+  const refresh = typeof cycleRepository.readOutboundQuoteRefresh === 'function'
+    ? await cycleRepository.readOutboundQuoteRefresh(context.cycleId)
+    : null;
+  const effectiveAdmission = refresh?.state === 'ACTIVE' ? refresh.replacement : cycle.admission;
+  const admitted = assertOutboundAdmission(effectiveAdmission, configured, money, context.cycleId);
   if (canonicalAmount(cycle.releaseAmount, 'outbound cycle release amount') !== admitted.aggregateFunding) {
     throw new Error('outbound cycle release amount does not match the durable aggregate funding quote');
   }
   const { quote, aggregateFunding: amountAtomic } = admitted;
   assertOutboundQuote(quote, configured, money);
   assertQuoteMatchesAdmission(quote, admitted);
-  assertQuoteUsable({ quote, nowMs });
+  try {
+    assertQuoteUsable({ quote, nowMs });
+  } catch (error) {
+    if (!(error instanceof RelayQuoteExpiredError)) throw error;
+    if (refresh === null) {
+      // The one and only typed pre-effect recovery boundary: this is reached before any stage
+      // request digest, Relay leg, or chain attempt exists, so the repository still accepts this
+      // as the first (and only) expiry evidence for the immutable original admission.
+      if (typeof cycleRepository.recordOutboundQuoteExpired === 'function') {
+        await cycleRepository.recordOutboundQuoteExpired(context.cycleId, outboundQuoteExpiryEvidence(cycle.admission, nowMs));
+      }
+      throw error;
+    }
+    if (refresh.state === 'ACTIVE' && typeof cycleRepository.holdCycle === 'function') {
+      // The one-replacement scope has no second refresh: a replacement that itself expires before
+      // preparation leaves a durable, zero-effect owner-decision hold rather than fetching again.
+      await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', {
+        stage: 'outbound',
+        reason: 'OUTBOUND_QUOTE_REFRESH_REPLACEMENT_EXPIRED',
+        error: error.message,
+      });
+    }
+    throw error;
+  }
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
   const transactions = await verifiedOutboundPlans({
     steps: execution.steps,
