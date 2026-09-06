@@ -3351,7 +3351,7 @@ test('recordPackBatchRequest refuses to add packs once the cycle is terminally h
 });
 
 function packBatchIntent(overrides = {}) {
-  return { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, ...overrides };
+  return { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: SETTLEMENT_SOLANA_OWNER, ...overrides };
 }
 
 test('readPackBatchIntent is null before an intent is recorded', async t => {

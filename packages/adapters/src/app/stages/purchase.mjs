@@ -278,6 +278,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       quantity,
       packType: prepared.packType ?? null,
       expectedCardCountPerPack: prepared.expectedCardCountPerPack,
+      playerAddress: prepared.playerAddress,
     });
     requireCollectorOnlyMutationAuthority(config);
     const generated = await adapters.collectorCrypt.generateYoloPacks({
@@ -317,7 +318,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   return { quantity, expectedCardCountPerPack: prepared.expectedCardCountPerPack };
 }
 
-async function reconcilePack({ adapters, config, context, asset, pack, deadlineSinceMs }) {
+async function reconcilePack({ adapters, config, context, asset, pack, playerAddress, deadlineSinceMs }) {
   let packStatus;
   try {
     packStatus = await adapters.collectorCrypt.getPackStatus({ memo: pack.memo });
@@ -364,7 +365,7 @@ async function reconcilePack({ adapters, config, context, asset, pack, deadlineS
   } catch {
     return { determined: false };
   }
-  const debits = entries.filter(entry => entry.owner === config.accounts.solana && entry.mint === asset.assetId && BigInt(entry.postAmount) < BigInt(entry.preAmount));
+  const debits = entries.filter(entry => entry.owner === playerAddress && entry.mint === asset.assetId && BigInt(entry.postAmount) < BigInt(entry.preAmount));
   if (debits.length !== 1) {
     return { determined: true, outcome: 'anomaly', evidence: { reason: 'exact settlement debit was not observed', signature } };
   }
@@ -403,10 +404,17 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
   }
   if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
   const asset = configuredSettlementAsset(config);
+  // The wallet that actually made this purchase is bound durably at the pre-call intent, not
+  // re-derived from the live operator config -- a config change (wallet rotation, environment
+  // swap) between purchase and a later restart/reconcile must never change which address this
+  // cycle's settlement debit is attributed to.
+  const intentRecord = await cycleRepository.readPackBatchIntent(context.cycleId, 'purchase');
+  if (intentRecord === null) throw new Error('purchase reconciliation requires the pre-call intent that must exist alongside any recorded batch');
+  const playerAddress = intentRecord.intent.playerAddress;
 
   const outcomes = [];
   for (const pack of batch.packs) {
-    const result = await reconcilePack({ adapters, config, context, asset, pack, deadlineSinceMs: batch.requestedAtMs });
+    const result = await reconcilePack({ adapters, config, context, asset, pack, playerAddress, deadlineSinceMs: batch.requestedAtMs });
     if (!result.determined) return null;
     if (result.outcome === 'anomaly') {
       return holdWholeCycle(cycleRepository, context, {

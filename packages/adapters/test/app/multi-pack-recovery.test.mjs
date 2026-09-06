@@ -184,7 +184,9 @@ function memoFor(index) {
 
 for (const quantity of [1, 2, MAXIMUM_PACK_BATCH_SIZE]) {
   test(`purchase batch of ${quantity} pack(s): every pack is purchased exactly once and never regenerated on retry`, async () => {
-    const cycleRepository = repository();
+    const cycleRepository = repository({
+      intents: { purchase: { recordedAtMs: 0, intent: { quantity, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+    });
     const packs = Array.from({ length: quantity }, (_, index) => ({ memo: memoFor(index), transaction: `unsigned-${index}` }));
     const debits = new Map(packs.map((pack, index) => [signatureFor(index), '25000000']));
     let generateCalls = 0;
@@ -443,7 +445,7 @@ test('generate response lost before any memo returns: the pre-call intent is dur
   assert.equal(generateCalls, 0);
   assert.deepEqual(cycleRepository.intentState.purchase, {
     recordedAtMs: 1_000,
-    intent: { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 },
+    intent: { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR },
   });
   assert.equal(cycleRepository.batchState.purchase, undefined);
 
@@ -463,7 +465,7 @@ test('generate response lost before any memo returns: the pre-call intent is dur
   assert.equal(result, null);
   assert.equal(heldRepository.held.length, 1);
   assert.equal(heldRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.deepEqual(heldRepository.held[0].evidence.intent, { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 });
+  assert.deepEqual(heldRepository.held[0].evidence.intent, { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR });
 
   // A second and third reconcile pass never call generate again and reach the identical hold.
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -480,12 +482,15 @@ test('generate response lost before any memo returns: the pre-call intent is dur
   // every call so this asserts that repeated content, not call count).
   for (const call of heldRepository.held) {
     assert.equal(call.terminalState, 'HELD_DATA_UNVERIFIED');
-    assert.deepEqual(call.evidence.intent, { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 });
+    assert.deepEqual(call.evidence.intent, { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR });
   }
 });
 
 test('lost response: a durably generated pack whose sign/broadcast crashed mid-flight is never repurchased and reconciles once the debit is observed', async () => {
-  const cycleRepository = repository({ batches: { purchase: { requestedAtMs: 0, packs: [{ packIndex: 0, memo: 'memo-lost', expectedCardCount: 1, packType: null }] } } });
+  const cycleRepository = repository({
+    batches: { purchase: { requestedAtMs: 0, packs: [{ packIndex: 0, memo: 'memo-lost', expectedCardCount: 1, packType: null }] } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+  });
   let generateCalls = 0;
   const signature = signatureFor(0);
   const collectorCrypt = {

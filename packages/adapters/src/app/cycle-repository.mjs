@@ -515,8 +515,9 @@ function fitsBoundedJournalPayload(value) {
 
 function assertPackBatchIntent(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== 3
-    || !Object.hasOwn(value, 'quantity') || !Object.hasOwn(value, 'packType') || !Object.hasOwn(value, 'expectedCardCountPerPack')) {
+    || Object.keys(value).length !== 4
+    || !Object.hasOwn(value, 'quantity') || !Object.hasOwn(value, 'packType') || !Object.hasOwn(value, 'expectedCardCountPerPack')
+    || !Object.hasOwn(value, 'playerAddress')) {
     throw new Error(`${label} must use the exact schema`);
   }
   if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error(`${label} quantity is invalid`);
@@ -526,7 +527,8 @@ function assertPackBatchIntent(value, label) {
   if (!Number.isInteger(value.expectedCardCountPerPack) || value.expectedCardCountPerPack < 1) {
     throw new Error(`${label} expectedCardCountPerPack is invalid`);
   }
-  return { quantity: value.quantity, packType: value.packType, expectedCardCountPerPack: value.expectedCardCountPerPack };
+  const playerAddress = assertHeldPositionText(value.playerAddress, `${label}.playerAddress`);
+  return { quantity: value.quantity, packType: value.packType, expectedCardCountPerPack: value.expectedCardCountPerPack, playerAddress };
 }
 
 function assertPagedPayoutStage(stage) {
@@ -3366,7 +3368,7 @@ export class CycleRepository {
     return structuredClone(latest.packBatchIntents.get(stage));
   }
 
-  /** @returns {Promise<{recordedAtMs: number, intent: {quantity: number, packType: string|null, expectedCardCountPerPack: number}}|null>} */
+  /** @returns {Promise<{recordedAtMs: number, intent: {quantity: number, packType: string|null, expectedCardCountPerPack: number, playerAddress: string}}|null>} */
   async readPackBatchIntent(cycleId, stage) {
     assertPackOperationStageName(stage);
     const state = await this.#replay(cycleId);
