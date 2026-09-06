@@ -94,24 +94,28 @@ const STAGE_HANDLERS = Object.freeze({
     reconcileLive: reconcileLiveOutbound,
   },
   purchase: {
+    collectorCapable: true,
     prepareRequest: preparePurchaseRequest,
     probe: probePurchase,
     mutate: mutatePurchase,
     reconcileLive: reconcileLivePurchase,
   },
   open: {
+    collectorCapable: true,
     prepareRequest: prepareOpenRequest,
     probe: probeOpen,
     mutate: mutateOpen,
     reconcileLive: reconcileLiveOpen,
   },
   'epic-gate': {
+    collectorCapable: true,
     prepareRequest: prepareEpicGateRequest,
     probe: probeEpicGate,
     mutate: mutateEpicGate,
     reconcileLive: reconcileLiveEpicGate,
   },
   buyback: {
+    collectorCapable: true,
     prepareRequest: prepareBuybackRequest,
     probe: probeBuyback,
     mutate: mutateBuyback,
@@ -276,6 +280,10 @@ function assertChainJournal(cycleRepository) {
 
 function isChainJournalHandler(handler) {
   return handler?.chainJournal === true;
+}
+
+function isCollectorCapableHandler(handler) {
+  return handler?.collectorCapable === true;
 }
 
 function rejectLegacyRelayOperationalAttempt(stage, attemptRecord) {
@@ -721,6 +729,31 @@ function chainPreparationAdapters(adapters, assertLease) {
   });
 }
 
+// Purchase/open/epic-gate/buyback prepareRequest reads only the Collector machine catalog
+// (purchase) and durable predecessor-stage evidence (open, epic-gate, buyback via
+// cycleRepository.readStage); this stays as narrow as those real handlers actually need, never the
+// writable repository, a signer, or any mutation capability.
+function collectorProductionPreparationAdapters(adapters, assertLease) {
+  const collectorCrypt = {};
+  const getMachines = leaseFencedReadMethod(adapters?.collectorCrypt, 'getMachines', assertLease);
+  if (getMachines) collectorCrypt.getMachines = getMachines;
+  return Object.freeze({ collectorCrypt: Object.freeze(collectorCrypt) });
+}
+
+function collectorProductionPreparationInput(context, config, adapters, cycleRepository) {
+  return Object.freeze({
+    liveMode: true,
+    adapters: collectorProductionPreparationAdapters(adapters, context.assertLease),
+    config: frozenCanonicalValue(config),
+    cycleRepository: createLeaseFencedReadRepository(cycleRepository, context.assertLease),
+    context: frozenCanonicalValue({
+      cycleId: context.cycleId,
+      stage: context.stage,
+      intent: context.intent,
+    }),
+  });
+}
+
 function chainPreparationInput(context, config, adapters, cycleRepository) {
   return Object.freeze({
     liveMode: true,
@@ -893,10 +926,20 @@ async function prepareRequestForMutation({ handler, usesBuiltInHandlers, context
       context.stage,
     );
   }
+  if (isChainJournalHandler(handler)) {
+    return assertPreparedRequest(
+      await handler.prepareRequest(chainPreparationInput(context, config, adapters, cycleRepository)),
+      context.stage,
+    );
+  }
+  if (isCollectorCapableHandler(handler)) {
+    return assertPreparedRequest(
+      await handler.prepareRequest(collectorProductionPreparationInput(context, config, adapters, cycleRepository)),
+      context.stage,
+    );
+  }
   return assertPreparedRequest(
-    await handler.prepareRequest(isChainJournalHandler(handler)
-      ? chainPreparationInput(context, config, adapters, cycleRepository)
-      : preparationInput(context, config)),
+    await handler.prepareRequest(preparationInput(context, config)),
     context.stage,
   );
 }

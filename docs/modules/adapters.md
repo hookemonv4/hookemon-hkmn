@@ -67,8 +67,16 @@ infrastructure.
   exact custody before finality. Direct payout owns a recipient-level journal and emits evidence only
   after terminal conservation. Outbound and return are built-in chain-journal stages: they retain a
   Relay leg, complete only after their own RPC settlement evidence, and return canonical settlement
-  evidence on a `SETTLED` replay. Purchase, open, epic gate, and buyback durably record `PREPARED`
-  and then throw `LiveModeIntegrationPendingError`.
+  evidence on a `SETTLED` replay. Purchase, open, epic gate, and buyback are Collector-capable
+  built-in stages: in true production mode (`execution.profile !== 'rehearsal'`), not only the
+  narrower collector-only rehearsal profile, their `prepareRequest` receives its own dedicated
+  frozen input carrying `liveMode`, a lease-fenced read-only Collector machine-catalog reader
+  (purchase only), a lease-fenced read-only `cycleRepository` facade, `config`, and `context` --
+  never a signer, a writable repository, or any other adapter. Each reaches its own real refusal
+  (missing durable predecessor-stage evidence, the Collector policy evidence-only gate, or a
+  downstream configuration or mutation-authority refusal) rather than the frozen
+  `LiveModeIntegrationPendingError`, which the driver keeps defined only as inert historical
+  journal-compatibility scaffolding; no stage currently maps to it.
 - The general chain-attempt runtime is v1; the frozen v2 policy, fencing, refusal, and
   approval-digest fields are unavailable. Live Relay signing uses the separate combined
   recovery record rather than claiming schema parity for all chain attempts.

@@ -962,7 +962,7 @@ test('collector-only rehearsal uses honest skip evidence for bridge stages', asy
   }
 });
 
-test('the remaining frozen built-in mutation stages refuse live mutations before legacy provider handlers run', async () => {
+test('the Collector-capable mutation stages reach their own real handler refusal in true production mode, never the frozen integration-pending error', async () => {
   const cycleRepository = writeAheadRepository();
   const driver = createStageDriver({
     liveMode: true,
@@ -970,15 +970,42 @@ test('the remaining frozen built-in mutation stages refuse live mutations before
     signerClient: throwingSigner(),
     config: baseConfig(),
     cycleRepository,
+    ...fixtureStageDriverOptions,
   });
 
+  // purchase has no pack code configured here, so its own prepareRequest succeeds (using the now
+  // real, lease-fenced collector-crypt catalog reader) and durably records PREPARED before its
+  // mutate reaches its own Solana-configuration refusal. open/epic-gate/buyback each read their
+  // real predecessor stage (also now genuinely wired) and refuse during preparation itself, before
+  // any attempt is durably recorded.
+  const expectations = {
+    purchase: { duringPrepare: false, attemptState: 'NOT_SENT', message: /Collector purchase requires a configured Solana RPC client/ },
+    open: { duringPrepare: true, attemptState: null, message: /open requires a completed purchase stage with a pack ledger/ },
+    'epic-gate': { duringPrepare: true, attemptState: null, message: /epic gate requires a completed open stage with a pack ledger/ },
+    buyback: { duringPrepare: true, attemptState: null, message: /buyback requires a completed epic-gate stage with a pack ledger/ },
+  };
+
   for (const stage of AUTOMATED_CYCLE_STAGES.filter(stage => !['eligibility-snapshot', 'claim-process', 'outbound', 'return', 'payout'].includes(stage))) {
+    const expected = expectations[stage];
     await assert.rejects(
-      () => driver.execute({ cycleId: CYCLE_ID, stage, intent: { journalHead: `pending-${stage}` } }),
-      error => error instanceof LiveModeIntegrationPendingError && error.stage === stage,
+      () => driver.execute({
+        cycleId: CYCLE_ID,
+        stage,
+        intent: { journalHead: `pending-${stage}` },
+        assertMutationAllowed: async () => {},
+      }),
+      error => {
+        assert.equal(error instanceof LiveModeIntegrationPendingError, false, `${stage} must not hit the frozen integration-pending refusal`);
+        assert.match(error.message, expected.message);
+        return true;
+      },
     );
     const attempt = await cycleRepository.readOperationalStageAttempt(CYCLE_ID, stage);
-    assert.equal(attempt.attempt.state, 'PREPARED');
+    if (expected.attemptState === null) {
+      assert.equal(attempt, null, `${stage} refuses during preparation, before any attempt is durably recorded`);
+    } else {
+      assert.equal(attempt.attempt.state, expected.attemptState);
+    }
   }
 });
 
@@ -3037,7 +3064,7 @@ test('records NOT_SENT when an injected live mutation guard hook is absent', asy
   assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'purchase')).attempt.state, 'NOT_SENT');
 });
 
-test('pending provider stages refuse live mutations while the eligibility snapshot stays read-only', async () => {
+test('Collector-capable stages reach their own real refusal while the eligibility snapshot stays read-only', async () => {
   const cycleRepository = writeAheadRepository();
   const driver = createStageDriver({
     liveMode: true,
@@ -3045,14 +3072,35 @@ test('pending provider stages refuse live mutations while the eligibility snapsh
     signerClient: null,
     config: baseConfig(),
     cycleRepository,
+    ...fixtureStageDriverOptions,
   });
+  const expectations = {
+    purchase: { attemptState: 'NOT_SENT', message: /purchase mutate requires a configured collector-crypt client/ },
+    open: { attemptState: null, message: /open requires a completed purchase stage with a pack ledger/ },
+    'epic-gate': { attemptState: null, message: /epic gate requires a completed open stage with a pack ledger/ },
+    buyback: { attemptState: null, message: /buyback requires a completed epic-gate stage with a pack ledger/ },
+  };
   for (const stage of AUTOMATED_CYCLE_STAGES.filter(stage => !['eligibility-snapshot', 'claim-process', 'outbound', 'return', 'payout'].includes(stage))) {
+    const expected = expectations[stage];
     await assert.rejects(
-      () => driver.execute({ cycleId: CYCLE_ID, stage, intent: { journalHead: `head-${stage}` } }),
-      error => error instanceof LiveModeIntegrationPendingError && error.stage === stage,
+      () => driver.execute({
+        cycleId: CYCLE_ID,
+        stage,
+        intent: { journalHead: `head-${stage}` },
+        assertMutationAllowed: async () => {},
+      }),
+      error => {
+        assert.equal(error instanceof LiveModeIntegrationPendingError, false, `${stage} must not hit the frozen integration-pending refusal`);
+        assert.match(error.message, expected.message);
+        return true;
+      },
     );
     const attempt = await cycleRepository.readOperationalStageAttempt(CYCLE_ID, stage);
-    assert.equal(attempt.attempt.state, 'PREPARED');
+    if (expected.attemptState === null) {
+      assert.equal(attempt, null, `${stage} refuses during preparation, before any attempt is durably recorded`);
+    } else {
+      assert.equal(attempt.attempt.state, expected.attemptState);
+    }
   }
   await assert.rejects(
     () => driver.execute({ cycleId: CYCLE_ID, stage: 'eligibility-snapshot', intent: { journalHead: 'head-eligibility-snapshot' } }),
