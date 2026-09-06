@@ -7,11 +7,18 @@ import { lstat, open } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { DurableCycleStore, StateDirectoryLossError } from '../../../runner/src/cycle/durable-store.mjs';
-import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
+import {
+  assertBoundedCanonicalValue,
+  canonicalJson,
+  CycleJournal,
+  digest,
+  RECOVERY_LIMITS,
+} from '../../../runner/src/cycle/journal.mjs';
 import { isProcessRpcFinalizedErc20TransferProof } from '../robinhood-rpc.mjs';
 import { isProcessRpcRelayDestinationObservation } from '../solana-rpc.mjs';
 import { isProcessRpcOutboundRefundProof } from './stages/outbound.mjs';
 import { isProcessRpcReturnLegDestinationProof } from './stages/return.mjs';
+import { assertPolicyAdmission } from '../../../runner/src/automation/policy-engine.mjs';
 import {
   assertRelayLeg,
   assertStandingAuthorityDecision,
@@ -19,12 +26,15 @@ import {
   attributeRelayLegSource,
   assertChainTransactionAttempt,
   assertCustodyLedger,
+  assertPackBatchRequest,
+  CUSTODY_LEDGER_BUCKETS,
   assertCycleTerminalState,
   assertProviderMutationAttempt,
   assertRelayFinality,
   assertTypedAmount,
   assertReturnLegDestinationProof,
   OPERATIONAL_CYCLE_STAGES,
+  PACK_OPERATION_STAGES,
   RELAY_LEG_TERMINAL_STATES,
   transitionChainTransactionAttempt,
   transitionRelayLeg,
@@ -50,6 +60,24 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'relay-leg-settled',
   'custody-ledger-recorded',
   'held-owner-decision-recorded',
+  'held-position-owner-decision-recorded',
+  'held-position-resolved',
+  'supplementary-settlement-advanced',
+  'supplementary-chain-attempt-prepared',
+  'supplementary-chain-attempt-signed',
+  'supplementary-chain-attempt-signed-with-recovery-context',
+  'supplementary-chain-attempt-broadcast',
+  'supplementary-chain-attempt-recovery-context-recorded',
+]);
+const POST_COMPLETION_RECORD_KINDS = new Set([
+  'held-position-owner-decision-recorded',
+  'held-position-resolved',
+  'supplementary-settlement-advanced',
+  'supplementary-chain-attempt-prepared',
+  'supplementary-chain-attempt-signed',
+  'supplementary-chain-attempt-signed-with-recovery-context',
+  'supplementary-chain-attempt-broadcast',
+  'supplementary-chain-attempt-recovery-context-recorded',
 ]);
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const signedDecimalPattern = /^(?:0|[1-9][0-9]*|-[1-9][0-9]*)$/;
@@ -57,6 +85,22 @@ const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const HELD_OWNER_DECISION = 'HELD_OWNER_DECISION';
 const HELD_OWNER_DECISION_CHOICES = new Set(['sell', 'keep-holding']);
+const HELD_POSITION_TERMINAL_STATES = new Set([
+  'HELD_DATA_UNVERIFIED',
+  'HELD_OWNER_DECISION',
+  'HELD_UNAVAILABLE',
+  'HELD_UNRESOLVED',
+]);
+const HELD_POSITION_RESOLUTION_TERMINAL_STATES = new Set(['SOLD', 'REFUNDED', 'NEVER_SENT']);
+const SUPPLEMENTARY_SETTLEMENT_STATES = new Set(['PREPARED', 'BUYBACK_SENT_UNKNOWN', 'RETURN_BROADCAST', 'PAYOUT_BROADCAST', 'COMPLETE']);
+const SUPPLEMENTARY_SETTLEMENT_TRANSITIONS = new Map([
+  ['PREPARED', new Set(['BUYBACK_SENT_UNKNOWN'])],
+  ['BUYBACK_SENT_UNKNOWN', new Set(['RETURN_BROADCAST'])],
+  ['RETURN_BROADCAST', new Set(['PAYOUT_BROADCAST'])],
+  ['PAYOUT_BROADCAST', new Set(['COMPLETE'])],
+]);
+const heldPositionIdPattern = /^held:[0-9a-f]{64}$/;
+const supplementaryPayoutPagedStagePattern = /^supplementary-[0-9a-f]{48}$/;
 const evmAddressPattern = /^0x[0-9a-fA-F]{40}$/;
 const evmTransactionHashPattern = /^0x[0-9a-fA-F]{64}$/;
 const fencingTokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -64,6 +108,10 @@ const quarantineReasonPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
 const payoutDustRecordSchema = 'hookemon.payout-dust-record.v1';
 const payoutDustConsumptionSchema = 'hookemon.payout-dust-consumption.v1';
 const payoutQuarantineSchema = 'hookemon.payout-quarantine-reservation.v1';
+const supplementaryPayoutSourceSchema = 'hookemon.supplementary-payout-source.v1';
+const supplementaryReturnBoundarySchema = 'hookemon.supplementary-return-boundary.v1';
+const supplementaryFinalizedReturnSchema = 'hookemon.supplementary-finalized-return.v1';
+const supplementarySettlementEvidenceSchema = 'hookemon.supplementary-settlement-evidence.v1';
 const evmNonceLockSchema = 'hookemon.evm-nonce-lock.v1';
 const relayAttributionSchema = 'hookemon.relay-attribution.v1';
 const chainAttemptRecoveryContextSchema = 'hookemon.chain-attempt-recovery-context.v1';
@@ -89,6 +137,9 @@ export const CYCLE_REPOSITORY_CLIENT_INTERFACE = Object.freeze([
   'readOperationalStageAttempt',
   'readChainTransactionAttempt',
   'readClaimPreconditions',
+  'readHeldPosition',
+  'listHeldPositions',
+  'readSupplementarySettlement',
   'listKnownCycleIds',
 ]);
 
@@ -99,6 +150,14 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'completeStage',
   'completeCycle',
   'holdCycle',
+  'recordPackBatchIntent',
+  'readPackBatchIntent',
+  'recordPackBatchRequest',
+  'readPackBatchRequest',
+  'recordHeldPosition',
+  'recordHeldOwnerDecision',
+  'resolveHeldPosition',
+  'advanceSupplementarySettlement',
   'prepareStageAttempt',
   'markStageAttemptSentUnknown',
   'markStageAttemptNotSent',
@@ -367,6 +426,10 @@ function createStateDirectoryRecoveryRepository(hold) {
         walletNonceReservations: new Map(),
         chainAttemptRecoveryContexts: new Map(),
         custodyLedgers: new Map(),
+        heldPositions: new Map(),
+        heldPositionLedgerKeys: new Map(),
+        supplementarySettlements: new Map(),
+        supplementarySettlementEvidence: new Map(),
         payoutDustRecords: new Map(),
         payoutDustConsumptions: new Map(),
         payoutQuarantines: new Map(),
@@ -389,8 +452,17 @@ function createStateDirectoryRecoveryRepository(hold) {
     },
     async readClaimPreconditions(cycleId) {
       assertCycle(cycleId);
-      return Object.freeze({ heldAssets: true, unattributed: true, unresolvedObligations: true });
+      return Object.freeze({
+        heldAssets: true,
+        unattributed: true,
+        unresolvedObligations: true,
+        heldPositions: Object.freeze({ count: 0, valueMicroUsdg: '0', positions: Object.freeze([]) }),
+      });
     },
+    async readHeldPosition() { return null; },
+    async listHeldPositions() { return []; },
+    async readSupplementarySettlement() { return null; },
+    async readSupplementarySettlementEvidence() { return null; },
     async listKnownCycleIds() {
       return [recovery.cycleId];
     },
@@ -414,6 +486,67 @@ function assertStageName(stage, { allowLegacyRead = false } = {}) {
   if (allowLegacyRead && LEGACY_ACCOUNTING_STAGE_SET.has(stage)) return;
   if (LEGACY_ACCOUNTING_STAGE_SET.has(stage)) throw new Error(`cycle-repository: retired stage "${stage}" is read-only`);
   throw new Error(`cycle-repository: unknown stage "${stage}"`);
+}
+
+const PACK_OPERATION_STAGE_SET = new Set(PACK_OPERATION_STAGES);
+const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
+
+function assertPackOperationStageName(stage) {
+  if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);
+}
+
+// Mirrors durable-store.mjs's own (module-private) paged-stage-evidence handle schema string --
+// the wire-format tag `persistPagedStageEvidence` stamps on the immutable handle it returns, which
+// this module journals verbatim in place of oversized stage evidence. Duplicated as a literal
+// because the handle is a versioned cross-module contract, not an implementation detail reached
+// into from here.
+const STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA = 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1';
+
+/** True only for the exact immutable handle completeStage journals in place of oversized evidence. */
+function isStageEvidencePageReference(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype
+    && value.schema === STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA;
+}
+
+/** Whether `value` fits one bounded journal-event payload unchanged (the journal's own limits). */
+function fitsBoundedJournalPayload(value) {
+  try {
+    assertBoundedCanonicalValue(value, 'stage evidence', {
+      objects: RECOVERY_LIMITS.payloadObjects,
+      arrays: RECOVERY_LIMITS.payloadArrays,
+      arrayItems: RECOVERY_LIMITS.payloadArrayItems,
+      aggregateBytes: RECOVERY_LIMITS.payloadAggregateBytes,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertPackBatchIntent(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== 4
+    || !Object.hasOwn(value, 'quantity') || !Object.hasOwn(value, 'packType') || !Object.hasOwn(value, 'expectedCardCountPerPack')
+    || !Object.hasOwn(value, 'playerAddress')) {
+    throw new Error(`${label} must use the exact schema`);
+  }
+  if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error(`${label} quantity is invalid`);
+  if (value.packType !== null && (typeof value.packType !== 'string' || !packTypeFieldPattern.test(value.packType))) {
+    throw new Error(`${label} packType is invalid`);
+  }
+  if (!Number.isInteger(value.expectedCardCountPerPack) || value.expectedCardCountPerPack < 1) {
+    throw new Error(`${label} expectedCardCountPerPack is invalid`);
+  }
+  const playerAddress = assertHeldPositionText(value.playerAddress, `${label}.playerAddress`);
+  return { quantity: value.quantity, packType: value.packType, expectedCardCountPerPack: value.expectedCardCountPerPack, playerAddress };
+}
+
+function assertPagedPayoutStage(stage) {
+  if (stage === 'payout' || (typeof stage === 'string' && supplementaryPayoutPagedStagePattern.test(stage))) {
+    return stage;
+  }
+  throw new Error('cycle-repository paged payout state is available only for the payout or a supplementary payout stage');
 }
 
 function assertReleaseAmount(value) {
@@ -457,12 +590,140 @@ function generateCycleId(now) {
   return `cycle-${now.toString(36)}-${globalThis.crypto.randomUUID()}`;
 }
 
+const reservedCycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
+
+/** Accepts only an identifier `nextCycleId` could have produced; the store re-validates on append. */
+function assertReservedCycleId(value) {
+  if (typeof value !== 'string' || !reservedCycleIdPattern.test(value)) {
+    throw new Error('cycle-repository createCycle: reserved cycleId is invalid');
+  }
+  return value;
+}
+
+/**
+ * Validates the quote-bound policy admission this cycle is opened under. Monetary rules are not
+ * restated here: `assertPolicyAdmission` is the policy engine's own normalizer, so the record this
+ * store accepts is exactly the record that engine will digest and that outbound will replay. What
+ * this adds is the persistence-boundary obligation -- the record must name this cycle, and it must
+ * carry the parsed aggregate Relay quote bound to the admitted quote digest, because outbound
+ * reconstructs its intent from that quote after a restart and must never requote.
+ *
+ * The full value is stored, not the normalized subset: normalization drops `relayQuote`, which is
+ * the evidence a restarted outbound needs.
+ */
+function assertDurableCycleAdmission(value, cycleId, label = 'cycle-repository admission') {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error(`${label} must be a plain object`);
+  }
+  assertPolicyAdmission(value);
+  if (value.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
+  const quote = value.relayQuote;
+  if (!quote || typeof quote !== 'object' || Array.isArray(quote) || Object.getPrototypeOf(quote) !== Object.prototype) {
+    throw new Error(`${label} must carry the parsed aggregate Relay quote`);
+  }
+  if (quote.quoteDigest !== value.quoteDigest || quote.tradeType !== 'EXACT_OUTPUT') {
+    throw new Error(`${label} aggregate Relay quote is not the admitted exact-output quote`);
+  }
+  canonicalJson(value);
+  return Object.freeze(structuredClone(value));
+}
+
 function custodyLedgerKey(ledger) {
   return `${ledger.chainId}\u0000${ledger.assetId}`;
 }
 
 function chainAttemptKey(stage, requestDigest) {
   return `${stage}\u0000${requestDigest}`;
+}
+
+const SUPPLEMENTARY_CHAIN_ATTEMPT_SCHEMA = 'hookemon.supplementary-chain-attempt.v1';
+const SUPPLEMENTARY_CHAIN_ATTEMPT_STATE_SET = new Set(['PREPARED', 'SIGNED', 'BROADCAST']);
+
+function supplementaryChainAttemptKey(positionId, requestDigest) {
+  return positionId + '|' + requestDigest;
+}
+
+/**
+ * A position-scoped analogue of the ordinary chainAttempts (prepareChainTransactionAttempt /
+ * recordSignedTransaction / recordBroadcast) state machine, for a supplementary settlement's own
+ * resale/return/payout transactions. Deliberately a separate schema and a separate keyspace
+ * (positionId, never a cycle's stage name) rather than reusing hookemon.chain-transaction-attempt.v1
+ * -- that frozen contract's `stage` field is validated against the fixed OPERATIONAL_CYCLE_STAGES
+ * enum everywhere it is consumed (money-schemas.mjs, dashboard, runner), so it structurally cannot
+ * accept a per-position identifier without loosening a much more central contract. Reusing the
+ * *transition rules* (PREPARED -> SIGNED -> BROADCAST) while keying by positionId instead avoids
+ * any collision with a main cycle's own buyback/return chain attempts under the same cycleId.
+ */
+function assertSupplementaryChainAttempt(value, label) {
+  exactObject(value, ['schema', 'positionId', 'requestDigest', 'state', 'rawBytes', 'nonce', 'blockhash', 'hash'], label);
+  if (value.schema !== SUPPLEMENTARY_CHAIN_ATTEMPT_SCHEMA) throw new Error(label + ' schema is invalid');
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(label + ' positionId is invalid');
+  }
+  if (typeof value.requestDigest !== 'string' || !digestPattern.test(value.requestDigest)) {
+    throw new Error(label + ' requestDigest is invalid');
+  }
+  if (!SUPPLEMENTARY_CHAIN_ATTEMPT_STATE_SET.has(value.state)) throw new Error(label + ' state is invalid');
+  if (value.state === 'PREPARED') {
+    if (value.rawBytes !== null || value.nonce !== null || value.blockhash !== null || value.hash !== null) {
+      throw new Error(label + ' prepared state cannot contain signing material');
+    }
+  } else {
+    if (typeof value.rawBytes !== 'string' || value.rawBytes.length === 0) throw new Error(label + ' rawBytes is invalid');
+    if ((value.nonce === null) === (value.blockhash === null)) throw new Error(label + ' requires exactly one nonce or blockhash');
+    if (value.nonce !== null && (typeof value.nonce !== 'string' || !decimalPattern.test(value.nonce))) throw new Error(label + ' nonce is invalid');
+    if (value.blockhash !== null && (typeof value.blockhash !== 'string' || value.blockhash.length === 0)) throw new Error(label + ' blockhash is invalid');
+    if (typeof value.hash !== 'string' || value.hash.length === 0) throw new Error(label + ' hash is invalid');
+  }
+  return structuredClone(value);
+}
+
+function transitionSupplementaryChainAttempt(value, nextState, evidence) {
+  if (evidence === undefined) evidence = {};
+  const permitted = { PREPARED: new Set(['SIGNED']), SIGNED: new Set(['BROADCAST']), BROADCAST: new Set() };
+  if (!permitted[value.state].has(nextState)) throw new Error('supplementary chain transaction attempt transition is invalid');
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    throw new Error('supplementary chain transaction attempt transition evidence is invalid');
+  }
+  const evidenceKeys = Object.keys(evidence).sort();
+  if (value.state === 'PREPARED') {
+    const signingKeys = ['blockhash', 'hash', 'nonce', 'rawBytes'];
+    if (evidenceKeys.length !== signingKeys.length || evidenceKeys.some((key, index) => key !== signingKeys[index])) {
+      throw new Error('supplementary chain transaction attempt signing evidence is invalid');
+    }
+  } else if (evidenceKeys.length !== 0) {
+    throw new Error('supplementary chain transaction attempt transition evidence is immutable after signing');
+  }
+  return assertSupplementaryChainAttempt(Object.assign({}, value, evidence, { state: nextState }), 'supplementary chain transaction attempt');
+}
+
+/**
+ * Minimal recovery binding for a supplementary chain attempt's signed bytes: proves which exact
+ * signed-bytes hash a durable, caller-defined recovery blob belongs to, so a restart can recover
+ * (or refuse to recover) the same signed attempt rather than re-signing. Unlike the ordinary
+ * chain-attempt recovery context, this does not itself model B's transaction-policy fencing/
+ * approval fields -- a supplementary handler that needs those uses B's own
+ * recoverTransactionPolicyApproval/Broadcast API directly and stores whatever it needs to recover
+ * that call inside `context`, which this store treats as an opaque bounded value.
+ */
+function assertSupplementaryChainAttemptRecoveryContext(value, label) {
+  exactObject(value, ['positionId', 'requestDigest', 'rawSignedBytesHash', 'context'], label);
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(label + ' positionId is invalid');
+  }
+  if (typeof value.requestDigest !== 'string' || !digestPattern.test(value.requestDigest)) {
+    throw new Error(label + ' requestDigest is invalid');
+  }
+  if (typeof value.rawSignedBytesHash !== 'string' || value.rawSignedBytesHash.length === 0 || value.rawSignedBytesHash.length > 512) {
+    throw new Error(label + ' rawSignedBytesHash is invalid');
+  }
+  assertBoundedCanonicalValue(value.context, label + ' context', {
+    objects: RECOVERY_LIMITS.payloadObjects,
+    arrays: RECOVERY_LIMITS.payloadArrays,
+    arrayItems: RECOVERY_LIMITS.payloadArrayItems,
+    aggregateBytes: RECOVERY_LIMITS.payloadAggregateBytes,
+  });
+  return structuredClone(value);
 }
 
 function payoutAssetKey(amount) {
@@ -845,6 +1106,7 @@ function returnSettlementCustodyLedger(state, leg) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -1453,6 +1715,31 @@ function evidenceDigest(domain, cycleId, stage, evidence) {
   return digest({ domain, cycleId, stage, evidence: cloneEvidence(evidence, `${domain} evidence`) });
 }
 
+/**
+ * `terminalAtMs`/`completedAtMs` were added after this event kind shipped. A stored entry from
+ * before that change legitimately omits it; a new one always carries it. Never fabricated from an
+ * HTTP request time -- only from this repository's own clock at the moment of the durable write.
+ */
+function assertOptionalTerminalAtMs(value, label) {
+  if (value === undefined) return null;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} terminalAtMs is invalid`);
+  return value;
+}
+
+function assertTerminalPayloadShape(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error(`${label} must be a plain object`);
+  }
+  canonicalJson(value);
+  const keys = Object.keys(value);
+  const required = ['terminalState', 'evidence'];
+  const hasRequired = required.every(field => Object.hasOwn(value, field));
+  const extra = keys.filter(key => !required.includes(key));
+  if (!hasRequired || (extra.length > 0 && (extra.length > 1 || extra[0] !== 'terminalAtMs'))) {
+    throw new Error(`${label} must use the exact schema`);
+  }
+}
+
 function exactObject(value, fields, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new Error(`${label} must be a plain object`);
@@ -1462,6 +1749,620 @@ function exactObject(value, fields, label) {
     throw new Error(`${label} must use the exact schema`);
   }
   return value;
+}
+
+function assertHeldPositionText(value, label, { nullable = false } = {}) {
+  if (nullable && value === null) return null;
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function assertHeldPositionAtomic(value, label) {
+  if (typeof value !== 'string' || !decimalPattern.test(value)) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
+function assertHeldPositionLedgerAsset(value, label) {
+  exactObject(value, ['chainId', 'assetId', 'decimals'], label);
+  const amount = assertTypedAmount({ ...value, amountAtomic: '0' }, label);
+  return {
+    chainId: amount.chainId,
+    assetId: amount.assetId,
+    decimals: amount.decimals,
+  };
+}
+
+function heldPositionId({ cycleId, memo, mint, cardRef }) {
+  return `held:${digest({
+    schema: 'hookemon.held-position-identity.v1',
+    cycleId,
+    memo,
+    mint,
+    cardRef,
+  }).slice('sha256:'.length)}`;
+}
+
+function heldPositionEvidenceDigest(position, evidence) {
+  return digest({
+    schema: 'hookemon.held-position-evidence.v1',
+    cycleId: position.cycleId,
+    packId: position.packId,
+    memo: position.memo,
+    mint: position.mint,
+    cardRef: position.cardRef,
+    costMicroUsdg: position.costMicroUsdg,
+    valueMicroUsdg: position.valueMicroUsdg,
+    insuredValue: position.insuredValue,
+    reason: position.reason,
+    terminalState: position.terminalState,
+    evidence: cloneEvidence(evidence, 'held position evidence'),
+  });
+}
+
+function assertHeldPositionOwnerDecision(value, label = 'held position owner decision') {
+  exactObject(value, ['positionId', 'heldEvidenceDigest', 'requestId', 'expectedRevision', 'choice'], label);
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(`${label}.positionId is invalid`);
+  }
+  if (typeof value.heldEvidenceDigest !== 'string' || !digestPattern.test(value.heldEvidenceDigest)) {
+    throw new Error(`${label}.heldEvidenceDigest is invalid`);
+  }
+  if (typeof value.requestId !== 'string' || !requestIdPattern.test(value.requestId)) {
+    throw new Error(`${label}.requestId is invalid`);
+  }
+  if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) {
+    throw new Error(`${label}.expectedRevision is invalid`);
+  }
+  if (!HELD_OWNER_DECISION_CHOICES.has(value.choice)) throw new Error(`${label}.choice is invalid`);
+  return cloneEvidence(value, label);
+}
+
+function heldPositionOwnerDecisionInput(positionId, value) {
+  exactObject(value, ['heldEvidenceDigest', 'requestId', 'expectedRevision', 'choice'], 'held position owner decision input');
+  return assertHeldPositionOwnerDecision({ positionId, ...value }, 'held position owner decision input');
+}
+
+function heldPositionResolutionEvidenceDigest(position, terminalState, evidence) {
+  return digest({
+    schema: 'hookemon.held-position-resolution-evidence.v1',
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    heldEvidenceDigest: position.evidenceDigest,
+    terminalState,
+    evidence: cloneEvidence(evidence, 'held position resolution evidence'),
+  });
+}
+
+function assertHeldPositionResolution(value, label = 'held position resolution') {
+  exactObject(value, ['terminalState', 'evidenceDigest', 'resolvedAtMs', 'evidence'], label);
+  if (!HELD_POSITION_RESOLUTION_TERMINAL_STATES.has(value.terminalState)) {
+    throw new Error(`${label}.terminalState is invalid`);
+  }
+  if (typeof value.evidenceDigest !== 'string' || !digestPattern.test(value.evidenceDigest)) {
+    throw new Error(`${label}.evidenceDigest is invalid`);
+  }
+  if (!Number.isSafeInteger(value.resolvedAtMs) || value.resolvedAtMs < 0) {
+    throw new Error(`${label}.resolvedAtMs is invalid`);
+  }
+  return {
+    terminalState: value.terminalState,
+    evidenceDigest: value.evidenceDigest,
+    resolvedAtMs: value.resolvedAtMs,
+    evidence: cloneEvidence(value.evidence, `${label}.evidence`),
+  };
+}
+
+function heldPositionResolutionInput(position, value, nowMs) {
+  exactObject(value, ['heldEvidenceDigest', 'expectedRevision', 'terminalState', 'evidence'], 'held position resolution input');
+  if (value.heldEvidenceDigest !== position.evidenceDigest) {
+    throw new Error('held position resolution input does not bind the held evidence digest');
+  }
+  if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) {
+    throw new Error('held position resolution input expectedRevision is invalid');
+  }
+  if (value.expectedRevision !== position.positionRevision) {
+    throw new Error('held position resolution input has a stale position revision');
+  }
+  const evidence = cloneEvidence(value.evidence, 'held position resolution input evidence');
+  return assertHeldPositionResolution({
+    terminalState: value.terminalState,
+    evidenceDigest: heldPositionResolutionEvidenceDigest(position, value.terminalState, evidence),
+    resolvedAtMs: nowMs,
+    evidence,
+  }, 'held position resolution input');
+}
+
+function completedEligibilitySnapshotEvidenceDigest(state, cycleId) {
+  const snapshot = state.stages.get('eligibility-snapshot') ?? null;
+  if (snapshot?.status !== 'COMPLETE') {
+    throw new Error('supplementary settlement requires the original completed eligibility snapshot');
+  }
+  return digest(snapshot.evidence);
+}
+
+function assertSupplementaryPayoutSourceAmount(value, label, usdgAddress) {
+  const amount = assertPayoutAmount(value, label);
+  const assetId = assertEvmAddress(amount.assetId, `${label}.assetId`);
+  if (amount.chainId !== '4663' || amount.decimals !== 6 || assetId !== usdgAddress) {
+    throw new Error(`${label} must identify the bound chain 4663 six-decimal USDG asset`);
+  }
+  return {
+    chainId: 4663,
+    assetId,
+    decimals: 6,
+    amountAtomic: amount.amountAtomic,
+  };
+}
+
+function assertSupplementaryReturnBinding(value, label) {
+  exactObject(value, ['operations', 'usdgAddress', 'evidenceDigest'], label);
+  return {
+    operations: assertEvmAddress(value.operations, `${label}.operations`),
+    usdgAddress: assertEvmAddress(value.usdgAddress, `${label}.usdgAddress`),
+    evidenceDigest: assertDigest(value.evidenceDigest, `${label}.evidenceDigest`),
+  };
+}
+
+function assertSupplementaryFinalizedReturnEvidence(value, settlement, label) {
+  exactObject(value, [
+    'schema',
+    'positionId',
+    'cycleId',
+    'manifestId',
+    'operations',
+    'usdgAddress',
+    'amountAtomic',
+    'finalityEvidence',
+  ], label);
+  if (value.schema !== supplementaryFinalizedReturnSchema) throw new Error(`${label}.schema is invalid`);
+  if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
+    || value.manifestId !== settlement.manifestId) {
+    throw new Error(`${label} does not bind its supplementary settlement`);
+  }
+  const operations = assertEvmAddress(value.operations, `${label}.operations`);
+  const usdgAddress = assertEvmAddress(value.usdgAddress, `${label}.usdgAddress`);
+  const amountAtomic = assertHeldPositionAtomic(value.amountAtomic, `${label}.amountAtomic`);
+  const finalityEvidence = cloneChainObservationEvidence(value.finalityEvidence, `${label}.finalityEvidence`);
+  const normalized = {
+    schema: supplementaryFinalizedReturnSchema,
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    operations,
+    usdgAddress,
+    amountAtomic,
+    finalityEvidence,
+  };
+  return {
+    evidence: normalized,
+    finalizedReturn: {
+      chainId: 4663,
+      assetId: usdgAddress,
+      decimals: 6,
+      amountAtomic,
+    },
+    returnBinding: {
+      operations,
+      usdgAddress,
+      evidenceDigest: digest({
+        schema: 'hookemon.supplementary-finalized-return-binding.v1',
+        positionId: settlement.positionId,
+        cycleId: settlement.cycleId,
+        manifestId: settlement.manifestId,
+        finalizedReturnEvidence: normalized,
+      }),
+    },
+  };
+}
+
+function assertSupplementaryReturnBoundaryEvidence(value, settlement, label) {
+  exactObject(value, ['schema', 'positionId', 'cycleId', 'manifestId', 'finalizedReturnEvidence'], label);
+  if (value.schema !== supplementaryReturnBoundarySchema) throw new Error(`${label}.schema is invalid`);
+  if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
+    || value.manifestId !== settlement.manifestId) {
+    throw new Error(`${label} does not bind its supplementary settlement`);
+  }
+  const finalized = assertSupplementaryFinalizedReturnEvidence(
+    value.finalizedReturnEvidence,
+    settlement,
+    `${label}.finalizedReturnEvidence`,
+  );
+  return {
+    schema: supplementaryReturnBoundarySchema,
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturnEvidence: finalized.evidence,
+    finalizedReturn: finalized.finalizedReturn,
+    returnBinding: finalized.returnBinding,
+  };
+}
+
+function assertSupplementaryPayoutSource(value, settlement, label = 'supplementary payout source') {
+  exactObject(value, [
+    'schema',
+    'positionId',
+    'cycleId',
+    'manifestId',
+    'finalizedReturn',
+    'previousDust',
+    'previousDustSource',
+    'returnBinding',
+  ], label);
+  if (value.schema !== supplementaryPayoutSourceSchema) throw new Error(`${label}.schema is invalid`);
+  if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
+    || value.manifestId !== settlement.manifestId) {
+    throw new Error(`${label} does not bind its supplementary settlement`);
+  }
+  const returnBinding = assertSupplementaryReturnBinding(value.returnBinding, `${label}.returnBinding`);
+  const finalizedReturn = assertSupplementaryPayoutSourceAmount(
+    value.finalizedReturn,
+    `${label}.finalizedReturn`,
+    returnBinding.usdgAddress,
+  );
+  const previousDust = assertSupplementaryPayoutSourceAmount(
+    value.previousDust,
+    `${label}.previousDust`,
+    returnBinding.usdgAddress,
+  );
+  const previousDustSource = value.previousDustSource === null
+    ? null
+    : assertPayoutDustSource(value.previousDustSource, `${label}.previousDustSource`);
+  if ((previousDust.amountAtomic === '0') !== (previousDustSource === null)) {
+    throw new Error(`${label} previous dust provenance is invalid`);
+  }
+  if (previousDustSource !== null && previousDustSource.cycleId !== settlement.cycleId) {
+    throw new Error(`${label} must use the original cycle's normal payout dust source`);
+  }
+  return {
+    schema: supplementaryPayoutSourceSchema,
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturn,
+    previousDust,
+    previousDustSource,
+    returnBinding,
+  };
+}
+
+function supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label) {
+  return assertSupplementaryPayoutSource({
+    schema: supplementaryPayoutSourceSchema,
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturn: returnBoundary.finalizedReturn,
+    previousDust: {
+      chainId: 4663,
+      assetId: returnBoundary.returnBinding.usdgAddress,
+      decimals: 6,
+      amountAtomic: '0',
+    },
+    previousDustSource: null,
+    returnBinding: returnBoundary.returnBinding,
+  }, settlement, label);
+}
+
+function supplementaryPayoutSourceForReturnBoundary(settlement, returnBoundary, label) {
+  // Main-cycle dust is not supplementary proceeds. The generic dust consumer identifies a
+  // successor by cycleId and therefore cannot atomically reserve a same-cycle position. Until a
+  // position-aware reservation exists, omitting that dust is the only safe outcome.
+  return supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label);
+}
+
+function supplementarySettlementEvidenceFor(settlement, state, evidence, payoutSource = null, returnBoundary = null) {
+  const record = {
+    state,
+    evidenceDigest: digest({
+      schema: supplementarySettlementEvidenceSchema,
+      positionId: settlement.positionId,
+      manifestId: settlement.manifestId,
+      state,
+      evidence,
+      ...(payoutSource === null ? {} : { payoutSourceDigest: settlement.payoutSourceDigest }),
+    }),
+    evidence,
+  };
+  if (payoutSource !== null) record.payoutSource = payoutSource;
+  if (returnBoundary !== null) record.returnBoundary = returnBoundary;
+  return record;
+}
+
+function durableSupplementaryReturnBoundary(settlement, evidenceRecord, label) {
+  const returnBoundary = evidenceRecord?.state === 'RETURN_BROADCAST'
+    ? evidenceRecord
+    : evidenceRecord?.returnBoundary ?? null;
+  if (returnBoundary === null || typeof returnBoundary !== 'object') {
+    throw new Error(`${label} is missing the durable return boundary`);
+  }
+  if (returnBoundary.state !== 'RETURN_BROADCAST') {
+    throw new Error(`${label} has an invalid durable return boundary state`);
+  }
+  const payoutSource = assertSupplementaryPayoutSource(
+    returnBoundary.payoutSource,
+    settlement,
+    `${label} payout source`,
+  );
+  if (digest(payoutSource) !== settlement.payoutSourceDigest) {
+    throw new Error(`${label} does not match the settlement payout source digest`);
+  }
+  return {
+    state: 'RETURN_BROADCAST',
+    evidenceDigest: assertDigest(returnBoundary.evidenceDigest, `${label} evidence digest`),
+    evidence: cloneEvidence(returnBoundary.evidence, `${label} evidence`),
+    payoutSource,
+  };
+}
+
+function supplementarySettlementFor(position, index, eligibilitySnapshotEvidenceDigest) {
+  if (!Number.isSafeInteger(index) || index < 1) throw new Error('supplementary settlement index is invalid');
+  assertDigest(eligibilitySnapshotEvidenceDigest, 'supplementary settlement eligibility snapshot evidence digest');
+  return Object.freeze({
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    manifestId: `${position.cycleId}:supplementary:${index}`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+    eligibilitySnapshotEvidenceDigest,
+    payoutSourceDigest: null,
+  });
+}
+
+function assertSupplementarySettlement(value, label = 'supplementary settlement') {
+  exactObject(value, [
+    'positionId',
+    'cycleId',
+    'manifestId',
+    'state',
+    'positionEvidenceDigest',
+    'eligibilitySnapshotEvidenceDigest',
+    'payoutSourceDigest',
+  ], label);
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(`${label}.positionId is invalid`);
+  }
+  if (typeof value.cycleId !== 'string' || value.cycleId.length === 0) throw new Error(`${label}.cycleId is invalid`);
+  if (typeof value.manifestId !== 'string' || !value.manifestId.startsWith(`${value.cycleId}:supplementary:`)) {
+    throw new Error(`${label}.manifestId is invalid`);
+  }
+  if (!SUPPLEMENTARY_SETTLEMENT_STATES.has(value.state)) throw new Error(`${label}.state is invalid`);
+  if (typeof value.positionEvidenceDigest !== 'string' || !digestPattern.test(value.positionEvidenceDigest)) {
+    throw new Error(`${label}.positionEvidenceDigest is invalid`);
+  }
+  if (typeof value.eligibilitySnapshotEvidenceDigest !== 'string' || !digestPattern.test(value.eligibilitySnapshotEvidenceDigest)) {
+    throw new Error(`${label}.eligibilitySnapshotEvidenceDigest is invalid`);
+  }
+  if (['RETURN_BROADCAST', 'PAYOUT_BROADCAST', 'COMPLETE'].includes(value.state)) {
+    if (typeof value.payoutSourceDigest !== 'string' || !digestPattern.test(value.payoutSourceDigest)) {
+      throw new Error(`${label}.payoutSourceDigest is required after the supplementary return boundary`);
+    }
+  } else if (value.payoutSourceDigest !== null) {
+    throw new Error(`${label}.payoutSourceDigest is invalid before the supplementary return boundary`);
+  }
+  return structuredClone(value);
+}
+
+function assertHeldPosition(value, label = 'held position') {
+  exactObject(value, [
+    'positionId',
+    'cycleId',
+    'packId',
+    'memo',
+    'mint',
+    'cardRef',
+    'costMicroUsdg',
+    'valueMicroUsdg',
+    'insuredValue',
+    'reason',
+    'terminalState',
+    'evidenceDigest',
+    'openedAtMs',
+    'positionRevision',
+    'ownerDecision',
+    'resolution',
+  ], label);
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(`${label}.positionId is invalid`);
+  }
+  const cycleId = assertHeldPositionText(value.cycleId, `${label}.cycleId`);
+  const packId = assertHeldPositionText(value.packId, `${label}.packId`);
+  const memo = assertHeldPositionText(value.memo, `${label}.memo`);
+  const mint = assertHeldPositionText(value.mint, `${label}.mint`, { nullable: true });
+  const cardRef = assertHeldPositionText(value.cardRef, `${label}.cardRef`);
+  if (value.positionId !== heldPositionId({ cycleId, memo, mint, cardRef })) {
+    throw new Error(`${label}.positionId does not bind its card identity`);
+  }
+  const costMicroUsdg = assertHeldPositionAtomic(value.costMicroUsdg, `${label}.costMicroUsdg`);
+  const valueMicroUsdg = assertHeldPositionAtomic(value.valueMicroUsdg, `${label}.valueMicroUsdg`);
+  const insuredValue = value.insuredValue === null ? null : assertTypedAmount(value.insuredValue, `${label}.insuredValue`);
+  if (typeof value.reason !== 'string' || !quarantineReasonPattern.test(value.reason)) {
+    throw new Error(`${label}.reason is invalid`);
+  }
+  if (!HELD_POSITION_TERMINAL_STATES.has(value.terminalState)) {
+    throw new Error(`${label}.terminalState is invalid`);
+  }
+  if (typeof value.evidenceDigest !== 'string' || !digestPattern.test(value.evidenceDigest)) {
+    throw new Error(`${label}.evidenceDigest is invalid`);
+  }
+  if (!Number.isSafeInteger(value.openedAtMs) || value.openedAtMs < 0) {
+    throw new Error(`${label}.openedAtMs is invalid`);
+  }
+  if (!Number.isSafeInteger(value.positionRevision) || value.positionRevision < 0) {
+    throw new Error(`${label}.positionRevision is invalid`);
+  }
+  const ownerDecision = value.ownerDecision === null
+    ? null
+    : assertHeldPositionOwnerDecision(value.ownerDecision, `${label}.ownerDecision`);
+  if (ownerDecision !== null) {
+    if (ownerDecision.positionId !== value.positionId || ownerDecision.heldEvidenceDigest !== value.evidenceDigest) {
+      throw new Error(`${label}.ownerDecision does not bind the held position`);
+    }
+    if (ownerDecision.expectedRevision + 1 > value.positionRevision) {
+      throw new Error(`${label}.ownerDecision revision transition is invalid`);
+    }
+  } else if (value.positionRevision !== 0 && value.resolution === null) {
+    throw new Error(`${label}.positionRevision requires an owner decision`);
+  }
+  const resolution = value.resolution === null
+    ? null
+    : assertHeldPositionResolution(value.resolution, `${label}.resolution`);
+  if (resolution !== null) {
+    const minimumRevision = ownerDecision === null ? 1 : ownerDecision.expectedRevision + 2;
+    if (value.positionRevision !== minimumRevision) {
+      throw new Error(`${label}.resolution revision transition is invalid`);
+    }
+    if (resolution.evidenceDigest !== heldPositionResolutionEvidenceDigest({
+      positionId: value.positionId,
+      cycleId,
+      evidenceDigest: value.evidenceDigest,
+    }, resolution.terminalState, resolution.evidence)) {
+      throw new Error(`${label}.resolution evidence digest does not bind the position`);
+    }
+  }
+  return {
+    positionId: value.positionId,
+    cycleId,
+    packId,
+    memo,
+    mint,
+    cardRef,
+    costMicroUsdg,
+    valueMicroUsdg,
+    insuredValue,
+    reason: value.reason,
+    terminalState: value.terminalState,
+    evidenceDigest: value.evidenceDigest,
+    openedAtMs: value.openedAtMs,
+    positionRevision: value.positionRevision,
+    ownerDecision,
+    resolution,
+  };
+}
+
+function heldPositionInput(cycleId, value, openedAtMs) {
+  const fields = [
+    'packId',
+    'memo',
+    'mint',
+    'cardRef',
+    'costMicroUsdg',
+    'valueMicroUsdg',
+    'insuredValue',
+    'reason',
+    'terminalState',
+    'evidence',
+  ];
+  if (Object.hasOwn(value ?? {}, 'ledgerAsset')) fields.push('ledgerAsset');
+  exactObject(value, fields, 'held position input');
+  const evidence = cloneEvidence(value.evidence, 'held position input evidence');
+  const ledgerAsset = value.ledgerAsset === undefined
+    ? null
+    : assertHeldPositionLedgerAsset(value.ledgerAsset, 'held position input ledgerAsset');
+  const base = {
+    cycleId,
+    packId: value.packId,
+    memo: value.memo,
+    mint: value.mint,
+    cardRef: value.cardRef,
+    costMicroUsdg: value.costMicroUsdg,
+    valueMicroUsdg: value.valueMicroUsdg,
+    insuredValue: value.insuredValue,
+    reason: value.reason,
+    terminalState: value.terminalState,
+  };
+  const position = assertHeldPosition({
+    positionId: heldPositionId(base),
+    ...base,
+    evidenceDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+    openedAtMs,
+    positionRevision: 0,
+    ownerDecision: null,
+    resolution: null,
+  }, 'held position input');
+  return {
+    position: assertHeldPosition({
+      ...position,
+      evidenceDigest: heldPositionEvidenceDigest(position, evidence),
+    }, 'held position input'),
+    evidence,
+    ledgerAsset,
+  };
+}
+
+function heldPositionCustodyLedger(custodyLedgers, cycleId, asset, position) {
+  const key = `${asset.chainId}\u0000${asset.assetId}`;
+  const previous = custodyLedgers.get(key) ?? null;
+  if (previous !== null) {
+    if (previous.decimals !== asset.decimals) {
+      throw new Error('held position custody ledger decimals are immutable for this cycle and asset');
+    }
+    return assertCustodyLedger({
+      ...previous,
+      heldPositions: (BigInt(previous.heldPositions) + BigInt(position.valueMicroUsdg)).toString(),
+    }, 'held position custody ledger');
+  }
+  return assertCustodyLedger({
+    schema: 'hookemon.custody-ledger.v1',
+    cycleId,
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [
+      bucket,
+      bucket === 'heldPositions' ? position.valueMicroUsdg : '0',
+    ])),
+  }, 'held position custody ledger');
+}
+
+function resolvedHeldPositionCustodyLedger(custodyLedgers, key, position) {
+  const previous = custodyLedgers.get(key) ?? null;
+  if (previous === null || BigInt(previous.heldPositions) < BigInt(position.valueMicroUsdg)) {
+    throw new Error('held position resolution has no attributable held custody ledger');
+  }
+  return assertCustodyLedger({
+    ...previous,
+    heldPositions: (BigInt(previous.heldPositions) - BigInt(position.valueMicroUsdg)).toString(),
+  }, 'resolved held position custody ledger');
+}
+
+function hasOpenHeldPositions(state) {
+  return [...state.heldPositions.values()].some(position => position.resolution === null);
+}
+
+function heldPositionOwnerDecisionTransition(position, decision) {
+  if (decision.heldEvidenceDigest !== position.evidenceDigest) {
+    throw new Error('cycle-repository recordHeldOwnerDecision: held evidence digest does not match the position');
+  }
+  if (position.resolution !== null) {
+    throw new Error('cycle-repository recordHeldOwnerDecision: held position is already resolved');
+  }
+  const existing = position.ownerDecision;
+  if (existing !== null) {
+    if (existing.requestId === decision.requestId) {
+      if (canonicalJson(existing) === canonicalJson(decision)) return { position, decision: existing };
+      throw new Error('cycle-repository recordHeldOwnerDecision: requestId conflict');
+    }
+    if (existing.choice === 'keep-holding' && decision.choice === 'keep-holding') {
+      return { position, decision: existing };
+    }
+    if (existing.choice === 'sell') {
+      throw new Error('cycle-repository recordHeldOwnerDecision: held position already has a sell decision');
+    }
+  }
+  if (decision.expectedRevision !== position.positionRevision) {
+    throw new Error('cycle-repository recordHeldOwnerDecision: stale position revision');
+  }
+  const updated = assertHeldPosition({
+    ...position,
+    positionRevision: position.positionRevision + 1,
+    ownerDecision: decision,
+  }, 'held position owner decision transition');
+  return { position: updated, decision };
 }
 
 function heldOwnerDecisionEvidenceDigest(cycleId, evidence) {
@@ -1658,37 +2559,57 @@ export class CycleRepository {
     const walletNonceReservations = new Map();
     const chainAttemptRecoveryContexts = new Map();
     const custodyLedgers = new Map();
+    const heldPositions = new Map();
+    const heldPositionLedgerKeys = new Map();
+    const supplementarySettlements = new Map();
+    const supplementarySettlementEvidence = new Map();
     const payoutDustRecords = new Map();
     const payoutDustConsumptions = new Map();
     const payoutQuarantines = new Map();
     const evmNonceLocks = new Map();
+    const packBatchRequests = new Map();
+    const packBatchIntents = new Map();
+    const supplementaryChainAttempts = new Map();
+    const supplementaryChainAttemptRecoveryContexts = new Map();
     const replayState = {
       stages,
       preparedStages,
       operationalAttempts,
       chainAttempts,
+      supplementaryChainAttempts,
+      supplementaryChainAttemptRecoveryContexts,
       relayLegs,
       standingAuthorityDecisions,
       walletNonceReservations,
       chainAttemptRecoveryContexts,
       custodyLedgers,
+      heldPositions,
+      heldPositionLedgerKeys,
+      supplementarySettlements,
+      supplementarySettlementEvidence,
       payoutDustRecords,
       payoutDustConsumptions,
       payoutQuarantines,
       evmNonceLocks,
+      packBatchRequests,
+      packBatchIntents,
     };
     let completed = false;
     let terminalState = null;
     let heldEvidenceDigest = null;
     let ownerDecision = null;
     let terminalEvidence = null;
+    let terminalAtMs = null;
     let releaseAmount = null;
+    let admission = null;
     let mode = null;
     let providerMode = null;
     let dryRun = false;
     let rehearsalSessionId = null;
     for (const entry of stored.entries) {
-      if (terminalState !== null && (completed || !POST_TERMINAL_RECORD_KINDS.has(entry.kind))) {
+      if (terminalState !== null
+        && (!POST_TERMINAL_RECORD_KINDS.has(entry.kind)
+          || (completed && !POST_COMPLETION_RECORD_KINDS.has(entry.kind)))) {
         if (entry.kind === 'cycle-terminal' || entry.kind === 'cycle-completed') {
           throw new Error('stored cycle has a second terminal event');
         }
@@ -1698,6 +2619,9 @@ export class CycleRepository {
         if (releaseAmount !== null) throw new Error('stored cycle has a second cycle-opened event');
         assertReleaseAmount(entry.payload.releaseAmount);
         releaseAmount = entry.payload.releaseAmount;
+        if (Object.hasOwn(entry.payload, 'admission')) {
+          admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, 'stored cycle admission');
+        }
         if (Object.hasOwn(entry.payload, 'mode')) {
           mode = assertCycleMode(entry.payload.mode, 'stored cycle mode');
         }
@@ -1739,6 +2663,30 @@ export class CycleRepository {
           throw new Error(`stored stage "${entry.payload.stage}" has conflicting completion evidence`);
         }
         stages.set(entry.payload.stage, { status: 'COMPLETE', evidence: entry.payload.evidence });
+      } else if (entry.kind === 'pack-batch-intent-recorded') {
+        assertPackOperationStageName(entry.payload.stage);
+        const intent = assertPackBatchIntent(entry.payload.intent, 'stored pack batch intent');
+        if (!Number.isSafeInteger(entry.payload.recordedAtMs) || entry.payload.recordedAtMs < 0) {
+          throw new Error('stored pack batch intent recordedAtMs is invalid');
+        }
+        const record = { recordedAtMs: entry.payload.recordedAtMs, intent };
+        const previous = packBatchIntents.get(entry.payload.stage);
+        if (previous && canonicalJson(previous.intent) !== canonicalJson(intent)) {
+          throw new Error(`stored pack batch intent for "${entry.payload.stage}" has conflicting fields`);
+        }
+        if (!previous) packBatchIntents.set(entry.payload.stage, record);
+      } else if (entry.kind === 'pack-batch-request-recorded') {
+        assertPackOperationStageName(entry.payload.stage);
+        const packs = assertPackBatchRequest(entry.payload.packs, 'stored pack batch request');
+        if (!Number.isSafeInteger(entry.payload.requestedAtMs) || entry.payload.requestedAtMs < 0) {
+          throw new Error('stored pack batch request requestedAtMs is invalid');
+        }
+        const record = { requestedAtMs: entry.payload.requestedAtMs, packs };
+        const previous = packBatchRequests.get(entry.payload.stage);
+        if (previous && canonicalJson(previous.packs) !== canonicalJson(packs)) {
+          throw new Error(`stored pack batch request for "${entry.payload.stage}" has conflicting packs`);
+        }
+        if (!previous) packBatchRequests.set(entry.payload.stage, record);
       } else if (entry.kind === 'stage-attempted') {
         const attemptIndex = attemptCounts.get(entry.payload.stage) ?? 0;
         attempts.set(entry.payload.stage, { evidence: entry.payload.evidence, attemptIndex, failed: false });
@@ -1757,17 +2705,22 @@ export class CycleRepository {
           attempt,
           responseEvidence: null,
           reconciliationEvidence: null,
+          sentAtMs: null,
           failed: false,
         });
       } else if (entry.kind === 'stage-attempt-sent-unknown') {
         const previous = operationalAttempts.get(entry.payload.stage);
         const attempt = assertProviderMutationAttempt(entry.payload.attempt, 'stored provider mutation attempt');
+        const sentAtMs = Object.hasOwn(entry.payload, 'sentAtMs') ? entry.payload.sentAtMs : null;
         if (!previous || previous.attempt.state !== 'PREPARED' || attempt.state !== 'SENT_UNKNOWN'
           || attempt.cycleId !== cycleId || attempt.stage !== entry.payload.stage
           || attempt.requestDigest !== previous.attempt.requestDigest) {
           throw new Error('stored provider mutation sent-unknown transition is invalid');
         }
-        operationalAttempts.set(attempt.stage, { ...previous, attempt });
+        if (sentAtMs !== null && (!Number.isSafeInteger(sentAtMs) || sentAtMs < 0)) {
+          throw new Error('stored provider mutation sent-unknown timestamp is invalid');
+        }
+        operationalAttempts.set(attempt.stage, { ...previous, attempt, sentAtMs });
       } else if (entry.kind === 'stage-attempt-not-sent') {
         const previous = operationalAttempts.get(entry.payload.stage);
         const attempt = assertProviderMutationAttempt(entry.payload.attempt, 'stored provider mutation attempt');
@@ -1789,6 +2742,7 @@ export class CycleRepository {
           attempt,
           responseEvidence: null,
           reconciliationEvidence: null,
+          sentAtMs: null,
           failed: false,
         });
       } else if (entry.kind === 'stage-attempt-response-recorded') {
@@ -1886,6 +2840,71 @@ export class CycleRepository {
           throw new Error('stored chain attempt recovery context conflicts with prior context');
         }
         chainAttemptRecoveryContexts.set(key, context);
+      } else if (entry.kind === 'supplementary-chain-attempt-prepared') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        if (attempt.state !== 'PREPARED' || supplementaryChainAttempts.has(key)) {
+          throw new Error('stored supplementary chain transaction preparation is invalid');
+        }
+        supplementaryChainAttempts.set(key, { attempt, broadcastEvidence: null });
+      } else if (entry.kind === 'supplementary-chain-attempt-signed') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        const previous = supplementaryChainAttempts.get(key);
+        if (!previous || previous.attempt.state !== 'PREPARED' || attempt.state !== 'SIGNED') {
+          throw new Error('stored supplementary chain transaction signing transition is invalid');
+        }
+        const expected = transitionSupplementaryChainAttempt(previous.attempt, 'SIGNED', {
+          rawBytes: attempt.rawBytes, nonce: attempt.nonce, blockhash: attempt.blockhash, hash: attempt.hash,
+        });
+        if (canonicalJson(attempt) !== canonicalJson(expected)) {
+          throw new Error('stored supplementary chain transaction signing material is invalid');
+        }
+        supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt }));
+      } else if (entry.kind === 'supplementary-chain-attempt-signed-with-recovery-context') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const context = assertSupplementaryChainAttemptRecoveryContext(entry.payload.context, 'stored supplementary chain attempt recovery context');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        const previous = supplementaryChainAttempts.get(key);
+        if (!previous || previous.attempt.state !== 'PREPARED' || attempt.state !== 'SIGNED') {
+          throw new Error('stored atomic supplementary chain transaction signing transition is invalid');
+        }
+        const expected = transitionSupplementaryChainAttempt(previous.attempt, 'SIGNED', {
+          rawBytes: attempt.rawBytes, nonce: attempt.nonce, blockhash: attempt.blockhash, hash: attempt.hash,
+        });
+        if (canonicalJson(attempt) !== canonicalJson(expected)
+          || context.positionId !== attempt.positionId
+          || context.requestDigest !== attempt.requestDigest
+          || context.rawSignedBytesHash !== attempt.hash) {
+          throw new Error('stored atomic supplementary chain signing recovery context does not bind signed bytes');
+        }
+        if (supplementaryChainAttemptRecoveryContexts.has(key)) {
+          throw new Error('stored atomic supplementary chain signing recovery context already exists');
+        }
+        supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt }));
+        supplementaryChainAttemptRecoveryContexts.set(key, context);
+      } else if (entry.kind === 'supplementary-chain-attempt-broadcast') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        const previous = supplementaryChainAttempts.get(key);
+        const broadcastEvidence = cloneChainObservationEvidence(entry.payload.evidence, 'stored supplementary chain transaction broadcast evidence');
+        if (!previous || previous.attempt.state !== 'SIGNED' || attempt.state !== 'BROADCAST'
+          || canonicalJson(attempt) !== canonicalJson(transitionSupplementaryChainAttempt(previous.attempt, 'BROADCAST'))) {
+          throw new Error('stored supplementary chain transaction broadcast transition is invalid');
+        }
+        supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt, broadcastEvidence }));
+      } else if (entry.kind === 'supplementary-chain-attempt-recovery-context-recorded') {
+        const context = assertSupplementaryChainAttemptRecoveryContext(entry.payload.context, 'stored supplementary chain attempt recovery context');
+        const key = supplementaryChainAttemptKey(context.positionId, context.requestDigest);
+        const chain = supplementaryChainAttempts.get(key);
+        if (!chain || !['SIGNED', 'BROADCAST'].includes(chain.attempt.state) || chain.attempt.hash !== context.rawSignedBytesHash) {
+          throw new Error('stored supplementary chain attempt recovery context does not bind signed bytes');
+        }
+        const previous = supplementaryChainAttemptRecoveryContexts.get(key);
+        if (previous && canonicalJson(previous) !== canonicalJson(context)) {
+          throw new Error('stored supplementary chain attempt recovery context conflicts with prior context');
+        }
+        supplementaryChainAttemptRecoveryContexts.set(key, context);
       } else if (entry.kind === 'relay-leg-recorded') {
         const leg = assertRelayLeg(entry.payload.leg, 'stored Relay leg');
         const key = relayLegKey(leg.relayRequestId);
@@ -1940,6 +2959,181 @@ export class CycleRepository {
           throw new Error('stored wallet nonce release is invalid');
         }
         walletNonceReservations.set(key, release);
+      } else if (entry.kind === 'held-position-recorded') {
+        const fields = Object.hasOwn(entry.payload ?? {}, 'ledger')
+          ? ['position', 'evidence', 'ledger']
+          : ['position', 'evidence'];
+        exactObject(entry.payload, fields, 'stored held position');
+        const position = assertHeldPosition(entry.payload.position, 'stored held position');
+        if (position.cycleId !== cycleId) throw new Error('stored held position cycleId is invalid');
+        if (position.evidenceDigest !== heldPositionEvidenceDigest(position, entry.payload.evidence)) {
+          throw new Error('stored held position evidence digest does not match its evidence');
+        }
+        const previous = heldPositions.get(position.positionId);
+        if (previous && canonicalJson(previous) !== canonicalJson(position)) {
+          throw new Error('stored held position conflicts with prior card custody');
+        }
+        if (entry.payload.ledger !== undefined) {
+          const ledger = assertCustodyLedger(entry.payload.ledger, 'stored held position custody ledger');
+          if (ledger.cycleId !== cycleId) throw new Error('stored held position custody ledger cycleId is invalid');
+          const expected = heldPositionCustodyLedger(custodyLedgers, cycleId, ledger, position);
+          if (canonicalJson(ledger) !== canonicalJson(expected)) {
+            throw new Error('stored held position custody ledger does not bind the held position value');
+          }
+          custodyLedgers.set(custodyLedgerKey(ledger), ledger);
+          heldPositionLedgerKeys.set(position.positionId, custodyLedgerKey(ledger));
+        }
+        heldPositions.set(position.positionId, position);
+      } else if (entry.kind === 'held-position-owner-decision-recorded') {
+        const fields = Object.hasOwn(entry.payload ?? {}, 'settlement')
+          ? ['positionId', 'decision', 'position', 'settlement']
+          : ['positionId', 'decision', 'position'];
+        exactObject(entry.payload, fields, 'stored held position owner decision');
+        const previous = heldPositions.get(entry.payload.positionId) ?? null;
+        const decision = assertHeldPositionOwnerDecision(entry.payload.decision, 'stored held position owner decision');
+        const position = assertHeldPosition(entry.payload.position, 'stored held position owner decision position');
+        if (previous === null || decision.positionId !== entry.payload.positionId
+          || decision.heldEvidenceDigest !== previous.evidenceDigest
+          || decision.expectedRevision !== previous.positionRevision) {
+          throw new Error('stored held position owner decision does not bind the current position');
+        }
+        const expected = {
+          ...previous,
+          positionRevision: previous.positionRevision + 1,
+          ownerDecision: decision,
+        };
+        if (canonicalJson(position) !== canonicalJson(expected)) {
+          throw new Error('stored held position owner decision transition is invalid');
+        }
+        if (entry.payload.settlement !== undefined) {
+          const settlement = assertSupplementarySettlement(entry.payload.settlement, 'stored supplementary settlement');
+          if (decision.choice !== 'sell'
+            || settlement.positionId !== position.positionId
+            || settlement.cycleId !== cycleId
+            || settlement.positionEvidenceDigest !== position.evidenceDigest
+            || settlement.state !== 'PREPARED'
+            || supplementarySettlements.has(settlement.positionId)) {
+            throw new Error('stored supplementary settlement does not bind the sell decision');
+          }
+          const expectedSettlement = supplementarySettlementFor(
+            position,
+            supplementarySettlements.size + 1,
+            completedEligibilitySnapshotEvidenceDigest(replayState, cycleId),
+          );
+          if (canonicalJson(settlement) !== canonicalJson(expectedSettlement)) {
+            throw new Error('stored supplementary settlement manifest is invalid');
+          }
+          supplementarySettlements.set(settlement.positionId, settlement);
+          supplementarySettlementEvidence.set(settlement.positionId, null);
+        } else if (decision.choice === 'sell') {
+          throw new Error('stored sell decision requires a supplementary settlement');
+        }
+        heldPositions.set(position.positionId, position);
+      } else if (entry.kind === 'supplementary-settlement-advanced') {
+        const fields = entry.payload?.nextState === 'RETURN_BROADCAST'
+          ? ['positionId', 'expectedState', 'nextState', 'evidence', 'payoutSource']
+          : ['positionId', 'expectedState', 'nextState', 'evidence'];
+        exactObject(entry.payload, fields, 'stored supplementary settlement advance');
+        if (typeof entry.payload.positionId !== 'string' || !heldPositionIdPattern.test(entry.payload.positionId)) {
+          throw new Error('stored supplementary settlement position id is invalid');
+        }
+        if (!SUPPLEMENTARY_SETTLEMENT_STATES.has(entry.payload.expectedState)
+          || !SUPPLEMENTARY_SETTLEMENT_STATES.has(entry.payload.nextState)) {
+          throw new Error('stored supplementary settlement state is invalid');
+        }
+        const previous = supplementarySettlements.get(entry.payload.positionId) ?? null;
+        if (previous === null || previous.state !== entry.payload.expectedState
+          || !SUPPLEMENTARY_SETTLEMENT_TRANSITIONS.get(entry.payload.expectedState)?.has(entry.payload.nextState)) {
+          throw new Error('stored supplementary settlement transition is invalid');
+        }
+        const returnBoundary = entry.payload.nextState === 'RETURN_BROADCAST'
+          ? assertSupplementaryReturnBoundaryEvidence(
+            entry.payload.evidence,
+            previous,
+            'stored supplementary settlement return boundary',
+          )
+          : null;
+        const evidence = returnBoundary === null
+          ? cloneEvidence(entry.payload.evidence, 'stored supplementary settlement evidence')
+          : {
+            schema: returnBoundary.schema,
+            positionId: returnBoundary.positionId,
+            cycleId: returnBoundary.cycleId,
+            manifestId: returnBoundary.manifestId,
+            finalizedReturnEvidence: returnBoundary.finalizedReturnEvidence,
+          };
+        const priorEvidence = supplementarySettlementEvidence.get(entry.payload.positionId) ?? null;
+        const carriedReturnBoundary = returnBoundary === null && previous.payoutSourceDigest !== null
+          ? durableSupplementaryReturnBoundary(
+            previous,
+            priorEvidence,
+            'stored supplementary settlement advance',
+          )
+          : null;
+        const payoutSource = returnBoundary === null
+          ? (carriedReturnBoundary?.payoutSource ?? null)
+          : assertSupplementaryPayoutSource(
+            entry.payload.payoutSource,
+            previous,
+            'stored supplementary payout source',
+          );
+        if (returnBoundary !== null) {
+          const expectedPayoutSource = supplementaryPayoutSourceForReturnBoundary(
+            previous,
+            returnBoundary,
+            'stored supplementary payout source',
+          );
+          if (canonicalJson(payoutSource) !== canonicalJson(expectedPayoutSource)) {
+            throw new Error('stored supplementary payout source is not derived from the position return boundary');
+          }
+        }
+        const settlement = assertSupplementarySettlement({
+          ...previous,
+          state: entry.payload.nextState,
+          ...(payoutSource === null ? {} : { payoutSourceDigest: digest(payoutSource) }),
+        }, 'stored advanced supplementary settlement');
+        supplementarySettlements.set(settlement.positionId, settlement);
+        supplementarySettlementEvidence.set(
+          settlement.positionId,
+          supplementarySettlementEvidenceFor(
+            settlement,
+            settlement.state,
+            evidence,
+            payoutSource,
+            carriedReturnBoundary,
+          ),
+        );
+      } else if (entry.kind === 'held-position-resolved') {
+        const fields = Object.hasOwn(entry.payload ?? {}, 'ledger')
+          ? ['positionId', 'resolution', 'position', 'ledger']
+          : ['positionId', 'resolution', 'position'];
+        exactObject(entry.payload, fields, 'stored held position resolution');
+        const previous = heldPositions.get(entry.payload.positionId) ?? null;
+        const resolution = assertHeldPositionResolution(entry.payload.resolution, 'stored held position resolution');
+        const position = assertHeldPosition(entry.payload.position, 'stored held position resolution position');
+        if (previous === null || previous.resolution !== null || position.positionId !== entry.payload.positionId
+          || resolution.evidenceDigest !== heldPositionResolutionEvidenceDigest(previous, resolution.terminalState, resolution.evidence)) {
+          throw new Error('stored held position resolution does not bind the current position');
+        }
+        const expected = assertHeldPosition({
+          ...previous,
+          positionRevision: previous.positionRevision + 1,
+          resolution,
+        }, 'stored held position resolution transition');
+        if (canonicalJson(position) !== canonicalJson(expected)) {
+          throw new Error('stored held position resolution transition is invalid');
+        }
+        if (entry.payload.ledger !== undefined) {
+          const key = heldPositionLedgerKeys.get(position.positionId) ?? null;
+          if (key === null) throw new Error('stored held position resolution has no attributable held custody ledger');
+          const ledger = assertCustodyLedger(entry.payload.ledger, 'stored resolved held position custody ledger');
+          const expectedLedger = resolvedHeldPositionCustodyLedger(custodyLedgers, key, previous);
+          if (canonicalJson(ledger) !== canonicalJson(expectedLedger)) {
+            throw new Error('stored held position resolution custody ledger does not bind the held position');
+          }
+          custodyLedgers.set(key, ledger);
+        }
+        heldPositions.set(position.positionId, position);
       } else if (entry.kind === 'custody-ledger-recorded') {
         const ledger = assertCustodyLedger(entry.payload.ledger, 'stored custody ledger');
         if (ledger.cycleId !== cycleId) throw new Error('stored custody ledger cycleId is invalid');
@@ -2006,9 +3200,10 @@ export class CycleRepository {
         }
         evmNonceLocks.set(key, { ...previous, state: 'RELEASED', journalHead: entry.digest });
       } else if (entry.kind === 'cycle-terminal') {
-        exactObject(entry.payload, ['terminalState', 'evidence'], 'stored cycle terminal state');
+        assertTerminalPayloadShape(entry.payload, 'stored cycle terminal state');
         terminalState = assertCycleTerminalState(entry.payload.terminalState, 'stored cycle terminal state');
         terminalEvidence = cloneEvidence(entry.payload.evidence, 'stored cycle terminal evidence');
+        terminalAtMs = assertOptionalTerminalAtMs(entry.payload.terminalAtMs, 'stored cycle terminal state');
         if (terminalState === HELD_OWNER_DECISION) {
           heldEvidenceDigest = heldOwnerDecisionEvidenceDigest(cycleId, entry.payload.evidence);
         }
@@ -2026,9 +3221,13 @@ export class CycleRepository {
         if (ownerDecision !== null) throw new Error('stored cycle has a second held owner decision');
         ownerDecision = decision;
       } else if (entry.kind === 'cycle-completed') {
+        if (Object.keys(entry.payload).length > 1 || (Object.keys(entry.payload).length === 1 && !Object.hasOwn(entry.payload, 'completedAtMs'))) {
+          throw new Error('stored cycle-completed event must use the exact schema');
+        }
         assertCycleClosure(replayState);
         completed = true;
         terminalState = 'COMPLETED';
+        terminalAtMs = assertOptionalTerminalAtMs(entry.payload.completedAtMs, 'stored cycle-completed event');
       }
     }
     return {
@@ -2038,26 +3237,36 @@ export class CycleRepository {
       providerMode,
       dryRun,
       rehearsalSessionId,
+      admission,
       stages,
       preparedStages,
       attempts,
       attemptCounts,
       operationalAttempts,
       chainAttempts,
+      supplementaryChainAttempts,
+      supplementaryChainAttemptRecoveryContexts,
       relayLegs,
       standingAuthorityDecisions,
       walletNonceReservations,
       chainAttemptRecoveryContexts,
       custodyLedgers,
+      heldPositions,
+      heldPositionLedgerKeys,
+      supplementarySettlements,
+      supplementarySettlementEvidence,
       payoutDustRecords,
       payoutDustConsumptions,
       payoutQuarantines,
       evmNonceLocks,
+      packBatchRequests,
+      packBatchIntents,
       completed,
       terminalState,
       heldEvidenceDigest,
       ownerDecision,
       terminalEvidence,
+      terminalAtMs,
       archived,
       version: stored.version,
       journalHead: stored.journalHead,
@@ -2138,6 +3347,7 @@ export class CycleRepository {
     for (const cycleId of this.#store.activeCycleIds) {
       const state = await this.#replay(cycleId);
       if (state.completed) {
+        if (hasOpenHeldPositions(state)) continue;
         // Crash recovery: the 'cycle-completed' event committed but the archive step never ran.
         // Finish it now (idempotent — archiveCycle() only fails if already archived, which cannot
         // be true here since activeCycleIds just listed this id) rather than surfacing a completed
@@ -2151,7 +3361,7 @@ export class CycleRepository {
         ...(state.rehearsalSessionId === null ? {} : { rehearsalSessionId: state.rehearsalSessionId }),
       };
       return state.terminalState
-        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState }
+        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState, terminalAtMs: state.terminalAtMs }
         : { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile };
     }
     return null;
@@ -2165,6 +3375,7 @@ export class CycleRepository {
   async peekActiveCycle() {
     for (const cycleId of this.#store.activeCycleIds) {
       const state = await this.#replay(cycleId);
+      if (state.completed) continue;
       return state.terminalState
         ? { cycleId, releaseAmount: state.releaseAmount, terminalState: state.terminalState }
         : { cycleId, releaseAmount: state.releaseAmount };
@@ -2173,7 +3384,20 @@ export class CycleRepository {
   }
 
   /** @param {{releaseAmount: string, mode: 'production'|'rehearsal', providerMode?: 'live'|'fake', dryRun?: boolean, rehearsalSessionId?: string}} input @returns {Promise<{cycleId: string, releaseAmount: string, mode: 'production'|'rehearsal', providerMode: 'live'|'fake'|null, dryRun: boolean, rehearsalSessionId: string|null}>} */
-  async createCycle({ releaseAmount, mode, providerMode = null, dryRun = false, rehearsalSessionId = null }) {
+  /**
+   * Reserves the identifier a subsequent `createCycle` will open under, so a caller that must bind
+   * money evidence to this cycle before it exists -- the quote-bound policy admission, whose
+   * `cycleId` the policy digest and outbound both check -- has one identifier to bind. Reserving is
+   * pure: nothing is journaled, and an unused reservation leaves no state behind.
+   */
+  nextCycleId() {
+    return generateCycleId(this.#now());
+  }
+
+  async createCycle({
+    releaseAmount, mode, providerMode = null, dryRun = false, rehearsalSessionId = null,
+    cycleId = null, admission = null,
+  }) {
     assertReleaseAmount(releaseAmount);
     assertCycleMode(mode);
     assertDryRun(dryRun, mode, providerMode);
@@ -2181,23 +3405,72 @@ export class CycleRepository {
     if (rehearsalSessionId !== null) assertRehearsalSessionId(rehearsalSessionId, mode, providerMode);
     const active = await this.readActiveCycle();
     if (active) throw new Error('cycle-repository createCycle: a cycle is already active');
-    const cycleId = generateCycleId(this.#now());
-    await this.#append(cycleId, 'cycle-opened', {
+    const openedCycleId = cycleId === null ? generateCycleId(this.#now()) : assertReservedCycleId(cycleId);
+    // The admission rides in `cycle-opened` itself rather than a following event. Replay already
+    // refuses a second `cycle-opened`, so one atomic write makes the record immutable for the life
+    // of the cycle: there is no window in which a cycle exists whose admission could still be
+    // replaced, and a replacement quote cannot inherit this cycle's authorization.
+    const admitted = admission === null
+      ? null
+      : assertDurableCycleAdmission(admission, openedCycleId, 'cycle-repository createCycle admission');
+    if (admitted !== null && admitted.aggregateFundingQuote.amountAtomic !== releaseAmount) {
+      throw new Error('cycle-repository createCycle: release amount does not equal the admitted aggregate funding quote');
+    }
+    await this.#append(openedCycleId, 'cycle-opened', {
       releaseAmount,
       mode,
       ...(providerMode === null ? {} : { providerMode }),
       ...(dryRun ? { dryRun: true } : {}),
       ...(rehearsalSessionId === null ? {} : { rehearsalSessionId }),
+      ...(admitted === null ? {} : { admission: admitted }),
       openedAtMs: this.#now(),
     });
-    return { cycleId, releaseAmount, mode, providerMode, dryRun, rehearsalSessionId };
+    return {
+      cycleId: openedCycleId, releaseAmount, mode, providerMode, dryRun, rehearsalSessionId,
+      admission: admitted,
+    };
   }
 
   /** @returns {Promise<{status: 'COMPLETE', evidence: unknown}|{status: 'PENDING'}>} */
   async readStage(cycleId, stage) {
     assertStageName(stage, { allowLegacyRead: true });
     const state = await this.#replay(cycleId);
-    return state.stages.get(stage) ?? { status: 'PENDING' };
+    const stored = state.stages.get(stage) ?? { status: 'PENDING' };
+    if (stored.status !== 'COMPLETE') return stored;
+    const evidence = await this.#resolveStageEvidence(cycleId, stage, stored.evidence);
+    return evidence === stored.evidence ? stored : { status: 'COMPLETE', evidence };
+  }
+
+  /**
+   * Reconstructs oversized stage evidence from durable paged storage when `storedEvidence` is the
+   * immutable handle `persistPagedStageEvidence` returned at completion time; returns
+   * `storedEvidence` unchanged otherwise. Passing the handle back in as `readPagedStageEvidence`'s
+   * `expected` argument makes a missing blob, an identity mismatch, or a manifest that no longer
+   * matches this exact handle a hard failure there -- never a silent `null` -- so absence and
+   * corruption stay distinct recovery facts.
+   */
+  async #resolveStageEvidence(cycleId, stage, storedEvidence) {
+    if (!isStageEvidencePageReference(storedEvidence)) return storedEvidence;
+    const wrapped = await this.#store.readPagedStageEvidence(cycleId, stage, storedEvidence);
+    return wrapped.evidence;
+  }
+
+  /**
+   * Evidence that fits one bounded journal payload is returned unchanged. Oversized evidence (for
+   * example a real eligibility-snapshot manifest with more holders than the journal's 64-item
+   * array bound admits) is persisted through the durable paged-stage-evidence store first, wrapped
+   * as `{cycleId, evidence}` to satisfy that store's own cycleId-binding requirement without
+   * altering the evidence shape callers of readStage/completeStage see back. Only the immutable,
+   * content-addressed handle `persistPagedStageEvidence` returns is journaled -- the handle commits
+   * only after the blob is durable, a same-payload retry reuses it, and a differently-shaped retry
+   * for the same (cycleId, stage) is rejected by the store itself before any reference is journaled.
+   */
+  async #preparePagedStageEvidence(cycleId, stage, evidence) {
+    if (fitsBoundedJournalPayload(evidence)) return evidence;
+    if (typeof this.#store.persistPagedStageEvidence !== 'function' || typeof this.#store.readPagedStageEvidence !== 'function') {
+      throw new Error(`cycle-repository completeStage: stage "${stage}" evidence exceeds the bounded journal payload and this store has no paged-stage-evidence support`);
+    }
+    return this.#store.persistPagedStageEvidence(cycleId, stage, { cycleId, evidence: structuredClone(evidence) });
   }
 
   async prepareStage(cycleId, stage) {
@@ -2222,14 +3495,16 @@ export class CycleRepository {
     }
     const current = state.stages.get(stage) ?? { status: 'PENDING' };
     if (current.status === 'COMPLETE') {
-      if (canonicalJson(current.evidence) !== canonicalJson(evidence)) {
+      const currentEvidence = await this.#resolveStageEvidence(cycleId, stage, current.evidence);
+      if (canonicalJson(currentEvidence) !== canonicalJson(evidence)) {
         throw new Error(`cycle-repository completeStage: stage "${stage}" was already completed with different evidence`);
       }
       return; // idempotent retry
     }
     assertPreparedOrderedCompletion(state, stage);
     assertReconciledCompletion(state, stage, evidence);
-    await this.#append(cycleId, 'stage-completed', { stage, evidence }, {
+    const storedEvidence = await this.#preparePagedStageEvidence(cycleId, stage, evidence);
+    await this.#append(cycleId, 'stage-completed', { stage, evidence: storedEvidence }, {
       operation: 'completeStage',
       assertState: currentState => {
         const latest = currentState.stages.get(stage) ?? { status: 'PENDING' };
@@ -2249,15 +3524,18 @@ export class CycleRepository {
     }
     if (!state.completed) {
       assertCycleClosure(state);
-      await this.#append(cycleId, 'cycle-completed', {}, {
+      await this.#append(cycleId, 'cycle-completed', { completedAtMs: currentRepositoryTime(this.#now) }, {
         operation: 'completeCycle',
         assertState: assertCycleClosure,
       });
     }
-    try {
-      await this.#store.archiveCycle(cycleId);
-    } catch (error) {
-      if (!/already archived/.test(error.message)) throw error;
+    const completed = await this.#replay(cycleId);
+    if (!hasOpenHeldPositions(completed)) {
+      try {
+        await this.#store.archiveCycle(cycleId);
+      } catch (error) {
+        if (!/already archived/.test(error.message)) throw error;
+      }
     }
   }
 
@@ -2289,6 +3567,7 @@ export class CycleRepository {
     await this.#append(cycleId, 'cycle-terminal', {
       terminalState,
       evidence: cloneEvidence(evidence, 'cycle terminal evidence'),
+      terminalAtMs: currentRepositoryTime(this.#now),
     }, {
       assertState: currentState => {
         if (currentState.terminalState) throw new Error('cycle-repository holdCycle terminal state changed while recording hold');
@@ -2298,31 +3577,627 @@ export class CycleRepository {
   }
 
   /**
-   * Persist an owner choice for a HELD_OWNER_DECISION cycle without resuming any effect.
-   * A follow-up control path must consume the durable record before it can sell or retain custody.
+   * Durably persists the exact quantity and pack code this cycle is about to request from a
+   * batch provider call, before that call is ever made. This is the pre-call counterpart to
+   * `recordPackBatchRequest`: an operator recovering a cycle whose batch call's response was
+   * lost with no memo at all still has a durable, human-readable record of what was attempted
+   * (cycle, quantity, pack code) to reconcile against provider support, rather than only the
+   * generic stage-attempt's opaque request digest.
    */
-  async recordHeldOwnerDecision(cycleId, input) {
-    const decision = heldOwnerDecisionInput(cycleId, input);
+  async recordPackBatchIntent(cycleId, stage, intentValue) {
+    assertPackOperationStageName(stage);
+    const intent = assertPackBatchIntent(intentValue, `${stage} pack batch intent`);
     const state = await this.#replay(cycleId);
-    const existing = assertHeldOwnerDecisionTransition(state, decision);
-    if (existing !== null) return existing;
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordPackBatchIntent: cycle is terminal as ${state.terminalState}`);
+    }
+    const existing = state.packBatchIntents.get(stage);
+    if (existing) {
+      if (canonicalJson(existing.intent) === canonicalJson(intent)) return structuredClone(existing);
+      throw new Error(`cycle-repository recordPackBatchIntent: stage "${stage}" already has a different pack batch intent`);
+    }
+    const recordedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'pack-batch-intent-recorded', { stage, intent, recordedAtMs }, {
+      operation: 'recordPackBatchIntent',
+      assertState: currentState => {
+        const latest = currentState.packBatchIntents.get(stage);
+        if (latest && canonicalJson(latest.intent) !== canonicalJson(intent)) {
+          throw new Error(`cycle-repository recordPackBatchIntent: stage "${stage}" changed while recording the pack batch intent`);
+        }
+      },
+    });
+    const latest = await this.#replay(cycleId);
+    return structuredClone(latest.packBatchIntents.get(stage));
+  }
+
+  /** @returns {Promise<{recordedAtMs: number, intent: {quantity: number, packType: string|null, expectedCardCountPerPack: number, playerAddress: string}}|null>} */
+  async readPackBatchIntent(cycleId, stage) {
+    assertPackOperationStageName(stage);
+    const state = await this.#replay(cycleId);
+    const record = state.packBatchIntents.get(stage);
+    return record ? structuredClone(record) : null;
+  }
+
+  /**
+   * Durably persists every pack a single batch provider call generated (memo, expected card
+   * count, pack type) before any transaction is signed. Idempotent for the exact same batch:
+   * this is the sole guard against re-issuing a batch purchase whose response was lost after the
+   * provider already committed it. A stage may record at most one batch (bounded to
+   * `MAXIMUM_PACK_BATCH_SIZE` packs by the shared journal payload limit).
+   */
+  async recordPackBatchRequest(cycleId, stage, packsValue) {
+    assertPackOperationStageName(stage);
+    const packs = assertPackBatchRequest(packsValue, `${stage} pack batch request`);
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordPackBatchRequest: cycle is terminal as ${state.terminalState}`);
+    }
+    const existing = state.packBatchRequests.get(stage);
+    if (existing) {
+      if (canonicalJson(existing.packs) === canonicalJson(packs)) return structuredClone(existing);
+      throw new Error(`cycle-repository recordPackBatchRequest: stage "${stage}" already has a different pack batch`);
+    }
+    const requestedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'pack-batch-request-recorded', { stage, packs, requestedAtMs }, {
+      operation: 'recordPackBatchRequest',
+      assertState: currentState => {
+        const latest = currentState.packBatchRequests.get(stage);
+        if (latest && canonicalJson(latest.packs) !== canonicalJson(packs)) {
+          throw new Error(`cycle-repository recordPackBatchRequest: stage "${stage}" changed while recording the pack batch`);
+        }
+      },
+    });
+    const latest = await this.#replay(cycleId);
+    return structuredClone(latest.packBatchRequests.get(stage));
+  }
+
+  /** @returns {Promise<{requestedAtMs: number, packs: Array<{packIndex: number, memo: string, expectedCardCount: number, packType: string|null}>}|null>} */
+  async readPackBatchRequest(cycleId, stage) {
+    assertPackOperationStageName(stage);
+    const state = await this.#replay(cycleId);
+    const record = state.packBatchRequests.get(stage);
+    return record ? structuredClone(record) : null;
+  }
+
+  /**
+   * Carve one card out of the cycle without changing the cycle's terminal state. The record is
+   * append-only and binds the card identity, attributed cost, valuation basis, and observed
+   * evidence together so later stages cannot quietly move it into another cycle.
+   */
+  async recordHeldPosition(cycleId, input) {
+    const { position, evidence, ledgerAsset } = heldPositionInput(cycleId, input, currentRepositoryTime(this.#now));
+    const state = await this.#replay(cycleId);
+    const existing = state.heldPositions.get(position.positionId) ?? null;
+    if (existing !== null) {
+      if (existing.evidenceDigest === position.evidenceDigest) return structuredClone(existing);
+      throw new Error('cycle-repository recordHeldPosition: card already has conflicting held custody');
+    }
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordHeldPosition: cycle is terminal as ${state.terminalState}`);
+    }
+    const ledger = ledgerAsset === null
+      ? null
+      : heldPositionCustodyLedger(state.custodyLedgers, cycleId, ledgerAsset, position);
 
     try {
-      await this.#append(cycleId, 'held-owner-decision-recorded', decision, {
+      await this.#append(cycleId, 'held-position-recorded', {
+        position,
+        evidence,
+        ...(ledger === null ? {} : { ledger }),
+      }, {
+        operation: 'recordHeldPosition',
         assertState: currentState => {
-          if (assertHeldOwnerDecisionTransition(currentState, decision) !== null) {
-            throw new Error('cycle-repository recordHeldOwnerDecision: held owner decision changed while recording');
+          const latest = currentState.heldPositions.get(position.positionId) ?? null;
+          if (latest !== null && canonicalJson(latest) !== canonicalJson(position)) {
+            throw new Error('cycle-repository recordHeldPosition: card changed while recording custody');
+          }
+          if (ledger !== null) {
+            const expected = heldPositionCustodyLedger(currentState.custodyLedgers, cycleId, ledgerAsset, position);
+            if (canonicalJson(expected) !== canonicalJson(ledger)) {
+              throw new Error('cycle-repository recordHeldPosition: custody ledger changed while recording custody');
+            }
           }
         },
       });
     } catch (error) {
-      if (!/stale cycle journal (?:version|head)/.test(error?.message)) throw error;
+      if (!/stale cycle journal (?:version|head)/.test(error?.message ?? '')) throw error;
       const latest = await this.#replay(cycleId);
-      const persisted = assertHeldOwnerDecisionTransition(latest, decision);
-      if (persisted !== null) return persisted;
+      const persisted = latest.heldPositions.get(position.positionId) ?? null;
+      if (persisted !== null && persisted.evidenceDigest === position.evidenceDigest) return structuredClone(persisted);
       throw error;
     }
-    return decision;
+    return structuredClone(position);
+  }
+
+  async readHeldPosition(positionId) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readHeldPosition: positionId is invalid');
+    }
+    for (const { state } of await this.#knownStates()) {
+      const position = state.heldPositions.get(positionId) ?? null;
+      if (position !== null) return structuredClone(position);
+    }
+    return null;
+  }
+
+  async listHeldPositions({ cycleId = undefined, includeResolved = false } = {}) {
+    if (cycleId !== undefined && (typeof cycleId !== 'string' || cycleId.length === 0)) {
+      throw new Error('cycle-repository listHeldPositions: cycleId is invalid');
+    }
+    if (typeof includeResolved !== 'boolean') {
+      throw new Error('cycle-repository listHeldPositions: includeResolved is invalid');
+    }
+    const positions = [];
+    for (const { cycleId: candidateCycleId, state } of await this.#knownStates()) {
+      if (cycleId !== undefined && candidateCycleId !== cycleId) continue;
+      for (const position of state.heldPositions.values()) {
+        if (includeResolved || position.resolution === null) positions.push(structuredClone(position));
+      }
+    }
+    return positions.sort((left, right) => left.openedAtMs - right.openedAtMs || left.positionId.localeCompare(right.positionId));
+  }
+
+  /**
+   * Persist an owner choice for one held position. `keep-holding` is intentionally repeatable;
+   * a later `sell` advances that position revision exactly once and leaves the cycle runnable.
+   */
+  async recordHeldOwnerDecision(positionId, input) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository recordHeldOwnerDecision: positionId is invalid');
+    }
+    const decision = heldPositionOwnerDecisionInput(positionId, input);
+    const locations = await this.#knownStates();
+    const location = locations.find(({ state }) => state.heldPositions.has(positionId)) ?? null;
+    if (location === null) throw new Error('cycle-repository recordHeldOwnerDecision: held position is unknown');
+    if (location.state.archived) {
+      throw new Error('cycle-repository recordHeldOwnerDecision: archived held positions require supplementary settlement recovery');
+    }
+    const current = location.state.heldPositions.get(positionId);
+    const transition = heldPositionOwnerDecisionTransition(current, decision);
+    if (transition.position === current) return structuredClone(transition.decision);
+    const settlement = decision.choice === 'sell'
+      ? supplementarySettlementFor(
+        transition.position,
+        location.state.supplementarySettlements.size + 1,
+        completedEligibilitySnapshotEvidenceDigest(location.state, location.cycleId),
+      )
+      : null;
+
+    try {
+      await this.#append(location.cycleId, 'held-position-owner-decision-recorded', {
+        positionId,
+        decision,
+        position: transition.position,
+        ...(settlement === null ? {} : { settlement }),
+      }, {
+        assertState: state => {
+          const latest = state.heldPositions.get(positionId) ?? null;
+          if (latest === null) throw new Error('cycle-repository recordHeldOwnerDecision: held position disappeared');
+          const latestTransition = heldPositionOwnerDecisionTransition(latest, decision);
+          if (canonicalJson(latestTransition.position) !== canonicalJson(transition.position)) {
+            throw new Error('cycle-repository recordHeldOwnerDecision: held position changed while recording decision');
+          }
+          if (settlement !== null) {
+            if (state.supplementarySettlements.has(positionId)) {
+              throw new Error('cycle-repository recordHeldOwnerDecision: supplementary settlement already exists');
+            }
+            const currentSnapshotDigest = completedEligibilitySnapshotEvidenceDigest(state, location.cycleId);
+            if (settlement.eligibilitySnapshotEvidenceDigest !== currentSnapshotDigest) {
+              throw new Error('cycle-repository recordHeldOwnerDecision: eligibility snapshot changed while recording decision');
+            }
+          }
+        },
+      });
+    } catch (error) {
+      if (!/stale cycle journal (?:version|head)/.test(error?.message ?? '')) throw error;
+      const latest = await this.#replay(location.cycleId);
+      const persisted = latest.heldPositions.get(positionId) ?? null;
+      if (persisted?.ownerDecision !== null && canonicalJson(persisted.ownerDecision) === canonicalJson(decision)) {
+        return structuredClone(persisted.ownerDecision);
+      }
+      throw error;
+    }
+    return structuredClone(decision);
+  }
+
+  async readSupplementarySettlement(positionId) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readSupplementarySettlement: positionId is invalid');
+    }
+    for (const { state } of await this.#knownStates()) {
+      const settlement = state.supplementarySettlements.get(positionId) ?? null;
+      if (settlement !== null) return structuredClone(settlement);
+    }
+    return null;
+  }
+
+  /**
+   * Returns the latest durable supplementary boundary evidence for recovery. It is deliberately
+   * unavailable from the narrow repository client because it can contain provider transaction
+   * facts; the stage driver uses the full repository only while reconciling a held position.
+   */
+  async readSupplementarySettlementEvidence(positionId) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readSupplementarySettlementEvidence: positionId is invalid');
+    }
+    for (const { state } of await this.#knownStates()) {
+      const evidence = state.supplementarySettlementEvidence.get(positionId) ?? null;
+      if (evidence !== null) return structuredClone(evidence);
+    }
+    return null;
+  }
+
+  async #supplementarySettlementLocation(positionId, operation) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error(`cycle-repository ${operation}: positionId is invalid`);
+    }
+    const locations = await this.#knownStates();
+    const location = locations.find(({ state }) => state.supplementarySettlements.has(positionId)) ?? null;
+    if (location === null) throw new Error(`cycle-repository ${operation}: settlement is unknown`);
+    if (location.state.archived) throw new Error(`cycle-repository ${operation}: archived settlement requires recovery`);
+    return location;
+  }
+
+  /**
+   * Position-scoped pre-send write-ahead record for a supplementary settlement's own resale/
+   * return/payout transaction -- the same "durable before the provider call" guarantee
+   * prepareChainTransactionAttempt gives an ordinary stage, keyed by positionId instead so it can
+   * never collide with the main cycle's own chain attempts for the identical cycleId.
+   */
+  async prepareSupplementaryChainTransactionAttempt(positionId, attemptValue) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'prepareSupplementaryChainTransactionAttempt');
+    const attempt = assertSupplementaryChainAttempt(attemptValue, 'supplementary chain transaction attempt');
+    if (attempt.positionId !== positionId || attempt.state !== 'PREPARED') {
+      throw new Error('cycle-repository prepareSupplementaryChainTransactionAttempt attempt does not match its position');
+    }
+    const key = supplementaryChainAttemptKey(positionId, attempt.requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (current) {
+      if (canonicalJson(current.attempt) !== canonicalJson(attempt)) {
+        throw new Error(`cycle-repository prepareSupplementaryChainTransactionAttempt: request "${attempt.requestDigest}" already has an attempt`);
+      }
+      return structuredClone(current);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-prepared', { attempt }, {
+      assertState: currentState => {
+        if (currentState.supplementaryChainAttempts.has(key)) {
+          throw new Error(`cycle-repository prepareSupplementaryChainTransactionAttempt: request "${attempt.requestDigest}" already has an attempt`);
+        }
+      },
+    });
+    return { attempt, broadcastEvidence: null };
+  }
+
+  /** @returns {Promise<{attempt: object, broadcastEvidence: object|null}|null>} */
+  async readSupplementaryChainTransactionAttempt(positionId, requestDigest) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readSupplementaryChainTransactionAttempt: positionId is invalid');
+    }
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    for (const { state } of await this.#knownStates()) {
+      const current = state.supplementaryChainAttempts.get(key);
+      if (current) return structuredClone(current);
+    }
+    return null;
+  }
+
+  async recordSupplementarySignedTransaction(positionId, requestDigest, signingMaterial) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'recordSupplementarySignedTransaction');
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (!current) throw new Error(`cycle-repository recordSupplementarySignedTransaction: no prepared attempt for "${requestDigest}"`);
+    const prepared = { ...current.attempt, state: 'PREPARED', rawBytes: null, nonce: null, blockhash: null, hash: null };
+    const signed = transitionSupplementaryChainAttempt(prepared, 'SIGNED', signingMaterial);
+    if (current.attempt.state === 'SIGNED') {
+      if (canonicalJson(current.attempt) !== canonicalJson(signed)) {
+        throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" already has different signing material`);
+      }
+      return structuredClone(current);
+    }
+    if (current.attempt.state !== 'PREPARED') {
+      throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" is already broadcast and cannot be re-signed`);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-signed', { attempt: signed }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttempts.get(key);
+        if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)) {
+          throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" changed while recording signing material`);
+        }
+      },
+    });
+    return { ...current, attempt: signed };
+  }
+
+  /**
+   * Atomically records the only signed bytes a supplementary effect may broadcast and the exact
+   * policy-recovery material needed to resume them. A process crash can therefore expose either
+   * the PREPARED attempt or both values, never an unrecoverable signed attempt.
+   */
+  async recordSupplementarySignedTransactionWithRecoveryContext(positionId, requestDigest, signingMaterial, contextValue) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'recordSupplementarySignedTransactionWithRecoveryContext');
+    const context = assertSupplementaryChainAttemptRecoveryContext(contextValue, 'supplementary chain attempt recovery context');
+    if (context.positionId !== positionId || context.requestDigest !== requestDigest) {
+      throw new Error('cycle-repository recordSupplementarySignedTransactionWithRecoveryContext context does not match its attempt');
+    }
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (!current) throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: no prepared attempt for "${requestDigest}"`);
+    const prepared = { ...current.attempt, state: 'PREPARED', rawBytes: null, nonce: null, blockhash: null, hash: null };
+    const signed = transitionSupplementaryChainAttempt(prepared, 'SIGNED', signingMaterial);
+    if (context.rawSignedBytesHash !== signed.hash) {
+      throw new Error('cycle-repository recordSupplementarySignedTransactionWithRecoveryContext context does not bind signed bytes');
+    }
+    const existingContext = location.state.supplementaryChainAttemptRecoveryContexts.get(key);
+    if (current.attempt.state === 'SIGNED') {
+      if (canonicalJson(current.attempt) !== canonicalJson(signed) || canonicalJson(existingContext) !== canonicalJson(context)) {
+        throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: "${requestDigest}" already has different signing material or recovery context`);
+      }
+      return structuredClone(current);
+    }
+    if (current.attempt.state !== 'PREPARED' || existingContext) {
+      throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: "${requestDigest}" cannot be re-signed`);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-signed-with-recovery-context', { attempt: signed, context }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttempts.get(key);
+        if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)
+          || currentState.supplementaryChainAttemptRecoveryContexts.has(key)) {
+          throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: "${requestDigest}" changed while recording signing material`);
+        }
+      },
+    });
+    return { ...current, attempt: signed };
+  }
+
+  async recordSupplementaryBroadcast(positionId, requestDigest, evidence) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'recordSupplementaryBroadcast');
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (!current) throw new Error(`cycle-repository recordSupplementaryBroadcast: no signed attempt for "${requestDigest}"`);
+    const broadcastEvidence = cloneChainObservationEvidence(evidence, 'supplementary chain transaction broadcast evidence');
+    if (current.attempt.state === 'BROADCAST') {
+      if (canonicalJson(current.broadcastEvidence) !== canonicalJson(broadcastEvidence)) {
+        throw new Error(`cycle-repository recordSupplementaryBroadcast: "${requestDigest}" already has different broadcast evidence`);
+      }
+      return structuredClone(current);
+    }
+    const attempt = transitionSupplementaryChainAttempt(current.attempt, 'BROADCAST');
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-broadcast', { attempt, evidence: broadcastEvidence }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttempts.get(key);
+        if (!latest || latest.attempt.state !== 'SIGNED') {
+          throw new Error(`cycle-repository recordSupplementaryBroadcast: "${requestDigest}" changed while recording the broadcast`);
+        }
+      },
+    });
+    return { attempt, broadcastEvidence };
+  }
+
+  /**
+   * Durably binds a caller-defined, bounded recovery blob to the exact signed-bytes hash of a
+   * SIGNED or BROADCAST supplementary chain attempt -- the position-scoped counterpart to
+   * persistChainAttemptRecoveryContext, for a handler (e.g. supplementary-buyback.mjs) that needs
+   * to recover its own provider-specific approval/recovery state after a restart rather than
+   * re-signing. Idempotent for an identical retry; rejects a conflicting one.
+   */
+  async persistSupplementaryChainAttemptRecoveryContext(positionId, contextValue) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'persistSupplementaryChainAttemptRecoveryContext');
+    const context = assertSupplementaryChainAttemptRecoveryContext(contextValue, 'supplementary chain attempt recovery context');
+    if (context.positionId !== positionId) {
+      throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext context does not match its position');
+    }
+    const attemptKey = supplementaryChainAttemptKey(positionId, context.requestDigest);
+    const chain = location.state.supplementaryChainAttempts.get(attemptKey);
+    if (!chain || !['SIGNED', 'BROADCAST'].includes(chain.attempt.state) || chain.attempt.hash !== context.rawSignedBytesHash) {
+      throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext: context does not bind signed bytes');
+    }
+    const key = attemptKey;
+    const existing = location.state.supplementaryChainAttemptRecoveryContexts.get(key);
+    if (existing) {
+      if (canonicalJson(existing) !== canonicalJson(context)) {
+        throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext: conflicts with prior context');
+      }
+      return structuredClone(existing);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-recovery-context-recorded', { context }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttemptRecoveryContexts.get(key);
+        if (latest && canonicalJson(latest) !== canonicalJson(context)) {
+          throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext: conflicts with prior context');
+        }
+      },
+    });
+    return structuredClone(context);
+  }
+
+  async readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readSupplementaryChainAttemptRecoveryContext: positionId is invalid');
+    }
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    for (const { state } of await this.#knownStates()) {
+      const context = state.supplementaryChainAttemptRecoveryContexts.get(key);
+      if (context) return structuredClone(context);
+    }
+    return null;
+  }
+
+  /**
+   * Record one write-ahead supplementary-settlement boundary. The event is deliberately allowed
+   * after the main cycle is COMPLETE: its payload remains bound to the original position and
+   * immutable manifest, so it cannot become proceeds for another cycle.
+   */
+  async advanceSupplementarySettlement(positionId, input) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository advanceSupplementarySettlement: positionId is invalid');
+    }
+    exactObject(input, ['expectedState', 'nextState', 'evidence'], 'supplementary settlement advance input');
+    if (!SUPPLEMENTARY_SETTLEMENT_STATES.has(input.expectedState)
+      || !SUPPLEMENTARY_SETTLEMENT_STATES.has(input.nextState)
+      || !SUPPLEMENTARY_SETTLEMENT_TRANSITIONS.get(input.expectedState)?.has(input.nextState)) {
+      throw new Error('cycle-repository advanceSupplementarySettlement: state transition is invalid');
+    }
+    const locations = await this.#knownStates();
+    const location = locations.find(({ state }) => state.supplementarySettlements.has(positionId)) ?? null;
+    if (location === null) throw new Error('cycle-repository advanceSupplementarySettlement: settlement is unknown');
+    if (location.state.archived) {
+      throw new Error('cycle-repository advanceSupplementarySettlement: archived settlement requires recovery');
+    }
+    const current = location.state.supplementarySettlements.get(positionId);
+    const returnBoundary = input.nextState === 'RETURN_BROADCAST'
+      ? assertSupplementaryReturnBoundaryEvidence(
+        input.evidence,
+        current,
+        'supplementary settlement advance return boundary',
+      )
+      : null;
+    const evidence = returnBoundary === null
+      ? cloneEvidence(input.evidence, 'supplementary settlement advance evidence')
+      : {
+        schema: returnBoundary.schema,
+        positionId: returnBoundary.positionId,
+        cycleId: returnBoundary.cycleId,
+        manifestId: returnBoundary.manifestId,
+        finalizedReturnEvidence: returnBoundary.finalizedReturnEvidence,
+      };
+    const payoutSource = returnBoundary === null
+      ? (current.payoutSourceDigest === null
+        ? null
+        : durableSupplementaryReturnBoundary(
+          current,
+          location.state.supplementarySettlementEvidence.get(positionId) ?? null,
+          'supplementary settlement advance',
+        ).payoutSource)
+      : supplementaryPayoutSourceForReturnBoundary(
+        current,
+        returnBoundary,
+        'supplementary settlement advance payout source',
+      );
+    const next = assertSupplementarySettlement({
+      ...current,
+      state: input.nextState,
+      ...(payoutSource === null ? {} : { payoutSourceDigest: digest(payoutSource) }),
+    }, 'advanced supplementary settlement');
+    const carriedReturnBoundary = returnBoundary === null && current.payoutSourceDigest !== null
+      ? durableSupplementaryReturnBoundary(
+        current,
+        location.state.supplementarySettlementEvidence.get(positionId) ?? null,
+        'supplementary settlement advance',
+      )
+      : null;
+    const evidenceRecord = supplementarySettlementEvidenceFor(
+      next,
+      input.nextState,
+      evidence,
+      payoutSource,
+      carriedReturnBoundary,
+    );
+    if (current.state === input.nextState) {
+      const existing = location.state.supplementarySettlementEvidence.get(positionId) ?? null;
+      if (canonicalJson(current) !== canonicalJson(next) || canonicalJson(existing) !== canonicalJson(evidenceRecord)) {
+        throw new Error('cycle-repository advanceSupplementarySettlement: settled boundary evidence conflicts');
+      }
+      return structuredClone(current);
+    }
+    if (current.state !== input.expectedState) {
+      throw new Error('cycle-repository advanceSupplementarySettlement: settlement changed while advancing');
+    }
+
+    try {
+      await this.#append(location.cycleId, 'supplementary-settlement-advanced', {
+        positionId,
+        expectedState: input.expectedState,
+        nextState: input.nextState,
+        evidence,
+        ...(returnBoundary === null ? {} : { payoutSource }),
+      }, {
+        assertState: state => {
+          const latest = state.supplementarySettlements.get(positionId) ?? null;
+          if (latest === null || canonicalJson(latest) !== canonicalJson(current)) {
+            throw new Error('cycle-repository advanceSupplementarySettlement: settlement changed while advancing');
+          }
+        },
+      });
+    } catch (error) {
+      if (!/stale cycle journal (?:version|head)/.test(error?.message ?? '')) throw error;
+      const latest = await this.#replay(location.cycleId);
+      const persisted = latest.supplementarySettlements.get(positionId) ?? null;
+      const persistedEvidence = latest.supplementarySettlementEvidence.get(positionId) ?? null;
+      if (persisted !== null && canonicalJson(persisted) === canonicalJson(next)
+        && canonicalJson(persistedEvidence) === canonicalJson(evidenceRecord)) {
+        return structuredClone(persisted);
+      }
+      throw error;
+    }
+    return structuredClone(next);
+  }
+
+  async resolveHeldPosition(positionId, input) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository resolveHeldPosition: positionId is invalid');
+    }
+    const locations = await this.#knownStates();
+    const location = locations.find(({ state }) => state.heldPositions.has(positionId)) ?? null;
+    if (location === null) throw new Error('cycle-repository resolveHeldPosition: held position is unknown');
+    if (location.state.archived) {
+      throw new Error('cycle-repository resolveHeldPosition: archived held positions require supplementary settlement recovery');
+    }
+    const current = location.state.heldPositions.get(positionId);
+    if (input?.terminalState === 'SOLD') {
+      const settlement = location.state.supplementarySettlements.get(positionId) ?? null;
+      if (settlement?.state !== 'COMPLETE') {
+        throw new Error('cycle-repository resolveHeldPosition: sold resolution requires its supplementary settlement to be complete');
+      }
+    }
+    if (current.resolution !== null) {
+      const resolution = heldPositionResolutionInput(current, input, current.resolution.resolvedAtMs);
+      if (canonicalJson(resolution) !== canonicalJson(current.resolution)) {
+        throw new Error('cycle-repository resolveHeldPosition: resolution conflict');
+      }
+      return structuredClone(current);
+    }
+    const resolution = heldPositionResolutionInput(current, input, currentRepositoryTime(this.#now));
+    const position = assertHeldPosition({
+      ...current,
+      positionRevision: current.positionRevision + 1,
+      resolution,
+    }, 'held position resolution transition');
+    const ledgerKey = location.state.heldPositionLedgerKeys.get(positionId) ?? null;
+    const ledger = ledgerKey === null
+      ? null
+      : resolvedHeldPositionCustodyLedger(location.state.custodyLedgers, ledgerKey, current);
+
+    try {
+      await this.#append(location.cycleId, 'held-position-resolved', {
+        positionId,
+        resolution,
+        position,
+        ...(ledger === null ? {} : { ledger }),
+      }, {
+        assertState: state => {
+          const latest = state.heldPositions.get(positionId) ?? null;
+          if (latest === null || latest.resolution !== null || canonicalJson(latest) !== canonicalJson(current)) {
+            throw new Error('cycle-repository resolveHeldPosition: held position changed while resolving');
+          }
+          if (ledger !== null) {
+            const latestLedgerKey = state.heldPositionLedgerKeys.get(positionId) ?? null;
+            if (latestLedgerKey !== ledgerKey
+              || canonicalJson(resolvedHeldPositionCustodyLedger(state.custodyLedgers, latestLedgerKey, latest)) !== canonicalJson(ledger)) {
+              throw new Error('cycle-repository resolveHeldPosition: custody ledger changed while resolving');
+            }
+          }
+        },
+      });
+    } catch (error) {
+      if (!/stale cycle journal (?:version|head)/.test(error?.message ?? '')) throw error;
+      const latest = await this.#replay(location.cycleId);
+      const persisted = latest.heldPositions.get(positionId) ?? null;
+      if (persisted?.resolution !== null && canonicalJson(persisted.resolution) === canonicalJson(resolution)) {
+        return structuredClone(persisted);
+      }
+      throw error;
+    }
+    return structuredClone(position);
   }
 
   /**
@@ -2773,12 +4648,15 @@ export class CycleRepository {
    * A caller can only proceed to a claim when no recorded ledger marks assets or obligations held.
    */
   async readClaimPreconditions(cycleId) {
-    const cycleIds = cycleId === undefined ? this.#store.activeCycleIds : [cycleId];
+    const states = cycleId === undefined
+      ? await this.#knownStates()
+      : [{ cycleId, state: await this.#replay(cycleId) }];
     let heldAssets = false;
     let unattributed = false;
     let unresolvedObligations = false;
-    for (const candidateCycleId of cycleIds) {
-      const state = await this.#replay(candidateCycleId);
+    const positions = [];
+    let heldPositionValue = 0n;
+    for (const { state } of states) {
       for (const ledger of state.custodyLedgers.values()) {
         heldAssets ||= BigInt(ledger.heldAssets) > 0n;
         unattributed ||= BigInt(ledger.unattributed) > 0n;
@@ -2786,8 +4664,23 @@ export class CycleRepository {
           || BigInt(ledger.refunds) > 0n
           || BigInt(ledger.residual) > 0n;
       }
+      for (const position of state.heldPositions.values()) {
+        if (position.resolution !== null) continue;
+        positions.push(structuredClone(position));
+        heldPositionValue += BigInt(position.valueMicroUsdg);
+      }
     }
-    return { heldAssets, unattributed, unresolvedObligations };
+    positions.sort((left, right) => left.openedAtMs - right.openedAtMs || left.positionId.localeCompare(right.positionId));
+    return {
+      heldAssets,
+      unattributed,
+      unresolvedObligations,
+      heldPositions: {
+        count: positions.length,
+        valueMicroUsdg: heldPositionValue.toString(),
+        positions,
+      },
+    };
   }
 
   /** @param {string} cycleId @param {string} stage @param {unknown} attemptValue */
@@ -3453,15 +5346,13 @@ export class CycleRepository {
 
   /** Reads a recipient-paged payout snapshot that is deliberately outside the 64-item journal limit. */
   async readPagedPayoutState(cycleId, stage) {
-    assertStageName(stage);
-    if (stage !== 'payout') throw new Error('cycle-repository paged payout state is available only for the payout stage');
+    assertPagedPayoutStage(stage);
     return this.#store.readPagedPayoutState(cycleId, stage);
   }
 
   /** Persists recipient-keyed payout pages before their compact journal reference is recorded. */
   async persistPagedPayoutState(cycleId, stage, state) {
-    assertStageName(stage);
-    if (stage !== 'payout') throw new Error('cycle-repository paged payout state is available only for the payout stage');
+    assertPagedPayoutStage(stage);
     if (!state || typeof state !== 'object' || Array.isArray(state)) {
       throw new Error('cycle-repository paged payout state must be an object');
     }
@@ -3512,7 +5403,8 @@ export class CycleRepository {
       throw new Error(`cycle-repository markStageAttemptSentUnknown: "${stage}" must be reconciled instead of re-sent`);
     }
     const attempt = transitionProviderMutationAttempt(current.attempt, 'SENT_UNKNOWN');
-    await this.#append(cycleId, 'stage-attempt-sent-unknown', { stage, attempt }, {
+    const sentAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'stage-attempt-sent-unknown', { stage, attempt, sentAtMs }, {
       assertState: currentState => {
         const latest = currentState.operationalAttempts.get(stage);
         if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)) {
@@ -3520,7 +5412,7 @@ export class CycleRepository {
         }
       },
     });
-    return { ...current, attempt };
+    return { ...current, attempt, sentAtMs };
   }
 
   /** Records a pre-call failure; the identical request may be prepared again without reconciliation. */

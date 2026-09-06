@@ -9,6 +9,10 @@ const LEGACY_POLICY_DIGEST_REVISION_SEARCH_LIMIT = 10_000;
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
+const USDG_ROUTE = Object.freeze({ chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 });
+const COLLECTOR_SETTLEMENT_ROUTE = Object.freeze({ chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 });
+const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
+const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
 const mutationBoundaries = new Set(['claim-process', 'purchase', 'signature', 'broadcast', 'mutation']);
 const executionBoundaries = new Set(['signature', 'broadcast', 'mutation']);
 
@@ -71,11 +75,240 @@ function assertPackId(value) {
   return value;
 }
 
+function assertPolicyAdmissionAmount(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is invalid`);
+  if (typeof value.chainId !== 'string' || value.chainId.length === 0
+    || typeof value.assetId !== 'string' || value.assetId.length === 0
+    || !Number.isInteger(value.decimals) || value.decimals < 0) {
+    throw new Error(`${label} asset identity is invalid`);
+  }
+  return Object.freeze({
+    chainId: value.chainId,
+    assetId: value.assetId,
+    decimals: value.decimals,
+    amountAtomic: assertAmount(value.amountAtomic, `${label} amountAtomic`, { positive: true }).toString(),
+  });
+}
+
+function assertAdmissionRoute(amount, expected, label) {
+  if (amount.chainId !== expected.chainId || amount.assetId.toLowerCase() !== expected.assetId.toLowerCase() || amount.decimals !== expected.decimals) {
+    throw new Error(`${label} does not match the canonical asset route`);
+  }
+}
+
+function immutableCanonicalValue(value, label) {
+  try {
+    return JSON.parse(canonicalJson(value));
+  } catch (error) {
+    throw new Error(`${label} is not canonical immutable data: ${error.message}`);
+  }
+}
+
+function freezeRecursively(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeRecursively(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function relayQuoteEvidenceDigest(quote) {
+  return digest({
+    schema: 'hookemon.relay-quote.v1',
+    direction: quote.direction,
+    tradeType: quote.tradeType,
+    requestId: quote.requestId,
+    orderId: quote.orderId,
+    sender: quote.sender,
+    recipient: quote.recipient,
+    deadlineUnixSeconds: quote.deadlineUnixSeconds,
+    origin: quote.origin,
+    destination: quote.destination,
+    raw: quote.raw,
+  });
+}
+
+function assertQuoteRouteLeg(value, expected, label, { destination = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || String(value.chainId) !== expected.chainId
+    || typeof value.address !== 'string' || value.address.toLowerCase() !== expected.assetId.toLowerCase()
+    || value.decimals !== expected.decimals
+    || assertAmount(value.amount, `${label} amount`, { positive: true }).toString() !== expected.amountAtomic
+    || (destination && assertAmount(value.minimumAmount, `${label} minimumAmount`, { positive: true }).toString() !== expected.amountAtomic)) {
+    throw new Error(`${label} does not bind the admitted asset amount`);
+  }
+}
+
+function assertRawRelayLeg(value, expected, label, { destination = false } = {}) {
+  const currency = value?.currency;
+  if (!currency || String(currency.chainId) !== expected.chainId
+    || typeof currency.address !== 'string' || currency.address.toLowerCase() !== expected.assetId.toLowerCase()
+    || currency.decimals !== expected.decimals
+    || value.amount !== expected.amountAtomic
+    || (destination && value.minimumAmount !== expected.amountAtomic)) {
+    throw new Error(`${label} does not bind the admitted asset amount`);
+  }
+}
+
+function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRelay }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('policy admission unitRelayQuote must be a parsed Relay quote');
+  }
+  const raw = immutableCanonicalValue(value.raw, 'policy admission unitRelayQuote raw response');
+  const quote = {
+    direction: value.direction,
+    tradeType: value.tradeType,
+    requestId: value.requestId,
+    orderId: value.orderId,
+    sender: value.sender,
+    recipient: value.recipient,
+    deadlineUnixSeconds: value.deadlineUnixSeconds,
+    origin: immutableCanonicalValue(value.origin, 'policy admission unitRelayQuote origin'),
+    destination: immutableCanonicalValue(value.destination, 'policy admission unitRelayQuote destination'),
+    stepCount: value.stepCount,
+    raw,
+    quoteDigest: value.quoteDigest,
+  };
+  if (quote.direction !== 'OUTBOUND' || quote.tradeType !== 'EXACT_OUTPUT'
+    || quote.requestId !== unitRelay.requestId || quote.orderId !== unitRelay.orderId
+    || quote.sender?.toLowerCase() !== OPERATIONS_EVM || quote.recipient !== OPERATIONS_SOLANA
+    || quote.deadlineUnixSeconds !== unitRelay.deadlineUnixSeconds
+    || !Number.isSafeInteger(quote.stepCount) || quote.stepCount < 0
+    || typeof quote.quoteDigest !== 'string' || !digestPattern.test(quote.quoteDigest)) {
+    throw new Error('policy admission unitRelayQuote identity is invalid');
+  }
+  assertQuoteRouteLeg(quote.origin, unitFundingQuote, 'policy admission unitRelayQuote origin');
+  assertQuoteRouteLeg(quote.destination, unitPurchase, 'policy admission unitRelayQuote destination', { destination: true });
+  if (!raw || raw.requestId !== quote.requestId || !Array.isArray(raw.steps) || raw.steps.length !== quote.stepCount
+    || raw.details?.sender?.toLowerCase() !== quote.sender.toLowerCase() || raw.details?.recipient !== quote.recipient
+    || raw.protocol?.v2?.orderId !== quote.orderId || raw.protocol.v2.orderData?.output?.deadline !== quote.deadlineUnixSeconds
+    || raw.protocol.v2.orderData.output?.chainId !== 'solana' || !Array.isArray(raw.protocol.v2.orderData.output.calls)
+    || raw.protocol.v2.orderData.output.calls.length !== 0) {
+    throw new Error('policy admission unitRelayQuote raw identity is invalid');
+  }
+  assertRawRelayLeg(raw.details.currencyIn, unitFundingQuote, 'policy admission unitRelayQuote raw origin');
+  assertRawRelayLeg(raw.details.currencyOut, unitPurchase, 'policy admission unitRelayQuote raw destination', { destination: true });
+  const payments = raw.protocol.v2.orderData.output.payments;
+  const inputs = raw.protocol.v2.orderData.inputs;
+  if (!Array.isArray(payments) || payments.length !== 1
+    || payments[0]?.recipient !== quote.recipient || payments[0]?.currency !== quote.destination.address
+    || payments[0]?.expectedAmount !== unitPurchase.amountAtomic || payments[0]?.minimumAmount !== unitPurchase.amountAtomic
+    || !Array.isArray(inputs) || inputs.length !== 1
+    || inputs[0]?.payment?.chainId !== 'robinhood' || inputs[0]?.payment?.currency?.toLowerCase() !== quote.origin.address.toLowerCase()
+    || inputs[0]?.payment?.amount !== unitFundingQuote.amountAtomic) {
+    throw new Error('policy admission unitRelayQuote raw order does not bind the admitted amounts');
+  }
+  if (quote.quoteDigest !== unitRelay.quoteDigest || quote.quoteDigest !== relayQuoteEvidenceDigest(quote)) {
+    throw new Error('policy admission unitRelayQuote digest does not match its immutable parsed evidence');
+  }
+  return freezeRecursively(quote);
+}
+
+/**
+ * Normalizes the quote-bound monetary record produced before a live cycle exists. The policy
+ * engine deliberately does not infer a unit quote from an aggregate quote: they are separate
+ * source-asset facts, while purchase targets remain separately typed destination-asset facts.
+ *
+ * Exported as `assertPolicyAdmission` so the durable cycle repository validates exactly the record
+ * this engine will later digest, instead of keeping a second copy of these monetary rules. The
+ * returned value is the normalized subset the policy digest covers; a persisting caller keeps its
+ * own full record (which additionally carries the parsed aggregate `relayQuote` outbound replays).
+ */
+function normalizePolicyAdmission(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.schema !== 'hookemon.policy-admission.v2') {
+    throw new Error('policy admission must use hookemon.policy-admission.v2');
+  }
+  assertCycleId(value.cycleId);
+  assertPackId(value.packId);
+  if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error('policy admission quantity is invalid');
+  if (typeof value.quoteDigest !== 'string' || !digestPattern.test(value.quoteDigest)) throw new Error('policy admission quoteDigest is invalid');
+  const unitPurchase = assertPolicyAdmissionAmount(value.unitPurchase, 'policy admission unitPurchase');
+  const aggregatePurchase = assertPolicyAdmissionAmount(value.aggregatePurchase, 'policy admission aggregatePurchase');
+  const unitFundingQuote = assertPolicyAdmissionAmount(value.unitFundingQuote, 'policy admission unitFundingQuote');
+  const aggregateFundingQuote = assertPolicyAdmissionAmount(value.aggregateFundingQuote, 'policy admission aggregateFundingQuote');
+  assertAdmissionRoute(unitPurchase, COLLECTOR_SETTLEMENT_ROUTE, 'policy admission unitPurchase');
+  assertAdmissionRoute(aggregatePurchase, COLLECTOR_SETTLEMENT_ROUTE, 'policy admission aggregatePurchase');
+  assertAdmissionRoute(unitFundingQuote, USDG_ROUTE, 'policy admission unitFundingQuote');
+  assertAdmissionRoute(aggregateFundingQuote, USDG_ROUTE, 'policy admission aggregateFundingQuote');
+  if (unitPurchase.chainId !== aggregatePurchase.chainId || unitPurchase.assetId !== aggregatePurchase.assetId
+    || unitPurchase.decimals !== aggregatePurchase.decimals
+    || BigInt(unitPurchase.amountAtomic) * BigInt(value.quantity) !== BigInt(aggregatePurchase.amountAtomic)) {
+    throw new Error('policy admission aggregatePurchase does not exactly equal unitPurchase times quantity');
+  }
+  if (unitFundingQuote.chainId !== aggregateFundingQuote.chainId || unitFundingQuote.assetId !== aggregateFundingQuote.assetId
+    || unitFundingQuote.decimals !== aggregateFundingQuote.decimals) {
+    throw new Error('policy admission funding quotes do not share one source asset identity');
+  }
+  const relay = value.relay;
+  if (!relay || relay.tradeType !== 'EXACT_OUTPUT' || typeof relay.requestId !== 'string' || relay.requestId.length === 0
+    || typeof relay.orderId !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId)
+    || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
+    || typeof relay.sender !== 'string' || relay.sender.toLowerCase() !== OPERATIONS_EVM || relay.recipient !== OPERATIONS_SOLANA
+    || assertAmount(relay.destinationAmount, 'policy admission relay destinationAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic
+    || assertAmount(relay.destinationMinimumAmount, 'policy admission relay destinationMinimumAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic) {
+    throw new Error('policy admission Relay exact-output identity is invalid');
+  }
+  const unitRelay = value.unitRelay;
+  if (!unitRelay || unitRelay.tradeType !== 'EXACT_OUTPUT' || typeof unitRelay.requestId !== 'string' || unitRelay.requestId.length === 0
+    || !/^0x[0-9a-fA-F]{64}$/.test(unitRelay.orderId ?? '') || !Number.isSafeInteger(unitRelay.deadlineUnixSeconds)
+    || unitRelay.deadlineUnixSeconds <= 0 || unitRelay.sender?.toLowerCase() !== OPERATIONS_EVM || unitRelay.recipient !== OPERATIONS_SOLANA
+    || assertAmount(unitRelay.destinationAmount, 'policy admission unitRelay destinationAmount', { positive: true }).toString() !== unitPurchase.amountAtomic
+    || assertAmount(unitRelay.destinationMinimumAmount, 'policy admission unitRelay destinationMinimumAmount', { positive: true }).toString() !== unitPurchase.amountAtomic
+    || typeof unitRelay.quoteDigest !== 'string' || !digestPattern.test(unitRelay.quoteDigest)) {
+    throw new Error('policy admission unit exact-output Relay evidence is invalid');
+  }
+  if (typeof relay.quoteDigest !== 'string' || relay.quoteDigest !== value.quoteDigest) {
+    throw new Error('policy admission aggregate Relay quote digest is invalid');
+  }
+  const unitRelayQuote = normalizeUnitRelayQuote(value.unitRelayQuote, { unitFundingQuote, unitPurchase, unitRelay });
+  return Object.freeze({
+    schema: value.schema,
+    cycleId: value.cycleId,
+    packId: value.packId,
+    quantity: value.quantity,
+    quoteDigest: value.quoteDigest,
+    unitPurchase,
+    aggregatePurchase,
+    unitFundingQuote,
+    aggregateFundingQuote,
+    relay: Object.freeze({ ...relay }),
+    unitRelay: Object.freeze({ ...unitRelay }),
+    unitRelayQuote,
+  });
+}
+
 function assertBoundary(value) {
   if (!['cycle-start', 'claim-process', 'purchase', 'signature', 'broadcast', 'mutation'].includes(value)) {
     throw new Error('policy boundary is invalid');
   }
   return value;
+}
+
+function normalizeHeldPositions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('policy custody heldPositions is invalid');
+  }
+  if (!Number.isSafeInteger(value.count) || value.count < 0) {
+    throw new Error('policy custody heldPositions count is invalid');
+  }
+  if (!Array.isArray(value.positions) || value.positions.length !== value.count) {
+    throw new Error('policy custody heldPositions count does not match positions');
+  }
+  const reportedValue = assertAmount(value.valueMicroUsdg, 'policy custody heldPositions valueMicroUsdg');
+  const positionValue = value.positions.reduce((total, position, index) => {
+    if (!position || typeof position !== 'object' || Array.isArray(position)) {
+      throw new Error(`policy custody heldPositions positions[${index}] is invalid`);
+    }
+    return total + assertAmount(
+      position.valueMicroUsdg,
+      `policy custody heldPositions positions[${index}] valueMicroUsdg`,
+    );
+  }, 0n);
+  if (positionValue !== reportedValue) {
+    throw new Error('policy custody heldPositions value does not match positions');
+  }
+  return { count: value.count, valueMicroUsdg: reportedValue };
 }
 
 function normalizeCustody(value) {
@@ -85,6 +318,7 @@ function normalizeCustody(value) {
     atRiskMicroUsdg: assertAmount(value.atRiskMicroUsdg, 'policy custody atRiskMicroUsdg'),
     outstandingMicroUsdg: assertAmount(value.outstandingMicroUsdg, 'policy custody outstandingMicroUsdg'),
     heldAssets: value.heldAssets,
+    heldPositions: normalizeHeldPositions(value.heldPositions),
     unattributed: value.unattributed,
     unvaluedExposure: value.unvaluedExposure,
   };
@@ -100,6 +334,7 @@ function zeroCustody() {
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -129,6 +364,41 @@ function policyMaterial(configuration) {
     maxCyclesPerDay: configuration.maxCyclesPerDay,
     lossCapMicroUsdg: configuration.lossCapMicroUsdg,
     maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
+    maxHeldPositions: configuration.maxHeldPositions,
+    maxHeldValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+    unresolvedCardDeadlineMinutes: configuration.unresolvedCardDeadlineMinutes,
+    manualApprovalCycles: configuration.manualApprovalCycles,
+  };
+}
+
+function versionThreePolicyMaterial(configuration) {
+  return {
+    allowedPackIds: [...configuration.allowedPackIds],
+    requestedOrders: configuration.requestedOrders,
+    maxBoostersPerCycle: configuration.maxBoostersPerCycle,
+    maxUnitPriceMicroUsdg: configuration.maxUnitPriceMicroUsdg,
+    perCycleCapMicroUsdg: configuration.perCycleCapMicroUsdg,
+    max24HourBudgetMicroUsdg: configuration.max24HourBudgetMicroUsdg,
+    maxCyclesPerDay: configuration.maxCyclesPerDay,
+    lossCapMicroUsdg: configuration.lossCapMicroUsdg,
+    maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
+    maxHeldPositions: configuration.maxHeldPositions,
+    maxHeldValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+    manualApprovalCycles: configuration.manualApprovalCycles,
+  };
+}
+
+function versionTwoPolicyMaterial(configuration) {
+  return {
+    allowedPackIds: [...configuration.allowedPackIds],
+    requestedOrders: configuration.requestedOrders,
+    maxBoostersPerCycle: configuration.maxBoostersPerCycle,
+    maxUnitPriceMicroUsdg: configuration.maxUnitPriceMicroUsdg,
+    perCycleCapMicroUsdg: configuration.perCycleCapMicroUsdg,
+    max24HourBudgetMicroUsdg: configuration.max24HourBudgetMicroUsdg,
+    maxCyclesPerDay: configuration.maxCyclesPerDay,
+    lossCapMicroUsdg: configuration.lossCapMicroUsdg,
+    maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
     manualApprovalCycles: configuration.manualApprovalCycles,
   };
 }
@@ -142,14 +412,46 @@ function assertOperatorHardCaps(configuration) {
   return configuration;
 }
 
+/**
+ * Narrows the general operator policy to the single permitted live Collector-only rehearsal.
+ * The caller supplies the immutable pack and typed atomic spend from its environment boundary;
+ * this helper only validates the persisted, owner-controlled policy document.
+ */
+export function assertCollectorOnlyRehearsalPolicy(configuration, { packCode, packPriceAtomic } = {}) {
+  const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
+  assertPackId(packCode);
+  assertAmount(packPriceAtomic, 'collector-only rehearsal packPriceAtomic', { positive: true });
+  if (normalized.liveMode !== true) throw new Error('collector-only rehearsal policy requires liveMode=true');
+  if (normalized.allowedPackIds.length !== 1 || normalized.allowedPackIds[0] !== packCode) {
+    throw new Error('collector-only rehearsal policy must allow exactly the selected pack');
+  }
+  if (normalized.requestedOrders !== 1) throw new Error('collector-only rehearsal policy requestedOrders must equal 1');
+  if (normalized.maxBoostersPerCycle !== 1) throw new Error('collector-only rehearsal policy maxBoostersPerCycle must equal 1');
+  if (normalized.manualApprovalCycles < 1) {
+    throw new Error('collector-only rehearsal policy requires at least one manual approval cycle');
+  }
+  for (const field of [
+    'maxUnitPriceMicroUsdg',
+    'maxCycleBudgetMicroUsdg',
+    'max24HourBudgetMicroUsdg',
+    'perCycleCapMicroUsdg',
+  ]) {
+    if (normalized[field] !== packPriceAtomic) {
+      throw new Error(`collector-only rehearsal policy ${field} must equal the configured pack price`);
+    }
+  }
+  if (normalized.maxCyclesPerDay !== 1) throw new Error('collector-only rehearsal policy maxCyclesPerDay must equal 1');
+  return normalized;
+}
+
 function legacyPolicyMaterial(configuration, configurationRevision) {
   return {
     configurationRevision,
-    ...policyMaterial(configuration),
+    ...versionTwoPolicyMaterial(configuration),
   };
 }
 
-function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = null }) {
   return digest({
     schema,
     cycleId,
@@ -157,17 +459,45 @@ function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, pa
     packId,
     mode: cycleMode(liveMode, mode),
     policy,
+    ...(admission === null ? {} : { admission }),
   });
 }
 
-export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined }) {
   const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
   assertCycleId(cycleId);
   assertAmount(releaseAmountMicroUsdg, 'policy releaseAmountMicroUsdg', { positive: true });
   assertPackId(packId);
+  const normalizedAdmission = admission === undefined ? null : normalizePolicyAdmission(admission);
+  if (normalizedAdmission !== null && normalizedAdmission.cycleId !== cycleId) throw new Error('policy admission cycleId does not match cycle digest');
+  return digestCyclePolicy({
+    schema: normalizedAdmission === null ? 'hookemon.policy-cycle.v3' : 'hookemon.policy-cycle.v4',
+    policy: policyMaterial(normalized),
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+    admission: normalizedAdmission,
+  });
+}
+
+function deriveVersionTwoCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
   return digestCyclePolicy({
     schema: 'hookemon.policy-cycle.v2',
-    policy: policyMaterial(normalized),
+    policy: versionTwoPolicyMaterial(configuration),
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+}
+
+function deriveVersionThreeCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+  return digestCyclePolicy({
+    schema: 'hookemon.policy-cycle.v3',
+    policy: versionThreePolicyMaterial(configuration),
     cycleId,
     releaseAmountMicroUsdg,
     packId,
@@ -188,9 +518,28 @@ function deriveLegacyCyclePolicyDigest({ configuration, cycleId, releaseAmountMi
   });
 }
 
-function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
-  const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode });
+function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined }) {
+  const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission });
   if (existing.cycleDigest === current) return current;
+  if (admission !== undefined) return null;
+  const versionThree = deriveVersionThreeCyclePolicyDigest({
+    configuration,
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+  if (existing.cycleDigest === versionThree) return versionThree;
+  const versionTwo = deriveVersionTwoCyclePolicyDigest({
+    configuration,
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId,
+    liveMode,
+    mode,
+  });
+  if (existing.cycleDigest === versionTwo) return versionTwo;
   if (configuration.configurationRevision > LEGACY_POLICY_DIGEST_REVISION_SEARCH_LIMIT) return null;
   for (let revision = 0; revision <= configuration.configurationRevision; revision += 1) {
     const legacy = deriveLegacyCyclePolicyDigest({
@@ -299,13 +648,32 @@ function admissionContext(input) {
   if (input.cycleId !== undefined && input.cycleId !== null) assertCycleId(input.cycleId);
   if (input.packId !== undefined && input.packId !== null) assertPackId(input.packId);
   const capUsdg = input.capUsdg === undefined ? null : assertAmount(input.capUsdg, 'policy capUsdg');
-  return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? null, packId: input.packId ?? null };
+  const admission = input.admission === undefined ? null : normalizePolicyAdmission(input.admission);
+  if (admission !== null) {
+    if (input.cycleId !== undefined && input.cycleId !== null && input.cycleId !== admission.cycleId) {
+      throw new Error('policy admission cycleId does not match policy context');
+    }
+    if (releaseAmount !== BigInt(admission.aggregateFundingQuote.amountAtomic)) {
+      throw new Error('policy release amount does not match admitted aggregate funding quote');
+    }
+    if (input.packId !== undefined && input.packId !== admission.packId) {
+      throw new Error('policy admission packId does not match policy context');
+    }
+    if (input.requestedOrders !== undefined && input.requestedOrders !== admission.quantity) {
+      throw new Error('policy admission quantity does not match requested orders');
+    }
+    if (now >= admission.relay.deadlineUnixSeconds * 1000 || now >= admission.unitRelay.deadlineUnixSeconds * 1000) {
+      return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission.cycleId, packId: input.packId ?? admission.packId, admission, expiredAdmission: true };
+    }
+  }
+  return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission?.cycleId ?? null, packId: input.packId ?? null, admission };
 }
 
 function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
   const context = admissionContext(input);
   const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
   const custodyState = normalizeCustody(custody);
+  if (context.expiredAdmission) return refused('QUOTE_EXPIRED');
   if (normalized.liveMode !== context.liveMode) return refused('EXECUTION_MODE_MISMATCH');
 
   const requiresImmediateExecutionGate = context.boundary === 'cycle-start' || mutationBoundaries.has(context.boundary);
@@ -342,11 +710,15 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
 
   if (context.boundary === 'claim-process') {
     if (context.cycleId === null || context.packId === null) throw new Error('policy claim-process requires cycleId and packId');
-    if (normalized.pendingEpicDecisions.length > 0 || custodyState.heldAssets) return refused('HELD_CUSTODY');
     if (custodyState.unattributed) return refused('UNATTRIBUTED_CUSTODY');
     if (custodyState.unvaluedExposure) return refused('UNVALUED_CUSTODY');
+    if (custodyState.heldPositions.count >= normalized.maxHeldPositions
+      || custodyState.heldPositions.valueMicroUsdg > BigInt(normalized.maxHeldValueMicroUsdg)) {
+      return refused('HELD_LIMIT');
+    }
     if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
     if (normalized.requestedOrders === 0) return refused('NO_ORDERS_REQUESTED');
+    if (context.admission !== null && context.admission.quantity !== normalized.requestedOrders) return refused('QUANTITY_MISMATCH');
     if (context.releaseAmount > effectiveCycleCap(normalized, context)) return refused('PER_CYCLE_CAP');
     if (context.releaseAmount > BigInt(normalized.maxCycleBudgetMicroUsdg)) return refused('PER_CYCLE_CAP');
 
@@ -365,6 +737,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       packId: context.packId,
       liveMode: context.liveMode,
       mode: context.mode,
+      admission: context.admission ?? undefined,
     });
     const cycleDigest = existing
       ? matchingExistingCycleDigest({
@@ -375,6 +748,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
         packId: context.packId,
         liveMode: context.liveMode,
         mode: context.mode,
+        admission: context.admission ?? undefined,
       })
       : derivedCycleDigest;
     if (cycleDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
@@ -412,11 +786,11 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
 
   if (context.boundary === 'purchase') {
     if (context.cycleId === null || context.packId === null) throw new Error('policy purchase requires cycleId and packId');
-    if (normalized.pendingEpicDecisions.length > 0 || custodyState.heldAssets) return refused('HELD_CUSTODY');
     if (custodyState.unattributed) return refused('UNATTRIBUTED_CUSTODY');
     if (custodyState.unvaluedExposure) return refused('UNVALUED_CUSTODY');
     if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
-    if (context.releaseAmount > BigInt(normalized.maxUnitPriceMicroUsdg)) return refused('UNIT_PRICE_CAP');
+    const unitFundingAmount = context.admission === null ? context.releaseAmount : BigInt(context.admission.unitFundingQuote.amountAtomic);
+    if (unitFundingAmount > BigInt(normalized.maxUnitPriceMicroUsdg)) return refused('UNIT_PRICE_CAP');
     const existing = existingCycle(normalized, context.cycleId);
     if (!existing) return refused('CYCLE_POLICY_MISSING');
     const expectedDigest = matchingExistingCycleDigest({
@@ -427,10 +801,12 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       packId: context.packId,
       liveMode: context.liveMode,
       mode: context.mode,
+      admission: context.admission ?? undefined,
     });
     if (expectedDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
     const reservation = normalized.spendLedger.find(entry => entry.cycleDigest === expectedDigest);
     if (!reservation || context.releaseAmount > BigInt(reservation.amountMicroUsdg)) return refused('SPEND_RESERVATION_MISSING');
+    if (!withinTrailingWindow([reservation], 'reservedAtMs', context.now).length) return refused('SPEND_RESERVATION_EXPIRED');
     if (context.releaseAmount > effectiveCycleCap(normalized, context)) return refused('PER_CYCLE_CAP');
     if (custodyState.realizedLossMicroUsdg + custodyState.atRiskMicroUsdg > BigInt(normalized.lossCapMicroUsdg)) {
       return refused('LOSS_CAP');
@@ -442,6 +818,10 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
   }
 
   return allowed();
+}
+
+export function assertPolicyAdmission(value) {
+  return normalizePolicyAdmission(value);
 }
 
 export function evaluateClaim(input) {
