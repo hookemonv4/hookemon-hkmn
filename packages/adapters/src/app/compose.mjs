@@ -1031,11 +1031,6 @@ export async function compose(config) {
           packCode: resolved.pack.code,
           packPriceAtomic: collectorOnlyPackPrice(resolved),
         });
-      } else {
-        const minimumApprovals = mode === 'production' ? 3 : 1;
-        if (configuration.manualApprovalCycles < minimumApprovals) {
-          throw new Error(`policy configuration manualApprovalCycles must be at least ${minimumApprovals} for ${mode} startup`);
-        }
       }
     }
     if (requireCanaryPreflight || liveMode === true) await requireStartPreflight();

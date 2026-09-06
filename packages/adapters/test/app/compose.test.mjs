@@ -1157,7 +1157,7 @@ test('compose default profile enforcement refuses a live call without observabil
   assert.equal(await composition.cycleRepository.readActiveCycle(), null);
 });
 
-test('explicit production readiness requires the owner\'s first three manual-approval slots before signer construction', async t => {
+test('explicit production readiness permits an activated automatic policy before signer construction', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
   await writeOperatorState(statePath, livePolicyPatch('base-pack'));
@@ -1184,18 +1184,6 @@ test('explicit production readiness requires the owner\'s first three manual-app
   });
   t.after(() => composition.shutdown());
 
-  await assert.rejects(
-    () => composition.assertStartReadiness({
-      liveMode: true, mode: 'production', requirePolicyConfiguration: true, requireCanaryPreflight: true,
-    }),
-    /manualApprovalCycles must be at least 3/,
-  );
-
-  const state = await readOperatorState(statePath);
-  await mutateOperatorState(statePath, state.revision, current => ({
-    ...current,
-    configuration: applyOperatorConfiguration(current.configuration, { manualApprovalCycles: 3 }),
-  }));
   assert.deepEqual(await composition.assertStartReadiness({
     liveMode: true, mode: 'production', requirePolicyConfiguration: true, requireCanaryPreflight: true,
   }), { cycleCount: 0, preflight: 'PASSED' });

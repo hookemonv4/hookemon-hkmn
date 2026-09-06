@@ -71,8 +71,8 @@ repository client.
   checks both Operations identities and its EVM and Solana canaries. The live Collector-only
   rehearsal checks only `operator-solana`, its expected public key, Collector read-only state, and
   Solana read-only state. Execution profiles also require a valid persisted policy configuration
-  whose `liveMode` matches the selected provider profile. Production requires
-  `manualApprovalCycles >= 3`; rehearsal requires at least one manual approval slot.
+  whose `liveMode` matches the selected provider profile. An activated production policy may run
+  unattended within its configured limits; rehearsal retains its explicit manual approval slot.
 
 ## Invariants
 
