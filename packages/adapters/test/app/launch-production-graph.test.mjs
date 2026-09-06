@@ -291,7 +291,13 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
   await writeFile(paths.extensions, 'subjectAltName=IP:127.0.0.1\n');
   await execFileAsync('/usr/bin/openssl', ['x509', '-req', '-in', paths.request, '-CA', paths.caCert, '-CAkey', paths.caKey, '-CAcreateserial', '-out', paths.cert, '-days', '1', '-extfile', paths.extensions]);
   const [key, cert] = await Promise.all([readFile(paths.key), readFile(paths.cert)]);
-  const calls = { evm: 0, solana: 0, methods: [], quotes: [] };
+  const calls = {
+    evm: 0, solana: 0, methods: [], quotes: [],
+    // Purchase's own Collector mutation endpoints. Tracked explicitly (rather than left to the
+    // generic 404 branch below) so the graph can assert exactly how many times each was reached,
+    // instead of only inferring it from the absence of a durable batch record.
+    collectorGenerateYoloPacks: 0, collectorPackStatus: 0, collectorSubmitTransaction: 0,
+  };
   const broadcasts = new Map();
   const server = createServer({ key, cert }, async (request, response) => {
     if (request.url === '/alert') { response.writeHead(204); response.end(); return; }
@@ -302,6 +308,16 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
       respond(response, { machines: [{ code: 'return-fixture', price: PACK_PRICE, contains: 1 }] });
       return;
     }
+    // Purchase's mutation endpoints are deliberately left unimplemented (still counted, then
+    // refused with 404): the current production configuration wiring makes
+    // `assertSolanaSignerMoneyConfiguration` refuse every purchase mutate attempt before it reaches
+    // any of these (see the frontier comment below this fixture), so none of these three branches
+    // is exercised by this run today. They stay in place, and are asserted at exactly zero calls,
+    // so a future config fix that reaches this far is caught reaching an intentionally-unimplemented
+    // provider response rather than silently appearing to "work" against no fixture at all.
+    if (request.url === '/api/generateYoloPacks') { calls.collectorGenerateYoloPacks += 1; response.writeHead(404); response.end(); return; }
+    if (request.url.startsWith('/api/pack/status')) { calls.collectorPackStatus += 1; response.writeHead(404); response.end(); return; }
+    if (request.url === '/api/submitTransaction') { calls.collectorSubmitTransaction += 1; response.writeHead(404); response.end(); return; }
     if (request.url === '/quote/v2') {
       const quoteRequest = await body(request);
       calls.quotes.push({ amount: quoteRequest.amount, tradeType: quoteRequest.tradeType });
@@ -910,36 +926,55 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   // next automatic tick durably reaches the purchase operation boundary.
   //
   // Purchase/open/epic-gate/buyback/return/payout completion are the next bounded steps and are
-  // deliberately not asserted here yet. The two defects this comment previously named are now
-  // resolved: stage-driver.mjs's collector-production preparation path supplies real
-  // collector-crypt adapters to a non-rehearsal `preparePurchaseRequest`
-  // (collector-integration-report.md), so this fixture's two-pack policy above (`activateTwoPackPolicy`)
-  // reaches purchase's PREPARED boundary.
+  // deliberately not asserted here yet. Every defect this comment previously named (the
+  // preparation-adapter gap, then the pack-quantity config-wiring gap) is now resolved: purchase
+  // durably reaches PREPARED with the admitted quantity of 2.
   //
-  // The verified next blocker (reproduced 2026-09-06 with this exact env/config; not yet fixed,
-  // outside this file's write-set) is a real config-wiring gap rather than the Collector-policy
-  // bundle: `environment.mjs` never reads any pack-quantity variable into `config.pack`
-  // (`pack: Object.freeze({ code: packCode })`, packages/adapters/src/app/environment.mjs:1013),
-  // so `assertConfiguredPackQuantity(config?.pack?.quantity)` in
-  // packages/adapters/src/app/stages/purchase.mjs:147-148 always defaults `quantity` to 1 in a
-  // real production run, no matter how many packs the operator's `requestedOrders` admits the
-  // cycle for. `admittedPurchaseBounds` (purchase.mjs:201-213) then cross-checks that defaulted 1
-  // against the durable admission's own quantity (2, from `configuration.requestedOrders` at
-  // compose.mjs:614) and throws `purchase prepareRequest quantity does not match the admitted
-  // quantity` (purchase.mjs:206) on every later tick's re-`prepareRequest` call
-  // (stage-driver.mjs prepareRequestForMutation, packages/adapters/src/app/stage-driver.mjs:943),
-  // even though the cycle's first prepare call already durably recorded a PREPARED digest. The
-  // Collector policy bundle question (rehearsal/collector-policy/bundle.json, checked-in
-  // `evidence-only`) is a distinct, separately real gap for later once purchase's own quantity
-  // wiring is fixed: `compose.mjs`'s `attachCollectorPolicyBundle` call is gated on
-  // `isLiveCollectorOnlyRehearsal` (compose.mjs:101-105,1187), which is false for this fixture's
-  // `--mode production` run, and no other production path assembles a per-stage
-  // `config.collectorCrypt.<stage>.policy`, so `requirePolicy` (purchase.mjs:54-60) has nothing to
-  // return in either case.
+  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after both
+  // prior fixes) is earlier and more fundamental than the previously expected Collector-policy
+  // refusal, and is a real production defect outside this file's write-set: `mutatePurchase`
+  // (purchase.mjs:327-332) calls `assertSolanaSignerMoneyConfiguration` with
+  // `config.collectorCrypt.settlementAsset` -- the native Collector asset identity
+  // (`COLLECTOR_CRYPT_SETTLEMENT_ASSET`, chain id `solana-mainnet`, environment.mjs:975-1002) --
+  // and that function (solana-money-controls.mjs:41-52) requires it to `sameAsset`-equal
+  // `config.moneyConfiguration.assets.solanaStablecoin`, which production always builds in Relay's
+  // own numeric chain-id namespace (`792703809`, environment.mjs:544-548) even though both name the
+  // same mint and decimals. The two chain-id labels are deliberately kept distinct (Relay's
+  // cross-chain numbering is not a Solana RPC or Collector transaction-policy identity --
+  // solana-rpc.mjs's own `SOLANA_RELAY_CHAIN_ID` doc comment), so this is a real cross-file
+  // inconsistency, not a fixture gap: every live production purchase mutate attempt throws
+  // "purchase MoneyConfigurationV1 Solana asset does not match the configured settlement asset"
+  // on every tick, before any Collector Crypt HTTP call, durable batch write, or ATA read. This
+  // makes the Collector-policy-refusal boundary this comment previously anticipated currently
+  // unreachable; closing that requires reconciling the two namespaces in `purchase.mjs` or
+  // `solana-money-controls.mjs`, which is out of this file's write-set.
   assert.equal(cycle.stages.get('outbound')?.status, 'COMPLETE', `outbound must durably settle from Solana destination-chain evidence; ${await diagnostics()}`);
   const purchase = cycle.preparedStages.get('purchase') ?? null;
   assert.ok(purchase, `purchase must durably reach the PREPARED operation boundary once outbound settles; ${await diagnostics()}`);
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
+  assert.match(
+    stderr,
+    /purchase MoneyConfigurationV1 Solana asset does not match the configured settlement asset/,
+    `every purchase mutate tick must refuse the current settlement-asset/MoneyConfigurationV1 namespace mismatch; ${await diagnostics()}`,
+  );
+  assert.equal(
+    await repository.readPackBatchIntent(cycleIds[0], 'purchase'), null,
+    `purchase must never durably record a batch intent while its money-configuration guard refuses first; ${await diagnostics()}`,
+  );
+  assert.equal(
+    await repository.readPackBatchRequest(cycleIds[0], 'purchase'), null,
+    `purchase must never durably record generated pack memos while its money-configuration guard refuses first; ${await diagnostics()}`,
+  );
+  const purchaseAttempt = await repository.readOperationalStageAttempt(cycleIds[0], 'purchase');
+  assert.equal(
+    purchaseAttempt?.attempt?.state, 'NOT_SENT',
+    `purchase's operational attempt must stay NOT_SENT -- refused before any provider call, never reaching SENT_UNKNOWN; ${await diagnostics()}`,
+  );
+  assert.equal(fixture.calls.collectorGenerateYoloPacks, 0, `purchase must never call generateYoloPacks; ${await diagnostics()}`);
+  assert.equal(fixture.calls.collectorPackStatus, 0, `purchase must never poll pack status with no batch to reconcile; ${await diagnostics()}`);
+  assert.equal(fixture.calls.collectorSubmitTransaction, 0, `purchase must never submit a signed transaction; ${await diagnostics()}`);
+  assert.notEqual(cycle.stages.get('purchase')?.status, 'COMPLETE', `purchase must not be claimed complete; ${await diagnostics()}`);
+  assert.equal(cycle.terminalState, null, `the cycle must have no terminal success or failure; ${await diagnostics()}`);
 });
 
 
