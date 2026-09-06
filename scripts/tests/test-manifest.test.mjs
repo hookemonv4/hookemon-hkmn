@@ -21,7 +21,9 @@ import {
 const root = resolve(import.meta.dirname, '../..');
 const script = join(root, 'scripts', 'test-manifest.mjs');
 const workflow = readFileSync(join(root, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
-const REQUIRED_SUITES = ['runner', 'adapters', 'dashboard', 'contracts-js', 'contracts-abi', 'scripts'];
+const webCiWorkflow = readFileSync(join(root, '.github', 'workflows', 'web-ci.yml'), 'utf8');
+const REQUIRED_SUITES = ['runner', 'adapters', 'dashboard', 'contracts-js', 'contracts-abi', 'scripts', 'web'];
+const BARE_NODE_SUITES = REQUIRED_SUITES.filter(name => name !== 'web');
 
 function run(args, cwd = root) {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
@@ -50,6 +52,7 @@ test('the manifest declares the required suites in order with explicit recursive
   assert.deepEqual(SUITES['contracts-js'].roots, ['packages/contracts/test-js', 'packages/contracts/test/blind']);
   assert.deepEqual(SUITES['contracts-abi'].roots, ['packages/contracts/test/process']);
   assert.deepEqual(SUITES.scripts.roots, ['scripts/tests']);
+  assert.deepEqual(SUITES.web.roots, ['apps/web/tests']);
   for (const suite of Object.values(SUITES)) {
     for (const suiteRoot of suite.roots) {
       assert.doesNotMatch(suiteRoot, /[*?{}]/, 'suite roots are directories, not globs');
@@ -310,9 +313,9 @@ test('check exits nonzero and names the orphan from the command line', () => {
   assert.match(usage.stderr, /usage/);
 });
 
-test('CI runs every suite from the manifest with the required timeout and no globs', () => {
+test('CI runs every bare-node suite from the manifest with the required timeout and no globs', () => {
   assert.match(workflow, /node scripts\/test-manifest\.mjs check/);
-  for (const name of REQUIRED_SUITES) {
+  for (const name of BARE_NODE_SUITES) {
     const list = `files="$(node scripts/test-manifest.mjs list ${name})"`;
     assert.ok(workflow.includes(list), `${name} must be listed from the manifest`);
     const following = workflow.slice(workflow.indexOf(list) + list.length).split('\n')[1];
@@ -320,4 +323,15 @@ test('CI runs every suite from the manifest with the required timeout and no glo
   }
   assert.doesNotMatch(workflow, /\*\*/);
   assert.doesNotMatch(workflow, /\*\.test\.mjs/);
+});
+
+test('the web suite is honestly executed by web-ci, not duplicated as an incompatible bare-node gate', () => {
+  // apps/web's real test script builds first and needs the Cloudflare Workers loader; a bare
+  // `node --test $files` invocation (the pattern every other suite uses) would run the app's
+  // tests without the build output or the loader they import, so v4-gates.yml must never gain
+  // that invocation for `web`.
+  assert.ok(!workflow.includes('node scripts/test-manifest.mjs list web'), 'v4-gates.yml must not run the web suite as a bare node --test gate');
+  assert.match(webCiWorkflow, /npm ci/);
+  assert.match(webCiWorkflow, /npm test/);
+  assert.match(webCiWorkflow, /npm run lint/);
 });

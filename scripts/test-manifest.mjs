@@ -25,6 +25,15 @@ export const SUITES = Object.freeze({
   'contracts-js': Object.freeze({ roots: Object.freeze(['packages/contracts/test-js', 'packages/contracts/test/blind']) }),
   'contracts-abi': Object.freeze({ roots: Object.freeze(['packages/contracts/test/process']) }),
   scripts: Object.freeze({ roots: Object.freeze(['scripts/tests']) }),
+  // apps/web cannot ride in an existing bare `node --test` suite: its test script builds the
+  // app first and requires the Cloudflare Workers loader (`--import
+  // ./tests/cloudflare-workers-loader.mjs --experimental-strip-types`), which the other suites'
+  // plain invocation does not supply. It gets its own suite so this manifest's coverage check
+  // is satisfied honestly; the gates workflow does not run it directly, because
+  // .github/workflows/web-ci.yml already runs the app's real `npm test` (which builds first)
+  // on every apps/web change, and running the same suite a second way in a second workflow
+  // would be a duplicate, incompatible invocation, not an additional check.
+  web: Object.freeze({ roots: Object.freeze(['apps/web/tests']) }),
 });
 
 function toPosix(path) {
