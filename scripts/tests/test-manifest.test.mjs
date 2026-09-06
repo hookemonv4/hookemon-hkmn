@@ -329,22 +329,25 @@ test('CI runs every bare-node suite from the manifest with the required timeout 
   assert.doesNotMatch(workflow, /\*\.test\.mjs/);
 });
 
-test('CI serializes exactly the three resource-heavy scripts-suite files, then runs the remaining manifest once with the required timeout', () => {
+test('CI serializes exactly the two resource-heavy scripts-suite files, excludes the isolated Phase 3 bytecode file, then runs the remaining manifest once with the required timeout', () => {
   const scriptsStepBody = [
     'files="$(node scripts/test-manifest.mjs list scripts)"',
     'heavy_files=(',
     '  scripts/tests/cleanroom.test.mjs',
     '  scripts/tests/launch-addresses.test.mjs',
+    ')',
+    'isolated_files=(',
     '  scripts/tests/phase3-bytecode-binding.test.mjs',
     ')',
-    'for heavy in "${heavy_files[@]}"; do',
-    '  count="$(printf \'%s\\n\' "$files" | grep -Fxc "$heavy")"',
+    'excluded_files=("${heavy_files[@]}" "${isolated_files[@]}")',
+    'for excluded in "${excluded_files[@]}"; do',
+    '  count="$(printf \'%s\\n\' "$files" | grep -Fxc "$excluded")"',
     '  if [ "$count" -ne 1 ]; then',
-    '    echo "heavy manifest member $heavy count=$count (expected exactly 1)" >&2',
+    '    echo "manifest member $excluded count=$count (expected exactly 1)" >&2',
     '    exit 1',
     '  fi',
     'done',
-    'remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${heavy_files[@]}"))"',
+    'remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${excluded_files[@]}"))"',
     'for heavy in "${heavy_files[@]}"; do',
     '  node --test --test-timeout=120000 "$heavy"',
     'done',
@@ -358,10 +361,39 @@ test('CI serializes exactly the three resource-heavy scripts-suite files, then r
     .join('\n');
   assert.ok(
     workflow.includes(scriptsStep),
-    'scripts suite must fail on a missing/duplicated heavy member, serialize exactly the three heavy files with the required timeout, then run every remaining manifest file exactly once at the existing default parallelism',
+    'scripts suite must fail on a missing/duplicated heavy or isolated member, serialize exactly the two heavy files with the required timeout, exclude the isolated Phase 3 bytecode file, then run every remaining manifest file exactly once at the existing default parallelism',
   );
   assert.doesNotMatch(scriptsStepBody, /\*\*/);
   assert.doesNotMatch(scriptsStepBody, /\*\.test\.mjs/);
+});
+
+test('the isolated phase3-bytecode job asserts exact-once manifest membership and runs the file exactly once with the required timeout', () => {
+  const membershipCheck = [
+    'files="$(node scripts/test-manifest.mjs list scripts)"',
+    'count="$(printf \'%s\\n\' "$files" | grep -Fxc \'scripts/tests/phase3-bytecode-binding.test.mjs\')"',
+    'if [ "$count" -ne 1 ]; then',
+    '  echo "scripts/tests/phase3-bytecode-binding.test.mjs count=$count in scripts manifest (expected exactly 1)" >&2',
+    '  exit 1',
+    'fi',
+  ].join('\n');
+  const membershipStep = membershipCheck
+    .split('\n')
+    .map(line => `          ${line}`)
+    .join('\n');
+  assert.ok(
+    workflow.includes(membershipStep),
+    'the isolated job must independently assert phase3-bytecode-binding.test.mjs occurs exactly once in the scripts manifest before running it',
+  );
+  assert.match(
+    workflow,
+    /name: Verify Phase 3 bytecode binding\n {8}run: node --test --test-timeout=120000 scripts\/tests\/phase3-bytecode-binding\.test\.mjs$/m,
+  );
+  // The isolated job references the file 3 times (membership check, its error message, and
+  // its own node --test invocation) and the scripts-suite job references it once (its
+  // isolated_files declaration, excluding it from the remaining-files invocation) — 4 total,
+  // proving the file is neither omitted nor run a second time by the scripts-suite job.
+  const invocationCount = workflow.split('phase3-bytecode-binding.test.mjs').length - 1;
+  assert.equal(invocationCount, 4, 'phase3-bytecode-binding.test.mjs must appear exactly 4 times across the workflow');
 });
 
 test('the web suite is honestly executed by web-ci, not duplicated as an incompatible bare-node gate', () => {

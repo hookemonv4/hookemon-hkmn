@@ -430,6 +430,7 @@ test('verifies the exact runtime executable for the selected platform distributi
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/launch-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/web-ci.yml', ref: CHECKOUT_SHA },
     ],
     'actions/setup-node': [
@@ -1253,7 +1254,7 @@ assertWorkflowTamperIsRejected('rejects removing a required workflow step', work
   '',
 ));
 
-const CANONICAL_SCRIPTS_STEP = '      - name: Verify scripts suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list scripts)"\n          heavy_files=(\n            scripts/tests/cleanroom.test.mjs\n            scripts/tests/launch-addresses.test.mjs\n            scripts/tests/phase3-bytecode-binding.test.mjs\n          )\n          for heavy in "${heavy_files[@]}"; do\n            count="$(printf \'%s\\n\' "$files" | grep -Fxc "$heavy")"\n            if [ "$count" -ne 1 ]; then\n              echo "heavy manifest member $heavy count=$count (expected exactly 1)" >&2\n              exit 1\n            fi\n          done\n          remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${heavy_files[@]}"))"\n          for heavy in "${heavy_files[@]}"; do\n            node --test --test-timeout=120000 "$heavy"\n          done\n          node --test --test-timeout=120000 $remaining_files';
+const CANONICAL_SCRIPTS_STEP = '      - name: Verify scripts suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list scripts)"\n          heavy_files=(\n            scripts/tests/cleanroom.test.mjs\n            scripts/tests/launch-addresses.test.mjs\n          )\n          isolated_files=(\n            scripts/tests/phase3-bytecode-binding.test.mjs\n          )\n          excluded_files=("${heavy_files[@]}" "${isolated_files[@]}")\n          for excluded in "${excluded_files[@]}"; do\n            count="$(printf \'%s\\n\' "$files" | grep -Fxc "$excluded")"\n            if [ "$count" -ne 1 ]; then\n              echo "manifest member $excluded count=$count (expected exactly 1)" >&2\n              exit 1\n            fi\n          done\n          remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${excluded_files[@]}"))"\n          for heavy in "${heavy_files[@]}"; do\n            node --test --test-timeout=120000 "$heavy"\n          done\n          node --test --test-timeout=120000 $remaining_files';
 const CANONICAL_CONTRACTS_JS_STEP = '      - name: Verify contracts-js suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list contracts-js)"\n          node --test --test-timeout=120000 $files';
 
 assertWorkflowTamperIsRejected('rejects reordering required workflow steps', workflow => workflow.replace(

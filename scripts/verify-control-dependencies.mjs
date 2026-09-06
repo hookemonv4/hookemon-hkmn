@@ -47,7 +47,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '751b032462deb31ddc93f1c2d93e5cf39283dbaf03ee6c2facf1ca0c05bcc66d';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '8b378f22361e15873482d8ce6cec96ba7e0f0d5e1b129c9a4aafa0f9b6a148d9';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -113,16 +113,19 @@ const REQUIRED_LOCAL_PHASE2_GATE_BLOCKS = Object.freeze({
     'heavy_files=(',
     '  scripts/tests/cleanroom.test.mjs',
     '  scripts/tests/launch-addresses.test.mjs',
+    ')',
+    'isolated_files=(',
     '  scripts/tests/phase3-bytecode-binding.test.mjs',
     ')',
-    'for heavy in "${heavy_files[@]}"; do',
-    '  count="$(printf \'%s\\n\' "$files" | grep -Fxc "$heavy")"',
+    'excluded_files=("${heavy_files[@]}" "${isolated_files[@]}")',
+    'for excluded in "${excluded_files[@]}"; do',
+    '  count="$(printf \'%s\\n\' "$files" | grep -Fxc "$excluded")"',
     '  if [ "$count" -ne 1 ]; then',
-    '    echo "heavy manifest member $heavy count=$count (expected exactly 1)" >&2',
+    '    echo "manifest member $excluded count=$count (expected exactly 1)" >&2',
     '    exit 1',
     '  fi',
     'done',
-    'remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${heavy_files[@]}"))"',
+    'remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${excluded_files[@]}"))"',
     'for heavy in "${heavy_files[@]}"; do',
     '  node --test --test-timeout=120000 "$heavy"',
     'done',
@@ -416,6 +419,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   if (forkProofPrNodeBlock !== null && forkProofPrNodeBlock !== canonicalNodeInstallBlock(pins)) {
     errors.push('fork-proof pull-request Node install block must match the canonical verified data flow');
   }
+  const phase3BytecodeNodeBlock = workflowInstallRunBlock(workflow, 'Install pinned Node (phase3-bytecode)', errors);
+  if (phase3BytecodeNodeBlock !== null && phase3BytecodeNodeBlock !== canonicalNodeInstallBlock(pins)) {
+    errors.push('phase3-bytecode Node install block must match the canonical verified data flow');
+  }
   const gitleaksBlock = workflowInstallRunBlock(workflow, 'Install pinned Gitleaks', errors);
   if (gitleaksBlock !== null && gitleaksBlock !== canonicalGitleaksInstallBlock(pins)) {
     errors.push('Gitleaks install block must match the canonical verified data flow');
@@ -431,6 +438,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   const forkProofPrFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof pull-request)', errors);
   if (forkProofPrFoundryBlock !== null && forkProofPrFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
     errors.push('fork-proof pull-request Foundry install block must match the canonical verified data flow');
+  }
+  const phase3BytecodeFoundryBlock = workflowInstallRunBlock(workflow, 'Install pinned Foundry (phase3-bytecode)', errors);
+  if (phase3BytecodeFoundryBlock !== null && phase3BytecodeFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
+    errors.push('phase3-bytecode Foundry install block must match the canonical verified data flow');
   }
 }
 

@@ -127,9 +127,50 @@ test('CI runs the manifest-driven dashboard and contracts-js suites', () => {
   assert.match(workflow, /name: Verify scripts suite/);
   assert.match(
     workflow,
-    /files="\$\(node scripts\/test-manifest\.mjs list scripts\)"\n\s+heavy_files=\(\n(?:\s+scripts\/tests\/[a-z0-9-]+\.test\.mjs\n){3}\s*\)\n[\s\S]*?\n\s+node --test --test-timeout=120000 \$remaining_files/,
+    /files="\$\(node scripts\/test-manifest\.mjs list scripts\)"\n\s+heavy_files=\(\n(?:\s+scripts\/tests\/[a-z0-9-]+\.test\.mjs\n){2}\s*\)\n\s+isolated_files=\(\n\s+scripts\/tests\/phase3-bytecode-binding\.test\.mjs\n\s*\)\n[\s\S]*?\n\s+node --test --test-timeout=120000 \$remaining_files/,
   );
   assert.match(workflow, /name: Verify the test manifest covers every test file\n\s+run: node scripts\/test-manifest\.mjs check/);
+});
+
+test('CI isolates the Phase 3 bytecode-binding test in its own required job with a fail-closed dependency from gates', () => {
+  assert.match(workflow, /^ {2}phase3-bytecode:\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m);
+  assert.match(
+    workflow,
+    /^ {2}gates:\n {4}needs: \[phase3-bytecode\]\n {4}if: \$\{\{ always\(\) \}\}\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n/m,
+  );
+  const requireStep = [
+    '      - name: Require the isolated Phase 3 bytecode job to succeed',
+    '        shell: bash',
+    '        env:',
+    '          PHASE3_BYTECODE_RESULT: ${{ needs.phase3-bytecode.result }}',
+    '        run: |',
+    '          echo "phase3-bytecode job result: $PHASE3_BYTECODE_RESULT"',
+    '          [ "$PHASE3_BYTECODE_RESULT" = "success" ]',
+  ].join('\n');
+  assert.ok(
+    workflow.includes(requireStep),
+    'gates must fail closed on its very first step unless the isolated phase3-bytecode job result is exactly success',
+  );
+  const gatesIndex = workflow.indexOf('\n  gates:\n');
+  const requireIndex = workflow.indexOf(requireStep);
+  const firstCheckoutInGates = workflow.indexOf('actions/checkout', gatesIndex);
+  assert.ok(gatesIndex !== -1 && requireIndex > gatesIndex, 'the fail-closed step must belong to the gates job');
+  assert.ok(
+    requireIndex < firstCheckoutInGates,
+    'the fail-closed dependency check must be the earliest step in gates, before any checkout',
+  );
+  assert.match(
+    workflow,
+    /name: Verify Phase 3 bytecode binding\n {8}run: node --test --test-timeout=120000 scripts\/tests\/phase3-bytecode-binding\.test\.mjs/,
+  );
+  // The isolated job must reuse the identical pinned checkout action, Node, and Foundry
+  // versions as gates, not a drifted or unpinned copy.
+  const checkoutPin = 'uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803';
+  assert.equal(workflow.split(checkoutPin).length - 1, 2, 'both jobs must use the identical pinned checkout action');
+  assert.match(workflow, /name: Install pinned Node \(phase3-bytecode\)/);
+  assert.match(workflow, /name: Install pinned Foundry \(phase3-bytecode\)/);
+  assert.match(workflow, /node_version='24\.19\.0'[\s\S]*?node_version='24\.19\.0'/);
+  assert.match(workflow, /foundry_version='1\.7\.1'[\s\S]*?foundry_version='1\.7\.1'/);
 });
 
 test('fork-proof runs the same read-only archive proof for a main push, a manual main dispatch, and a pull request head, and fails closed without its endpoint', () => {
