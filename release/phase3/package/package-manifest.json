@@ -13,7 +13,7 @@
       "release/phase3/artifacts/hook.json",
       "release/phase3/artifacts/token.json"
     ],
-    "metadataImagePath": null,
+    "metadataImagePath": "release/phase3/metadata/hookemon-mark.png",
     "schemaVersion": "hookemon.phase3.source-bundle-coverage.v1",
     "sourcePaths": [
       "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
@@ -21,6 +21,7 @@
       "packages/contracts/src/access/MoneyRoles.sol",
       "packages/contracts/src/accounting/FeeAccounting.sol",
       "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "packages/contracts/src/launch/HKMNToken.sol",
       "packages/contracts/src/launch/HookemonIssuance.sol",
       "packages/contracts/src/market/CanonicalMarket.sol"
     ],
@@ -33,12 +34,6 @@
         "missing": "No committed attestation evidence file is available for the V4 launch request.",
         "resolve": "Generate and commit the attestation evidence file, then record its repository-relative path.",
         "verifiedAlternative": "Keep the attestation coverage unresolved and refuse source-bundle materialization."
-      },
-      {
-        "category": "metadataImagePath",
-        "missing": "No committed project metadata image is available for the V4 launch request.",
-        "resolve": "Commit the selected metadata image and record its repository-relative path.",
-        "verifiedAlternative": "Keep the metadata coverage unresolved and refuse source-bundle materialization."
       }
     ]
   },

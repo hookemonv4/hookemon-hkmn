@@ -1807,6 +1807,7 @@
       "packages/contracts/src/accounting/FeeAccounting.sol",
       "packages/contracts/src/market/CanonicalMarket.sol",
       "packages/contracts/src/access/MoneyRoles.sol",
+      "packages/contracts/src/launch/HKMNToken.sol",
       "packages/contracts/src/launch/HookemonIssuance.sol",
       "packages/contracts/src/bindings/RobinhoodBindings.sol",
       "packages/contracts/script/release/PhaseThreeReleasePlan.sol"

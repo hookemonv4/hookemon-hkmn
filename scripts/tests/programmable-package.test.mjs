@@ -471,6 +471,7 @@ test('derives the exact Phase 3 source coverage and refuses unresolved package i
     'packages/contracts/src/access/MoneyRoles.sol',
     'packages/contracts/src/accounting/FeeAccounting.sol',
     'packages/contracts/src/bindings/RobinhoodBindings.sol',
+    'packages/contracts/src/launch/HKMNToken.sol',
     'packages/contracts/src/launch/HookemonIssuance.sol',
     'packages/contracts/src/market/CanonicalMarket.sol',
   ]);
@@ -481,8 +482,25 @@ test('derives the exact Phase 3 source coverage and refuses unresolved package i
     'release/phase3/artifacts/token.json',
   ]);
   assert.equal(coverage.attestationEvidencePaths, null);
-  assert.equal(coverage.metadataImagePath, null);
-  assert.throws(() => buildPhaseThreeSourceBundle({ root, coverage }), /attestation evidence|metadata image/i);
+  assert.equal(coverage.metadataImagePath, 'release/phase3/metadata/hookemon-mark.png');
+  assert.deepEqual(coverage.unresolved.map((fact) => fact.category), ['attestationEvidencePaths']);
+  assert.throws(() => buildPhaseThreeSourceBundle({ root, coverage }), /attestation evidence/i);
+});
+
+test('regression: every selected graph target source path is covered by the declared source bundle (A-SOL-1)', () => {
+  // The graph/create-request select HKMNToken from packages/contracts/src/launch/HKMNToken.sol.
+  // A different file, HookemonIssuance.sol, also declares a contract named HKMNToken; the source
+  // bundle must still list the exact file the graph selected, not merely a same-named one.
+  const { request } = materializePhaseThreeCreateRequest({ root });
+  const coverage = derivePhaseThreeSourceBundleCoverage({ root });
+  const coveredPaths = new Set(coverage.sourcePaths);
+  for (const component of request.verificationBundle.components) {
+    assert.ok(
+      coveredPaths.has(component.sourcePath),
+      `verificationBundle component ${component.targetId} selects ${component.sourcePath}, which is missing from the declared source-bundle coverage`,
+    );
+  }
+  assert.ok(coveredPaths.has('packages/contracts/src/launch/HKMNToken.sol'));
 });
 
 test('records the provider statement that settles the V4 digest and nonce rules', () => {
