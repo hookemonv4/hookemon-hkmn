@@ -433,7 +433,7 @@ test('Operations Solana child refuses a transaction for a mismatched public iden
   }
 });
 
-test('keychain signer returns a structured broadcast refusal', async t => {
+test('keychain signer fails a broadcast operation instead of returning a success-shaped refusal', async t => {
   const keychain = await createTestKeychain(t);
   const result = await invokeSigner(keychain, {
     operation: 'broadcast',
@@ -441,8 +441,7 @@ test('keychain signer returns a structured broadcast refusal', async t => {
     account: 'operator-evm',
     payload: { signedTx: '0x' },
   });
-  assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), {
-    error: { code: 'broadcast_not_supported', message: 'broadcast is performed by the configured RPC client' },
-  });
+  assert.notEqual(result.code, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /broadcast is performed by the configured RPC client/);
 });
