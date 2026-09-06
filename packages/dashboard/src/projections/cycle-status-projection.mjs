@@ -1,6 +1,6 @@
 // Maps the runner's internal status projection (packages/runner/src/observability/
 // status-projection.mjs's `projectCycleStatus`) onto the website's public cycle-status contract
-// (contracts/public-cycle-status.mjs, schemaVersion 3). The internal projection is deliberately
+// (contracts/public-cycle-status.mjs, schemaVersion 5). The internal projection is deliberately
 // conservative — it carries a stage name and stage-completion counts for the active cycle, and
 // (only when the caller supplied `projectCycleStatus`'s optional `readAccounting` seam — see
 // routes/public.mjs's `ctx.readAccounting`, wired by compose.mjs to
@@ -20,11 +20,17 @@ import { normalizePublicCycleStatus } from '../contracts/public-cycle-status.mjs
  * @param {object} input.internalStatus - the object `projectCycleStatus` returns.
  * @param {{maxBoostersPerCycle: number}|null} [input.configuration] - the runner configuration
  *   supplied with the status projection. It sizes `maxBoostersPerCycle` for the public view.
- * @returns {object} a `PublicCycleStatus` (schemaVersion 3), already validated against
+ * @param {object|null} [input.schedulerView] - the frozen `SchedulerView` (see E-interface.json's
+ *   `scheduler.mjs#getView()`), passed straight through as `scheduler` when supplied. Omitted, a
+ *   conservative fallback is built from the fields this projection can already honestly derive
+ *   (`nextCycleAt`, `automationEnabled` from `configured`, `paused`, `pendingReason` from
+ *   `executionReason`) — `nextReconcileAt` stays `null` in that fallback, since only the real
+ *   scheduler knows a pending reconcile wakeup.
+ * @returns {object} a `PublicCycleStatus` (schemaVersion 6), already validated against
  *   `normalizePublicCycleStatus` — this function never returns a shape the website's own validator
  *   would reject.
  */
-export function buildPublicCycleStatus({ profileId, internalStatus, configuration = null }) {
+export function buildPublicCycleStatus({ profileId, internalStatus, configuration = null, schedulerView = null }) {
   const profile = readDashboardProfile(profileId);
   const generatedAt = internalStatus.generatedAt;
   const configured = internalStatus.intervalMinutes !== null;
@@ -37,7 +43,7 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
   const countdownSeconds = Math.ceil(Math.max(0, Date.parse(nextCycleAt) - Date.parse(generatedAt)) / 1_000);
 
   const status = {
-    schemaVersion: 3,
+    schemaVersion: 6,
     profile: profile.id,
     network: profile.network,
     executionState,
@@ -46,6 +52,15 @@ export function buildPublicCycleStatus({ profileId, internalStatus, configuratio
     nextCycleAt,
     countdownSeconds,
     cycle: internalStatus.activeCycle ? buildPublicActiveCycle(internalStatus.activeCycle, configuration) : null,
+    heldPositionCount: Array.isArray(internalStatus.heldPositions) ? internalStatus.heldPositions.length : 0,
+    heldPositions: Array.isArray(internalStatus.heldPositions) ? internalStatus.heldPositions : [],
+    scheduler: schedulerView ?? {
+      nextCycleAt,
+      nextReconcileAt: null,
+      automationEnabled: configured,
+      paused: internalStatus.paused,
+      pendingReason: executionReason,
+    },
   };
   return normalizePublicCycleStatus(status, profileId);
 }
