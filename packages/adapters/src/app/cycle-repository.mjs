@@ -7,7 +7,13 @@ import { lstat, open } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { DurableCycleStore, StateDirectoryLossError } from '../../../runner/src/cycle/durable-store.mjs';
-import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
+import {
+  assertBoundedCanonicalValue,
+  canonicalJson,
+  CycleJournal,
+  digest,
+  RECOVERY_LIMITS,
+} from '../../../runner/src/cycle/journal.mjs';
 import { isProcessRpcFinalizedErc20TransferProof } from '../robinhood-rpc.mjs';
 import { isProcessRpcRelayDestinationObservation } from '../solana-rpc.mjs';
 import { isProcessRpcOutboundRefundProof } from './stages/outbound.mjs';
@@ -19,6 +25,7 @@ import {
   attributeRelayLegSource,
   assertChainTransactionAttempt,
   assertCustodyLedger,
+  assertPackBatchRequest,
   CUSTODY_LEDGER_BUCKETS,
   assertCycleTerminalState,
   assertProviderMutationAttempt,
@@ -26,6 +33,7 @@ import {
   assertTypedAmount,
   assertReturnLegDestinationProof,
   OPERATIONAL_CYCLE_STAGES,
+  PACK_OPERATION_STAGES,
   RELAY_LEG_TERMINAL_STATES,
   transitionChainTransactionAttempt,
   transitionRelayLeg,
@@ -54,11 +62,19 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'held-position-owner-decision-recorded',
   'held-position-resolved',
   'supplementary-settlement-advanced',
+  'supplementary-chain-attempt-prepared',
+  'supplementary-chain-attempt-signed',
+  'supplementary-chain-attempt-broadcast',
+  'supplementary-chain-attempt-recovery-context-recorded',
 ]);
 const POST_COMPLETION_RECORD_KINDS = new Set([
   'held-position-owner-decision-recorded',
   'held-position-resolved',
   'supplementary-settlement-advanced',
+  'supplementary-chain-attempt-prepared',
+  'supplementary-chain-attempt-signed',
+  'supplementary-chain-attempt-broadcast',
+  'supplementary-chain-attempt-recovery-context-recorded',
 ]);
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const signedDecimalPattern = /^(?:0|[1-9][0-9]*|-[1-9][0-9]*)$/;
@@ -131,6 +147,10 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'completeStage',
   'completeCycle',
   'holdCycle',
+  'recordPackBatchIntent',
+  'readPackBatchIntent',
+  'recordPackBatchRequest',
+  'readPackBatchRequest',
   'recordHeldPosition',
   'recordHeldOwnerDecision',
   'resolveHeldPosition',
@@ -465,6 +485,60 @@ function assertStageName(stage, { allowLegacyRead = false } = {}) {
   throw new Error(`cycle-repository: unknown stage "${stage}"`);
 }
 
+const PACK_OPERATION_STAGE_SET = new Set(PACK_OPERATION_STAGES);
+const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
+
+function assertPackOperationStageName(stage) {
+  if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);
+}
+
+// Mirrors durable-store.mjs's own (module-private) paged-stage-evidence handle schema string --
+// the wire-format tag `persistPagedStageEvidence` stamps on the immutable handle it returns, which
+// this module journals verbatim in place of oversized stage evidence. Duplicated as a literal
+// because the handle is a versioned cross-module contract, not an implementation detail reached
+// into from here.
+const STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA = 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1';
+
+/** True only for the exact immutable handle completeStage journals in place of oversized evidence. */
+function isStageEvidencePageReference(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype
+    && value.schema === STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA;
+}
+
+/** Whether `value` fits one bounded journal-event payload unchanged (the journal's own limits). */
+function fitsBoundedJournalPayload(value) {
+  try {
+    assertBoundedCanonicalValue(value, 'stage evidence', {
+      objects: RECOVERY_LIMITS.payloadObjects,
+      arrays: RECOVERY_LIMITS.payloadArrays,
+      arrayItems: RECOVERY_LIMITS.payloadArrayItems,
+      aggregateBytes: RECOVERY_LIMITS.payloadAggregateBytes,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertPackBatchIntent(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== 4
+    || !Object.hasOwn(value, 'quantity') || !Object.hasOwn(value, 'packType') || !Object.hasOwn(value, 'expectedCardCountPerPack')
+    || !Object.hasOwn(value, 'playerAddress')) {
+    throw new Error(`${label} must use the exact schema`);
+  }
+  if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error(`${label} quantity is invalid`);
+  if (value.packType !== null && (typeof value.packType !== 'string' || !packTypeFieldPattern.test(value.packType))) {
+    throw new Error(`${label} packType is invalid`);
+  }
+  if (!Number.isInteger(value.expectedCardCountPerPack) || value.expectedCardCountPerPack < 1) {
+    throw new Error(`${label} expectedCardCountPerPack is invalid`);
+  }
+  const playerAddress = assertHeldPositionText(value.playerAddress, `${label}.playerAddress`);
+  return { quantity: value.quantity, packType: value.packType, expectedCardCountPerPack: value.expectedCardCountPerPack, playerAddress };
+}
+
 function assertPagedPayoutStage(stage) {
   if (stage === 'payout' || (typeof stage === 'string' && supplementaryPayoutPagedStagePattern.test(stage))) {
     return stage;
@@ -519,6 +593,96 @@ function custodyLedgerKey(ledger) {
 
 function chainAttemptKey(stage, requestDigest) {
   return `${stage}\u0000${requestDigest}`;
+}
+
+const SUPPLEMENTARY_CHAIN_ATTEMPT_SCHEMA = 'hookemon.supplementary-chain-attempt.v1';
+const SUPPLEMENTARY_CHAIN_ATTEMPT_STATE_SET = new Set(['PREPARED', 'SIGNED', 'BROADCAST']);
+
+function supplementaryChainAttemptKey(positionId, requestDigest) {
+  return positionId + '|' + requestDigest;
+}
+
+/**
+ * A position-scoped analogue of the ordinary chainAttempts (prepareChainTransactionAttempt /
+ * recordSignedTransaction / recordBroadcast) state machine, for a supplementary settlement's own
+ * resale/return/payout transactions. Deliberately a separate schema and a separate keyspace
+ * (positionId, never a cycle's stage name) rather than reusing hookemon.chain-transaction-attempt.v1
+ * -- that frozen contract's `stage` field is validated against the fixed OPERATIONAL_CYCLE_STAGES
+ * enum everywhere it is consumed (money-schemas.mjs, dashboard, runner), so it structurally cannot
+ * accept a per-position identifier without loosening a much more central contract. Reusing the
+ * *transition rules* (PREPARED -> SIGNED -> BROADCAST) while keying by positionId instead avoids
+ * any collision with a main cycle's own buyback/return chain attempts under the same cycleId.
+ */
+function assertSupplementaryChainAttempt(value, label) {
+  exactObject(value, ['schema', 'positionId', 'requestDigest', 'state', 'rawBytes', 'nonce', 'blockhash', 'hash'], label);
+  if (value.schema !== SUPPLEMENTARY_CHAIN_ATTEMPT_SCHEMA) throw new Error(label + ' schema is invalid');
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(label + ' positionId is invalid');
+  }
+  if (typeof value.requestDigest !== 'string' || !digestPattern.test(value.requestDigest)) {
+    throw new Error(label + ' requestDigest is invalid');
+  }
+  if (!SUPPLEMENTARY_CHAIN_ATTEMPT_STATE_SET.has(value.state)) throw new Error(label + ' state is invalid');
+  if (value.state === 'PREPARED') {
+    if (value.rawBytes !== null || value.nonce !== null || value.blockhash !== null || value.hash !== null) {
+      throw new Error(label + ' prepared state cannot contain signing material');
+    }
+  } else {
+    if (typeof value.rawBytes !== 'string' || value.rawBytes.length === 0) throw new Error(label + ' rawBytes is invalid');
+    if ((value.nonce === null) === (value.blockhash === null)) throw new Error(label + ' requires exactly one nonce or blockhash');
+    if (value.nonce !== null && (typeof value.nonce !== 'string' || !decimalPattern.test(value.nonce))) throw new Error(label + ' nonce is invalid');
+    if (value.blockhash !== null && (typeof value.blockhash !== 'string' || value.blockhash.length === 0)) throw new Error(label + ' blockhash is invalid');
+    if (typeof value.hash !== 'string' || value.hash.length === 0) throw new Error(label + ' hash is invalid');
+  }
+  return structuredClone(value);
+}
+
+function transitionSupplementaryChainAttempt(value, nextState, evidence) {
+  if (evidence === undefined) evidence = {};
+  const permitted = { PREPARED: new Set(['SIGNED']), SIGNED: new Set(['BROADCAST']), BROADCAST: new Set() };
+  if (!permitted[value.state].has(nextState)) throw new Error('supplementary chain transaction attempt transition is invalid');
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    throw new Error('supplementary chain transaction attempt transition evidence is invalid');
+  }
+  const evidenceKeys = Object.keys(evidence).sort();
+  if (value.state === 'PREPARED') {
+    const signingKeys = ['blockhash', 'hash', 'nonce', 'rawBytes'];
+    if (evidenceKeys.length !== signingKeys.length || evidenceKeys.some((key, index) => key !== signingKeys[index])) {
+      throw new Error('supplementary chain transaction attempt signing evidence is invalid');
+    }
+  } else if (evidenceKeys.length !== 0) {
+    throw new Error('supplementary chain transaction attempt transition evidence is immutable after signing');
+  }
+  return assertSupplementaryChainAttempt(Object.assign({}, value, evidence, { state: nextState }), 'supplementary chain transaction attempt');
+}
+
+/**
+ * Minimal recovery binding for a supplementary chain attempt's signed bytes: proves which exact
+ * signed-bytes hash a durable, caller-defined recovery blob belongs to, so a restart can recover
+ * (or refuse to recover) the same signed attempt rather than re-signing. Unlike the ordinary
+ * chain-attempt recovery context, this does not itself model B's transaction-policy fencing/
+ * approval fields -- a supplementary handler that needs those uses B's own
+ * recoverTransactionPolicyApproval/Broadcast API directly and stores whatever it needs to recover
+ * that call inside `context`, which this store treats as an opaque bounded value.
+ */
+function assertSupplementaryChainAttemptRecoveryContext(value, label) {
+  exactObject(value, ['positionId', 'requestDigest', 'rawSignedBytesHash', 'context'], label);
+  if (typeof value.positionId !== 'string' || !heldPositionIdPattern.test(value.positionId)) {
+    throw new Error(label + ' positionId is invalid');
+  }
+  if (typeof value.requestDigest !== 'string' || !digestPattern.test(value.requestDigest)) {
+    throw new Error(label + ' requestDigest is invalid');
+  }
+  if (typeof value.rawSignedBytesHash !== 'string' || value.rawSignedBytesHash.length === 0 || value.rawSignedBytesHash.length > 512) {
+    throw new Error(label + ' rawSignedBytesHash is invalid');
+  }
+  assertBoundedCanonicalValue(value.context, label + ' context', {
+    objects: RECOVERY_LIMITS.payloadObjects,
+    arrays: RECOVERY_LIMITS.payloadArrays,
+    arrayItems: RECOVERY_LIMITS.payloadArrayItems,
+    aggregateBytes: RECOVERY_LIMITS.payloadAggregateBytes,
+  });
+  return structuredClone(value);
 }
 
 function payoutAssetKey(amount) {
@@ -1510,6 +1674,31 @@ function evidenceDigest(domain, cycleId, stage, evidence) {
   return digest({ domain, cycleId, stage, evidence: cloneEvidence(evidence, `${domain} evidence`) });
 }
 
+/**
+ * `terminalAtMs`/`completedAtMs` were added after this event kind shipped. A stored entry from
+ * before that change legitimately omits it; a new one always carries it. Never fabricated from an
+ * HTTP request time -- only from this repository's own clock at the moment of the durable write.
+ */
+function assertOptionalTerminalAtMs(value, label) {
+  if (value === undefined) return null;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} terminalAtMs is invalid`);
+  return value;
+}
+
+function assertTerminalPayloadShape(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error(`${label} must be a plain object`);
+  }
+  canonicalJson(value);
+  const keys = Object.keys(value);
+  const required = ['terminalState', 'evidence'];
+  const hasRequired = required.every(field => Object.hasOwn(value, field));
+  const extra = keys.filter(key => !required.includes(key));
+  if (!hasRequired || (extra.length > 0 && (extra.length > 1 || extra[0] !== 'terminalAtMs'))) {
+    throw new Error(`${label} must use the exact schema`);
+  }
+}
+
 function exactObject(value, fields, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new Error(`${label} must be a plain object`);
@@ -2337,11 +2526,17 @@ export class CycleRepository {
     const payoutDustConsumptions = new Map();
     const payoutQuarantines = new Map();
     const evmNonceLocks = new Map();
+    const packBatchRequests = new Map();
+    const packBatchIntents = new Map();
+    const supplementaryChainAttempts = new Map();
+    const supplementaryChainAttemptRecoveryContexts = new Map();
     const replayState = {
       stages,
       preparedStages,
       operationalAttempts,
       chainAttempts,
+      supplementaryChainAttempts,
+      supplementaryChainAttemptRecoveryContexts,
       relayLegs,
       standingAuthorityDecisions,
       walletNonceReservations,
@@ -2355,12 +2550,15 @@ export class CycleRepository {
       payoutDustConsumptions,
       payoutQuarantines,
       evmNonceLocks,
+      packBatchRequests,
+      packBatchIntents,
     };
     let completed = false;
     let terminalState = null;
     let heldEvidenceDigest = null;
     let ownerDecision = null;
     let terminalEvidence = null;
+    let terminalAtMs = null;
     let releaseAmount = null;
     let mode = null;
     let providerMode = null;
@@ -2420,6 +2618,30 @@ export class CycleRepository {
           throw new Error(`stored stage "${entry.payload.stage}" has conflicting completion evidence`);
         }
         stages.set(entry.payload.stage, { status: 'COMPLETE', evidence: entry.payload.evidence });
+      } else if (entry.kind === 'pack-batch-intent-recorded') {
+        assertPackOperationStageName(entry.payload.stage);
+        const intent = assertPackBatchIntent(entry.payload.intent, 'stored pack batch intent');
+        if (!Number.isSafeInteger(entry.payload.recordedAtMs) || entry.payload.recordedAtMs < 0) {
+          throw new Error('stored pack batch intent recordedAtMs is invalid');
+        }
+        const record = { recordedAtMs: entry.payload.recordedAtMs, intent };
+        const previous = packBatchIntents.get(entry.payload.stage);
+        if (previous && canonicalJson(previous.intent) !== canonicalJson(intent)) {
+          throw new Error(`stored pack batch intent for "${entry.payload.stage}" has conflicting fields`);
+        }
+        if (!previous) packBatchIntents.set(entry.payload.stage, record);
+      } else if (entry.kind === 'pack-batch-request-recorded') {
+        assertPackOperationStageName(entry.payload.stage);
+        const packs = assertPackBatchRequest(entry.payload.packs, 'stored pack batch request');
+        if (!Number.isSafeInteger(entry.payload.requestedAtMs) || entry.payload.requestedAtMs < 0) {
+          throw new Error('stored pack batch request requestedAtMs is invalid');
+        }
+        const record = { requestedAtMs: entry.payload.requestedAtMs, packs };
+        const previous = packBatchRequests.get(entry.payload.stage);
+        if (previous && canonicalJson(previous.packs) !== canonicalJson(packs)) {
+          throw new Error(`stored pack batch request for "${entry.payload.stage}" has conflicting packs`);
+        }
+        if (!previous) packBatchRequests.set(entry.payload.stage, record);
       } else if (entry.kind === 'stage-attempted') {
         const attemptIndex = attemptCounts.get(entry.payload.stage) ?? 0;
         attempts.set(entry.payload.stage, { evidence: entry.payload.evidence, attemptIndex, failed: false });
@@ -2573,6 +2795,49 @@ export class CycleRepository {
           throw new Error('stored chain attempt recovery context conflicts with prior context');
         }
         chainAttemptRecoveryContexts.set(key, context);
+      } else if (entry.kind === 'supplementary-chain-attempt-prepared') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        if (attempt.state !== 'PREPARED' || supplementaryChainAttempts.has(key)) {
+          throw new Error('stored supplementary chain transaction preparation is invalid');
+        }
+        supplementaryChainAttempts.set(key, { attempt, broadcastEvidence: null });
+      } else if (entry.kind === 'supplementary-chain-attempt-signed') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        const previous = supplementaryChainAttempts.get(key);
+        if (!previous || previous.attempt.state !== 'PREPARED' || attempt.state !== 'SIGNED') {
+          throw new Error('stored supplementary chain transaction signing transition is invalid');
+        }
+        const expected = transitionSupplementaryChainAttempt(previous.attempt, 'SIGNED', {
+          rawBytes: attempt.rawBytes, nonce: attempt.nonce, blockhash: attempt.blockhash, hash: attempt.hash,
+        });
+        if (canonicalJson(attempt) !== canonicalJson(expected)) {
+          throw new Error('stored supplementary chain transaction signing material is invalid');
+        }
+        supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt }));
+      } else if (entry.kind === 'supplementary-chain-attempt-broadcast') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        const previous = supplementaryChainAttempts.get(key);
+        const broadcastEvidence = cloneChainObservationEvidence(entry.payload.evidence, 'stored supplementary chain transaction broadcast evidence');
+        if (!previous || previous.attempt.state !== 'SIGNED' || attempt.state !== 'BROADCAST'
+          || canonicalJson(attempt) !== canonicalJson(transitionSupplementaryChainAttempt(previous.attempt, 'BROADCAST'))) {
+          throw new Error('stored supplementary chain transaction broadcast transition is invalid');
+        }
+        supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt, broadcastEvidence }));
+      } else if (entry.kind === 'supplementary-chain-attempt-recovery-context-recorded') {
+        const context = assertSupplementaryChainAttemptRecoveryContext(entry.payload.context, 'stored supplementary chain attempt recovery context');
+        const key = supplementaryChainAttemptKey(context.positionId, context.requestDigest);
+        const chain = supplementaryChainAttempts.get(key);
+        if (!chain || !['SIGNED', 'BROADCAST'].includes(chain.attempt.state) || chain.attempt.hash !== context.rawSignedBytesHash) {
+          throw new Error('stored supplementary chain attempt recovery context does not bind signed bytes');
+        }
+        const previous = supplementaryChainAttemptRecoveryContexts.get(key);
+        if (previous && canonicalJson(previous) !== canonicalJson(context)) {
+          throw new Error('stored supplementary chain attempt recovery context conflicts with prior context');
+        }
+        supplementaryChainAttemptRecoveryContexts.set(key, context);
       } else if (entry.kind === 'relay-leg-recorded') {
         const leg = assertRelayLeg(entry.payload.leg, 'stored Relay leg');
         const key = relayLegKey(leg.relayRequestId);
@@ -2868,9 +3133,10 @@ export class CycleRepository {
         }
         evmNonceLocks.set(key, { ...previous, state: 'RELEASED', journalHead: entry.digest });
       } else if (entry.kind === 'cycle-terminal') {
-        exactObject(entry.payload, ['terminalState', 'evidence'], 'stored cycle terminal state');
+        assertTerminalPayloadShape(entry.payload, 'stored cycle terminal state');
         terminalState = assertCycleTerminalState(entry.payload.terminalState, 'stored cycle terminal state');
         terminalEvidence = cloneEvidence(entry.payload.evidence, 'stored cycle terminal evidence');
+        terminalAtMs = assertOptionalTerminalAtMs(entry.payload.terminalAtMs, 'stored cycle terminal state');
         if (terminalState === HELD_OWNER_DECISION) {
           heldEvidenceDigest = heldOwnerDecisionEvidenceDigest(cycleId, entry.payload.evidence);
         }
@@ -2888,9 +3154,13 @@ export class CycleRepository {
         if (ownerDecision !== null) throw new Error('stored cycle has a second held owner decision');
         ownerDecision = decision;
       } else if (entry.kind === 'cycle-completed') {
+        if (Object.keys(entry.payload).length > 1 || (Object.keys(entry.payload).length === 1 && !Object.hasOwn(entry.payload, 'completedAtMs'))) {
+          throw new Error('stored cycle-completed event must use the exact schema');
+        }
         assertCycleClosure(replayState);
         completed = true;
         terminalState = 'COMPLETED';
+        terminalAtMs = assertOptionalTerminalAtMs(entry.payload.completedAtMs, 'stored cycle-completed event');
       }
     }
     return {
@@ -2906,6 +3176,8 @@ export class CycleRepository {
       attemptCounts,
       operationalAttempts,
       chainAttempts,
+      supplementaryChainAttempts,
+      supplementaryChainAttemptRecoveryContexts,
       relayLegs,
       standingAuthorityDecisions,
       walletNonceReservations,
@@ -2919,11 +3191,14 @@ export class CycleRepository {
       payoutDustConsumptions,
       payoutQuarantines,
       evmNonceLocks,
+      packBatchRequests,
+      packBatchIntents,
       completed,
       terminalState,
       heldEvidenceDigest,
       ownerDecision,
       terminalEvidence,
+      terminalAtMs,
       archived,
       version: stored.version,
       journalHead: stored.journalHead,
@@ -3018,7 +3293,7 @@ export class CycleRepository {
         ...(state.rehearsalSessionId === null ? {} : { rehearsalSessionId: state.rehearsalSessionId }),
       };
       return state.terminalState
-        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState }
+        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState, terminalAtMs: state.terminalAtMs }
         : { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile };
     }
     return null;
@@ -3065,7 +3340,42 @@ export class CycleRepository {
   async readStage(cycleId, stage) {
     assertStageName(stage, { allowLegacyRead: true });
     const state = await this.#replay(cycleId);
-    return state.stages.get(stage) ?? { status: 'PENDING' };
+    const stored = state.stages.get(stage) ?? { status: 'PENDING' };
+    if (stored.status !== 'COMPLETE') return stored;
+    const evidence = await this.#resolveStageEvidence(cycleId, stage, stored.evidence);
+    return evidence === stored.evidence ? stored : { status: 'COMPLETE', evidence };
+  }
+
+  /**
+   * Reconstructs oversized stage evidence from durable paged storage when `storedEvidence` is the
+   * immutable handle `persistPagedStageEvidence` returned at completion time; returns
+   * `storedEvidence` unchanged otherwise. Passing the handle back in as `readPagedStageEvidence`'s
+   * `expected` argument makes a missing blob, an identity mismatch, or a manifest that no longer
+   * matches this exact handle a hard failure there -- never a silent `null` -- so absence and
+   * corruption stay distinct recovery facts.
+   */
+  async #resolveStageEvidence(cycleId, stage, storedEvidence) {
+    if (!isStageEvidencePageReference(storedEvidence)) return storedEvidence;
+    const wrapped = await this.#store.readPagedStageEvidence(cycleId, stage, storedEvidence);
+    return wrapped.evidence;
+  }
+
+  /**
+   * Evidence that fits one bounded journal payload is returned unchanged. Oversized evidence (for
+   * example a real eligibility-snapshot manifest with more holders than the journal's 64-item
+   * array bound admits) is persisted through the durable paged-stage-evidence store first, wrapped
+   * as `{cycleId, evidence}` to satisfy that store's own cycleId-binding requirement without
+   * altering the evidence shape callers of readStage/completeStage see back. Only the immutable,
+   * content-addressed handle `persistPagedStageEvidence` returns is journaled -- the handle commits
+   * only after the blob is durable, a same-payload retry reuses it, and a differently-shaped retry
+   * for the same (cycleId, stage) is rejected by the store itself before any reference is journaled.
+   */
+  async #preparePagedStageEvidence(cycleId, stage, evidence) {
+    if (fitsBoundedJournalPayload(evidence)) return evidence;
+    if (typeof this.#store.persistPagedStageEvidence !== 'function' || typeof this.#store.readPagedStageEvidence !== 'function') {
+      throw new Error(`cycle-repository completeStage: stage "${stage}" evidence exceeds the bounded journal payload and this store has no paged-stage-evidence support`);
+    }
+    return this.#store.persistPagedStageEvidence(cycleId, stage, { cycleId, evidence: structuredClone(evidence) });
   }
 
   async prepareStage(cycleId, stage) {
@@ -3090,14 +3400,16 @@ export class CycleRepository {
     }
     const current = state.stages.get(stage) ?? { status: 'PENDING' };
     if (current.status === 'COMPLETE') {
-      if (canonicalJson(current.evidence) !== canonicalJson(evidence)) {
+      const currentEvidence = await this.#resolveStageEvidence(cycleId, stage, current.evidence);
+      if (canonicalJson(currentEvidence) !== canonicalJson(evidence)) {
         throw new Error(`cycle-repository completeStage: stage "${stage}" was already completed with different evidence`);
       }
       return; // idempotent retry
     }
     assertPreparedOrderedCompletion(state, stage);
     assertReconciledCompletion(state, stage, evidence);
-    await this.#append(cycleId, 'stage-completed', { stage, evidence }, {
+    const storedEvidence = await this.#preparePagedStageEvidence(cycleId, stage, evidence);
+    await this.#append(cycleId, 'stage-completed', { stage, evidence: storedEvidence }, {
       operation: 'completeStage',
       assertState: currentState => {
         const latest = currentState.stages.get(stage) ?? { status: 'PENDING' };
@@ -3117,7 +3429,7 @@ export class CycleRepository {
     }
     if (!state.completed) {
       assertCycleClosure(state);
-      await this.#append(cycleId, 'cycle-completed', {}, {
+      await this.#append(cycleId, 'cycle-completed', { completedAtMs: currentRepositoryTime(this.#now) }, {
         operation: 'completeCycle',
         assertState: assertCycleClosure,
       });
@@ -3160,12 +3472,96 @@ export class CycleRepository {
     await this.#append(cycleId, 'cycle-terminal', {
       terminalState,
       evidence: cloneEvidence(evidence, 'cycle terminal evidence'),
+      terminalAtMs: currentRepositoryTime(this.#now),
     }, {
       assertState: currentState => {
         if (currentState.terminalState) throw new Error('cycle-repository holdCycle terminal state changed while recording hold');
       },
       assertLease,
     });
+  }
+
+  /**
+   * Durably persists the exact quantity and pack code this cycle is about to request from a
+   * batch provider call, before that call is ever made. This is the pre-call counterpart to
+   * `recordPackBatchRequest`: an operator recovering a cycle whose batch call's response was
+   * lost with no memo at all still has a durable, human-readable record of what was attempted
+   * (cycle, quantity, pack code) to reconcile against provider support, rather than only the
+   * generic stage-attempt's opaque request digest.
+   */
+  async recordPackBatchIntent(cycleId, stage, intentValue) {
+    assertPackOperationStageName(stage);
+    const intent = assertPackBatchIntent(intentValue, `${stage} pack batch intent`);
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordPackBatchIntent: cycle is terminal as ${state.terminalState}`);
+    }
+    const existing = state.packBatchIntents.get(stage);
+    if (existing) {
+      if (canonicalJson(existing.intent) === canonicalJson(intent)) return structuredClone(existing);
+      throw new Error(`cycle-repository recordPackBatchIntent: stage "${stage}" already has a different pack batch intent`);
+    }
+    const recordedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'pack-batch-intent-recorded', { stage, intent, recordedAtMs }, {
+      operation: 'recordPackBatchIntent',
+      assertState: currentState => {
+        const latest = currentState.packBatchIntents.get(stage);
+        if (latest && canonicalJson(latest.intent) !== canonicalJson(intent)) {
+          throw new Error(`cycle-repository recordPackBatchIntent: stage "${stage}" changed while recording the pack batch intent`);
+        }
+      },
+    });
+    const latest = await this.#replay(cycleId);
+    return structuredClone(latest.packBatchIntents.get(stage));
+  }
+
+  /** @returns {Promise<{recordedAtMs: number, intent: {quantity: number, packType: string|null, expectedCardCountPerPack: number, playerAddress: string}}|null>} */
+  async readPackBatchIntent(cycleId, stage) {
+    assertPackOperationStageName(stage);
+    const state = await this.#replay(cycleId);
+    const record = state.packBatchIntents.get(stage);
+    return record ? structuredClone(record) : null;
+  }
+
+  /**
+   * Durably persists every pack a single batch provider call generated (memo, expected card
+   * count, pack type) before any transaction is signed. Idempotent for the exact same batch:
+   * this is the sole guard against re-issuing a batch purchase whose response was lost after the
+   * provider already committed it. A stage may record at most one batch (bounded to
+   * `MAXIMUM_PACK_BATCH_SIZE` packs by the shared journal payload limit).
+   */
+  async recordPackBatchRequest(cycleId, stage, packsValue) {
+    assertPackOperationStageName(stage);
+    const packs = assertPackBatchRequest(packsValue, `${stage} pack batch request`);
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordPackBatchRequest: cycle is terminal as ${state.terminalState}`);
+    }
+    const existing = state.packBatchRequests.get(stage);
+    if (existing) {
+      if (canonicalJson(existing.packs) === canonicalJson(packs)) return structuredClone(existing);
+      throw new Error(`cycle-repository recordPackBatchRequest: stage "${stage}" already has a different pack batch`);
+    }
+    const requestedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'pack-batch-request-recorded', { stage, packs, requestedAtMs }, {
+      operation: 'recordPackBatchRequest',
+      assertState: currentState => {
+        const latest = currentState.packBatchRequests.get(stage);
+        if (latest && canonicalJson(latest.packs) !== canonicalJson(packs)) {
+          throw new Error(`cycle-repository recordPackBatchRequest: stage "${stage}" changed while recording the pack batch`);
+        }
+      },
+    });
+    const latest = await this.#replay(cycleId);
+    return structuredClone(latest.packBatchRequests.get(stage));
+  }
+
+  /** @returns {Promise<{requestedAtMs: number, packs: Array<{packIndex: number, memo: string, expectedCardCount: number, packType: string|null}>}|null>} */
+  async readPackBatchRequest(cycleId, stage) {
+    assertPackOperationStageName(stage);
+    const state = await this.#replay(cycleId);
+    const record = state.packBatchRequests.get(stage);
+    return record ? structuredClone(record) : null;
   }
 
   /**
@@ -3332,6 +3728,160 @@ export class CycleRepository {
     for (const { state } of await this.#knownStates()) {
       const evidence = state.supplementarySettlementEvidence.get(positionId) ?? null;
       if (evidence !== null) return structuredClone(evidence);
+    }
+    return null;
+  }
+
+  async #supplementarySettlementLocation(positionId, operation) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error(`cycle-repository ${operation}: positionId is invalid`);
+    }
+    const locations = await this.#knownStates();
+    const location = locations.find(({ state }) => state.supplementarySettlements.has(positionId)) ?? null;
+    if (location === null) throw new Error(`cycle-repository ${operation}: settlement is unknown`);
+    if (location.state.archived) throw new Error(`cycle-repository ${operation}: archived settlement requires recovery`);
+    return location;
+  }
+
+  /**
+   * Position-scoped pre-send write-ahead record for a supplementary settlement's own resale/
+   * return/payout transaction -- the same "durable before the provider call" guarantee
+   * prepareChainTransactionAttempt gives an ordinary stage, keyed by positionId instead so it can
+   * never collide with the main cycle's own chain attempts for the identical cycleId.
+   */
+  async prepareSupplementaryChainTransactionAttempt(positionId, attemptValue) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'prepareSupplementaryChainTransactionAttempt');
+    const attempt = assertSupplementaryChainAttempt(attemptValue, 'supplementary chain transaction attempt');
+    if (attempt.positionId !== positionId || attempt.state !== 'PREPARED') {
+      throw new Error('cycle-repository prepareSupplementaryChainTransactionAttempt attempt does not match its position');
+    }
+    const key = supplementaryChainAttemptKey(positionId, attempt.requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (current) {
+      if (canonicalJson(current.attempt) !== canonicalJson(attempt)) {
+        throw new Error(`cycle-repository prepareSupplementaryChainTransactionAttempt: request "${attempt.requestDigest}" already has an attempt`);
+      }
+      return structuredClone(current);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-prepared', { attempt }, {
+      assertState: currentState => {
+        if (currentState.supplementaryChainAttempts.has(key)) {
+          throw new Error(`cycle-repository prepareSupplementaryChainTransactionAttempt: request "${attempt.requestDigest}" already has an attempt`);
+        }
+      },
+    });
+    return { attempt, broadcastEvidence: null };
+  }
+
+  /** @returns {Promise<{attempt: object, broadcastEvidence: object|null}|null>} */
+  async readSupplementaryChainTransactionAttempt(positionId, requestDigest) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readSupplementaryChainTransactionAttempt: positionId is invalid');
+    }
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    for (const { state } of await this.#knownStates()) {
+      const current = state.supplementaryChainAttempts.get(key);
+      if (current) return structuredClone(current);
+    }
+    return null;
+  }
+
+  async recordSupplementarySignedTransaction(positionId, requestDigest, signingMaterial) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'recordSupplementarySignedTransaction');
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (!current) throw new Error(`cycle-repository recordSupplementarySignedTransaction: no prepared attempt for "${requestDigest}"`);
+    const prepared = { ...current.attempt, state: 'PREPARED', rawBytes: null, nonce: null, blockhash: null, hash: null };
+    const signed = transitionSupplementaryChainAttempt(prepared, 'SIGNED', signingMaterial);
+    if (current.attempt.state === 'SIGNED') {
+      if (canonicalJson(current.attempt) !== canonicalJson(signed)) {
+        throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" already has different signing material`);
+      }
+      return structuredClone(current);
+    }
+    if (current.attempt.state !== 'PREPARED') {
+      throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" is already broadcast and cannot be re-signed`);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-signed', { attempt: signed }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttempts.get(key);
+        if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)) {
+          throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" changed while recording signing material`);
+        }
+      },
+    });
+    return { ...current, attempt: signed };
+  }
+
+  async recordSupplementaryBroadcast(positionId, requestDigest, evidence) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'recordSupplementaryBroadcast');
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (!current) throw new Error(`cycle-repository recordSupplementaryBroadcast: no signed attempt for "${requestDigest}"`);
+    const broadcastEvidence = cloneChainObservationEvidence(evidence, 'supplementary chain transaction broadcast evidence');
+    if (current.attempt.state === 'BROADCAST') {
+      if (canonicalJson(current.broadcastEvidence) !== canonicalJson(broadcastEvidence)) {
+        throw new Error(`cycle-repository recordSupplementaryBroadcast: "${requestDigest}" already has different broadcast evidence`);
+      }
+      return structuredClone(current);
+    }
+    const attempt = transitionSupplementaryChainAttempt(current.attempt, 'BROADCAST');
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-broadcast', { attempt, evidence: broadcastEvidence }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttempts.get(key);
+        if (!latest || latest.attempt.state !== 'SIGNED') {
+          throw new Error(`cycle-repository recordSupplementaryBroadcast: "${requestDigest}" changed while recording the broadcast`);
+        }
+      },
+    });
+    return { attempt, broadcastEvidence };
+  }
+
+  /**
+   * Durably binds a caller-defined, bounded recovery blob to the exact signed-bytes hash of a
+   * SIGNED or BROADCAST supplementary chain attempt -- the position-scoped counterpart to
+   * persistChainAttemptRecoveryContext, for a handler (e.g. supplementary-buyback.mjs) that needs
+   * to recover its own provider-specific approval/recovery state after a restart rather than
+   * re-signing. Idempotent for an identical retry; rejects a conflicting one.
+   */
+  async persistSupplementaryChainAttemptRecoveryContext(positionId, contextValue) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'persistSupplementaryChainAttemptRecoveryContext');
+    const context = assertSupplementaryChainAttemptRecoveryContext(contextValue, 'supplementary chain attempt recovery context');
+    if (context.positionId !== positionId) {
+      throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext context does not match its position');
+    }
+    const attemptKey = supplementaryChainAttemptKey(positionId, context.requestDigest);
+    const chain = location.state.supplementaryChainAttempts.get(attemptKey);
+    if (!chain || !['SIGNED', 'BROADCAST'].includes(chain.attempt.state) || chain.attempt.hash !== context.rawSignedBytesHash) {
+      throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext: context does not bind signed bytes');
+    }
+    const key = attemptKey;
+    const existing = location.state.supplementaryChainAttemptRecoveryContexts.get(key);
+    if (existing) {
+      if (canonicalJson(existing) !== canonicalJson(context)) {
+        throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext: conflicts with prior context');
+      }
+      return structuredClone(existing);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-recovery-context-recorded', { context }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttemptRecoveryContexts.get(key);
+        if (latest && canonicalJson(latest) !== canonicalJson(context)) {
+          throw new Error('cycle-repository persistSupplementaryChainAttemptRecoveryContext: conflicts with prior context');
+        }
+      },
+    });
+    return structuredClone(context);
+  }
+
+  async readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest) {
+    if (typeof positionId !== 'string' || !heldPositionIdPattern.test(positionId)) {
+      throw new Error('cycle-repository readSupplementaryChainAttemptRecoveryContext: positionId is invalid');
+    }
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    for (const { state } of await this.#knownStates()) {
+      const context = state.supplementaryChainAttemptRecoveryContexts.get(key);
+      if (context) return structuredClone(context);
     }
     return null;
   }

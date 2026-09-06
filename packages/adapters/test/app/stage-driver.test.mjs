@@ -226,7 +226,7 @@ test('limits held-position persistence to card-stage reconciliation', async () =
   });
   const attempts = new Map([
     ['open', sentUnknown('open')],
-    ['purchase', sentUnknown('purchase')],
+    ['return', sentUnknown('return')],
   ]);
   const repository = fakeCycleRepository(new Map(), '0', attempts);
   let heldWrites = 0;
@@ -263,7 +263,7 @@ test('limits held-position persistence to card-stage reconciliation', async () =
           return { decision: 'held' };
         },
       },
-      purchase: {
+      return: {
         async probe() { return null; },
         async prepareRequest() { return { request: 'unused' }; },
         async mutate() { throw new Error('reconciliation must not mutate'); },
@@ -277,7 +277,7 @@ test('limits held-position persistence to card-stage reconciliation', async () =
   });
 
   await driver.reconcile({ cycleId: CYCLE_ID, stage: 'open', nowMs: 1_000 });
-  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'purchase', nowMs: 1_000 });
+  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'return', nowMs: 1_000 });
   assert.equal(heldWrites, 1);
   assert.equal(wholeCycleHolds, 1);
 });
@@ -450,6 +450,117 @@ test('rejects supplementary handler injection outside the Node test runner', () 
       }),
       /available only from the Node test runner/,
     );
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
+});
+
+test('productionSupplementaryStageHandlers requires its own real adapters and signer client', () => {
+  assert.throws(
+    () => createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: fakeCycleRepository(),
+      productionSupplementaryStageHandlers: { PREPARED: { stage: 'supplementary-buyback', async reconcile() {} } },
+    }),
+    /requires supplementaryAdapters and supplementarySignerClient/,
+  );
+});
+
+test('productionSupplementaryStageHandlers cannot be combined with the Node-test-only seam', () => {
+  assert.throws(
+    () => createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: fakeCycleRepository(),
+      supplementaryStageHandlers: {},
+      supplementaryAdapters: {},
+      supplementarySignerClient: {},
+      productionSupplementaryStageHandlers: { PREPARED: { stage: 'supplementary-buyback', async reconcile() {} } },
+    }),
+    /cannot combine productionSupplementaryStageHandlers with the Node-test-only supplementaryStageHandlers seam/,
+  );
+});
+
+test('productionSupplementaryStageHandlers dispatches outside the Node test runner with real capabilities, unrestricted to observation-only', async () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    const position = {
+      positionId: `held:${'f'.repeat(64)}`,
+      cycleId: CYCLE_ID,
+      packId: 'base-pack',
+      memo: 'memo-supplementary-production',
+      mint: 'mint-supplementary-production',
+      cardRef: 'mint-supplementary-production',
+      costMicroUsdg: '25',
+      insuredValue: null,
+      reason: 'EPIC_THRESHOLD',
+      terminalState: 'HELD_OWNER_DECISION',
+      evidenceDigest: `sha256:${'1'.repeat(64)}`,
+      openedAtMs: 1_000,
+      ownerDecision: { choice: 'sell' },
+      resolution: null,
+    };
+    let settlement = {
+      positionId: position.positionId,
+      cycleId: CYCLE_ID,
+      manifestId: `${CYCLE_ID}:supplementary:3`,
+      state: 'PREPARED',
+      positionEvidenceDigest: position.evidenceDigest,
+    };
+    const repository = fakeCycleRepository();
+    repository.readSupplementarySettlement = async () => structuredClone(settlement);
+    repository.advanceSupplementarySettlement = async (positionId, input) => {
+      settlement = { ...settlement, state: input.nextState };
+      return structuredClone(settlement);
+    };
+    const productionAdapters = Object.freeze({ collectorCrypt: { async buyback() { return { signature: 'sig' }; } } });
+    const productionSignerClient = Object.freeze({ solana: { async sign() { return 'signed'; } } });
+    let receivedAdapters = null;
+    let receivedSignerClient = null;
+    const driver = createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: repository,
+      supplementaryAdapters: productionAdapters,
+      supplementarySignerClient: productionSignerClient,
+      productionSupplementaryStageHandlers: {
+        PREPARED: {
+          stage: 'supplementary-buyback',
+          mutation: 'buyback',
+          async reconcile({ adapters, signerClient, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
+            receivedAdapters = adapters;
+            receivedSignerClient = signerClient;
+            return injectedRepository.advanceSupplementarySettlement(position.positionId, {
+              expectedState: receivedSettlement.state,
+              nextState: 'BUYBACK_SENT_UNKNOWN',
+              evidence: { requestDigest: `sha256:${'2'.repeat(64)}` },
+            });
+          },
+        },
+      },
+    });
+
+    const result = await driver.runSupplementarySettlement({
+      position,
+      settlement,
+      nowMs: 1_001,
+      fencingToken: '11111111-1111-4111-8111-111111111111',
+      assertLease() {},
+    });
+
+    assert.equal(receivedAdapters, productionAdapters);
+    assert.equal(receivedSignerClient, productionSignerClient);
+    assert.equal(result.status, 'ADVANCED');
+    assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
   } finally {
     if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
     else process.env.NODE_TEST_CONTEXT = previous;
@@ -818,6 +929,7 @@ test('purchase request omits packType when no pack code is configured', async ()
     provider: 'collector-crypt',
     operation: 'purchase',
     playerAddress: 'PLAYER11111111111111111111111111111111111',
+    quantity: 1,
   });
 });
 
@@ -868,7 +980,7 @@ test('a live collector-only rehearsal journals and invokes the real open handler
   const attempts = new Map();
   const stages = new Map([['purchase', {
     status: 'COMPLETE',
-    evidence: { memo: 'collector-memo', expectedCardCount: 1 },
+    evidence: { quantity: 1, packs: [{ packIndex: 0, memo: 'collector-memo', status: 'purchased', expectedCardCount: 1 }] },
   }]]);
   const cycleRepository = fakeCycleRepository(stages, '0', attempts);
   let openCalls = 0;
@@ -2362,16 +2474,16 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     ...writeAheadRepository(),
     async holdCycle() { throw new Error('reconciliation must not receive a repository writer'); },
   };
-  await cycleRepository.prepareStageAttempt(CYCLE_ID, 'purchase', {
+  await cycleRepository.prepareStageAttempt(CYCLE_ID, 'return', {
     schema: 'hookemon.provider-mutation-attempt.v1',
     cycleId: CYCLE_ID,
-    stage: 'purchase',
+    stage: 'return',
     state: 'PREPARED',
     requestDigest: `sha256:${'a'.repeat(64)}`,
     responseDigest: null,
     reconciliationDigest: null,
   });
-  await cycleRepository.recordStageAttemptResponse(CYCLE_ID, 'purchase', { providerReceipt: 'provider-receipt-1' });
+  await cycleRepository.recordStageAttemptResponse(CYCLE_ID, 'return', { providerReceipt: 'provider-receipt-1' });
   let readCalls = 0;
   let leaseCurrent = true;
   const driver = createStageDriver({
@@ -2396,7 +2508,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     config: baseConfig(),
     cycleRepository,
     stageHandlers: {
-      purchase: {
+      return: {
         async probe() { return null; },
         async mutate() { throw new Error('mutation must not run during reconciliation'); },
         async reconcileLive({ adapters, cycleRepository }) {
@@ -2412,7 +2524,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
   await assert.rejects(
     () => driver.reconcile({
       cycleId: CYCLE_ID,
-      stage: 'purchase',
+      stage: 'return',
       intent: { journalHead: 'head-read-fence' },
       assertLease() {
         if (!leaseCurrent) throw new Error('lease expired before reconciliation read');
@@ -2421,7 +2533,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     /lease expired before reconciliation read/,
   );
   assert.equal(readCalls, 0);
-  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'purchase')).attempt.state, 'RESPONSE_RECORDED');
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'return')).attempt.state, 'RESPONSE_RECORDED');
 });
 
 test('does not repeat a provider mutation after a post-send error leaves an attempt unknown', async () => {

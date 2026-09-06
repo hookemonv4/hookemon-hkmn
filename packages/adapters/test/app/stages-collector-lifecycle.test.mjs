@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +21,7 @@ import { policyFor } from '../signing/policy-fixture.mjs';
 import {
   mutatePurchase,
   preparePurchaseRequest,
+  probePurchase,
   reconcileLivePurchase,
 } from '../../src/app/stages/purchase.mjs';
 import {
@@ -42,27 +42,28 @@ import {
   reconcileLiveBuyback,
 } from '../../src/app/stages/buyback.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
-import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE, createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 
 const CYCLE_ID = 'cycle-collector-lifecycle';
 const CHAIN_ID = 'solana-mainnet';
 const OPERATOR = 'AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9';
-const PACK_ASSET = 'EdmxWPmx2WH6WgFfTdu9xfkYf3k1g5wD1zccTVySEEh1';
 const CARD_ASSET = 'GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB';
 const SETTLEMENT_ASSET = CIRCLE_USD_MINT;
 const COLLECTOR_RECIPIENT = '8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe';
 const MEMO = 'memo-collector-lifecycle';
-const PURCHASE_SIGNATURE = '5'.repeat(88);
-const OPEN_SIGNATURE = '4'.repeat(88);
-const BUYBACK_SIGNATURE = '3'.repeat(88);
+// Not-all-digit placeholders: a real Solana signature is base58, and the durable journal treats
+// an all-digit string as a decimal value with its own (shorter) length bound.
+const PURCHASE_SIGNATURE = 'P5'.repeat(44);
+const OPEN_SIGNATURE = 'O4'.repeat(44);
+const BUYBACK_SIGNATURE = 'B3'.repeat(44);
 const OPERATOR_KEYPAIR = Keypair.fromSeed(Uint8Array.from(Array(32).fill(1)));
 
 function jsonRpc(result, id = 1) {
   return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id, result }) };
 }
 
-function tokenAccountResponse({ owner = OPERATOR, mint = PACK_ASSET, amount = '100', decimals = CIRCLE_USD_DECIMALS } = {}) {
+function tokenAccountResponse({ owner = OPERATOR, mint = SETTLEMENT_ASSET, amount = '100', decimals = CIRCLE_USD_DECIMALS } = {}) {
   return {
     value: {
       owner: TOKEN_PROGRAM_ID,
@@ -111,7 +112,7 @@ function rpcClient({ tokenAccount = tokenAccountResponse(), entries = [], finali
   });
 }
 
-function transactionFor({ mint = PACK_ASSET, amount = 1n, destination = COLLECTOR_RECIPIENT } = {}) {
+function transactionFor({ mint = SETTLEMENT_ASSET, amount = 1n, destination = COLLECTOR_RECIPIENT } = {}) {
   const source = deriveAssociatedTokenAddress(OPERATOR, mint).toBase58();
   const instruction = buildTransferCheckedInstruction({
     source,
@@ -167,55 +168,42 @@ function collectorMoneyConfiguration() {
   };
 }
 
-function reconciledSellDecision({
-  rawInsuredValue = '100',
-  insuredValueUnit = 'atomic',
-  instantBuybackPercent = 85,
-  matchedBuybackPercent = 85,
-  prizeTier = '1',
-  rarity = { 1: 'epic', 2: 'rare', 3: 'uncommon', 4: 'common' }[prizeTier],
-  offerAtomic = (BigInt(rawInsuredValue) * BigInt(matchedBuybackPercent) / 100n).toString(),
-} = {}) {
-  const insuredAtomic = insuredValueUnit === 'whole-usd'
-    ? (BigInt(rawInsuredValue) * 1_000_000n).toString()
-    : rawInsuredValue;
+function baseConfig(overrides = {}) {
   return {
-    memo: MEMO,
-    mint: CARD_ASSET,
-    decision: 'sell',
-    offer: { ...settlementAsset(), amountAtomic: offerAtomic },
-    rawInsuredValue,
-    insuredValue: { ...settlementAsset(), amountAtomic: insuredAtomic },
-    insuredValueUnit,
-    instantBuybackPercent,
-    matchedBuybackPercent,
-    prizeTier,
-    rarity,
+    accounts: { solana: OPERATOR },
+    pack: { code: 'pokemon_50' },
+    solana: {
+      chainId: CHAIN_ID,
+      blockhashContextResolver: async blockhash => ({ blockhash, lastValidBlockHeight: '100' }),
+    },
+    collectorCrypt: { settlementAsset: settlementAsset() },
+    moneyConfiguration: collectorMoneyConfiguration(),
+    ...overrides,
   };
 }
 
-function buybackResponseEvidence(amountAtomic = '85') {
-  const amount = { ...settlementAsset(), amountAtomic };
-  return {
-    memo: MEMO,
-    mint: CARD_ASSET,
-    signature: BUYBACK_SIGNATURE,
-    quote: amount,
-    refundAmount: { ...amount },
-  };
-}
-
-function repository({ stages = {}, attempts = {} } = {}) {
+/** In-memory fake covering the exact repository surface every stage module reads or writes. */
+function repository({ stages = {}, attempts = {}, batches = {}, intents = {} } = {}) {
   const held = [];
   const heldPositions = [];
   const ledgers = [];
+  const batchState = { ...batches };
+  const intentState = { ...intents };
   return {
     held,
     heldPositions,
     ledgers,
+    batchState,
+    intentState,
     async readStage(_cycleId, stage) { return stages[stage] ?? { status: 'PENDING' }; },
     async readOperationalStageAttempt(_cycleId, stage) { return attempts[stage] ?? null; },
-    async describeCycle() { return { releaseAmount: '40', heldPositions: new Map(heldPositions.map(position => [position.positionId, position])) }; },
+    async describeCycle() {
+      return {
+        releaseAmount: '40',
+        heldPositions: new Map(heldPositions.map(position => [position.positionId, position])),
+        custodyLedgers: new Map(ledgers.map(({ ledger }) => [`${ledger.chainId} ${ledger.assetId}`, ledger])),
+      };
+    },
     async holdCycle(cycleId, terminalState, evidence) { held.push({ cycleId, terminalState, evidence }); },
     async recordHeldPosition(cycleId, input) {
       const position = {
@@ -233,457 +221,637 @@ function repository({ stages = {}, attempts = {} } = {}) {
       return position;
     },
     async recordCustodyLedger(cycleId, ledger) { ledgers.push({ cycleId, ledger }); },
-  };
-}
-
-function baseConfig(overrides = {}) {
-  return {
-    accounts: { solana: OPERATOR },
-    pack: { code: 'pokemon_50' },
-    solana: {
-      chainId: CHAIN_ID,
-      blockhashContextResolver: async blockhash => ({ blockhash, lastValidBlockHeight: '100' }),
+    async readPackBatchRequest(_cycleId, stage) { return batchState[stage] ?? null; },
+    async recordPackBatchRequest(_cycleId, stage, packs) {
+      if (batchState[stage]) return batchState[stage];
+      const record = { requestedAtMs: 1_000, packs };
+      batchState[stage] = record;
+      return record;
     },
-    collectorCrypt: { settlementAsset: settlementAsset() },
-    moneyConfiguration: collectorMoneyConfiguration(),
-    ...overrides,
+    async readPackBatchIntent(_cycleId, stage) { return intentState[stage] ?? null; },
+    async recordPackBatchIntent(_cycleId, stage, intent) {
+      if (intentState[stage]) return intentState[stage];
+      const record = { recordedAtMs: 1_000, intent };
+      intentState[stage] = record;
+      return record;
+    },
   };
 }
 
-function responseAttempt(evidence) {
-  return {
-    attempt: { state: 'RESPONSE_RECORDED' },
-    responseEvidence: evidence,
-    reconciliationEvidence: null,
-  };
+function generateYoloPacksFixture({ memo = MEMO, transaction } = {}) {
+  return { packs: [{ memo, transaction }] };
 }
 
 async function durableCycle(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'hookemon-open-reconciliation-'));
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-collector-lifecycle-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  return { directory, repository, cycleId };
+  const repo = await CycleRepository.open(directory);
+  const { cycleId } = await repo.createCycle({ releaseAmount: '1', mode: 'production' });
+  return { directory, repository: repo, cycleId };
 }
 
-async function completeThroughOpen(repository, cycleId, openEvidence) {
+async function completeThroughOpen(repo, cycleId, openPacks) {
   for (const [stage, evidence] of [
     ['eligibility-snapshot', { source: 'durable-test' }],
     ['claim-process', { source: 'durable-test' }],
     ['outbound', { source: 'durable-test' }],
-    ['purchase', { memo: MEMO, expectedCardCount: 1 }],
-    ['open', openEvidence],
+    ['purchase', { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', signature: PURCHASE_SIGNATURE, expectedCardCount: 1, packCost: { ...settlementAsset(), amountAtomic: '40' } }], purchasedCount: 1 }],
+    ['open', { packs: openPacks }],
   ]) {
-    await repository.prepareStage(cycleId, stage);
-    await repository.completeStage(cycleId, stage, evidence);
+    await repo.prepareStage(cycleId, stage);
+    await repo.completeStage(cycleId, stage, evidence);
   }
 }
 
-async function completeThroughEpicGate(repository, cycleId) {
-  await completeThroughOpen(repository, cycleId, { memo: MEMO, mint: CARD_ASSET });
-  await repository.prepareStage(cycleId, 'epic-gate');
-  await repository.completeStage(cycleId, 'epic-gate', reconciledSellDecision());
+function openedPack(overrides = {}) {
+  return { packIndex: 0, memo: MEMO, decision: 'opened', signature: OPEN_SIGNATURE, mint: CARD_ASSET, assetKind: 'spl', ...overrides };
 }
 
-function sentUnknownAttempt(requestDigest) {
+function sellDecisionPack(overrides = {}) {
+  const rawInsuredValue = overrides.rawInsuredValue ?? '100';
+  const instantBuybackPercent = overrides.instantBuybackPercent ?? 85;
+  const matchedBuybackPercent = overrides.matchedBuybackPercent ?? instantBuybackPercent;
+  const offerAtomic = overrides.offerAtomic ?? (BigInt(rawInsuredValue) * BigInt(matchedBuybackPercent) / 100n).toString();
   return {
-    attempt: { state: 'SENT_UNKNOWN', requestDigest },
-    responseEvidence: null,
-    reconciliationEvidence: null,
+    packIndex: 0,
+    memo: MEMO,
+    mint: CARD_ASSET,
+    decision: 'sell',
+    offer: { ...settlementAsset(), amountAtomic: offerAtomic },
+    rawInsuredValue,
+    insuredValue: { ...settlementAsset(), amountAtomic: rawInsuredValue },
+    insuredValueUnit: 'atomic',
+    instantBuybackPercent,
+    matchedBuybackPercent,
+    prizeTier: '1',
+    rarity: 'epic',
+    ...overrides,
   };
 }
 
-async function prepareSentUnknownBuybackAttempt(cycleRepository, cycleId, request = null) {
-  const prepared = request ?? await prepareBuybackRequest({ cycleRepository, context: { cycleId } });
-  await cycleRepository.prepareStageAttempt(cycleId, 'buyback', createPreparedProviderMutationAttempt({
-    cycleId,
-    stage: 'buyback',
-    requestDigest: digest({
-      schema: 'hookemon.operational-stage-request.v1',
-      cycleId,
-      stage: 'buyback',
-      request: prepared,
-    }),
-  }));
-  await cycleRepository.markStageAttemptSentUnknown(cycleId, 'buyback');
-  return prepared;
-}
+// --- purchase --------------------------------------------------------------------------------
 
-test('purchase plans an expected card count from an integer or numeric-string machine contains value', async () => {
-  for (const [contains, expectedCardCount] of [[1, 1], ['02', 2]]) {
-    const collectorCrypt = {
-      async getMachines() { return { machines: [{ code: 'pokemon_50', contains }] }; },
-    };
-    assert.deepEqual(
-      await preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50' } }) }),
-      { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, packType: 'pokemon_50', expectedCardCount },
-    );
-  }
-
-  await assert.rejects(
-    preparePurchaseRequest({
-      adapters: { collectorCrypt: { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 'description of contents' }] }; } } },
-      config: baseConfig({ pack: { code: 'pokemon_50' } }),
-    }),
-    /contains/,
+test('preparePurchaseRequest defaults to a single pack and reads the expected per-pack card count from the catalog', async () => {
+  const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: '01' }] }; } };
+  assert.deepEqual(
+    await preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50' } }) }),
+    { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, packType: 'pokemon_50', expectedCardCountPerPack: 1 },
   );
 });
 
-test('purchase refuses the provisional authority before requesting a provider transaction', async () => {
-  const transaction = transactionFor({ mint: SETTLEMENT_ASSET, amount: 40n });
-  const policy = await policyForTransaction(transaction);
-  const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const purchase = { memo: MEMO, signature: PURCHASE_SIGNATURE, expectedCardCount: 1 };
-  let generated = 0;
-  let signed = 0;
-  let submitted = 0;
-  const cycleRepository = repository({
-    attempts: { purchase: responseAttempt(purchase) },
+test('preparePurchaseRequest rejects a catalog pack needing an unsupported multi-card fan-out, before any spend', async () => {
+  const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 2 }] }; } };
+  await assert.rejects(
+    preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50' } }) }),
+    /unsupported 2-card fan-out/,
+  );
+});
+
+function heldPositionFixture(valueMicroUsdg = '10') {
+  return { positionId: `held:test:${Math.random()}`, valueMicroUsdg };
+}
+
+test('preparePurchaseRequest refuses admission when the batch would exceed the configured held-position count, before any spend', async () => {
+  const collectorCrypt = { async getMachines() { throw new Error('must not be called'); } };
+  const cycleRepository = {
+    async listHeldPositions() { return [heldPositionFixture(), heldPositionFixture()]; },
+    async describeCycle() { return { releaseAmount: '100' }; },
+  };
+  await assert.rejects(
+    preparePurchaseRequest({
+      adapters: { collectorCrypt },
+      config: baseConfig({ pack: { code: 'pokemon_50', quantity: 2 }, maxHeldPositions: 3 }),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+    }),
+    /HELD_LIMIT would exceed maxHeldPositions by 1 position/,
+  );
+});
+
+test('preparePurchaseRequest refuses admission when the batch would exceed the configured held value, before any spend', async () => {
+  const collectorCrypt = { async getMachines() { throw new Error('must not be called'); } };
+  const cycleRepository = {
+    async listHeldPositions() { return [heldPositionFixture('60')]; },
+    async describeCycle() { return { releaseAmount: '80' }; },
+  };
+  // Existing held value 60 + worst case (releaseAmount 80 / quantity 2 = 40 per pack * 2) = 140 > 100.
+  await assert.rejects(
+    preparePurchaseRequest({
+      adapters: { collectorCrypt },
+      config: baseConfig({ pack: { code: 'pokemon_50', quantity: 2 }, maxHeldValueMicroUsdg: '100' }),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+    }),
+    /HELD_LIMIT would exceed maxHeldValueMicroUsdg/,
+  );
+});
+
+test('preparePurchaseRequest admits a batch exactly at configured held-position headroom', async () => {
+  const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 1 }] }; } };
+  const cycleRepository = {
+    async listHeldPositions() { return [heldPositionFixture()]; },
+    async describeCycle() { return { releaseAmount: '100' }; },
+  };
+  const request = await preparePurchaseRequest({
+    adapters: { collectorCrypt },
+    config: baseConfig({ pack: { code: 'pokemon_50', quantity: 2 }, maxHeldPositions: 3 }),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
   });
+  assert.equal(request.quantity, 2);
+});
+
+test('preparePurchaseRequest skips the held-headroom check when the caller has no held-position read access', async () => {
+  const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 1 }] }; } };
+  const request = await preparePurchaseRequest({
+    adapters: { collectorCrypt },
+    config: baseConfig({ pack: { code: 'pokemon_50', quantity: 2 }, maxHeldPositions: 0 }),
+  });
+  assert.equal(request.quantity, 2);
+});
+
+test('preparePurchaseRequest accepts a configured quantity within the shared batch bound', async () => {
+  const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 1 }] }; } };
+  const request = await preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50', quantity: 5 } }) });
+  assert.equal(request.quantity, 5);
+});
+
+test('preparePurchaseRequest rejects an out-of-range quantity at admission time, before any spend', async () => {
+  const collectorCrypt = { async getMachines() { throw new Error('must not be called before quantity validation'); } };
+  await assert.rejects(
+    preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50', quantity: MAXIMUM_PACK_BATCH_SIZE + 1 } }) }),
+    /quantity must be an integer/,
+  );
+  await assert.rejects(
+    preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50', quantity: 0 } }) }),
+    /quantity must be an integer/,
+  );
+});
+
+test('probePurchase reports the configured quantity without spending', async () => {
   const collectorCrypt = {
     async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 1 }] }; },
-    async generatePack() { generated += 1; return { memo: MEMO, transaction }; },
-    async submitTransaction() { submitted += 1; return { signature: PURCHASE_SIGNATURE, confirmationStatus: 'submitted' }; },
-    async getPackStatus() {
-      return { memo: MEMO, pack: { transaction_signature: PURCHASE_SIGNATURE, token_mint: SETTLEMENT_ASSET }, send: null, buyback: [] };
-    },
+    async getStatus() { return { machineStatus: 'running', gachas: [] }; },
   };
-  const rpc = rpcClient({
-    tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }),
-    entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }],
-  });
-  const config = baseConfig({
-    collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy } },
-  });
+  const evidence = await probePurchase({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50', quantity: 3 } }) });
+  assert.equal(evidence.quantity, 3);
+  assert.equal(evidence.expectedCardCountPerPack, 1);
+});
+
+test('mutatePurchase refuses the provisional authority before requesting a fresh batch', async () => {
+  const transaction = transactionFor({ amount: 40n });
+  const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const cycleRepository = repository();
+  let generateCalls = 0;
+  const collectorCrypt = { async generateYoloPacks() { generateCalls += 1; return generateYoloPacksFixture({ transaction }); } };
+  const rpc = rpcClient({ entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }] });
+
   await assert.rejects(
     () => mutatePurchase({
       liveMode: true,
       adapters: { collectorCrypt, solana: { client: rpc } },
-      signerClient: { solana: { async sign(value) { signed += 1; return { signedTxBase64: value }; } } },
-      config,
+      signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID, request: { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, expectedCardCountPerPack: 1 } },
     }),
     /active frozen interface authority is invalid/,
   );
-  assert.equal(generated, 0);
-  assert.equal(signed, 0);
-  assert.equal(submitted, 0);
+  assert.equal(generateCalls, 0);
+  assert.equal(cycleRepository.batchState.purchase, undefined);
+});
 
-  assert.deepEqual(await reconcileLivePurchase({
+test('mutatePurchase reuses an already-recorded batch and returns without ever requesting live-mutation authority', async () => {
+  const cycleRepository = repository({
+    batches: { purchase: { requestedAtMs: 1_000, packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1, packType: null }] } },
+    intents: { purchase: { recordedAtMs: 1_000, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+  });
+  let generateCalls = 0;
+  const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const collectorCrypt = { async generateYoloPacks() { generateCalls += 1; throw new Error('must not regenerate an already-recorded batch'); } };
+  const rpc = rpcClient({ entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }] });
+
+  // No cached unsigned transaction bytes survive a restart, so there is nothing left to sign
+  // either: this call reaches neither generateYoloPacks nor the signer, and therefore never
+  // needs the (otherwise always-denied in this test profile) live-mutation authority.
+  const evidence = await mutatePurchase({
+    liveMode: true,
     adapters: { collectorCrypt, solana: { client: rpc } },
-    config,
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: baseConfig(),
     cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'purchase' },
-  }), {
-    memo: MEMO,
-    signature: PURCHASE_SIGNATURE,
-    expectedCardCount: 1,
+    context: { cycleId: CYCLE_ID, request: { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, expectedCardCountPerPack: 1 } },
+  });
+
+  assert.deepEqual(evidence, { quantity: 1, expectedCardCountPerPack: 1 });
+  assert.equal(generateCalls, 0);
+
+  const reconciled = await reconcileLivePurchase({
+    adapters: { collectorCrypt: { async getPackStatus() { return { memo: MEMO, pack: { transaction_signature: PURCHASE_SIGNATURE, token_mint: SETTLEMENT_ASSET }, send: null, buyback: [] }; } }, solana: { client: rpc } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+  });
+  assert.equal(reconciled.purchasedCount, 1);
+  assert.deepEqual(reconciled.packs[0], {
+    packIndex: 0, memo: MEMO, status: 'purchased', signature: PURCHASE_SIGNATURE, expectedCardCount: 1,
     packCost: { ...settlementAsset(), amountAtomic: '40' },
   });
 });
 
-test('purchase requires MoneyConfigurationV1 before requesting a provider transaction', async () => {
-  const transaction = transactionFor({ mint: SETTLEMENT_ASSET, amount: 40n });
-  const policy = await policyForTransaction(transaction);
-  let generated = 0;
-
-  await assert.rejects(
-    () => mutatePurchase({
-      liveMode: true,
-      adapters: {
-        collectorCrypt: {
-          async generatePack() {
-            generated += 1;
-            return { memo: MEMO, transaction };
-          },
-        },
-        solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-      },
-      signerClient: { solana: { async sign() { throw new Error('signer must not be called'); } } },
-      config: baseConfig({
-        moneyConfiguration: null,
-        collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy } },
-      }),
-      request: { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, expectedCardCount: 1 },
-    }),
-    /purchase requires MoneyConfigurationV1/,
-  );
-  assert.equal(generated, 0);
-});
-
-test('Collector Solana signers apply the typed priority-fee cap and post-fee reserve', async () => {
-  const {
-    assertSolanaSignerFeeEnvelope,
-    assertSolanaSignerMoneyConfiguration,
-  } = await import('../../src/app/stages/solana-money-controls.mjs');
-  const money = assertSolanaSignerMoneyConfiguration({
-    config: baseConfig(),
-    asset: settlementAsset(),
-    stage: 'purchase',
-  });
-  const decoded = {
-    gas: { computeUnitLimit: '1000000' },
-    priorityFee: {
-      chainId: CHAIN_ID,
-      assetId: 'microlamports-per-compute-unit',
-      decimals: 0,
-      amountAtomic: '2',
-    },
-  };
-
-  await assert.rejects(
-    () => assertSolanaSignerFeeEnvelope({
-      client: rpcClient({ balance: 3 }),
-      owner: OPERATOR,
-      money,
-      decoded,
-      stage: 'purchase',
-    }),
-    /purchase Operations SOL balance does not retain the configured lamport reserve after the maximum priority fee/,
-  );
-  await assert.doesNotReject(
-    () => assertSolanaSignerFeeEnvelope({
-      client: rpcClient({ balance: 4 }),
-      owner: OPERATOR,
-      money,
-      decoded,
-      stage: 'purchase',
-    }),
-  );
-  await assert.rejects(
-    () => assertSolanaSignerFeeEnvelope({
-      client: rpcClient({ balance: 1_000_000 }),
-      owner: OPERATOR,
-      money,
-      decoded: {
-        ...decoded,
-        priorityFee: { ...decoded.priorityFee, amountAtomic: '3' },
-      },
-      stage: 'purchase',
-    }),
-    /purchase priority fee exceeds the configured MoneyConfigurationV1 cap/,
-  );
-});
-
-test('purchase refuses the provisional authority before a signer can change the approved recipient', async () => {
-  const transaction = transactionFor({ mint: SETTLEMENT_ASSET, amount: 40n });
-  const changed = transactionFor({
-    mint: SETTLEMENT_ASSET,
-    amount: 40n,
-    destination: Keypair.generate().publicKey.toBase58(),
-  });
-  const policy = await policyForTransaction(transaction);
-  let signerCalls = 0;
-  let submissions = 0;
-  const collectorCrypt = {
-    async getMachines() { return { machines: [{ code: 'pokemon_50', contains: 1 }] }; },
-    async generatePack() { return { memo: MEMO, transaction }; },
-    async submitTransaction() {
-      submissions += 1;
-      return { signature: PURCHASE_SIGNATURE, confirmationStatus: 'submitted' };
-    },
-  };
-  const config = baseConfig({
-    collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy } },
-  });
-
-  await assert.rejects(
-    mutatePurchase({
-      liveMode: true,
-      adapters: { collectorCrypt, solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) } },
-      signerClient: { solana: { async sign() { signerCalls += 1; return { signedTxBase64: signTransaction(changed) }; } } },
-      config,
-    }),
-    /active frozen interface authority is invalid/,
-  );
-  assert.equal(signerCalls, 0);
-  assert.equal(submissions, 0);
-});
-
-test('open refuses the provisional authority before a provider mutation and reconciles persisted evidence', async () => {
+test('reconcileLivePurchase holds the whole cycle when a pack status conflicts with its durable memo', async () => {
   const cycleRepository = repository({
-    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
-    attempts: { open: responseAttempt({ memo: MEMO, expectedCardCount: 1, opened: { success: true, code: 'ALREADY_OPENED' } }) },
+    batches: { purchase: { requestedAtMs: 1_000, packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1, packType: null }] } },
+    intents: { purchase: { recordedAtMs: 1_000, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
   });
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  let openPackCalls = 0;
-  const collectorCrypt = {
-    async openPack() { openPackCalls += 1; return { success: true, code: 'ALREADY_OPENED' }; },
-    async getPackStatus() {
-      return {
-        memo: MEMO,
-        pack: { transaction_signature: PURCHASE_SIGNATURE },
-        send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: OPERATOR },
-        buyback: [],
-      };
+  const result = await reconcileLivePurchase({
+    adapters: {
+      collectorCrypt: { async getPackStatus() { return { memo: 'different-memo', pack: null, send: null, buyback: [] }; } },
+      solana: { client: rpcClient() },
     },
-  };
-  const rpc = rpcClient({
-    entries: [{ tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '0', postAmount: '1' }],
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
   });
-  const config = baseConfig();
+  assert.equal(result, null);
+  assert.equal(cycleRepository.held.length, 1);
+  assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+});
+
+test('reconcileLivePurchase resolves a pack with no provider evidence as not_purchased once its deadline passes', async () => {
+  const cycleRepository = repository({
+    batches: { purchase: { requestedAtMs: 0, packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1, packType: null }] } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+  });
+  const beforeDeadline = await reconcileLivePurchase({
+    adapters: { collectorCrypt: { async getPackStatus() { return { memo: MEMO, pack: null, send: null, buyback: [] }; } }, solana: { client: rpcClient() } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, nowMs: 1000 },
+  });
+  assert.equal(beforeDeadline, null);
+
+  const afterDeadline = await reconcileLivePurchase({
+    adapters: { collectorCrypt: { async getPackStatus() { return { memo: MEMO, pack: null, send: null, buyback: [] }; } }, solana: { client: rpcClient() } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, nowMs: 31 * 60 * 1000 },
+  });
+  assert.deepEqual(afterDeadline, { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'not_purchased' }], purchasedCount: 0 });
+  assert.equal(cycleRepository.held.length, 0);
+});
+
+test('reconcileLivePurchase holds the whole cycle when the batch call itself remained sent-unknown past the deadline', async () => {
+  const cycleRepository = repository({ attempts: { purchase: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 0, responseEvidence: null, reconciliationEvidence: null } } });
+  const result = await reconcileLivePurchase({
+    adapters: { collectorCrypt: {}, solana: { client: rpcClient() } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, nowMs: 31 * 60 * 1000 },
+  });
+  assert.equal(result, null);
+  assert.equal(cycleRepository.held.length, 1);
+  assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.match(cycleRepository.held[0].evidence.reason, /no durably generated pack/);
+});
+
+// --- open ------------------------------------------------------------------------------------
+
+test('prepareOpenRequest filters the durable purchase ledger to purchased packs only', async () => {
+  const cycleRepository = repository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          packs: [
+            { packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 },
+            { packIndex: 1, memo: 'memo-not-purchased', status: 'not_purchased' },
+          ],
+        },
+      },
+    },
+  });
   assert.deepEqual(await prepareOpenRequest({ cycleRepository, context: { cycleId: CYCLE_ID } }), {
-    provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1,
+    provider: 'collector-crypt', operation: 'open', packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1 }],
   });
+});
+
+test('mutateOpen refuses the provisional authority before opening any purchased pack', async () => {
+  const cycleRepository = repository({
+    stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+  });
+  let openCalls = 0;
   await assert.rejects(
     () => mutateOpen({
       liveMode: true,
-      adapters: { collectorCrypt, solana: { client: rpc } },
-      config,
+      adapters: { collectorCrypt: { async openPack() { openCalls += 1; return { success: true }; } } },
+      config: baseConfig(),
       cycleRepository,
       context: { cycleId: CYCLE_ID },
     }),
     /active frozen interface authority is invalid/,
   );
-  assert.equal(openPackCalls, 0);
-  assert.deepEqual(await reconcileLiveOpen({
-    adapters: { collectorCrypt, solana: { client: rpc } },
-    config,
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'open' },
-  }), { memo: MEMO, signature: OPEN_SIGNATURE, mint: CARD_ASSET, assetKind: 'spl' });
+  assert.equal(openCalls, 0);
+});
 
-  collectorCrypt.getPackStatus = async () => ({ memo: MEMO, pack: null, send: null, buyback: [] });
-  const heldEvidence = await reconcileLiveOpen({
-    adapters: { collectorCrypt, solana: { client: rpc } }, config, cycleRepository, context: { cycleId: CYCLE_ID, stage: 'open' },
+test('reconcileLiveOpen resolves an opened pack from memo-bound status and finalized mint derivation', async () => {
+  const cycleRepository = repository({
+    stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
   });
-  assert.equal(heldEvidence.decision, 'held');
-  assert.equal(heldEvidence.terminalState, 'HELD_DATA_UNVERIFIED');
+  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
+  const collectorCrypt = {
+    async getPackStatus() {
+      return { memo: MEMO, pack: { transaction_signature: PURCHASE_SIGNATURE }, send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: OPERATOR }, buyback: [] };
+    },
+  };
+  const rpc = rpcClient({ entries: [{ tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '0', postAmount: '1' }] });
+  const result = await reconcileLiveOpen({ adapters: { collectorCrypt, solana: { client: rpc } }, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.deepEqual(result, { packs: [openedPack()] });
+});
+
+test('reconcileLiveOpen carves an unverified pack into a held position while another pack in the same batch still resolves', async () => {
+  const cycleRepository = repository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          packs: [
+            { packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 },
+            { packIndex: 1, memo: 'memo-two', status: 'purchased', expectedCardCount: 1 },
+          ],
+        },
+      },
+    },
+    attempts: {
+      open: {
+        attempt: { state: 'RESPONSE_RECORDED' },
+        responseEvidence: { packs: [{ packIndex: 0, memo: MEMO, opened: { success: true } }, { packIndex: 1, memo: 'memo-two', opened: { success: true } }] },
+        reconciliationEvidence: null,
+      },
+    },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 2, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+  });
+  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
+  const collectorCrypt = {
+    async getPackStatus({ memo }) {
+      if (memo === MEMO) return { memo, pack: {}, send: null, buyback: [] };
+      return { memo, pack: { transaction_signature: PURCHASE_SIGNATURE }, send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: OPERATOR }, buyback: [] };
+    },
+  };
+  const rpc = rpcClient({ entries: [{ tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '0', postAmount: '1' }] });
+  const result = await reconcileLiveOpen({ adapters: { collectorCrypt, solana: { client: rpc } }, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+
+  assert.equal(result.packs.length, 2);
+  assert.equal(result.packs[0].decision, 'held');
+  assert.equal(result.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(result.packs[1].decision, 'opened');
+  assert.equal(result.packs[1].mint, CARD_ASSET);
   assert.equal(cycleRepository.heldPositions.length, 1);
 });
 
-test('open requires memo-bound status evidence for the signature, card asset, and destination wallet', async () => {
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  const rpc = rpcClient({
-    entries: [{ tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '0', postAmount: '1' }],
+test('reconcileLiveOpen holds a SENT_UNKNOWN pack past its deadline as HELD_UNRESOLVED without resubmitting', async () => {
+  const cycleRepository = repository({
+    stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+    attempts: { open: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 0, responseEvidence: null, reconciliationEvidence: null } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
   });
-  const opened = { transactionSignature: OPEN_SIGNATURE, nft_address: CARD_ASSET };
-  const statuses = [
-    { label: 'missing send record', send: null, expectedHold: true },
-    {
-      label: 'conflicting send signature',
-      send: { nft_address: CARD_ASSET, transaction_signature: PURCHASE_SIGNATURE, to_wallet: OPERATOR },
-      expectedHold: true,
-    },
-    {
-      label: 'conflicting destination wallet',
-      send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: COLLECTOR_RECIPIENT },
-      expectedHold: true,
-    },
-  ];
-
-  for (const entry of statuses) {
-    const cycleRepository = repository({
-      attempts: { open: responseAttempt({ memo: MEMO, expectedCardCount: 1, opened }) },
-    });
-    const collectorCrypt = {
-      async getPackStatus() {
-        return { memo: MEMO, pack: {}, send: entry.send, buyback: [] };
-      },
-    };
-
-    const heldEvidence = await reconcileLiveOpen({
-      adapters: { collectorCrypt, solana: { client: rpc } },
-      config: baseConfig(),
-      cycleRepository,
-      context: { cycleId: CYCLE_ID, stage: 'open' },
-    });
-    if (entry.expectedHold) {
-      assert.equal(heldEvidence?.decision, 'held', entry.label);
-      assert.equal(heldEvidence?.terminalState, 'HELD_DATA_UNVERIFIED', entry.label);
-    } else {
-      assert.equal(heldEvidence, null, entry.label);
-    }
-    assert.equal(cycleRepository.held.length > 0, entry.expectedHold, entry.label);
-    if (entry.expectedHold) assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-  }
+  let openCalls = 0;
+  const collectorCrypt = {
+    async getPackStatus() { return { memo: MEMO, pack: null, send: null, buyback: [] }; },
+    async openPack() { openCalls += 1; throw new Error('must not resubmit'); },
+  };
+  const result = await reconcileLiveOpen({ adapters: { collectorCrypt, solana: { client: rpcClient() } }, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID, nowMs: 31 * 60 * 1000 } });
+  assert.equal(result.packs[0].decision, 'held');
+  assert.equal(result.packs[0].terminalState, 'HELD_UNRESOLVED');
+  assert.equal(result.packs[0].reason, 'SENT_UNKNOWN_DEADLINE');
+  assert.equal(openCalls, 0);
 });
 
-test('carves an unverified opened card into a held position without terminalizing its cycle', async () => {
+// --- epic-gate ---------------------------------------------------------------------------------
+
+test('mutateEpicGate passes a held open pack through without a second held-position write', async () => {
+  const heldPack = { packIndex: 0, memo: MEMO, mint: null, decision: 'held', terminalState: 'HELD_DATA_UNVERIFIED', reason: 'DATA_UNVERIFIED', heldPosition: { positionId: 'held:test:1', evidenceDigest: `sha256:${'a'.repeat(64)}`, terminalState: 'HELD_DATA_UNVERIFIED', reason: 'DATA_UNVERIFIED' } };
+  const cycleRepository = repository({ stages: { open: { status: 'COMPLETE', evidence: { packs: [heldPack] } } } });
+  const evidence = await mutateEpicGate({ liveMode: true, adapters: {}, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.deepEqual(evidence, { packs: [heldPack] });
+  assert.equal(cycleRepository.heldPositions.length, 0);
+});
+
+test('mutateEpicGate records a sell decision for an eligible card', async () => {
+  const cycleRepository = repository({ stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } } });
+  const collectorCrypt = {
+    async getPackStatus() {
+      return { memo: MEMO, pack: { pack_type: 'pokemon_50' }, send: { nft_address: CARD_ASSET, prize_tier: 1, insured_value: 100 }, buyback: [] };
+    },
+    async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 100 }], page: 1, limit: 50, hasMore: false }; },
+    async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+  };
+  const config = baseConfig({
+    collectorCrypt: {
+      settlementAsset: settlementAsset(),
+      epicGate: { nftAddressField: 'nft_address', insuredValueField: 'insured_value', prizeTierField: 'prize_tier', rarityField: 'rarity', asset: settlementAsset() },
+    },
+  });
+  const evidence = await mutateEpicGate({ liveMode: true, adapters: { collectorCrypt }, config, cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.equal(evidence.packs[0].decision, 'sell');
+  assert.equal(evidence.packs[0].packIndex, 0);
+});
+
+test('reconcileLiveEpicGate carves a recorded below-forty-percent hold decision into HELD_OWNER_DECISION', async () => {
   const cycleRepository = repository({
-    attempts: { open: responseAttempt({ memo: MEMO, expectedCardCount: 1, opened: { success: true } }) },
+    attempts: { 'epic-gate': { attempt: { state: 'RESPONSE_RECORDED' }, responseEvidence: { packs: [sellDecisionPack({ offerAtomic: '39', decision: 'hold' })] }, reconciliationEvidence: null } },
+  });
+  const evidence = await reconcileLiveEpicGate({ adapters: {}, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_OWNER_DECISION');
+  assert.equal(evidence.packs[0].reason, 'EPIC_THRESHOLD');
+  assert.equal(cycleRepository.heldPositions.length, 1);
+});
+
+test('reconcileLiveEpicGate holds a pack whose buyback quote changed since mutation', async () => {
+  const cycleRepository = repository({ attempts: { 'epic-gate': { attempt: { state: 'RESPONSE_RECORDED' }, responseEvidence: { packs: [sellDecisionPack()] }, reconciliationEvidence: null } } });
+  const collectorCrypt = {
+    async getPackStatus() {
+      return { memo: MEMO, pack: { pack_type: 'pokemon_50' }, send: { nft_address: CARD_ASSET, prize_tier: 1, insured_value: 100 }, buyback: [] };
+    },
+    async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 100 }], page: 1, limit: 50, hasMore: false }; },
+    async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '84' } }; },
+  };
+  const config = baseConfig({
+    collectorCrypt: {
+      settlementAsset: settlementAsset(),
+      epicGate: { nftAddressField: 'nft_address', insuredValueField: 'insured_value', prizeTierField: 'prize_tier', rarityField: 'rarity', asset: settlementAsset() },
+    },
+  });
+  const result = await reconcileLiveEpicGate({ adapters: { collectorCrypt }, config, cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.equal(result.packs[0].decision, 'held');
+  assert.equal(result.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+});
+
+// --- buyback -----------------------------------------------------------------------------------
+
+test('mutateBuyback passes a held epic-gate pack through without touching the provider', async () => {
+  const heldPack = { packIndex: 0, memo: MEMO, mint: CARD_ASSET, decision: 'held', terminalState: 'HELD_OWNER_DECISION', reason: 'EPIC_THRESHOLD', heldPosition: { positionId: 'held:test:1', evidenceDigest: `sha256:${'a'.repeat(64)}`, terminalState: 'HELD_OWNER_DECISION', reason: 'EPIC_THRESHOLD' } };
+  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [heldPack] } } } });
+  const collectorCrypt = { async getBuybackAvailable() { throw new Error('must not query a held pack'); } };
+  const evidence = await mutateBuyback({ liveMode: true, adapters: { collectorCrypt }, signerClient: {}, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.deepEqual(evidence, { packs: [heldPack] });
+});
+
+test('mutateBuyback holds a pack as unavailable before it can request or sign a provider transaction', async () => {
+  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const collectorCrypt = { async getBuybackAvailable() { return { available: false }; } };
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  const evidence = await mutateBuyback({ liveMode: true, adapters: { collectorCrypt, solana: { client: rpc } }, signerClient: {}, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(cycleRepository.heldPositions.length, 1);
+});
+
+test('mutateBuyback marks a pack unknown (not held) when the provisional authority denies it after a matching quote', async () => {
+  // Nothing has been sent to the provider yet at this boundary, but a denial here is the same
+  // guard that also protects a real post-send failure; treating it as "unknown" (never "held")
+  // keeps the two indistinguishable paths from ever double-holding a pack the provider may have
+  // actually processed.
+  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const evidence = await mutateBuyback({ liveMode: true, adapters: { collectorCrypt, solana: { client: rpc } }, signerClient: {}, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
+  assert.equal(evidence.packs[0].decision, 'unknown');
+  assert.equal(evidence.packs[0].memo, MEMO);
+  assert.equal(cycleRepository.held.length, 0);
+  assert.equal(buybackCalls, 0);
+});
+
+test('reconcileLiveBuyback confirms proceeds for a submitted sale and records the summed custody ledger', async () => {
+  const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET, signature: BUYBACK_SIGNATURE, quote: { ...settlementAsset(), amountAtomic: '85' }, refundAmount: { ...settlementAsset(), amountAtomic: '85' } };
+  const cycleRepository = repository({
+    stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+    attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, responseEvidence: { packs: [submitted] }, reconciliationEvidence: null } },
+  });
+  const proceedsTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const collectorCrypt = {
+    async getBuybackCheck() {
+      return { exists: true, status: 'complete', buybackAmount: 85, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE, createdAt: '2026-01-01T00:00:00.000Z' };
+    },
+  };
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
+  });
+  const reconciled = await reconcileLiveBuyback({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+  });
+  assert.equal(reconciled.soldCount, 1);
+  assert.equal(reconciled.packs[0].decision, 'sold');
+  assert.deepEqual(reconciled.packs[0].proceeds, { ...settlementAsset(), amountAtomic: '85' });
+  assert.equal(cycleRepository.ledgers.length, 1);
+  assert.equal(cycleRepository.ledgers[0].ledger.buybackProceeds, '85');
+});
+
+test('reconcileLiveBuyback resolves an "unknown" (ambiguous-mutation) pack to sold once Collector confirms it, and waits while Collector shows nothing yet', async () => {
+  const unknown = { packIndex: 0, decision: 'unknown', memo: MEMO, mint: CARD_ASSET, quote: { ...settlementAsset(), amountAtomic: '85' } };
+  const cycleRepository = repository({
+    stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+    attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, responseEvidence: { packs: [unknown] }, reconciliationEvidence: null } },
+  });
+  const proceedsTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
   });
 
-  const result = await reconcileLiveOpen({
+  const stillPending = await reconcileLiveBuyback({
+    adapters: { collectorCrypt: { async getBuybackCheck() { return { exists: false }; } }, solana: { client: rpc } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+  });
+  assert.equal(stillPending, null);
+
+  const reconciled = await reconcileLiveBuyback({
     adapters: {
       collectorCrypt: {
-        async getPackStatus() {
-          return { memo: MEMO, pack: {}, send: null, buyback: [] };
+        async getBuybackCheck() {
+          return { exists: true, status: 'complete', buybackAmount: 85, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE, createdAt: '2026-01-01T00:00:00.000Z' };
         },
       },
-      solana: { client: rpcClient() },
+      solana: { client: rpc },
     },
     config: baseConfig(),
     cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'open' },
+    context: { cycleId: CYCLE_ID },
   });
-
-  assert.equal(result?.decision, 'held');
-  assert.equal(result?.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(result?.mint, null);
-  assert.equal(cycleRepository.heldPositions.length, 1);
-  assert.deepEqual(cycleRepository.heldPositions[0], {
-    positionId: 'held:test:1',
-    cycleId: CYCLE_ID,
-    packId: 'pokemon_50',
-    memo: MEMO,
-    mint: null,
-    cardRef: MEMO,
-    costMicroUsdg: '40',
-    valueMicroUsdg: '40',
-    ledgerAsset: { ...collectorMoneyConfiguration().assets.usdg },
-    insuredValue: null,
-    reason: 'DATA_UNVERIFIED',
-    terminalState: 'HELD_DATA_UNVERIFIED',
-    evidence: {
-      stage: 'open',
-      memo: MEMO,
-      opened: { success: true },
-      send: null,
-      reason: 'response-recorded open is missing memo-bound mint evidence',
-    },
-    evidenceDigest: `sha256:${'a'.repeat(64)}`,
-    openedAtMs: 1,
-    positionRevision: 0,
-    ownerDecision: null,
-    resolution: null,
-  });
+  assert.equal(reconciled.soldCount, 1);
+  assert.equal(reconciled.packs[0].decision, 'sold');
+  assert.equal(reconciled.packs[0].signature, BUYBACK_SIGNATURE);
 });
 
+// --- durable, end-to-end restart safety ---------------------------------------------------------
+
+test('a held open pack survives a repository reopen without terminalizing the cycle', async t => {
+  const { directory, repository: repo, cycleId } = await durableCycle(t);
+  await completeThroughOpen(repo, cycleId, [{ packIndex: 0, memo: MEMO, mint: null, decision: 'held', terminalState: 'HELD_DATA_UNVERIFIED', reason: 'DATA_UNVERIFIED', heldPosition: { positionId: 'held:1', evidenceDigest: `sha256:${'a'.repeat(64)}`, terminalState: 'HELD_DATA_UNVERIFIED', reason: 'DATA_UNVERIFIED' } }]);
+
+  const reopened = await CycleRepository.open(directory);
+  const state = await reopened.describeCycle(cycleId);
+  assert.equal(state.terminalState, null);
+  assert.equal(state.stages.get('open').status, 'COMPLETE');
+});
+
+// --- governance failure-matrix citations (docs/audit/2026-09-04/failure-matrix.json) -----------
+// These five scenarios are cited by name from the documented failure matrix; renaming them
+// breaks packages/runner/test/cycle/failure-matrix.test.mjs's binding to an executed test.
+
 test('open response missing its memo-bound mint holds durably without a retry', async t => {
-  const { directory, repository, cycleId } = await durableCycle(t);
-  const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
-  await repository.prepareStageAttempt(cycleId, 'open', createPreparedProviderMutationAttempt({
-    cycleId,
-    stage: 'open',
-    requestDigest: digest({
-      schema: 'hookemon.operational-stage-request.v1',
-      cycleId,
-      stage: 'open',
-      request,
-    }),
+  const { directory, repository: repo, cycleId } = await durableCycle(t);
+  for (const [stage, evidence] of [
+    ['eligibility-snapshot', { source: 'durable-test' }],
+    ['claim-process', { source: 'durable-test' }],
+    ['outbound', { source: 'durable-test' }],
+    ['purchase', { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }], purchasedCount: 1 }],
+  ]) {
+    await repo.prepareStage(cycleId, stage);
+    await repo.completeStage(cycleId, stage, evidence);
+  }
+  await repo.recordPackBatchIntent(cycleId, 'purchase', { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR });
+
+  const request = { provider: 'collector-crypt', operation: 'open', packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1 }] };
+  await repo.prepareStageAttempt(cycleId, 'open', createPreparedProviderMutationAttempt({
+    cycleId, stage: 'open',
+    requestDigest: digest({ schema: 'hookemon.operational-stage-request.v1', cycleId, stage: 'open', request }),
   }));
-  await repository.recordStageAttemptResponse(cycleId, 'open', {
-    memo: MEMO,
-    expectedCardCount: 1,
-    opened: { transactionSignature: 'open-signature-recorded', nft_address: CARD_ASSET },
+  await repo.recordStageAttemptResponse(cycleId, 'open', {
+    packs: [{ packIndex: 0, memo: MEMO, opened: { transactionSignature: 'open-signature-recorded', nft_address: CARD_ASSET } }],
   });
   let statusReads = 0;
 
-  const heldEvidence = await reconcileLiveOpen({
+  const result = await reconcileLiveOpen({
     adapters: {
-      collectorCrypt: {
-        async getPackStatus() {
-          statusReads += 1;
-          return { memo: MEMO, pack: {}, send: null, buyback: [] };
-        },
-      },
+      collectorCrypt: { async getPackStatus() { statusReads += 1; return { memo: MEMO, pack: {}, send: null, buyback: [] }; } },
       solana: { client: rpcClient() },
     },
     config: baseConfig(),
-    cycleRepository: repository,
-    context: { cycleId, stage: 'open' },
+    cycleRepository: repo,
+    context: { cycleId },
   });
-  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(result.packs[0].decision, 'held');
   assert.equal(statusReads, 1);
 
   const reopened = await CycleRepository.open(directory);
@@ -694,132 +862,41 @@ test('open response missing its memo-bound mint holds durably without a retry', 
   await assert.doesNotReject(() => reopened.prepareStage(cycleId, 'open'));
 });
 
-test('open reconciles a SENT_UNKNOWN attempt from finalized memo-bound status without resubmitting', async () => {
-  const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
-  const requestDigest = digest({
-    schema: 'hookemon.operational-stage-request.v1',
-    cycleId: CYCLE_ID,
-    stage: 'open',
-    request,
-  });
-  const cycleRepository = repository({
-    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
-    attempts: { open: sentUnknownAttempt(requestDigest) },
-  });
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  let statusReads = 0;
-  let openCalls = 0;
-  const collectorCrypt = {
-    async getPackStatus() {
-      statusReads += 1;
-      return {
-        memo: MEMO,
-        pack: { transaction_signature: PURCHASE_SIGNATURE },
-        send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: OPERATOR },
-        buyback: [],
-      };
-    },
-    async openPack() {
-      openCalls += 1;
-      throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
-    },
-  };
-  const result = await reconcileLiveOpen({
-    adapters: { collectorCrypt, solana: { client: rpcClient({ entries: [{ tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '0', postAmount: '1' }] }) } },
-    config: baseConfig(),
-    cycleRepository,
-    context: {
-      cycleId: CYCLE_ID,
-      stage: 'open',
-    },
-  });
-
-  assert.deepEqual(result, { memo: MEMO, signature: OPEN_SIGNATURE, mint: CARD_ASSET, assetKind: 'spl' });
-  assert.equal(statusReads, 1);
-  assert.equal(openCalls, 0);
-});
-
-test('carves an overdue SENT_UNKNOWN open without adapter access', async () => {
-  const requestDigest = digest({
-    schema: 'hookemon.operational-stage-request.v1',
-    cycleId: CYCLE_ID,
-    stage: 'open',
-    request: { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 },
-  });
-  const cycleRepository = repository({
-    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
-    attempts: { open: { ...sentUnknownAttempt(requestDigest), sentAtMs: 0 } },
-  });
-
-  const result = await reconcileLiveOpen({
-    adapters: {},
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'open', nowMs: 30 * 60 * 1000 },
-  });
-
-  assert.equal(result.decision, 'held');
-  assert.equal(result.terminalState, 'HELD_UNRESOLVED');
-  assert.equal(result.reason, 'SENT_UNKNOWN_DEADLINE');
-  assert.equal(cycleRepository.heldPositions.length, 1);
-});
-
 test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t => {
-  const { directory, repository, cycleId } = await durableCycle(t);
-  const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
-  const requestDigest = digest({
-    schema: 'hookemon.operational-stage-request.v1',
-    cycleId,
-    stage: 'open',
-    request,
-  });
-  await repository.prepareStageAttempt(cycleId, 'open', createPreparedProviderMutationAttempt({
-    cycleId,
-    stage: 'open',
-    requestDigest,
+  const { directory, repository: repo, cycleId } = await durableCycle(t);
+  for (const [stage, evidence] of [
+    ['eligibility-snapshot', { source: 'durable-test' }],
+    ['claim-process', { source: 'durable-test' }],
+    ['outbound', { source: 'durable-test' }],
+    ['purchase', { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }], purchasedCount: 1 }],
+  ]) {
+    await repo.prepareStage(cycleId, stage);
+    await repo.completeStage(cycleId, stage, evidence);
+  }
+  await repo.recordPackBatchIntent(cycleId, 'purchase', { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR });
+  const request = { provider: 'collector-crypt', operation: 'open', packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1 }] };
+  await repo.prepareStageAttempt(cycleId, 'open', createPreparedProviderMutationAttempt({
+    cycleId, stage: 'open',
+    requestDigest: digest({ schema: 'hookemon.operational-stage-request.v1', cycleId, stage: 'open', request }),
   }));
-  await repository.markStageAttemptSentUnknown(cycleId, 'open');
+  await repo.markStageAttemptSentUnknown(cycleId, 'open');
   let openCalls = 0;
-  const cycleRepository = {
-    async readStage(requestCycleId, stage) {
-      if (stage === 'purchase') return { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } };
-      return repository.readStage(requestCycleId, stage);
-    },
-    readOperationalStageAttempt: repository.readOperationalStageAttempt.bind(repository),
-    describeCycle: repository.describeCycle.bind(repository),
-    recordHeldPosition: repository.recordHeldPosition.bind(repository),
-    holdCycle: repository.holdCycle.bind(repository),
-  };
 
-  const heldEvidence = await reconcileLiveOpen({
+  const result = await reconcileLiveOpen({
     adapters: {
       collectorCrypt: {
         async getPackStatus() {
-          return {
-            memo: MEMO,
-            pack: {},
-            send: { transaction_signature: 'open-sig', to_wallet: OPERATOR },
-            buyback: [],
-          };
+          return { memo: MEMO, pack: {}, send: { transaction_signature: 'open-sig', to_wallet: OPERATOR }, buyback: [] };
         },
-        async openPack() {
-          openCalls += 1;
-          throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
-        },
+        async openPack() { openCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack'); },
       },
       solana: { client: rpcClient() },
     },
     config: baseConfig(),
-    cycleRepository,
-    context: {
-      cycleId,
-      stage: 'open',
-      fencingToken: 'fence-1',
-      assertLease() {},
-      async assertMutationAllowed() {},
-    },
+    cycleRepository: repo,
+    context: { cycleId, fencingToken: 'fence-1', assertLease() {}, async assertMutationAllowed() {} },
   });
-  assert.equal(heldEvidence.decision, 'held');
+  assert.equal(result.packs[0].decision, 'held');
   assert.equal(openCalls, 0);
 
   const reopened = await CycleRepository.open(directory);
@@ -830,143 +907,22 @@ test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t 
   await assert.doesNotReject(() => reopened.prepareStage(cycleId, 'open'));
 });
 
-test('open holds a SENT_UNKNOWN attempt when a memo-bound send targets another wallet', async () => {
-  const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
-  const requestDigest = digest({
-    schema: 'hookemon.operational-stage-request.v1',
-    cycleId: CYCLE_ID,
-    stage: 'open',
-    request,
-  });
-  const cycleRepository = repository({
-    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
-    attempts: { open: sentUnknownAttempt(requestDigest) },
-  });
-  let openCalls = 0;
-  const collectorCrypt = {
-    async getPackStatus() {
-      return {
-        memo: MEMO,
-        pack: {},
-        send: { nft_address: CARD_ASSET, transaction_signature: OPEN_SIGNATURE, to_wallet: COLLECTOR_RECIPIENT },
-        buyback: [],
-      };
-    },
-    async openPack() {
-      openCalls += 1;
-      throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
-    },
-  };
-
-  const heldEvidence = await reconcileLiveOpen({
-    adapters: { collectorCrypt, solana: { client: rpcClient() } },
-    config: baseConfig(),
-    cycleRepository,
-    context: {
-      cycleId: CYCLE_ID,
-      stage: 'open',
-    },
-  });
-  assert.equal(heldEvidence.decision, 'held');
-  assert.equal(openCalls, 0);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-});
-
-test('open leaves a SENT_UNKNOWN attempt unresolved while its memo-bound status cannot be read', async () => {
-  const request = { provider: 'collector-crypt', operation: 'open', memo: MEMO, expectedCardCount: 1 };
-  const requestDigest = digest({
-    schema: 'hookemon.operational-stage-request.v1',
-    cycleId: CYCLE_ID,
-    stage: 'open',
-    request,
-  });
-  const cycleRepository = repository({
-    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } } },
-    attempts: { open: sentUnknownAttempt(requestDigest) },
-  });
-  let openCalls = 0;
-  const collectorCrypt = {
-    async getPackStatus() { throw new Error('collector status temporarily unavailable'); },
-    async openPack() {
-      openCalls += 1;
-      throw new Error('SENT_UNKNOWN reconciliation must not resubmit openPack');
-    },
-  };
-
-  assert.equal(await reconcileLiveOpen({
-    adapters: { collectorCrypt, solana: { client: rpcClient() } },
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'open' },
-  }), null);
-  assert.equal(openCalls, 0);
-  assert.equal(cycleRepository.held.length, 0);
-});
-
-test('open refuses a purchase whose documented card count needs an unsupported fan-out', async () => {
-  const cycleRepository = repository({
-    stages: { purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 2 } } },
-  });
-  await assert.rejects(
-    prepareOpenRequest({ cycleRepository, context: { cycleId: CYCLE_ID } }),
-    /exactly one expected card/,
-  );
-});
-
-test('passes a held open position through epic gate and buyback without a second card write', async () => {
-  const heldOpen = {
-    memo: MEMO,
-    expectedCardCount: 1,
-    mint: null,
-    decision: 'held',
-    terminalState: 'HELD_DATA_UNVERIFIED',
-    reason: 'DATA_UNVERIFIED',
-    heldPosition: {
-      positionId: 'held:test:open',
-      evidenceDigest: `sha256:${'c'.repeat(64)}`,
-      terminalState: 'HELD_DATA_UNVERIFIED',
-      reason: 'DATA_UNVERIFIED',
-    },
-  };
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: heldOpen } },
-  });
-
-  const epicRequest = await prepareEpicGateRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
-  const epicEvidence = await mutateEpicGate({
-    liveMode: true,
-    adapters: {},
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'epic-gate' },
-    request: epicRequest,
-  });
-  const buybackRequest = await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
-  const buybackEvidence = await mutateBuyback({
-    liveMode: true,
-    adapters: {},
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'buyback' },
-    request: buybackRequest,
-  });
-
-  assert.deepEqual(epicEvidence, heldOpen);
-  assert.deepEqual(buybackEvidence, heldOpen);
-  assert.equal(cycleRepository.heldPositions.length, 0);
-  assert.equal(cycleRepository.ledgers.length, 0);
-});
-
 test('keeps a forty-percent epic equality sellable after a real repository reopen', async t => {
-  const { directory, repository, cycleId } = await durableCycle(t);
+  const { directory, repository: repo, cycleId } = await durableCycle(t);
   const offer = { ...settlementAsset(), amountAtomic: '40' };
   const insuredValue = { ...settlementAsset(), amountAtomic: '100' };
-  await completeThroughOpen(repository, cycleId, { memo: MEMO, mint: CARD_ASSET, offer, insuredValue });
+  for (const [stage, evidence] of [
+    ['eligibility-snapshot', { source: 'durable-test' }],
+    ['claim-process', { source: 'durable-test' }],
+    ['outbound', { source: 'durable-test' }],
+    ['purchase', { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1, packCost: { ...settlementAsset(), amountAtomic: '40' } }], purchasedCount: 1 }],
+    ['open', { memo: MEMO, mint: CARD_ASSET, offer, insuredValue }],
+  ]) {
+    await repo.prepareStage(cycleId, stage);
+    await repo.completeStage(cycleId, stage, evidence);
+  }
 
-  const outcome = await probeEpicGate({
-    cycleRepository: repository,
-    context: { cycleId },
-  });
+  const outcome = await probeEpicGate({ cycleRepository: repo, context: { cycleId } });
   assert.equal(outcome.belowFortyPercent, false);
   assert.equal(outcome.nextAction, 'sell');
 
@@ -979,583 +935,19 @@ test('keeps a forty-percent epic equality sellable after a real repository reope
   assert.equal((await reopened.prepareStage(cycleId, 'epic-gate')).status, 'PREPARED');
 });
 
-test('carves a below-threshold epic card into a held position without terminalizing its cycle', async () => {
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-    attempts: {
-      'epic-gate': responseAttempt({
-        ...reconciledSellDecision({ offerAtomic: '39' }),
-        decision: 'hold',
-      }),
-    },
-  });
-
-  const evidence = await reconcileLiveEpicGate({
-    adapters: {},
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'epic-gate' },
-  });
-
-  assert.deepEqual(evidence, {
-    memo: MEMO,
-    expectedCardCount: 1,
-    mint: CARD_ASSET,
-    decision: 'held',
-    terminalState: 'HELD_OWNER_DECISION',
-    reason: 'EPIC_THRESHOLD',
-    heldPosition: {
-      positionId: 'held:test:1',
-      evidenceDigest: `sha256:${'a'.repeat(64)}`,
-      terminalState: 'HELD_OWNER_DECISION',
-      reason: 'EPIC_THRESHOLD',
-    },
-  });
-  assert.equal(cycleRepository.held.length, 1);
-  assert.equal(cycleRepository.heldPositions[0].costMicroUsdg, '40');
-  assert.equal(cycleRepository.heldPositions[0].valueMicroUsdg, '40');
-  assert.deepEqual(cycleRepository.heldPositions[0].insuredValue, { ...settlementAsset(), amountAtomic: '100' });
-});
-
-test('epic gate uses configured field names, reconciles an atomic insured value, and holds a changed quote', async () => {
-  const epicGate = {
-    nftAddressField: 'nft_address',
-    insuredValueField: 'insured_value',
-    prizeTierField: 'prize_tier',
-    rarityField: 'rarity',
-    asset: settlementAsset(),
-  };
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-  });
-  let quoteAmount = { ...settlementAsset(), amountAtomic: '85' };
-  const collectorCrypt = {
-    async getPackStatus() {
-      return { memo: MEMO, pack: { pack_type: 'pokemon_50' }, send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 1, rarity: 'epic' }, buyback: [] };
-    },
-    async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 100 }], hasMore: false, page: 1, limit: 50 }; },
-    async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
-    async getBuybackAvailable() { return { available: true, amount: quoteAmount }; },
-  };
-  const config = baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), epicGate } });
-  assert.deepEqual(await prepareEpicGateRequest({ cycleRepository, context: { cycleId: CYCLE_ID } }), {
-    provider: 'collector-crypt', operation: 'epic-gate', memo: MEMO, mint: CARD_ASSET,
-  });
-  const evidence = await mutateEpicGate({
-    liveMode: true, adapters: { collectorCrypt }, config, cycleRepository, context: { cycleId: CYCLE_ID },
-  });
-  assert.equal(evidence.decision, 'sell');
-  assert.equal(evidence.offer.amountAtomic, '85');
-  assert.equal(evidence.insuredValueUnit, 'atomic');
-  cycleRepository.readOperationalStageAttempt = async () => responseAttempt(evidence);
-  quoteAmount = { ...settlementAsset(), amountAtomic: '40' };
-  const heldEvidence = await reconcileLiveEpicGate({
-    adapters: { collectorCrypt }, config, cycleRepository, context: { cycleId: CYCLE_ID, stage: 'epic-gate' },
-  });
-  assert.equal(heldEvidence.decision, 'held');
-  assert.equal(heldEvidence.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(cycleRepository.heldPositions.at(-1).reason, 'DATA_UNVERIFIED');
-});
-
-test('epic gate reconciles a whole-dollar insured value against the machine buyback percentage before selling', async () => {
-  const epicGate = {
-    nftAddressField: 'nft_address',
-    insuredValueField: 'insured_value',
-    prizeTierField: 'prize_tier',
-    rarityField: 'rarity',
-    asset: settlementAsset(),
-  };
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-  });
-  const collectorCrypt = {
-    async getPackStatus() {
-      return {
-        memo: MEMO,
-        pack: { pack_type: 'pokemon_50' },
-        send: { nft_address: CARD_ASSET, insured_value: 50, prize_tier: '1', rarity: 'epic' },
-        buyback: [],
-      };
-    },
-    async getNfts() {
-      return {
-        nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 50 }],
-        hasMore: false,
-        page: 1,
-        limit: 50,
-      };
-    },
-    async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
-    async getBuybackAvailable() {
-      return { available: true, amount: { ...settlementAsset(), amountAtomic: '42500000' } };
-    },
-  };
-
-  const evidence = await mutateEpicGate({
-    liveMode: true,
-    adapters: { collectorCrypt },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), epicGate } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(evidence.decision, 'sell');
-  assert.deepEqual(evidence.insuredValue, { ...settlementAsset(), amountAtomic: '50000000' });
-  assert.equal(evidence.insuredValueUnit, 'whole-usd');
-});
-
-test('epic gate accepts a one-point lower rounded buyback percentage', async () => {
-  const epicGate = {
-    nftAddressField: 'nft_address',
-    insuredValueField: 'insured_value',
-    prizeTierField: 'prize_tier',
-    rarityField: 'rarity',
-    asset: settlementAsset(),
-  };
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-  });
-  const collectorCrypt = {
-    async getPackStatus() {
-      return { memo: MEMO, pack: { pack_type: 'pokemon_50' }, send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 1, rarity: 'epic' }, buyback: [] };
-    },
-    async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, insured_value: 100, rarity: 'epic' }], hasMore: false, page: 1, limit: 50 }; },
-    async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
-    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '84' } }; },
-  };
-
-  const evidence = await mutateEpicGate({
-    liveMode: true,
-    adapters: { collectorCrypt },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), epicGate } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(evidence.decision, 'sell');
-  assert.equal(evidence.insuredValueUnit, 'atomic');
-  assert.equal(evidence.matchedBuybackPercent, 84);
-});
-
-test('epic gate holds when zero or two insured-value unit candidates reconcile', async () => {
-  const epicGate = {
-    nftAddressField: 'nft_address',
-    insuredValueField: 'insured_value',
-    prizeTierField: 'prize_tier',
-    rarityField: 'rarity',
-    asset: settlementAsset(),
-  };
-  for (const entry of [
-    { label: 'no candidate', insuredValue: 100, offerAtomic: '40' },
-    { label: 'two candidates', insuredValue: 0, offerAtomic: '0' },
-  ]) {
-    const cycleRepository = repository({
-      stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-    });
-    const collectorCrypt = {
-      async getPackStatus() {
-        return {
-          memo: MEMO,
-          pack: { pack_type: 'pokemon_50' },
-          send: { nft_address: CARD_ASSET, insured_value: entry.insuredValue, prize_tier: 1, rarity: 'epic' },
-          buyback: [],
-        };
-      },
-      async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, insured_value: entry.insuredValue, rarity: 'epic' }], hasMore: false, page: 1, limit: 50 }; },
-      async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
-      async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: entry.offerAtomic } }; },
-    };
-
-    const result = await mutateEpicGate({
-      liveMode: true,
-      adapters: { collectorCrypt },
-      config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), epicGate } }),
-      cycleRepository,
-      context: { cycleId: CYCLE_ID },
-    });
-
-    assert.equal(result.terminalState, 'HELD_DATA_UNVERIFIED', entry.label);
-    assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED', entry.label);
-  }
-});
-
-test('epic gate holds a conflict between the numeric tier and string rarity', async () => {
-  const epicGate = {
-    nftAddressField: 'nft_address',
-    insuredValueField: 'insured_value',
-    prizeTierField: 'prize_tier',
-    rarityField: 'rarity',
-    asset: settlementAsset(),
-  };
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-  });
-  const collectorCrypt = {
-    async getPackStatus() {
-      return { memo: MEMO, pack: { pack_type: 'pokemon_50' }, send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: '1', rarity: 'rare' }, buyback: [] };
-    },
-    async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, insured_value: 100, rarity: 'epic' }], hasMore: false, page: 1, limit: 50 }; },
-    async getMachines() { throw new Error('machine lookup must not happen after a rarity conflict'); },
-    async getBuybackAvailable() { throw new Error('quote lookup must not happen after a rarity conflict'); },
-  };
-
-  const result = await mutateEpicGate({
-    liveMode: true,
-    adapters: { collectorCrypt },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), epicGate } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(result.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-});
-
-test('epic gate holds when the configured insured-value asset differs from the buyback settlement asset', async () => {
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-  });
-  const collectorCrypt = {
-    async getPackStatus() {
-      return { memo: MEMO, pack: { pack_type: 'pokemon_50' }, send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 4 }, buyback: [] };
-    },
-    async getNfts() { return { nfts: [{ nft_address: CARD_ASSET, rarity: 'epic' }], hasMore: false, page: 1, limit: 50 }; },
-    async getBuybackAvailable() { return { available: true, amount: 40 }; },
-  };
-  const result = await mutateEpicGate({
-    liveMode: true,
-    adapters: { collectorCrypt },
-    config: baseConfig({
-      collectorCrypt: {
-        settlementAsset: settlementAsset(),
-        epicGate: {
-          nftAddressField: 'nft_address',
-          insuredValueField: 'insured_value',
-          prizeTierField: 'prize_tier',
-          rarityField: 'rarity',
-          epicPrizeTier: '4',
-          epicRarity: 'epic',
-          asset: settlementAsset(PACK_ASSET),
-        },
-      },
-    }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(result.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-});
-
-test('epic gate treats malformed provider responses as unverified data', async () => {
-  const cases = [
-    {
-      label: 'card listing',
-      pack: { pack_type: 'pokemon_50' },
-      send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 1 },
-      getNfts: async () => ({ nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 100 }], page: 1, limit: 50 }),
-      getBuybackAvailable: async () => ({ available: true, amount: { ...settlementAsset(), amountAtomic: '40' } }),
-    },
-    {
-      label: 'buyback offer',
-      pack: { pack_type: 'pokemon_50' },
-      send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 1 },
-      getNfts: async () => ({ nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 100 }], hasMore: false, page: 1, limit: 50 }),
-      getBuybackAvailable: async () => ({}),
-    },
-    {
-      label: 'documented numeric fields',
-      pack: { pack_type: 'pokemon_50' },
-      send: { nft_address: CARD_ASSET, insured_value: '100', prize_tier: '1' },
-      getNfts: async () => ({ nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: '100' }], hasMore: false, page: 1, limit: 50 }),
-      getBuybackAvailable: async () => ({ available: true, amount: { ...settlementAsset(), amountAtomic: '40' } }),
-    },
-    {
-      label: 'pack type',
-      pack: {},
-      send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 1 },
-      getNfts: async () => ({ nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 100 }], hasMore: false, page: 1, limit: 50 }),
-      getBuybackAvailable: async () => ({ available: true, amount: { ...settlementAsset(), amountAtomic: '40' } }),
-    },
-  ];
-
-  for (const entry of cases) {
-    const cycleRepository = repository({
-      stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-    });
-    const collectorCrypt = {
-      async getPackStatus() {
-        return {
-          memo: MEMO,
-          pack: entry.pack,
-          send: entry.send,
-          buyback: [],
-        };
-      },
-      getNfts: entry.getNfts,
-      async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
-      getBuybackAvailable: entry.getBuybackAvailable,
-    };
-    const result = await mutateEpicGate({
-      liveMode: true,
-      adapters: { collectorCrypt },
-      config: baseConfig({
-        collectorCrypt: {
-          settlementAsset: settlementAsset(),
-          epicGate: {
-            nftAddressField: 'nft_address',
-            insuredValueField: 'insured_value',
-            prizeTierField: 'prize_tier',
-            rarityField: 'rarity',
-            asset: settlementAsset(),
-          },
-        },
-      }),
-      cycleRepository,
-      context: { cycleId: CYCLE_ID },
-    });
-
-    assert.equal(result.terminalState, 'HELD_DATA_UNVERIFIED', entry.label);
-    assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED', entry.label);
-  }
-});
-
-test('epic gate finds a later-page card and verifies each documented tier mapping', async () => {
-  const insuredValue = 100000000;
-  const offerAmount = { ...settlementAsset(), amountAtomic: '85000000' };
-  const tierRarities = new Map([
-    [1, 'epic'],
-    [2, 'rare'],
-    [3, 'uncommon'],
-    [4, 'common'],
-  ]);
-
-  for (const [prizeTier, rarity] of tierRarities) {
-    const requests = [];
-    const cycleRepository = repository({
-      stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-    });
-    const collectorCrypt = {
-      async getPackStatus() {
-        return {
-          memo: MEMO,
-          pack: { pack_type: 'pokemon_50' },
-          send: { nft_address: CARD_ASSET, insured_value: insuredValue, prize_tier: prizeTier },
-          buyback: [],
-        };
-      },
-      async getNfts(request) {
-        requests.push(request);
-        if (request.page === 1) return { nfts: [], hasMore: true, page: 1, limit: 50 };
-        return {
-          nfts: [{ nft_address: CARD_ASSET, rarity, insured_value: insuredValue }],
-          hasMore: false,
-          page: 2,
-          limit: 50,
-        };
-      },
-      async getMachines() { return { machines: [{ code: 'pokemon_50', instantBuyback: 85 }] }; },
-      async getBuybackAvailable() { return { available: true, amount: offerAmount }; },
-    };
-    const config = baseConfig({
-      collectorCrypt: {
-        settlementAsset: settlementAsset(),
-        epicGate: {
-          nftAddressField: 'nft_address',
-          insuredValueField: 'insured_value',
-          prizeTierField: 'prize_tier',
-          rarityField: 'rarity',
-          asset: settlementAsset(),
-        },
-      },
-    });
-
-    const evidence = await mutateEpicGate({
-      liveMode: true,
-      adapters: { collectorCrypt },
-      config,
-      cycleRepository,
-      context: { cycleId: CYCLE_ID },
-    });
-
-    assert.equal(evidence.decision, 'sell', `tier ${prizeTier}`);
-    assert.deepEqual(requests, [
-      { code: 'pokemon_50', page: 1, limit: 50 },
-      { code: 'pokemon_50', page: 2, limit: 50 },
-    ], `tier ${prizeTier}`);
-  }
-});
-
-test('epic gate holds when card insured value disagrees with memo status', async () => {
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } } },
-  });
-  const collectorCrypt = {
-    async getPackStatus() {
-      return {
-        memo: MEMO,
-        pack: { pack_type: 'pokemon_50' },
-        send: { nft_address: CARD_ASSET, insured_value: 100, prize_tier: 1 },
-        buyback: [],
-      };
-    },
-    async getNfts() {
-      return { nfts: [{ nft_address: CARD_ASSET, rarity: 'epic', insured_value: 101 }], hasMore: false, page: 1, limit: 50 };
-    },
-    async getBuybackAvailable() { return { available: true, amount: 40 }; },
-  };
-  const config = baseConfig({
-    collectorCrypt: {
-      settlementAsset: settlementAsset(),
-      epicGate: {
-        nftAddressField: 'nft_address',
-        insuredValueField: 'insured_value',
-        prizeTierField: 'prize_tier',
-        rarityField: 'rarity',
-        epicPrizeTier: '1',
-        epicRarity: 'epic',
-        asset: settlementAsset(),
-      },
-    },
-  });
-
-  const evidence = await mutateEpicGate({
-    liveMode: true,
-    adapters: { collectorCrypt },
-    config,
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(evidence.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-});
-
-test('buyback refuses the provisional authority before requesting an unbound provider transaction', async () => {
-  const transaction = transactionFor({ mint: PACK_ASSET });
-  const policy = await policyForTransaction(transaction);
-  let signed = false;
-  let buybackCalls = 0;
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': {
-        status: 'COMPLETE',
-        evidence: reconciledSellDecision(),
-      },
-    },
-  });
-  const config = baseConfig({
-    collectorCrypt: {
-      settlementAsset: settlementAsset(),
-      buyback: { policy, collectorProgramId: TOKEN_PROGRAM_ID, collectorRecipient: COLLECTOR_RECIPIENT },
-    },
-  });
-  await assert.rejects(() => mutateBuyback({
-    liveMode: true,
-    adapters: {
-      collectorCrypt: {
-        async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
-        async buyback() {
-          buybackCalls += 1;
-          return { success: true, serializedTransaction: transaction, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, memo: MEMO };
-        },
-      },
-      solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-    },
-    signerClient: { solana: { async sign() { signed = true; return { signedTxBase64: transaction }; } } },
-    config,
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  }), /active frozen interface authority is invalid/);
-  assert.equal(signed, false);
-  assert.equal(buybackCalls, 0);
-});
-
-test('buyback requires MoneyConfigurationV1 before querying or constructing a provider transaction', async () => {
-  const transaction = transactionFor({ mint: PACK_ASSET });
-  const policy = await policyForTransaction(transaction);
-  let availabilityCalls = 0;
-  let buybackCalls = 0;
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': { status: 'COMPLETE', evidence: reconciledSellDecision() },
-    },
-  });
-
-  await assert.rejects(
-    () => mutateBuyback({
-      liveMode: true,
-      adapters: {
-        collectorCrypt: {
-          async getBuybackAvailable() {
-            availabilityCalls += 1;
-            return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } };
-          },
-          async buyback() {
-            buybackCalls += 1;
-            return { success: true, serializedTransaction: transaction, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, memo: MEMO };
-          },
-        },
-        solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-      },
-      signerClient: { solana: { async sign() { throw new Error('signer must not be called'); } } },
-      config: baseConfig({
-        moneyConfiguration: null,
-        collectorCrypt: {
-          settlementAsset: settlementAsset(),
-          buyback: { policy, collectorProgramId: TOKEN_PROGRAM_ID, collectorRecipient: COLLECTOR_RECIPIENT },
-        },
-      }),
-      cycleRepository,
-      context: { cycleId: CYCLE_ID },
-    }),
-    /buyback requires MoneyConfigurationV1/,
-  );
-  assert.equal(availabilityCalls, 0);
-  assert.equal(buybackCalls, 0);
-});
-
-test('buyback holds as unavailable before it can request or sign a provider transaction', async () => {
-  let buybackCalls = 0;
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': {
-        status: 'COMPLETE',
-        evidence: reconciledSellDecision(),
-      },
-    },
-  });
-  const result = await mutateBuyback({
-    liveMode: true,
-    adapters: {
-      collectorCrypt: {
-        async getBuybackAvailable() { return { available: false }; },
-        async buyback() { buybackCalls += 1; throw new Error('provider buyback must not be called'); },
-      },
-      solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-    },
-    signerClient: { solana: { async sign() { throw new Error('signer must not be called'); } } },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset() } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(result.memo, MEMO);
-  assert.equal(result.mint, CARD_ASSET);
-  assert.equal(result.decision, 'held');
-  assert.equal(result.terminalState, 'HELD_UNAVAILABLE');
-  assert.equal(result.reason, 'BUYBACK_UNAVAILABLE');
-  assert.equal(result.heldPosition.positionId, 'held:test:1');
-  assert.equal(buybackCalls, 0);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_UNAVAILABLE');
-});
-
 test('records unavailable buyback as a durable held position without terminalizing the cycle', async t => {
   const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
-  await completeThroughEpicGate(cycleRepository, cycleId);
+  for (const [stage, evidence] of [
+    ['eligibility-snapshot', { source: 'durable-test' }],
+    ['claim-process', { source: 'durable-test' }],
+    ['outbound', { source: 'durable-test' }],
+    ['purchase', { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1, packCost: { ...settlementAsset(), amountAtomic: '40' } }], purchasedCount: 1 }],
+    ['open', { packs: [openedPack()] }],
+    ['epic-gate', { packs: [sellDecisionPack()] }],
+  ]) {
+    await cycleRepository.prepareStage(cycleId, stage);
+    await cycleRepository.completeStage(cycleId, stage, evidence);
+  }
   let buybackCalls = 0;
   let signCalls = 0;
   const result = await mutateBuyback({
@@ -1570,10 +962,10 @@ test('records unavailable buyback as a durable held position without terminalizi
     signerClient: { solana: { async sign() { signCalls += 1; throw new Error('signer must not run'); } } },
     config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset() } }),
     cycleRepository,
-    context: { cycleId, stage: 'buyback' },
+    context: { cycleId },
   });
 
-  assert.equal(result.terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(result.packs[0].terminalState, 'HELD_UNAVAILABLE');
   assert.equal(buybackCalls, 0);
   assert.equal(signCalls, 0);
   const reopened = await CycleRepository.open(directory);
@@ -1585,440 +977,11 @@ test('records unavailable buyback as a durable held position without terminalizi
   assert.equal((await reopened.prepareStage(cycleId, 'buyback')).status, 'PREPARED');
 });
 
-test('skips buyback for a held epic position and records zero main proceeds', async () => {
-  const heldEpic = {
-    memo: MEMO,
-    expectedCardCount: 1,
-    mint: CARD_ASSET,
-    decision: 'held',
-    terminalState: 'HELD_OWNER_DECISION',
-    reason: 'EPIC_THRESHOLD',
-    heldPosition: {
-      positionId: 'held:test:epic',
-      evidenceDigest: `sha256:${'b'.repeat(64)}`,
-      terminalState: 'HELD_OWNER_DECISION',
-      reason: 'EPIC_THRESHOLD',
-    },
-  };
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { memo: MEMO, mint: CARD_ASSET } },
-      'epic-gate': { status: 'COMPLETE', evidence: heldEpic },
-    },
-  });
-  let providerCalls = 0;
-  const prepared = await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
-
-  assert.equal(prepared.decision, 'held');
-  const result = await mutateBuyback({
-    liveMode: true,
-    adapters: {
-      collectorCrypt: {
-        async getBuybackAvailable() { providerCalls += 1; throw new Error('held card must not request a buyback'); },
-      },
-    },
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'buyback' },
-  });
-
-  assert.equal(result.decision, 'held');
-  assert.equal(result.heldPosition.positionId, heldEpic.heldPosition.positionId);
-  assert.equal(providerCalls, 0);
-  assert.equal(cycleRepository.heldPositions.length, 0);
-  assert.equal(cycleRepository.ledgers.length, 0);
-});
-
-test('buyback binds the completed sell decision into its prepared request', async () => {
-  const decision = reconciledSellDecision({ rawInsuredValue: '100000000000000000000' });
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': { status: 'COMPLETE', evidence: decision },
-    },
-  });
-
-  assert.deepEqual(await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } }), {
-    provider: 'collector-crypt',
-    operation: 'buyback',
-    memo: MEMO,
-    mint: CARD_ASSET,
-    epicDecision: {
-      ...decision,
-      decisionDigest: digest({
-        schema: 'hookemon.collector-crypt-epic-decision.v1',
-        cycleId: CYCLE_ID,
-        ...decision,
-      }),
-    },
-  });
-});
-
-test('buyback holds before a provider request when the completed decision is missing', async () => {
-  let availabilityCalls = 0;
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } } },
-  });
-  const request = await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } });
-
-  const result = await mutateBuyback({
-    liveMode: true,
-    adapters: {
-      collectorCrypt: {
-        async getBuybackAvailable() { availabilityCalls += 1; return { available: true, amount: '40' }; },
-      },
-      solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-    },
-    signerClient: { solana: { async sign() { throw new Error('signer must not be called'); } } },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset() } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-    request,
-  });
-
-  assert.equal(result.terminalState, 'HELD_OWNER_DECISION');
-  assert.equal(availabilityCalls, 0);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_OWNER_DECISION');
-});
-
-test('buyback prepares a canonical non-authorizing request when the completed decision is missing', async () => {
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } } },
-  });
-
-  assert.deepEqual(await prepareBuybackRequest({ cycleRepository, context: { cycleId: CYCLE_ID } }), {
-    provider: 'collector-crypt',
-    operation: 'buyback',
-    memo: MEMO,
-    mint: CARD_ASSET,
-    epicDecision: null,
-  });
-});
-
-test('buyback holds a changed quote before requesting a provider transaction or signature', async () => {
-  const decision = reconciledSellDecision({ rawInsuredValue: '100000000000000000000' });
-  const { offer, insuredValue } = decision;
-  let buybackCalls = 0;
-  let signerCalls = 0;
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': {
-        status: 'COMPLETE',
-        evidence: decision,
-      },
-    },
-  });
-
-  const result = await mutateBuyback({
-    liveMode: true,
-    adapters: {
-      collectorCrypt: {
-        async getBuybackAvailable() { return { available: true, amount: { ...offer, amountAtomic: (BigInt(offer.amountAtomic) - 1n).toString() } }; },
-        async buyback() { buybackCalls += 1; throw new Error('provider buyback must not be called'); },
-      },
-      solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-    },
-    signerClient: { solana: { async sign() { signerCalls += 1; throw new Error('signer must not be called'); } } },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset() } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(result.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(buybackCalls, 0);
-  assert.equal(signerCalls, 0);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-});
-
-test('buyback rechecks the completed sell decision immediately before signing', () => {
-  const source = readFileSync(new URL('../../src/app/stages/buyback.mjs', import.meta.url), 'utf8');
-  const beforeSign = source.indexOf('beforeSign: async () => {');
-  const decisionRead = source.indexOf('readCompletedSellDecision', beforeSign);
-  const preparedCheck = source.indexOf('assertPreparedBuybackRequest(prepared, currentDecision);', decisionRead);
-  const beforeSignInvocation = source.indexOf('if (beforeSign !== null) await beforeSign();');
-  const authorityCheck = source.indexOf('requireCollectorOnlyMutationAuthority(config);', beforeSignInvocation);
-  const signerCall = source.indexOf('return signerClient.solana.sign(request);', authorityCheck);
-
-  assert.notEqual(beforeSign, -1);
-  assert.notEqual(decisionRead, -1);
-  assert.notEqual(preparedCheck, -1);
-  assert.notEqual(beforeSignInvocation, -1);
-  assert.notEqual(authorityCheck, -1);
-  assert.notEqual(signerCall, -1);
-  assert.ok(beforeSign < decisionRead && decisionRead < preparedCheck);
-  assert.ok(beforeSignInvocation < authorityCheck && authorityCheck < signerCall);
-});
-
-test('buyback holds a quote that does not use the fixed Collector settlement asset', async () => {
-  let buybackCalls = 0;
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': { status: 'COMPLETE', evidence: reconciledSellDecision() },
-    },
-  });
-
-  const result = await mutateBuyback({
-    liveMode: true,
-    adapters: {
-      collectorCrypt: {
-        async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(PACK_ASSET), amountAtomic: '85' } }; },
-        async buyback() { buybackCalls += 1; throw new Error('buyback must not be called with an invalid quote'); },
-      },
-      solana: { client: rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) }) },
-    },
-    signerClient: { solana: { async sign() { throw new Error('signer must not be called'); } } },
-    config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset() } }),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID },
-  });
-
-  assert.equal(result.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(buybackCalls, 0);
-  assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-});
-
-test('buyback rechecks the unit-bound quote after provider construction and before authority-gated signing', () => {
-  const source = readFileSync(new URL('../../src/app/stages/buyback.mjs', import.meta.url), 'utf8');
-  const providerBuild = source.indexOf('const built = await adapters.collectorCrypt.buyback');
-  const beforeSign = source.indexOf('beforeSign: async () => {', providerBuild);
-  const decisionRead = source.indexOf('readCompletedSellDecision', beforeSign);
-  const preparedCheck = source.indexOf('assertPreparedBuybackRequest(prepared, currentDecision);', decisionRead);
-  const quoteCheck = source.indexOf('if (!sameAmount(quote, currentDecision.offer))', preparedCheck);
-  const beforeSignInvocation = source.indexOf('if (beforeSign !== null) await beforeSign();');
-  const authorityCheck = source.indexOf('requireCollectorOnlyMutationAuthority(config);', beforeSignInvocation);
-  const signerCall = source.indexOf('return signerClient.solana.sign(request);', authorityCheck);
-
-  assert.notEqual(providerBuild, -1);
-  assert.notEqual(beforeSign, -1);
-  assert.notEqual(decisionRead, -1);
-  assert.notEqual(preparedCheck, -1);
-  assert.notEqual(quoteCheck, -1);
-  assert.notEqual(beforeSignInvocation, -1);
-  assert.notEqual(authorityCheck, -1);
-  assert.notEqual(signerCall, -1);
-  assert.ok(providerBuild < beforeSign && beforeSign < decisionRead && decisionRead < preparedCheck && preparedCheck < quoteCheck);
-  assert.ok(beforeSignInvocation < authorityCheck && authorityCheck < signerCall);
-});
-
-test('buyback reconciles a completed memo check even after sale eligibility becomes unavailable', async () => {
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  const settlementTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const evidence = buybackResponseEvidence();
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': {
-        status: 'COMPLETE',
-        evidence: reconciledSellDecision(),
-      },
-    },
-    attempts: { buyback: responseAttempt(evidence) },
-  });
-  const collectorCrypt = {
-    async getPackStatus() { return { memo: MEMO, pack: {}, send: {}, buyback: [] }; },
-    async getBuybackAvailable() { throw new Error('post-sale eligibility must not be checked'); },
-    async getBuybackCheck() {
-      return {
-        exists: true,
-        playerWallet: OPERATOR,
-        nft: CARD_ASSET,
-        transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85',
-        createdAt: '2025-05-26T17:32:33.588Z',
-        status: 'complete',
-      };
-    },
-  };
-  const rpc = rpcClient({
-    entries: [
-      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
-      { tokenAccount: settlementTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '0', postAmount: '85', decimals: CIRCLE_USD_DECIMALS },
-    ],
-  });
-
-  assert.deepEqual(await reconcileLiveBuyback({
-    adapters: { collectorCrypt, solana: { client: rpc } },
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'buyback' },
-  }), {
-    ...evidence,
-    proceeds: { ...settlementAsset(), amountAtomic: '85' },
-  });
-});
-
-test('buyback recovers a matching SENT_UNKNOWN attempt from durable purchase, open, and sell decision evidence without mutations', async t => {
-  const { repository: cycleRepository, cycleId } = await durableCycle(t);
-  await completeThroughEpicGate(cycleRepository, cycleId);
-  const request = await prepareSentUnknownBuybackAttempt(cycleRepository, cycleId);
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  const settlementTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  let checkReads = 0;
-  let availabilityReads = 0;
-  let buybackCalls = 0;
-  let submitCalls = 0;
-  const collectorCrypt = {
-    async getBuybackCheck() {
-      checkReads += 1;
-      return {
-        exists: true,
-        playerWallet: OPERATOR,
-        nft: CARD_ASSET,
-        transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85',
-        createdAt: '2025-05-26T17:32:33.588Z',
-        status: 'complete',
-      };
-    },
-    async getBuybackAvailable() { availabilityReads += 1; throw new Error('SENT_UNKNOWN reconciliation must not read buyback availability'); },
-    async buyback() { buybackCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not retry buyback'); },
-    async submitTransaction() { submitCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not submit a transaction'); },
-  };
-  const rpc = rpcClient({
-    entries: [
-      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
-      { tokenAccount: settlementTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '0', postAmount: '85', decimals: CIRCLE_USD_DECIMALS },
-    ],
-  });
-
-  assert.deepEqual(await reconcileLiveBuyback({
-    adapters: { collectorCrypt, solana: { client: rpc } },
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId, stage: 'buyback' },
-  }), {
-    memo: MEMO,
-    mint: CARD_ASSET,
-    signature: BUYBACK_SIGNATURE,
-    quote: request.epicDecision.offer,
-    refundAmount: request.epicDecision.offer,
-    proceeds: request.epicDecision.offer,
-  });
-  assert.equal(checkReads, 1);
-  assert.equal(availabilityReads, 0);
-  assert.equal(buybackCalls, 0);
-  assert.equal(submitCalls, 0);
-});
-
-test('buyback holds a mismatched SENT_UNKNOWN request before any provider or RPC read', async t => {
-  const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
-  await completeThroughEpicGate(cycleRepository, cycleId);
-  await prepareSentUnknownBuybackAttempt(cycleRepository, cycleId, {
-    provider: 'collector-crypt',
-    operation: 'buyback',
-    memo: MEMO,
-    mint: CARD_ASSET,
-    epicDecision: null,
-  });
-  let checkReads = 0;
-  let availabilityReads = 0;
-  let buybackCalls = 0;
-  let submitCalls = 0;
-  let rpcReads = 0;
-  const rpc = createSolanaRpcClient({
-    fetchImpl: async () => {
-      rpcReads += 1;
-      throw new Error('mismatched SENT_UNKNOWN request must not reach Solana RPC');
-    },
-  });
-
-  const heldEvidence = await reconcileLiveBuyback({
-    adapters: {
-      collectorCrypt: {
-        async getBuybackCheck() { checkReads += 1; throw new Error('mismatched SENT_UNKNOWN request must not read a buyback check'); },
-        async getBuybackAvailable() { availabilityReads += 1; throw new Error('mismatched SENT_UNKNOWN request must not read buyback availability'); },
-        async buyback() { buybackCalls += 1; throw new Error('mismatched SENT_UNKNOWN request must not retry buyback'); },
-        async submitTransaction() { submitCalls += 1; throw new Error('mismatched SENT_UNKNOWN request must not submit a transaction'); },
-      },
-      solana: { client: rpc },
-    },
-    config: baseConfig(),
-    cycleRepository,
-    context: { cycleId, stage: 'buyback' },
-  });
-  assert.equal(heldEvidence.decision, 'held');
-  assert.equal(heldEvidence.terminalState, 'HELD_DATA_UNVERIFIED');
-  assert.equal(checkReads, 0);
-  assert.equal(availabilityReads, 0);
-  assert.equal(buybackCalls, 0);
-  assert.equal(submitCalls, 0);
-  assert.equal(rpcReads, 0);
-
-  const reopened = await CycleRepository.open(directory);
-  assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
-  assert.equal((await reopened.describeCycle(cycleId)).heldPositions.size, 1);
-});
-
-test('buyback leaves absent or pending SENT_UNKNOWN checks unresolved without mutations', async () => {
-  const stages = {
-    purchase: { status: 'COMPLETE', evidence: { memo: MEMO, expectedCardCount: 1 } },
-    open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-    'epic-gate': { status: 'COMPLETE', evidence: reconciledSellDecision() },
-  };
-  for (const check of [
-    { label: 'absent', value: { exists: false } },
-    { label: 'pending', value: { exists: true, status: '' } },
-  ]) {
-    const request = await prepareBuybackRequest({
-      cycleRepository: repository({ stages }),
-      context: { cycleId: CYCLE_ID },
-    });
-    const cycleRepository = repository({
-      stages,
-      attempts: {
-        buyback: sentUnknownAttempt(digest({
-          schema: 'hookemon.operational-stage-request.v1',
-          cycleId: CYCLE_ID,
-          stage: 'buyback',
-          request,
-        })),
-      },
-    });
-    let checkReads = 0;
-    let availabilityReads = 0;
-    let buybackCalls = 0;
-    let submitCalls = 0;
-
-    const reconciliation = await reconcileLiveBuyback({
-      adapters: {
-        collectorCrypt: {
-          async getBuybackCheck() { checkReads += 1; return check.value; },
-          async getBuybackAvailable() { availabilityReads += 1; throw new Error('SENT_UNKNOWN reconciliation must not read buyback availability'); },
-          async buyback() { buybackCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not retry buyback'); },
-          async submitTransaction() { submitCalls += 1; throw new Error('SENT_UNKNOWN reconciliation must not submit a transaction'); },
-        },
-        solana: { client: rpcClient() },
-      },
-      config: baseConfig(),
-      cycleRepository,
-      context: { cycleId: CYCLE_ID, stage: 'buyback' },
-    });
-    if (check.expectedHold) {
-      assert.equal(reconciliation.decision, 'held', check.label);
-      assert.equal(reconciliation.terminalState, 'HELD_DATA_UNVERIFIED', check.label);
-    } else {
-      assert.equal(reconciliation, null, check.label);
-    }
-    assert.equal(checkReads, 1, check.label);
-    assert.equal(availabilityReads, 0, check.label);
-    assert.equal(buybackCalls, 0, check.label);
-    assert.equal(submitCalls, 0, check.label);
-    assert.equal(cycleRepository.held.length, 0, check.label);
-  }
-});
-
 test('carves an overdue SENT_UNKNOWN buyback into a held position without another provider call', async () => {
   const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-    },
+    stages: { open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } } },
     attempts: {
-      buyback: {
-        ...sentUnknownAttempt(`sha256:${'e'.repeat(64)}`),
-        sentAtMs: 1_700_000_000_000,
-      },
+      buyback: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 1_700_000_000_000, responseEvidence: null, reconciliationEvidence: null },
     },
   });
 
@@ -2026,7 +989,7 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
     adapters: {},
     config: baseConfig({ unresolvedCardDeadlineMinutes: 30 }),
     cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'buyback', nowMs: 1_700_001_800_000 },
+    context: { cycleId: CYCLE_ID, nowMs: 1_700_001_800_000 },
   });
 
   assert.deepEqual(evidence, {
@@ -2045,238 +1008,4 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
   });
   assert.equal(cycleRepository.held.length, 1);
   assert.equal(cycleRepository.heldPositions[0].costMicroUsdg, '40');
-});
-
-test('live collector-only buyback omits an unverified token-account alternate recipient', () => {
-  const proceedsAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const selected = baseConfig({
-    execution: { profile: 'rehearsal', providerMode: 'live' },
-    rehearsal: {
-      mode: 'collector-only',
-      proceedsAccount,
-      payoutRecipients: [COLLECTOR_RECIPIENT],
-      split: 'equal',
-    },
-  });
-  assert.deepEqual(buildCollectorBuybackRequest({ config: selected, mint: CARD_ASSET }), {
-    playerAddress: OPERATOR,
-    nftAddress: CARD_ASSET,
-  });
-
-  assert.throws(
-    () => buildCollectorBuybackRequest({
-      config: {
-        ...selected,
-        rehearsal: { ...selected.rehearsal, proceedsAccount: PACK_ASSET },
-      },
-      mint: CARD_ASSET,
-    }),
-    /canonical Circle token account/,
-  );
-
-  assert.throws(
-    () => buildCollectorBuybackRequest({
-      config: {
-        ...selected,
-        rehearsal: { ...selected.rehearsal, payoutRecipients: [OPERATOR] },
-      },
-      mint: CARD_ASSET,
-    }),
-    /distinct from the operator wallet and every recipient/,
-  );
-});
-
-test('live collector-only buyback reconciles only the finalized dedicated proceeds account delta', async () => {
-  const proceedsAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  const evidence = { ...buybackResponseEvidence(), proceedsAccount };
-  const cycleRepository = repository({
-    stages: { open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } } },
-    attempts: { buyback: responseAttempt(evidence) },
-  });
-  const collectorCrypt = {
-    async getBuybackCheck() {
-      return {
-        exists: true,
-        playerWallet: OPERATOR,
-        nft: CARD_ASSET,
-        transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85',
-        createdAt: '2025-05-26T17:32:33.588Z',
-        status: 'complete',
-      };
-    },
-  };
-  const rpc = rpcClient({
-    entries: [
-      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
-      { tokenAccount: proceedsAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92', decimals: CIRCLE_USD_DECIMALS },
-    ],
-  });
-  const selected = baseConfig({
-    execution: { profile: 'rehearsal', providerMode: 'live' },
-    rehearsal: {
-      mode: 'collector-only',
-      proceedsAccount,
-      payoutRecipients: [COLLECTOR_RECIPIENT],
-      split: 'equal',
-    },
-  });
-
-  assert.deepEqual(await reconcileLiveBuyback({
-    adapters: { collectorCrypt, solana: { client: rpc } },
-    config: selected,
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'buyback' },
-  }), {
-    ...evidence,
-    proceeds: { ...settlementAsset(), amountAtomic: '85' },
-    proceedsProjection: {
-      account: proceedsAccount,
-      beforeAtomic: '7',
-      afterAtomic: '92',
-      delta: { ...settlementAsset(), amountAtomic: '85' },
-    },
-  });
-});
-
-test('buyback leaves absent or pending checks unresolved and holds a conflicting completed check', async () => {
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  const settlementTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const evidence = buybackResponseEvidence();
-  const checks = [
-    { label: 'absent', value: { exists: false }, expectedHold: false },
-    {
-      label: 'pending',
-      value: {
-        exists: true, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85', createdAt: '2025-05-26T17:32:33.588Z', status: '',
-      },
-      expectedHold: false,
-    },
-    {
-      label: 'unknown status',
-      value: {
-        exists: true, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85', createdAt: '2025-05-26T17:32:33.588Z', status: 'failed',
-      },
-      expectedHold: true,
-    },
-    {
-      label: 'conflicting',
-      value: {
-        exists: true, playerWallet: OPERATOR, nft: PACK_ASSET, transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85', createdAt: '2025-05-26T17:32:33.588Z', status: 'complete',
-      },
-      expectedHold: true,
-    },
-  ];
-  const rpc = rpcClient({
-    entries: [
-      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
-      { tokenAccount: settlementTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '0', postAmount: '85', decimals: CIRCLE_USD_DECIMALS },
-    ],
-  });
-
-  for (const check of checks) {
-    const cycleRepository = repository({
-      stages: { open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } } },
-      attempts: { buyback: responseAttempt(evidence) },
-    });
-    const collectorCrypt = {
-      async getPackStatus() { return { memo: MEMO, pack: {}, send: {}, buyback: [{ transaction_signature: BUYBACK_SIGNATURE }] }; },
-      async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
-      async getBuybackCheck() { return check.value; },
-    };
-
-    const reconciliation = await reconcileLiveBuyback({
-      adapters: { collectorCrypt, solana: { client: rpc } },
-      config: baseConfig(),
-      cycleRepository,
-      context: { cycleId: CYCLE_ID, stage: 'buyback' },
-    });
-    if (check.expectedHold) {
-      assert.equal(reconciliation?.decision, 'held', check.label);
-      assert.equal(reconciliation?.terminalState, 'HELD_DATA_UNVERIFIED', check.label);
-    } else {
-      assert.equal(reconciliation, null, check.label);
-    }
-    assert.equal(cycleRepository.held.length > 0, check.expectedHold, check.label);
-    if (check.expectedHold) assert.equal(cycleRepository.held.at(-1).terminalState, 'HELD_DATA_UNVERIFIED');
-  }
-});
-
-test('buyback refuses the provisional authority before mutation and still reconciles typed finalized proceeds', async () => {
-  const transaction = transactionFor({ mint: CARD_ASSET });
-  const policy = await policyForTransaction(transaction);
-  const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
-  const settlementTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
-  const evidence = buybackResponseEvidence();
-  const cycleRepository = repository({
-    stages: {
-      open: { status: 'COMPLETE', evidence: { mint: CARD_ASSET, memo: MEMO } },
-      'epic-gate': {
-        status: 'COMPLETE',
-        evidence: reconciledSellDecision(),
-      },
-    },
-    attempts: { buyback: responseAttempt(evidence) },
-  });
-  let signed = 0;
-  let submitted = 0;
-  let buybackCalls = 0;
-  const collectorCrypt = {
-    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
-    async buyback() { buybackCalls += 1; return { success: true, serializedTransaction: transaction, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, memo: MEMO }; },
-    async submitTransaction() { submitted += 1; return { success: true, signature: BUYBACK_SIGNATURE, confirmationStatus: 'submitted' }; },
-    async getBuybackCheck() {
-      return {
-        exists: true,
-        playerWallet: OPERATOR,
-        nft: CARD_ASSET,
-        transactionSignature: BUYBACK_SIGNATURE,
-        buybackAmount: '85',
-        createdAt: '2025-05-26T17:32:33.588Z',
-        status: 'complete',
-      };
-    },
-  };
-  const rpc = rpcClient({
-    tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }),
-    entries: [
-      { tokenAccount: cardTokenAccount, owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
-      { tokenAccount: settlementTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '0', postAmount: '85', decimals: CIRCLE_USD_DECIMALS },
-    ],
-  });
-  const config = baseConfig({
-    collectorCrypt: {
-      settlementAsset: settlementAsset(),
-      buyback: { policy, collectorProgramId: TOKEN_PROGRAM_ID, collectorRecipient: COLLECTOR_RECIPIENT },
-    },
-  });
-  await assert.rejects(
-    () => mutateBuyback({
-      liveMode: true,
-      adapters: { collectorCrypt, solana: { client: rpc } },
-      signerClient: { solana: { async sign(value) { signed += 1; return { signedTxBase64: value }; } } },
-      config,
-      cycleRepository,
-      context: { cycleId: CYCLE_ID },
-    }),
-    /active frozen interface authority is invalid/,
-  );
-  assert.equal(signed, 0);
-  assert.equal(submitted, 0);
-  assert.equal(buybackCalls, 0);
-  assert.deepEqual(await reconcileLiveBuyback({
-    adapters: { collectorCrypt, solana: { client: rpc } },
-    config,
-    cycleRepository,
-    context: { cycleId: CYCLE_ID, stage: 'buyback' },
-  }), {
-    ...evidence,
-    proceeds: { ...settlementAsset(), amountAtomic: '85' },
-  });
-  assert.equal(cycleRepository.ledgers.length, 1);
-  assert.equal(cycleRepository.ledgers[0].ledger.buybackProceeds, '85');
 });

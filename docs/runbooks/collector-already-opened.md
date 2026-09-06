@@ -14,8 +14,10 @@ buyback. Retain the original memo, provider response, and any Solana evidence.
 ## Runner behavior
 
 When an already-recorded provider response lacks its memo-bound mint, the open
-stage holds the cycle `HELD_DATA_UNVERIFIED` and retains the
-`RESPONSE_RECORDED` attempt. It does not retry the mutation.
+stage carves this pack's card out as a durable held position
+(`HELD_DATA_UNVERIFIED`) and retains the `RESPONSE_RECORDED` attempt. It does
+not retry the mutation. The cycle itself is not held: a multi-pack batch's
+other packs still open, gate, and sell normally in the same reconcile pass.
 
 ## Operator recovery
 
@@ -40,7 +42,7 @@ Traceability: L4-M1.
 
 Failure-matrix cells: Open result:missing-mint-response-recorded
 Owning work package: WP08b
-Expected outcome: terminal=HELD_DATA_UNVERIFIED; attempt=RESPONSE_RECORDED; next=owner-decision
+Expected outcome: cycle terminal=none (position held HELD_DATA_UNVERIFIED); attempt=RESPONSE_RECORDED; next=held-position-owner-decision
 Test: packages/adapters/test/app/stages-collector-lifecycle.test.mjs — open response missing its memo-bound mint holds durably without a retry
 Alarm reason/code: OPEN FACT (WP08b): no dedicated alarm reason/code is emitted for this hold.
 Resume command: none supported; preserve the memo and reconcile through the approved operator control.

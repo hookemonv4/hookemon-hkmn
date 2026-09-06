@@ -2,6 +2,15 @@ const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
 const canonicalSignedInteger = /^(?:0|[1-9][0-9]*|-[1-9][0-9]*)$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 
+// The durable journal bounds a single event payload to 64 array items / object fields
+// (packages/runner/src/cycle/journal.mjs RECOVERY_LIMITS.payloadArrayItems /
+// canonicalObjectFields). Collector's documented /api/generateYoloPacks accepts 1-100 packs per
+// call, but a pack batch recorded in one journal event cannot exceed that shared bound. Until a
+// paged/chunked pack ledger exists, 64 is the system-enforced ceiling, not the provider's.
+export const MAXIMUM_PACK_BATCH_SIZE = 64;
+
+export const PACK_OPERATION_STAGES = Object.freeze(['purchase', 'open', 'epic-gate', 'buyback']);
+
 export const OPERATIONAL_CYCLE_STAGES = Object.freeze([
   'eligibility-snapshot',
   'claim-process',
@@ -688,4 +697,116 @@ export function assertMoneyConfiguration(value, label = 'money configuration') {
       lamportReserve: assertMoneyAmount(value.solana.lamportReserve, solanaNative, `${label} solana lamportReserve`),
     },
   };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Multiple-pack lifecycle records (Task C). One cycle can request several packs from a supported
+// Collector batch operation; each pack keeps its own durable identity, memo, mint, and settlement
+// evidence so several packs are never conflated with several cards returned by one operation.
+
+const packMemoPattern = /^[\x21-\x7e]{1,255}$/;
+const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** One durably generated pack request within a batch, before any signing risk. */
+export function assertPackBatchRequestEntry(value, label = 'pack batch request entry') {
+  assertPlainObject(value, ['packIndex', 'memo', 'expectedCardCount', 'packType'], label);
+  if (!Number.isInteger(value.packIndex) || value.packIndex < 0) throw new Error(`${label} packIndex is invalid`);
+  if (typeof value.memo !== 'string' || !packMemoPattern.test(value.memo)) throw new Error(`${label} memo is invalid`);
+  if (!Number.isInteger(value.expectedCardCount) || value.expectedCardCount < 1) throw new Error(`${label} expectedCardCount is invalid`);
+  if (value.packType !== null && (typeof value.packType !== 'string' || !packTypeFieldPattern.test(value.packType))) {
+    throw new Error(`${label} packType is invalid`);
+  }
+  return clone(value);
+}
+
+/** The full set of packs a batch purchase durably generated, indexed 0..n-1 with unique memos. */
+export function assertPackBatchRequest(value, label = 'pack batch request') {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAXIMUM_PACK_BATCH_SIZE) {
+    throw new Error(`${label} must be a non-empty array of at most ${MAXIMUM_PACK_BATCH_SIZE} packs`);
+  }
+  const seenMemos = new Set();
+  return value.map((entry, index) => {
+    const asserted = assertPackBatchRequestEntry(entry, `${label}[${index}]`);
+    if (asserted.packIndex !== index) throw new Error(`${label}[${index}] packIndex must equal its array position`);
+    if (seenMemos.has(asserted.memo)) throw new Error(`${label} memo values must be unique`);
+    seenMemos.add(asserted.memo);
+    return asserted;
+  });
+}
+
+/** Frozen contract: durable identity shared by every lifecycle record for one pack operation. */
+export function assertOperationIdentity(value, label = 'operation identity') {
+  assertPlainObject(value, ['cycleId', 'operationId', 'packIndex', 'memo', 'mint'], label);
+  assertNonEmptyString(value.cycleId, `${label} cycleId`);
+  assertNonEmptyString(value.operationId, `${label} operationId`);
+  if (!Number.isInteger(value.packIndex) || value.packIndex < 0) throw new Error(`${label} packIndex is invalid`);
+  if (value.memo !== null) assertNonEmptyString(value.memo, `${label} memo`);
+  if (value.mint !== null) assertNonEmptyString(value.mint, `${label} mint`);
+  return clone(value);
+}
+
+/** Deterministic durable identity for one pack within a cycle; stable across every observation. */
+export function packOperationId(cycleId, packIndex) {
+  if (typeof cycleId !== 'string' || cycleId.length === 0) throw new Error('packOperationId cycleId is invalid');
+  if (!Number.isInteger(packIndex) || packIndex < 0) throw new Error('packOperationId packIndex is invalid');
+  return `pack:${cycleId}:${packIndex}`;
+}
+
+export const PUBLIC_CARD_EVENT_STATES = Object.freeze(['PURCHASED', 'OPENED', 'GATED', 'SOLD', 'HELD', 'REFUNDED']);
+const publicCardEventStateSet = new Set(PUBLIC_CARD_EVENT_STATES);
+
+/**
+ * Frozen contract: one normalized observation of a pack/card's progress. Several observations of
+ * the same operationId are idempotent updates to one card's public history, never distinct cards.
+ */
+export function assertPublicCardEvent(value, label = 'public card event') {
+  assertPlainObject(value, [
+    'cycleId', 'operationId', 'packIndex', 'memo', 'mint',
+    'eventId', 'sequence', 'state', 'name', 'imageUrl',
+    'observedAt', 'finalizedAt', 'transactionId', 'proceeds',
+  ], label);
+  assertOperationIdentity({
+    cycleId: value.cycleId,
+    operationId: value.operationId,
+    packIndex: value.packIndex,
+    memo: value.memo,
+    mint: value.mint,
+  }, label);
+  assertNonEmptyString(value.eventId, `${label} eventId`);
+  assertAtomic(value.sequence, `${label} sequence`);
+  if (!publicCardEventStateSet.has(value.state)) throw new Error(`${label} state is invalid`);
+  if (value.name !== null) assertNonEmptyString(value.name, `${label} name`);
+  if (value.imageUrl !== null) assertNonEmptyString(value.imageUrl, `${label} imageUrl`);
+  if (typeof value.observedAt !== 'string' || !isoTimestampPattern.test(value.observedAt)) {
+    throw new Error(`${label} observedAt is invalid`);
+  }
+  if (value.finalizedAt !== null
+    && (typeof value.finalizedAt !== 'string' || !isoTimestampPattern.test(value.finalizedAt))) {
+    throw new Error(`${label} finalizedAt is invalid`);
+  }
+  if (value.transactionId !== null) assertNonEmptyString(value.transactionId, `${label} transactionId`);
+  if (value.proceeds !== null) assertPublicAmount(value.proceeds, `${label} proceeds`);
+  return clone(value);
+}
+
+/**
+ * Frozen public contract: `{chainId, assetId, units, decimals}`. Every internal amount in this
+ * codebase is `{chainId, assetId, decimals, amountAtomic}` (`assertTypedAmount`); `units` is that
+ * same unsigned integer string renamed at the public boundary. The two are never interchangeable
+ * field names on the same object.
+ */
+export function assertPublicAmount(value, label = 'public amount') {
+  assertPlainObject(value, ['chainId', 'assetId', 'units', 'decimals'], label);
+  assertNonEmptyString(value.chainId, `${label} chainId`);
+  assertNonEmptyString(value.assetId, `${label} assetId`);
+  if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) throw new Error(`${label} decimals is invalid`);
+  assertAtomic(value.units, `${label} units`);
+  return clone(value);
+}
+
+/** Converts one internal typed amount to the frozen public `Amount` shape. Null maps to null. */
+export function toPublicAmount(value) {
+  if (value === null) return null;
+  const amount = assertTypedAmount(value, 'internal amount');
+  return { chainId: amount.chainId, assetId: amount.assetId, decimals: amount.decimals, units: amount.amountAtomic };
 }

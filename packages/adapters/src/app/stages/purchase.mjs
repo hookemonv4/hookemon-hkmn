@@ -5,7 +5,7 @@ import {
   readBlockhashValidity,
   readFinalizedSignatureStatus,
 } from '../../solana-rpc.mjs';
-import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { assertTypedAmount, MAXIMUM_PACK_BATCH_SIZE } from '../../../../runner/src/cycle/money-schemas.mjs';
 import {
   decodeProviderTransaction,
   evaluate as evaluateTransactionPolicy,
@@ -20,6 +20,9 @@ import {
 } from './solana-money-controls.mjs';
 
 const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
+const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
+const MINIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES = 5;
+const MAXIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES = 1440;
 
 function plainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -114,25 +117,6 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
   return { signer, signed: await signer.sign(transaction) };
 }
 
-function responseEvidence(record) {
-  const evidence = record?.responseEvidence;
-  if (!plainObject(evidence) || typeof evidence.memo !== 'string' || evidence.memo.length === 0
-    || typeof evidence.signature !== 'string' || evidence.signature.length === 0
-    || !Number.isSafeInteger(evidence.expectedCardCount) || evidence.expectedCardCount < 1) return null;
-  return evidence;
-}
-
-async function holdDataUnverified(cycleRepository, context, evidence) {
-  if (typeof cycleRepository?.holdCycle !== 'function') throw new Error('Collector reconciliation requires cycleRepository.holdCycle');
-  await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', evidence);
-}
-
-function exactDebit(entries, owner, asset) {
-  const debits = entries.filter(entry => entry.owner === owner && entry.mint === asset.assetId && BigInt(entry.postAmount) < BigInt(entry.preAmount));
-  if (debits.length !== 1) return null;
-  return typedAmount(asset, BigInt(debits[0].preAmount) - BigInt(debits[0].postAmount), 'purchase pack cost');
-}
-
 function expectedCardCountFromCatalog({ catalog, packType }) {
   if (!plainObject(catalog) || !Array.isArray(catalog.machines)) {
     throw new Error('purchase prepareRequest received an invalid Collector machine catalog');
@@ -142,24 +126,85 @@ function expectedCardCountFromCatalog({ catalog, packType }) {
   return parseCollectorMachineContains(matches[0].contains);
 }
 
-async function expectedCardCount({ adapters, packType }) {
+async function expectedCardCountPerPack({ adapters, packType }) {
   if (typeof adapters?.collectorCrypt?.getMachines !== 'function') {
     throw new Error('purchase prepareRequest requires collector-crypt machine data');
   }
-  return expectedCardCountFromCatalog({ catalog: await adapters.collectorCrypt.getMachines(), packType });
+  const count = expectedCardCountFromCatalog({ catalog: await adapters.collectorCrypt.getMachines(), packType });
+  // open() supports exactly one card per pack (the documented openPack response carries a single
+  // nft_address). A catalog entry needing more is rejected here, at admission, before any pack in
+  // the batch is purchased.
+  if (count !== 1) throw new Error(`Collector machine "${packType}" needs an unsupported ${count}-card fan-out per pack`);
+  return count;
 }
 
-export async function preparePurchaseRequest({ adapters, config }) {
+/**
+ * Catalog/admission-time quantity validation. A configured quantity above the documented
+ * provider batch ceiling, or above the shared durable-journal payload bound
+ * (`MAXIMUM_PACK_BATCH_SIZE`, packages/runner/src/cycle/money-schemas.mjs), is rejected here —
+ * before any spend — rather than discovered only after a purchase attempt.
+ */
+function assertConfiguredPackQuantity(value) {
+  if (value === undefined) return 1;
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAXIMUM_PACK_BATCH_SIZE) {
+    throw new Error(`Collector purchase config.pack.quantity must be an integer from 1 through ${MAXIMUM_PACK_BATCH_SIZE}`);
+  }
+  return value;
+}
+
+/**
+ * Refuses admission, before any spend, when purchasing `quantity` more packs could push the
+ * outstanding held-position count or value past the operator's configured ceiling — even though
+ * every individual position stays within limits at claim-process admission (a single multi-pack
+ * batch can otherwise add several held positions in one already-admitted cycle). Silently does
+ * nothing when the caller has no held-position read access (the current default, non-collector-only
+ * preparation input) or the operator has not configured a ceiling.
+ */
+async function assertHeldHeadroom({ cycleRepository, context, config, quantity }) {
+  if (typeof cycleRepository?.listHeldPositions !== 'function') return;
+  const maxHeldPositions = config?.maxHeldPositions;
+  const maxHeldValueMicroUsdg = config?.maxHeldValueMicroUsdg;
+  const checksCount = Number.isSafeInteger(maxHeldPositions);
+  const checksValue = typeof maxHeldValueMicroUsdg === 'string' && canonicalUnsignedInteger.test(maxHeldValueMicroUsdg);
+  if (!checksCount && !checksValue) return;
+  const positions = await cycleRepository.listHeldPositions({ includeResolved: false });
+  if (checksCount) {
+    const deficit = positions.length + quantity - maxHeldPositions;
+    if (deficit > 0) {
+      throw new Error(`purchase admission refused: HELD_LIMIT would exceed maxHeldPositions by ${deficit} position(s) (${positions.length} outstanding + ${quantity} requested > ${maxHeldPositions})`);
+    }
+  }
+  if (checksValue) {
+    const currentValue = positions.reduce((sum, position) => sum + BigInt(position.valueMicroUsdg ?? '0'), 0n);
+    let worstCasePerPack = 0n;
+    if (typeof context?.cycleId === 'string' && typeof cycleRepository.describeCycle === 'function') {
+      const description = await cycleRepository.describeCycle(context.cycleId);
+      if (typeof description?.releaseAmount === 'string' && canonicalUnsignedInteger.test(description.releaseAmount)) {
+        worstCasePerPack = BigInt(description.releaseAmount) / BigInt(quantity);
+      }
+    }
+    const projectedValue = currentValue + (worstCasePerPack * BigInt(quantity));
+    const maximum = BigInt(maxHeldValueMicroUsdg);
+    if (projectedValue > maximum) {
+      throw new Error(`purchase admission refused: HELD_LIMIT would exceed maxHeldValueMicroUsdg by ${(projectedValue - maximum).toString()} (worst case ${projectedValue.toString()} > ${maximum.toString()})`);
+    }
+  }
+}
+
+export async function preparePurchaseRequest({ adapters, config, cycleRepository, context }) {
   const playerAddress = config?.accounts?.solana;
   if (typeof playerAddress !== 'string' || playerAddress.length === 0) throw new Error('purchase prepareRequest requires HOOKEMON_SOLANA_ACCOUNT');
   const packType = config?.pack?.code;
+  const quantity = assertConfiguredPackQuantity(config?.pack?.quantity);
+  await assertHeldHeadroom({ cycleRepository, context, config, quantity });
   const request = {
     provider: 'collector-crypt',
     operation: 'purchase',
     playerAddress,
+    quantity,
   };
   if (typeof packType !== 'string' || packType.length === 0) return request;
-  return { ...request, packType, expectedCardCount: await expectedCardCount({ adapters, packType }) };
+  return { ...request, packType, expectedCardCountPerPack: await expectedCardCountPerPack({ adapters, packType }) };
 }
 
 export async function probePurchase({ adapters, config }) {
@@ -170,84 +215,231 @@ export async function probePurchase({ adapters, config }) {
     configured: true,
     machineCount: Array.isArray(catalog?.machines) ? catalog.machines.length : null,
     machineStatus: status.machineStatus,
+    quantity: assertConfiguredPackQuantity(config?.pack?.quantity),
   };
   const packType = config?.pack?.code;
   if (typeof packType !== 'string' || packType.length === 0) return evidence;
   try {
-    return { ...evidence, packType, expectedCardCount: expectedCardCountFromCatalog({ catalog, packType }) };
+    return { ...evidence, packType, expectedCardCountPerPack: expectedCardCountFromCatalog({ catalog, packType }) };
   } catch (error) {
     return { ...evidence, configured: false, packType, reason: error.message };
   }
 }
 
-export async function mutatePurchase({ liveMode, adapters, signerClient, config, context, request }) {
+function unresolvedCardDeadlineMinutes(config) {
+  const value = config?.unresolvedCardDeadlineMinutes ?? DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES;
+  if (!Number.isSafeInteger(value)
+    || value < MINIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES
+    || value > MAXIMUM_UNRESOLVED_CARD_DEADLINE_MINUTES) {
+    throw new Error('purchase unresolvedCardDeadlineMinutes is invalid');
+  }
+  return value;
+}
+
+function pastDeadline(sinceMs, config, context) {
+  const nowMs = context?.nowMs ?? Date.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) throw new Error('purchase reconciliation clock is invalid');
+  return nowMs >= sinceMs + unresolvedCardDeadlineMinutes(config) * 60_000;
+}
+
+async function holdWholeCycle(cycleRepository, context, evidence) {
+  if (typeof cycleRepository?.holdCycle !== 'function') throw new Error('purchase reconciliation requires cycleRepository.holdCycle');
+  await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', evidence);
+  return null;
+}
+
+export async function mutatePurchase({ liveMode, adapters, signerClient, config, cycleRepository, context, request }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutatePurchase reached without liveMode');
   if (!adapters?.collectorCrypt) throw new Error('purchase mutate requires a configured collector-crypt client');
   requireSolanaConfiguration({ adapters, config, signerClient, stage: 'purchase' });
   const asset = configuredSettlementAsset(config);
   const money = assertSolanaSignerMoneyConfiguration({ config, asset, stage: 'purchase' });
   const prepared = request ?? context?.request ?? await preparePurchaseRequest({ adapters, config });
-  if (!Number.isSafeInteger(prepared.expectedCardCount) || prepared.expectedCardCount < 1) {
-    throw new Error('purchase mutation requires a positive prepared card-count expectation');
+  const quantity = assertConfiguredPackQuantity(prepared.quantity);
+  if (!Number.isSafeInteger(prepared.expectedCardCountPerPack) || prepared.expectedCardCountPerPack < 1) {
+    throw new Error('purchase mutation requires a positive prepared per-pack card-count expectation');
   }
   const account = await readAssociatedTokenAccount(adapters.solana.client, prepared.playerAddress, asset.assetId);
   if (!account.exists) throw new Error('purchase mutate requires the operator settlement token account to exist');
   if (account.decimals !== asset.decimals) throw new Error('purchase mutate settlement token account decimals do not match configured settlementAsset');
 
-  requireCollectorOnlyMutationAuthority(config);
-  const generated = await adapters.collectorCrypt.generatePack({
-    playerAddress: prepared.playerAddress,
-    ...(prepared.packType ? { packType: prepared.packType } : {}),
-  });
-  const { signer, signed } = await decodeAndSignProviderTransaction({
-    transaction: generated.transaction,
-    stage: 'purchase',
-    adapters,
-    config,
-    money,
-    signerClient,
-  });
-  const submitted = await signer.broadcast(signed);
-  return { memo: generated.memo, signature: submitted.signature, expectedCardCount: prepared.expectedCardCount };
+  // The batch may already be durably recorded from an interrupted prior attempt (crash after the
+  // provider call returned, before every pack finished signing). Reuse it rather than requesting
+  // a second batch under the same memo identity — a fresh generateYoloPacks call after the
+  // provider already committed the first would be a genuine double purchase.
+  let batch = await cycleRepository.readPackBatchRequest(context.cycleId, 'purchase');
+  let unsignedTransactionsByMemo = null;
+  if (batch === null) {
+    // Persist exactly what is about to be requested -- cycle, quantity, and pack code -- before
+    // the batch call itself. If the call's response is lost with no memo at all, this durable,
+    // human-readable intent (not just the generic stage attempt's opaque request digest) is what
+    // an operator correlates against provider support while the cycle stays held.
+    await cycleRepository.recordPackBatchIntent(context.cycleId, 'purchase', {
+      quantity,
+      packType: prepared.packType ?? null,
+      expectedCardCountPerPack: prepared.expectedCardCountPerPack,
+      playerAddress: prepared.playerAddress,
+    });
+    requireCollectorOnlyMutationAuthority(config);
+    const generated = await adapters.collectorCrypt.generateYoloPacks({
+      playerAddress: prepared.playerAddress,
+      quantity,
+      ...(prepared.packType ? { packType: prepared.packType } : {}),
+    });
+    unsignedTransactionsByMemo = new Map(generated.packs.map(pack => [pack.memo, pack.transaction]));
+    const packs = generated.packs.map((pack, packIndex) => ({
+      packIndex,
+      memo: pack.memo,
+      expectedCardCount: prepared.expectedCardCountPerPack,
+      packType: prepared.packType ?? null,
+    }));
+    batch = await cycleRepository.recordPackBatchRequest(context.cycleId, 'purchase', packs);
+  }
+
+  // Sign and broadcast every pack this invocation still holds unsigned bytes for. A pack whose
+  // bytes were only ever in a crashed process's memory cannot be re-signed under its existing
+  // memo; reconcileLivePurchase resolves it to "not purchased" once its deadline passes.
+  if (unsignedTransactionsByMemo !== null) {
+    for (const pack of batch.packs) {
+      const transaction = unsignedTransactionsByMemo.get(pack.memo);
+      if (transaction === undefined) continue;
+      const { signer, signed } = await decodeAndSignProviderTransaction({
+        transaction,
+        stage: 'purchase',
+        adapters,
+        config,
+        money,
+        signerClient,
+      });
+      await signer.broadcast(signed);
+    }
+  }
+
+  return { quantity, expectedCardCountPerPack: prepared.expectedCardCountPerPack };
 }
 
-export async function reconcileLivePurchase({ adapters, config, cycleRepository, context }) {
-  const evidence = responseEvidence(await cycleRepository.readOperationalStageAttempt(context.cycleId, 'purchase'));
-  if (!evidence || !adapters?.collectorCrypt || !adapters?.solana?.client) return null;
-  const asset = configuredSettlementAsset(config);
+async function reconcilePack({ adapters, config, context, asset, pack, playerAddress, deadlineSinceMs }) {
   let packStatus;
   try {
-    packStatus = await adapters.collectorCrypt.getPackStatus({ memo: evidence.memo });
+    packStatus = await adapters.collectorCrypt.getPackStatus({ memo: pack.memo });
   } catch {
-    return null;
+    return { determined: false };
   }
-  if (packStatus.memo !== evidence.memo || !plainObject(packStatus.pack)
-    || packStatus.pack.transaction_signature !== evidence.signature
-    || packStatus.pack.token_mint !== asset.assetId) {
-    await holdDataUnverified(cycleRepository, context, { stage: 'purchase', memo: evidence.memo, signature: evidence.signature, packStatus });
-    return null;
+  if (packStatus.memo !== pack.memo) {
+    return { determined: true, outcome: 'anomaly', evidence: { reason: 'pack status memo did not match', packStatus } };
   }
+  if (packStatus.pack === null) {
+    if (!pastDeadline(deadlineSinceMs, config, context)) return { determined: false };
+    return {
+      determined: true,
+      outcome: 'notPurchased',
+      packIndex: pack.packIndex,
+      memo: pack.memo,
+      evidence: { reason: 'no provider purchase evidence before the reconcile deadline' },
+    };
+  }
+  if (!plainObject(packStatus.pack) || typeof packStatus.pack.transaction_signature !== 'string'
+    || packStatus.pack.transaction_signature.length === 0 || packStatus.pack.token_mint !== asset.assetId) {
+    return { determined: true, outcome: 'anomaly', evidence: { reason: 'pack status does not carry a documented purchase record', packStatus } };
+  }
+  const signature = packStatus.pack.transaction_signature;
   let signatureStatus;
   try {
-    signatureStatus = await readFinalizedSignatureStatus(adapters.solana.client, evidence.signature);
+    signatureStatus = await readFinalizedSignatureStatus(adapters.solana.client, signature);
   } catch {
-    return null;
+    return { determined: false };
   }
-  if (signatureStatus === null) return null;
+  if (signatureStatus === null) return { determined: false };
   if (signatureStatus.err) {
-    await holdDataUnverified(cycleRepository, context, { stage: 'purchase', memo: evidence.memo, signature: evidence.signature, signatureStatus });
-    return null;
+    return {
+      determined: true,
+      outcome: 'notPurchased',
+      packIndex: pack.packIndex,
+      memo: pack.memo,
+      evidence: { reason: 'provider purchase transaction finalized with an error', signature, signatureStatus },
+    };
   }
   let entries;
   try {
-    entries = await getFinalizedTokenBalanceChanges(adapters.solana.client, evidence.signature);
+    entries = await getFinalizedTokenBalanceChanges(adapters.solana.client, signature);
   } catch {
-    return null;
+    return { determined: false };
   }
-  const packCost = exactDebit(entries, config.accounts.solana, asset);
-  if (packCost === null || packCost.amountAtomic === '0') {
-    await holdDataUnverified(cycleRepository, context, { stage: 'purchase', memo: evidence.memo, signature: evidence.signature, reason: 'exact settlement debit was not observed' });
-    return null;
+  const debits = entries.filter(entry => entry.owner === playerAddress && entry.mint === asset.assetId && BigInt(entry.postAmount) < BigInt(entry.preAmount));
+  if (debits.length !== 1) {
+    return { determined: true, outcome: 'anomaly', evidence: { reason: 'exact settlement debit was not observed', signature } };
   }
-  return { memo: evidence.memo, signature: evidence.signature, expectedCardCount: evidence.expectedCardCount, packCost };
+  const packCost = typedAmount(asset, BigInt(debits[0].preAmount) - BigInt(debits[0].postAmount), 'purchase pack cost');
+  if (packCost.amountAtomic === '0') {
+    return { determined: true, outcome: 'anomaly', evidence: { reason: 'observed settlement debit was zero', signature } };
+  }
+  return {
+    determined: true,
+    outcome: 'purchased',
+    packIndex: pack.packIndex,
+    memo: pack.memo,
+    signature,
+    expectedCardCount: pack.expectedCardCount,
+    packCost,
+  };
+}
+
+export async function reconcileLivePurchase({ adapters, config, cycleRepository, context }) {
+  const batch = await cycleRepository.readPackBatchRequest(context.cycleId, 'purchase');
+  if (batch === null) {
+    const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'purchase');
+    if (record?.attempt?.state !== 'SENT_UNKNOWN' || !Number.isSafeInteger(record.sentAtMs)) return null;
+    if (!pastDeadline(record.sentAtMs, config, context)) return null;
+    const intentRecord = await cycleRepository.readPackBatchIntent(context.cycleId, 'purchase');
+    return holdWholeCycle(cycleRepository, context, {
+      stage: 'purchase',
+      attempt: record.attempt,
+      sentAtMs: record.sentAtMs,
+      deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+      // The pre-call intent (quantity, pack code) is the durable, human-readable record of what
+      // was requested when no memo ever came back to check provider status against.
+      intent: intentRecord?.intent ?? null,
+      reason: 'purchase batch generation remained sent-unknown past the reconcile deadline with no durably generated pack',
+    });
+  }
+  if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
+  const asset = configuredSettlementAsset(config);
+  // The wallet that actually made this purchase is bound durably at the pre-call intent, not
+  // re-derived from the live operator config -- a config change (wallet rotation, environment
+  // swap) between purchase and a later restart/reconcile must never change which address this
+  // cycle's settlement debit is attributed to.
+  const intentRecord = await cycleRepository.readPackBatchIntent(context.cycleId, 'purchase');
+  if (intentRecord === null) throw new Error('purchase reconciliation requires the pre-call intent that must exist alongside any recorded batch');
+  const playerAddress = intentRecord.intent.playerAddress;
+
+  const outcomes = [];
+  for (const pack of batch.packs) {
+    const result = await reconcilePack({ adapters, config, context, asset, pack, playerAddress, deadlineSinceMs: batch.requestedAtMs });
+    if (!result.determined) return null;
+    if (result.outcome === 'anomaly') {
+      return holdWholeCycle(cycleRepository, context, {
+        stage: 'purchase',
+        packIndex: pack.packIndex,
+        memo: pack.memo,
+        ...result.evidence,
+      });
+    }
+    outcomes.push(result);
+  }
+
+  const purchased = outcomes.filter(outcome => outcome.outcome === 'purchased');
+  return {
+    quantity: batch.packs.length,
+    packs: outcomes.map(outcome => (outcome.outcome === 'purchased'
+      ? {
+        packIndex: outcome.packIndex,
+        memo: outcome.memo,
+        status: 'purchased',
+        signature: outcome.signature,
+        expectedCardCount: outcome.expectedCardCount,
+        packCost: outcome.packCost,
+      }
+      : { packIndex: outcome.packIndex, memo: outcome.memo, status: 'not_purchased' })),
+    purchasedCount: purchased.length,
+  };
 }

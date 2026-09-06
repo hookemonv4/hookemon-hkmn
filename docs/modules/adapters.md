@@ -67,8 +67,11 @@ infrastructure.
   exact custody before finality. Direct payout owns a recipient-level journal and emits evidence only
   after terminal conservation. Outbound and return are built-in chain-journal stages: they retain a
   Relay leg, complete only after their own RPC settlement evidence, and return canonical settlement
-  evidence on a `SETTLED` replay. Purchase, open, epic gate, and buyback durably record `PREPARED`
-  and then throw `LiveModeIntegrationPendingError`.
+  evidence on a `SETTLED` replay. Purchase, open, epic gate, and buyback implement live batch
+  purchase, open, gate, and sell logic (see "Multiple-pack lifecycle" below); `LIVE_MUTATION_PENDING`
+  still gates their standard (non-collector-only) production profile until a non-bridge integration
+  decision admits it, and `stage-driver.mjs`'s `integrationPendingFor` bypasses that gate only for
+  the live collector-only rehearsal profile, which is the currently viable execution path.
 - The general chain-attempt runtime is v1; the frozen v2 policy, fencing, refusal, and
   approval-digest fields are unavailable. Live Relay signing uses the separate combined
   recovery record rather than claiming schema parity for all chain attempts.
@@ -87,6 +90,49 @@ infrastructure.
   an adapter capability call is observation-only `SENT_UNKNOWN`.
   `reconcileLive` must return `null` for unavailable evidence or a canonical value; `undefined` is
   rejected without advancing the attempt. The driver never completes a stage directly.
+
+### Multiple-pack lifecycle (purchase, open, epic gate, buyback)
+
+- One cycle can purchase 1 to `MAXIMUM_PACK_BATCH_SIZE` (64, `packages/runner/src/cycle/money-schemas.mjs`)
+  packs from one supported Collector batch operation (`generateYoloPacks`,
+  `src/collector-crypt.mjs`). Every stage's completed evidence is `{packs: [...]}`, one entry per
+  `packIndex`, so several packs are never conflated with several cards returned by one operation.
+  Each pack carries its own durable `OperationIdentity` (`cycleId`, `operationId =
+  packOperationId(cycleId, packIndex)`, `packIndex`, `memo`, `mint`) — see
+  `packages/runner/src/cycle/money-schemas.mjs`'s `assertOperationIdentity`/`assertPublicCardEvent`
+  for the frozen per-card contract F/E/D consume.
+- `mutatePurchase` persists the batch's `{memo, expectedCardCount, packType}` per pack via
+  `cycleRepository.recordPackBatchRequest` immediately after `generateYoloPacks` returns, before any
+  transaction is signed — the sole guard against re-issuing the batch after a lost response. Signing
+  and broadcasting happen only for packs whose unsigned bytes this same invocation still holds; a
+  pack whose bytes were only ever in a crashed process's memory cannot be re-signed under its
+  existing memo and reconciles to `not_purchased` once its deadline passes, contributing zero cost.
+  `reconcileLivePurchase` re-derives every pack's outcome (`purchased`, `not_purchased`, or a
+  whole-cycle `HELD_DATA_UNVERIFIED` anomaly) from Collector's `getPackStatus` and Solana finality —
+  never from locally cached mutate-time state.
+- `open`, `epic-gate`, and `buyback` loop the identical single-card verification logic across every
+  purchased/opened/sell-decision pack. A pack that cannot be resolved is carved out with
+  `cycleRepository.recordHeldPosition` (never `holdCycle`) so it never blocks another pack in the
+  same batch from opening, gating, or selling; `epic-gate` and `buyback` pass an already-held pack
+  through unchanged rather than writing a second held position for it.
+- `buyback`'s own mutation call (`adapters.collectorCrypt.buyback`, sign, broadcast) is the one
+  provider-ambiguous boundary: a thrown error there marks the pack `unknown` (not held), and
+  reconciliation resolves it from Collector's `getBuybackCheck(memo)` using the pack's own
+  already-known memo, holding only past `unresolvedCardDeadlineMinutes`. Every earlier check
+  (settlement asset, token account, availability, quote match) is deterministic and money-safe to
+  hold on immediately. `reconcileLiveBuyback` sums proceeds over `sold` packs only and writes the
+  cycle's `buybackProceeds` custody bucket once per reconcile pass, never per pack.
+- `probeOpen`, `probeEpicGate`, and `probeBuyback` (dry-run) fall back to the legacy single-card
+  evidence shape (`open.evidence.mint`/`.memo`, or `open.evidence.offer`/`.insuredValue` for
+  `probeEpicGate`) when a predecessor stage's evidence is not the current `{packs: [...]}` array —
+  this keeps historical rehearsal fixtures and `docs/audit/2026-09-04/failure-matrix.json` citations
+  reproducible without a second probe contract.
+- OPEN FACT: `policy-engine.mjs`'s held-position count/value ceiling (`maxHeldPositions`,
+  `maxHeldValueMicroUsdg`) is enforced once, at claim-process admission, before a cycle starts — not
+  per pack as a batch's held positions accumulate during that one admitted cycle. See
+  `docs/modules/cycle-repository.md`'s matching OPEN FACT for the resolution path and the verified
+  safe alternative (keep the configured pack quantity at or below the current held-position
+  headroom).
 
 ## Invariants
 

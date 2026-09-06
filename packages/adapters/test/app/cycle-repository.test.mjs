@@ -16,7 +16,7 @@ import { ERC20_TRANSFER_TOPIC, readFinalizedErc20TransferProof } from '../../src
 import { createSolanaRpcClient, readFinalizedRelayDestinationObservation } from '../../src/solana-rpc.mjs';
 import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
 import { CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
-import { OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 
 const SETTLEMENT_SOURCE_ASSET = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
@@ -712,6 +712,35 @@ test('readActiveCycle is null before any cycle is created', async t => {
   assert.equal(await repository.readActiveCycle(), null);
 });
 
+test('holdCycle persists terminalAtMs from the repository clock', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  assert.equal((await repository.describeCycle(cycleId)).terminalAtMs, 1_700_000_000_000);
+});
+
+test('completeCycle persists terminalAtMs from the repository clock', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  assert.equal((await repository.describeCycle(cycleId)).terminalAtMs, 1_700_000_000_000);
+});
+
+test('a legacy cycle-terminal event stored without terminalAtMs reads back null rather than a fabricated time', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const store = await DurableCycleStore.open(directory);
+  const stored = store.readCycle(cycleId);
+  const entry = new CycleJournal(cycleId, stored.entries).propose('cycle-terminal', { terminalState: 'HELD_UNAVAILABLE', evidence: {} });
+  const transaction = store.begin(cycleId, { expectedVersion: stored.version, expectedJournalHead: stored.journalHead });
+  transaction.stageEvent(entry);
+  await store.commit(transaction);
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  assert.equal((await reopened.describeCycle(cycleId)).terminalAtMs, null);
+});
+
 test('peekActiveCycle skips a completed crash-recovery record without changing it', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
@@ -951,6 +980,87 @@ test('completeStage is idempotent when retried with identical evidence, and reje
   );
 });
 
+function oversizedEligibilitySnapshotEvidence(overrides = {}) {
+  return {
+    entries: Array.from({ length: 200 }, (_, index) => ({ holder: `holder-${index}`, amount: `${index}` })),
+    ...overrides,
+  };
+}
+
+test('completeStage pages oversized evidence to durable storage and readStage transparently resolves it', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  const evidence = oversizedEligibilitySnapshotEvidence();
+
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence);
+  assert.deepEqual(await repository.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence });
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence }, 'survives a repository restart');
+});
+
+test('completeStage retried with identical oversized evidence is idempotent and reuses the durable blob', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  const evidence = oversizedEligibilitySnapshotEvidence();
+
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence);
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence); // no throw
+  assert.deepEqual(await repository.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence });
+});
+
+test('completeStage rejects a retry with different oversized evidence for the same stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+  await assert.rejects(
+    () => repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence({ note: 'different' })),
+    /already completed with different evidence/,
+  );
+});
+
+test('readStage hard-fails when paged evidence is referenced but missing from durable storage', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+
+  await rm(join(directory, 'stage-evidence'), { recursive: true, force: true });
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => reopened.readStage(cycleId, 'eligibility-snapshot'),
+    /durable cycle store stage evidence is missing/,
+  );
+});
+
+test('readStage hard-fails when a paged evidence blob no longer matches its durable reference digest', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent('eligibility-snapshot'));
+  const manifest = JSON.parse(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'));
+  const generationDirectory = join(stageDirectory, manifest.generation);
+  const firstPageFile = join(generationDirectory, '0000.json');
+  const page = JSON.parse(await readFile(firstPageFile, 'utf8'));
+  page.entries = page.entries.slice().reverse();
+  await writeFile(firstPageFile, `${JSON.stringify(page)}\n`);
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => reopened.readStage(cycleId, 'eligibility-snapshot'),
+    /page digest does not match its manifest|does not match its durable reference digest/,
+  );
+});
+
 test('readStage/completeStage reject an unknown stage name', async t => {
   const repository = await CycleRepository.open(await tempDirectory(t));
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
@@ -1139,6 +1249,121 @@ test('starts a supplementary settlement for a held position after its main cycle
   assert.equal((await repository.describeCycle(cycleId)).terminalState, 'COMPLETED');
   const next = await repository.createCycle({ releaseAmount: '2', mode: 'production' });
   assert.notEqual(next.cycleId, cycleId);
+});
+
+async function preparedSupplementarySettlement(repository, cycleId) {
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary',
+    mint: 'mint-supplementary',
+    cardRef: 'mint-supplementary',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  return position.positionId;
+}
+
+function supplementaryChainAttempt(positionId, overrides = {}) {
+  return {
+    schema: 'hookemon.supplementary-chain-attempt.v1',
+    positionId,
+    requestDigest: `sha256:${'7'.repeat(64)}`,
+    state: 'PREPARED',
+    rawBytes: null,
+    nonce: null,
+    blockhash: null,
+    hash: null,
+    ...overrides,
+  };
+}
+
+test('prepares, signs, and broadcasts a position-scoped supplementary chain attempt without colliding with the main cycle stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+
+  const prepared = await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  assert.deepEqual(prepared, { attempt: supplementaryChainAttempt(positionId), broadcastEvidence: null });
+  // Idempotent retry with identical evidence.
+  assert.deepEqual(await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId)), prepared);
+
+  const signed = await repository.recordSupplementarySignedTransaction(positionId, requestDigest, {
+    rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}`,
+  });
+  assert.equal(signed.attempt.state, 'SIGNED');
+  assert.deepEqual(
+    await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}` }),
+    signed,
+  );
+
+  const broadcast = await repository.recordSupplementaryBroadcast(positionId, requestDigest, { schema: 'hookemon.chain-observation.v1', observed: true });
+  assert.equal(broadcast.attempt.state, 'BROADCAST');
+  assert.deepEqual(broadcast.broadcastEvidence, { schema: 'hookemon.chain-observation.v1', observed: true });
+
+  assert.deepEqual(await repository.readSupplementaryChainTransactionAttempt(positionId, requestDigest), broadcast);
+  // Ordinary per-cycle chain attempts remain untouched: nothing was ever written under the
+  // 'buyback'/'return' stage keyspace for this cycleId.
+  assert.equal(await repository.readChainTransactionAttempt(cycleId, 'buyback', requestDigest), null);
+});
+
+test('recordSupplementarySignedTransaction refuses to re-sign an already-broadcast attempt', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}` });
+  await repository.recordSupplementaryBroadcast(positionId, requestDigest, { schema: 'hookemon.chain-observation.v1', observed: true });
+  await assert.rejects(
+    () => repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW2', nonce: '2', blockhash: null, hash: `hash:${'b'.repeat(64)}` }),
+    /already broadcast and cannot be re-signed/,
+  );
+});
+
+test('supplementary chain attempt recovery context binds to the exact signed-bytes hash and rejects a conflicting retry', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash });
+
+  await assert.rejects(
+    () => repository.persistSupplementaryChainAttemptRecoveryContext(positionId, {
+      positionId, requestDigest, rawSignedBytesHash: `hash:${'f'.repeat(64)}`, context: { approvalRef: 'x' },
+    }),
+    /does not bind signed bytes/,
+  );
+
+  const persisted = await repository.persistSupplementaryChainAttemptRecoveryContext(positionId, {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' },
+  });
+  assert.deepEqual(persisted, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' } });
+  assert.deepEqual(await repository.readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest), persisted);
+  // Idempotent identical retry.
+  assert.deepEqual(
+    await repository.persistSupplementaryChainAttemptRecoveryContext(positionId, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' } }),
+    persisted,
+  );
+  await assert.rejects(
+    () => repository.persistSupplementaryChainAttemptRecoveryContext(positionId, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'different' } }),
+    /conflicts with prior context/,
+  );
 });
 
 test('persists the completed eligibility evidence and zero-dust return source for a sell settlement across restart', async t => {
@@ -1668,11 +1893,14 @@ test('a held terminal state stays active and prevents automatic completion', asy
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
   await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'snapshot source disagreed' });
 
-  assert.deepEqual(await repository.readActiveCycle(), {
+  const active = await repository.readActiveCycle();
+  assert.equal(Number.isSafeInteger(active.terminalAtMs), true);
+  assert.deepEqual(active, {
     cycleId,
     releaseAmount: '1',
     mode: 'production',
     terminalState: 'HELD_DATA_UNVERIFIED',
+    terminalAtMs: active.terminalAtMs,
   });
   await assert.rejects(() => repository.completeCycle(cycleId), /terminally held/);
   await assert.rejects(() => repository.completeStage(cycleId, 'outbound', { transactionId: 'must-not-append' }), /terminally held/);
@@ -3150,4 +3378,124 @@ test('timestamps a sent-unknown provider attempt for deadline reconciliation', a
 
   await repository.markStageAttemptSentUnknown(cycleId, 'buyback');
   assert.equal((await repository.readOperationalStageAttempt(cycleId, 'buyback')).sentAtMs, 1_700_000_300_000);
+});
+
+function packBatch(count, overrides = {}) {
+  return Array.from({ length: count }, (_, packIndex) => ({
+    packIndex,
+    memo: `memo-${packIndex}`,
+    expectedCardCount: 1,
+    packType: 'pokemon_25',
+    ...overrides,
+  }));
+}
+
+test('readPackBatchRequest is null before a batch is recorded', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readPackBatchRequest(cycleId, 'purchase'), null);
+});
+
+test('recordPackBatchRequest persists every pack before signing and is idempotent for a retried identical batch', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const packs = packBatch(3);
+
+  const recorded = await repository.recordPackBatchRequest(cycleId, 'purchase', packs);
+  assert.deepEqual(recorded, { requestedAtMs: 1_700_000_000_000, packs });
+  assert.deepEqual(await repository.readPackBatchRequest(cycleId, 'purchase'), { requestedAtMs: 1_700_000_000_000, packs });
+
+  // A retried "generate the batch" call after a lost response replays the exact same durable
+  // packs (and the original requestedAtMs) rather than raising a conflict.
+  assert.deepEqual(await repository.recordPackBatchRequest(cycleId, 'purchase', packs), { requestedAtMs: 1_700_000_000_000, packs });
+});
+
+test('recordPackBatchRequest survives a repository reopen', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const packs = packBatch(2);
+  const recorded = await repository.recordPackBatchRequest(cycleId, 'purchase', packs);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPackBatchRequest(cycleId, 'purchase'), recorded);
+});
+
+test('recordPackBatchRequest rejects a conflicting batch for the same stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(2));
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(3)),
+    /already has a different pack batch/,
+  );
+});
+
+test('recordPackBatchRequest keeps purchase and open batches independent and rejects a non-pack stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(2));
+  await repository.recordPackBatchRequest(cycleId, 'open', packBatch(1));
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'purchase')).packs.length, 2);
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'open')).packs.length, 1);
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'return', packBatch(1)),
+    /not a pack-operation stage/,
+  );
+});
+
+test('recordPackBatchRequest refuses more packs than the shared journal payload bound', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(MAXIMUM_PACK_BATCH_SIZE + 1)),
+    /at most/,
+  );
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(MAXIMUM_PACK_BATCH_SIZE));
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'purchase')).packs.length, MAXIMUM_PACK_BATCH_SIZE);
+});
+
+test('recordPackBatchRequest refuses to add packs once the cycle is terminally held', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(1)),
+    /cycle is terminal/,
+  );
+});
+
+function packBatchIntent(overrides = {}) {
+  return { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: SETTLEMENT_SOLANA_OWNER, ...overrides };
+}
+
+test('readPackBatchIntent is null before an intent is recorded', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readPackBatchIntent(cycleId, 'purchase'), null);
+});
+
+test('recordPackBatchIntent persists the requested quantity and pack code before any provider call, and is idempotent on retry', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const intent = packBatchIntent();
+
+  const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', intent);
+  assert.deepEqual(recorded, { recordedAtMs: 1_700_000_000_000, intent });
+  assert.deepEqual(await repository.readPackBatchIntent(cycleId, 'purchase'), { recordedAtMs: 1_700_000_000_000, intent });
+  assert.deepEqual(await repository.recordPackBatchIntent(cycleId, 'purchase', intent), { recordedAtMs: 1_700_000_000_000, intent });
+});
+
+test('recordPackBatchIntent survives a repository reopen and rejects a conflicting retry', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent());
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPackBatchIntent(cycleId, 'purchase'), recorded);
+  await assert.rejects(
+    () => reopened.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent({ quantity: 5 })),
+    /already has a different pack batch intent/,
+  );
 });
