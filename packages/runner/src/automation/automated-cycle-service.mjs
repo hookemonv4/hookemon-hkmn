@@ -63,6 +63,7 @@ async function assertJoinPreconditions(cycleRepository, cycleId, stage) {
 export class AutomatedCycleService {
   #budgetReader;
   #admissionPlanner;
+  #quoteRefreshPlanner;
   #operationsAccounts;
   #beforeComplete;
   #beforeMutation;
@@ -100,7 +101,7 @@ export class AutomatedCycleService {
       'feeSettlementObserver',
       'liveMode',
     ];
-    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'operationsAccounts'];
+    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'quoteRefreshPlanner', 'operationsAccounts'];
     const keys = Object.keys(config);
     if (!requiredFields.every(field => Object.hasOwn(config, field)) || keys.some(field => !requiredFields.includes(field) && !optionalFields.includes(field))) {
       throw new Error('automated cycle service configuration must use the exact schema');
@@ -180,11 +181,15 @@ export class AutomatedCycleService {
     this.#leaseStore = config.leaseStore;
     this.#budgetReader = config.budgetReader;
     this.#admissionPlanner = config.admissionPlanner ?? null;
+    this.#quoteRefreshPlanner = config.quoteRefreshPlanner ?? null;
     // Only ever a branded test-only deployment identity. Production composition supplies nothing, so
     // the policy engine and the durable store both fall back to the approved production pins.
     this.#operationsAccounts = config.operationsAccounts ?? null;
     if (this.#admissionPlanner !== null && typeof this.#admissionPlanner.plan !== 'function') {
       throw new Error('admissionPlanner must expose plan()');
+    }
+    if (this.#quoteRefreshPlanner !== null && typeof this.#quoteRefreshPlanner.plan !== 'function') {
+      throw new Error('quoteRefreshPlanner must expose plan()');
     }
     this.#cycleRepository = config.cycleRepository;
     this.#runnerFactory = config.runnerFactory;
@@ -240,6 +245,56 @@ export class AutomatedCycleService {
       };
     }
     return null;
+  }
+
+  /**
+   * ADR-0025 `refresh-after-readmission`'s bounded service-tick half: attempts, at most once per
+   * tick, to fetch an independently normalized replacement and atomically select it. Returns
+   * `false` -- never throwing -- when the capability, the repository-owned finalized claim/custody
+   * evidence, or a replacement quote simply is not available yet, so the caller can report a benign
+   * waiting status and retry on a later tick rather than repeating the same expired-quote attempt.
+   * A genuine policy refusal or a repository-refused replacement (for example a source amount that
+   * no longer equals the immutable `releaseAmount`) still throws, exactly like every other execution
+   * boundary in this service.
+   */
+  async #selectQuoteRefresh({ cycle, refresh, assertLease }) {
+    if (this.#quoteRefreshPlanner === null || this.#policyEngine === null
+      || typeof this.#policyEngine.evaluateQuoteRefresh !== 'function'
+      || typeof this.#cycleRepository.readFinalizedClaimCustodyEvidence !== 'function'
+      || typeof this.#cycleRepository.selectOutboundQuoteRefresh !== 'function') {
+      return false;
+    }
+    const custody = await this.#cycleRepository.readFinalizedClaimCustodyEvidence(cycle.cycleId);
+    if (custody === null) return false;
+    const replacement = await this.#quoteRefreshPlanner.plan({
+      cycleId: cycle.cycleId,
+      packId: this.#packId,
+      admission: cycle.admission,
+      custody,
+    });
+    if (replacement === null) return false;
+    assertLease();
+    const decision = await this.#policyEngine.evaluateQuoteRefresh({
+      cycleId: cycle.cycleId,
+      releaseAmountMicroUsdg: cycle.releaseAmount,
+      packId: this.#packId,
+      liveMode: this.#liveMode,
+      mode: this.#mode,
+      capUsdg: this.#policyCapUsdg ?? undefined,
+      admission: cycle.admission,
+      replacement,
+      operations: this.#operationsAccounts ?? undefined,
+    });
+    assertPolicyDecision(decision);
+    assertLease();
+    await this.#cycleRepository.selectOutboundQuoteRefresh(cycle.cycleId, {
+      predecessorExpiryDigest: refresh.expiryDigest,
+      replacement,
+      refreshPolicyDecisionDigest: decision.refreshPolicyDecisionDigest,
+      operations: this.#operationsAccounts ?? null,
+      assertLease,
+    });
+    return true;
   }
 
   async #run({ signal, requireActive }) {
@@ -486,6 +541,17 @@ export class AutomatedCycleService {
         assertLease();
         const current = await this.#cycleRepository.readStage(cycle.cycleId, stage);
         if (current?.status === 'COMPLETE') continue;
+        // ADR-0025 `refresh-after-readmission`: a durably recorded expiry blocks outbound until a
+        // replacement is selected. Attempting the stage anyway would only repeat the same expired
+        // quote, so this tick either advances the refresh or reports a benign wait -- never a crash
+        // loop -- and only falls through to the ordinary stage flow once a replacement is ACTIVE.
+        if (stage === 'outbound' && typeof this.#cycleRepository.readOutboundQuoteRefresh === 'function') {
+          const refresh = await this.#cycleRepository.readOutboundQuoteRefresh(cycle.cycleId);
+          if (refresh?.state === 'REFRESH_REQUIRED') {
+            const selected = await this.#selectQuoteRefresh({ cycle, refresh, assertLease });
+            if (!selected) return { status: 'WAITING_FOR_QUOTE_REFRESH', cycleId: cycle.cycleId, stage };
+          }
+        }
         await assertJoinPreconditions(this.#cycleRepository, cycle.cycleId, stage);
         const context = {
           cycleId: cycle.cycleId,
