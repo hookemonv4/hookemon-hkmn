@@ -785,6 +785,28 @@ export function assertPublicCardEvent(value, label = 'public card event') {
     throw new Error(`${label} finalizedAt is invalid`);
   }
   if (value.transactionId !== null) assertNonEmptyString(value.transactionId, `${label} transactionId`);
-  if (value.proceeds !== null) assertTypedAmount(value.proceeds, `${label} proceeds`);
+  if (value.proceeds !== null) assertPublicAmount(value.proceeds, `${label} proceeds`);
   return clone(value);
+}
+
+/**
+ * Frozen public contract: `{chainId, assetId, units, decimals}`. Every internal amount in this
+ * codebase is `{chainId, assetId, decimals, amountAtomic}` (`assertTypedAmount`); `units` is that
+ * same unsigned integer string renamed at the public boundary. The two are never interchangeable
+ * field names on the same object.
+ */
+export function assertPublicAmount(value, label = 'public amount') {
+  assertPlainObject(value, ['chainId', 'assetId', 'units', 'decimals'], label);
+  assertNonEmptyString(value.chainId, `${label} chainId`);
+  assertNonEmptyString(value.assetId, `${label} assetId`);
+  if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) throw new Error(`${label} decimals is invalid`);
+  assertAtomic(value.units, `${label} units`);
+  return clone(value);
+}
+
+/** Converts one internal typed amount to the frozen public `Amount` shape. Null maps to null. */
+export function toPublicAmount(value) {
+  if (value === null) return null;
+  const amount = assertTypedAmount(value, 'internal amount');
+  return { chainId: amount.chainId, assetId: amount.assetId, decimals: amount.decimals, units: amount.amountAtomic };
 }

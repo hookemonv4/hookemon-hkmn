@@ -152,11 +152,51 @@ function assertConfiguredPackQuantity(value) {
   return value;
 }
 
-export async function preparePurchaseRequest({ adapters, config }) {
+/**
+ * Refuses admission, before any spend, when purchasing `quantity` more packs could push the
+ * outstanding held-position count or value past the operator's configured ceiling — even though
+ * every individual position stays within limits at claim-process admission (a single multi-pack
+ * batch can otherwise add several held positions in one already-admitted cycle). Silently does
+ * nothing when the caller has no held-position read access (the current default, non-collector-only
+ * preparation input) or the operator has not configured a ceiling.
+ */
+async function assertHeldHeadroom({ cycleRepository, context, config, quantity }) {
+  if (typeof cycleRepository?.listHeldPositions !== 'function') return;
+  const maxHeldPositions = config?.maxHeldPositions;
+  const maxHeldValueMicroUsdg = config?.maxHeldValueMicroUsdg;
+  const checksCount = Number.isSafeInteger(maxHeldPositions);
+  const checksValue = typeof maxHeldValueMicroUsdg === 'string' && canonicalUnsignedInteger.test(maxHeldValueMicroUsdg);
+  if (!checksCount && !checksValue) return;
+  const positions = await cycleRepository.listHeldPositions({ includeResolved: false });
+  if (checksCount) {
+    const deficit = positions.length + quantity - maxHeldPositions;
+    if (deficit > 0) {
+      throw new Error(`purchase admission refused: HELD_LIMIT would exceed maxHeldPositions by ${deficit} position(s) (${positions.length} outstanding + ${quantity} requested > ${maxHeldPositions})`);
+    }
+  }
+  if (checksValue) {
+    const currentValue = positions.reduce((sum, position) => sum + BigInt(position.valueMicroUsdg ?? '0'), 0n);
+    let worstCasePerPack = 0n;
+    if (typeof context?.cycleId === 'string' && typeof cycleRepository.describeCycle === 'function') {
+      const description = await cycleRepository.describeCycle(context.cycleId);
+      if (typeof description?.releaseAmount === 'string' && canonicalUnsignedInteger.test(description.releaseAmount)) {
+        worstCasePerPack = BigInt(description.releaseAmount) / BigInt(quantity);
+      }
+    }
+    const projectedValue = currentValue + (worstCasePerPack * BigInt(quantity));
+    const maximum = BigInt(maxHeldValueMicroUsdg);
+    if (projectedValue > maximum) {
+      throw new Error(`purchase admission refused: HELD_LIMIT would exceed maxHeldValueMicroUsdg by ${(projectedValue - maximum).toString()} (worst case ${projectedValue.toString()} > ${maximum.toString()})`);
+    }
+  }
+}
+
+export async function preparePurchaseRequest({ adapters, config, cycleRepository, context }) {
   const playerAddress = config?.accounts?.solana;
   if (typeof playerAddress !== 'string' || playerAddress.length === 0) throw new Error('purchase prepareRequest requires HOOKEMON_SOLANA_ACCOUNT');
   const packType = config?.pack?.code;
   const quantity = assertConfiguredPackQuantity(config?.pack?.quantity);
+  await assertHeldHeadroom({ cycleRepository, context, config, quantity });
   const request = {
     provider: 'collector-crypt',
     operation: 'purchase',
@@ -230,6 +270,15 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   let batch = await cycleRepository.readPackBatchRequest(context.cycleId, 'purchase');
   let unsignedTransactionsByMemo = null;
   if (batch === null) {
+    // Persist exactly what is about to be requested -- cycle, quantity, and pack code -- before
+    // the batch call itself. If the call's response is lost with no memo at all, this durable,
+    // human-readable intent (not just the generic stage attempt's opaque request digest) is what
+    // an operator correlates against provider support while the cycle stays held.
+    await cycleRepository.recordPackBatchIntent(context.cycleId, 'purchase', {
+      quantity,
+      packType: prepared.packType ?? null,
+      expectedCardCountPerPack: prepared.expectedCardCountPerPack,
+    });
     requireCollectorOnlyMutationAuthority(config);
     const generated = await adapters.collectorCrypt.generateYoloPacks({
       playerAddress: prepared.playerAddress,
@@ -340,11 +389,15 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
     const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'purchase');
     if (record?.attempt?.state !== 'SENT_UNKNOWN' || !Number.isSafeInteger(record.sentAtMs)) return null;
     if (!pastDeadline(record.sentAtMs, config, context)) return null;
+    const intentRecord = await cycleRepository.readPackBatchIntent(context.cycleId, 'purchase');
     return holdWholeCycle(cycleRepository, context, {
       stage: 'purchase',
       attempt: record.attempt,
       sentAtMs: record.sentAtMs,
       deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+      // The pre-call intent (quantity, pack code) is the durable, human-readable record of what
+      // was requested when no memo ever came back to check provider status against.
+      intent: intentRecord?.intent ?? null,
       reason: 'purchase batch generation remained sent-unknown past the reconcile deadline with no durably generated pack',
     });
   }
