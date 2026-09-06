@@ -752,15 +752,23 @@ async function acquireLock(lockPath, legacyPath) {
   }
 }
 
+// Release strictly in reverse acquisition order (fence, the second lock taken by acquireLock, then
+// SQLite, the first). Releasing SQLite first would free it for a second acquirer while this legacy
+// fence file still exists: that acquirer reaches acquireLegacyMigrationFence's EEXIST branch, reads
+// this (still-live) process's own fence, and either fails contention against a lock we are actively
+// releasing, or — if our own unlink lands mid-read — sees the file vanish underneath it and surfaces
+// a raw ENOENT instead of ever getting a chance to create its own fence. Removing the fence while
+// still holding the SQLite lease closes that window entirely: no other acquirer can even attempt
+// acquireLegacyMigrationFence until SQLite is free, and by then this fence is already gone.
 async function releaseLock(lock) {
   let failure = null;
   try {
-    releaseSqliteLock(lock.database);
+    await releaseLegacyMigrationFence(lock.legacyFence);
   } catch (error) {
     failure = error;
   }
   try {
-    await releaseLegacyMigrationFence(lock.legacyFence);
+    releaseSqliteLock(lock.database);
   } catch (error) {
     if (failure === null) failure = error;
   }
@@ -817,15 +825,16 @@ function acquireLockSync(lockPath, legacyPath) {
   }
 }
 
+// Synchronous twin of releaseLock — same reverse-acquisition-order reasoning (see its comment).
 function releaseLockSync(lock) {
   let failure = null;
   try {
-    releaseSqliteLock(lock.database);
+    releaseLegacyMigrationFenceSync(lock.legacyFence);
   } catch (error) {
     failure = error;
   }
   try {
-    releaseLegacyMigrationFenceSync(lock.legacyFence);
+    releaseSqliteLock(lock.database);
   } catch (error) {
     if (failure === null) failure = error;
   }

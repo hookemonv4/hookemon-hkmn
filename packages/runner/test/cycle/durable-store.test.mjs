@@ -14,13 +14,15 @@ import { CycleJournal, RECOVERY_LIMITS, canonicalJson } from '../../src/cycle/jo
 const { DurableCycleStore, StateDirectoryLossError, readStateDirectoryRecovery } = durableStore;
 const lockRaceChildPath = fileURLToPath(new URL('./durable-store-lock-race-child.mjs', import.meta.url));
 
-function lockRaceChild({ directory, role }) {
+function lockRaceChild({ directory, role, hammerPrefix, hammerIterations }) {
   const stderr = [];
   const child = spawn(process.execPath, [lockRaceChildPath], {
     env: {
       ...process.env,
       DURABLE_LOCK_RACE_DIRECTORY: directory,
       DURABLE_LOCK_RACE_ROLE: role,
+      ...(hammerPrefix === undefined ? {} : { DURABLE_LOCK_RACE_HAMMER_PREFIX: hammerPrefix }),
+      ...(hammerIterations === undefined ? {} : { DURABLE_LOCK_RACE_HAMMER_ITERATIONS: String(hammerIterations) }),
     },
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
@@ -321,6 +323,30 @@ test('makes commitSync contend on the same SQLite lease used by async operations
   assert.equal((await holderResult).outcome, 'released');
   store.commitSync(transaction);
   assert.equal(store.readCycle('cycle-sync-lease-contention').version, 1);
+});
+
+test('two independent child processes committing concurrently never surface a store.lock ENOENT or a missing legacy fence', async t => {
+  // Regression for a release-order race in releaseLock/releaseLockSync: releasing the SQLite lease
+  // before removing the legacy migration fence let a second acquirer slip past the (now-free) SQLite
+  // lease while the fence file still existed, then either lose to a spurious "held by a live process"
+  // or hit a raw ENOENT if the first process's unlink landed mid-read. Two real, independent OS
+  // processes hammering the same directory reproduce it far more reliably than same-process
+  // instances sharing a runtime. A "durable cycle store lock contention" from genuine contention is
+  // expected and benign; anything else (an ENOENT, "legacy migration fence is missing") is the defect.
+  const directory = await temporaryDirectory(t);
+  await DurableCycleStore.open(directory);
+  const iterations = 250;
+
+  const hammerA = lockRaceChild({ directory, role: 'commit-hammer', hammerPrefix: 'hammer-a', hammerIterations: iterations });
+  const hammerB = lockRaceChild({ directory, role: 'commit-hammer', hammerPrefix: 'hammer-b', hammerIterations: iterations });
+  t.after(() => { hammerA.stop(); hammerB.stop(); });
+
+  const [resultA, resultB] = await Promise.all([hammerA.waitFor('result'), hammerB.waitFor('result')]);
+
+  for (const [label, result] of [['A', resultA], ['B', resultB]]) {
+    assert.equal(result.outcome, 'done', `hammer ${label} did not complete cleanly`);
+    assert.deepEqual(result.anomalies, [], `hammer ${label} hit a store.lock anomaly beyond ordinary contention`);
+  }
 });
 
 test('never lets a nonce consumed by an archived cycle be replayed by a later cycle', async t => {
