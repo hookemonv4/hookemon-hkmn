@@ -57,6 +57,13 @@ repository client.
   `standing-authority-step-authorizations.json`. Its digest-bound, policy-signed entries resolve
   production step authorizations before the private repository writer persists first use and the raw
   signer is invoked.
+- `createTrustedSolanaBlockhashContextResolver(client)` builds the one trusted
+  `config.solana.blockhashContextResolver` compose wires, constructed only from the composed Solana
+  RPC client -- no other adapter or config value feeds it. Called with an observed transaction
+  blockhash, it reads a fresh `readUsableLatestBlockhash(client)` pair and accepts only an exact
+  match between the observed blockhash and that pair's own current latest, usable blockhash,
+  returning its `lastValidBlockHeight`. It refuses any other blockhash outright; it never accepts or
+  derives a deadline from an arbitrary still-valid older blockhash.
 - The root exposes read-only dependency health and readiness to automation and dashboard surfaces.
   The decoder-backed, request-scoped signing wrapper remains an integration boundary; live startup
   preflight does not replace its final per-signature canary call.
@@ -195,6 +202,12 @@ repository client.
 - Fake rehearsal composes sealed fake Relay and Collector adapters. They provide deterministic
   effect records to the rehearsal driver and cannot issue a network request. Its evidence is sealed
   after every stage is reconciled and before terminal archival.
+- Frozen request/evidence and child stage payloads remain data-only: canonicalization strips
+  function fields, so a resolver or other capability is never serialized into a stored record. The
+  one exception is the production supplementary reconcile call site, which re-attaches this exact
+  in-process `blockhashContextResolver` function after canonicalization solely so the production
+  supplementary buyback handler can resolve trusted blockhash context; no other frozen preparation
+  or reconciliation payload carries a function capability.
 
 ## State transitions
 

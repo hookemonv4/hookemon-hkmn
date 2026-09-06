@@ -101,7 +101,7 @@
     {
       "id": "signing",
       "path": "docs/modules/signing.md",
-      "sha256": "de7208984d54511b2c45c3cd3ffb64df6cc7a6b8ede1aa9f70c1f5761cdc2826"
+      "sha256": "e5b66d4a9767a2e75e86ad37b719a1d8fcbd8e6f99140ae26588073610362fc3"
     },
     {
       "id": "cycle-repository",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "0bebc805fd5609ee4f3d73fe5235da579da52dd1218c4519875c526a5bc86910"
+      "sha256": "65837c6c06028abfd5248ba76f4277580d7398b864145399613a89576a1a7fe1"
     },
     {
       "id": "dashboard",
