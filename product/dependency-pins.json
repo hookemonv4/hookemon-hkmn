@@ -26,7 +26,7 @@
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
-      "sha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
+      "sha256": "09cb482c0eaf071c57a03ab007d3baab62ed1907d74633881a133f46c9caee49"
     },
     "forkPinCanary": {
       "path": ".github/workflows/fork-pin-canary.yml",
@@ -71,11 +71,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "4eae394949aec1be867a6e6f916657d101c0ad6944a127a35f5cf4dbcf9e09fa",
+      "sha256": "3318e1b7a62371d788f53d419145dd8b748d7034b07d20f96396e2b403813f52",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "4eae394949aec1be867a6e6f916657d101c0ad6944a127a35f5cf4dbcf9e09fa"
+          "sha256": "3318e1b7a62371d788f53d419145dd8b748d7034b07d20f96396e2b403813f52"
         },
         {
           "path": "scripts/lib/util.mjs",
