@@ -93,12 +93,9 @@
     "materializedPriceCandidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sqrtPriceX96", "liquidity", "amount0Max", "amount1Max"],
+      "required": ["sqrtPriceX96"],
       "properties": {
-        "sqrtPriceX96": { "$ref": "#/$defs/amount" },
-        "liquidity": { "$ref": "#/$defs/amount" },
-        "amount0Max": { "$ref": "#/$defs/amount" },
-        "amount1Max": { "$ref": "#/$defs/amount" }
+        "sqrtPriceX96": { "$ref": "#/$defs/amount" }
       }
     },
     "selectedMaterializedPriceCandidate": {
@@ -555,7 +552,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "schemaVersion", "chain", "graphAuthorization", "compilerProfile", "usdg", "roles", "pool", "seedIntent",
+        "schemaVersion", "chain", "graphAuthorization", "compilerProfile", "usdg", "roles", "pool",
         "hookConstructorConfig", "targets"
       ],
       "properties": {
@@ -606,17 +603,6 @@
                 "hkmnCurrency0": { "$ref": "#/$defs/materializedPriceCandidate" }
               }
             }
-          }
-        },
-        "seedIntent": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["payer", "tickLower", "tickUpper", "maxDeadlineSeconds"],
-          "properties": {
-            "payer": { "$ref": "#/$defs/nonzeroAddress" },
-            "tickLower": { "const": -887220 },
-            "tickUpper": { "const": 887220 },
-            "maxDeadlineSeconds": { "const": 900 }
           }
         },
         "hookConstructorConfig": { "type": "object" },
