@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,43 @@ const redteamEvidenceInputs = Object.freeze({
 
 function git(root, ...args) {
   return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+}
+
+// Independent reimplementation of owner-closeout.mjs's own marker/formal-token classification,
+// used to cross-check summary.inventory.unsigned/selfContradictory against the actual current
+// approval files instead of a hardcoded count. Deliberately does not import or call the module
+// under test: a regression that makes the real classifier stop recognizing a marker shape (a "new
+// unrecognized approval format"), or that lets a still-marked draft register as formally approved
+// ("unsigned-as-approved"), changes only one side of the comparison and is caught here.
+const UNSIGNED_MARKER = 'DRAFT_UNSIGNED';
+const FORMAL_TOKENS = new Set(['OWNER APPROVED', 'OWNER AUTHORIZED']);
+
+function containsUnsignedMarker(value) {
+  if (typeof value === 'string') return value.includes(UNSIGNED_MARKER);
+  if (Array.isArray(value)) return value.some(containsUnsignedMarker);
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, nested]) => key.includes(UNSIGNED_MARKER) || containsUnsignedMarker(nested));
+}
+
+function independentApprovalClassification(root) {
+  const directory = join(root, 'decisions', 'owner-approvals');
+  const unsigned = [];
+  const selfContradictory = [];
+  for (const name of readdirSync(directory).sort()) {
+    if (!name.endsWith('.json')) continue;
+    const path = `decisions/owner-approvals/${name}`;
+    let artifact;
+    try {
+      artifact = readJson(join(root, path));
+    } catch {
+      continue;
+    }
+    const marked = containsUnsignedMarker(artifact);
+    const formal = FORMAL_TOKENS.has(String(artifact?.approvalToken ?? '').trim());
+    if (marked && formal) selfContradictory.push(path);
+    else if (marked) unsigned.push(path);
+  }
+  return { unsigned, selfContradictory };
 }
 
 function writeFakeV4(root) {
@@ -339,8 +376,11 @@ test('owner closeout previews immutable drafts, signs current successor approval
     assert.equal(readFileSync(baselinePath, 'utf8'), baselineBefore);
 
     const summary = closeoutSummary(root);
-    assert.equal(summary.inventory.unsigned.length, 13);
-    assert.equal(summary.inventory.selfContradictory.length, 5);
+    const independent = independentApprovalClassification(root);
+    assert.deepEqual([...summary.inventory.unsigned].sort(), independent.unsigned.sort());
+    assert.deepEqual([...summary.inventory.selfContradictory].sort(), independent.selfContradictory.sort());
+    assert.ok(summary.inventory.unsigned.length > 0, 'fixture must carry at least one real unsigned draft to exercise this check');
+    assert.ok(summary.inventory.selfContradictory.length > 0, 'fixture must carry at least one real self-contradictory record to exercise this check');
     assert.equal(summary.inventory.namedOverrideDrafts.length, 1);
     assert.equal(summary.inventory.namedOverrideDrafts[0].path, 'decisions/owner-approvals/closeout-feasibility-override-DRAFT.json');
     assert.equal(summary.inventory.namedOverrideDrafts[0].validator.result, 'INVALID');
