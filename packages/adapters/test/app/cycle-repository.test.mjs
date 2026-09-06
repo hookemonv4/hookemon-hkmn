@@ -4023,40 +4023,139 @@ test('readFinalizedClaimCustodyEvidence is null until this cycle\'s own claim-pr
   );
 });
 
-test('readFinalizedClaimCustodyEvidence requires exactly one finalized cycle-owned claim-process chain attempt whose finality evidence the completed stage evidence exactly matches, plus recorded custody', async t => {
-  const { repository, cycleId } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-claim-evidence-proven' });
-  await repository.prepareStage(cycleId, 'eligibility-snapshot');
-  await repository.completeStage(cycleId, 'eligibility-snapshot', { transactionId: 'tx-1' });
-  await repository.prepareStage(cycleId, 'claim-process');
+/**
+ * Production `claim-process.mjs` shape: finality evidence carries `transactionHash`,
+ * `claimedAmountAtomic`, and `destination` only after validating the exact ProcessClaimed event and
+ * one finalized USDG transfer. Defaults are all correct/matching; each field is independently
+ * overridable so negative tests can flip exactly one at a time.
+ */
+async function setupCompletedClaimProcess(t, {
+  cycleId, transactionHash = '0xdeadbeef', finalityTransactionHash = transactionHash, claimedAmountAtomic, destination = ADMISSION_EVM,
+} = {}) {
+  const { repository, cycleId: id, admission, directory } = await openCycleWithAdmission(t, { cycleId });
+  await repository.prepareStage(id, 'eligibility-snapshot');
+  await repository.completeStage(id, 'eligibility-snapshot', { transactionId: 'tx-1' });
+  await repository.prepareStage(id, 'claim-process');
 
-  const chainAttempt = preparedChainAttempt(cycleId, 'claim-process');
-  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', chainAttempt);
-  await repository.recordSignedTransaction(cycleId, 'claim-process', chainAttempt.requestDigest, {
-    rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash: '0xdeadbeef',
+  const chainAttempt = preparedChainAttempt(id, 'claim-process');
+  await repository.prepareChainTransactionAttempt(id, 'claim-process', chainAttempt);
+  await repository.recordSignedTransaction(id, 'claim-process', chainAttempt.requestDigest, {
+    rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash: transactionHash,
   });
-  await repository.recordBroadcast(cycleId, 'claim-process', chainAttempt.requestDigest, { transactionHash: '0xdeadbeef' });
-  assert.equal(
-    await repository.readFinalizedClaimCustodyEvidence(cycleId), null,
-    'a BROADCAST, not yet FINALIZED, chain attempt is never finalized evidence',
-  );
+  await repository.recordBroadcast(id, 'claim-process', chainAttempt.requestDigest, { transactionHash });
+  const finalityEvidence = Object.freeze({
+    transactionHash: finalityTransactionHash,
+    finalized: true,
+    finalizedBlockNumber: '9',
+    finalizedBlockHash: `0x${'a'.repeat(64)}`,
+    receiptStatus: 1,
+    claimedAmountAtomic: claimedAmountAtomic ?? admission.aggregateFundingQuote.amountAtomic,
+    destination,
+  });
+  await repository.recordFinality(id, 'claim-process', chainAttempt.requestDigest, finalityEvidence);
+  await repository.completeStage(id, 'claim-process', finalityEvidence);
+  return { repository, cycleId: id, admission, chainAttempt, finalityEvidence, directory };
+}
 
-  const finalityEvidence = { transactionHash: '0xdeadbeef', blockNumber: '9' };
-  await repository.recordFinality(cycleId, 'claim-process', chainAttempt.requestDigest, finalityEvidence);
-  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null, 'the stage itself is not yet COMPLETE');
+/** The exact custody row `claim-process.mjs`'s own identity rule derives for the funding asset. */
+function claimCustodyLedger(cycleId, admission, overrides = {}) {
+  const funding = admission.aggregateFundingQuote;
+  return custodyLedger(cycleId, {
+    chainId: `eip155:${funding.chainId}`,
+    assetId: `eip155:${funding.chainId}/erc20:${funding.assetId.toLowerCase()}`,
+    decimals: funding.decimals,
+    claimed: funding.amountAtomic,
+    ...overrides,
+  });
+}
 
-  await repository.completeStage(cycleId, 'claim-process', finalityEvidence);
+test('readFinalizedClaimCustodyEvidence requires exactly one finalized cycle-owned claim-process chain attempt whose finality evidence the completed stage evidence exactly matches, plus the exact claim custody row', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-proven';
+  const { repository, admission, finalityEvidence } = await setupCompletedClaimProcess(t, { cycleId });
+
   assert.equal(
     await repository.readFinalizedClaimCustodyEvidence(cycleId), null,
     'no custody has been recorded for this cycle yet',
   );
 
-  const ledger = custodyLedger(cycleId, { heldAssets: '1000000' });
+  const ledger = claimCustodyLedger(cycleId, admission);
   await repository.recordCustodyLedger(cycleId, ledger);
 
   const evidence = await repository.readFinalizedClaimCustodyEvidence(cycleId);
   assert.equal(evidence.cycleId, cycleId);
   assert.deepEqual(evidence.claimEvidence, finalityEvidence);
   assert.deepEqual(evidence.custodyLedgers, [ledger]);
+});
+
+test('readFinalizedClaimCustodyEvidence refuses a custody ledger for an unrelated chain or asset', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-foreign-asset';
+  const { repository } = await setupCompletedClaimProcess(t, { cycleId });
+
+  // Default custodyLedger() fixture asset ('eip155:4663/erc20:stablecoin') is not the admitted
+  // funding asset ('eip155:4663/erc20:0x5fc5...') -- an unrelated row must never qualify.
+  await repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, { claimed: '1000000' }));
+
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('readFinalizedClaimCustodyEvidence refuses the exact custody row when its claimed bucket is zero or does not equal the release amount', async t => {
+  for (const [label, claimed] of [['zero', '0'], ['wrong nonzero', '999999']]) {
+    const cycleId = `cycle-quote-refresh-claim-evidence-bad-claimed-${claimed}`;
+    const { repository, admission } = await setupCompletedClaimProcess(t, { cycleId });
+    await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, admission, { claimed }));
+
+    assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null, label);
+  }
+});
+
+test('readFinalizedClaimCustodyEvidence refuses finality evidence whose transactionHash does not match the finalized attempt hash', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-wrong-tx-hash';
+  const { repository, admission } = await setupCompletedClaimProcess(t, {
+    cycleId, transactionHash: '0xdeadbeef', finalityTransactionHash: '0xFEEDFACE',
+  });
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, admission));
+
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('a finality transactionHash differing only in case from the finalized attempt hash still qualifies', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-tx-hash-case';
+  const { repository, admission } = await setupCompletedClaimProcess(t, {
+    cycleId, transactionHash: '0xdeadbeef', finalityTransactionHash: '0xDEADBEEF',
+  });
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, admission));
+
+  assert.notEqual(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('readFinalizedClaimCustodyEvidence refuses finality evidence whose claimedAmountAtomic does not equal the immutable releaseAmount', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-wrong-claimed-amount';
+  const { repository, admission } = await setupCompletedClaimProcess(t, { cycleId, claimedAmountAtomic: '999999' });
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, admission));
+
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('readFinalizedClaimCustodyEvidence refuses finality evidence whose destination does not match the admitted Operations identity', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-wrong-destination';
+  const { repository, admission } = await setupCompletedClaimProcess(t, {
+    cycleId, destination: '0x000000000000000000000000000000000000dead',
+  });
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, admission));
+
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('readFinalizedClaimCustodyEvidence proof survives a repository reopen', async t => {
+  const cycleId = 'cycle-quote-refresh-claim-evidence-reopen';
+  const { repository, admission, directory } = await setupCompletedClaimProcess(t, { cycleId });
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, admission));
+
+  const before = await repository.readFinalizedClaimCustodyEvidence(cycleId);
+  const reopened = await CycleRepository.open(directory);
+  const after = await reopened.readFinalizedClaimCustodyEvidence(cycleId);
+  assert.deepEqual(after, before);
+  assert.notEqual(after, null);
 });
 
 test('readFinalizedClaimCustodyEvidence refuses completed stage evidence that does not canonically equal the finalized chain attempt\'s own finality evidence', async t => {

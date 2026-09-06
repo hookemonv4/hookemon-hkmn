@@ -3802,9 +3802,14 @@ export class CycleRepository {
    * balance, and never the pre-claim hook liability re-read as though it were still claimable.
    * Returns `null` until this cycle's own `claim-process` stage is durably COMPLETE behind exactly
    * one cycle-owned `claim-process` chain attempt in `FINALIZED`, the completed stage evidence is
-   * canonically that attempt's own finality evidence (never arbitrary caller-supplied stage
-   * evidence), and this cycle has recorded custody. Missing, multiple, nonfinal, or mismatched
-   * stage/finality evidence returns `null`, never a partial or best-effort result.
+   * canonically that attempt's own finality evidence, that finality evidence's `transactionHash`,
+   * `claimedAmountAtomic`, and `destination` match the finalized attempt hash, the immutable
+   * `releaseAmount`, and the admitted Operations identity respectively, and this cycle's custody
+   * ledger for the admitted funding chain/asset carries exactly that claimed amount. V1 proves
+   * only that these exact durable claim-attempt/finality fields and the exact amount/asset ledger
+   * row coexist for this cycle -- it never accepts an unrelated chain/asset row, a zero or
+   * mismatched claimed bucket, or event-level ledger provenance V1 cannot carry. Missing, multiple,
+   * nonfinal, or any mismatched field returns `null`, never a partial or best-effort result.
    */
   async readFinalizedClaimCustodyEvidence(cycleId) {
     const state = await this.#replay(cycleId);
@@ -3815,7 +3820,23 @@ export class CycleRepository {
     if (finalizedAttempts.length !== 1) return null;
     const [finalized] = finalizedAttempts;
     if (canonicalJson(claimStage.evidence) !== canonicalJson(finalized.finalityEvidence)) return null;
-    if (state.custodyLedgers.size === 0) return null;
+    if (!state.admission) return null;
+    const evidence = finalized.finalityEvidence;
+    if (typeof evidence.transactionHash !== 'string' || typeof finalized.attempt.hash !== 'string'
+      || evidence.transactionHash.toLowerCase() !== finalized.attempt.hash.toLowerCase()) {
+      return null;
+    }
+    if (evidence.claimedAmountAtomic !== state.releaseAmount) return null;
+    const operations = state.admission.processLiabilityEvidence.operations;
+    if (typeof evidence.destination !== 'string' || typeof operations !== 'string'
+      || evidence.destination.toLowerCase() !== operations.toLowerCase()) {
+      return null;
+    }
+    const funding = state.admission.aggregateFundingQuote;
+    const chainId = `eip155:${funding.chainId}`;
+    const assetId = `${chainId}/erc20:${funding.assetId.toLowerCase()}`;
+    const ledger = state.custodyLedgers.get(custodyLedgerKey({ chainId, assetId }));
+    if (!ledger || ledger.decimals !== funding.decimals || ledger.claimed !== state.releaseAmount) return null;
     return Object.freeze({
       cycleId,
       claimEvidence: structuredClone(claimStage.evidence),
