@@ -77,6 +77,14 @@ const approvedPathDelimiter = /[\s"'`()\[\]{},;]/;
 const identifierCharacter = /[A-Za-z0-9_$\\]|[^\x00-\x7f]/;
 const PHASE_THREE_JSON_PATH = /^release\/phase3\/[^/]+\.json$/;
 const PHASE_THREE_PROVIDER_ADDRESS_ENUM = ['nonzero', ['ethe', 'reum'].join(''), 'address'].join('-');
+// The current architecture retains a real Solana-side USD stablecoin leg (typed distinctly from
+// EVM chain 4663's USDG); a bare stablecoin mention is not itself a retired-architecture claim.
+// Only the exact, case-insensitive adjacency "solana <stablecoin>" is approved -- a bare mention,
+// a mention qualified by a retired chain or retired bridge protocol name, or any other
+// surrounding phrasing all stay flagged.
+const STABLECOIN_DIGEST = 'a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966';
+const SOLANA_STABLECOIN_PREFIX_LENGTH = 'solana '.length;
+const SOLANA_STABLECOIN_MENTION_DIGEST = '93bdce2c282d77c0f6598a2cd3f960b51978bcefe8ae098d184787678777b0be';
 
 // Exact full-token hashes keep the revision-56 exception fail-closed. New
 // identifiers require an explicit control change instead of inheriting a
@@ -138,6 +146,15 @@ function isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file) {
   return /:\s*"$/.test(prefix) && /^"\s*(?:[,}\]])/.test(suffix);
 }
 
+function isApprovedSolanaStablecoinMention(text, offset, rule) {
+  if (rule.sha256 !== STABLECOIN_DIGEST) return false;
+  const tokenStart = offset - SOLANA_STABLECOIN_PREFIX_LENGTH;
+  if (tokenStart < 0) return false;
+  const token = text.slice(tokenStart, offset + rule.length).toLowerCase();
+  return token.length === SOLANA_STABLECOIN_PREFIX_LENGTH + rule.length
+    && sha256Text(token) === SOLANA_STABLECOIN_MENTION_DIGEST;
+}
+
 function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   if (rule.sha256 === RETIRED_CYCLE_VAULT_DIGEST) {
     return isApprovedRevision56Identifier(text, offset, rule.length);
@@ -146,6 +163,7 @@ function isApprovedCurrentMarkerContext(text, offset, rule, file) {
     return isApprovedPreviousChainPathToken(text, offset)
       || isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file);
   }
+  if (isApprovedSolanaStablecoinMention(text, offset, rule)) return true;
   return false;
 }
 
