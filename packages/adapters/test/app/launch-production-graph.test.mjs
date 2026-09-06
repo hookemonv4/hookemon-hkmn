@@ -965,42 +965,46 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   // Purchase now durably reads its own settlement ATA (this fixture's `getAccountInfo`) and passes
   // the priority-fee envelope check before attempting to record its batch.
   //
+  // `bot-pack-type-parity` (cherry-picked as `fix(cycle): align pack type validators`) closed the
+  // `cycle-repository.mjs`/`environment.mjs` pack-code mismatch this comment previously named:
+  // purchase now durably records its batch intent for this fixture's hyphenated
+  // `HOOKEMON_PACK_CODE`, `'return-fixture'`.
+  //
   // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after the
-  // native/Relay fix) is a real production defect outside this file's write-set, one step earlier
-  // than the previously expected Collector-policy refusal: `mutatePurchase`
-  // (purchase.mjs:353-358) calls `cycleRepository.recordPackBatchIntent` with
-  // `packType: prepared.packType` -- this fixture's own configured `HOOKEMON_PACK_CODE`,
-  // `'return-fixture'` -- before ever calling `generateYoloPacks`. `assertPackBatchIntent`
-  // (cycle-repository.mjs:527-537) validates that field against `packTypeFieldPattern`
-  // (cycle-repository.mjs:492, `/^[a-z][a-z0-9_]{0,63}$/`), which has no hyphen, while
-  // `environment.mjs`'s own `packCodePattern` (environment.mjs:211, `/^[a-z0-9][a-z0-9_-]{1,63}$/`)
-  // explicitly allows one. Any hyphenated `HOOKEMON_PACK_CODE` -- a value `readEnvironment` itself
-  // accepts -- durably fails every purchase batch-intent write with "purchase pack batch intent
-  // packType is invalid", before any Collector Crypt HTTP call. This makes the Collector-policy
-  // refusal this comment previously anticipated currently unreachable for this pack code; closing
-  // it requires reconciling the two patterns in `environment.mjs` or `cycle-repository.mjs`, which
-  // is out of this file's write-set. Truthful `generateYoloPacks`/`pack/status`/`submitTransaction`
-  // fixture responses (two unique memos, syntactically valid unsigned transactions for the
-  // isolated Operations address, observation-only status) were built and exercised against this
-  // exact run; actual execution proved this earlier defect stops every attempt before any of the
-  // three is ever called, so the response bodies were removed as unreachable and only each
-  // endpoint's call count remains, asserted at zero below.
+  // pack-type-parity fix) is a distinct, real production defect outside this file's write-set,
+  // still one step earlier than the expected Collector-policy refusal: `collector-crypt.mjs` keeps
+  // its own separate `packTypePattern` (collector-crypt.mjs:74, `/^[a-z][a-z0-9_]{0,63}$/`, no
+  // hyphen), enforced client-side by `validateGenerateYoloPacksRequest` (collector-crypt.mjs:241)
+  // before `generateYoloPacks` (collector-crypt.mjs:545) ever attempts an HTTP call. This pattern
+  // was not touched by the reviewed parity fix (which only aligned `cycle-repository.mjs` and
+  // `money-schemas.mjs`), so it throws "collector-crypt generateYoloPacks packType must be a
+  // lowercase machine code" on every tick, still before any Collector Crypt HTTP call, still before
+  // the Collector-policy refusal this comment anticipates. Closing it requires reconciling this
+  // third pattern with `environment.mjs`'s `packCodePattern` (environment.mjs:211,
+  // `/^[a-z0-9][a-z0-9_-]{1,63}$/`), out of this file's write-set. The validator throws inside
+  // `generateYoloPacks` itself, before `postMutation`/`fetch` ever runs, so truthful
+  // `generateYoloPacks`/`pack/status`/`submitTransaction` fixture response bodies (two unique
+  // memos, syntactically valid unsigned transactions for the isolated Operations address,
+  // observation-only status) stay left out as still unreachable -- this run's own zero call counts
+  // below are the proof -- and only each endpoint's call count is asserted, at zero.
   assert.equal(cycle.stages.get('outbound')?.status, 'COMPLETE', `outbound must durably settle from Solana destination-chain evidence; ${await diagnostics()}`);
   const purchase = cycle.preparedStages.get('purchase') ?? null;
   assert.ok(purchase, `purchase must durably reach the PREPARED operation boundary once outbound settles; ${await diagnostics()}`);
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
   assert.match(
     stderr,
-    /purchase pack batch intent packType is invalid/,
-    `every purchase mutate tick must refuse the hyphenated pack code's batch-intent packType validation; ${await diagnostics()}`,
+    /collector-crypt generateYoloPacks packType must be a lowercase machine code/,
+    `every purchase mutate tick must refuse collector-crypt.mjs's own separate packType pattern; ${await diagnostics()}`,
   );
-  assert.equal(
-    await repository.readPackBatchIntent(cycleIds[0], 'purchase'), null,
-    `purchase must never durably record a batch intent while its packType validation refuses first; ${await diagnostics()}`,
+  const purchaseIntent = await repository.readPackBatchIntent(cycleIds[0], 'purchase');
+  assert.deepEqual(
+    purchaseIntent && { quantity: purchaseIntent.intent.quantity, packType: purchaseIntent.intent.packType },
+    { quantity: 2, packType: 'return-fixture' },
+    `purchase must now durably record its batch intent for the hyphenated pack code (the parity fix); ${await diagnostics()}`,
   );
   assert.equal(
     await repository.readPackBatchRequest(cycleIds[0], 'purchase'), null,
-    `purchase must never durably record generated pack memos while its packType validation refuses first; ${await diagnostics()}`,
+    `purchase must never durably record generated pack memos while collector-crypt.mjs's own packType validation refuses first; ${await diagnostics()}`,
   );
   const purchaseAttempt = await repository.readOperationalStageAttempt(cycleIds[0], 'purchase');
   assert.equal(
