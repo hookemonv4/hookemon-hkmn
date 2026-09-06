@@ -58,6 +58,15 @@ boundaries without changing the original cycle's holder set.
   shortfall throws `DirectPayoutBridgeShortfallError`; a native-gas shortfall throws
   `DirectPayoutNativeGasShortfallError`. Both checks are skipped only when `payableRecipientCount`
   is 0 (nothing will ever be spent).
+- `assertFinalizedPayoutTransferEvidence({transactionHash, finalizedTransfer, operations,
+  recipient, amount})` is a read-only seam for external projections (public accounting) that need
+  to verify a FINALIZED recipient's persisted evidence. It reuses the exact same producer
+  finality-proof validator that gates a live FINALIZED transition (the 16-field
+  schema/endpoint/amount/block/balance-delta/log-index checks), plus a `transactionHash` format
+  check, instead of a second, weaker validator. Callers must supply `operations`/`recipient`/
+  `amount` from their own trusted context (frozen plan, configured USDG address) -- never derived
+  from the evidence itself -- which is what rejects a syntactically valid but foreign same-chain,
+  same-decimals token.
 - `recoverDroppedBroadcast()` reauthorizes and submits only the exact retained signed bytes. It
   requires the stored policy, approval, semantics, signed-message, and fencing-token digests. It
   reloads the authoritative paged payout state before reauthorization and refuses a stale attempt

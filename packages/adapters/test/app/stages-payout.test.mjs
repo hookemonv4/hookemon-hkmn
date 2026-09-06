@@ -22,10 +22,12 @@ import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { wrapSignerClient, wrapTransactionPolicySignerClient } from '../../src/signing/signer-client.mjs';
 import {
   advanceDirectPayout,
+  assertFinalizedPayoutTransferEvidence,
   assertPayoutManifestUnchanged,
   buildDirectPayoutTransaction,
   createCycleRepositoryPayoutStore,
   createDirectPayoutState,
+  DirectPayoutError,
   DirectPayoutNonceInterferenceError,
   initializeDirectPayout,
   isDirectPayoutComplete,
@@ -2652,4 +2654,70 @@ test('rejects a changed plan after the first broadcast and requires an exact fin
     config: config(),
   });
   assert.equal((await store.load()).recipients.find(entry => entry.recipient === RECIPIENT_A).state, 'BROADCAST');
+});
+
+function validFinalizedTransfer({ operations = OPERATIONS, recipient = RECIPIENT_A, amountAtomic = '100' } = {}) {
+  return {
+    from: operations,
+    to: recipient,
+    amount: usdg(amountAtomic),
+    finalizedBlockNumber: '100',
+    finalizedBlockHash: `0x${'1'.repeat(64)}`,
+    receiptBlockNumber: '100',
+    receiptBlockHash: `0x${'1'.repeat(64)}`,
+    previousBlockNumber: '99',
+    previousBlockHash: `0x${'2'.repeat(64)}`,
+    sourceBalanceBeforeAtomic: '1000',
+    sourceBalanceAfterAtomic: String(1000 - Number(amountAtomic)),
+    sourceBalanceDeltaAtomic: amountAtomic,
+    recipientBalanceBeforeAtomic: '0',
+    recipientBalanceAfterAtomic: amountAtomic,
+    recipientBalanceDeltaAtomic: amountAtomic,
+    logIndexes: ['0'],
+  };
+}
+
+test('assertFinalizedPayoutTransferEvidence accepts a full producer-shaped valid finality proof', () => {
+  const finalizedTransfer = validFinalizedTransfer();
+  const normalized = assertFinalizedPayoutTransferEvidence({
+    transactionHash: `0x${'3'.repeat(64)}`,
+    finalizedTransfer,
+    operations: OPERATIONS,
+    recipient: RECIPIENT_A,
+    amount: usdg('100'),
+  });
+  assert.equal(normalized.to, RECIPIENT_A);
+  assert.equal(normalized.amount.amountAtomic, '100');
+  assert.equal(normalized.logIndexes.length, 1);
+});
+
+test('assertFinalizedPayoutTransferEvidence rejects a malformed transactionHash even when the amount matches', () => {
+  assert.throws(
+    () => assertFinalizedPayoutTransferEvidence({
+      transactionHash: 'not-a-transaction-hash',
+      finalizedTransfer: validFinalizedTransfer(),
+      operations: OPERATIONS,
+      recipient: RECIPIENT_A,
+      amount: usdg('100'),
+    }),
+    error => error instanceof DirectPayoutError && /transactionHash is invalid/.test(error.message),
+  );
+});
+
+test('assertFinalizedPayoutTransferEvidence rejects a fully-shaped foreign same-chain six-decimal token', () => {
+  const foreignToken = `0x${'f'.repeat(40)}`;
+  const finalizedTransfer = {
+    ...validFinalizedTransfer(),
+    amount: { chainId: '4663', assetId: foreignToken, decimals: 6, amountAtomic: '100' },
+  };
+  assert.throws(
+    () => assertFinalizedPayoutTransferEvidence({
+      transactionHash: `0x${'3'.repeat(64)}`,
+      finalizedTransfer,
+      operations: OPERATIONS,
+      recipient: RECIPIENT_A,
+      amount: usdg('100'),
+    }),
+    error => error instanceof DirectPayoutError && /wrong transfer amount/.test(error.message),
+  );
 });
