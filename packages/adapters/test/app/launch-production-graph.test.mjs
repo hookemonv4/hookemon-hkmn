@@ -1042,27 +1042,33 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   // `solana-rpc.mjs` helpers -- never derived from any candidate) is genuinely reached and durably
   // recorded as the batch request.
   //
-  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after both
-  // pack-code fixes) is a real production defect outside this file's write-set, earlier than the
-  // expected Collector-policy refusal and unrelated to the offline Collector policy work
-  // (`collector-policy-offline-implementation-scope.md`, still unwired and not imported here):
-  // `decodeAndSignProviderTransaction`'s `trustedSolanaDecodeOptions` (purchase.mjs:72-74) requires
-  // `config.solana.blockhashContextResolver`, but nothing in the composed production config ever
-  // sets it -- only `rehearsal.mjs` and `return.mjs` build their own local resolver for their own
-  // use. This literal-CLI harness has no composition or stage injection seam (see this file's own
-  // header), so this cannot be worked around here; every purchase mutate tick throws "Collector
-  // purchase requires a trusted Solana blockhashContextResolver" before evaluating any transaction
-  // policy, before `signer.sign`, and before `submitTransaction`. Closing it requires wiring a
-  // trusted resolver into `config.solana` for the production purchase/buyback path, out of this
-  // file's write-set.
+  // The composed production `config.solana.blockhashContextResolver` gap this comment previously
+  // named is now resolved by the independently reviewed resolver-integration work (cherry-picked
+  // as `test(adapters): prove composed Solana blockhash resolver wiring` /
+  // `test(adapters): observe unexpected Collector submit calls`): purchase now decodes each
+  // generated transaction and validates its blockhash successfully.
+  //
+  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after the
+  // resolver integration) is exactly the expected, honest boundary -- not a defect: `requirePolicy`
+  // (purchase.mjs:54-60) checks `collectorPolicyForStage` first (the historical, evidence-only
+  // loader, which production never attaches -- `compose.mjs` gates it to the live collector-only
+  // rehearsal profile only, so it correctly returns null here and is never treated as authority),
+  // then finds no `config.collectorCrypt.purchase.policy` either, since the new offline Collector
+  // policy factory (`collector-policy-offline-implementation-scope.md`) remains a separate,
+  // unwired module not imported or anticipated here. Every purchase mutate tick therefore throws
+  // "Collector purchase requires a pinned transaction policy" from inside
+  // `decodeAndSignProviderTransaction` (purchase.mjs:91), strictly before `evaluateTransactionPolicy`
+  // runs, before `signer.sign`, and before `submitTransaction`. Closing it requires wiring a real,
+  // independently pinned Collector purchase policy/binding into production configuration, out of
+  // this file's write-set.
   assert.equal(cycle.stages.get('outbound')?.status, 'COMPLETE', `outbound must durably settle from Solana destination-chain evidence; ${await diagnostics()}`);
   const purchase = cycle.preparedStages.get('purchase') ?? null;
   assert.ok(purchase, `purchase must durably reach the PREPARED operation boundary once outbound settles; ${await diagnostics()}`);
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
   assert.match(
     stderr,
-    /Collector purchase requires a trusted Solana blockhashContextResolver/,
-    `every purchase mutate tick must refuse to decode without a trusted blockhash context resolver; ${await diagnostics()}`,
+    /Collector purchase requires a pinned transaction policy/,
+    `every purchase mutate tick must refuse to sign without an independently pinned Collector policy; ${await diagnostics()}`,
   );
   const purchaseIntent = await repository.readPackBatchIntent(cycleIds[0], 'purchase');
   assert.deepEqual(
