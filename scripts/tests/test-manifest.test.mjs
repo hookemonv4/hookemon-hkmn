@@ -318,11 +318,44 @@ test('CI runs every bare-node suite from the manifest with the required timeout 
   for (const name of BARE_NODE_SUITES) {
     const list = `files="$(node scripts/test-manifest.mjs list ${name})"`;
     assert.ok(workflow.includes(list), `${name} must be listed from the manifest`);
+    // The scripts suite serializes three heavy files before the remaining manifest; its
+    // exact scheduling is proven by the dedicated test below instead of the generic
+    // next-line shape every other bare-node suite still uses.
+    if (name === 'scripts') continue;
     const following = workflow.slice(workflow.indexOf(list) + list.length).split('\n')[1];
     assert.match(following, /node --test --test-timeout=120000 \$files$/, `${name} must run with the required timeout`);
   }
   assert.doesNotMatch(workflow, /\*\*/);
   assert.doesNotMatch(workflow, /\*\.test\.mjs/);
+});
+
+test('CI serializes exactly the three resource-heavy scripts-suite files, then runs the remaining manifest once with the required timeout', () => {
+  const scriptsStep = [
+    'files="$(node scripts/test-manifest.mjs list scripts)"',
+    'heavy_files=(',
+    '  scripts/tests/cleanroom.test.mjs',
+    '  scripts/tests/launch-addresses.test.mjs',
+    '  scripts/tests/phase3-bytecode-binding.test.mjs',
+    ')',
+    'for heavy in "${heavy_files[@]}"; do',
+    '  count="$(printf \'%s\\n\' "$files" | grep -Fxc "$heavy")"',
+    '  if [ "$count" -ne 1 ]; then',
+    '    echo "heavy manifest member $heavy count=$count (expected exactly 1)" >&2',
+    '    exit 1',
+    '  fi',
+    'done',
+    'remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${heavy_files[@]}"))"',
+    'for heavy in "${heavy_files[@]}"; do',
+    '  node --test --test-timeout=120000 "$heavy"',
+    'done',
+    'node --test --test-timeout=120000 $remaining_files',
+  ].join('\n');
+  assert.ok(
+    workflow.includes(scriptsStep),
+    'scripts suite must fail on a missing/duplicated heavy member, serialize exactly the three heavy files with the required timeout, then run every remaining manifest file exactly once at the existing default parallelism',
+  );
+  assert.doesNotMatch(scriptsStep, /\*\*/);
+  assert.doesNotMatch(scriptsStep, /\*\.test\.mjs/);
 });
 
 test('the web suite is honestly executed by web-ci, not duplicated as an incompatible bare-node gate', () => {

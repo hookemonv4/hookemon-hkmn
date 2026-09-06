@@ -225,4 +225,20 @@ jobs:
         shell: bash
         run: |
           files="$(node scripts/test-manifest.mjs list scripts)"
-          node --test --test-timeout=120000 $files
+          heavy_files=(
+            scripts/tests/cleanroom.test.mjs
+            scripts/tests/launch-addresses.test.mjs
+            scripts/tests/phase3-bytecode-binding.test.mjs
+          )
+          for heavy in "${heavy_files[@]}"; do
+            count="$(printf '%s\n' "$files" | grep -Fxc "$heavy")"
+            if [ "$count" -ne 1 ]; then
+              echo "heavy manifest member $heavy count=$count (expected exactly 1)" >&2
+              exit 1
+            fi
+          done
+          remaining_files="$(printf '%s\n' "$files" | grep -Fxv -f <(printf '%s\n' "${heavy_files[@]}"))"
+          for heavy in "${heavy_files[@]}"; do
+            node --test --test-timeout=120000 "$heavy"
+          done
+          node --test --test-timeout=120000 $remaining_files

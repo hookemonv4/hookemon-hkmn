@@ -125,7 +125,10 @@ test('CI runs the manifest-driven dashboard and contracts-js suites', () => {
   assert.match(workflow, /name: Verify contracts-js suite/);
   assert.match(workflow, /files="\$\(node scripts\/test-manifest\.mjs list contracts-js\)"\n\s+node --test --test-timeout=120000 \$files/);
   assert.match(workflow, /name: Verify scripts suite/);
-  assert.match(workflow, /files="\$\(node scripts\/test-manifest\.mjs list scripts\)"\n\s+node --test --test-timeout=120000 \$files/);
+  assert.match(
+    workflow,
+    /files="\$\(node scripts\/test-manifest\.mjs list scripts\)"\n\s+heavy_files=\(\n(?:\s+scripts\/tests\/[a-z0-9-]+\.test\.mjs\n){3}\s*\)\n[\s\S]*?\n\s+node --test --test-timeout=120000 \$remaining_files/,
+  );
   assert.match(workflow, /name: Verify the test manifest covers every test file\n\s+run: node scripts\/test-manifest\.mjs check/);
 });
 

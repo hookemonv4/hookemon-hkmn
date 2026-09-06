@@ -47,7 +47,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'df34bc9bd1ecf7d5ac4e34cd1a32e2694124cfbd23786a3b2ae3d65e39a9b374';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '751b032462deb31ddc93f1c2d93e5cf39283dbaf03ee6c2facf1ca0c05bcc66d';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -110,7 +110,23 @@ const REQUIRED_LOCAL_PHASE2_GATE_BLOCKS = Object.freeze({
   ]),
   'Verify scripts suite': Object.freeze([
     'files="$(node scripts/test-manifest.mjs list scripts)"',
-    'node --test --test-timeout=120000 $files',
+    'heavy_files=(',
+    '  scripts/tests/cleanroom.test.mjs',
+    '  scripts/tests/launch-addresses.test.mjs',
+    '  scripts/tests/phase3-bytecode-binding.test.mjs',
+    ')',
+    'for heavy in "${heavy_files[@]}"; do',
+    '  count="$(printf \'%s\\n\' "$files" | grep -Fxc "$heavy")"',
+    '  if [ "$count" -ne 1 ]; then',
+    '    echo "heavy manifest member $heavy count=$count (expected exactly 1)" >&2',
+    '    exit 1',
+    '  fi',
+    'done',
+    'remaining_files="$(printf \'%s\\n\' "$files" | grep -Fxv -f <(printf \'%s\\n\' "${heavy_files[@]}"))"',
+    'for heavy in "${heavy_files[@]}"; do',
+    '  node --test --test-timeout=120000 "$heavy"',
+    'done',
+    'node --test --test-timeout=120000 $remaining_files',
   ]),
 });
 const ADAPTERS_PACKAGE_PATH = 'packages/adapters/package.json';
