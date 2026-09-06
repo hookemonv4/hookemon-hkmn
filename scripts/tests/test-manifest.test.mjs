@@ -44,7 +44,7 @@ function fixtureRoot() {
 
 test('the manifest declares the required suites in order with explicit recursive roots', () => {
   assert.deepEqual(Object.keys(SUITES), REQUIRED_SUITES);
-  assert.deepEqual(SUITES.runner.roots, ['packages/runner/test']);
+  assert.deepEqual(SUITES.runner.roots, ['packages/domain/test', 'packages/runner/test']);
   assert.deepEqual(SUITES.adapters.roots, ['packages/adapters/test']);
   assert.deepEqual(SUITES.dashboard.roots, ['packages/dashboard/test']);
   assert.deepEqual(SUITES['contracts-js'].roots, ['packages/contracts/test-js', 'packages/contracts/test/blind']);
