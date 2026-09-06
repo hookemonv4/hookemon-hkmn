@@ -1090,6 +1090,68 @@ export function evaluateSignature(input) {
   return evaluateConfiguredPolicy({ ...input, boundary: 'signature' });
 }
 
+/**
+ * REQ-cycle-repository-2 / ADR-0025 `refresh-after-readmission`'s policy boundary. Re-admits a
+ * selected replacement quote against *current* configuration and caps while proving the immutable
+ * original admission's already-reserved principal is still recognized -- never a second
+ * reservation, and never `admissionContext`'s ordinary quote-deadline gate, which every other
+ * boundary enforces and which a refresh exists precisely to route around (the original admission is
+ * expired by definition here). The returned digest binds the original admission and the complete
+ * replacement together; it is never the cycle-policy digest itself, so a refresh decision can never
+ * be presented in place of -- or mistaken for -- the original admission's own digest.
+ */
+export function evaluateQuoteRefresh(input) {
+  const {
+    configuration, custody, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, capUsdg,
+    admission, replacement, operations, now,
+  } = input ?? {};
+  if (admission === undefined || admission === null) {
+    throw new Error('policy quote refresh requires the immutable original admission');
+  }
+  if (replacement === undefined || replacement === null) {
+    throw new Error('policy quote refresh requires the complete replacement admission');
+  }
+  assertCycleId(cycleId);
+  assertPackId(packId);
+  assertClock(now);
+  const resolvedOperations = assertOperationsAccounts(operations);
+  const normalizedAdmission = normalizePolicyAdmission(admission, resolvedOperations);
+  const normalizedReplacement = normalizePolicyAdmission(replacement, resolvedOperations);
+  if (normalizedAdmission.cycleId !== cycleId || normalizedReplacement.cycleId !== cycleId) {
+    throw new Error('policy quote refresh admission/replacement does not name this cycle');
+  }
+  const releaseAmount = assertAmount(releaseAmountMicroUsdg, 'policy releaseAmountMicroUsdg', { positive: true });
+  if (releaseAmount !== BigInt(normalizedAdmission.aggregateFundingQuote.amountAtomic)
+    || releaseAmount !== BigInt(normalizedReplacement.aggregateFundingQuote.amountAtomic)) {
+    throw new Error('policy quote refresh release amount does not match the immutable admitted principal');
+  }
+  const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
+  if (normalized.liveMode !== liveMode) return refused('EXECUTION_MODE_MISMATCH');
+  if (normalized.killSwitch) return refused('KILL_SWITCH');
+  if (normalized.executionPaused) return refused('EXECUTION_PAUSED');
+  if (BigInt(normalizedReplacement.unitFundingQuote.amountAtomic) > BigInt(normalized.maxUnitPriceMicroUsdg)) {
+    return refused('UNIT_PRICE_CAP');
+  }
+  const resolvedCapUsdg = capUsdg === undefined ? null : assertAmount(capUsdg, 'policy capUsdg');
+  const decision = evaluateExistingCycleExecution({
+    configuration: normalized,
+    custodyState: normalizeCustody(custody),
+    context: {
+      cycleId, packId, releaseAmount, capUsdg: resolvedCapUsdg, liveMode, mode,
+      admission: normalizedAdmission, operations: resolvedOperations,
+    },
+  });
+  if (!decision.allowed) return decision;
+  const refreshPolicyDecisionDigest = digest({
+    schema: 'hookemon.outbound-quote-refresh-decision.v1',
+    cycleId,
+    cycleDigest: decision.cycleDigest,
+    admission: normalizedAdmission,
+    replacement: normalizedReplacement,
+  });
+  return Object.freeze({ allowed: true, refreshPolicyDecisionDigest });
+}
+
 function reservationConfiguration(configuration, { cycleId, cycleDigest, releaseAmountMicroUsdg, liveMode, mode, now }) {
   const existing = existingCycle(configuration, cycleId);
   if (existing) return configuration;
@@ -1201,6 +1263,12 @@ export function createPolicyEngine({ now = () => Date.now(), readConfiguration, 
       const decision = await evaluate({ ...input, boundary, liveMode });
       if (!decision.allowed) throw new PolicyRefusalError(decision.reason);
       return decision;
+    },
+    async evaluateQuoteRefresh(input) {
+      const configuration = await readConfiguration();
+      if (configuration === null) return refused('CONFIGURATION_MISSING');
+      const custody = await readCustody();
+      return evaluateQuoteRefresh({ ...input, configuration, custody, now: now() });
     },
   });
 }
