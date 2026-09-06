@@ -9,7 +9,8 @@ canonical micro-USDG integer strings.
 ## Public interface
 
 - `deriveCyclePolicyDigest(input)` binds a production cycle id, pack id, release amount, mode, and
-  immutable economic-policy material to one SHA-256 digest.
+  immutable economic-policy material to one SHA-256 digest. When supplied, a
+  `hookemon.policy-admission.v2` record is part of the digest.
 - `evaluateClaim`, `evaluatePurchase`, and `evaluateSignature` evaluate a supplied configuration
   and custody projection without writing state.
 - `createPolicyEngine(dependencies)` returns `evaluate`, `evaluateClaim`, `evaluatePurchase`,
@@ -57,6 +58,11 @@ canonical micro-USDG integer strings.
   typed unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string
   quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share one
   asset identity, and the reservation covers totalAtomic plus boundedOverheadAtomic.
+- A `policy-admission.v2` binds one typed catalog unit target, its checked aggregate target, a
+  separate N=1 source funding quote, an aggregate source funding quote, and the `EXACT_OUTPUT`
+  Relay identity. The unit rail compares only `unitFundingQuote.amountAtomic`; per-cycle and
+  trailing-24-hour reservations compare only `aggregateFundingQuote.amountAtomic` once. The
+  aggregate quote is never divided by quantity and no USDG/USDC conversion is inferred.
 - The current digest excludes the generic configuration revision and binds every economic-policy
   field, including held-position limits and the unresolved-card deadline, so a pause or resume does
   not invalidate an admitted cycle. Existing version-3, version-2, and version-1 digests remain
@@ -111,9 +117,9 @@ node --test packages/runner/test/automation/policy-engine.test.mjs \
 - Do not authorize purchase from a release cap alone. Persist the full purchase request before
   signing, validate its arithmetic and typed assets, reserve its total plus overhead, and keep
   finalized observed balances separate from obligations with unresolved principal counted once.
-- The cycle record's release cap is not a final provider-validated purchase price. Until the
-  purchase stage persists the atomic price, the service passes the release cap to the purchase
-  check and refuses a release above the configured unit-price cap.
+- A changed admission, target, route, deadline, or quote digest changes the cycle digest and is
+  refused under the prior reservation. The caller must create a new admission rather than reuse
+  the prior authorization.
 - OPEN FACT: No frozen conversion quote binds a Collector Solana stablecoin insured amount to USDG.
   Resolve it by adding a quoted, digest-bound USDG conversion to the held-position contract and
   tests that reject a substituted quote. Verified safe alternative: use the cycle-attributed USDG
