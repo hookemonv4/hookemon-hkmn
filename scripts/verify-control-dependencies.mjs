@@ -47,7 +47,7 @@ const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mj
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
 const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '2945c9c7946eb2c3fa113142d2b46d8f03d8f387305a1b5ed6198baa3a79a5b9';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'db27a283abf64f616664d9c26bfe55912fec79dedd780c97e89acbec2141dd7e';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'ad9cdcb2b2d596a43900cbe082e273723b97db7c851c30e0fa7807aed7657ffe';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '896a8df85ab356c84649bb942a9fd171b5dcd6883047cbe40c03a074cfe1e994';
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = '45b7339b63b4b334620ab8eac8b873b08788c42af6e8159490baca00ed6916bb';
@@ -303,6 +303,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   if (forkProofNodeBlock !== null && forkProofNodeBlock !== canonicalNodeInstallBlock(pins)) {
     errors.push('fork-proof Node install block must match the canonical verified data flow');
   }
+  const forkProofPrNodeBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Node (fork-proof pull-request)', errors);
+  if (forkProofPrNodeBlock !== null && forkProofPrNodeBlock !== canonicalNodeInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Node install block must match the canonical verified data flow');
+  }
   const gitleaksBlock = workflowInstallRunBlock(workflow, 'Install pinned Gitleaks', errors);
   if (gitleaksBlock !== null && gitleaksBlock !== canonicalGitleaksInstallBlock(pins)) {
     errors.push('Gitleaks install block must match the canonical verified data flow');
@@ -314,6 +318,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   const forkProofFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof)', errors);
   if (forkProofFoundryBlock !== null && forkProofFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
     errors.push('fork-proof Foundry install block must match the canonical verified data flow');
+  }
+  const forkProofPrFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof pull-request)', errors);
+  if (forkProofPrFoundryBlock !== null && forkProofPrFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Foundry install block must match the canonical verified data flow');
   }
 }
 

@@ -48,6 +48,10 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/fork-proof.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/identity-gate.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
@@ -82,8 +86,8 @@
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "db27a283abf64f616664d9c26bfe55912fec79dedd780c97e89acbec2141dd7e",
-    "actualSha256": "db27a283abf64f616664d9c26bfe55912fec79dedd780c97e89acbec2141dd7e"
+    "expectedSha256": "ad9cdcb2b2d596a43900cbe082e273723b97db7c851c30e0fa7807aed7657ffe",
+    "actualSha256": "ad9cdcb2b2d596a43900cbe082e273723b97db7c851c30e0fa7807aed7657ffe"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
@@ -146,13 +150,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "163b5aa9e6505c9a7d68ce3987a97fa012f2e4172a8a8bb962ba6ee9b453a910",
-      "actualSha256": "163b5aa9e6505c9a7d68ce3987a97fa012f2e4172a8a8bb962ba6ee9b453a910",
+      "expectedSha256": "b4eb46a20952aaf362435b2495eb06fb023cb80f96ea73fb34a52ac8d408d289",
+      "actualSha256": "b4eb46a20952aaf362435b2495eb06fb023cb80f96ea73fb34a52ac8d408d289",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "163b5aa9e6505c9a7d68ce3987a97fa012f2e4172a8a8bb962ba6ee9b453a910",
-          "actualSha256": "163b5aa9e6505c9a7d68ce3987a97fa012f2e4172a8a8bb962ba6ee9b453a910"
+          "sha256": "b4eb46a20952aaf362435b2495eb06fb023cb80f96ea73fb34a52ac8d408d289",
+          "actualSha256": "b4eb46a20952aaf362435b2495eb06fb023cb80f96ea73fb34a52ac8d408d289"
         },
         {
           "path": "scripts/lib/util.mjs",
