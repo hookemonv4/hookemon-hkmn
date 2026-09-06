@@ -42,18 +42,17 @@ test("renders one private live operations dashboard with bounded cycle controls"
     "Zurück transferiert",
     "Letzte tatsächliche Ausschüttung",
     "Übersicht als Bild herunterladen",
-    "Automatische Auswahl",
-    "Eigene Packauswahl",
+    "Zugelassene Packs",
+    "Angefragte Boosterzahl",
     "Maximaler Packpreis",
     "Maximale Booster pro Zyklus",
     "Startwert 100",
-    "Collector-Bruttobelastung",
     "Nächste Gebührenreserve",
     "Zyklusbudget",
     "24-Stunden-Budget",
     "Automatische Zyklen aktivieren",
     "Nächsten zulässigen Zyklus jetzt starten",
-    "Nächsten planmäßigen Zyklus überspringen",
+    "Zustand neu abgleichen",
     "Entscheidungshistorie",
   ]) assert.match(html, new RegExp(text, "i"));
 });
@@ -66,19 +65,20 @@ test("keeps operator commands auditable, concurrency-safe and execution-free", a
   assert.match(source, /x-hookemon-request/);
   assert.match(source, /cache:\s*["']no-store["']/);
   assert.match(source, /maxBoostersPerCycle:\s*Number\(form\.maxBoostersPerCycle\)/);
-  assert.match(source, /cycleIntervalMinutes:\s*Number\(form\.cycleIntervalMinutes\)/);
-  assert.match(source, /min=\{15\}/);
-  assert.match(source, /15–60 Minuten/);
+  assert.match(source, /intervalMinutes:\s*Number\(form\.intervalMinutes\)/);
+  assert.match(source, /min=\{5\}/);
+  assert.match(source, /max=\{1440\}/);
+  assert.match(source, /5–1440 Minuten/);
   assert.match(source, /type:\s*["']run-cycle-now["']/);
-  assert.match(source, /type:\s*["']skip-next-cycle["']/);
+  assert.match(source, /type:\s*["']reconcile["']/);
   assert.match(source, /\/operator\/api\/dashboard/);
   assert.match(source, /downloadCommunityCard/);
   assert.match(source, /cycleStartProjectPoolMicroUsdg/);
   assert.match(source, /latestCycleTopAllocations/);
   assert.match(source, /historyComplete/);
   assert.doesNotMatch(source, />Cumulative</);
-  assert.match(source, /manualPackOrders:/);
-  assert.match(source, /quantityFor\(pack\.id\)/);
+  assert.match(source, /allowedPackIds:\s*\[\.\.\.form\.allowedPackIds\]\.sort\(\)/);
+  assert.match(source, /togglePackAllowed\(pack\.id\)/);
   assert.match(source, /parseGermanUsdg\(form\.maxUnitPriceMicroUsdg\)/);
   assert.match(source, /configurationSnapshotFromForm/);
   assert.match(source, /commandConfirmation/);
@@ -226,9 +226,8 @@ test("separates the running cycle from persistent next-cycle settings in German"
     "Operator-Steuerung",
     "Laufender Zyklus",
     "Ab nächstem Zyklus",
-    "Automatische Auswahl",
-    "Eigene Packauswahl",
-    "Menge",
+    "Zugelassene Packs",
+    "Angefragte Boosterzahl",
     "Maximaler Packpreis",
     "Zyklusbudget",
     "24-Stunden-Budget",
@@ -237,7 +236,7 @@ test("separates the running cycle from persistent next-cycle settings in German"
     "Konfiguration speichern",
     "Automatische Zyklen aktivieren",
     "Nächsten zulässigen Zyklus jetzt starten",
-    "Nächsten planmäßigen Zyklus überspringen",
+    "Zustand neu abgleichen",
     "Entscheidungshistorie",
     "Technische Details",
   ]) assert.match(source, new RegExp(text));

@@ -7,6 +7,7 @@ interface __BaseEnv_Env {
 	PUBLIC_DASHBOARD_PROFILE: string;
 	PUBLIC_CYCLE_STATUS_URL: string;
 	PUBLIC_COMMUNITY_SNAPSHOT_URL: string;
+	PUBLIC_CYCLE_HISTORY_URL: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -19,7 +20,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "OPERATOR_CONTROL_SERVICE_URL" | "OPERATOR_CONTROL_PROXY_CREDENTIAL" | "PUBLIC_DASHBOARD_PROFILE" | "PUBLIC_CYCLE_STATUS_URL" | "PUBLIC_COMMUNITY_SNAPSHOT_URL">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "OPERATOR_CONTROL_SERVICE_URL" | "OPERATOR_CONTROL_PROXY_CREDENTIAL" | "PUBLIC_DASHBOARD_PROFILE" | "PUBLIC_CYCLE_STATUS_URL" | "PUBLIC_COMMUNITY_SNAPSHOT_URL" | "PUBLIC_CYCLE_HISTORY_URL">> {}
 }
 
 // Begin runtime types

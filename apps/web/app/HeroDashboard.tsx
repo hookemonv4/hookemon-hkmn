@@ -1,8 +1,7 @@
 "use client";
 
-import { resolveDashboardPresentation } from "../lib/public-dashboard-view";
+import { presentDisplayCard, resolveDashboardPresentation } from "../lib/public-dashboard-view";
 import {
-  cardAltText,
   formatCount,
   formatCountdown,
   formatMicroUsdg,
@@ -47,23 +46,26 @@ export default function HeroDashboard() {
         <span className={styles.heroDashboardCardsLabel}>Latest pulls</span>
         {latestCards.length ? (
           <ul>
-            {latestCards.map((card, index) => (
-              <li key={`${card.nftAddress ?? card.productId}-${index}`}>
-                {card.imageUrl ? (
-                  // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={card.imageUrl}
-                    alt={cardAltText(card)}
-                    loading="lazy"
-                    decoding="async"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span aria-hidden="true">H</span>
-                )}
-              </li>
-            ))}
+            {latestCards.map((card, index) => {
+              const display = presentDisplayCard(card);
+              return (
+                <li key={`${display.key}-${index}`}>
+                  {display.imageUrl ? (
+                    // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={display.imageUrl}
+                      alt={display.altText}
+                      loading="lazy"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span aria-hidden="true">H</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <span className={styles.heroDashboardEmpty}>Awaiting verified pulls</span>

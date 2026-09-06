@@ -8,6 +8,43 @@ import type {
   PublicCycleCard,
   PublicCycleStatus,
 } from "./public-cycle-status.ts";
+import { isPublicCardEvent, presentCardEvent, type PublicCardEvent } from "./public-card-event.ts";
+
+export type DisplayCard = PublicCycleCard | PublicCommunityCard | PublicCardEvent;
+
+export type CardDisplay = {
+  key: string;
+  imageUrl: string | null;
+  altText: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+};
+
+/**
+ * A single presentation surface for both the legacy productId/rarity card shape and the frozen
+ * `PublicCardEvent` recent-winners feed (schemaVersion 8+), so every render site (hero, rail,
+ * detailed grid) shows the same facts the same way regardless of which shape the current backend
+ * emits, and never fabricates a field the other shape doesn't actually carry.
+ */
+export function presentDisplayCard(card: DisplayCard): CardDisplay {
+  if (isPublicCardEvent(card)) {
+    const presentation = presentCardEvent(card);
+    return {
+      key: `${card.cycleId}:${card.operationId}:${card.packIndex}`,
+      imageUrl: presentation.imageUrl,
+      altText: presentation.label !== "Name pending" ? `${presentation.label} card` : "Revealed card",
+      primaryLabel: presentation.label,
+      secondaryLabel: presentation.stateLabel,
+    };
+  }
+  return {
+    key: card.nftAddress ?? card.productId,
+    imageUrl: card.imageUrl,
+    altText: card.cardName ? `${card.cardName} card` : `Revealed ${card.rarity} card`,
+    primaryLabel: card.cardName ?? "Name pending",
+    secondaryLabel: card.rarity,
+  };
+}
 
 export type PublicProcessStepId =
   | "fees" | "budget" | "packs" | "cards" | "sales" | "return" | "holders";
@@ -139,8 +176,8 @@ export function hasLatestPayoutFacts(
 
 export function latestDashboardCards(
   cycle: { cards: PublicCycleCard[] } | null | undefined,
-  community: { cards: PublicCommunityCard[] } | null | undefined,
-): Array<PublicCycleCard | PublicCommunityCard> {
+  community: { cards: PublicCommunityCard[] | PublicCardEvent[] } | null | undefined,
+): DisplayCard[] {
   return cycle?.cards.length
     ? [...cycle.cards].reverse()
     : [...(community?.cards ?? [])];

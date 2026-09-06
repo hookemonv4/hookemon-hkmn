@@ -9,6 +9,7 @@ function validEnv(overrides = {}) {
     PUBLIC_DASHBOARD_PROFILE: "testnet",
     PUBLIC_CYCLE_STATUS_URL: "https://operator.example/public/api/cycle-status",
     PUBLIC_COMMUNITY_SNAPSHOT_URL: "https://operator.example/public/api/community-dashboard",
+    PUBLIC_CYCLE_HISTORY_URL: "https://operator.example/public/api/cycle-history",
     ...overrides,
   };
 }

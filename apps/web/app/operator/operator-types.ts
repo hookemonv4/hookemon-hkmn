@@ -22,7 +22,7 @@ export type ActiveCycle = {
   updatedAt: string | null;
   configurationRevision: string | null;
   allowedPackIds: string[];
-  requestedOrders: Array<{ productId: string; quantity: number }>;
+  requestedOrders: number;
   maxBoostersPerCycle: number | null;
   maxUnitPriceMicroUsdg: string | null;
   maxCycleBudgetMicroUsdg: string | null;

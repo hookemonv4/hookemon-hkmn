@@ -177,11 +177,11 @@ export function HookemonHeroVisual() {
         <strong>I&apos;ll show you where every swap goes.</strong>
       </div>
       <div className="hero-chain-pills" aria-hidden="true">
-        <span>ETH</span>
+        <span>EVM</span>
         <i />
         <span>SOL</span>
         <i />
-        <span>USDC</span>
+        <span>USDG</span>
       </div>
     </div>
   );
@@ -256,7 +256,7 @@ export function HookemonJourney({ steps }: { steps: JourneyStep[] }) {
           <h2>Six stops. One visible loop</h2>
         </div>
         <p>
-          Pikachu follows the money from an Ethereum swap to a sponsored USDC payout. Scroll to
+          Pikachu follows the money from an EVM swap to a sponsored USDG payout. Scroll to
           charge every stage.
         </p>
       </div>
@@ -275,10 +275,10 @@ export function HookemonJourney({ steps }: { steps: JourneyStep[] }) {
 
           <JourneyCollectorCardViewport state={collectorState} />
 
-          <div className="journey-hook-fee" aria-label="3% Hook fee from the Ethereum swap">
+          <div className="journey-hook-fee" aria-label="3% Hook fee from the EVM swap">
             <span>HOOK FEE</span>
             <strong>3%</strong>
-            <small>ETH SWAP</small>
+            <small>EVM SWAP</small>
           </div>
 
           <div className="journey-mobile-speech retro-dialogue" aria-live="polite">

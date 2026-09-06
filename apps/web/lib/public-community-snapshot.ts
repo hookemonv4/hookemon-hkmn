@@ -8,22 +8,24 @@ import type {
   PublicRoundAccounting,
   PublicQuotedCosts,
   PublicNativeFee,
+  PublicHeldPosition,
 } from "./public-cycle-status.ts";
+import { type Amount, type PublicCardEvent, normalizeAmount, normalizePublicCardEvent } from "./public-card-event.ts";
 
 export type PublicCommunityMetrics = {
   latestObservedProjectPoolMicroUsdg: string | null;
-  totalCycleFundingMicroUsdg: string;
-  totalCollectorSpendMicroUsdg: string;
-  totalBuybacksReturnedMicroUsdg: string;
-  totalBridgedBackMicroUsdg: string;
-  totalRewardsPaidMicroUsdg: string;
-  totalRewardsDeferredMicroUsdg: string;
-  totalQuotedOperatingCostsMicroUsdg: string;
-  latestRetainedReserveMicroUsdg: string;
-  latestCycleReserveTargetMicroUsdg: string;
+  totalCycleFundingMicroUsdg: string | null;
+  totalCollectorSpendMicroUsdg: string | null;
+  totalBuybacksReturnedMicroUsdg: string | null;
+  totalBridgedBackMicroUsdg: string | null;
+  totalRewardsPaidMicroUsdg: string | null;
+  totalRewardsDeferredMicroUsdg: string | null;
+  totalQuotedOperatingCostsMicroUsdg: string | null;
+  latestRetainedReserveMicroUsdg: string | null;
+  latestCycleReserveTargetMicroUsdg: string | null;
   completedCycles: number;
-  skippedCycles: number;
-  openedPacks: number;
+  skippedCycles: number | null;
+  openedPacks: number | null;
 };
 
 export type PublicCommunityCycle = {
@@ -32,10 +34,10 @@ export type PublicCommunityCycle = {
   reason: string | null;
   updatedAt: string | null;
   paidMicroUsdg: string | null;
-  payoutRecipientCount: number;
+  payoutRecipientCount: number | null;
   roundAccounting: PublicCommunityRoundAccounting | null;
   transactions: PublicTransactionReference[];
-  rewardRecipientLimit?: number;
+  rewardRecipientLimit?: number | null;
 };
 
 export type PublicCommunityRoundAccounting = PublicRoundAccounting;
@@ -54,7 +56,7 @@ export type PublicCommunityCard = {
 };
 
 export type PublicCommunitySnapshot = {
-  schemaVersion: 4 | 5;
+  schemaVersion: 4 | 5 | 6 | 7 | 8;
   profile: DashboardProfileId;
   badge: "TESTNET" | "MAINNET";
   network: DashboardNetwork;
@@ -65,7 +67,9 @@ export type PublicCommunitySnapshot = {
   poolObservedAt: string | null;
   metrics: PublicCommunityMetrics;
   latestCycle: PublicCommunityCycle | null;
-  cards: PublicCommunityCard[];
+  cards: PublicCommunityCard[] | PublicCardEvent[];
+  heldPositionCount?: number;
+  heldPositions?: PublicHeldPosition[];
 };
 
 const MONEY_KEYS = [
@@ -95,6 +99,7 @@ const SNAPSHOT_KEYS = new Set([
   "latestCycle",
   "cards",
 ]);
+const SNAPSHOT_HELD_POSITION_KEYS = new Set([...SNAPSHOT_KEYS, "heldPositionCount", "heldPositions"]);
 const NETWORK_KEYS = new Set(["evm", "solana"]);
 const EVM_NETWORK_KEYS = new Set(["name", "chainId", "label"]);
 const SOLANA_NETWORK_KEYS = new Set(["name", "genesisHash", "label"]);
@@ -132,6 +137,17 @@ const ROUND_ACCOUNTING_KEYS = new Set([
   "holderRewardsStatus",
   "distributionStatus",
 ]);
+// schemaVersion 8: same nullable/typed evolution as public-cycle-status.ts's schemaVersion 6.
+const ROUND_ACCOUNTING_V8_KEYS = new Set([
+  ...ROUND_ACCOUNTING_KEYS,
+  "outboundBridgeDebit",
+  "inboundBridgeProceeds",
+  "collectorPurchaseDebit",
+  "collectorBuybackProceeds",
+  "payoutLiabilityMicroUsdg",
+  "payoutDustMicroUsdg",
+  "paidHolderRewardsRecipientCount",
+]);
 const LEGACY_ROUND_ACCOUNTING_KEYS = new Set([
   "packSpendMicroUsdg",
   "buybackMicroUsdg",
@@ -155,6 +171,8 @@ const QUOTED_COST_KEYS = new Set([
 ]);
 const NETWORK_FEE_KEYS = new Set(["walletLamportsCharged", "purchase", "buyback"]);
 const NATIVE_FEE_KEYS = new Set(["lamports", "paidBy"]);
+const HELD_POSITION_V6_KEYS = new Set(["positionId", "cycleId", "reason", "ageSeconds", "cycleState"]);
+const HELD_POSITION_V7_KEYS = new Set(["reason", "ageSeconds", "cycleState"]);
 const TRANSACTION_KEYS = new Set(["chain", "purpose", "id"]);
 const CARD_KEYS = new Set([
   "cycleId",
@@ -189,10 +207,14 @@ export function normalizePublicCommunitySnapshot(
 ): PublicCommunitySnapshot {
   try {
     const source = requiredRecord(value);
-    exactKeys(source, SNAPSHOT_KEYS);
-    requiredKeys(source, SNAPSHOT_KEYS);
+    const snapshotKeys = source.schemaVersion === 6 || source.schemaVersion === 7 || source.schemaVersion === 8
+      ? SNAPSHOT_HELD_POSITION_KEYS
+      : SNAPSHOT_KEYS;
+    exactKeys(source, snapshotKeys);
+    requiredKeys(source, snapshotKeys);
     if (
-      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5) ||
+      !(source.schemaVersion === 3 || source.schemaVersion === 4 || source.schemaVersion === 5 ||
+        source.schemaVersion === 6 || source.schemaVersion === 7 || source.schemaVersion === 8) ||
       typeof source.historyComplete !== "boolean"
     ) invalid();
     const sourceSchemaVersion = source.schemaVersion;
@@ -220,11 +242,23 @@ export function normalizePublicCommunitySnapshot(
       metricsSource.latestObservedProjectPoolMicroUsdg === null
         ? null
         : money(metricsSource.latestObservedProjectPoolMicroUsdg);
-    for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key]);
-    for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key]);
+    // schemaVersion 8: no durable lifetime-aggregate producer exists, so these totals are honestly
+    // null rather than a fabricated '0'; completedCycles stays a required real count. schemaVersion
+    // <8 keeps its original required shape for any still-current caller.
+    if (sourceSchemaVersion === 8) {
+      for (const key of MONEY_KEYS.slice(1)) metrics[key] = nullableMoney(metricsSource[key]);
+      metrics.completedCycles = count(metricsSource.completedCycles);
+      metrics.skippedCycles = nullableCount(metricsSource.skippedCycles);
+      metrics.openedPacks = nullableCount(metricsSource.openedPacks);
+    } else {
+      for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key]);
+      for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key]);
+    }
 
-    return {
-      schemaVersion: sourceSchemaVersion === 5 ? 5 : 4,
+    const result: PublicCommunitySnapshot = {
+      schemaVersion: sourceSchemaVersion === 8
+        ? 8
+        : (sourceSchemaVersion === 7 ? 7 : (sourceSchemaVersion === 6 ? 6 : (sourceSchemaVersion === 5 ? 5 : 4))),
       profile: selected.id,
       badge: selected.badge,
       network: readNetwork(source.network, selected.network),
@@ -236,11 +270,42 @@ export function normalizePublicCommunitySnapshot(
       metrics,
       latestCycle: readLatestCycle(source.latestCycle, sourceSchemaVersion),
       cards: boundedArray(source.cards, MAX_CARDS).map((card) =>
-        readCard(card, sourceSchemaVersion)),
+        readCard(card, sourceSchemaVersion)) as PublicCommunitySnapshot["cards"],
     };
+    if (sourceSchemaVersion === 6 || sourceSchemaVersion === 7 || sourceSchemaVersion === 8) {
+      result.heldPositionCount = count(source.heldPositionCount);
+      result.heldPositions = readHeldPositions(source.heldPositions, result.heldPositionCount, sourceSchemaVersion);
+    }
+    return result;
   } catch {
     throw new TypeError("PUBLIC_COMMUNITY_SNAPSHOT_INVALID");
   }
+}
+
+function readHeldPositions(
+  value: unknown,
+  heldPositionCount: number,
+  schemaVersion: unknown,
+): PublicHeldPosition[] {
+  const positions = boundedArray(value, 1_000).map((position) => {
+    const source = requiredRecord(position);
+    const keys = schemaVersion === 7 || schemaVersion === 8 ? HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS;
+    exactKeys(source, keys);
+    requiredKeys(source, keys);
+    if (typeof source.reason !== "string" || !/^[A-Z][A-Z0-9_]{2,63}$/.test(source.reason)) invalid();
+    const result: PublicHeldPosition = {
+      reason: source.reason,
+      ageSeconds: count(source.ageSeconds),
+      cycleState: boundedText(source.cycleState),
+    };
+    if (schemaVersion === 6) {
+      result.positionId = boundedText(source.positionId);
+      result.cycleId = boundedText(source.cycleId);
+    }
+    return result;
+  });
+  if (heldPositionCount !== positions.length) invalid();
+  return positions;
 }
 
 function readNetwork(value: unknown, expected: DashboardNetwork): DashboardNetwork {
@@ -267,7 +332,8 @@ function readNetwork(value: unknown, expected: DashboardNetwork): DashboardNetwo
 function readLatestCycle(value: unknown, schemaVersion: unknown): PublicCommunityCycle | null {
   if (value === null) return null;
   const source = requiredRecord(value);
-  const required = schemaVersion === 5 ? LATEST_CYCLE_V5_KEYS : LATEST_CYCLE_KEYS;
+  const currentSchema = schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7 || schemaVersion === 8;
+  const required = currentSchema ? LATEST_CYCLE_V5_KEYS : LATEST_CYCLE_KEYS;
   exactKeys(source, required);
   requiredKeys(source, required);
   const transactions = boundedArray(source.transactions, MAX_TRANSACTIONS).map(readTransaction);
@@ -281,7 +347,11 @@ function readLatestCycle(value: unknown, schemaVersion: unknown): PublicCommunit
     reason: source.reason === null ? null : boundedText(source.reason),
     updatedAt: optionalTimestamp(source.updatedAt),
     paidMicroUsdg: source.paidMicroUsdg === null ? null : money(source.paidMicroUsdg),
-    payoutRecipientCount: count(source.payoutRecipientCount),
+    // schemaVersion 8: no durable recipient-count producer exists yet, so an unknown count is
+    // null, never a fabricated 0.
+    payoutRecipientCount: schemaVersion === 8
+      ? nullableCount(source.payoutRecipientCount)
+      : count(source.payoutRecipientCount),
     roundAccounting: readRoundAccounting(
       source.roundAccounting,
       schemaVersion,
@@ -289,7 +359,11 @@ function readLatestCycle(value: unknown, schemaVersion: unknown): PublicCommunit
     ),
     transactions,
   };
-  if (schemaVersion === 5) result.rewardRecipientLimit = recipientLimit(source.rewardRecipientLimit);
+  if (currentSchema) {
+    result.rewardRecipientLimit = schemaVersion === 8
+      ? nullableRecipientLimit(source.rewardRecipientLimit)
+      : recipientLimit(source.rewardRecipientLimit);
+  }
   return result;
 }
 
@@ -301,6 +375,14 @@ function recipientLimit(value: unknown): number {
   return value as number;
 }
 
+function nullableRecipientLimit(value: unknown): number | null {
+  return value === null ? null : recipientLimit(value);
+}
+
+function nullableCount(value: unknown): number | null {
+  return value === null ? null : count(value);
+}
+
 function readRoundAccounting(
   value: unknown,
   schemaVersion: unknown,
@@ -309,6 +391,7 @@ function readRoundAccounting(
   if (value === null) return null;
   const source = requiredRecord(value);
   if (schemaVersion === 3) return readLegacyRoundAccounting(source, paidMicroUsdg);
+  if (schemaVersion === 8) return readRoundAccountingV8(source);
   exactKeys(source, ROUND_ACCOUNTING_KEYS);
   requiredKeys(source, ROUND_ACCOUNTING_KEYS);
   const result: PublicCommunityRoundAccounting = {
@@ -333,9 +416,55 @@ function readRoundAccounting(
     holderRewardsStatus: boundedText(source.holderRewardsStatus),
     distributionStatus: boundedText(source.distributionStatus),
   };
-  assertExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertExclusive(result.packGainMicroUsdg as string, result.packLossMicroUsdg as string);
   assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
   return result;
+}
+
+function readRoundAccountingV8(source: Record<string, unknown>): PublicCommunityRoundAccounting {
+  exactKeys(source, ROUND_ACCOUNTING_V8_KEYS);
+  requiredKeys(source, ROUND_ACCOUNTING_V8_KEYS);
+  const result: PublicCommunityRoundAccounting = {
+    packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg),
+    buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg),
+    outboundBridgeDebit: nullableAmount(source.outboundBridgeDebit),
+    inboundBridgeProceeds: nullableAmount(source.inboundBridgeProceeds),
+    collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit),
+    collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds),
+    packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg),
+    packLossMicroUsdg: nullableMoney(source.packLossMicroUsdg),
+    quotedCosts: readQuotedCosts(source.quotedCosts),
+    protectedCostsMicroUsdg: nullableMoney(source.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: nullableSignedMoney(source.confirmedCostsMicroUsdg),
+    cycleGainMicroUsdg: nullableMoney(source.cycleGainMicroUsdg),
+    cycleLossMicroUsdg: nullableMoney(source.cycleLossMicroUsdg),
+    walletBalanceBeforeMicroUsdg: nullableMoney(source.walletBalanceBeforeMicroUsdg),
+    walletBalanceAfterMicroUsdg: nullableMoney(source.walletBalanceAfterMicroUsdg),
+    networkFees: readNetworkFees(source.networkFees),
+    feeReserveBeforeMicroUsdg: nullableMoney(source.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: nullableMoney(source.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: nullableMoney(source.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: nullableMoney(source.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: nullableMoney(source.plannedHolderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: nullableMoney(source.paidHolderRewardsMicroUsdg),
+    payoutLiabilityMicroUsdg: nullableMoney(source.payoutLiabilityMicroUsdg),
+    payoutDustMicroUsdg: nullableMoney(source.payoutDustMicroUsdg),
+    paidHolderRewardsRecipientCount: nullableCount(source.paidHolderRewardsRecipientCount),
+    holderRewardsStatus: boundedText(source.holderRewardsStatus),
+    distributionStatus: boundedText(source.distributionStatus),
+  };
+  assertNullableExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
+  return result;
+}
+
+function nullableAmount(value: unknown): Amount | null {
+  if (value === null) return null;
+  try {
+    return normalizeAmount(value);
+  } catch {
+    invalid();
+  }
 }
 
 function readLegacyRoundAccounting(
@@ -446,9 +575,16 @@ function readTransaction(value: unknown): PublicTransactionReference {
   return source as PublicTransactionReference;
 }
 
-function readCard(value: unknown, schemaVersion: unknown): PublicCommunityCard {
+function readCard(value: unknown, schemaVersion: unknown): PublicCommunityCard | PublicCardEvent {
+  if (schemaVersion === 8) {
+    try {
+      return normalizePublicCardEvent(value);
+    } catch {
+      invalid();
+    }
+  }
   const source = requiredRecord(value);
-  const currentSchema = schemaVersion === 4 || schemaVersion === 5;
+  const currentSchema = schemaVersion === 4 || schemaVersion === 5 || schemaVersion === 6 || schemaVersion === 7;
   exactKeys(source, currentSchema ? CARD_KEYS : LEGACY_CARD_KEYS);
   requiredKeys(
     source,
@@ -498,7 +634,7 @@ function boundedArray(value: unknown, maximumLength: number): unknown[] {
   return value;
 }
 
-function exactKeys(value: Record<string, unknown>, allowed: Set<string>) {
+function exactKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>) {
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) invalid();
   }

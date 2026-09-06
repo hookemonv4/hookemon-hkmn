@@ -289,7 +289,7 @@ test("renders profile-aware community totals beside the live cycle", async () =>
   ]);
 
   assert.equal((source.match(/fetch\("\/api\/community-dashboard"/g) ?? []).length, 1);
-  assert.equal((source.match(/credentials:\s*"omit"/g) ?? []).length, 2);
+  assert.equal((source.match(/credentials:\s*"omit"/g) ?? []).length, 3);
   assert.match(source, /normalizePublicCommunitySnapshot/);
   assert.match(source, /resolveDashboardPresentation/);
   assert.match(source, /dashboardCommunity\?\.badge/);
@@ -309,6 +309,17 @@ test("renders profile-aware community totals beside the live cycle", async () =>
   assert.match(source, /Last pool observation/);
   assert.match(source, /Last verified snapshot/);
   assert.match(source, /latestDashboardCards\(cycle, dashboardCommunity\)/);
+  assert.match(source, /Recent completed cycles/);
+  assert.match(source, /normalizePublicCycleHistory/);
+  assert.match(source, /url\.searchParams\.set\("limit", "10"\)/);
+  assert.match(source, /Cycle history unavailable: awaiting a verified terminal timestamp/);
+  assert.match(source, /Load more cycles/);
+  // Out-of-order guard: a stale in-flight request (e.g. a fast double-click on "Load more") must
+  // never overwrite state written by a newer one.
+  assert.match(source, /generationRef\.current !== generation/);
+  // The history poller must stay independent of the 5s status\/community poll effect, so an
+  // unrelated background refresh never resets or duplicates already-loaded pages.
+  assert.doesNotMatch(source, /setItems\(\[\]\)/);
   assert.match(css, /\.testnetBadge/);
   assert.match(css, /\.primaryMetrics/);
   assert.match(css, /\.process/);
@@ -319,6 +330,7 @@ test("renders profile-aware community totals beside the live cycle", async () =>
 
 test("renders a complete and truthful latest Holder Rewards round", async () => {
   const source = await readFile(new URL("../app/PublicCycleTracker.tsx", import.meta.url), "utf8");
+  const dashboardViewSource = await readFile(new URL("../lib/public-dashboard-view.ts", import.meta.url), "utf8");
 
   assert.match(source, /aria-label="Latest Holder Rewards round"/);
   for (const label of [
@@ -354,7 +366,9 @@ test("renders a complete and truthful latest Holder Rewards round", async () => 
   assert.match(source, /Fee evidence unavailable/);
   assert.match(source, /lamports/);
   assert.match(source, /Paid by/);
-  assert.match(source, /Name pending/);
+  // "Name pending" is the shared presentDisplayCard fallback (lib/public-dashboard-view.ts), not
+  // duplicated per render site.
+  assert.match(dashboardViewSource, /Name pending/);
   assert.match(source, /Set: \{card\.setName \?\? "pending"\}/);
   assert.match(source, /Card number: \{card\.cardNumber \?\? "pending"\}/);
   assert.match(source, /Image pending/);
@@ -377,11 +391,11 @@ test("keeps dashboard presentation credential-free and free of partial network f
   assert.match(viewSource, /dashboardFeedState/);
   assert.doesNotMatch(source, /function resolveConnectionState/);
   assert.match(source, /hasLatestPayoutFacts\(latestCycle\)/);
-  assert.match(source, /card\.cardName \?\? "Name pending"/);
+  assert.match(viewSource, /card\.cardName \?\? "Name pending"/);
   assert.match(html, /Connecting to cycle data/i);
   assert.doesNotMatch(html, /Latest verified payout/i);
-  assert.doesNotMatch(page, /canonical HOOKEMON \/ USDC pool runs/i);
-  assert.match(page, /protocol design routes HOOKEMON \/ USDC swaps through one immutable Uniswap v4 hook/i);
+  assert.doesNotMatch(page, /canonical HOOKEMON \/ USDG pool runs/i);
+  assert.match(page, /protocol design routes HOOKEMON \/ USDG swaps through one immutable Uniswap v4 hook/i);
 });
 
 test("keeps the visible testnet disclosure free of mainnet labeling", async () => {
@@ -424,6 +438,7 @@ test("keeps one shared poller behind every live cycle surface", async () => {
 
 test("keeps every compact live cycle state honest", async () => {
   const source = await readFile(new URL("../app/PublicCycleTracker.tsx", import.meta.url), "utf8");
+  const dashboardViewSource = await readFile(new URL("../lib/public-dashboard-view.ts", import.meta.url), "utf8");
 
   assert.match(source, /const RAIL_CARD_COUNT = 4/);
   assert.match(source, /slice\(0, RAIL_CARD_COUNT\)/);
@@ -433,7 +448,9 @@ test("keeps every compact live cycle state honest", async () => {
   assert.match(source, /Showing latest \{cards\.length\} of \{cycle\.openedBoosters\} revealed cards/);
   assert.match(source, /`\$\{cycle\.openedBoosters\} revealed`/);
   assert.match(source, /feedState\.toUpperCase\(\)/);
-  assert.match(source, /card\.cardName \? `\$\{card\.cardName\} card` : `Revealed \$\{card\.rarity\} card`/);
+  // Card alt text (shared by the rail, hero, and detailed grid) now lives in one presentation
+  // helper rather than being duplicated at each render site -- see presentDisplayCard.
+  assert.match(dashboardViewSource, /card\.cardName \? `\$\{card\.cardName\} card` : `Revealed \$\{card\.rarity\} card`/);
 });
 
 test("styles the compact live cycle surfaces for touch, desktop, and narrow screens", async () => {

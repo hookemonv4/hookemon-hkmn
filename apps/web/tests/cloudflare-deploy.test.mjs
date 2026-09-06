@@ -142,6 +142,7 @@ test("accepts only the generated Hookemon production target", async () => {
           "PUBLIC_DASHBOARD_PROFILE",
           "PUBLIC_CYCLE_STATUS_URL",
           "PUBLIC_COMMUNITY_SNAPSHOT_URL",
+          "PUBLIC_CYCLE_HISTORY_URL",
         ],
       },
     }),

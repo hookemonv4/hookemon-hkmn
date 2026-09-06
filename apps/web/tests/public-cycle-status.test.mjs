@@ -267,6 +267,142 @@ test("accepts only stable public reasons for skipped cycles", () => {
   );
 });
 
+const EMPTY_QUOTED_COSTS = {
+  outboundBridgeMicroUsdg: null,
+  inboundBridgeMicroUsdg: null,
+  collectorApiMicroUsdg: null,
+  evmNetworkMicroUsdg: null,
+  solanaNetworkMicroUsdg: null,
+  slippageMicroUsdg: null,
+};
+
+function schemaVersion6Fixture() {
+  return {
+    schemaVersion: 6,
+    profile: "testnet",
+    network: TESTNET_NETWORK,
+    executionState: "active",
+    executionReason: null,
+    generatedAt: "2026-09-06T12:00:00.000Z",
+    nextCycleAt: "2026-09-06T12:20:00.000Z",
+    countdownSeconds: 1_200,
+    cycle: {
+      cycleId: "cycle-9",
+      status: "complete",
+      selectedPackId: "pokemon_25",
+      maxBoostersPerCycle: 4,
+      plannedBoosters: 1,
+      openedBoosters: 1,
+      actions: [{ type: "packs-bought", status: "complete", at: "2026-09-06T11:59:00.000Z" }],
+      cards: [card("pokemon_25")],
+      returnedMicroUsdg: null,
+      rewardStatus: "pending",
+      roundAccounting: {
+        packSpendMicroUsdg: null,
+        buybackMicroUsdg: null,
+        outboundBridgeDebit: null,
+        inboundBridgeProceeds: null,
+        collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6 },
+        collectorBuybackProceeds: null,
+        packGainMicroUsdg: null,
+        packLossMicroUsdg: null,
+        quotedCosts: EMPTY_QUOTED_COSTS,
+        protectedCostsMicroUsdg: null,
+        confirmedCostsMicroUsdg: null,
+        cycleGainMicroUsdg: null,
+        cycleLossMicroUsdg: null,
+        walletBalanceBeforeMicroUsdg: null,
+        walletBalanceAfterMicroUsdg: null,
+        networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
+        feeReserveBeforeMicroUsdg: null,
+        feeReserveTargetMicroUsdg: null,
+        feeReserveTopUpMicroUsdg: null,
+        feeReserveAfterMicroUsdg: null,
+        plannedHolderRewardsMicroUsdg: null,
+        paidHolderRewardsMicroUsdg: null,
+        payoutLiabilityMicroUsdg: null,
+        payoutDustMicroUsdg: null,
+        paidHolderRewardsRecipientCount: null,
+        holderRewardsStatus: "pending",
+        distributionStatus: "pending",
+      },
+    },
+    heldPositionCount: 1,
+    heldPositions: [{ reason: "AWAITING_BUYBACK_WINDOW", ageSeconds: 30, cycleState: "opened" }],
+    scheduler: {
+      nextCycleAt: "2026-09-06T12:20:00.000Z",
+      nextReconcileAt: null,
+      automationEnabled: true,
+      paused: false,
+      pendingReason: null,
+    },
+  };
+}
+
+test("accepts schemaVersion 6 with held positions, scheduler, and typed nullable accounting", () => {
+  const fixture = schemaVersion6Fixture();
+  const result = normalizePublicCycleStatus(fixture, "testnet");
+  assert.deepEqual(result, fixture);
+  assert.equal(result.scheduler.nextReconcileAt, null);
+  assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, null);
+  assert.deepEqual(result.cycle.roundAccounting.collectorPurchaseDebit, {
+    chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6,
+  });
+});
+
+test("schemaVersion 6 rejects a missing scheduler, held positions, or a scheduler with both wakeups set", () => {
+  const withoutScheduler = schemaVersion6Fixture();
+  delete withoutScheduler.scheduler;
+  assert.throws(() => normalizePublicCycleStatus(withoutScheduler, "testnet"), /PUBLIC_CYCLE_STATUS_INVALID/);
+
+  const withoutHeldPositions = schemaVersion6Fixture();
+  delete withoutHeldPositions.heldPositionCount;
+  delete withoutHeldPositions.heldPositions;
+  assert.throws(() => normalizePublicCycleStatus(withoutHeldPositions, "testnet"), /PUBLIC_CYCLE_STATUS_INVALID/);
+
+  const bothWakeups = schemaVersion6Fixture();
+  bothWakeups.scheduler.nextReconcileAt = "2026-09-06T12:00:05.000Z";
+  assert.throws(() => normalizePublicCycleStatus(bothWakeups, "testnet"), /PUBLIC_CYCLE_STATUS_INVALID/);
+
+  const mismatchedHeldCount = schemaVersion6Fixture();
+  mismatchedHeldCount.heldPositionCount = 2;
+  assert.throws(() => normalizePublicCycleStatus(mismatchedHeldCount, "testnet"), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
+
+test("schemaVersion 6 carries real bridge amounts and payout-liability facts distinctly from the Collector-side amounts", () => {
+  const fixture = schemaVersion6Fixture();
+  fixture.cycle.roundAccounting.outboundBridgeDebit = {
+    chainId: "eip155:4663", assetId: "USDG", units: "5000000", decimals: 6,
+  };
+  fixture.cycle.roundAccounting.payoutLiabilityMicroUsdg = "1200000";
+  fixture.cycle.roundAccounting.payoutDustMicroUsdg = "0";
+  fixture.cycle.roundAccounting.paidHolderRewardsRecipientCount = 3;
+  const result = normalizePublicCycleStatus(fixture, "testnet");
+  assert.deepEqual(result.cycle.roundAccounting.outboundBridgeDebit, {
+    chainId: "eip155:4663", assetId: "USDG", units: "5000000", decimals: 6,
+  });
+  assert.equal(result.cycle.roundAccounting.inboundBridgeProceeds, null);
+  assert.equal(result.cycle.roundAccounting.payoutLiabilityMicroUsdg, "1200000");
+  assert.equal(result.cycle.roundAccounting.paidHolderRewardsRecipientCount, 3);
+
+  const missingBridgeField = schemaVersion6Fixture();
+  delete missingBridgeField.cycle.roundAccounting.outboundBridgeDebit;
+  assert.throws(
+    () => normalizePublicCycleStatus(missingBridgeField, "testnet"),
+    /PUBLIC_CYCLE_STATUS_INVALID/,
+  );
+});
+
+test("schemaVersion 6 never invents a spend/buyback amount before it is actually settled", () => {
+  const fixture = schemaVersion6Fixture();
+  fixture.cycle.roundAccounting.packSpendMicroUsdg = "0";
+  // A real '0' is legitimate once settled at zero, but it must be distinguishable from the
+  // fixture's own null (unknown/unsettled) case above -- both must round-trip exactly.
+  const result = normalizePublicCycleStatus(fixture, "testnet");
+  assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, "0");
+  assert.notEqual(result.cycle.roundAccounting.packSpendMicroUsdg, null);
+});
+
 function card(productId) {
   return {
     productId,

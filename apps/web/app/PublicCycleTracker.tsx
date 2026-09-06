@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -14,21 +15,28 @@ import {
   normalizePublicCycleStatus,
   type PublicCycle,
   type PublicCycleAction,
-  type PublicCycleCard,
   type PublicCycleStatus,
 } from "../lib/public-cycle-status";
 import {
   normalizePublicCommunitySnapshot,
   type PublicCommunitySnapshot,
 } from "../lib/public-community-snapshot";
-import { dashboardExplorerHref } from "../lib/public-dashboard-profile";
+import { isPublicCardEvent, presentCardEvent } from "../lib/public-card-event";
+import { dashboardExplorerHref, type DashboardProfileId } from "../lib/public-dashboard-profile";
+import {
+  normalizePublicCycleHistory,
+  type PublicCycleHistory,
+  type PublicCycleHistoryItem,
+} from "../lib/public-cycle-history";
 import {
   buildPublicCycleProcess,
   hasLatestPayoutFacts,
   latestDashboardCards,
+  presentDisplayCard,
   resolveDashboardPresentation,
   type DashboardEnvironment,
   type DashboardFeedState,
+  type DisplayCard,
   type PublicProcessStepId,
 } from "../lib/public-dashboard-view";
 import styles from "./PublicCycleTracker.module.css";
@@ -234,29 +242,32 @@ export function PublicCycleCardRail() {
         </div>
         {cards.length ? (
           <ul className={styles.pullRailCards}>
-            {cards.map((card, index) => (
-              <li className={styles.pullRailCard} key={`${card.nftAddress ?? card.productId}-${index}`}>
-                <span className={styles.pullRailArt}>
-                  {card.imageUrl ? (
-                    // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={card.imageUrl}
-                      alt={cardAltText(card)}
-                      loading="lazy"
-                      decoding="async"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span aria-hidden="true">H</span>
-                  )}
-                </span>
-                <span className={styles.pullRailCopy}>
-                  <span>{card.rarity}</span>
-                  <strong>{card.cardName ?? "Name pending"}</strong>
-                </span>
-              </li>
-            ))}
+            {cards.map((card, index) => {
+              const display = presentDisplayCard(card);
+              return (
+                <li className={styles.pullRailCard} key={`${display.key}-${index}`}>
+                  <span className={styles.pullRailArt}>
+                    {display.imageUrl ? (
+                      // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={display.imageUrl}
+                        alt={display.altText}
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <span aria-hidden="true">H</span>
+                    )}
+                  </span>
+                  <span className={styles.pullRailCopy}>
+                    <span>{display.secondaryLabel}</span>
+                    <strong>{display.primaryLabel}</strong>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className={styles.pullRailEmpty}>
@@ -283,6 +294,91 @@ export function PublicDeploymentDisclosure() {
     return <span>Testnet prototype only. Displayed assets have no production value.</span>;
   }
   return <span>Network status is loading. No deployment claim is being made.</span>;
+}
+
+type HistoryFeedState =
+  | { status: "loading" }
+  | { status: "unavailable" }
+  | { status: "ready"; page: PublicCycleHistory };
+
+/**
+ * Its own independent fetch against /api/cycle-history, deliberately not tied to the 5s
+ * status/community poller above: a cursor-paginated "load more" list must never be reset out
+ * from under the reader by an unrelated background refresh. A request-generation counter discards
+ * any response that arrives after a newer request has already started (e.g. a fast double-click,
+ * or the profile becoming known mid-flight), so responses can never apply out of order.
+ */
+function PublicCycleHistorySection({ profile }: { profile: DashboardProfileId | null }) {
+  const [feed, setFeed] = useState<HistoryFeedState>({ status: "loading" });
+  const [items, setItems] = useState<PublicCycleHistoryItem[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const generationRef = useRef(0);
+
+  const load = useCallback(async (cursor: string | null, append: boolean) => {
+    if (profile === null) return;
+    const generation = ++generationRef.current;
+    if (append) setLoadingMore(true);
+    try {
+      const url = new URL("/api/cycle-history", window.location.origin);
+      url.searchParams.set("limit", "10");
+      if (cursor !== null) url.searchParams.set("cursor", cursor);
+      const response = await fetch(url, { cache: "no-store", credentials: "omit" });
+      if (!response.ok) throw new Error("PUBLIC_CYCLE_HISTORY_UNAVAILABLE");
+      const page = normalizePublicCycleHistory(await response.json(), profile);
+      if (generationRef.current !== generation) return;
+      setFeed({ status: "ready", page });
+      setItems((current) => (append ? [...current, ...page.items] : page.items));
+    } catch {
+      if (generationRef.current !== generation) return;
+      if (!append) setFeed({ status: "unavailable" });
+    } finally {
+      if (generationRef.current === generation) setLoadingMore(false);
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (profile === null) return;
+    const initialLoad = window.setTimeout(() => void load(null, false), 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [profile, load]);
+
+  const page = feed.status === "ready" ? feed.page : null;
+
+  return (
+    <section aria-labelledby="cycle-history-title" className={styles.communityFreshness}>
+      <span id="cycle-history-title">Recent completed cycles</span>
+      {feed.status === "loading" ? <small>Loading verified history…</small> : null}
+      {feed.status === "unavailable" || (page && !page.historyComplete) ? (
+        <small>Cycle history unavailable: awaiting a verified terminal timestamp for every cycle.</small>
+      ) : null}
+      {page?.historyComplete ? (
+        items.length ? (
+          <nav className={styles.transactions} aria-label="Recent completed cycles">
+            {items.map((item) => (
+              <span key={item.cycleId}>
+                {item.cycleId}
+                <small>
+                  {humanize(item.status)} · {formatTimestamp(item.terminalAt)}
+                </small>
+              </span>
+            ))}
+          </nav>
+        ) : (
+          <small>No completed cycles yet.</small>
+        )
+      ) : null}
+      {page?.historyComplete && page.nextCursor !== null ? (
+        <button
+          className={styles.moreButton}
+          type="button"
+          disabled={loadingMore}
+          onClick={() => void load(page.nextCursor, true)}
+        >
+          {loadingMore ? "Loading…" : "Load more cycles"}
+        </button>
+      ) : null}
+    </section>
+  );
 }
 
 export default function PublicCycleTracker() {
@@ -581,6 +677,8 @@ export default function PublicCycleTracker() {
           ) : null}
         </div>
 
+        <PublicCycleHistorySection key={environment.profile ?? "loading"} profile={environment.profile} />
+
         <div className={`live-cycle-screen ${styles.trackerGrid}`}>
           <article className={styles.actionsPanel}>
             <div className={styles.panelHeader}>
@@ -624,7 +722,7 @@ export default function PublicCycleTracker() {
                     : "Awaiting booster results"}
                 </strong>
               </div>
-              <span>{cycle?.selectedPackId ?? cards[0]?.productId ?? "UNAVAILABLE"}</span>
+              <span>{cycle?.selectedPackId ?? firstCardProductId(cards[0]) ?? "UNAVAILABLE"}</span>
             </div>
             {cycle && cycle.openedBoosters > cards.length ? (
               <p className={styles.windowNotice}>
@@ -634,7 +732,7 @@ export default function PublicCycleTracker() {
             {visibleCards.length ? (
               <div className={styles.cardGrid}>
                 {visibleCards.map((card, index) => (
-                  <CycleCard card={card} key={`${card.nftAddress ?? card.productId}-${index}`} />
+                  <CycleCard card={card} key={`${presentDisplayCard(card).key}-${index}`} />
                 ))}
               </div>
             ) : (
@@ -724,16 +822,17 @@ function ActionRow({ action, index }: { action: PublicCycleAction; index: number
   );
 }
 
-function CycleCard({ card }: { card: PublicCycleCard }) {
+function CycleCard({ card }: { card: DisplayCard }) {
+  const display = presentDisplayCard(card);
   return (
     <div className={styles.card}>
       <div className={styles.cardArt}>
-        {card.imageUrl ? (
+        {display.imageUrl ? (
           // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={card.imageUrl}
-            alt={cardAltText(card)}
+            src={display.imageUrl}
+            alt={display.altText}
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
@@ -743,13 +842,19 @@ function CycleCard({ card }: { card: PublicCycleCard }) {
         )}
       </div>
       <div className={styles.cardCopy}>
-        <span>{card.rarity}</span>
-        <strong>{card.cardName ?? "Name pending"}</strong>
-        <small>Set: {card.setName ?? "pending"}</small>
-        <small>Card number: {card.cardNumber ?? "pending"}</small>
-        <small>NFT: {card.nftAddress ?? "pending"}</small>
-        <small>Pack price: {pendingMoney(card.packPriceMicroUsdg, "pending")}</small>
-        <small>Buyback: {pendingMoney(card.buybackMicroUsdg, "pending")}</small>
+        <span>{display.secondaryLabel}</span>
+        <strong>{display.primaryLabel}</strong>
+        {isPublicCardEvent(card) ? (
+          <small>Proceeds: {presentCardEvent(card).proceedsText}</small>
+        ) : (
+          <>
+            <small>Set: {card.setName ?? "pending"}</small>
+            <small>Card number: {card.cardNumber ?? "pending"}</small>
+            <small>NFT: {card.nftAddress ?? "pending"}</small>
+            <small>Pack price: {pendingMoney(card.packPriceMicroUsdg, "pending")}</small>
+            <small>Buyback: {pendingMoney(card.buybackMicroUsdg, "pending")}</small>
+          </>
+        )}
       </div>
     </div>
   );
@@ -812,8 +917,10 @@ function resolveEmptyPullsMessage(
   return "No cards revealed in this cycle yet";
 }
 
-export function cardAltText(card: PublicCycleCard): string {
-  return card.cardName ? `${card.cardName} card` : `Revealed ${card.rarity} card`;
+function firstCardProductId(card: DisplayCard | undefined): string | null {
+  // The frozen PublicCardEvent feed carries no pack/product SKU (a genuinely different concept
+  // from its operationId), so this identifier is only available for the legacy card shape.
+  return card !== undefined && !isPublicCardEvent(card) ? card.productId : null;
 }
 
 function pendingMoney(value: string | null, pending: string): string {
@@ -830,7 +937,7 @@ function historyMoney(
 
 function historyCount(
   snapshot: PublicCommunitySnapshot | null,
-  value: number | undefined,
+  value: number | null | undefined,
 ): string {
   if (!snapshot) return "—";
   return snapshot.historyComplete ? formatCount(value) : "History incomplete";
@@ -871,8 +978,8 @@ export function formatMicroUsdg(value: string | null | undefined): string {
   return `${grouped}${fraction ? `.${fraction}` : ""} USDG`;
 }
 
-export function formatCount(value: number | undefined): string {
-  return value === undefined ? "—" : value.toLocaleString("en-US");
+export function formatCount(value: number | null | undefined): string {
+  return value === undefined || value === null ? "—" : value.toLocaleString("en-US");
 }
 
 function formatTimestamp(value: string | null | undefined): string {

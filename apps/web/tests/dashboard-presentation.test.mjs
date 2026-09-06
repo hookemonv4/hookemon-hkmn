@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readDashboardProfile } from '../lib/public-dashboard-profile.ts';
 import { normalizePublicCycleStatus } from '../lib/public-cycle-status.ts';
 import { normalizePublicCommunitySnapshot } from '../lib/public-community-snapshot.ts';
-import { dashboardTiming, formatMicroUsdg, historyPresentation, latestPayout, payoutPresentation, processStep, safeCardImage, validateDashboardPair } from '../public/comic-production/dashboard.mjs';
+import { dashboardTiming, formatMicroUsdg, historyPresentation, humanizeSchedulerReason, latestPayout, normalizePublicCycleHistory, payoutPresentation, presentCard, processStep, safeCardImage, validateDashboardPair } from '../public/comic-production/dashboard.mjs';
 
 const generatedAt = '2026-09-04T12:00:00.000Z';
 const nextCycleAt = '2026-09-04T12:20:00.000Z';
@@ -240,4 +240,181 @@ test('process indicators preserve failed and deferred evidence and do not infer 
   assert.equal(processStep('holders', status).state, 'failed');
   status.executionState = 'paused';
   assert.equal(processStep('fees', status).state, 'paused');
+});
+
+function schemaVersion6And8Fixture() {
+  return {
+    status: {
+      schemaVersion: 6, profile: 'testnet', network: structuredClone(network), executionState: 'active',
+      executionReason: null, generatedAt, nextCycleAt, countdownSeconds: 1200, cycle: null,
+      heldPositionCount: 1,
+      heldPositions: [{ reason: 'AWAITING_BUYBACK_WINDOW', ageSeconds: 30, cycleState: 'opened' }],
+      scheduler: { nextCycleAt, nextReconcileAt: null, automationEnabled: true, paused: false, pendingReason: null },
+    },
+    community: {
+      schemaVersion: 8, profile: 'testnet', badge: 'TESTNET', network: structuredClone(network),
+      historyComplete: false, generatedAt, nextCycleAt, delayed: false, poolObservedAt: null,
+      metrics: {
+        latestObservedProjectPoolMicroUsdg: null, totalCycleFundingMicroUsdg: '0', totalCollectorSpendMicroUsdg: '0',
+        totalBuybacksReturnedMicroUsdg: '0', totalBridgedBackMicroUsdg: '0', totalRewardsPaidMicroUsdg: '0',
+        totalRewardsDeferredMicroUsdg: '0', totalQuotedOperatingCostsMicroUsdg: '0', latestRetainedReserveMicroUsdg: '0',
+        latestCycleReserveTargetMicroUsdg: '0', completedCycles: 0, skippedCycles: 0, openedPacks: 0,
+      },
+      latestCycle: null, cards: [],
+      heldPositionCount: 1,
+      heldPositions: [{ reason: 'AWAITING_BUYBACK_WINDOW', ageSeconds: 30, cycleState: 'opened' }],
+    },
+  };
+}
+
+test('browser dashboard accepts the real backend schemaVersion 6/8 pair with scheduler, held positions, and typed nullable accounting', () => {
+  const pair = schemaVersion6And8Fixture();
+  pair.community.cards = [{
+    cycleId: 'cycle-1', operationId: 'op-1', packIndex: 0, memo: 'memo-1', mint: null,
+    eventId: 'evt-1', sequence: '1', state: 'finalized', name: 'Pikachu',
+    imageUrl: 'https://images.example/pikachu.png',
+    observedAt: '2026-09-04T11:58:00.000Z', finalizedAt: '2026-09-04T11:59:00.000Z', transactionId: null,
+    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'USDC', units: '8000000', decimals: 6 },
+  }];
+  const canonical = {
+    status: normalizePublicCycleStatus(pair.status, 'testnet'),
+    community: normalizePublicCommunitySnapshot(pair.community, 'testnet'),
+  };
+  const validated = validateDashboardPair(canonical.status, canonical.community);
+  assert.deepEqual(validated, canonical);
+  assert.equal(validated.status.scheduler.nextReconcileAt, null);
+
+  const display = presentCard(validated.community.cards[0]);
+  assert.equal(display.label, 'Pikachu');
+  assert.equal(display.detailLine, 'Proceeds: 8 USDC');
+});
+
+test('standalone dashboard.mjs validates real bridge amounts, payout-liability facts, and nullable lifetime metrics at schemaVersion 8', () => {
+  const pair = schemaVersion6And8Fixture();
+  const typedAccounting = {
+    packSpendMicroUsdg: null, buybackMicroUsdg: null,
+    outboundBridgeDebit: { chainId: 'eip155:4663', assetId: 'USDG', units: '5000000', decimals: 6 },
+    inboundBridgeProceeds: null,
+    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'USDC', units: '10000000', decimals: 6 },
+    collectorBuybackProceeds: null,
+    packGainMicroUsdg: null, packLossMicroUsdg: null,
+    quotedCosts: {
+      outboundBridgeMicroUsdg: null, inboundBridgeMicroUsdg: null, collectorApiMicroUsdg: null,
+      evmNetworkMicroUsdg: null, solanaNetworkMicroUsdg: null, slippageMicroUsdg: null,
+    },
+    protectedCostsMicroUsdg: null, confirmedCostsMicroUsdg: null,
+    cycleGainMicroUsdg: null, cycleLossMicroUsdg: null,
+    walletBalanceBeforeMicroUsdg: null, walletBalanceAfterMicroUsdg: null,
+    networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
+    feeReserveBeforeMicroUsdg: null, feeReserveTargetMicroUsdg: null, feeReserveTopUpMicroUsdg: null,
+    feeReserveAfterMicroUsdg: null, plannedHolderRewardsMicroUsdg: null, paidHolderRewardsMicroUsdg: null,
+    payoutLiabilityMicroUsdg: '1200000', payoutDustMicroUsdg: '0', paidHolderRewardsRecipientCount: null,
+    holderRewardsStatus: 'awaiting-verification', distributionStatus: 'pending',
+  };
+  pair.community.metrics.skippedCycles = null;
+  pair.community.metrics.openedPacks = null;
+  pair.community.metrics.totalRewardsPaidMicroUsdg = null;
+  pair.community.latestCycle = {
+    cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
+    paidMicroUsdg: null, payoutRecipientCount: null, rewardRecipientLimit: null,
+    roundAccounting: typedAccounting, transactions: [],
+  };
+  const canonical = {
+    status: normalizePublicCycleStatus(pair.status, 'testnet'),
+    community: normalizePublicCommunitySnapshot(pair.community, 'testnet'),
+  };
+  const validated = validateDashboardPair(canonical.status, canonical.community);
+  assert.deepEqual(validated.community.latestCycle.roundAccounting.outboundBridgeDebit, typedAccounting.outboundBridgeDebit);
+  assert.equal(validated.community.latestCycle.roundAccounting.payoutLiabilityMicroUsdg, '1200000');
+  assert.equal(validated.community.latestCycle.payoutRecipientCount, null);
+  assert.equal(validated.community.latestCycle.rewardRecipientLimit, null);
+  assert.equal(validated.community.metrics.skippedCycles, null);
+  assert.equal(validated.community.metrics.totalRewardsPaidMicroUsdg, null);
+});
+
+test('dashboardTiming shows a reconcile wakeup distinctly from a cycle wakeup, and humanizes a pending reason', () => {
+  const pair = schemaVersion6And8Fixture();
+  pair.status.scheduler = {
+    nextCycleAt: null, nextReconcileAt: '2026-09-04T12:00:05.000Z',
+    automationEnabled: true, paused: false, pendingReason: 'RECONCILING_PENDING_TRANSACTION',
+  };
+  const canonical = {
+    status: normalizePublicCycleStatus(pair.status, 'testnet'),
+    community: normalizePublicCommunitySnapshot(pair.community, 'testnet'),
+  };
+  // pendingReason takes priority over a raw wakeup countdown -- it is the more specific fact.
+  const timing = dashboardTiming(validateDashboardPair(canonical.status, canonical.community), now);
+  assert.equal(timing.countdown, '--:--');
+  assert.equal(timing.note, humanizeSchedulerReason('RECONCILING_PENDING_TRANSACTION'));
+  assert.equal(timing.note, 'Reconciling a pending transaction');
+});
+
+test('dashboardTiming counts down to nextReconcileAt when no pendingReason blocks it', () => {
+  const pair = schemaVersion6And8Fixture();
+  pair.status.scheduler = {
+    nextCycleAt: null, nextReconcileAt: '2026-09-04T12:00:05.000Z',
+    automationEnabled: true, paused: false, pendingReason: null,
+  };
+  const canonical = {
+    status: normalizePublicCycleStatus(pair.status, 'testnet'),
+    community: normalizePublicCommunitySnapshot(pair.community, 'testnet'),
+  };
+  const timing = dashboardTiming(validateDashboardPair(canonical.status, canonical.community), now);
+  assert.equal(timing.countdown, '00:05');
+  assert.match(timing.note, /^Reconciling/);
+});
+
+function historyPage(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    profile: 'testnet',
+    network,
+    generatedAt: '2026-09-06T12:00:00.000Z',
+    asOf: '2026-09-06T11:59:55.000Z',
+    historyComplete: true,
+    items: [
+      { cycleId: 'cycle-2', status: 'complete', terminalAt: '2026-09-06T11:00:00.000Z', updatedAt: '2026-09-06T11:00:01.000Z' },
+      { cycleId: 'cycle-1', status: 'complete', terminalAt: '2026-09-06T10:00:00.000Z', updatedAt: '2026-09-06T10:00:01.000Z' },
+    ],
+    nextCursor: null,
+    ...overrides,
+  };
+}
+
+test('standalone dashboard.mjs normalizePublicCycleHistory accepts a real page and rejects out-of-order or fail-open shapes', () => {
+  const page = historyPage();
+  assert.deepEqual(normalizePublicCycleHistory(page), page);
+  assert.deepEqual(normalizePublicCycleHistory(page, 'testnet'), page);
+  assert.throws(() => normalizePublicCycleHistory(page, 'mainnet'), /PUBLIC_CYCLE_HISTORY_INVALID/);
+
+  const outOfOrder = historyPage({
+    items: [
+      { cycleId: 'cycle-1', status: 'complete', terminalAt: '2026-09-06T10:00:00.000Z', updatedAt: null },
+      { cycleId: 'cycle-2', status: 'complete', terminalAt: '2026-09-06T11:00:00.000Z', updatedAt: null },
+    ],
+  });
+  assert.throws(() => normalizePublicCycleHistory(outOfOrder), /PUBLIC_CYCLE_HISTORY_INVALID/);
+
+  const incompleteWithItems = historyPage({ historyComplete: false });
+  assert.throws(() => normalizePublicCycleHistory(incompleteWithItems), /PUBLIC_CYCLE_HISTORY_INVALID/);
+
+  const incompleteEmpty = historyPage({ historyComplete: false, items: [], nextCursor: null });
+  assert.deepEqual(normalizePublicCycleHistory(incompleteEmpty), incompleteEmpty);
+
+  // historyComplete: true can never coexist with a null terminalAt anywhere in items -- the
+  // producer's own all-or-nothing rule fails the whole page closed instead.
+  const fakeComplete = historyPage({
+    items: [{ cycleId: 'cycle-3', status: 'awaiting-terminal-timestamp', terminalAt: null, updatedAt: null }],
+  });
+  assert.throws(() => normalizePublicCycleHistory(fakeComplete), /PUBLIC_CYCLE_HISTORY_INVALID/);
+});
+
+test('presentCard never shows a not-yet-finalized card event as if it had proceeds', () => {
+  const pending = presentCard({
+    cycleId: 'cycle-1', operationId: 'op-1', packIndex: 0, memo: null, mint: null,
+    eventId: 'evt-1', sequence: '1', state: 'observed', name: null, imageUrl: null,
+    observedAt: '2026-09-04T11:58:00.000Z', finalizedAt: null, transactionId: null, proceeds: null,
+  });
+  assert.equal(pending.label, 'op-1');
+  assert.equal(pending.detailLine, 'Not yet sold');
 });
