@@ -823,14 +823,17 @@ async function acquireLock(lockPath, legacyPath) {
 }
 
 async function releaseLock(lock) {
+  // Unlink the legacy fence before dropping the SQLite exclusive lease: a waiting acquirer
+  // is unblocked the instant the lease is released, and would otherwise be able to observe
+  // (and lose a TOCTOU race against) a fence file we are still in the middle of removing.
   let failure = null;
   try {
-    releaseSqliteLock(lock.database);
+    await releaseLegacyMigrationFence(lock.legacyFence);
   } catch (error) {
     failure = error;
   }
   try {
-    await releaseLegacyMigrationFence(lock.legacyFence);
+    releaseSqliteLock(lock.database);
   } catch (error) {
     if (failure === null) failure = error;
   }
@@ -888,14 +891,15 @@ function acquireLockSync(lockPath, legacyPath) {
 }
 
 function releaseLockSync(lock) {
+  // See releaseLock: fence must be unlinked while the SQLite exclusive lease is still held.
   let failure = null;
   try {
-    releaseSqliteLock(lock.database);
+    releaseLegacyMigrationFenceSync(lock.legacyFence);
   } catch (error) {
     failure = error;
   }
   try {
-    releaseLegacyMigrationFenceSync(lock.legacyFence);
+    releaseSqliteLock(lock.database);
   } catch (error) {
     if (failure === null) failure = error;
   }

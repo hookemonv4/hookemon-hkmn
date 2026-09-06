@@ -70,10 +70,13 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   `.store-lock/lease.sqlite` file and a SQLite `BEGIN EXCLUSIVE` transaction. Once it owns that
   lease, each acquisition creates `store.lock` with exclusive creation, records its PID and random
   token, syncs the file and directory, and verifies the same inode, PID, and token before removing
-  its own fence. A clean release retains the 0600 SQLite file. After a crash releases SQLite's
-  operating-system lease, a new owner may remove a legacy fence only after it confirms the same
-  inode and token and that the recorded PID no longer exists; a live or ambiguous PID remains
-  lock contention.
+  its own fence. A clean release always removes its own `store.lock` fence before it commits and
+  releases the SQLite lease, so a fresh acquirer unblocked by that release never observes (or races
+  against) a fence file the departing owner is still in the middle of deleting; the SQLite lease
+  covers the fence's entire lifetime, not just its creation. A clean release retains the 0600
+  SQLite file. After a crash releases SQLite's operating-system lease, a new owner may remove a
+  legacy fence only after it confirms the same inode and token and that the recorded PID no longer
+  exists; a live or ambiguous PID remains lock contention.
 - `recordHeldOwnerDecision(cycleId, { heldEvidenceDigest, requestId, expectedRevision, choice })`
   is a writer-only transition for `HELD_OWNER_DECISION`. `choice` is `sell` or `keep-holding`;
   the method is deliberately outside the read facade until a separately authorized control path
