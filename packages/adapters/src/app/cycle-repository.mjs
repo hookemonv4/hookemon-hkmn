@@ -7,7 +7,13 @@ import { lstat, open } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { DurableCycleStore, StateDirectoryLossError } from '../../../runner/src/cycle/durable-store.mjs';
-import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
+import {
+  assertBoundedCanonicalValue,
+  canonicalJson,
+  CycleJournal,
+  digest,
+  RECOVERY_LIMITS,
+} from '../../../runner/src/cycle/journal.mjs';
 import { isProcessRpcFinalizedErc20TransferProof } from '../robinhood-rpc.mjs';
 import { isProcessRpcRelayDestinationObservation } from '../solana-rpc.mjs';
 import { isProcessRpcOutboundRefundProof } from './stages/outbound.mjs';
@@ -476,6 +482,30 @@ const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
 
 function assertPackOperationStageName(stage) {
   if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);
+}
+
+const STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA = 'hookemon.stage-evidence-page-reference.v1';
+
+/** True only for the exact compact marker completeStage journals in place of oversized evidence. */
+function isStageEvidencePageReference(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype
+    && value.schema === STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA;
+}
+
+/** Whether `value` fits one bounded journal-event payload unchanged (the journal's own limits). */
+function fitsBoundedJournalPayload(value) {
+  try {
+    assertBoundedCanonicalValue(value, 'stage evidence', {
+      objects: RECOVERY_LIMITS.payloadObjects,
+      arrays: RECOVERY_LIMITS.payloadArrays,
+      arrayItems: RECOVERY_LIMITS.payloadArrayItems,
+      aggregateBytes: RECOVERY_LIMITS.payloadAggregateBytes,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function assertPackBatchIntent(value, label) {
@@ -3156,7 +3186,62 @@ export class CycleRepository {
   async readStage(cycleId, stage) {
     assertStageName(stage, { allowLegacyRead: true });
     const state = await this.#replay(cycleId);
-    return state.stages.get(stage) ?? { status: 'PENDING' };
+    const stored = state.stages.get(stage) ?? { status: 'PENDING' };
+    if (stored.status !== 'COMPLETE') return stored;
+    const evidence = await this.#resolveStageEvidence(cycleId, stage, stored.evidence);
+    return evidence === stored.evidence ? stored : { status: 'COMPLETE', evidence };
+  }
+
+  /**
+   * Reconstructs oversized stage evidence from durable paged storage when `storedEvidence` is a
+   * compact page reference; returns `storedEvidence` unchanged otherwise. A reference whose blob
+   * is missing or whose recomputed digest disagrees is a hard failure, never a silent `null` --
+   * absence and corruption are distinct recovery facts.
+   */
+  async #resolveStageEvidence(cycleId, stage, storedEvidence) {
+    if (!isStageEvidencePageReference(storedEvidence)) return storedEvidence;
+    if (storedEvidence.cycleId !== cycleId || storedEvidence.stage !== stage) {
+      throw new Error(`cycle-repository: stage "${stage}" paged evidence reference does not bind its own cycle and stage`);
+    }
+    const wrapped = await this.#store.readPagedStageEvidence(cycleId, stage);
+    if (wrapped === null) {
+      throw new Error(`cycle-repository: stage "${stage}" paged evidence is referenced but missing from durable storage`);
+    }
+    const full = wrapped.evidence;
+    if (digest(full) !== storedEvidence.evidenceDigest) {
+      throw new Error(`cycle-repository: stage "${stage}" paged evidence does not match its durable reference digest`);
+    }
+    return full;
+  }
+
+  /**
+   * Evidence that fits one bounded journal payload is returned unchanged. Oversized evidence (for
+   * example a real eligibility-snapshot manifest with more holders than the journal's 64-item
+   * array bound admits) is persisted through the durable paged-stage-evidence store first, then
+   * only a compact `{schema, cycleId, stage, evidenceDigest}` reference is returned for the
+   * journal to record -- the reference commits only after the blob is durable. A retry with the
+   * identical evidence reuses the existing blob (matched by digest) without rewriting it; a retry
+   * with different evidence for the same (cycleId, stage) is rejected rather than silently
+   * replacing the durably committed blob.
+   */
+  async #preparePagedStageEvidence(cycleId, stage, evidence) {
+    if (fitsBoundedJournalPayload(evidence)) return evidence;
+    if (typeof this.#store.persistPagedStageEvidence !== 'function' || typeof this.#store.readPagedStageEvidence !== 'function') {
+      throw new Error(`cycle-repository completeStage: stage "${stage}" evidence exceeds the bounded journal payload and this store has no paged-stage-evidence support`);
+    }
+    const evidenceDigest = digest(evidence);
+    const existing = await this.#store.readPagedStageEvidence(cycleId, stage);
+    if (existing !== null) {
+      if (digest(existing.evidence) !== evidenceDigest) {
+        throw new Error(`cycle-repository completeStage: stage "${stage}" already has different paged evidence durably stored`);
+      }
+      return Object.freeze({ schema: STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA, cycleId, stage, evidenceDigest });
+    }
+    // persistPagedStageEvidence requires its own top-level `cycleId` field on the object it
+    // stores; wrap the caller's evidence rather than injecting `cycleId` into it, so the exact
+    // evidence shape returned to callers of readStage/completeStage is never altered.
+    await this.#store.persistPagedStageEvidence(cycleId, stage, { cycleId, evidence: structuredClone(evidence) });
+    return Object.freeze({ schema: STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA, cycleId, stage, evidenceDigest });
   }
 
   async prepareStage(cycleId, stage) {
@@ -3181,14 +3266,16 @@ export class CycleRepository {
     }
     const current = state.stages.get(stage) ?? { status: 'PENDING' };
     if (current.status === 'COMPLETE') {
-      if (canonicalJson(current.evidence) !== canonicalJson(evidence)) {
+      const currentEvidence = await this.#resolveStageEvidence(cycleId, stage, current.evidence);
+      if (canonicalJson(currentEvidence) !== canonicalJson(evidence)) {
         throw new Error(`cycle-repository completeStage: stage "${stage}" was already completed with different evidence`);
       }
       return; // idempotent retry
     }
     assertPreparedOrderedCompletion(state, stage);
     assertReconciledCompletion(state, stage, evidence);
-    await this.#append(cycleId, 'stage-completed', { stage, evidence }, {
+    const storedEvidence = await this.#preparePagedStageEvidence(cycleId, stage, evidence);
+    await this.#append(cycleId, 'stage-completed', { stage, evidence: storedEvidence }, {
       operation: 'completeStage',
       assertState: currentState => {
         const latest = currentState.stages.get(stage) ?? { status: 'PENDING' };

@@ -980,6 +980,87 @@ test('completeStage is idempotent when retried with identical evidence, and reje
   );
 });
 
+function oversizedEligibilitySnapshotEvidence(overrides = {}) {
+  return {
+    entries: Array.from({ length: 200 }, (_, index) => ({ holder: `holder-${index}`, amount: `${index}` })),
+    ...overrides,
+  };
+}
+
+test('completeStage pages oversized evidence to durable storage and readStage transparently resolves it', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  const evidence = oversizedEligibilitySnapshotEvidence();
+
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence);
+  assert.deepEqual(await repository.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence });
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence }, 'survives a repository restart');
+});
+
+test('completeStage retried with identical oversized evidence is idempotent and reuses the durable blob', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  const evidence = oversizedEligibilitySnapshotEvidence();
+
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence);
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence); // no throw
+  assert.deepEqual(await repository.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence });
+});
+
+test('completeStage rejects a retry with different oversized evidence for the same stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+  await assert.rejects(
+    () => repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence({ note: 'different' })),
+    /already completed with different evidence/,
+  );
+});
+
+test('readStage hard-fails when paged evidence is referenced but missing from durable storage', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+
+  await rm(join(directory, 'stage-evidence'), { recursive: true, force: true });
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => reopened.readStage(cycleId, 'eligibility-snapshot'),
+    /paged evidence is referenced but missing from durable storage/,
+  );
+});
+
+test('readStage hard-fails when a paged evidence blob no longer matches its durable reference digest', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent('eligibility-snapshot'));
+  const manifest = JSON.parse(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'));
+  const generationDirectory = join(stageDirectory, manifest.generation);
+  const firstPageFile = join(generationDirectory, '0000.json');
+  const page = JSON.parse(await readFile(firstPageFile, 'utf8'));
+  page.entries = page.entries.slice().reverse();
+  await writeFile(firstPageFile, `${JSON.stringify(page)}\n`);
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => reopened.readStage(cycleId, 'eligibility-snapshot'),
+    /page digest does not match its manifest|does not match its durable reference digest/,
+  );
+});
+
 test('readStage/completeStage reject an unknown stage name', async t => {
   const repository = await CycleRepository.open(await tempDirectory(t));
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
