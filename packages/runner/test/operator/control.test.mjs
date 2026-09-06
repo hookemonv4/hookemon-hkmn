@@ -1012,12 +1012,12 @@ test('configuration updates reject monetary values above the fixed operator ceil
     command: {
       type: 'update-configuration',
       configuration: {
-        maxUnitPriceMicroUsdg: '50000000',
-        maxCycleBudgetMicroUsdg: '150000000',
-        max24HourBudgetMicroUsdg: '450000000',
-        perCycleCapMicroUsdg: '150000000',
-        lossCapMicroUsdg: '450000000',
-        maxOutstandingCustodyMicroUsdg: '450000000',
+        maxUnitPriceMicroUsdg: '55000000',
+        maxCycleBudgetMicroUsdg: '165000000',
+        max24HourBudgetMicroUsdg: '495000000',
+        perCycleCapMicroUsdg: '165000000',
+        lossCapMicroUsdg: '495000000',
+        maxOutstandingCustodyMicroUsdg: '495000000',
       },
     },
   });
@@ -1029,10 +1029,10 @@ test('configuration updates reject monetary values above the fixed operator ceil
       command: {
         type: 'update-configuration',
         configuration: {
-          maxUnitPriceMicroUsdg: '50000001',
-          maxCycleBudgetMicroUsdg: '150000001',
-          perCycleCapMicroUsdg: '150000001',
-          max24HourBudgetMicroUsdg: '450000001',
+          maxUnitPriceMicroUsdg: '55000001',
+          maxCycleBudgetMicroUsdg: '165000001',
+          perCycleCapMicroUsdg: '165000001',
+          max24HourBudgetMicroUsdg: '495000001',
         },
       },
     }),

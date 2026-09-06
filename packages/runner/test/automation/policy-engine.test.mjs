@@ -515,10 +515,10 @@ test('the first production cycle needs an approval bound to its exact policy dig
 test('claim admission rejects configuration values above the fixed operator ceilings', async () => {
   const { engine } = policyFixture({
     configuration: configuredPolicy({
-      maxUnitPriceMicroUsdg: '50000001',
-      maxCycleBudgetMicroUsdg: '150000001',
-      max24HourBudgetMicroUsdg: '450000001',
-      perCycleCapMicroUsdg: '150000001',
+      maxUnitPriceMicroUsdg: '55000001',
+      maxCycleBudgetMicroUsdg: '165000001',
+      max24HourBudgetMicroUsdg: '495000001',
+      perCycleCapMicroUsdg: '165000001',
     }),
   });
 
@@ -532,6 +532,46 @@ test('claim admission rejects configuration values above the fixed operator ceil
     }),
     /fixed hard cap/i,
   );
+});
+
+// H's verified exact-output bridge quote (H-funding-observations.md, 2026-09-05): acquiring
+// 50,000,000 atomic USDC (two `pokemon_25` packs) required exactly this many atomic USDG in. USDC
+// and USDG are different assets; this is the one number in this file that is a measured quote, not a
+// derived multiple or a round USD guess.
+const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
+
+test('the verified N2 two-pack USDG quote is admitted under an explicit configuration sized exactly to it, and one atomic unit above the same rail is refused', async () => {
+  const releaseAmountMicroUsdg = VERIFIED_N2_QUOTE_INPUT_MICRO_USDG;
+  const configuration = configuredPolicy({
+    maxUnitPriceMicroUsdg: releaseAmountMicroUsdg,
+    maxCycleBudgetMicroUsdg: releaseAmountMicroUsdg,
+    perCycleCapMicroUsdg: releaseAmountMicroUsdg,
+    max24HourBudgetMicroUsdg: releaseAmountMicroUsdg,
+    lossCapMicroUsdg: releaseAmountMicroUsdg,
+    maxOutstandingCustodyMicroUsdg: releaseAmountMicroUsdg,
+    maxCyclesPerDay: 1,
+    manualApprovalCycles: 0,
+  });
+  const cycleId = 'cycle-n2-verified-quote';
+  const cycleDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg, packId: 'base-pack', liveMode: true,
+  });
+  const { engine } = policyFixture({
+    configuration: {
+      ...configuration,
+      cycleLedger: [{ cycleId, cycleDigest, mode: 'production', openedAtMs: 1_000, releaseAmountMicroUsdg }],
+      spendLedger: [{ cycleId, cycleDigest, amountMicroUsdg: releaseAmountMicroUsdg, reservedAtMs: 1_000 }],
+    },
+  });
+
+  assert.deepEqual(await engine.evaluatePurchase({
+    boundary: 'purchase', cycleId, releaseAmountMicroUsdg, packId: 'base-pack', liveMode: true,
+  }), { allowed: true, cycleDigest });
+
+  const oneAtomicUnitOver = (BigInt(releaseAmountMicroUsdg) + 1n).toString();
+  assert.deepEqual(await engine.evaluatePurchase({
+    boundary: 'purchase', cycleId, releaseAmountMicroUsdg: oneAtomicUnitOver, packId: 'base-pack', liveMode: true,
+  }), { allowed: false, reason: 'UNIT_PRICE_CAP' });
 });
 
 test('an existing production cycle without its matching durable spend reservation cannot proceed', async () => {
