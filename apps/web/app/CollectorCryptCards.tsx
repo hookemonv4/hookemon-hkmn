@@ -260,8 +260,8 @@ export function HeroCollectorCards() {
         </button>
       </div>
 
-      <div className="collector-route-label" aria-label="Ethereum swap to pack to card to USDC">
-        ETH SWAP → PACK → CARD → USDC
+      <div className="collector-route-label" aria-label="EVM swap to pack to card to USDG payout">
+        EVM SWAP → PACK → CARD → USDG
       </div>
     </div>
   );
@@ -273,7 +273,7 @@ const journeyStateLabels: Record<CollectorJourneyState, string> = {
   bridged: "The Collector Crypt Gacha pack destination activates in the Solana lane.",
   opened: "A Collector Crypt Gacha pack reveals the inventory example.",
   buyback: "The same card remains visible beside illustrative instant buyback data.",
-  payout: "The card recedes while automatic USDC payout takes priority.",
+  payout: "The card recedes while automatic USDG payout takes priority.",
 };
 
 export function JourneyCollectorCardViewport({ state }: { state: CollectorJourneyState }) {
@@ -301,7 +301,7 @@ export function JourneyCollectorCardViewport({ state }: { state: CollectorJourne
       aria-label={`${journeyStateLabels[state]} ${describeCollectorCard(card)}`}
     >
       <div className="collector-lane-label">
-        <span>ETH</span>
+        <span>EVM</span>
         <i aria-hidden="true" />
         <strong>COLLECTOR CRYPT</strong>
         <i aria-hidden="true" />
@@ -334,8 +334,8 @@ export function JourneyCollectorCardViewport({ state }: { state: CollectorJourne
         {illustrativeReturn ? <small>Illustrative return: {illustrativeReturn}</small> : null}
       </div>
       <div className="journey-payout-panel" aria-hidden={state !== "payout"}>
-        <span>AUTOMATIC USDC PAYOUT</span>
-        <strong>ELIGIBLE HOLDERS RECEIVE ROUTED USDC</strong>
+        <span>AUTOMATIC USDG PAYOUT</span>
+        <strong>ELIGIBLE HOLDERS RECEIVE ROUTED USDG</strong>
         <small>No claim required. Amounts are not promised.</small>
       </div>
     </div>

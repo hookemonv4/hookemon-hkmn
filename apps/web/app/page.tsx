@@ -17,10 +17,10 @@ const journeySteps = [
   {
     id: "swap",
     number: "01",
-    title: "Swap on Ethereum",
-    copy: "The protocol design routes HOOKEMON / USDC swaps through one immutable Uniswap v4 hook.",
+    title: "Swap on EVM",
+    copy: "The protocol design routes HOOKEMON / USDG swaps through one immutable Uniswap v4 hook.",
     bubble: "Every swap starts the machine.",
-    meta: "ETH · V4",
+    meta: "EVM · V4",
   },
   {
     id: "split",
@@ -34,9 +34,9 @@ const journeySteps = [
     id: "bridge",
     number: "03",
     title: "Bridge to Solana",
-    copy: "Collected USDC moves in bounded batches instead of paying for a bridge on every trade.",
+    copy: "Collected USDG moves in bounded batches instead of paying for a bridge on every trade.",
     bubble: "We batch the trip to Solana.",
-    meta: "USDC · CCTP",
+    meta: "USDG · Bridge",
   },
   {
     number: "04",
@@ -58,8 +58,8 @@ const journeySteps = [
     id: "pay",
     number: "06",
     title: "Pay holders automatically",
-    copy: "Returned USDC bridges home and the operator sponsors proportional payouts to eligible time-weighted holders.",
-    bubble: "No claim. USDC comes to you.",
+    copy: "Returned Solana proceeds bridge home as USDG, and the operator sponsors proportional payouts to eligible time-weighted holders.",
+    bubble: "No claim. USDG comes to you.",
     meta: "AUTO · TOP 200",
   },
 ] satisfies JourneyStep[];
@@ -68,7 +68,7 @@ const stats = [
   ["3.0%", "Hook fee"],
   ["Top 200", "Time-weighted"],
   ["20 min", "Accounting cycle"],
-  ["No claim", "Automatic USDC"],
+  ["No claim", "Automatic USDG"],
 ];
 
 export default function Home() {
@@ -119,22 +119,22 @@ export default function Home() {
         <div className="hero-copy">
           <div className="retro-hud" aria-label="Protocol status">
             <span>PLAYER 01</span>
-            <span>ETH ↔ SOL</span>
+            <span>EVM ↔ SOL</span>
             <span>3% POWER</span>
           </div>
           <div className="eyebrow-row">
             <span className="status-chip">
               <span className="status-dot" aria-hidden="true" /> <PublicDeploymentDisclosure />
             </span>
-            <span className="chain-label">ETHEREUM ↔ SOLANA</span>
+            <span className="chain-label">EVM ↔ SOLANA</span>
           </div>
           <h1 data-parallax="slow">
             <span>THE CYCLE</span>
             <span className="accent-line">NEVER STOPS</span>
           </h1>
           <p className="hero-lede">
-            Hookemon uses Ethereum swap fees to open Collector Crypt Pok&eacute;mon Gacha packs and
-            automatically routes instant buyback USDC proceeds to eligible holders.
+            Hookemon uses EVM swap fees to open Collector Crypt Pok&eacute;mon Gacha packs and
+            automatically routes instant buyback proceeds to eligible holders as USDG.
           </p>
           <div className="hero-manifesto" aria-label="Hookemon promise">
             <span>SWAPS RIP PACKS.</span>
@@ -284,7 +284,7 @@ export default function Home() {
             <h2>Your wallet receives. You do nothing</h2>
             <p>
               Hookemon closes accounting every 20 minutes, ranks direct holders by time-weighted
-              balance, and accrues returned USDC proportionally. The operator pays eligible wallets
+              balance, and accrues returned USDG proportionally. The operator pays eligible wallets
               in sponsored batches.
             </p>
             <ul>
@@ -305,7 +305,7 @@ export default function Home() {
             </div>
             <div className="wallet-balance">
               <span>AUTOMATIC REWARD</span>
-              <strong>+12.84 USDC</strong>
+              <strong>+12.84 USDG</strong>
             </div>
             <div className="wallet-status-row">
               <span className="check-mark" aria-hidden="true" />
@@ -337,7 +337,7 @@ export default function Home() {
           <article data-reveal="up" style={{ "--reveal-delay": "0.16s" } as React.CSSProperties}>
             <span>03</span>
             <h3>Cross-chain dependency</h3>
-            <p>Circle, Ethereum, Solana and Collector Crypt can pause, fail, or change behavior.</p>
+            <p>Circle, EVM, Solana and Collector Crypt can pause, fail, or change behavior.</p>
           </article>
           <article data-reveal="up" style={{ "--reveal-delay": "0.24s" } as React.CSSProperties}>
             <span>04</span>
