@@ -216,13 +216,43 @@ test('requires a trusted manifest digest, unique paths, and the exact runner set
   }
 });
 
+// Mirrors the runner paths independently declared in verify-phase1-release.mjs's
+// requiredCandidatePaths (lines 300-323), not derived from expectedRunnerPaths itself,
+// so this test still catches a default-set replacement rather than only echoing it back.
+const productionRunnerPaths = [
+  'packages/runner/src/cycle/authorization.mjs',
+  'packages/runner/src/cycle/bindings.mjs',
+  'packages/runner/src/cycle/blockhash-validity.mjs',
+  'packages/runner/src/cycle/collector.mjs',
+  'packages/runner/src/cycle/cycle-runner.mjs',
+  'packages/runner/src/cycle/cycle-store.mjs',
+  'packages/runner/src/cycle/decoder.mjs',
+  'packages/runner/src/cycle/execution-accounting.mjs',
+  'packages/runner/src/cycle/journal.mjs',
+  'packages/runner/src/cycle/preflight.mjs',
+  'packages/runner/src/cycle/receipt-registry.mjs',
+  'packages/runner/src/cycle/reducer.mjs',
+  'packages/runner/src/cycle/schemas.mjs',
+  'packages/runner/src/cycle/verify-fixtures.mjs',
+  'packages/runner/src/distribution/manifest.mjs',
+  'packages/runner/src/distribution/merkle-sum.mjs',
+  'packages/runner/src/distribution/reconcile.mjs',
+  'packages/runner/test/cycle/fixture-crypto.mjs',
+  'packages/runner/test/cycle/fixture-cycle.mjs',
+  'packages/runner/test/cycle/security.test.mjs',
+  'packages/runner/test/distribution/holder-candidate.test.mjs',
+  'packages/runner/test/distribution/manifest.test.mjs',
+  'packages/runner/test/distribution/reconcile.test.mjs',
+  'packages/runner/test/integration/phase-one-local-loop-adapter.mjs',
+];
+
 test('validateCandidateManifest accepts the production default 24-path runner set', () => {
-  assert.equal(expectedRunnerPaths.length, 24);
-  assert.ok(expectedRunnerPaths.includes('packages/runner/test/cycle/security.test.mjs'));
+  assert.equal(productionRunnerPaths.length, 24);
+  assert.deepEqual([...expectedRunnerPaths].sort(), [...productionRunnerPaths].sort());
 
   const fixture = mkdtempSync(join(tmpdir(), 'hookemon-repro-default-runner-set-'));
   try {
-    const files = expectedRunnerPaths.map((path) => {
+    const files = productionRunnerPaths.map((path) => {
       const content = `// fixture content for ${path}\n`;
       mkdirSync(join(fixture, ...path.split('/').slice(0, -1)), { recursive: true });
       writeFileSync(join(fixture, path), content);
@@ -230,8 +260,9 @@ test('validateCandidateManifest accepts the production default 24-path runner se
     });
     const manifestBytes = Buffer.from(JSON.stringify({ files }));
 
-    // No expectedRunnerPaths override: this exercises the module's real production default,
-    // not a caller-supplied set, so drift in the default constant itself would be caught.
+    // No expectedRunnerPaths override: this exercises the module's real production default
+    // against a test-owned literal list, so replacing the default constant with a different
+    // set (not just changing its length) is still caught.
     const result = validateCandidateManifest({
       checkout: fixture,
       manifestBytes,
