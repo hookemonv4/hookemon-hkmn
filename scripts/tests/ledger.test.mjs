@@ -8,10 +8,18 @@ import {
   openLedger, addTask, listTasks, nextTask, claimTask, completeTask, projectTasks,
   heartbeatTask, releaseTask, setTaskDeps, prepareTaskDeferral, deferTask,
   prepareTaskDeferralRebind, rebindCompletionCommit, rebindTaskDeferral,
+  importHistoricalTasks,
 } from '../lib/ledger.mjs';
-import { hashFile, writeJson } from '../lib/util.mjs';
+import { hashFile, sha256, writeJson } from '../lib/util.mjs';
+import { addReceipt } from '../lib/receipts.mjs';
 import { validateTaskDeferralApproval } from '../lib/gates.mjs';
 import { writeOwnerApproval } from './helpers/owner-approval.mjs';
+
+function commitAll(root, message) {
+  execFileSync('git', ['-C', root, 'add', '-A']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', message]);
+  return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+}
 
 function repo() {
   const root = mkdtempSync(join(tmpdir(), 'v4-'));
@@ -127,6 +135,28 @@ test('task projection revalidates the recorded completion commit', () => {
   db.prepare("UPDATE attempts SET commit_sha=? WHERE task_id='T1'").run('0'.repeat(40));
 
   assert.throws(() => projectTasks(db, root), /not an existing commit object/);
+});
+
+test('task projection rejects an unreachable commit with no real evidence receipt binding it', () => {
+  const { root } = repo();
+  // A real commit object that is deliberately not on any branch -- the same disconnected shape as
+  // a genuine historical completion commit, but with no receipt evidence backing it, unlike a
+  // legitimate importHistoricalTasks row.
+  execFileSync('git', ['-C', root, 'checkout', '--quiet', '--orphan', 'unreachable']);
+  const orphanCommit = commitAll(root, 'a real but disconnected commit with no evidence');
+  execFileSync('git', ['-C', root, 'checkout', '--quiet', 'main']);
+  execFileSync('git', ['-C', root, 'branch', '-D', 'unreachable']);
+
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'project commit', phase: 'build' });
+  const { token } = claimTask(db, 'T1', 'worker');
+  db.exec('BEGIN IMMEDIATE');
+  db.prepare("UPDATE tasks SET status='done' WHERE id='T1'").run();
+  db.prepare("UPDATE attempts SET ended=?, outcome='done', commit_sha=? WHERE task_id='T1' AND token=?")
+    .run(new Date().toISOString(), orphanCommit, token);
+  db.exec('COMMIT');
+
+  assert.throws(() => projectTasks(db, root), /not reachable from current HEAD/);
 });
 
 test('rebindCompletionCommit appends completion history and projects the descendant commit', () => {
@@ -479,5 +509,172 @@ test('rebindTaskDeferral validates the replacement authority inside its transact
       fingerprint: before.defer_prestate_fingerprint,
       token: before.lease_token,
     },
+  );
+});
+
+function historicalSnapshotCommit(root, tasks) {
+  writeJson(join(root, 'tasks.json'), { generatedAt: new Date().toISOString(), tasks });
+  return commitAll(root, 'historical snapshot');
+}
+
+test('importHistoricalTasks restores a done task from its real evidence receipt', () => {
+  const { root } = repo();
+  const doneCommit = commitAll(root, 'implement P0-DONE');
+  const receipt = addReceipt(root, {
+    type: 'evidence',
+    phase: 'build',
+    result: 'PASSED',
+    data: { taskId: 'P0-DONE', commitSha: doneCommit },
+  });
+  commitAll(root, 'record P0-DONE evidence receipt');
+  const fromCommit = historicalSnapshotCommit(root, [
+    { id: 'P0-DONE', title: 'freeze interface', phase: 'build', risk: 'ordinary', deps: [], reqs: [], status: 'done', commitSha: doneCommit },
+  ]);
+
+  const db = openLedger(root);
+  const result = importHistoricalTasks(db, root, { fromCommit });
+  assert.deepEqual(result.imported, ['P0-DONE']);
+  const imported = listTasks(db).find(task => task.id === 'P0-DONE');
+  assert.equal(imported.status, 'done');
+  assert.equal(
+    db.prepare('SELECT commit_sha, started, ended, owner FROM attempts WHERE task_id=?').get('P0-DONE').commit_sha,
+    doneCommit,
+  );
+  assert.equal(
+    db.prepare('SELECT started FROM attempts WHERE task_id=?').get('P0-DONE').started,
+    receipt.at,
+  );
+});
+
+test('importHistoricalTasks refuses a done task with no matching evidence receipt', () => {
+  const { root } = repo();
+  const doneCommit = commitAll(root, 'implement P0-UNPROVEN');
+  const fromCommit = historicalSnapshotCommit(root, [
+    { id: 'P0-UNPROVEN', title: 'freeze interface', phase: 'build', risk: 'ordinary', deps: [], reqs: [], status: 'done', commitSha: doneCommit },
+  ]);
+
+  const db = openLedger(root);
+  assert.throws(
+    () => importHistoricalTasks(db, root, { fromCommit }),
+    /no PASSED evidence receipt binds historical task P0-UNPROVEN/,
+  );
+  assert.deepEqual(listTasks(db), []);
+});
+
+test('importHistoricalTasks refuses to overwrite an existing live task', () => {
+  const { root } = repo();
+  const doneCommit = commitAll(root, 'implement LAUNCH-A');
+  addReceipt(root, { type: 'evidence', phase: 'build', result: 'PASSED', data: { taskId: 'LAUNCH-A', commitSha: doneCommit } });
+  commitAll(root, 'record LAUNCH-A evidence receipt');
+  const fromCommit = historicalSnapshotCommit(root, [
+    { id: 'LAUNCH-A', title: 'live task', phase: 'build', risk: 'ordinary', deps: [], reqs: [], status: 'done', commitSha: doneCommit },
+  ]);
+
+  const db = openLedger(root);
+  addTask(db, { id: 'LAUNCH-A', title: 'live claimable work' });
+  assert.throws(
+    () => importHistoricalTasks(db, root, { fromCommit }),
+    /LAUNCH-A already exists in this ledger; historical import refuses to overwrite/,
+  );
+  const live = listTasks(db).find(task => task.id === 'LAUNCH-A');
+  assert.equal(live.status, 'ready');
+});
+
+test('importHistoricalTasks restores a deferred task from its real descriptor and owner approval', () => {
+  const { root } = repo();
+  const prestate = {
+    id: 'P0-DEFER', title: 'dashboard', phase: 'build', risk: 'ordinary', deps: [], reqs: [],
+    status: 'ready', leaseToken: 0, completionCommit: null,
+  };
+  const prestateFingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+  const descriptorInput = 'decisions/task-deferrals/P0-DEFER.json';
+  const rationale = 'Dashboard deferred to Phase 2 by the owner-approved manual one-cycle scope';
+  writeJson(join(root, descriptorInput), {
+    schema: 'v4-task-deferral-v1', action: 'TASK_DEFER', taskId: 'P0-DEFER', phase: 'build',
+    targetStatus: 'deferred', rationale, prestate, prestateFingerprint,
+  });
+  const approvalInput = 'decisions/owner-approvals/p0-defer.json';
+  writeJson(join(root, 'policy/policy.json'), {});
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_DEFER', phase: 'build', itemId: 'P0-DEFER', rationale,
+  }, ['policy/policy.json', descriptorInput]);
+  commitAll(root, 'sign P0-DEFER deferral');
+
+  const fromCommit = historicalSnapshotCommit(root, [
+    { id: 'P0-DEFER', title: 'dashboard', phase: 'build', risk: 'ordinary', deps: [], reqs: [], status: 'deferred' },
+  ]);
+
+  const db = openLedger(root);
+  const result = importHistoricalTasks(db, root, { fromCommit });
+  assert.deepEqual(result.imported, ['P0-DEFER']);
+  const imported = listTasks(db).find(task => task.id === 'P0-DEFER');
+  assert.equal(imported.status, 'deferred');
+  assert.equal(imported.defer_approval, approvalInput);
+  assert.equal(imported.defer_descriptor, descriptorInput);
+  assert.equal(imported.defer_prestate_fingerprint, prestateFingerprint);
+});
+
+test('importHistoricalTasks reconstructs a prior completion before a retiring deferral', () => {
+  const { root } = repo();
+  const priorCompletionCommit = commitAll(root, 'implement P0-RETIRED before it was retired');
+  const prestate = {
+    id: 'P0-RETIRED', title: 'render loop dashboard', phase: 'build', risk: 'ordinary', deps: [], reqs: [],
+    status: 'done', leaseToken: 1, completionCommit: priorCompletionCommit,
+  };
+  const prestateFingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+  const descriptorInput = 'decisions/task-deferrals/P0-RETIRED.json';
+  const rationale = 'Retired to Phase 2 after the manual one-cycle scope closed it out';
+  writeJson(join(root, descriptorInput), {
+    schema: 'v4-task-deferral-v1', action: 'TASK_DEFER', taskId: 'P0-RETIRED', phase: 'build',
+    targetStatus: 'deferred', rationale, prestate, prestateFingerprint,
+  });
+  const approvalInput = 'decisions/owner-approvals/p0-retired-defer.json';
+  writeJson(join(root, 'policy/policy.json'), {});
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_DEFER', phase: 'build', itemId: 'P0-RETIRED', rationale,
+  }, ['policy/policy.json', descriptorInput]);
+  commitAll(root, 'sign P0-RETIRED deferral');
+
+  const fromCommit = historicalSnapshotCommit(root, [
+    { id: 'P0-RETIRED', title: 'render loop dashboard', phase: 'build', risk: 'ordinary', deps: [], reqs: [], status: 'deferred' },
+  ]);
+
+  const db = openLedger(root);
+  const result = importHistoricalTasks(db, root, { fromCommit });
+  assert.deepEqual(result.imported, ['P0-RETIRED']);
+  const imported = listTasks(db).find(task => task.id === 'P0-RETIRED');
+  assert.equal(imported.status, 'deferred');
+  assert.equal(imported.lease_token, 1);
+  assert.equal(
+    db.prepare("SELECT commit_sha FROM attempts WHERE task_id='P0-RETIRED' AND outcome='done'").get().commit_sha,
+    priorCompletionCommit,
+  );
+});
+
+test('importHistoricalTasks refuses a deferred task whose approval token is not formal', () => {
+  const { root } = repo();
+  const prestate = {
+    id: 'P0-UNSIGNED', title: 'dashboard', phase: 'build', risk: 'ordinary', deps: [], reqs: [],
+    status: 'ready', leaseToken: 0, completionCommit: null,
+  };
+  const prestateFingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+  const descriptorInput = 'decisions/task-deferrals/P0-UNSIGNED.json';
+  writeJson(join(root, descriptorInput), {
+    schema: 'v4-task-deferral-v1', action: 'TASK_DEFER', taskId: 'P0-UNSIGNED', phase: 'build',
+    targetStatus: 'deferred', rationale: 'draft', prestate, prestateFingerprint,
+  });
+  writeJson(join(root, 'policy/policy.json'), {});
+  writeOwnerApproval(root, 'decisions/owner-approvals/p0-unsigned-defer.json', {
+    action: 'TASK_DEFER', phase: 'build', itemId: 'P0-UNSIGNED', rationale: 'draft',
+    approvalToken: 'DRAFT_UNSIGNED_NOT_YET_APPROVED',
+  }, ['policy/policy.json', descriptorInput]);
+  commitAll(root, 'draft P0-UNSIGNED deferral, never signed');
+  const fromCommit = historicalSnapshotCommit(root, [
+    { id: 'P0-UNSIGNED', title: 'dashboard', phase: 'build', risk: 'ordinary', deps: [], reqs: [], status: 'deferred' },
+  ]);
+
+  assert.throws(
+    () => importHistoricalTasks(openLedger(root), root, { fromCommit }),
+    /no verifiable owner-approved deferral authority found for historical task P0-UNSIGNED/,
   );
 });

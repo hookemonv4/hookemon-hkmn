@@ -15,6 +15,7 @@ import {
   openLedger, addTask, listTasks, nextTask, claimTask, heartbeatTask,
   completeTask, releaseTask, projectTasks, mergeEnqueue, mergeNext, mergeRecord,
   setTaskDeps, prepareTaskDeferral, deferTask, rebindCompletionCommit,
+  importHistoricalTasks,
 } from './lib/ledger.mjs';
 
 const root = process.cwd();
@@ -114,7 +115,7 @@ try {
       title: { type: 'string' }, phase: { type: 'string' }, risk: { type: 'string' },
       dep: { type: 'string', multiple: true }, req: { type: 'string', multiple: true },
       owner: { type: 'string' }, token: { type: 'string' }, ttl: { type: 'string' }, commit: { type: 'string' },
-      from: { type: 'string' },
+      from: { type: 'string' }, only: { type: 'string', multiple: true },
       rationale: { type: 'string' }, approval: { type: 'string' }, record: { type: 'string' },
     });
     if (sub === 'add') { addTask(db, { id, title: values.title, phase: values.phase, risk: values.risk, deps: values.dep ?? [], reqs: values.req ?? [] }); projectTasks(db, root); out({ ok: true, id }); }
@@ -148,6 +149,9 @@ try {
     }
     else if (sub === 'list') out({ tasks: listTasks(db) });
     else if (sub === 'project') { projectTasks(db, root); out({ ok: true }); }
+    else if (sub === 'import-historical') {
+      out(importHistoricalTasks(db, root, { fromCommit: values.from, only: values.only ?? null }));
+    }
     else throw new Error(`unknown task subcommand ${sub}`);
   }
   else if (cmd === 'merge') {
