@@ -2987,7 +2987,7 @@ export class CycleRepository {
           throw new Error('stored held position conflicts with prior card custody');
         }
         if (entry.payload.ledger !== undefined) {
-          const ledger = assertCustodyLedger(entry.payload.ledger, 'stored held position custody ledger');
+          const ledger = assertCustodyLedger(entry.payload.ledger, 'stored held position custody ledger', { allowLegacyBuckets: true });
           if (ledger.cycleId !== cycleId) throw new Error('stored held position custody ledger cycleId is invalid');
           const expected = heldPositionCustodyLedger(custodyLedgers, cycleId, ledger, position);
           if (canonicalJson(ledger) !== canonicalJson(expected)) {
@@ -3139,7 +3139,7 @@ export class CycleRepository {
         if (entry.payload.ledger !== undefined) {
           const key = heldPositionLedgerKeys.get(position.positionId) ?? null;
           if (key === null) throw new Error('stored held position resolution has no attributable held custody ledger');
-          const ledger = assertCustodyLedger(entry.payload.ledger, 'stored resolved held position custody ledger');
+          const ledger = assertCustodyLedger(entry.payload.ledger, 'stored resolved held position custody ledger', { allowLegacyBuckets: true });
           const expectedLedger = resolvedHeldPositionCustodyLedger(custodyLedgers, key, previous);
           if (canonicalJson(ledger) !== canonicalJson(expectedLedger)) {
             throw new Error('stored held position resolution custody ledger does not bind the held position');
@@ -3148,7 +3148,7 @@ export class CycleRepository {
         }
         heldPositions.set(position.positionId, position);
       } else if (entry.kind === 'custody-ledger-recorded') {
-        const ledger = assertCustodyLedger(entry.payload.ledger, 'stored custody ledger');
+        const ledger = assertCustodyLedger(entry.payload.ledger, 'stored custody ledger', { allowLegacyBuckets: true });
         if (ledger.cycleId !== cycleId) throw new Error('stored custody ledger cycleId is invalid');
         const key = custodyLedgerKey(ledger);
         const previous = custodyLedgers.get(key);
