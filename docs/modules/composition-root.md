@@ -58,9 +58,11 @@ repository client.
 - `readEnvironment` accepts standing-authority material only as one document path, one owner public
   key path, and one policy public key path. `loadStandingAuthority` verifies the owner signature and
   policy-key binding, then loads the private canonical state-directory artifact
-  `standing-authority-step-authorizations.json`. Its digest-bound, policy-signed entries resolve
-  production step authorizations before the private repository writer persists first use and the raw
-  signer is invoked.
+  `standing-authority-step-authorizations.json`. The owner document and policy key remain pinned for
+  the process, while the private canonical artifact is re-read and fully validated at each signing
+  boundary so an external policy service can publish a newly scoped signed intent without a runner
+  restart. Its digest-bound, policy-signed entries resolve production step authorizations before the
+  private repository writer persists first use and the raw signer is invoked.
 - The root exposes read-only dependency health and readiness to automation and dashboard surfaces.
   The decoder-backed, request-scoped signing wrapper remains an integration boundary; live startup
   preflight does not replace its final per-signature canary call.

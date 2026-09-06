@@ -1179,8 +1179,16 @@ export function loadStandingAuthority(config) {
   const ownerPublicKey = loadPublicKeyFromPemFile(config.standingAuthority.ownerPublicKeyPath);
   const policyPublicKey = loadPublicKeyFromPemFile(config.standingAuthority.policyPublicKeyPath);
   const provider = createStandingAuthorityProvider({ standingAuthority: document, ownerPublicKey, policyPublicKey });
+  // The owner-signed document and policy key are pinned above for this process lifetime. Only the
+  // private, policy-signed artifact is re-read at each signing boundary, so an external policy
+  // service can publish the exact runtime cycle/request authorization without restarting the
+  // runner. Every reload repeats no-follow, ownership, mode, canonical-JSON, digest, and signature
+  // validation before the already-pinned provider is allowed to consume the selected intent.
   const resolveStepAuthorization = config.execution.profile === 'production'
-    ? loadPersistedStandingAuthorityArtifact(config.stateDir, document.documentDigest)
+    ? Object.freeze(async request => {
+      const resolver = loadPersistedStandingAuthorityArtifact(config.stateDir, document.documentDigest);
+      return resolver(request);
+    })
     : null;
   return Object.freeze({
     ...document,

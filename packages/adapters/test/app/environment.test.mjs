@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign as signMessage } from 'node:crypto';
 import { mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { canonicalJson } from '../../../runner/src/cycle/journal.mjs';
+import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
 import {
   readEnvironment,
   loadSignerClient,
@@ -689,6 +691,66 @@ test('loadStandingAuthority returns null when no document path is configured, an
   assert.equal(verified.provider.standingAuthorityDigest, unsigned.documentDigest);
 });
 
+test('loadStandingAuthority reloads only the private policy artifact at each signing boundary', async t => {
+  const env = await productionEnv(t, {
+    HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive-rpc.example.test',
+  });
+  const directory = env.HOOKEMON_STATE_DIR;
+  const ownerKeys = generateKeyPairSync('ed25519');
+  const policyKeys = generateKeyPairSync('ed25519');
+  const ownerPublicKeyPath = join(directory, 'owner-public.pem');
+  const policyPublicKeyPath = join(directory, 'policy-public.pem');
+  const documentPath = join(directory, 'standing-authority.json');
+  await Promise.all([
+    writeFile(ownerPublicKeyPath, ownerKeys.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 }),
+    writeFile(policyPublicKeyPath, policyKeys.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 }),
+  ]);
+  const unsignedDocument = buildCanonicalStandingAuthorityDocument({
+    owner: 'fixture-owner', policyPublicKey: policyKeys.publicKey, perCycleSpendCap: '10', maxCyclesPerDay: 1,
+    allowedPacks: ['collector-25'], allowedDestinations: ['fixture-solana-policy-account'],
+    issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2027-01-01T00:00:00.000Z', documentId: 'fixture-reload-authority',
+  });
+  const document = attachOwnerSignature(unsignedDocument, ownerKeys.privateKey);
+  await writeFile(documentPath, `${canonicalJson(document)}\n`, { mode: 0o600 });
+  const request = {
+    cycleId: 'cycle-authority-reload', stage: 'claim-process', authorizationKind: 'sign',
+    requestDigest: `sha256:${'a'.repeat(64)}`, signerRole: 'operator-evm',
+  };
+  const unsignedIntent = {
+    schema: 'hookemon.standing-authority-step-intent.v1', standingAuthorityDigest: document.documentDigest,
+    cycleId: request.cycleId, actionKind: request.stage, authorizationKind: request.authorizationKind,
+    subjectDigest: request.requestDigest, destination: 'fixture-solana-policy-account', pack: 'collector-25',
+    spendAmount: '1', nonce: 'authority-reload-1', issuedAt: '2026-09-06T00:00:00.000Z',
+  };
+  const intent = {
+    ...unsignedIntent,
+    policySignature: signMessage(null, Buffer.from(stepAuthorizationIntentDigest(unsignedIntent), 'utf8'), policyKeys.privateKey).toString('base64url'),
+  };
+  const artifactPath = join(directory, 'standing-authority-step-authorizations.json');
+  const writeArtifact = artifact => writeFile(artifactPath, `${canonicalJson(artifact)}\n`, { mode: 0o600 });
+  await writeArtifact({
+    schema: 'hookemon.standing-authority-step-authorizations.v1', authorityDigest: document.documentDigest,
+    entries: [{ signerRole: request.signerRole, intent }],
+  });
+  const configured = readEnvironment({
+    ...env,
+    HOOKEMON_STANDING_AUTHORITY_PATH: documentPath,
+    HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH: ownerPublicKeyPath,
+    HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH: policyPublicKeyPath,
+  }, { profile: 'production' });
+  const authority = loadStandingAuthority(configured);
+  assert.deepEqual(await authority.resolveStepAuthorization(request), intent);
+
+  await writeArtifact({
+    schema: 'hookemon.standing-authority-step-authorizations.v1', authorityDigest: `sha256:${'b'.repeat(64)}`,
+    entries: [],
+  });
+  await assert.rejects(
+    () => authority.resolveStepAuthorization(request),
+    /artifact is invalid: standing authority artifact authority digest does not match the verified document/,
+  );
+});
+
 test('loadStandingAuthority rejects a configured policy key that is not bound by the owner-signed document', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-env-standing-authority-mismatch-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -755,15 +817,17 @@ test('loadStandingAuthority rejects symlinked and non-private production artifac
   const artifactTarget = join(directory, 'authority-artifact-target.json');
   await writeFile(artifactTarget, '{}\n', { mode: 0o600 });
   await symlink(artifactTarget, artifactPath);
-  assert.throws(
-    () => loadStandingAuthority(config),
+  const symlinkedAuthority = loadStandingAuthority(config);
+  await assert.rejects(
+    () => symlinkedAuthority.resolveStepAuthorization({}),
     /standing authority artifact must be a private regular file/,
   );
 
   await unlink(artifactPath);
   await writeFile(artifactPath, '{}\n', { mode: 0o644 });
-  assert.throws(
-    () => loadStandingAuthority(config),
+  const nonPrivateAuthority = loadStandingAuthority(config);
+  await assert.rejects(
+    () => nonPrivateAuthority.resolveStepAuthorization({}),
     /standing authority artifact must be a private regular file/,
   );
 });
