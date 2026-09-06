@@ -1418,27 +1418,36 @@ for (const command of REQUIRED_DEPLOY_WEB_COMMANDS_FOR_TESTS) {
 }
 
 assertDeployWebTamperIsRejected(
-  'rejects a deploy-web workflow that adds a manual workflow_dispatch trigger',
-  workflow => workflow.replace('on:\n  workflow_run:', 'on:\n  workflow_dispatch:\n  workflow_run:'),
-  /deploy-web workflow must trigger only from a completed workflow_run/,
+  'rejects a deploy-web workflow that adds an automatic push trigger',
+  workflow => workflow.replace('on:\n  workflow_dispatch: {}', 'on:\n  push:\n    branches: [main]\n  workflow_dispatch: {}'),
+  /deploy-web workflow must be manual-dispatch-only/,
 );
 
 assertDeployWebTamperIsRejected(
-  'rejects a deploy-web workflow scoped to a different upstream workflow',
-  workflow => workflow.replace('workflows: ["Hookemon CI"]', 'workflows: ["Other CI"]'),
-  /deploy-web workflow must be scoped to the completed Hookemon CI run/,
+  'rejects a deploy-web workflow that reintroduces a workflow_run trigger',
+  workflow => `${workflow.replace('on:\n  workflow_dispatch: {}', 'on:\n  workflow_dispatch: {}\n  workflow_run:\n    workflows: ["Hookemon CI"]\n    types: [completed]')}`,
+  /deploy-web workflow must (?:be manual-dispatch-only|never deploy from an automatic workflow_run trigger)/,
 );
 
 assertDeployWebTamperIsRejected(
-  'rejects a deploy-web workflow that drops the success-conclusion assertion',
-  workflow => workflow.replace("github.event.workflow_run.conclusion == 'success' &&\n      ", ''),
-  /deploy-web workflow must require the triggering Hookemon CI run to have succeeded/,
+  'rejects a deploy-web workflow that accepts a dispatch input selecting an arbitrary ref',
+  workflow => workflow.replace(
+    'on:\n  workflow_dispatch: {}',
+    'on:\n  workflow_dispatch:\n    inputs:\n      ref:\n        required: true\n        type: string',
+  ),
+  /deploy-web workflow must accept no dispatch input/,
 );
 
 assertDeployWebTamperIsRejected(
-  'rejects a deploy-web workflow that drops the exact-commit checkout',
-  workflow => workflow.replaceAll('github.event.workflow_run.head_sha', 'github.sha'),
-  /deploy-web workflow must check out the exact commit/,
+  'rejects a deploy-web workflow that drops the main-only ref assertion',
+  workflow => workflow.replace("github.ref == 'refs/heads/main'", "true"),
+  /deploy-web workflow must require the dispatch to run against refs\/heads\/main/,
+);
+
+assertDeployWebTamperIsRejected(
+  'rejects a deploy-web workflow that drops the exact github.sha checkout',
+  workflow => workflow.replace('ref: ${{ github.sha }}', 'ref: main'),
+  /deploy-web workflow must check out the exact dispatched github\.sha/,
 );
 
 assertDeployWebTamperIsRejected(

@@ -54,7 +54,7 @@ const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c64
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
 const SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256 = 'fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4';
 const SUPPORTED_WEB_CI_WORKFLOW_SHA256 = '49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc';
-const SUPPORTED_DEPLOY_WEB_WORKFLOW_SHA256 = 'b3a588c4f8ec1495d179fb079862b4660f3e68812d98385f37233e2168e3bda3';
+const SUPPORTED_DEPLOY_WEB_WORKFLOW_SHA256 = 'b36cee8a361e491879fc18d33f9008c77e803106626588260e63ce10bc450864';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_MANIFEST_SHA256 = 'd3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b';
@@ -735,7 +735,7 @@ const REQUIRED_WEB_CI_COMMANDS = Object.freeze([
 
 function verifyWebCiSemantics(workflow, errors) {
   if (!/^name:\s*Hookemon CI\s*$/m.test(workflow)) {
-    errors.push('web-ci workflow must be named Hookemon CI, which deploy-web binds to by name');
+    errors.push('web-ci workflow must be named Hookemon CI');
   }
   for (const command of REQUIRED_WEB_CI_COMMANDS) {
     if (!workflow.includes(command)) {
@@ -771,27 +771,21 @@ function verifyDeployWebSemantics(workflow, errors) {
   const triggerStart = workflow.indexOf('on:\n');
   const triggerEnd = workflow.indexOf('\njobs:\n', triggerStart);
   const triggerBlock = triggerStart === -1 || triggerEnd === -1 ? workflow : workflow.slice(triggerStart, triggerEnd);
-  if (!triggerBlock.includes('workflow_run')
-      || /^ {2}(?:pull_request|push|workflow_dispatch):/m.test(triggerBlock)) {
-    errors.push('deploy-web workflow must trigger only from a completed workflow_run, never directly');
+  if (!triggerBlock.includes('workflow_dispatch')
+      || /^ {2}(?:pull_request|push|workflow_run):/m.test(triggerBlock)) {
+    errors.push('deploy-web workflow must be manual-dispatch-only, never a pull_request, push, or workflow_run trigger');
   }
-  if (!triggerBlock.includes('workflows:') || !triggerBlock.includes('Hookemon CI')) {
-    errors.push('deploy-web workflow must be scoped to the completed Hookemon CI run');
+  if (/^\s*inputs:/m.test(triggerBlock) || workflow.includes('github.event.inputs')) {
+    errors.push('deploy-web workflow must accept no dispatch input that could select an arbitrary ref');
   }
-  if (!triggerBlock.includes('branches:') || !triggerBlock.includes('main')) {
-    errors.push('deploy-web workflow must restrict the triggering workflow_run to main');
+  if (!workflow.includes("github.ref == 'refs/heads/main'")) {
+    errors.push('deploy-web workflow must require the dispatch to run against refs/heads/main');
   }
-  if (!workflow.includes("workflow_run.conclusion == 'success'")) {
-    errors.push('deploy-web workflow must require the triggering Hookemon CI run to have succeeded');
+  if (!workflow.includes('ref: ${{ github.sha }}')) {
+    errors.push('deploy-web workflow must check out the exact dispatched github.sha');
   }
-  if (!workflow.includes("workflow_run.event == 'push'")) {
-    errors.push('deploy-web workflow must require the triggering Hookemon CI run to be a push run');
-  }
-  if (!workflow.includes("workflow_run.head_branch == 'main'")) {
-    errors.push('deploy-web workflow must require the triggering Hookemon CI run to have run on main');
-  }
-  if (!workflow.includes('github.event.workflow_run.head_sha')) {
-    errors.push('deploy-web workflow must check out the exact commit the triggering Hookemon CI run validated');
+  if (workflow.includes('workflow_run')) {
+    errors.push('deploy-web workflow must never deploy from an automatic workflow_run trigger');
   }
   if (!/^permissions:\n\s+contents:\s*read\s*$/m.test(workflow)) {
     errors.push('deploy-web workflow must declare least-privilege read-only contents permission and nothing else');

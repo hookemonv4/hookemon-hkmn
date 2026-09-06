@@ -11,19 +11,21 @@ const workflow = readFileSync(
   "utf8",
 );
 
-test("deploys only a successful Hookemon CI push on main", () => {
-  assert.match(workflow, /workflow_run:/);
-  assert.match(workflow, /workflows:\s*\["Hookemon CI"\]/);
-  assert.match(workflow, /branches:\s*\[main\]/);
-  assert.match(workflow, /types:\s*\[completed\]/);
-  assert.match(workflow, /workflow_run\.conclusion == 'success'/);
-  assert.match(workflow, /workflow_run\.event == 'push'/);
-  assert.match(workflow, /workflow_run\.head_branch == 'main'/);
+test("deploys only a manual dispatch from main", () => {
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.doesNotMatch(workflow, /^\s+pull_request:/m);
+  assert.doesNotMatch(workflow, /^\s+push:/m);
+  assert.doesNotMatch(workflow, /workflow_run/);
 });
 
-test("checks out and deploys the exact CI-approved revision", () => {
-  assert.match(workflow, /ref:\s*\$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+test("accepts no dispatch input and cannot deploy an arbitrary ref", () => {
+  assert.doesNotMatch(workflow, /^\s*inputs:/m);
+  assert.doesNotMatch(workflow, /github\.event\.inputs/);
+});
+
+test("checks out and deploys the exact dispatched commit", () => {
+  assert.match(workflow, /ref:\s*\$\{\{ github\.sha \}\}/);
   assert.match(workflow, /node-version:\s*22\.13\.0/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run build/);

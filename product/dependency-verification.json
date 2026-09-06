@@ -142,8 +142,8 @@
   },
   "deployWeb": {
     "path": ".github/workflows/deploy-web.yml",
-    "expectedSha256": "b3a588c4f8ec1495d179fb079862b4660f3e68812d98385f37233e2168e3bda3",
-    "actualSha256": "b3a588c4f8ec1495d179fb079862b4660f3e68812d98385f37233e2168e3bda3"
+    "expectedSha256": "b36cee8a361e491879fc18d33f9008c77e803106626588260e63ce10bc450864",
+    "actualSha256": "b36cee8a361e491879fc18d33f9008c77e803106626588260e63ce10bc450864"
   },
   "controlScripts": {
     "commitIdentityAllowlist": {
@@ -186,13 +186,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f",
-      "actualSha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f",
+      "expectedSha256": "472206694f78ec03f3586eefc93cab14e465bf7f9b3cd28a3f347ba8e2cfbbff",
+      "actualSha256": "472206694f78ec03f3586eefc93cab14e465bf7f9b3cd28a3f347ba8e2cfbbff",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f",
-          "actualSha256": "a9a5d577dff864ef319d8cd077406a1756c55652903c6129b17b0e8c1f1d064f"
+          "sha256": "472206694f78ec03f3586eefc93cab14e465bf7f9b3cd28a3f347ba8e2cfbbff",
+          "actualSha256": "472206694f78ec03f3586eefc93cab14e465bf7f9b3cd28a3f347ba8e2cfbbff"
         },
         {
           "path": "scripts/lib/util.mjs",
