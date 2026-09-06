@@ -51,9 +51,21 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   string; USDG and Solana stablecoins remain distinct assets.
 - `createCycle({ ..., dryRun: true })` records an explicit production dry run with fake providers;
   reopening preserves that flag. `CycleRepository.open(stateDir)` verifies a private sibling store
-  identity and an in-directory device-and-inode witness before opening the journal. A missing,
-  changed, copied, or replacement directory produces a durable, read-only
-  `HELD_DATA_UNVERIFIED` recovery facade rather than a fresh cycle.
+  identity, an in-directory device-and-inode witness, and a sibling identity-witness hard link
+  before opening the journal. The in-directory (device, inode) pair can be reused by the filesystem
+  immediately after a delete-and-recreate (observed on Linux ext4/tmpfs), so it alone cannot tell a
+  genuine reopen from a replacement directory with a byte-copied marker; the sibling hard link
+  outside the state directory closes that gap, since its target inode cannot be reused elsewhere
+  while the link survives. The witness link is created only once, at first bootstrap of a genuinely
+  new (empty) state directory. There is no automatic backfill for a store that lacks it: a missing
+  witness link is indistinguishable from a store that was just attacked this way, so it fails closed
+  identically to a mismatched one, with no owner-decision-free migration path. A missing, changed,
+  copied, or replacement directory, or a sibling witness link that is absent or stops pointing at the
+  current in-directory marker, produces a durable, read-only `HELD_DATA_UNVERIFIED` recovery facade
+  rather than a fresh cycle. Bootstrap itself refuses to overwrite or delete a witness link that
+  already exists and does not match the marker it just wrote (a crash-retry artifact or tampering,
+  which it cannot tell apart); it raises a bootstrap error and preserves the orphan link for review
+  instead.
 - The backing durable store serializes cross-process writes with a private 0700
   `.store-lock/lease.sqlite` file and a SQLite `BEGIN EXCLUSIVE` transaction. Once it owns that
   lease, each acquisition creates `store.lock` with exclusive creation, records its PID and random
@@ -232,10 +244,12 @@ node --test --test-timeout=120000 packages/runner/test/cycle/money-schemas.test.
   clients rather than reconstructing a settlement payload.
 - A recovery context that is absent, changed, or bound to different bytes leaves the chain attempt
   unresolved. Recovery never manufactures a replacement signature.
-- If the sibling identity or in-directory device-and-inode witness is absent or changed, use the
-  durable recovery facade instead of recreating the directory. It records the loss reason and
-  refuses `createCycle` and stage preparation until an owner reviews restored journal and custody
-  evidence.
+- If the sibling identity, in-directory device-and-inode witness, or sibling identity-witness hard
+  link is absent or changed, use the durable recovery facade instead of recreating the directory.
+  There is no supported way to mint or restore a missing witness link for an existing store; doing
+  so would just re-derive trust from the checks the link exists to cover for. It records the loss
+  reason and refuses `createCycle` and stage preparation until an owner reviews restored journal and
+  custody evidence.
 - On durable-store lock contention, do not delete `.store-lock/lease.sqlite`, its rollback journal,
   or `store.lock`. A retained `lease.sqlite` file alone is expected after a clean release. Reopen
   after a crashed writer's SQLite operating-system lease has released: the store reclaims only an
