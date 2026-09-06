@@ -10,6 +10,7 @@
     "schemaVersion": "programmable.custom-launch-funding-intent.v2",
     "valueWei": "0"
   },
+  "fundingPlan": null,
   "graphBundle": {
     "pool": {
       "fee": 0,
@@ -88,14 +89,14 @@
     "validAfter": null
   },
   "profile": {
-    "admissionBindingDigest": "sha256:f31643e6e9ff6d5409d59a2fc3ac7fb5ac9cfcb3af08e95c9478bc95ddfa66a2",
-    "admissionDescriptorDigest": "sha256:99b4ccabdaaf143bad28a8f6af441a1b93e1f113d0179236328b7fa594d1f948",
-    "admissionPolicyDigest": "sha256:31e6b286ca839b31cb1edfe30c05d9f334892f3d84377961dc10b93959c7e216",
-    "admissionSchemaDigest": "sha256:a28a6de6208d6ba7b65b4b706174509570955ba9ce9714624bcb2046ab7beae7",
+    "admissionBindingDigest": "sha256:5b2486f35fcd44bd476cafd5bfb5a12decf05a756ba237ca191928f5414c721e",
+    "admissionDescriptorDigest": "sha256:b09611360e284641873fdb2914b4282e0545e32ea587b278fcd11f4db9a4e7f5",
+    "admissionPolicyDigest": "sha256:47801f57e2365f89eb7397a2df10d697bd1f756ec01536b9b34755e89809da04",
+    "admissionSchemaDigest": "sha256:6a8194a3b5d8b6432a95ec04da3cd86091ad64c93c0531125caf00ecb919c8cf",
     "businessProfileId": "robinhood-production-launch",
-    "profileDigest": "sha256:484b1dc6e9091804fabc230f2b3a7504940fa00264f8e66e82a66a951e71f1a0",
-    "profileRevision": 1,
-    "profileVersion": "4.0.0",
+    "profileDigest": "sha256:b0fca91264a49d358ed1a9eec2a679b59a48d716b71475bef583c2545e1ee502",
+    "profileRevision": 2,
+    "profileVersion": "4.1.0",
     "schemaVersion": "programmable.custom-launch-profile-ref.v4",
     "structuralProfileId": "programmable.custom-launch.robinhood-mainnet.v1"
   },

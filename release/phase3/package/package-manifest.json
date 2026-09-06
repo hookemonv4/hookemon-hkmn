@@ -1,5 +1,5 @@
 {
-  "createRequestTemplateSha256": "sha256:98c6748f2a328d797da252c86d8166f05c7cd226d7b860a6b7bc8adcbc65cec7",
+  "createRequestTemplateSha256": "sha256:d1fa95c0ed29e1a2fa2869b10ecd227f9cdcb165b49e5ea32358e8c3addfa2c1",
   "graphDraftSha256": "sha256:c32c3a438c455b5384adf0e04fe6650bec444b01d15b160ce27dac451d6d7fd7",
   "inputDigests": {
     "addressManifestSha256": "sha256:60565de2d18a63babf1883f6af5442127addb623c40ccf22d2841ef0b9b475ee",
@@ -13,7 +13,7 @@
       "release/phase3/artifacts/hook.json",
       "release/phase3/artifacts/token.json"
     ],
-    "metadataImagePath": null,
+    "metadataImagePath": "release/phase3/metadata/hookemon-mark.png",
     "schemaVersion": "hookemon.phase3.source-bundle-coverage.v1",
     "sourcePaths": [
       "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
@@ -21,6 +21,7 @@
       "packages/contracts/src/access/MoneyRoles.sol",
       "packages/contracts/src/accounting/FeeAccounting.sol",
       "packages/contracts/src/bindings/RobinhoodBindings.sol",
+      "packages/contracts/src/launch/HKMNToken.sol",
       "packages/contracts/src/launch/HookemonIssuance.sol",
       "packages/contracts/src/market/CanonicalMarket.sol"
     ],
@@ -33,12 +34,6 @@
         "missing": "No committed attestation evidence file is available for the V4 launch request.",
         "resolve": "Generate and commit the attestation evidence file, then record its repository-relative path.",
         "verifiedAlternative": "Keep the attestation coverage unresolved and refuse source-bundle materialization."
-      },
-      {
-        "category": "metadataImagePath",
-        "missing": "No committed project metadata image is available for the V4 launch request.",
-        "resolve": "Commit the selected metadata image and record its repository-relative path.",
-        "verifiedAlternative": "Keep the metadata coverage unresolved and refuse source-bundle materialization."
       }
     ]
   },

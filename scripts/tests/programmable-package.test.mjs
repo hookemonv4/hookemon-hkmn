@@ -163,6 +163,43 @@ test('materializes the recorded Phase 3 request envelope without fabricating unr
   );
 });
 
+test('validates the fundingPlan field added in provider profile 4.1.0', () => {
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const { request } = materializePhaseThreeCreateRequest({ root });
+  assert.equal(request.fundingPlan, null);
+  assert.ok(providerDocuments.v4RequestContract.required.includes('fundingPlan'));
+
+  const buildOnly = structuredClone(request);
+  buildOnly.fundingPlan = {
+    schemaVersion: 'programmable.robinhood-funding-plan.v1',
+    capitalSource: 'creator-funded',
+    pricingModel: 'concentrated-liquidity',
+    nativeAllocations: { initialLiquidityWei: '0', initialBuyWei: '0', reserveWei: '0', otherLaunchValueWei: '0' },
+    maxLaunchValueWei: '0',
+    maxGasCostWei: '0',
+    launchMode: 'build-only',
+  };
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(buildOnly, providerDocuments.v4RequestContract));
+
+  const zeroBuyFundAndLaunch = structuredClone(buildOnly);
+  zeroBuyFundAndLaunch.fundingPlan.launchMode = 'fund-and-launch';
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(zeroBuyFundAndLaunch, providerDocuments.v4RequestContract),
+    /fund-and-launch requires a nonzero initial buy at \/fundingPlan\/nativeAllocations\/initialBuyWei/,
+  );
+
+  const fundedLaunch = structuredClone(zeroBuyFundAndLaunch);
+  fundedLaunch.fundingPlan.nativeAllocations.initialBuyWei = '1000000000000000';
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(fundedLaunch, providerDocuments.v4RequestContract));
+
+  const unknownCapitalSource = structuredClone(buildOnly);
+  unknownCapitalSource.fundingPlan.capitalSource = 'unsupported';
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(unknownCapitalSource, providerDocuments.v4RequestContract),
+    /funding plan capital source is not recorded/,
+  );
+});
+
 test('records and enforces the nonce shape learned from the preflight probe', () => {
   const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
   assert.deepEqual(providerDocuments.v4RequestContract.nonce, {
@@ -471,6 +508,7 @@ test('derives the exact Phase 3 source coverage and refuses unresolved package i
     'packages/contracts/src/access/MoneyRoles.sol',
     'packages/contracts/src/accounting/FeeAccounting.sol',
     'packages/contracts/src/bindings/RobinhoodBindings.sol',
+    'packages/contracts/src/launch/HKMNToken.sol',
     'packages/contracts/src/launch/HookemonIssuance.sol',
     'packages/contracts/src/market/CanonicalMarket.sol',
   ]);
@@ -481,8 +519,25 @@ test('derives the exact Phase 3 source coverage and refuses unresolved package i
     'release/phase3/artifacts/token.json',
   ]);
   assert.equal(coverage.attestationEvidencePaths, null);
-  assert.equal(coverage.metadataImagePath, null);
-  assert.throws(() => buildPhaseThreeSourceBundle({ root, coverage }), /attestation evidence|metadata image/i);
+  assert.equal(coverage.metadataImagePath, 'release/phase3/metadata/hookemon-mark.png');
+  assert.deepEqual(coverage.unresolved.map((fact) => fact.category), ['attestationEvidencePaths']);
+  assert.throws(() => buildPhaseThreeSourceBundle({ root, coverage }), /attestation evidence/i);
+});
+
+test('regression: every selected graph target source path is covered by the declared source bundle (A-SOL-1)', () => {
+  // The graph/create-request select HKMNToken from packages/contracts/src/launch/HKMNToken.sol.
+  // A different file, HookemonIssuance.sol, also declares a contract named HKMNToken; the source
+  // bundle must still list the exact file the graph selected, not merely a same-named one.
+  const { request } = materializePhaseThreeCreateRequest({ root });
+  const coverage = derivePhaseThreeSourceBundleCoverage({ root });
+  const coveredPaths = new Set(coverage.sourcePaths);
+  for (const component of request.verificationBundle.components) {
+    assert.ok(
+      coveredPaths.has(component.sourcePath),
+      `verificationBundle component ${component.targetId} selects ${component.sourcePath}, which is missing from the declared source-bundle coverage`,
+    );
+  }
+  assert.ok(coveredPaths.has('packages/contracts/src/launch/HKMNToken.sol'));
 });
 
 test('records the provider statement that settles the V4 digest and nonce rules', () => {
@@ -1652,6 +1707,7 @@ test('phase three submission normalization removes builder notes and binds mutab
     'release/phase3/admission/preflight-probe.json',
     'release/phase3/admission/provider-documents.json',
     'release/phase3/admission/route-log.json',
+    'release/phase3/admission/provider-statement-2026-09-05.json',
     'release/phase3/fork-pin.json',
     'release/phase3/genesis-evidence.json',
     'release/phase3/graph-gas-evidence.json',

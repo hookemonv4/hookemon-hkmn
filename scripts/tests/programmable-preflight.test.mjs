@@ -91,6 +91,15 @@ function requestTemplate() {
     verificationBundle: { schemaVersion: 'programmable.exact-source-verification-bundle.v2', compilationUnits: [], components: [] },
     funding: { schemaVersion: 'programmable.custom-launch-funding-intent.v2', mode: 'none', valueWei: '0' },
     liquidityModel: { schemaVersion: 'programmable.custom-launch-liquidity-model.v1', model: 'project-provided-liquidity', declaredLaunchState: 'liquidity-required', targetIds: ['token', 'hook'] },
+    fundingPlan: {
+      schemaVersion: 'programmable.robinhood-funding-plan.v1',
+      capitalSource: 'creator-funded',
+      pricingModel: 'concentrated-liquidity',
+      nativeAllocations: { initialLiquidityWei: '0', initialBuyWei: '0', reserveWei: '0', otherLaunchValueWei: '0' },
+      maxLaunchValueWei: '0',
+      maxGasCostWei: '0',
+      launchMode: 'build-only',
+    },
     launchIntentHash: 'sha256:fixture',
     agentAttestation: { schemaVersion: 'programmable.agent-launch-attestation.v2', subjectLaunchIntentHash: 'sha256:fixture', agentId: 'fixture', checkedAt: '2030-01-01T00:00:00.000Z', checks: [] },
   };

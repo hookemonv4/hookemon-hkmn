@@ -11,6 +11,10 @@ const GRAPH_SCHEMA_VERSION = 'programmable.custom-graph-bundle.v1';
 const FUNDING_SCHEMA_VERSION = 'programmable.custom-launch-funding-intent.v2';
 const VERIFICATION_SCHEMA_VERSION = 'programmable.exact-source-verification-bundle.v2';
 const LIQUIDITY_SCHEMA_VERSION = 'programmable.custom-launch-liquidity-model.v1';
+// Added in provider profile 4.1.0 (profileRevision 2); required by the live schema at
+// https://programmable.market/openapi/custom-launch-v4.1.json. Fetched and cross-checked
+// against the live GET /v4/chains/4663/capabilities response on 2026-09-06.
+const FUNDING_PLAN_SCHEMA_VERSION = 'programmable.robinhood-funding-plan.v1';
 const INTEGER = /^(?:0|[1-9][0-9]*)$/;
 const SOURCE_DESCRIPTOR_SCHEMA_VERSION = '2.0.0';
 const SOURCE_DESCRIPTOR_KIND = 'deterministic-source-bundle';
@@ -385,6 +389,35 @@ export function validateRecordedV4RequestTemplate(request, contract) {
       fail('declared launch state is not recorded', '/liquidityModel/declaredLaunchState');
     }
   }
+  if (request.fundingPlan !== null) {
+    const path = '/fundingPlan';
+    const plan = object(request.fundingPlan, path);
+    exactKeys(plan, [
+      'schemaVersion', 'capitalSource', 'pricingModel', 'nativeAllocations',
+      'maxLaunchValueWei', 'maxGasCostWei', 'launchMode',
+    ], path);
+    if (plan.schemaVersion !== FUNDING_PLAN_SCHEMA_VERSION) {
+      fail('unexpected funding plan schema version', `${path}/schemaVersion`);
+    }
+    if (Array.isArray(contract?.fundingPlan?.capitalSource) && !contract.fundingPlan.capitalSource.includes(plan.capitalSource)) {
+      fail('funding plan capital source is not recorded', `${path}/capitalSource`);
+    }
+    if (Array.isArray(contract?.fundingPlan?.pricingModel) && !contract.fundingPlan.pricingModel.includes(plan.pricingModel)) {
+      fail('funding plan pricing model is not recorded', `${path}/pricingModel`);
+    }
+    if (Array.isArray(contract?.fundingPlan?.launchMode) && !contract.fundingPlan.launchMode.includes(plan.launchMode)) {
+      fail('funding plan launch mode is not recorded', `${path}/launchMode`);
+    }
+    exactKeys(plan.nativeAllocations, ['initialLiquidityWei', 'initialBuyWei', 'reserveWei', 'otherLaunchValueWei'], `${path}/nativeAllocations`);
+    for (const key of ['initialLiquidityWei', 'initialBuyWei', 'reserveWei', 'otherLaunchValueWei']) {
+      requireString(plan.nativeAllocations[key], `${path}/nativeAllocations/${key}`, INTEGER);
+    }
+    requireString(plan.maxLaunchValueWei, `${path}/maxLaunchValueWei`, INTEGER);
+    requireString(plan.maxGasCostWei, `${path}/maxGasCostWei`, INTEGER);
+    if (plan.launchMode === 'fund-and-launch' && plan.nativeAllocations.initialBuyWei === '0') {
+      fail('fund-and-launch requires a nonzero initial buy', `${path}/nativeAllocations/initialBuyWei`);
+    }
+  }
   if (Object.hasOwn(request, 'platformFeeConfiguration')) fail('platform fee configuration is not permitted', '/platformFeeConfiguration');
   return request;
 }
@@ -462,6 +495,8 @@ export function materializePhaseThreeCreateRequest({ root, graphDraft: suppliedG
       declaredLaunchState: null,
       targetIds: targets.map(({ target }) => target.targetId),
     },
+    // Required since profile 4.1.0; value depends on an unresolved fund-and-launch decision (findings.md LIH-01).
+    fundingPlan: null,
     launchIntentHash: null,
     agentAttestation: null,
   };
