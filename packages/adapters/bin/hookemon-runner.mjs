@@ -331,6 +331,7 @@ function compositionInput({
     nativeGasCaps: env.nativeGasCaps,
     moneyConfiguration: env.moneyConfiguration,
     hkmn: env.hkmn,
+    eligibilitySnapshot: env.eligibilitySnapshot,
     distribution: env.distribution,
     rehearsal: env.rehearsal,
     execution: {

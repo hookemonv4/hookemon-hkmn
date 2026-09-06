@@ -154,6 +154,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_HKMN_ADDRESS',
   'HOOKEMON_HKMN_DECIMALS',
   'HOOKEMON_HKMN_DEPLOY_BLOCK',
+  'HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH',
   'HOOKEMON_DISTRIBUTION_DIR',
   // WP-39: the production evidence profile's own configuration. HOOKEMON_DISTRIBUTION_PROFILE is
   // 'fixture' (default — the existing Ed25519 local-pairing scheme, unchanged) or 'production' (the
@@ -895,6 +896,9 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const observability = readJsonObjectFile(env, 'HOOKEMON_OBSERVABILITY_CONFIG_PATH', {
     required: profile !== 'inspection' && !collectorOnlyRehearsal,
   });
+  const eligibilitySnapshot = readJsonObjectFile(env, 'HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH', {
+    required: profile === 'production' && !dryRun,
+  });
 
   const packCode = readString(env, 'HOOKEMON_PACK_CODE', { defaultValue: null });
   if (packCode !== null && !packCodePattern.test(packCode)) fail('HOOKEMON_PACK_CODE must be a lowercase pack code');
@@ -1014,6 +1018,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     nativeGasCaps,
     rehearsal,
     hkmn: Object.freeze({ address: hkmnAddress, deployBlock: BigInt(hkmnDeployBlockRaw), decimals: hkmnDecimals }),
+    eligibilitySnapshot,
     distribution: Object.freeze({
       dir: distributionDir,
       excludedHolderAddresses,

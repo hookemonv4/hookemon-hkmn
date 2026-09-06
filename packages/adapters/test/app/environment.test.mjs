@@ -28,7 +28,9 @@ async function productionEnv(t, overrides = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-env-production-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   return baseEnv({
     HOOKEMON_STATE_DIR: directory,
     HOOKEMON_CHAIN_ID: '4663',
