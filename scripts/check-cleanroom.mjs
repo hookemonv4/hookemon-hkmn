@@ -204,10 +204,7 @@ function isApprovedCollectorCatalogStablecoin(text, offset, rule, file) {
 }
 
 function isApprovedLegacyStablecoinField(text, offset, rule, file) {
-  if (rule.sha256 !== STABLECOIN_DIGEST || !new Set([
-    'packages/domain/src/cycle-status.js',
-    'packages/domain/test/cycle-status.test.mjs',
-  ]).has(file)) return false;
+  if (rule.sha256 !== STABLECOIN_DIGEST || file !== 'packages/domain/test/cycle-status.test.mjs') return false;
   return LEGACY_STABLECOIN_FIELDS.some(field => {
     const fieldStart = offset - (field.length - rule.length);
     const fieldEnd = fieldStart + field.length;

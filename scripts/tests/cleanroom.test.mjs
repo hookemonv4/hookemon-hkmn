@@ -423,12 +423,17 @@ test('clean-room scanner permits only audited typed and legacy stablecoin contex
 
   const stablecoinTitleCase = `${stablecoin[0].toUpperCase()}${stablecoin.slice(1)}`;
   const legacyField = `grossPackDebitMicro${stablecoinTitleCase}`;
-  assert.deepEqual(scanDigestMarkers(legacyField, [stablecoinRule], 'packages/domain/src/cycle-status.js'), []);
+  assert.deepEqual(scanDigestMarkers(legacyField, [stablecoinRule], 'packages/domain/test/cycle-status.test.mjs'), []);
   assert.equal(
-    scanDigestMarkers(`${legacyField}Backup`, [stablecoinRule], 'packages/domain/src/cycle-status.js').length,
+    scanDigestMarkers(`${legacyField}Backup`, [stablecoinRule], 'packages/domain/test/cycle-status.test.mjs').length,
     1,
   );
   assert.equal(scanDigestMarkers(legacyField, [stablecoinRule], 'packages/adapters/src/app/accounting-projection.mjs').length, 1);
+  assert.equal(
+    scanDigestMarkers(legacyField, [stablecoinRule], 'packages/domain/src/cycle-status.js').length,
+    1,
+    'the production module never carries these retired fields, so the allowance must not extend to it',
+  );
 
   assert.deepEqual(scanDigestMarkers(`Solana ${stablecoin}`, [stablecoinRule]), []);
   assert.deepEqual(scanDigestMarkers(`no SOLANA ${stablecoinTitleCase} ATA yet`, [stablecoinRule]), []);
