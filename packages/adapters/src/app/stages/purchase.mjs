@@ -4,6 +4,7 @@ import {
   readBlockHeight,
   readBlockhashValidity,
   readFinalizedSignatureStatus,
+  readUsableLatestBlockhash,
 } from '../../solana-rpc.mjs';
 import { assertTypedAmount, MAXIMUM_PACK_BATCH_SIZE } from '../../../../runner/src/cycle/money-schemas.mjs';
 import {
@@ -11,6 +12,10 @@ import {
   evaluate as evaluateTransactionPolicy,
 } from '../../signing/transaction-policy.mjs';
 import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
+import {
+  assertCollectorPurchaseBindingV1,
+  createCollectorPurchasePolicy,
+} from '../../signing/collector-purchase-policy.mjs';
 import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../signing/signer-client.mjs';
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { parseCollectorMachineContains } from '../../collector-crypt.mjs';
@@ -59,6 +64,41 @@ function requirePolicy(config, stage) {
   return policy;
 }
 
+/**
+ * Fixture-only binding seam (offline simulation wiring): plain data under
+ * `config.collectorCrypt.purchase.testFixtureBinding`, accepted only from the Node test runner and
+ * never populated by `readEnvironment` or a production binding registry -- neither of those write
+ * this key, so a real process never carries it regardless of this guard. A caller that declares the
+ * key outside the Node test runner is refused rather than silently ignored, so a future production
+ * wiring mistake fails loudly instead of falling back to the legacy evidence/static policy path.
+ */
+function purchaseBindingFixture(config) {
+  const purchaseConfig = config?.collectorCrypt?.purchase;
+  if (!plainObject(purchaseConfig) || !Object.hasOwn(purchaseConfig, 'testFixtureBinding')) return null;
+  if (process.env.NODE_TEST_CONTEXT === undefined) {
+    throw new Error('Collector purchase fixture binding is available only from the Node test runner');
+  }
+  const fixture = purchaseConfig.testFixtureBinding;
+  if (!plainObject(fixture) || typeof fixture.expectedDigest !== 'string' || fixture.binding === undefined) {
+    throw new Error('Collector purchase fixture binding must supply binding and expectedDigest');
+  }
+  return fixture;
+}
+
+/** Refuses a validated fixture binding whose chain/settlement identity does not match the same
+ * native Collector settlement asset every other purchase check is already pinned to. */
+function assertFixtureBindingMatchesSettlementAsset(binding, asset) {
+  if (binding.chainId !== asset.chainId) {
+    throw new Error('Collector purchase fixture binding chainId does not match the configured settlement asset');
+  }
+  if (binding.settlement.mint !== asset.assetId) {
+    throw new Error('Collector purchase fixture binding settlement mint does not match the configured settlement asset');
+  }
+  if (binding.settlement.decimals !== asset.decimals) {
+    throw new Error('Collector purchase fixture binding settlement decimals does not match the configured settlement asset');
+  }
+}
+
 function requireSolanaConfiguration({ adapters, config, signerClient, stage }) {
   if (!adapters?.solana?.client) throw new Error(`Collector ${stage} requires a configured Solana RPC client`);
   if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function') {
@@ -82,13 +122,17 @@ function trustedSolanaDecodeOptions({ adapters, config, stage }) {
   });
 }
 
-async function decodeAndSignProviderTransaction({ transaction, stage, adapters, config, money, signerClient }) {
+async function decodeAndSignProviderTransaction({ transaction, stage, adapters, config, money, signerClient, policy = null }) {
   const decodeOptions = trustedSolanaDecodeOptions({ adapters, config, stage });
   const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction });
   if (!decoded.blockhash || !(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
     throw new Error(`Collector ${stage} transaction blockhash is not valid before signing`);
   }
-  evaluateTransactionPolicy(requirePolicy(config, stage), decoded);
+  // Resolved once per candidate and reused for evaluate/signer below, never re-resolved from
+  // `requirePolicy` a second time -- a caller that already built a specific policy (the
+  // fixture-bound per-pack policy from mutatePurchase) hands it in directly instead.
+  const effectivePolicy = policy ?? requirePolicy(config, stage);
+  evaluateTransactionPolicy(effectivePolicy, decoded);
   await assertSolanaSignerFeeEnvelope({
     client: adapters.solana.client,
     owner: config.accounts?.solana,
@@ -105,7 +149,7 @@ async function decodeAndSignProviderTransaction({ transaction, stage, adapters, 
         return signerClient.solana.sign(request);
       },
     },
-    policy: requirePolicy(config, stage),
+    policy: effectivePolicy,
     decodeOptions,
     broadcast: async signed => {
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
@@ -346,6 +390,10 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   // provider already committed the first would be a genuine double purchase.
   let batch = await cycleRepository.readPackBatchRequest(context.cycleId, 'purchase');
   let unsignedTransactionsByMemo = null;
+  // Set only when this invocation is about to generate a fresh batch under a validated fixture
+  // binding. Carries the exact trusted inputs `createCollectorPurchasePolicy` is allowed to use --
+  // never the candidate transaction or its decoded semantics.
+  let fixtureBinding = null;
   if (batch === null) {
     // Persist exactly what is about to be requested -- cycle, quantity, and pack code -- before
     // the batch call itself. If the call's response is lost with no memo at all, this durable,
@@ -358,6 +406,23 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       playerAddress: prepared.playerAddress,
     });
     requireCollectorOnlyMutationAuthority(config);
+
+    // The one seam this task wires: validate a Node-test-only fixture binding (schema, digest,
+    // and native chain/settlement identity) before ever calling generateYoloPacks, so a bad or
+    // missing binding -- like a missing legacy evidence/static policy -- refuses before any
+    // provider generation, sign, or submit call, not merely before signing.
+    const fixture = purchaseBindingFixture(config);
+    if (fixture !== null) {
+      const validatedBinding = assertCollectorPurchaseBindingV1(fixture.binding, fixture.expectedDigest);
+      assertFixtureBindingMatchesSettlementAsset(validatedBinding, asset);
+      if (!plainObject(prepared.unitPurchase) || typeof prepared.unitPurchase.amountAtomic !== 'string') {
+        throw new Error('purchase mutation with a fixture binding requires the admitted unitPurchase amount');
+      }
+      fixtureBinding = fixture;
+    } else {
+      requirePolicy(config, 'purchase');
+    }
+
     const generated = await adapters.collectorCrypt.generateYoloPacks({
       playerAddress: prepared.playerAddress,
       quantity,
@@ -377,9 +442,38 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   // bytes were only ever in a crashed process's memory cannot be re-signed under its existing
   // memo; reconcileLivePurchase resolves it to "not purchased" once its deadline passes.
   if (unsignedTransactionsByMemo !== null) {
+    // Read once, immediately before this invocation's first decode -- independent of every
+    // candidate transaction -- rather than per pack, since one batch is generated and signed
+    // against a single shared recent blockhash.
+    const policyBlockhashContext = fixtureBinding === null ? null : await (async () => {
+      const latest = await readUsableLatestBlockhash(adapters.solana.client);
+      const currentHeight = await readBlockHeight(adapters.solana.client);
+      return Object.freeze({
+        blockhash: latest.blockhash,
+        lastValidBlockHeight: String(latest.lastValidBlockHeight),
+        currentBlockHeight: currentHeight.toString(),
+      });
+    })();
+
     for (const pack of batch.packs) {
       const transaction = unsignedTransactionsByMemo.get(pack.memo);
       if (transaction === undefined) continue;
+      // A separate, real policy per pack, built only from the validated binding, the immutable
+      // admitted unit amount, the durable request digest, this durably recorded pack's own memo,
+      // the independently read source ATA, the configured Operations payer, and the fresh
+      // blockhash context above -- never from the candidate `transaction` decoded below.
+      const policy = fixtureBinding === null ? null : createCollectorPurchasePolicy({
+        binding: fixtureBinding.binding,
+        expectedDigest: fixtureBinding.expectedDigest,
+        cycleFacts: {
+          operatorFeePayer: config.accounts.solana,
+          sourceAta: account.address,
+          amountAtomic: prepared.unitPurchase.amountAtomic,
+          memoValue: pack.memo,
+          requestDigest: context.requestDigest,
+        },
+        blockhashContext: policyBlockhashContext,
+      });
       const { signer, signed } = await decodeAndSignProviderTransaction({
         transaction,
         stage: 'purchase',
@@ -387,6 +481,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
         config,
         money,
         signerClient,
+        policy,
       });
       await signer.broadcast(signed);
     }
