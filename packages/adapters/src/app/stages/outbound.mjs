@@ -2,6 +2,7 @@ import {
   DIRECTIONS,
   RELAY_CONSTANTS,
   assertQuoteUsable,
+  relayQuoteDigest,
 } from '../../relay-client.mjs';
 import { keccak256 } from 'viem';
 import {
@@ -218,7 +219,9 @@ function assertQuoteMatchesAdmission(quote, admitted) {
     || quote.tradeType !== 'EXACT_OUTPUT'
     || quote.origin.amount !== admitted.aggregateFunding
     || quote.destination.amount !== admitted.aggregatePurchase
-    || quote.destination.minimumAmount !== admitted.aggregatePurchase) {
+    || quote.destination.minimumAmount !== admitted.aggregatePurchase
+    || quote.quoteDigest !== admitted.admission.quoteDigest
+    || relayQuoteDigest(quote) !== admitted.admission.quoteDigest) {
     throw new Error('outbound Relay quote differs from the durable policy admission');
   }
 }
@@ -352,7 +355,14 @@ export async function prepareOutboundRequest({ adapters, config, cycleRepository
   const configured = assertOutboundConfiguration(config);
   const money = assertOutboundMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const admitted = assertOutboundAdmission(context.admission ?? cycle?.admission, configured, money, context.cycleId);
+  if (!cycle?.admission) throw new Error('outbound requires a repository-owned durable policy admission');
+  if (context.admission !== undefined && digest(context.admission) !== digest(cycle.admission)) {
+    throw new Error('outbound context admission conflicts with the repository-owned admission');
+  }
+  const admitted = assertOutboundAdmission(cycle.admission, configured, money, context.cycleId);
+  if (canonicalAmount(cycle.releaseAmount, 'outbound cycle release amount') !== admitted.aggregateFunding) {
+    throw new Error('outbound cycle release amount does not match the durable aggregate funding quote');
+  }
   const { quote, aggregateFunding: amountAtomic } = admitted;
   assertOutboundQuote(quote, configured, money);
   assertQuoteMatchesAdmission(quote, admitted);
