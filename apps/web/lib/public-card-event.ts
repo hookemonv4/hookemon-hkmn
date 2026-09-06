@@ -83,21 +83,35 @@ export function normalizePublicCardEvent(value: unknown): PublicCardEvent {
 
 /**
  * Identity per the frozen contract: a card can have several observations, but public history
- * must never display them as several different cards. Keeps, per identity, only the event with
- * the highest `sequence` (ties broken by the most recently observed), so a later re-observation
- * (e.g. state moving from "opened" to "sold") replaces the earlier one in place rather than
- * appending a duplicate.
+ * must never display them as several different cards. Keeps, per identity, only the most recently
+ * observed event (by validated `observedAt`, a fixed-width ISO timestamp -- safe to compare
+ * lexically or by `Date.parse`, unlike `sequence`), so a later re-observation (e.g. state moving
+ * from "observed" to "finalized") replaces the earlier one in place rather than appending a
+ * duplicate.
+ *
+ * Deliberately does NOT order by `sequence`: the frozen contract only promises `sequence` is a
+ * stable string, not a zero-padded or fixed-width one (see F-sol-review.md's "9" vs "10" finding
+ * against an earlier caller-side lexical-sequence assumption -- localeCompare("9", "10") is
+ * positive, i.e. wrongly "newer"). `sequence` is used only to break an exact `observedAt` tie.
+ *
+ * Also rejects (rather than silently overwriting) two observations of the same identity that
+ * disagree on `memo` or `mint`: per the same review, a durable key that excludes those fields lets
+ * a later observation replace them without a conflict check. A public renderer must not paper over
+ * that inconsistency by picking one silently.
  */
 export function mergeCardEvents(events: readonly PublicCardEvent[]): PublicCardEvent[] {
-  const bySequenceThenObservedAt = new Map<string, PublicCardEvent>();
+  const byIdentity = new Map<string, PublicCardEvent>();
   for (const event of events) {
     const key = operationIdentityKey(event);
-    const current = bySequenceThenObservedAt.get(key);
-    if (current === undefined || isNewerEvent(event, current)) {
-      bySequenceThenObservedAt.set(key, event);
+    const current = byIdentity.get(key);
+    if (current === undefined) {
+      byIdentity.set(key, event);
+      continue;
     }
+    if (current.memo !== event.memo || current.mint !== event.mint) invalid();
+    if (isNewerEvent(event, current)) byIdentity.set(key, event);
   }
-  return [...bySequenceThenObservedAt.values()];
+  return [...byIdentity.values()];
 }
 
 /**
@@ -118,6 +132,11 @@ export function operationIdentityKey(identity: OperationIdentity): string {
 // localeCompare, matching that producer's own tie-break rule exactly (>= keeps the incoming
 // event on an exact tie, i.e. the most recently merged observation wins).
 function isNewerEvent(candidate: PublicCardEvent, current: PublicCardEvent): boolean {
+  const candidateMs = Date.parse(candidate.observedAt);
+  const currentMs = Date.parse(current.observedAt);
+  if (candidateMs !== currentMs) return candidateMs > currentMs;
+  // Only an exact observedAt tie falls back to sequence, purely as a deterministic (not
+  // necessarily chronological) last resort -- never the primary ordering.
   return candidate.sequence.localeCompare(current.sequence) >= 0;
 }
 

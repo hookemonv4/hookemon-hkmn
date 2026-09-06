@@ -62,10 +62,11 @@ test("normalizePublicCardEvent rejects malformed, extra, or impossible fields", 
   }
 });
 
-test("mergeCardEvents keeps one card per identity, preferring the latest sequence", () => {
+test("mergeCardEvents keeps one card per identity, preferring the most recently observed", () => {
   const first = normalizePublicCardEvent(validEvent);
   const secondObservation = normalizePublicCardEvent({
     ...validEvent, sequence: "2", state: "finalized",
+    observedAt: "2026-09-06T10:04:00.000Z",
     finalizedAt: "2026-09-06T10:05:00.000Z", proceeds: validAmount,
   });
   const otherCard = normalizePublicCardEvent({
@@ -76,6 +77,38 @@ test("mergeCardEvents keeps one card per identity, preferring the latest sequenc
   const merged1 = merged.find((event) => event.operationId === "op-1");
   assert.equal(merged1.state, "finalized");
   assert.equal(merged1.sequence, "2");
+});
+
+test("mergeCardEvents orders by observedAt, not a lexical sequence comparison (sequence '9' vs '10')", () => {
+  // localeCompare("9", "10") is positive -- wrongly "newer" under a naive lexical-sequence
+  // ordering (see F-sol-review.md). observedAt must decide, since it is a validated fixed-width
+  // ISO timestamp and sequence carries no such guarantee.
+  const earlierButHigherSequence = normalizePublicCardEvent({
+    ...validEvent, sequence: "9", observedAt: "2026-09-06T10:05:00.000Z",
+  });
+  const laterButLowerSequence = normalizePublicCardEvent({
+    ...validEvent, sequence: "10", state: "finalized", observedAt: "2026-09-06T10:06:00.000Z",
+    finalizedAt: "2026-09-06T10:06:00.000Z", proceeds: validAmount,
+  });
+  const merged = mergeCardEvents([earlierButHigherSequence, laterButLowerSequence]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].sequence, "10");
+  assert.equal(merged[0].state, "finalized");
+});
+
+test("mergeCardEvents rejects two observations of the same identity that disagree on memo or mint", () => {
+  const original = normalizePublicCardEvent(validEvent);
+  const conflictingMemo = normalizePublicCardEvent({ ...validEvent, memo: "different-memo" });
+  assert.throws(
+    () => mergeCardEvents([original, conflictingMemo]),
+    /PUBLIC_CARD_EVENT_INVALID/,
+  );
+
+  const conflictingMint = normalizePublicCardEvent({ ...validEvent, mint: "SomeMintAddress" });
+  assert.throws(
+    () => mergeCardEvents([original, conflictingMint]),
+    /PUBLIC_CARD_EVENT_INVALID/,
+  );
 });
 
 test("operationIdentityKey is stable across repeated observations of the same operation", () => {
