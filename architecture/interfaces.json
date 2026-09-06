@@ -171,7 +171,7 @@
       "scope": "EVM USDG canonical row only in this revision; a non-EVM-USDG row stays on hookemon.custody-ledger.v1, or, if migrated, stays permanently unvalued and fail-closed under the admission rule below, until a separately approved evidence producer exists for it",
       "verifiedCurrentBalance": "CustodyBalanceObservationV1 | null -- {schema, account, balance: TypedAmount, finality: {height, hash, timestampUnixSeconds}}; for the EVM USDG row, produced only by a dedicated public/archive/public-recheck finalized-balance reader reusing payout-availability.mjs's evidence discipline; null permitted only on a key's first-ever write; no non-null-to-null erasure and no v2-to-v1 downgrade",
       "obligations": "tracked separately from verified balance; unresolved principal is counted once",
-      "expectedCycleAssets": "singular TypedAmount | null per row (field name expectedCycleAsset, never a collection); a second unresolved return-direction leg for the same resolved chain/asset is refused before append, leaving the row's existing value unchanged",
+      "expectedCycleAsset": "singular TypedAmount | null per row, never a collection; a second unresolved return-direction leg for the same resolved chain/asset is refused before append, leaving the row's existing value unchanged",
       "unattributedExternalDeposits": "separate classification that pauses new claims",
       "admissionRule": "unvaluedExposure becomes true for the EVM USDG row when verifiedCurrentBalance is null while unresolvedClaim is positive or any current-custody bucket is nonzero; a row with a non-null verifiedCurrentBalance is never marked unvalued by this rule",
       "nonEvmEvidenceConstructionContract": {
