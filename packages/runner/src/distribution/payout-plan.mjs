@@ -12,13 +12,24 @@ const PREVIOUS_DUST_SOURCE_FIELDS = ['cycleId', 'digest', 'planDigest'];
 const FORBIDDEN_CANONICAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const MAX_UINT256 = (1n << 256n) - 1n;
 
-export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 1025;
+// A hard technical ceiling protecting the canonical-JSON and in-memory bounds below, not a
+// payout-capacity business rule: real admission is feasibility-gated (gas budget computed from
+// the actual recipient count) in eligibility-snapshot.mjs. Durable paged storage and bounded
+// in-flight dispatch (packages/adapters/src/app/stages/payout.mjs) are what make recipient counts
+// well above 1,025 practical; this constant only stops a pathological count from ever reaching
+// that machinery.
+export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 50_000;
 
 const PAYOUT_PLAN_CANONICAL_LIMITS = Object.freeze({
-  objects: 20_000,
+  objects: 200_000,
   arrays: 10_000,
   arrayItems: DIRECT_PAYOUT_RECIPIENT_LIMIT,
-  aggregateBytes: 4_194_304,
+  aggregateBytes: 33_554_432,
+});
+
+export const DIRECT_PAYOUT_OUTCOME = Object.freeze({
+  ALLOCATED: 'ALLOCATED',
+  NON_SPENDING_NO_ELIGIBLE_HOLDERS: 'NON_SPENDING_NO_ELIGIBLE_HOLDERS',
 });
 
 export const USDG_PAYOUT_CHAIN_ID = 4663;
@@ -168,7 +179,9 @@ function compareAddress(left, right) {
 }
 
 function normalizeEntries(entries, supply) {
-  if (!Array.isArray(entries) || entries.length === 0) throw new Error('eligibility manifest entries must be a nonempty array');
+  // An empty array is valid: it is the frozen shape of a cycle with no eligible holders, handled
+  // by compileDirectPayoutPlan as an explicit non-spending outcome rather than an exception.
+  if (!Array.isArray(entries)) throw new Error('eligibility manifest entries must be an array');
   const recipients = new Set();
   const normalized = entries.map((entry, index) => {
     assertExactFields(entry, ['recipient', 'hkmnBalance'], `eligibility manifest entry ${index}`);
@@ -352,6 +365,7 @@ function unsignedPlan(value) {
     totalAllocated: value.totalAllocated,
     dust: value.dust,
     feasibility: value.feasibility,
+    outcome: value.outcome,
   };
 }
 
@@ -415,9 +429,14 @@ export function compileDirectPayoutPlan({
     throw new Error('direct payout distributable pool exceeds uint256');
   }
   const totalEligibleHkmn = eligibility.entries.reduce((sum, entry) => sum + BigInt(entry.hkmnBalance.amountAtomic), 0n);
-  if (totalEligibleHkmn === 0n) throw new Error('eligibility manifest has no positive HKMN balance');
+  // No eligible holder this cycle is not an error: nothing is spent, and the entire distributable
+  // pool is retained as durable dust for the successor cycle rather than being invented away or
+  // thrown as an exception.
+  const outcome = totalEligibleHkmn === 0n
+    ? DIRECT_PAYOUT_OUTCOME.NON_SPENDING_NO_ELIGIBLE_HOLDERS
+    : DIRECT_PAYOUT_OUTCOME.ALLOCATED;
 
-  const candidates = eligibility.entries.map(entry => {
+  const candidates = totalEligibleHkmn === 0n ? [] : eligibility.entries.map(entry => {
     const numerator = BigInt(entry.hkmnBalance.amountAtomic) * distributablePool;
     return {
       recipient: entry.recipient,
@@ -477,6 +496,7 @@ export function compileDirectPayoutPlan({
     }),
     dust,
     feasibility: eligibility.feasibility,
+    outcome,
   };
   return freezePlan({
     ...unsigned,
