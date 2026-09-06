@@ -167,8 +167,6 @@ jobs:
           gitleaks git --no-banner --redact --ignore-gitleaks-allow \
             --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
             --log-opts="--full-history -m --text --no-textconv $range_base..$range_head" .
-      - name: Verify delivery boundary
-        run: node scripts/check-delivery-boundary.mjs
       - name: Verify local Phase 2 runner
         shell: bash
         run: |
@@ -227,6 +225,8 @@ jobs:
         run: node scripts/programmable/verify-launch-package.mjs --allow-unverified
       - name: Verify release package closure
         run: node scripts/verify-release-package-closure.mjs
+      - name: Verify delivery boundary
+        run: node scripts/check-delivery-boundary.mjs
       - run: node scripts/v4.mjs trace check
       - name: Verify deterministic state projection
         run: |
