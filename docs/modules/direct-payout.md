@@ -29,6 +29,23 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   It derives an exact one-recipient policy from the persisted payout attempt around the guarded
   Operations signer facade for every signature. A supplied branded signer is not reused as the
   payout authorization.
+- `createCycleAttributableFinalizedAvailableReader()` in
+  `packages/adapters/src/app/payout-availability.mjs` is the owned, read-only
+  `readCycleAttributableFinalizedAvailable` implementation composition wires onto the production
+  Robinhood client. Given the plan's cycle, Operations and USDG identities, return delta, return
+  evidence binding, and prior-dust provenance, it independently reloads and re-authenticates the
+  completed `return` stage evidence: either the zero-proceeds record with no recorded return Relay
+  leg, or exactly one total return Relay leg that is itself `SETTLED` and matches the cycle's
+  custody ledger `returnReceived`; a second unresolved or terminal return leg is rejected as
+  ambiguous even when the admitted leg is settled. For nonzero carried dust it accepts either the
+  exact globally unconsumed source (the later atomic initializer still consumes it) or this exact
+  cycle's already-consumed record when it is bound to the request's current plan digest with no
+  conflicting payout state -- the durable restart of a crash between dust consumption and
+  payout-state persistence; every other consumed source stays refused. It then proves a finalized
+  Operations USDG balance at least equal to the attributed sum through a
+  public/archive/same-height-public checkpoint before returning exactly `returnDelta +
+  previousDust` as a typed USDG amount. It never returns a wallet-wide balance and never mutates
+  the cycle repository; the existing atomic initializer remains the sole dust-consuming writer.
 - `createCycleRepositoryPayoutStore()` reads and writes recipient state through
   `readPagedPayoutState()` and `persistPagedPayoutState()`. Each retained recipient record contains
   its nonce, signed bytes, transaction hash, policy approval context, and finality or refusal
@@ -76,6 +93,11 @@ implements the payout durability contract in `REQ-direct-payout-1`.
 - `FINALIZED` requires a stable canonical receipt at or below the finalized head, matching Transfer
   logs, and archive-capable evidence proving both the Operations debit and recipient credit equal
   the planned amount. Receipt logs alone never settle a payout.
+- `evaluateDirectPayoutBridgeAdmission()` reads its `finalizedAvailableAmount` only from
+  `adapters.robinhood.client.readCycleAttributableFinalizedAvailable()`, never from a wallet-wide
+  balance; the same Operations wallet can hold unrelated cycles' funds that must never fund this
+  cycle's shortfall. A missing reader, or one that cannot yet produce a value, fails closed as
+  `NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN` rather than skipping the check.
 - A frozen pre-sign recipient or a finalized reverted transaction becomes `REFUSED` only after a
   custody-backed quarantine reservation succeeds. Paid, quarantined, and dust amounts must exactly
   conserve the distributable pool before terminal evidence exists. The exported direct-payout API
@@ -118,6 +140,7 @@ implements the payout durability contract in `REQ-direct-payout-1`.
 
 ```sh
 node --test --test-timeout=120000 packages/adapters/test/app/stages-payout.test.mjs
+node --test --test-timeout=120000 packages/adapters/test/app/payout-availability.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/stage-driver.test.mjs
 node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.test.mjs
 ```

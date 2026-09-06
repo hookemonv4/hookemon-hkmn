@@ -117,6 +117,13 @@ repository client.
   to it, and re-reads the same height from the public client before returning, refusing on a hash
   mismatch. The planner validates that same shape and each control independently of the reader that
   supplied it, so a test reader cannot hand it evidence a real one would have refused.
+- After the private `CycleRepository` opens, production composition derives its Robinhood client
+  by wiring `createCycleAttributableFinalizedAvailableReader()` (closing over that private
+  repository and the distinct archive client) as `readCycleAttributableFinalizedAvailable`,
+  spread in last so it always wins over any same-named method an injected raw client already
+  carries. This derived view, never the raw injected one, reaches the stage driver and the
+  composed result's exposed `adapters`; an untrusted client can never self-attest its own
+  cycle-attributable payout availability.
 - A cycle stores one immutable mode, `production` or `rehearsal`, at creation. Production services
   refuse rehearsal cycles and rehearsal services refuse production cycles.
 - `readEnvironment` resolves the EVM USDG address and decimals from the frozen binding. The

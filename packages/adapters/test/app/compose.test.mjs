@@ -498,6 +498,36 @@ test('compose requires a distinct archive-capable historical evidence client for
   assert.equal(composition.adapters.robinhood.historicalEvidenceClient, archiveEvidenceClient);
 });
 
+test('production composition wires its own owned cycle-attributable payout-availability reader over any injected same-named client method', async t => {
+  const stateDir = await tempStateDir(t);
+  const adapters = throwingAdapters();
+  const injectedSelfAttestation = async () => ({
+    chainId: '4663', assetId: `0x${'9'.repeat(40)}`, decimals: 6, amountAtomic: '999999999999999999',
+  });
+  adapters.robinhood.client.readCycleAttributableFinalizedAvailable = injectedSelfAttestation;
+  const composition = await compose({
+    stateDir,
+    statePath: join(stateDir, 'operator-state.json'),
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: { baseUrl: 'https://example.invalid' },
+    moneyConfiguration: productionMoneyConfiguration(),
+    execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    adapters,
+  });
+  t.after(() => composition.shutdown());
+
+  const composedReader = composition.adapters.robinhood.client.readCycleAttributableFinalizedAvailable;
+  assert.notEqual(composedReader, injectedSelfAttestation);
+  // An untrusted injected client can never self-attest its own cycle-attributable availability:
+  // the composed method is the real owned reader, proven by its distinct refusal vocabulary
+  // rather than the injected fixture's fixed resolved amount.
+  await assert.rejects(() => composedReader({}), /payout-availability reader refuses/);
+});
+
 test('compose constructs archive evidence from a distinct configured archive RPC when no explicit client is injected', async t => {
   const stateDir = await tempStateDir(t);
   const adapters = throwingAdapters();

@@ -126,7 +126,7 @@
     {
       "id": "direct-payout",
       "path": "docs/modules/direct-payout.md",
-      "sha256": "5e3572dbaa7f6f73fee7d861ec6d89cc8d5e2524d2a77bfc26a075c9f9adcce5"
+      "sha256": "7484c57aa917b4a83e4677d500e0caf1309a9cdf00ac90e30480881f08f0080e"
     },
     {
       "id": "automation",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "9508feaf9662b5d94a07f6e19aa372985d91f6e1d9c50471340b21a4cded13b0"
+      "sha256": "0bebc805fd5609ee4f3d73fe5235da579da52dd1218c4519875c526a5bc86910"
     },
     {
       "id": "dashboard",

@@ -2638,12 +2638,17 @@ export function evaluateDirectPayoutNativeGasAdmission({ requiredNativeAmount, o
  * its absence, or a reader that cannot yet produce a value, fails closed (returns null here) rather
  * than skipping the bridge-shortfall check or trusting the plan's own accounting.
  */
-async function readCycleAttributableFinalizedAvailableUsdg({ client, config, cycleId }) {
+async function readCycleAttributableFinalizedAvailableUsdg({ client, config, cycleId, plan }) {
   if (!client || typeof client.readCycleAttributableFinalizedAvailable !== 'function') return null;
   const result = await client.readCycleAttributableFinalizedAvailable({
     cycleId,
     operations: config.accounts.evm,
     usdgAddress: config.contracts.usdg,
+    returnDelta: plan.returnDelta,
+    returnEvidence: plan.returnEvidence,
+    previousDust: plan.previousDust,
+    previousDustSource: plan.previousDustSource,
+    planDigest: plan.planDigest,
   });
   if (result === null || result === undefined) return null;
   return assertUsdAmount(
@@ -2725,6 +2730,7 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
       client: freezeCheckClient,
       config,
       cycleId: context.cycleId,
+      plan: request.plan,
     });
     if (finalizedAvailableAmount === null) {
       const admission = Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN });

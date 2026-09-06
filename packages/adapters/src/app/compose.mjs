@@ -40,6 +40,7 @@ import {
   CycleRepository,
 } from './cycle-repository.mjs';
 import { createFileLeaseStore } from './lease-store.mjs';
+import { createCycleAttributableFinalizedAvailableReader } from './payout-availability.mjs';
 import { createObservability } from './observability.mjs';
 import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
@@ -1195,7 +1196,7 @@ export async function compose(config) {
     resolved.operatorAuditLogPath,
   );
 
-  const adapters = buildAdapters(resolved);
+  let adapters = buildAdapters(resolved);
   if (isLiveCollectorOnlyRehearsal(resolved) && resolved.collectorCrypt?.executionBundleRequired === true) {
     resolved = attachCollectorPolicyBundle(resolved, await loadCollectorPolicyBundle());
   }
@@ -1217,6 +1218,24 @@ export async function compose(config) {
 
   const cycleRepository = await CycleRepository.open(join(config.stateDir, 'cycles'), now);
   assertCycleRepositoryInterface(cycleRepository);
+  if (resolved.execution.profile === 'production') {
+    // The owned reader closes over this private repository instance and the distinct archive
+    // client; it is spread in last so it always wins over any same-named method an injected raw
+    // client (e.g. a test double passed as config.adapters) might already carry -- an untrusted
+    // client must never be able to self-attest its own cycle-attributable availability.
+    const reader = createCycleAttributableFinalizedAvailableReader({
+      cycleRepository,
+      publicClient: adapters.robinhood.client,
+      archiveClient: adapters.robinhood.historicalEvidenceClient,
+    });
+    adapters = {
+      ...adapters,
+      robinhood: {
+        ...adapters.robinhood,
+        client: Object.freeze({ ...adapters.robinhood.client, readCycleAttributableFinalizedAvailable: reader }),
+      },
+    };
+  }
   const cycleRepositoryClient = createCycleRepositoryClient(cycleRepository);
   const createCycleRunner = cycleId => createCycleRepositoryRunner(cycleRepository, cycleId);
   const leaseStore = createFileLeaseStore(join(config.stateDir, 'lease.json'));
