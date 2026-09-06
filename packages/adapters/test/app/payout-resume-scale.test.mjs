@@ -14,16 +14,24 @@ import test from 'node:test';
 import { keccak256, TransactionReceiptNotFoundError } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { compileDirectPayoutPlan, createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
+import {
+  compileDirectPayoutPlan,
+  createUsdgPayoutAmount,
+  DIRECT_PAYOUT_RECIPIENT_LIMIT,
+} from '../../../runner/src/distribution/payout-plan.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import {
   advanceDirectPayout,
   createDirectPayoutState,
+  DirectPayoutBridgeAvailabilityUnknownError,
+  DirectPayoutBridgeShortfallError,
   DirectPayoutFrozenAssetError,
+  DirectPayoutNativeGasShortfallError,
   evaluateDirectPayoutBridgeAdmission,
   evaluateDirectPayoutFrozenAssetAdmission,
+  evaluateDirectPayoutNativeGasAdmission,
   isDirectPayoutComplete,
   mutatePayout,
 } from '../../src/app/stages/payout.mjs';
@@ -95,7 +103,7 @@ function planFor(count) {
   });
 }
 
-for (const count of [1025, 1026, 10_000]) {
+for (const count of [1025, 1026, DIRECT_PAYOUT_RECIPIENT_LIMIT]) {
   test(`durable payout state scales to ${count} recipients without truncation or duplication`, () => {
     const plan = planFor(count);
     assert.equal(plan.allocations.length, count);
@@ -181,6 +189,9 @@ function windowRpc() {
     },
     async getTransactionCount() { return nonce; },
     async getBalance() { return 1_000_000_000n; },
+    async readCycleAttributableFinalizedAvailable() {
+      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '999999999999999999999999' };
+    },
     async getTransactionReceipt({ hash }) {
       const receipt = receipts.get(hash);
       if (!receipt) throw new TransactionReceiptNotFoundError({ hash });
@@ -436,4 +447,157 @@ test('mutatePayout admits and signs nothing when USDG is frozen for the Operatio
   assert.equal(holds[0].evidence.admission.outcome, 'NON_SPENDING_FROZEN_ASSET');
   assert.equal(holds[0].evidence.admission.unsentLiability, plan.totalAllocated.amountAtomic);
   assert.equal(holds[0].evidence.admission.remainingDust, plan.dust.amountAtomic);
+});
+
+test('native-gas admission reports the exact wei deficit and never claims OK when balance falls short', () => {
+  const shortfall = evaluateDirectPayoutNativeGasAdmission({
+    requiredNativeAmount: '100',
+    observedNativeBalance: '90',
+  });
+  assert.equal(shortfall.outcome, 'NON_SPENDING_NATIVE_GAS_SHORTFALL');
+  assert.equal(shortfall.deficit, '10');
+
+  const ok = evaluateDirectPayoutNativeGasAdmission({
+    requiredNativeAmount: '100',
+    observedNativeBalance: '100',
+  });
+  assert.equal(ok.outcome, 'OK');
+  assert.equal(ok.deficit, '0');
+});
+
+function shortfallPlan(finalizedReturnAtomic) {
+  return compileDirectPayoutPlan({
+    cycleId: 'cycle-resume-scale',
+    eligibilityManifest: eligibilityManifest(1),
+    finalizedReturn: usdg(finalizedReturnAtomic),
+    previousDust: usdg('0'),
+    returnBinding: RETURN_BINDING,
+  });
+}
+
+function shortfallCycleRepository() {
+  const holds = [];
+  let stored = null;
+  return {
+    holds,
+    async readPagedPayoutState() { return stored === null ? null : structuredClone(stored); },
+    async persistPagedPayoutState(_cycleId, _stage, state) { stored = structuredClone(state); },
+    async consumePayoutDustAndPersistPagedPayoutState(_cycleId, input) {
+      stored = structuredClone(input.evidence);
+      return { evidence: structuredClone(stored), consumption: null };
+    },
+    async describeCycle() { return { custodyLedgers: new Map() }; },
+    async recordCustodyLedger() {},
+    async reserveWalletNonce() {},
+    async assertWalletNonce() {},
+    async holdCycle(cycleId, terminalState, evidence) { holds.push({ cycleId, terminalState, evidence }); },
+    getStored: () => stored,
+  };
+}
+
+test('mutatePayout refuses a 100-required/99-available bridge shortfall before touching state or dust, even with unrelated wallet funds', async () => {
+  const plan = shortfallPlan('100');
+  assert.equal(plan.distributablePool.amountAtomic, '100');
+  const context = {
+    cycleId: plan.cycleId,
+    requestDigest: `sha256:${'c'.repeat(64)}`,
+    fencingToken: 'payout-fence-bridge-shortfall-1',
+  };
+  const cycleRepository = shortfallCycleRepository();
+  const client = {
+    ...windowRpc(),
+    async getBalance() { return 999_999_999_999n; }, // unrelated wallet-wide funds; must never fund the shortfall
+    async readCycleAttributableFinalizedAvailable() {
+      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '99' };
+    },
+  };
+  const counter = { sign: 0 };
+
+  await assert.rejects(
+    mutatePayout({
+      liveMode: true,
+      config: lifecycleConfig(),
+      cycleRepository,
+      context,
+      request: { plan },
+      adapters: { robinhood: { client } },
+      signerClient: lifecycleSigner(counter),
+    }),
+    error => error instanceof DirectPayoutBridgeShortfallError && error.deficit === '1',
+  );
+
+  assert.equal(counter.sign, 0);
+  assert.equal(cycleRepository.getStored(), null, 'no recipient state is ever persisted for a bridge-shortfall admission refusal');
+  assert.equal(cycleRepository.holds.length, 1);
+  assert.equal(cycleRepository.holds[0].terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(cycleRepository.holds[0].evidence.admission.outcome, 'NON_SPENDING_BRIDGE_SHORTFALL');
+  assert.equal(cycleRepository.holds[0].evidence.admission.deficit, '1');
+});
+
+test('mutatePayout fails closed when composition supplies no cycle-attributable finalized-available reader', async () => {
+  const plan = shortfallPlan('100');
+  const context = {
+    cycleId: plan.cycleId,
+    requestDigest: `sha256:${'d'.repeat(64)}`,
+    fencingToken: 'payout-fence-bridge-unknown-1',
+  };
+  const cycleRepository = shortfallCycleRepository();
+  const { readCycleAttributableFinalizedAvailable: _omit, ...clientWithoutReader } = windowRpc();
+  const counter = { sign: 0 };
+
+  await assert.rejects(
+    mutatePayout({
+      liveMode: true,
+      config: lifecycleConfig(),
+      cycleRepository,
+      context,
+      request: { plan },
+      adapters: { robinhood: { client: clientWithoutReader } },
+      signerClient: lifecycleSigner(counter),
+    }),
+    error => error instanceof DirectPayoutBridgeAvailabilityUnknownError,
+  );
+
+  assert.equal(counter.sign, 0);
+  assert.equal(cycleRepository.getStored(), null, 'no recipient state is ever persisted while bridge availability is unknown');
+  assert.equal(cycleRepository.holds.length, 1);
+  assert.equal(cycleRepository.holds[0].terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(cycleRepository.holds[0].evidence.admission.outcome, 'NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN');
+});
+
+test('mutatePayout rechecks native gas before durable admission and records the exact deficit', async () => {
+  const plan = planFor(1);
+  const required = BigInt(plan.feasibility.requiredNativeAmount.amountAtomic);
+  const observed = required - 10n;
+  const context = {
+    cycleId: plan.cycleId,
+    requestDigest: `sha256:${'e'.repeat(64)}`,
+    fencingToken: 'payout-fence-native-gas-1',
+  };
+  const cycleRepository = shortfallCycleRepository();
+  const client = {
+    ...windowRpc(),
+    async getBalance() { return observed; },
+  };
+  const counter = { sign: 0 };
+
+  await assert.rejects(
+    mutatePayout({
+      liveMode: true,
+      config: lifecycleConfig(),
+      cycleRepository,
+      context,
+      request: { plan },
+      adapters: { robinhood: { client } },
+      signerClient: lifecycleSigner(counter),
+    }),
+    error => error instanceof DirectPayoutNativeGasShortfallError && error.deficit === '10',
+  );
+
+  assert.equal(counter.sign, 0);
+  assert.equal(cycleRepository.getStored(), null, 'no recipient state is ever persisted for a native-gas admission refusal');
+  assert.equal(cycleRepository.holds.length, 1);
+  assert.equal(cycleRepository.holds[0].terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(cycleRepository.holds[0].evidence.admission.outcome, 'NON_SPENDING_NATIVE_GAS_SHORTFALL');
+  assert.equal(cycleRepository.holds[0].evidence.admission.deficit, '10');
 });

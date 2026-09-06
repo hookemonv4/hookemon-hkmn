@@ -109,6 +109,29 @@ export class DirectPayoutNonceInterferenceError extends DirectPayoutError {
   }
 }
 
+export class DirectPayoutBridgeShortfallError extends DirectPayoutError {
+  constructor({ deficit }) {
+    super(`direct payout finalized available USDG is short of the attributable distributable pool by ${deficit}: nothing was admitted or spent`);
+    this.name = 'DirectPayoutBridgeShortfallError';
+    this.deficit = deficit;
+  }
+}
+
+export class DirectPayoutBridgeAvailabilityUnknownError extends DirectPayoutError {
+  constructor() {
+    super('direct payout requires an authoritative cycle-attributable finalized-available USDG reader before admission: nothing was admitted or spent');
+    this.name = 'DirectPayoutBridgeAvailabilityUnknownError';
+  }
+}
+
+export class DirectPayoutNativeGasShortfallError extends DirectPayoutError {
+  constructor({ deficit }) {
+    super(`direct payout native gas balance is below the required feasibility envelope by ${deficit} wei: nothing was admitted or spent`);
+    this.name = 'DirectPayoutNativeGasShortfallError';
+    this.deficit = deficit;
+  }
+}
+
 function fail(message) {
   throw new DirectPayoutError(message);
 }
@@ -2517,7 +2540,9 @@ function frozenHeldPositionExclusions({ cycleId, requested }) {
 export const DIRECT_PAYOUT_ADMISSION_OUTCOME = Object.freeze({
   OK: 'OK',
   NON_SPENDING_BRIDGE_SHORTFALL: 'NON_SPENDING_BRIDGE_SHORTFALL',
+  NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN: 'NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN',
   NON_SPENDING_FROZEN_ASSET: 'NON_SPENDING_FROZEN_ASSET',
+  NON_SPENDING_NATIVE_GAS_SHORTFALL: 'NON_SPENDING_NATIVE_GAS_SHORTFALL',
 });
 
 /**
@@ -2554,6 +2579,48 @@ export function evaluateDirectPayoutFrozenAssetAdmission({ frozen, attributableD
     unsentLiability: (BigInt(attributableDistributableAmount) - BigInt(dust)).toString(),
     remainingDust: String(dust),
   });
+}
+
+/**
+ * Pure pre-admission check: the plan's frozen feasibility envelope can go stale between the
+ * eligibility snapshot and durable payout admission (native balance can drop in the meantime).
+ * Reports the exact deficit so a refusal is auditable before dust/state are committed, matching
+ * eligibility-snapshot's deficit-reporting contract instead of a generic failure discovered only
+ * at the first signature after irreversible accounting admission has already happened.
+ */
+export function evaluateDirectPayoutNativeGasAdmission({ requiredNativeAmount, observedNativeBalance }) {
+  const required = BigInt(requiredNativeAmount);
+  const observed = BigInt(observedNativeBalance);
+  if (observed >= required) {
+    return Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.OK, deficit: '0' });
+  }
+  return Object.freeze({
+    outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_NATIVE_GAS_SHORTFALL,
+    deficit: (required - observed).toString(),
+  });
+}
+
+/**
+ * Explicit I-owned admission input: the authoritative, cycle-attributable finalized-available
+ * USDG amount actually backing this cycle's payout right now -- never a wallet-wide balance, since
+ * the same Operations wallet can hold unrelated cycles' funds that must never fund this cycle's
+ * shortfall. Composition injects adapters.robinhood.client.readCycleAttributableFinalizedAvailable();
+ * its absence, or a reader that cannot yet produce a value, fails closed (returns null here) rather
+ * than skipping the bridge-shortfall check or trusting the plan's own accounting.
+ */
+async function readCycleAttributableFinalizedAvailableUsdg({ client, config, cycleId }) {
+  if (!client || typeof client.readCycleAttributableFinalizedAvailable !== 'function') return null;
+  const result = await client.readCycleAttributableFinalizedAvailable({
+    cycleId,
+    operations: config.accounts.evm,
+    usdgAddress: config.contracts.usdg,
+  });
+  if (result === null || result === undefined) return null;
+  return assertUsdAmount(
+    result,
+    'direct payout cycle-attributable finalized available USDG',
+    config.contracts.usdg,
+  ).amountAtomic;
 }
 
 /**
@@ -2623,6 +2690,61 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
         }
         throw new DirectPayoutFrozenAssetError({ operations: config.accounts.evm });
       }
+    }
+    const finalizedAvailableAmount = await readCycleAttributableFinalizedAvailableUsdg({
+      client: freezeCheckClient,
+      config,
+      cycleId: context.cycleId,
+    });
+    if (finalizedAvailableAmount === null) {
+      const admission = Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN });
+      if (typeof cycleRepository.holdCycle === 'function') {
+        await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+          stage: STAGE,
+          category: 'bridge-availability-unknown',
+          reason: 'PAYOUT_BRIDGE_AVAILABILITY_UNKNOWN',
+          admission,
+          planDigest: request.plan.planDigest,
+        });
+      }
+      throw new DirectPayoutBridgeAvailabilityUnknownError();
+    }
+    const bridgeAdmission = evaluateDirectPayoutBridgeAdmission({
+      attributableDistributableAmount: request.plan.distributablePool.amountAtomic,
+      finalizedAvailableAmount,
+    });
+    if (bridgeAdmission.outcome !== DIRECT_PAYOUT_ADMISSION_OUTCOME.OK) {
+      if (typeof cycleRepository.holdCycle === 'function') {
+        await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+          stage: STAGE,
+          category: 'bridge-shortfall',
+          reason: 'PAYOUT_BRIDGE_SHORTFALL',
+          admission: bridgeAdmission,
+          planDigest: request.plan.planDigest,
+        });
+      }
+      throw new DirectPayoutBridgeShortfallError({ deficit: bridgeAdmission.deficit });
+    }
+    if (!freezeCheckClient || typeof freezeCheckClient.getBalance !== 'function') {
+      fail('direct payout requires getBalance before durable admission');
+    }
+    const observedNativeRaw = await freezeCheckClient.getBalance({ address: config.accounts.evm });
+    const observedNative = typeof observedNativeRaw === 'bigint' ? observedNativeRaw : BigInt(observedNativeRaw);
+    const gasAdmission = evaluateDirectPayoutNativeGasAdmission({
+      requiredNativeAmount: requiredNativeAmount(preparedPlan.plan).toString(),
+      observedNativeBalance: observedNative.toString(),
+    });
+    if (gasAdmission.outcome !== DIRECT_PAYOUT_ADMISSION_OUTCOME.OK) {
+      if (typeof cycleRepository.holdCycle === 'function') {
+        await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+          stage: STAGE,
+          category: 'native-gas-shortfall',
+          reason: 'PAYOUT_NATIVE_GAS_SHORTFALL',
+          admission: gasAdmission,
+          planDigest: request.plan.planDigest,
+        });
+      }
+      throw new DirectPayoutNativeGasShortfallError({ deficit: gasAdmission.deficit });
     }
   }
   const firstNonce = preparedPlan.plan.payableRecipientCount === 0
