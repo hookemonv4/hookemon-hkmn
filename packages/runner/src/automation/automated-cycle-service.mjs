@@ -63,6 +63,8 @@ async function assertJoinPreconditions(cycleRepository, cycleId, stage) {
 export class AutomatedCycleService {
   #budgetReader;
   #admissionPlanner;
+  #operationsAccounts;
+  #processBalanceReader;
   #beforeComplete;
   #beforeMutation;
   #cycleRepository;
@@ -99,7 +101,7 @@ export class AutomatedCycleService {
       'feeSettlementObserver',
       'liveMode',
     ];
-    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId'];
+    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'operationsAccounts', 'processBalanceReader'];
     const keys = Object.keys(config);
     if (!requiredFields.every(field => Object.hasOwn(config, field)) || keys.some(field => !requiredFields.includes(field) && !optionalFields.includes(field))) {
       throw new Error('automated cycle service configuration must use the exact schema');
@@ -179,6 +181,9 @@ export class AutomatedCycleService {
     this.#leaseStore = config.leaseStore;
     this.#budgetReader = config.budgetReader;
     this.#admissionPlanner = config.admissionPlanner ?? null;
+    this.#operationsAccounts = config.operationsAccounts ?? null;
+    this.#processBalanceReader = config.processBalanceReader ?? null;
+    if (this.#processBalanceReader !== null) requireMethod(this.#processBalanceReader, 'read', 'processBalanceReader');
     if (this.#admissionPlanner !== null && typeof this.#admissionPlanner.plan !== 'function') {
       throw new Error('admissionPlanner must expose plan()');
     }
@@ -301,10 +306,39 @@ export class AutomatedCycleService {
             requiredProcessUsdg: '0',
           };
         }
-        // The admission is planned before the cycle exists, because its quotes are what decide the
-        // principal the cycle may be opened for and the policy digest binds its cycleId. The
-        // identifier is reserved rather than invented so one identity spans plan, evaluation and
-        // creation; an unused reservation journals nothing.
+        // Every existing refusal is settled against the configured budget FIRST, while planning is
+        // still free. Obtaining an admission means issuing real Relay quotes, and a run that is
+        // kill-switched, execution-paused, scheduling-paused, over its daily cycle count or short of
+        // its configured budget must not reach a provider at all -- so nothing below is planned
+        // until the unadmitted gate has already allowed the cycle.
+        const gate = decideCycleBudget(budget);
+        if (!gate.ready) {
+          return {
+            status: gate.reason === 'ACTIVE_CYCLE' ? 'ACTIVE_CYCLE_NOT_RECONCILED' : 'WAITING_FOR_PROCESS_BUDGET',
+            cycleId: null,
+            stage: null,
+            requiredProcessUsdg: gate.requiredProcessUsdg,
+          };
+        }
+        if (this.#policyEngine) {
+          const gateDecision = await this.#policyEngine.evaluate({
+            boundary: 'cycle-start',
+            releaseAmountMicroUsdg: gate.releaseAmount,
+            liveMode: this.#liveMode,
+            mode: this.#mode,
+            capUsdg: this.#policyCapUsdg ?? undefined,
+          });
+          if (!gateDecision?.allowed) {
+            return {
+              status: 'POLICY_REFUSED',
+              cycleId: null,
+              stage: null,
+              reason: gateDecision?.reason ?? 'POLICY_ENGINE_INVALID_DECISION',
+            };
+          }
+        }
+        // Only now is the cycle worth pricing. The identifier is reserved rather than invented so
+        // one identity spans plan, evaluation and creation; an unused reservation journals nothing.
         const reservedCycleId = this.#admissionPlanner === null ? null : this.#cycleRepository.nextCycleId();
         const admission = this.#admissionPlanner === null
           ? null
@@ -317,9 +351,16 @@ export class AutomatedCycleService {
           return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessUsdg: '0' };
         }
         assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
-        const decision = decideCycleBudget(budget, {
-          admittedAggregateFundingUsdg: admission === null ? null : admission.aggregateFundingQuote.amountAtomic,
-        });
+        // The quoted principal is checked against evidenced funds, not the configured figure: the
+        // operator's number expresses intent, while only a finalized on-chain balance can authorize
+        // a spend. An unreadable or unfinalized balance reports '0' and refuses.
+        const observedProcessUsdg = admission === null || this.#processBalanceReader === null
+          ? null
+          : await this.#processBalanceReader.read();
+        const decision = admission === null ? gate : decideCycleBudget({
+          ...budget,
+          ...(observedProcessUsdg === null ? {} : { availableProcessUsdg: observedProcessUsdg }),
+        }, { admittedAggregateFundingUsdg: admission.aggregateFundingQuote.amountAtomic });
         if (!decision.ready) {
           return {
             status: decision.reason === 'ACTIVE_CYCLE' ? 'ACTIVE_CYCLE_NOT_RECONCILED' : 'WAITING_FOR_PROCESS_BUDGET',
@@ -328,14 +369,18 @@ export class AutomatedCycleService {
             requiredProcessUsdg: decision.requiredProcessUsdg,
           };
         }
-        if (this.#policyEngine) {
+        // Re-evaluated against the quoted principal, which is the amount the caps actually apply to.
+        if (this.#policyEngine && admission !== null) {
           const policyDecision = await this.#policyEngine.evaluate({
             boundary: 'cycle-start',
             releaseAmountMicroUsdg: decision.releaseAmount,
             liveMode: this.#liveMode,
             mode: this.#mode,
             capUsdg: this.#policyCapUsdg ?? undefined,
-            ...(admission === null ? {} : { admission, cycleId: reservedCycleId, packId: this.#packId }),
+            admission,
+            cycleId: reservedCycleId,
+            packId: this.#packId,
+            operations: this.#operationsAccounts ?? undefined,
           });
           if (!policyDecision?.allowed) {
             return {
@@ -350,7 +395,7 @@ export class AutomatedCycleService {
         cycle = await this.#cycleRepository.createCycle({
           releaseAmount: decision.releaseAmount,
           mode: this.#mode,
-          ...(admission === null ? {} : { cycleId: reservedCycleId, admission }),
+          ...(admission === null ? {} : { cycleId: reservedCycleId, admission, operations: this.#operationsAccounts }),
           ...(this.#providerMode === null ? {} : { providerMode: this.#providerMode }),
           ...(this.#dryRun ? { dryRun: true } : {}),
           ...(this.#rehearsalSessionId === null ? {} : { rehearsalSessionId: this.#rehearsalSessionId }),
@@ -472,7 +517,7 @@ export class AutomatedCycleService {
               liveMode: this.#liveMode,
               mode: this.#mode,
               capUsdg: this.#policyCapUsdg ?? undefined,
-              ...(cycle.admission ? { admission: cycle.admission } : {}),
+              ...(cycle.admission ? { admission: cycle.admission, operations: this.#operationsAccounts ?? undefined } : {}),
             });
             assertPolicyDecision(policyDecision);
           }
@@ -485,7 +530,7 @@ export class AutomatedCycleService {
               liveMode: this.#liveMode,
               mode: this.#mode,
               capUsdg: this.#policyCapUsdg ?? undefined,
-              ...(cycle.admission ? { admission: cycle.admission } : {}),
+              ...(cycle.admission ? { admission: cycle.admission, operations: this.#operationsAccounts ?? undefined } : {}),
             });
             assertPolicyDecision(policyDecision);
           }

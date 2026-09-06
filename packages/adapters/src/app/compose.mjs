@@ -8,7 +8,7 @@
 import { join } from 'node:path';
 
 import { AutomatedCycleService } from '../../../runner/src/automation/automated-cycle-service.mjs';
-import { createPolicyEngine } from '../../../runner/src/automation/policy-engine.mjs';
+import { assertCollectorOnlyRehearsalPolicy, createPolicyEngine } from '../../../runner/src/automation/policy-engine.mjs';
 import { createRehearsalStageDriver } from '../../../runner/src/cycle/rehearsal-stage-driver.mjs';
 import { collectRehearsalEvidence, ensureRehearsalEvidence } from '../../../runner/src/cycle/rehearsal-evidence.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
@@ -23,8 +23,14 @@ import { assertProxyCredentialConfigured } from '../../../dashboard/src/auth/pro
 import { readDashboardProfile } from '../../../dashboard/src/contracts/dashboard-profile.mjs';
 import { createCollectorCryptClient } from '../collector-crypt.mjs';
 import { createRelayClient } from '../relay-client.mjs';
-import { createHistoricalErc20EvidenceClient, createRobinhoodClient, readChainId } from '../robinhood-rpc.mjs';
-import { createSolanaRpcClient } from '../solana-rpc.mjs';
+import {
+  confirmReadFinalized, createHistoricalErc20EvidenceClient, createRobinhoodClient, readChainId,
+  readTokenBalanceAtLatest,
+} from '../robinhood-rpc.mjs';
+import { createSolanaRpcClient, readSolBalance, readUsableLatestBlockhash } from '../solana-rpc.mjs';
+import { attachCollectorPolicyBundle, loadCollectorPolicyBundle } from '../signing/collector-policy-loader.mjs';
+import { buildDurableCardFeed } from '../collector/durable-card-feed.mjs';
+import { createRecentWinnersCollector } from '../collector/recent-winners.mjs';
 import {
   assertCycleRepositoryInterface,
   createCycleRepositoryClient,
@@ -36,6 +42,12 @@ import { createObservability } from './observability.mjs';
 import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
 import { MoneyConfigurationRejected, validateMoneyConfiguration } from './environment.mjs';
+import { createSupplementaryBuybackHandler } from './stages/supplementary-buyback.mjs';
+import {
+  mutateSupplementaryPayout,
+  mutateSupplementaryReturn,
+  reconcileSupplementaryReturn,
+} from './stages/supplementary-money.mjs';
 
 export { validateMoneyConfiguration } from './environment.mjs';
 
@@ -62,6 +74,7 @@ function emptyPolicyCustody({ unvaluedExposure = false } = {}) {
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: Object.freeze({ count: 0, valueMicroUsdg: '0', positions: Object.freeze([]) }),
     unattributed: false,
     unvaluedExposure,
     cycles: Object.freeze([]),
@@ -82,6 +95,21 @@ function configuredEvmUsdgAsset(config) {
     assetId: `eip155:${chainId}/erc20:${normalizedAddress}`,
     decimals,
   });
+}
+
+function isLiveCollectorOnlyRehearsal(config) {
+  return config?.execution?.profile === 'rehearsal'
+    && config.execution?.providerMode === 'live'
+    && config.rehearsal?.mode === 'collector-only';
+}
+
+function collectorOnlyPackPrice(config) {
+  const amountAtomic = config?.collectorCrypt?.packPrice?.amountAtomic;
+  if (typeof config?.pack?.code !== 'string' || config.pack.code.length === 0
+    || typeof amountAtomic !== 'string' || !decimalPattern.test(amountAtomic) || amountAtomic === '0') {
+    throw new Error('live collector-only rehearsal requires a configured pack and typed positive pack price');
+  }
+  return amountAtomic;
 }
 
 async function readPolicyConfiguration(statePath) {
@@ -137,13 +165,19 @@ function buildPolicyCustodyReader({ config, cycleRepository }) {
   return async () => projectPolicyCustody({ cycleRepository, evmUsdg });
 }
 
-function operatorAuditResultCode(command, status) {
+function operatorAuditResultCode(command) {
   if (command?.type === 'run-cycle-now') return 'TICK_TRIGGERED';
-  if (command?.type === 'resume-cycle') {
-    return status?.activeCycleId === null ? 'RECOVERY_NO_ACTIVE_CYCLE' : 'RECOVERY_DISPATCHED';
-  }
+  if (command?.type === 'resume-cycle') return 'RECOVERY_DISPATCHED';
   if (command?.type === 'reconcile') return 'RECONCILIATION_DISPATCHED';
   return 'DECISION_ACCEPTED';
+}
+
+function withResumeAuditResult(command, result) {
+  if (command?.type !== 'resume-cycle' || !result || typeof result !== 'object' || Array.isArray(result)
+    || typeof result.resultCode !== 'string' || result.resultCode.length === 0) {
+    return result;
+  }
+  return { ...result, auditResultCode: result.resultCode };
 }
 
 /** Builds the dashboard request context in-process, beside the scheduler. The injected
@@ -187,7 +221,7 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, cycleRepository, operatorControl, readLastTick, adapters, identities }) {
+async function composeDashboard({ dashboardConfig, chainId, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -224,6 +258,12 @@ async function composeDashboard({ dashboardConfig, chainId, cycleRepository, ope
     async readAccounting(cycleId) {
       return projectCycleAccounting({ cycleRepository, cycleId });
     },
+    // Public-Integration-interface.md binding 2: the frozen SchedulerView, read synchronously off
+    // the real running scheduler — never wrapped in a Promise, never a second timer's guess.
+    getSchedulerView,
+    // Public-Integration-interface.md binding 3: real recently-revealed cards, deduplicated and
+    // attributed to this project's own known operations, never a second source of financial truth.
+    listRecentWinners,
     onError(route, error) {
       // eslint-disable-next-line no-console -- this composition has no injected logger seam; stderr
       // is the whole observability story for a dependency-free node:http process.
@@ -342,10 +382,16 @@ function buildAdapters(config) {
     : config.collectorCrypt.apiKey
     ? createCollectorCryptClient({ apiKey: config.collectorCrypt.apiKey, baseUrl: config.collectorCrypt.baseUrl })
     : null;
+  const liveCollectorOnly = isLiveCollectorOnlyRehearsal(config);
   const relay = config.execution?.providerMode === 'fake'
     ? fakeProvider('relay')
-    : createRelayClient({ baseUrl: config.relay.baseUrl, apiKey: config.relay.apiKey ?? undefined });
-  const robinhoodClient = createRobinhoodClient({ rpcUrl: config.robinhood.rpcUrl });
+    : liveCollectorOnly
+      ? null
+      : createRelayClient({ baseUrl: config.relay.baseUrl, apiKey: config.relay.apiKey ?? undefined });
+  const robinhoodClient = liveCollectorOnly ? null : createRobinhoodClient({ rpcUrl: config.robinhood.rpcUrl });
+  const secondaryLogClient = liveCollectorOnly || config.robinhood.archiveRpcUrl === null || config.robinhood.archiveRpcUrl === undefined
+    ? null
+    : createRobinhoodClient({ rpcUrl: config.robinhood.archiveRpcUrl });
   const solanaClient = createSolanaRpcClient({ rpcUrl: config.solana.rpcUrl });
   const historicalEvidenceClient = injectedEvidenceClient ?? archiveEvidenceClientFromConfig(config);
 
@@ -354,6 +400,7 @@ function buildAdapters(config) {
     relay,
     robinhood: {
       client: robinhoodClient,
+      ...(secondaryLogClient === null ? {} : { secondaryLogClient }),
       ...(historicalEvidenceClient === null ? {} : { historicalEvidenceClient }),
     },
     solana: { client: solanaClient },
@@ -379,8 +426,8 @@ function unavailableNetworkIdentity(network) {
   throw new Error(`compose ${network} network identity unavailable`);
 }
 
-function requireNetworkIdentity(value) {
-  if (!value || typeof value.readEvmChainId !== 'function' || typeof value.readSolanaGenesisHash !== 'function') {
+function requireNetworkIdentity(value, { requireEvm = true } = {}) {
+  if (!value || (requireEvm && typeof value.readEvmChainId !== 'function') || typeof value.readSolanaGenesisHash !== 'function') {
     unavailableNetworkIdentity('injected');
   }
   return value;
@@ -418,27 +465,29 @@ async function readSolanaGenesisHash(client) {
   return payload.result;
 }
 
-function networkIdentityFor(config, adapters) {
-  if (config.networkIdentity !== undefined) return requireNetworkIdentity(config.networkIdentity);
+function networkIdentityFor(config, adapters, { requireEvm = true } = {}) {
+  if (config.networkIdentity !== undefined) return requireNetworkIdentity(config.networkIdentity, { requireEvm });
   if (config.adapters) unavailableNetworkIdentity('injected');
   return Object.freeze({
-    readEvmChainId: () => readChainId(adapters?.robinhood?.client),
+    ...(requireEvm ? { readEvmChainId: () => readChainId(adapters?.robinhood?.client) } : {}),
     readSolanaGenesisHash: () => readSolanaGenesisHash(adapters?.solana?.client),
   });
 }
 
-async function assertNetworkIdentity({ config, adapters, profileId }) {
+async function assertNetworkIdentity({ config, adapters, profileId, requireEvm = true }) {
   const profile = readDashboardProfile(profileId);
-  const identity = networkIdentityFor(config, adapters);
-  let evmChainId;
-  try {
-    evmChainId = await identity.readEvmChainId();
-  } catch {
-    unavailableNetworkIdentity('EVM');
-  }
-  if (!Number.isSafeInteger(evmChainId) || evmChainId <= 0) unavailableNetworkIdentity('EVM');
-  if (evmChainId !== config.chainId) {
-    throw new Error(`compose EVM network identity mismatch: expected chain ${config.chainId}, received ${evmChainId}`);
+  const identity = networkIdentityFor(config, adapters, { requireEvm });
+  if (requireEvm) {
+    let evmChainId;
+    try {
+      evmChainId = await identity.readEvmChainId();
+    } catch {
+      unavailableNetworkIdentity('EVM');
+    }
+    if (!Number.isSafeInteger(evmChainId) || evmChainId <= 0) unavailableNetworkIdentity('EVM');
+    if (evmChainId !== config.chainId) {
+      throw new Error(`compose EVM network identity mismatch: expected chain ${config.chainId}, received ${evmChainId}`);
+    }
   }
 
   let solanaGenesisHash;
@@ -489,6 +538,160 @@ function withRestartInjection(stageDriver, restartInjector) {
 /** Reads observed reserve inputs from composition config and the spend limit from the current
  * operator state. A missing or disabled configuration returns a non-ready budget for a live
  * service, while a dry-run remains able to exercise its explicitly supplied read-only budget. */
+const CATALOG_PRICE = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+
+/**
+ * Scales a catalog price expressed in whole settlement units into atomic units without ever going
+ * through a float. A price with more fractional digits than the asset has decimals is refused
+ * rather than rounded: rounding a pack price silently changes what the cycle is authorized to buy.
+ */
+function catalogAtomicAmount(price, decimals, label) {
+  const text = typeof price === 'number' && Number.isFinite(price) ? String(price) : price;
+  if (typeof text !== 'string' || !CATALOG_PRICE.test(text)) {
+    throw new Error(`${label} is not a canonical catalog price`);
+  }
+  const [whole, fraction = ''] = text.split('.');
+  if (fraction.length > decimals) throw new Error(`${label} has more precision than the settlement asset`);
+  const atomic = BigInt(whole) * 10n ** BigInt(decimals) + BigInt((fraction.padEnd(decimals, '0')) || '0');
+  if (atomic <= 0n) throw new Error(`${label} must be positive`);
+  return atomic;
+}
+
+/** The one configured machine for this pack, with its price validated as exact catalog evidence. */
+function admittedCatalogUnit({ catalog, packId, settlementAsset }) {
+  if (!catalog || typeof catalog !== 'object' || !Array.isArray(catalog.machines)) {
+    throw new Error('admission planner received an invalid Collector machine catalog');
+  }
+  const matches = catalog.machines.filter(machine => machine && typeof machine === 'object' && machine.code === packId);
+  if (matches.length !== 1) throw new Error('admission planner requires exactly one configured Collector machine');
+  const [machine] = matches;
+  if (machine.available === false || machine.enabled === false) {
+    throw new Error('admission planner refuses an unavailable Collector machine');
+  }
+  return catalogAtomicAmount(machine.price, settlementAsset.decimals, `Collector machine "${packId}" price`);
+}
+
+function typedAdmissionAmount(asset, amountAtomic) {
+  return Object.freeze({
+    chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals, amountAtomic: amountAtomic.toString(),
+  });
+}
+
+function admittedRelayIdentity(quote) {
+  return Object.freeze({
+    tradeType: 'EXACT_OUTPUT',
+    requestId: quote.requestId,
+    orderId: quote.orderId,
+    deadlineUnixSeconds: quote.deadlineUnixSeconds,
+    sender: quote.sender,
+    recipient: quote.recipient,
+    destinationAmount: quote.destination.amount,
+    destinationMinimumAmount: quote.destination.minimumAmount,
+    quoteDigest: quote.quoteDigest,
+  });
+}
+
+/**
+ * Plans the quote-bound admission a live cycle is opened under.
+ *
+ * Two quotes are obtained, never one. The unit quote prices exactly one configured pack and is the
+ * only thing compared against the operator's per-unit ceiling; the aggregate quote prices the whole
+ * requested quantity and is the only thing compared against the per-cycle and rolling caps. The
+ * aggregate is never divided to obtain a unit price, and the unit is never multiplied to obtain an
+ * aggregate: fees and slippage are not linear in quantity, so either substitution would authorize a
+ * spend nobody quoted. Both are EXACT_OUTPUT, so Relay reports the source USDG required to deliver
+ * an exact settlement-asset target rather than leaving the delivered amount to vary.
+ *
+ * Returns `null` when the configuration cannot admit a cycle at all, which the service reports as
+ * WAITING_FOR_ADMISSION. Anything malformed throws instead of degrading into a cheaper cycle.
+ */
+function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
+  return {
+    async plan({ cycleId, packId }) {
+      const configuration = await readConfiguration();
+      if (configuration === null || !configuration.liveMode) return null;
+      const quantity = configuration.requestedOrders;
+      if (!Number.isInteger(quantity) || quantity < 1) return null;
+      if (!configuration.allowedPackIds.includes(packId)) return null;
+      if (typeof adapters?.collectorCrypt?.getMachines !== 'function') {
+        throw new Error('admission planner requires collector-crypt machine data');
+      }
+      if (typeof adapters?.relay?.quoteOutboundBridge !== 'function') {
+        throw new Error('admission planner requires a Relay client');
+      }
+      const settlementAsset = config.money.assets.solanaStablecoin;
+      const fundingAsset = config.money.assets.usdg;
+      const unitAtomic = admittedCatalogUnit({
+        catalog: await adapters.collectorCrypt.getMachines(),
+        packId,
+        settlementAsset,
+      });
+      const aggregateAtomic = unitAtomic * BigInt(quantity);
+      const route = {
+        user: config.accounts.evm,
+        recipient: config.accounts.solana,
+        destinationCurrency: settlementAsset.assetId,
+        tradeType: 'EXACT_OUTPUT',
+      };
+      // Sequential, not concurrent: these are two separate priced facts about the same reserve, and
+      // issuing them together would make the pair's ordering -- and therefore which one Relay
+      // priced against which inventory state -- nondeterministic evidence.
+      const unitQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: unitAtomic.toString() });
+      const aggregateQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: aggregateAtomic.toString() });
+      if (unitQuote.requestId === aggregateQuote.requestId) {
+        throw new Error('admission planner received one Relay quote for both the unit and aggregate targets');
+      }
+      return Object.freeze({
+        schema: 'hookemon.policy-admission.v2',
+        cycleId,
+        packId,
+        quantity,
+        quoteDigest: aggregateQuote.quoteDigest,
+        unitPurchase: typedAdmissionAmount(settlementAsset, unitAtomic),
+        aggregatePurchase: typedAdmissionAmount(settlementAsset, aggregateAtomic),
+        unitFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(unitQuote.origin.amount)),
+        aggregateFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(aggregateQuote.origin.amount)),
+        relay: admittedRelayIdentity(aggregateQuote),
+        unitRelay: admittedRelayIdentity(unitQuote),
+        unitRelayQuote: unitQuote,
+        relayQuote: aggregateQuote,
+      });
+    },
+  };
+}
+
+/**
+ * The attributable, finalized process USDG balance: what the admitted cycle may actually spend.
+ *
+ * This does not replace the operator's configured budget figure, which stays an intent check run
+ * before anything is priced. It is the separate, evidenced check applied to the quoted principal --
+ * the amount actually being authorized.
+ *
+ * A configured literal is not admission evidence, and neither is a "latest" balance: the public RPC
+ * only serves state reads at latest, so the read is taken there and then separately confirmed to sit
+ * at or below the finalized head. An unfinalized read reports '0' rather than its value, so a
+ * reorg-eligible balance can never fund a cycle. A read that fails reports '0' too -- absence of
+ * evidence is not evidence of funds.
+ */
+function buildProcessBalanceReader({ config, adapters }) {
+  const client = adapters?.robinhood?.client ?? null;
+  return {
+    async read() {
+      if (client === null) return null;
+      try {
+        const balance = await readTokenBalanceAtLatest(client, {
+          token: config.money.assets.usdg.assetId,
+          account: config.accounts.evm,
+        });
+        const finality = await confirmReadFinalized(client, balance.blockNumber);
+        return finality.finalized ? balance.value.toString() : '0';
+      } catch {
+        return '0';
+      }
+    },
+  };
+}
+
 function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMode }) {
   return {
     async read() {
@@ -521,6 +724,67 @@ function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMod
  * (`OBSERVATION_FAILED`), so this never blocks cycle completion either way. */
 function buildFeeSettlementObserver() {
   return { async observe(cycleId) { return { cycleId, status: 'PENDING_BENEFICIARY_CLAIMS' }; } };
+}
+
+function createProductionSupplementaryStageHandlers({ assertCanary }) {
+  const guarded = handler => Object.freeze({
+    stage: handler.stage,
+    async reconcile(input) {
+      await assertCanary({
+        cycleId: input.context.cycleId,
+        stage: input.context.stage,
+        assertLease: input.assertLease,
+      });
+      return handler.reconcile(input);
+    },
+  });
+  const buyback = createSupplementaryBuybackHandler();
+  const returnHandler = {
+    stage: 'supplementary-return',
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position }) {
+      const sale = await cycleRepository.readSupplementarySettlementEvidence(position.positionId);
+      if (sale?.state !== 'BUYBACK_SENT_UNKNOWN' || !sale.evidence) {
+        throw new Error('supplementary return requires durable confirmed-sale evidence');
+      }
+      await mutateSupplementaryReturn({
+        liveMode: true,
+        adapters,
+        signerClient,
+        config,
+        cycleRepository,
+        context,
+        confirmedSale: sale.evidence,
+      });
+      return reconcileSupplementaryReturn({ adapters, config, cycleRepository, context });
+    },
+  };
+  const payoutHandler = {
+    stage: 'supplementary-payout',
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position }) {
+      const [boundary, snapshot] = await Promise.all([
+        cycleRepository.readSupplementarySettlementEvidence(position.positionId),
+        cycleRepository.readStage(position.cycleId, 'eligibility-snapshot'),
+      ]);
+      if (boundary?.state !== 'RETURN_BROADCAST' || !boundary.evidence
+        || snapshot?.status !== 'COMPLETE' || !snapshot.evidence) {
+        throw new Error('supplementary payout requires durable return and eligibility evidence');
+      }
+      return mutateSupplementaryPayout({
+        liveMode: true,
+        adapters,
+        signerClient,
+        config,
+        cycleRepository,
+        context: { ...context, eligibilityManifest: snapshot.evidence, returnBoundary: boundary.evidence },
+      });
+    },
+  };
+  return Object.freeze({
+    PREPARED: guarded(buyback),
+    BUYBACK_SENT_UNKNOWN: guarded(returnHandler),
+    RETURN_BROADCAST: guarded(payoutHandler),
+    PAYOUT_BROADCAST: guarded(payoutHandler),
+  });
 }
 
 /**
@@ -616,7 +880,7 @@ export async function compose(config) {
   };
   for (const [key, value] of Object.entries(budget)) assertDecimal(value, `compose config.budget.${key}`);
 
-  const resolved = {
+  let resolved = {
     chainId: 4663,
     // WP-37: `treasury`/`pool` are operator/test-configured fallbacks for `distribution.mjs`'s own
     // holder-exclusion-set builder (see environment.mjs's own header — `pool` only matters until
@@ -651,6 +915,10 @@ export async function compose(config) {
   if (resolved.stageHandlers !== undefined && resolved.stageHandlers !== null
     && process.env.NODE_TEST_CONTEXT === undefined) {
     throw new Error('compose stageHandlers are available only from the Node test runner');
+  }
+  if (resolved.supplementaryStageHandlers !== undefined && resolved.supplementaryStageHandlers !== null
+    && process.env.NODE_TEST_CONTEXT === undefined) {
+    throw new Error('compose supplementaryStageHandlers are available only from the Node test runner');
   }
 
   if (!resolved.execution || typeof resolved.execution !== 'object' || Array.isArray(resolved.execution)) {
@@ -706,6 +974,21 @@ export async function compose(config) {
     && (!resolved.rehearsal || resolved.rehearsal.proceedsAccount === undefined)) {
     throw new Error('compose fake rehearsal requires a dedicated proceeds account');
   }
+  if (isLiveCollectorOnlyRehearsal(resolved)) {
+    if (resolved.accounts?.evm !== null && resolved.accounts?.evm !== undefined) {
+      throw new Error('compose live collector-only rehearsal requires no EVM Operations account');
+    }
+    if (typeof resolved.accounts?.solana !== 'string' || resolved.accounts.solana.length === 0
+      || typeof resolved.rehearsal?.proceedsAccount !== 'string' || resolved.rehearsal.proceedsAccount.length === 0
+      || !Array.isArray(resolved.rehearsal.payoutRecipients) || resolved.rehearsal.payoutRecipients.length === 0) {
+      throw new Error('compose live collector-only rehearsal requires Solana Operations, proceeds, and payout recipients');
+    }
+    if (resolved.rehearsal.proceedsAccount === resolved.accounts.solana
+      || resolved.rehearsal.payoutRecipients.includes(resolved.rehearsal.proceedsAccount)) {
+      throw new Error('compose live collector-only rehearsal requires a proceeds account distinct from Operations and recipients');
+    }
+    collectorOnlyPackPrice(resolved);
+  }
   resolved.moneyConfiguration = resolveMoneyConfiguration(resolved.moneyConfiguration, resolved.execution);
 
   // The dashboard profile is part of the same network boundary as the runner. Resolve and check
@@ -718,6 +1001,9 @@ export async function compose(config) {
   );
 
   const adapters = buildAdapters(resolved);
+  if (isLiveCollectorOnlyRehearsal(resolved) && resolved.collectorCrypt?.executionBundleRequired === true) {
+    resolved = attachCollectorPolicyBundle(resolved, await loadCollectorPolicyBundle());
+  }
   if (resolved.execution.profile === 'production') {
     assertProductionHistoricalEvidenceClient(adapters);
   }
@@ -730,6 +1016,7 @@ export async function compose(config) {
       config: resolved,
       adapters,
       profileId: dashboardConfig?.profileId ?? 'mainnet',
+      requireEvm: !isLiveCollectorOnlyRehearsal(resolved),
     });
   }
 
@@ -755,7 +1042,43 @@ export async function compose(config) {
   let successfulStartPreflight = null;
   let successfulMainnetRpcIdentity = null;
 
+  async function assertLiveCollectorOnlyPolicyConfiguration() {
+    const configuration = await readConfiguration();
+    if (configuration === null) throw new Error('policy configuration is required before service startup');
+    assertCollectorOnlyRehearsalPolicy(configuration, {
+      packCode: resolved.pack.code,
+      packPriceAtomic: collectorOnlyPackPrice(resolved),
+    });
+    return configuration;
+  }
+
+  async function requireLiveCollectorOnlyCanary() {
+    const client = adapters?.solana?.client;
+    const operator = resolved.accounts?.solana;
+    const reserve = resolved.moneyConfiguration?.solana?.lamportReserve;
+    if (!client || typeof operator !== 'string' || operator.length === 0
+      || !reserve || typeof reserve.amountAtomic !== 'string' || !decimalPattern.test(reserve.amountAtomic)) {
+      throw new Error('live collector-only rehearsal requires a Solana RPC client, Operations account, and typed lamport reserve');
+    }
+    const [blockhash, solBalance] = await Promise.all([
+      readUsableLatestBlockhash(client),
+      readSolBalance(client, operator),
+    ]);
+    if (!blockhash || typeof blockhash.blockhash !== 'string' || blockhash.blockhash.length === 0) {
+      throw new Error('live collector-only rehearsal Solana blockhash canary did not return a usable blockhash');
+    }
+    if (typeof solBalance !== 'bigint' || solBalance < BigInt(reserve.amountAtomic)) {
+      throw new Error('live collector-only rehearsal Operations SOL balance is below the typed lamport reserve');
+    }
+    return Object.freeze({ blockhash: blockhash.blockhash, solBalanceLamports: solBalance.toString() });
+  }
+
   async function requireStartPreflight({ requireCanonicalEvmIdentity = true } = {}) {
+    if (isLiveCollectorOnlyRehearsal(resolved)) {
+      await assertLiveCollectorOnlyPolicyConfiguration();
+      await requireLiveCollectorOnlyCanary();
+      return;
+    }
     if (observability === null) throw new Error('observability configuration is required before live service startup');
     if (requireCanonicalEvmIdentity) await assertMainnetRpcChainId();
     if (successfulStartPreflight !== null) {
@@ -864,16 +1187,19 @@ export async function compose(config) {
     if (mode !== 'production' && mode !== 'rehearsal') throw new Error('compose readiness mode is invalid');
     if (typeof requireCanaryPreflight !== 'boolean') throw new Error('compose readiness canary requirement is invalid');
     const repository = await assertRepositoryIntegrity();
-    await assertMainnetRpcChainId();
+    const liveCollectorOnly = isLiveCollectorOnlyRehearsal(resolved);
+    if (!liveCollectorOnly) await assertMainnetRpcChainId();
     if (requirePolicyConfiguration) {
       const configuration = await readConfiguration();
       if (configuration === null) throw new Error('policy configuration is required before service startup');
       if (configuration.liveMode !== liveMode) {
         throw new Error('policy configuration liveMode does not match the execution profile');
       }
-      const minimumApprovals = mode === 'production' ? 3 : 1;
-      if (configuration.manualApprovalCycles < minimumApprovals) {
-        throw new Error(`policy configuration manualApprovalCycles must be at least ${minimumApprovals} for ${mode} startup`);
+      if (liveCollectorOnly) {
+        assertCollectorOnlyRehearsalPolicy(configuration, {
+          packCode: resolved.pack.code,
+          packPriceAtomic: collectorOnlyPackPrice(resolved),
+        });
       }
     }
     if (requireCanaryPreflight || liveMode === true) await requireStartPreflight();
@@ -914,6 +1240,9 @@ export async function compose(config) {
       && (!resolved.rehearsal || resolved.rehearsal.proceedsAccount === undefined)) {
       throw new Error('compose fake rehearsal requires a dedicated proceeds account');
     }
+    const productionSupplementaryStageHandlers = liveMode === true && resolved.execution.profile === 'production'
+      ? createProductionSupplementaryStageHandlers({ assertCanary: requireUsdgStatusCanary })
+      : null;
     const stageDriver = mode === 'rehearsal' && resolved.execution.providerMode === 'fake'
       ? createRehearsalStageDriver({
         cycleRepository,
@@ -930,7 +1259,12 @@ export async function compose(config) {
         config: resolved,
         cycleRepository,
         stageHandlers: resolved.stageHandlers ?? null,
+        supplementaryStageHandlers: resolved.supplementaryStageHandlers ?? null,
+        supplementaryAdapters: productionSupplementaryStageHandlers === null ? null : adapters,
+        supplementarySignerClient: productionSupplementaryStageHandlers === null ? null : resolved.signerClient,
+        productionSupplementaryStageHandlers,
         preflightAuthority: resolved.preflightAuthority,
+        readOperatorConfiguration: readConfiguration,
       }), resolved.restartInjector ?? null);
     const serviceConfig = {
       owner: resolved.workerOwner,
@@ -938,6 +1272,20 @@ export async function compose(config) {
       now,
       leaseStore,
       budgetReader: buildBudgetReader({ config: resolved, cycleRepository, readConfiguration, liveMode }),
+      // Only a live production cycle with a resolved money configuration and Operations accounts is
+      // quote-bound: those are what a quote is denominated in and routed to, so a composition
+      // without them has nothing to price. Rehearsal, dry-run and such partial compositions keep the
+      // previous unadmitted path, where decideCycleBudget still uses its configured static sum and
+      // outbound still refuses for want of a repository-owned admission.
+      ...(liveMode && mode === 'production'
+        && resolved.money?.assets?.solanaStablecoin && resolved.money?.assets?.usdg
+        && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
+        ? {
+          admissionPlanner: buildAdmissionPlanner({ config: resolved, adapters, readConfiguration }),
+          processBalanceReader: buildProcessBalanceReader({ config: resolved, adapters }),
+          operationsAccounts: { evm: resolved.accounts.evm, solana: resolved.accounts.solana },
+        }
+        : {}),
       cycleRepository,
       runnerFactory: createCycleRunner,
       stageDriver,
@@ -988,6 +1336,16 @@ export async function compose(config) {
     });
   }
 
+  function buildConfiguredRecoveryService() {
+    if (resolved.execution.profile === 'production') {
+      return buildAutomatedCycleService(!resolved.execution.dryRun, 'production');
+    }
+    if (resolved.execution.profile === 'rehearsal') {
+      return buildAutomatedCycleService(resolved.execution.providerMode === 'live', 'rehearsal');
+    }
+    return buildAutomatedCycleService(false, resolved.execution.dryRun ? 'production' : 'rehearsal');
+  }
+
   // Tracked so the composed dashboard's `ctx.lastTick()` (status-projection.mjs's `nextRunAt`) always
   // reflects the real, most recent tick this exact scheduler ran — never a value the dashboard
   // guessed or cached independently. Updated on every tick outcome, not only a successful one, since
@@ -1013,13 +1371,15 @@ export async function compose(config) {
     triggerTick: () => scheduler.triggerTick(),
     async resumeActiveCycle() {
       const active = await cycleRepository.readActiveCycle();
-      if (active === null) return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
+      if (active === null) {
+        return buildConfiguredRecoveryService().recoverActiveCycle({});
+      }
       if (active.mode !== 'production' && active.mode !== 'rehearsal') {
         return { status: 'CYCLE_MODE_UNRESOLVED', cycleId: active.cycleId, stage: null };
       }
       return buildAutomatedCycleService(active.mode === 'production', active.mode).recoverActiveCycle({});
     },
-    recordHeldOwnerDecision: ({ cycleId, ...decision }) => cycleRepository.recordHeldOwnerDecision(cycleId, decision),
+    recordHeldOwnerDecision: ({ positionId, ...decision }) => cycleRepository.recordHeldOwnerDecision(positionId, decision),
   });
 
   async function executeAudited({ requestId, expectedRevision, command, effect, note = null } = {}) {
@@ -1033,8 +1393,8 @@ export async function compose(config) {
       actor: { email: 'local-operator' },
       actorRole: 'operator',
       note,
-      resultCode: operatorAuditResultCode(command, status),
-      effect,
+      resultCode: operatorAuditResultCode(command),
+      effect: async receipt => withResumeAuditResult(command, await effect(receipt)),
     });
   }
 
@@ -1047,12 +1407,50 @@ export async function compose(config) {
     },
   };
 
+  // Public-Integration-interface.md binding 3: rebuilt from C's own durable pack-lifecycle evidence
+  // on every call, the same restart-recovery role `reconcileFromJournal` documents, never a mutable
+  // long-lived cache the dashboard could see go stale or duplicate across a composition restart.
+  // Bounded to the most recently known cycles: `listKnownCycleIds()` returns every cycle a store has
+  // ever held (archived cycles first, then active), unbounded over a long production lifetime, and
+  // this feed only ever needs to show the newest cards.
+  const RECENT_WINNERS_CYCLE_SCAN_LIMIT = 50;
+  async function listRecentWinners({ limit } = {}) {
+    const knownCycleIds = await cycleRepository.listKnownCycleIds();
+    const scannedCycleIds = knownCycleIds.slice(-RECENT_WINNERS_CYCLE_SCAN_LIMIT);
+    const trustedOperations = new Map();
+    const observations = [];
+    for (const cycleId of scannedCycleIds) {
+      const batch = await cycleRepository.readPackBatchRequest(cycleId, 'purchase');
+      if (batch === null) continue;
+      const built = buildDurableCardFeed({
+        cycleId,
+        packBatchRequestPacks: batch.packs,
+        purchaseRequestedAtMs: batch.requestedAtMs,
+        stages: {
+          purchase: await cycleRepository.readStage(cycleId, 'purchase'),
+          open: await cycleRepository.readStage(cycleId, 'open'),
+          epicGate: await cycleRepository.readStage(cycleId, 'epic-gate'),
+          buyback: await cycleRepository.readStage(cycleId, 'buyback'),
+        },
+        operatorWallet: resolved.accounts?.solana ?? null,
+      });
+      for (const [memo, record] of built.trustedOperations) trustedOperations.set(memo, record);
+      observations.push(...built.observations);
+    }
+    if (trustedOperations.size === 0) return [];
+    const collector = createRecentWinnersCollector({ trustedOperations });
+    for (const observation of observations) collector.ingest(observation);
+    return collector.list({ limit });
+  }
+
   const dashboard = dashboardConfig
     ? await composeDashboard({
       dashboardConfig,
       chainId: resolved.chainId,
       cycleRepository: cycleRepositoryClient,
       operatorControl,
+      getSchedulerView: () => scheduler.getView(),
+      listRecentWinners,
       readLastTick: () => lastTick,
       adapters,
       identities: buildDashboardIdentities(resolved),

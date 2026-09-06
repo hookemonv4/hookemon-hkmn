@@ -611,11 +611,11 @@ function assertReservedCycleId(value) {
  * The full value is stored, not the normalized subset: normalization drops `relayQuote`, which is
  * the evidence a restarted outbound needs.
  */
-function assertDurableCycleAdmission(value, cycleId, label = 'cycle-repository admission') {
+function assertDurableCycleAdmission(value, cycleId, operations, label = 'cycle-repository admission') {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new Error(`${label} must be a plain object`);
   }
-  assertPolicyAdmission(value);
+  assertPolicyAdmission(value, operations);
   if (value.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
   const quote = value.relayQuote;
   if (!quote || typeof quote !== 'object' || Array.isArray(quote) || Object.getPrototypeOf(quote) !== Object.prototype) {
@@ -2620,7 +2620,15 @@ export class CycleRepository {
         assertReleaseAmount(entry.payload.releaseAmount);
         releaseAmount = entry.payload.releaseAmount;
         if (Object.hasOwn(entry.payload, 'admission')) {
-          admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, 'stored cycle admission');
+          // Replay validates identity and structure only. The Operations accounts a stored
+          // admission was admitted against are not re-derived here: they are composition identity,
+          // and the policy engine re-checks them against current configuration on every boundary.
+          admission = assertDurableCycleAdmission(
+            entry.payload.admission,
+            cycleId,
+            { evm: entry.payload.admission?.relay?.sender ?? '', solana: entry.payload.admission?.relay?.recipient ?? '' },
+            'stored cycle admission',
+          );
         }
         if (Object.hasOwn(entry.payload, 'mode')) {
           mode = assertCycleMode(entry.payload.mode, 'stored cycle mode');
@@ -3400,7 +3408,7 @@ export class CycleRepository {
 
   async createCycle({
     releaseAmount, mode, providerMode = null, dryRun = false, rehearsalSessionId = null,
-    cycleId = null, admission = null,
+    cycleId = null, admission = null, operations = null,
   }) {
     assertReleaseAmount(releaseAmount);
     assertCycleMode(mode);
@@ -3416,7 +3424,7 @@ export class CycleRepository {
     // replaced, and a replacement quote cannot inherit this cycle's authorization.
     const admitted = admission === null
       ? null
-      : assertDurableCycleAdmission(admission, openedCycleId, 'cycle-repository createCycle admission');
+      : assertDurableCycleAdmission(admission, openedCycleId, operations, 'cycle-repository createCycle admission');
     if (admitted !== null && admitted.aggregateFundingQuote.amountAtomic !== releaseAmount) {
       throw new Error('cycle-repository createCycle: release amount does not equal the admitted aggregate funding quote');
     }

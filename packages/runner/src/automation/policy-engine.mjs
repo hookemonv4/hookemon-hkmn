@@ -13,6 +13,24 @@ const USDG_ROUTE = Object.freeze({ chainId: '4663', assetId: '0x5fc5360d0400a0fd
 const COLLECTOR_SETTLEMENT_ROUTE = Object.freeze({ chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 });
 const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
 const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+/**
+ * The deployed Operations accounts an admission may route funds to. Pinned as the default so
+ * production behaviour is unchanged when nothing supplies them, but they are deployment identity
+ * rather than policy: a literal here cannot survive an account rotation and makes an admission
+ * impossible to exercise under isolated keys. A caller that knows its configured accounts passes
+ * them in, and the check is exactly as strict against those.
+ */
+const DEFAULT_OPERATIONS_ACCOUNTS = Object.freeze({ evm: OPERATIONS_EVM, solana: OPERATIONS_SOLANA });
+
+function assertOperationsAccounts(value) {
+  if (value === undefined || value === null) return DEFAULT_OPERATIONS_ACCOUNTS;
+  if (typeof value !== 'object' || Array.isArray(value)
+    || typeof value.evm !== 'string' || value.evm.length === 0
+    || typeof value.solana !== 'string' || value.solana.length === 0) {
+    throw new Error('policy operations accounts are invalid');
+  }
+  return Object.freeze({ evm: value.evm.toLowerCase(), solana: value.solana });
+}
 const mutationBoundaries = new Set(['claim-process', 'purchase', 'signature', 'broadcast', 'mutation']);
 const executionBoundaries = new Set(['signature', 'broadcast', 'mutation']);
 
@@ -150,7 +168,7 @@ function assertRawRelayLeg(value, expected, label, { destination = false } = {})
   }
 }
 
-function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRelay }) {
+function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRelay, operations }) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('policy admission unitRelayQuote must be a parsed Relay quote');
   }
@@ -171,7 +189,7 @@ function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRe
   };
   if (quote.direction !== 'OUTBOUND' || quote.tradeType !== 'EXACT_OUTPUT'
     || quote.requestId !== unitRelay.requestId || quote.orderId !== unitRelay.orderId
-    || quote.sender?.toLowerCase() !== OPERATIONS_EVM || quote.recipient !== OPERATIONS_SOLANA
+    || quote.sender?.toLowerCase() !== operations.evm || quote.recipient !== operations.solana
     || quote.deadlineUnixSeconds !== unitRelay.deadlineUnixSeconds
     || !Number.isSafeInteger(quote.stepCount) || quote.stepCount < 0
     || typeof quote.quoteDigest !== 'string' || !digestPattern.test(quote.quoteDigest)) {
@@ -214,7 +232,8 @@ function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRe
  * returned value is the normalized subset the policy digest covers; a persisting caller keeps its
  * own full record (which additionally carries the parsed aggregate `relayQuote` outbound replays).
  */
-function normalizePolicyAdmission(value) {
+function normalizePolicyAdmission(value, operationsAccounts) {
+  const operations = assertOperationsAccounts(operationsAccounts);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.schema !== 'hookemon.policy-admission.v2') {
     throw new Error('policy admission must use hookemon.policy-admission.v2');
@@ -244,7 +263,7 @@ function normalizePolicyAdmission(value) {
   if (!relay || relay.tradeType !== 'EXACT_OUTPUT' || typeof relay.requestId !== 'string' || relay.requestId.length === 0
     || typeof relay.orderId !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId)
     || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
-    || typeof relay.sender !== 'string' || relay.sender.toLowerCase() !== OPERATIONS_EVM || relay.recipient !== OPERATIONS_SOLANA
+    || typeof relay.sender !== 'string' || relay.sender.toLowerCase() !== operations.evm || relay.recipient !== operations.solana
     || assertAmount(relay.destinationAmount, 'policy admission relay destinationAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic
     || assertAmount(relay.destinationMinimumAmount, 'policy admission relay destinationMinimumAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic) {
     throw new Error('policy admission Relay exact-output identity is invalid');
@@ -252,7 +271,7 @@ function normalizePolicyAdmission(value) {
   const unitRelay = value.unitRelay;
   if (!unitRelay || unitRelay.tradeType !== 'EXACT_OUTPUT' || typeof unitRelay.requestId !== 'string' || unitRelay.requestId.length === 0
     || !/^0x[0-9a-fA-F]{64}$/.test(unitRelay.orderId ?? '') || !Number.isSafeInteger(unitRelay.deadlineUnixSeconds)
-    || unitRelay.deadlineUnixSeconds <= 0 || unitRelay.sender?.toLowerCase() !== OPERATIONS_EVM || unitRelay.recipient !== OPERATIONS_SOLANA
+    || unitRelay.deadlineUnixSeconds <= 0 || unitRelay.sender?.toLowerCase() !== operations.evm || unitRelay.recipient !== operations.solana
     || assertAmount(unitRelay.destinationAmount, 'policy admission unitRelay destinationAmount', { positive: true }).toString() !== unitPurchase.amountAtomic
     || assertAmount(unitRelay.destinationMinimumAmount, 'policy admission unitRelay destinationMinimumAmount', { positive: true }).toString() !== unitPurchase.amountAtomic
     || typeof unitRelay.quoteDigest !== 'string' || !digestPattern.test(unitRelay.quoteDigest)) {
@@ -261,7 +280,7 @@ function normalizePolicyAdmission(value) {
   if (typeof relay.quoteDigest !== 'string' || relay.quoteDigest !== value.quoteDigest) {
     throw new Error('policy admission aggregate Relay quote digest is invalid');
   }
-  const unitRelayQuote = normalizeUnitRelayQuote(value.unitRelayQuote, { unitFundingQuote, unitPurchase, unitRelay });
+  const unitRelayQuote = normalizeUnitRelayQuote(value.unitRelayQuote, { unitFundingQuote, unitPurchase, unitRelay, operations });
   return Object.freeze({
     schema: value.schema,
     cycleId: value.cycleId,
@@ -463,12 +482,12 @@ function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, pa
   });
 }
 
-export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined }) {
+export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined, operations = undefined }) {
   const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
   assertCycleId(cycleId);
   assertAmount(releaseAmountMicroUsdg, 'policy releaseAmountMicroUsdg', { positive: true });
   assertPackId(packId);
-  const normalizedAdmission = admission === undefined ? null : normalizePolicyAdmission(admission);
+  const normalizedAdmission = admission === undefined ? null : normalizePolicyAdmission(admission, operations);
   if (normalizedAdmission !== null && normalizedAdmission.cycleId !== cycleId) throw new Error('policy admission cycleId does not match cycle digest');
   return digestCyclePolicy({
     schema: normalizedAdmission === null ? 'hookemon.policy-cycle.v3' : 'hookemon.policy-cycle.v4',
@@ -518,8 +537,8 @@ function deriveLegacyCyclePolicyDigest({ configuration, cycleId, releaseAmountMi
   });
 }
 
-function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined }) {
-  const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission });
+function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined, operations = undefined }) {
+  const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission, operations });
   if (existing.cycleDigest === current) return current;
   if (admission !== undefined) return null;
   const versionThree = deriveVersionThreeCyclePolicyDigest({
@@ -648,7 +667,8 @@ function admissionContext(input) {
   if (input.cycleId !== undefined && input.cycleId !== null) assertCycleId(input.cycleId);
   if (input.packId !== undefined && input.packId !== null) assertPackId(input.packId);
   const capUsdg = input.capUsdg === undefined ? null : assertAmount(input.capUsdg, 'policy capUsdg');
-  const admission = input.admission === undefined ? null : normalizePolicyAdmission(input.admission);
+  const operations = assertOperationsAccounts(input.operations);
+  const admission = input.admission === undefined ? null : normalizePolicyAdmission(input.admission, operations);
   if (admission !== null) {
     if (input.cycleId !== undefined && input.cycleId !== null && input.cycleId !== admission.cycleId) {
       throw new Error('policy admission cycleId does not match policy context');
@@ -663,10 +683,10 @@ function admissionContext(input) {
       throw new Error('policy admission quantity does not match requested orders');
     }
     if (now >= admission.relay.deadlineUnixSeconds * 1000 || now >= admission.unitRelay.deadlineUnixSeconds * 1000) {
-      return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission.cycleId, packId: input.packId ?? admission.packId, admission, expiredAdmission: true };
+      return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission.cycleId, packId: input.packId ?? admission.packId, admission, operations, expiredAdmission: true };
     }
   }
-  return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission?.cycleId ?? null, packId: input.packId ?? null, admission };
+  return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission?.cycleId ?? null, packId: input.packId ?? null, admission, operations };
 }
 
 function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
@@ -738,6 +758,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       liveMode: context.liveMode,
       mode: context.mode,
       admission: context.admission ?? undefined,
+      operations: context.operations,
     });
     const cycleDigest = existing
       ? matchingExistingCycleDigest({
@@ -749,6 +770,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
         liveMode: context.liveMode,
         mode: context.mode,
         admission: context.admission ?? undefined,
+        operations: context.operations,
       })
       : derivedCycleDigest;
     if (cycleDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
@@ -802,6 +824,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       liveMode: context.liveMode,
       mode: context.mode,
       admission: context.admission ?? undefined,
+      operations: context.operations,
     });
     if (expectedDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
     const reservation = normalized.spendLedger.find(entry => entry.cycleDigest === expectedDigest);
@@ -820,8 +843,8 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
   return allowed();
 }
 
-export function assertPolicyAdmission(value) {
-  return normalizePolicyAdmission(value);
+export function assertPolicyAdmission(value, operations) {
+  return normalizePolicyAdmission(value, operations);
 }
 
 export function evaluateClaim(input) {
