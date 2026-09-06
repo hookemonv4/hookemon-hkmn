@@ -28,10 +28,45 @@ boundaries without changing the original cycle's holder set.
   position, cycle, snapshot digest, return-source digest, boundary evidence, or manifest mismatch.
   `assertSupplementaryPayoutManifestUnchanged()` rejects a changed frozen plan.
 - `createDirectPayoutState()` and `initializeDirectPayout()` create or recover the durable payout
-  state; initialization returns an existing matching journal instead of overwriting it.
-  `advanceDirectPayout()` advances the first unresolved recipient. A dropped broadcast can use only
-  `recoverDroppedBroadcast()` with its retained bytes; a nonce consumed by another transaction
-  becomes a recipient `NONCE_INTERFERENCE` quarantine.
+  state; initialization returns an existing matching journal instead of overwriting it. Both accept
+  an optional `inFlightWindow` (default 1, byte-identical to fully serial dispatch) that bounds how
+  many recipients may hold a live, not-yet-finalized on-chain nonce at once.
+  `advanceDirectPayout()` advances any recipient inside that bounded in-flight window: a recipient
+  still `PREPARED` (not yet broadcast) always blocks every later recipient, since nonces are handed
+  out and broadcast strictly in order, but up to `inFlightWindow` already `SIGNED`/`BROADCAST`
+  recipients may await finality concurrently, so one slow confirmation does not stall the recipients
+  behind it. A dropped broadcast can use only `recoverDroppedBroadcast()` with its retained bytes; a
+  nonce consumed by another transaction becomes a recipient `NONCE_INTERFERENCE` quarantine.
+- `evaluateDirectPayoutBridgeAdmission()`, `evaluateDirectPayoutFrozenAssetAdmission()`, and
+  `evaluateDirectPayoutNativeGasAdmission()` are pure pre-admission checks: the first refuses to
+  admit an attributable distributable amount above the actually finalized available proceeds and
+  reports the exact deficit; the second refuses to admit any recipient while USDG is frozen for the
+  Operations sender, preserving the whole distributable pool as unsent liability instead of
+  partially dispatching; the third refuses to admit when the live native balance no longer covers
+  the plan's frozen feasibility envelope and reports the exact wei deficit. `ensureDirectPayoutState()`
+  runs the frozen-asset check, then the bridge-shortfall check, then the native-gas recheck, all
+  before any recipient state or predecessor dust is consumed, and holds the cycle `HELD_UNAVAILABLE`
+  with the admission evidence when any of them fails; it never signs, broadcasts, or persists a
+  recipient record before every check has passed.
+- The bridge-shortfall check consumes an explicit, I-owned admission input:
+  `adapters.robinhood.client.readCycleAttributableFinalizedAvailable({cycleId, operations,
+  usdgAddress})`. This must return the authoritative amount attributable to *this* cycle -- never a
+  wallet-wide balance read, since the Operations wallet can hold unrelated cycles' funds that must
+  never fund this cycle's shortfall. A missing method, or a reader that returns `null`/`undefined`,
+  fails closed to `NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN` (via `DirectPayoutBridgeAvailabilityUnknownError`)
+  rather than silently skipping the check or trusting the plan's own accounting. A confirmed
+  shortfall throws `DirectPayoutBridgeShortfallError`; a native-gas shortfall throws
+  `DirectPayoutNativeGasShortfallError`. Both checks are skipped only when `payableRecipientCount`
+  is 0 (nothing will ever be spent).
+- `assertFinalizedPayoutTransferEvidence({transactionHash, finalizedTransfer, operations,
+  recipient, amount})` is a read-only seam for external projections (public accounting) that need
+  to verify a FINALIZED recipient's persisted evidence. It reuses the exact same producer
+  finality-proof validator that gates a live FINALIZED transition (the 16-field
+  schema/endpoint/amount/block/balance-delta/log-index checks), plus a `transactionHash` format
+  check, instead of a second, weaker validator. Callers must supply `operations`/`recipient`/
+  `amount` from their own trusted context (frozen plan, configured USDG address) -- never derived
+  from the evidence itself -- which is what rejects a syntactically valid but foreign same-chain,
+  same-decimals token.
 - `recoverDroppedBroadcast()` reauthorizes and submits only the exact retained signed bytes. It
   requires the stored policy, approval, semantics, signed-message, and fencing-token digests. It
   reloads the authoritative paged payout state before reauthorization and refuses a stale attempt
@@ -53,7 +88,9 @@ boundaries without changing the original cycle's holder set.
   settlement's manifest id, original frozen eligibility-snapshot evidence digest, and later
   repository-derived payout-source digest remain distinct from the main payout manifest.
   `readSupplementarySettlementEvidence(positionId)` is available only on the full repository while
-  recovery needs its provider or transaction facts; the narrow read client omits it.
+  recovery needs its provider or transaction facts; the narrow read client omits it. The actual
+  production handlers that drive this sequence's return and payout legs live in
+  `docs/modules/supplementary-money.md` (`packages/adapters/src/app/stages/supplementary-money.mjs`).
 - `createCycleRepositoryPayoutStore()` reads and writes recipient state through
   `readPagedPayoutState()` and `persistPagedPayoutState()`. Each retained recipient record contains
   its nonce, signed bytes, transaction hash, policy approval context, and finality or refusal
@@ -88,9 +125,27 @@ boundaries without changing the original cycle's holder set.
   set by the stored eligibility-snapshot evidence digest. It cannot change the main manifest,
   substitute another cycle's attribution, use a later same-cycle snapshot, or accept a different
   manifest ordinal after the settlement is prepared.
-- `DIRECT_PAYOUT_RECIPIENT_LIMIT` bounds plan compilation and the feasibility gate at 1,025.
-  Recipient-keyed durable pages retain the full manifest outside bounded journal payload arrays;
-  journal entries retain only compact state metadata and page roots.
+- `DIRECT_PAYOUT_RECIPIENT_LIMIT` is a hard technical ceiling (2,500) below recipient count alone
+  ever truncating a feasible holder set; real admission is still feasibility-gated by the actual
+  recipient count's gas budget (`estimatedNativeFee = recipientCount * measuredTransferGas *
+  maxGasPriceWei`, computed and reported with its exact deficit in `eligibility-snapshot.mjs`), not
+  by this cap alone. Unlike the earlier 50,000 figure, this ceiling is the empirically measured
+  honest capacity of the current durable payout store (`packages/runner/src/cycle/durable-store.mjs`),
+  not just a canonical-JSON/memory bound: that store enforces a 20,000-object canonical budget per
+  persisted payout state (`journal.mjs`'s `canonicalObjects` limit), and a recipient's object
+  footprint grows as it progresses (`SIGNED`/`FINALIZED` add an `approvalContext` and a
+  `finalizedTransfer` object each). Measured against the unmodified store on 2026-09-06: initial
+  admission survives up to 3,995 recipients; a fully-finalized state survives up to 2,854. The
+  limit is set below both with margin for held-position-exclusion and quarantine overhead. Raising
+  it requires a coordinated object-count (or paging-scheme) capacity increase in the durable store
+  and in `CycleRepository.completeStage`'s non-paged stage-evidence embedding (a separate,
+  currently much smaller journal-array-item bottleneck for eligibility/payout stage completion),
+  not just this constant.
+- A frozen eligibility manifest with no eligible holders compiles to an explicit
+  `outcome: 'NON_SPENDING_NO_ELIGIBLE_HOLDERS'` plan instead of throwing: `allocations` is empty,
+  `payableRecipientCount` is 0, and the entire distributable pool becomes durable dust for the
+  successor cycle. A plan with at least one eligible holder always compiles with
+  `outcome: 'ALLOCATED'`. No unallocated value is ever invented or dropped in either case.
 - A supplementary wrapper is deterministic for identical frozen inputs and is deeply immutable in
   memory. Its digest detects a changed ordinal, return evidence, allocation, zero-amount dust
   setting, or eligibility proof before an execution layer can bind it. `RETURN_BROADCAST` is the
@@ -165,6 +220,7 @@ boundaries without changing the original cycle's holder set.
 node --test --test-timeout=120000 packages/adapters/test/app/stages-payout.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/stage-driver.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/supplementary-payout.test.mjs
+node --test --test-timeout=120000 packages/adapters/test/app/payout-resume-scale.test.mjs
 node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.test.mjs
 ```
 

@@ -95,7 +95,7 @@ function canonicalAmount(value, label) {
   return value;
 }
 
-function typedAmount(leg) {
+export function typedAmount(leg) {
   return Object.freeze({
     chainId: String(leg.chainId),
     assetId: leg.chainId === RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID ? leg.address.toLowerCase() : leg.address,
@@ -104,7 +104,7 @@ function typedAmount(leg) {
   });
 }
 
-function assertReturnConfiguration(config) {
+export function assertReturnConfiguration(config) {
   const evm = config?.accounts?.evm;
   const solana = config?.accounts?.solana;
   const solanaMint = config?.relay?.solanaMint;
@@ -192,7 +192,7 @@ function hasHeldPositionWithoutProceedsLedger(cycle) {
   return cycle?.heldPositions instanceof Map && cycle.heldPositions.size > 0;
 }
 
-function assertReturnQuote(quote, config, money = null) {
+export function assertReturnQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.RETURN) throw new Error('return requires a RETURN Relay quote');
   if (quote.origin?.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID || quote.origin?.address !== config.solanaMint) {
     throw new Error('return quote origin does not match the configured Solana mint');
@@ -372,7 +372,7 @@ function exactPolicyRule(decoded, id) {
   });
 }
 
-function assertReturnMoneyConfiguration(config, configured) {
+export function assertReturnMoneyConfiguration(config, configured) {
   let money;
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'return money configuration');
@@ -536,7 +536,7 @@ function assertReturnRequest({ request, context, cycle, configured, money }) {
   return request;
 }
 
-function canonicalPositiveInteger(value, label) {
+export function canonicalPositiveInteger(value, label) {
   canonicalAmount(value, label);
   if (BigInt(value) === 0n) throw new Error(`${label} must be positive`);
   return value;
@@ -559,7 +559,7 @@ function maximumReturnPriorityFeeLamports(decoded) {
   return ((BigInt(computeUnitLimit) * microLamports) + 999_999n) / 1_000_000n;
 }
 
-async function assertReturnLamportReserve({ client, configured, money, decoded }) {
+export async function assertReturnLamportReserve({ client, configured, money, decoded }) {
   const balance = await readSolBalance(client, configured.solana);
   const reserve = BigInt(money.solana.lamportReserve.amountAtomic);
   const required = reserve + maximumReturnPriorityFeeLamports(decoded);
@@ -594,7 +594,7 @@ function requireReturnMutationAuthority(preflightAuthority) {
   return requireLiveMutationAuthority();
 }
 
-async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority }) {
+export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return' }) {
   if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function' || typeof signerClient.solana.broadcast !== 'function') {
     throw new Error('return requires an Operations Solana signer with sign and broadcast capabilities');
   }
@@ -613,7 +613,7 @@ async function createReturnPolicySigner({ signerClient, client, configured, requ
   }
   assertReturnPriorityFeeCap(decoded, money);
   const policy = createTransactionPolicy({
-    policy: createCanonicalTransactionPolicy({ decoded, stage: 'return', requestDigest }),
+    policy: createCanonicalTransactionPolicy({ decoded, stage, requestDigest }),
     rules: [exactPolicyRule(decoded, 'relay-return-step')],
   });
   const policyRules = readTransactionPolicyRules(policy);
@@ -653,9 +653,9 @@ async function createReturnPolicySigner({ signerClient, client, configured, requ
   });
 }
 
-function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, approval, blockhashLastValidHeight }) {
+export function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, approval, blockhashLastValidHeight, stage = 'return' }) {
   return Object.freeze({
-    stage: 'return',
+    stage,
     recipient: null,
     requestDigest,
     policyDigest: approval.policyDigest,
@@ -664,7 +664,7 @@ function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, app
     fencingTokenDigest: canonicalDigest({
       schema: 'hookemon.wallet-nonce-reservation.v1',
       chainId: SOLANA_CHAIN_ID,
-      stage: 'return',
+      stage,
       fencingToken: context.fencingToken,
     }),
     approvedSemanticsDigest: approval.approvedSemanticsDigest,
@@ -674,7 +674,7 @@ function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, app
   });
 }
 
-function returnPolicyRecoveryContext(recoveryContext) {
+export function returnPolicyRecoveryContext(recoveryContext) {
   if (!recoveryContext || typeof recoveryContext !== 'object' || typeof recoveryContext.blockhashLastValidHeight !== 'string') {
     throw new ReturnRecoveryRequiredError(
       'RETURN_SIGNED_BLOCKHASH_CONTEXT_MISSING',
@@ -697,7 +697,7 @@ function returnPolicyRecoveryContext(recoveryContext) {
   });
 }
 
-function assertReturnBroadcastHash(result, expectedHash) {
+export function assertReturnBroadcastHash(result, expectedHash) {
   const transactionHash = typeof result === 'string' ? result : result?.transactionHash ?? result?.signature;
   if (typeof transactionHash !== 'string' || transactionHash !== expectedHash) {
     throw new Error('return broadcaster returned a hash that does not match the persisted signed Solana bytes');
