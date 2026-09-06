@@ -5,7 +5,7 @@
 `packages/dashboard/src/auth/audit-log.mjs` is the append-only, hash-chained record of every
 dispatched operator command. It is a record of decisions, never the money-moving state itself: the
 runner authority (`packages/runner/src/operator/control.mjs`) remains the sole source of truth a
-caller mutates, and this log cannot mutate it back.
+caller mutates, and this log cannot mutate it back or infer that it did.
 
 ## Public interface
 
@@ -14,9 +14,10 @@ caller mutates, and this log cannot mutate it back.
 - `commandDigest({expectedVersion, command, note})` binds a command's identity for
   `executeAuditedCommand`'s idempotency check.
 - `executeAuditedCommand({path, requestId, command, actor, actorRole, expectedVersion,
-  observedVersion, note, resultCode, now, processIsAlive, effect})` reserves a `PREPARED` record,
-  invokes `effect(preparedReceipt)` outside the write lock, and finalizes it `APPLIED`, `REJECTED`,
-  or `UNCERTAIN`. `processIsAlive` defaults to a real PID liveness check and is injectable for tests.
+  observedVersion, note, resultCode, now, leaseTtlMs, heartbeatIntervalMs, effect})` reserves a
+  `PREPARED` record, invokes `effect(preparedReceipt)` outside the write lock, and finalizes it
+  `APPLIED`, `REJECTED`, or `UNCERTAIN`. `leaseTtlMs` (default 30s) and `heartbeatIntervalMs`
+  (default `leaseTtlMs / 2`) are injectable for tests.
 
 ## Invariants
 
@@ -26,29 +27,38 @@ caller mutates, and this log cannot mutate it back.
 - A normal in-process effect failure (a thrown error the calling process is alive to catch) resolves
   to `UNCERTAIN` in the same call, never `PREPARED` — the caller-visible outcome always distinguishes
   "ran and failed" from "still pending."
-- A `PREPARED` record whose owning process has since died (a hard crash between reserving `PREPARED`
-  and finalizing it) is an orphan, not an in-flight command. `executeAuditedCommand` detects this by
-  checking whether the recorded owner PID is still alive; a live owner's `PREPARED` is replayed
-  unchanged (do not run its effect a second time from a different process while it may still be
-  running).
-- Reclaiming an orphaned `PREPARED` record atomically rewrites its owner PID to the current process
-  (still under the write lock, before `effect` runs) so a second concurrent recovery attempt sees a
-  live owner and backs off instead of running the same effect twice. The original request's identity
-  (its very first `PREPARED` entry — `eventId`, `commandDigest`, `observedVersion`) never changes.
-- A reclaimed effect that fails with the exact `'stale operator state revision'` compare-and-swap
-  signal `operator/control.mjs`/`operator/state-file.mjs` use for a lost CAS is finalized `APPLIED`
-  with `COMMAND_RECOVERED_ALREADY_APPLIED`, not `UNCERTAIN`: the CAS failure itself proves the crashed
-  attempt already took effect. Any other reclaimed failure is finalized `UNCERTAIN`, identically to a
-  normal in-process failure.
-- A `PREPARED` record from a version of this module that predates the `pid` field is never treated as
-  an orphan (there is no owner to check liveness against) and keeps its prior behavior.
+- A `PREPARED` record's ownership is a durable, time-based lease, never a process ID. Every PREPARED
+  entry — freshly reserved, reclaimed, or renewed — carries a random `claimToken` and inherits its
+  `occurredAt` from the same clock every append already uses. A claim older than `leaseTtlMs` with no
+  renewal is orphaned and reclaimable; a live claimant renews it via a heartbeat at half the lease
+  interval, so a claim genuinely still in flight never appears stale to a second claimant. This is
+  deliberately not PID-based: `process.kill(pid, 0)` only ever inspects the local host's process
+  table, so it is either useless or actively wrong from a second host sharing the same log, and
+  cannot distinguish a dead PID from one a different process has since reused. The write-append lock
+  (`${path}.lock`) uses the identical time-based reasoning: a lock is only ever removed once its
+  filesystem modification time exceeds the stale threshold, never by checking its recorded owner
+  PID's liveness.
+- A legacy `PREPARED` record from before `claimToken` existed still carries `occurredAt` (a required
+  field on every entry) and ages out the same way — there is no separate migration path.
+- Reclaiming an orphaned `PREPARED` record appends a fresh claim (new `claimToken`, current
+  `occurredAt`) under the same write lock the staleness check itself ran inside, so a second
+  concurrent recovery attempt that acquires the lock afterward sees the fresh claim and backs off
+  instead of running the same effect twice. The original request's identity (its very first
+  `PREPARED` entry — `eventId`, `commandDigest`, `observedVersion`) never changes.
+- This module never infers "the crashed attempt's effect already applied" from a generic error
+  message: a shared-state compare-and-swap conflict (e.g. `'stale operator state revision'`) carries
+  no command-specific identity or postcondition, only "some write happened." Any effect failure —
+  first attempt or recovered — is finalized `UNCERTAIN` alike. An authoritative APPLIED outcome comes
+  only from the wrapped authority itself recognizing its own already-applied effect and returning
+  successfully (see `operator/control.mjs`'s idempotent configuration mutation for how that authority
+  does it) — never from this log guessing.
 
 ## State transitions
 
 - `PREPARED` → `APPLIED` | `REJECTED` | `UNCERTAIN`, exactly once, terminal from there.
-- An orphan recovery inserts one additional `PREPARED` entry (the reclaim, under the recovering
-  process's PID) before the same terminal transition; `readAllAuditEntries` therefore shows
-  `PREPARED, PREPARED, <terminal>` for a recovered request instead of `PREPARED, <terminal>`.
+- Any number of `PREPARED` renewal/reclaim entries (heartbeat or recovery) may precede the terminal
+  transition; `readAllAuditEntries` shows `PREPARED, PREPARED, ..., <terminal>` for a
+  renewed/recovered request instead of a single `PREPARED, <terminal>`.
 
 ## Operational commands
 
@@ -60,11 +70,12 @@ node --test packages/dashboard/test/auth/audit-log.test.mjs
 
 ## Recovery pointers
 
-- A request stuck at `PREPARED` with its owner process still alive is genuinely in flight; wait for
-  it, do not reclaim it.
-- A request stuck at `PREPARED` with a dead owner self-heals the next time any caller retries
+- A request stuck at `PREPARED` younger than `leaseTtlMs` is genuinely in flight (or its claimant is
+  renewing it); wait for it, do not reclaim it.
+- A request stuck at `PREPARED` older than `leaseTtlMs` self-heals the next time any caller retries
   `executeAuditedCommand` with the same requestId and command digest — including the dashboard's own
-  normal retry path after a restart. No separate sweep or manual repair step exists or is needed.
-- If a reclaimed effect's `UNCERTAIN` outcome needs a human decision, inspect the wrapped authority's
+  normal retry path after a restart, on any host sharing the log. No separate sweep, PID inspection,
+  or manual repair step exists or is needed.
+- If a recovered effect's `UNCERTAIN` outcome needs a human decision, inspect the wrapped authority's
   own state (e.g. `operatorControl.status()`) directly; this log records that a decision was made, not
   what the authoritative state ended up being.
