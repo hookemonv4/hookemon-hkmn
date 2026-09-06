@@ -245,8 +245,13 @@ test('EVM Keychain child wrapper surfaces its parent-envelope timeout when the c
 // entirely, so only the child's own request-level 50ms enforcement can resolve the call -
 // but that enforcement runs three labeled lookups at the same 50ms budget (default-keychain
 // and login-keychain discovery, then find-generic-password), and under cold-start
-// contention any one of the three can legitimately be the stage that exceeds it first; this
-// asserts the failure is exactly one of those three known 50ms outcomes, not a specific one.
+// contention any one of the three can legitimately be the stage whose timer fires first.
+// This asserts the failure is exactly one of those three known 50ms outcomes, not a
+// specific one. It does not additionally check the fixture's own recorded calls: that 50ms
+// timer starts right after the fixture is spawned, before the (also cold-starting) fixture
+// process can be relied on to have reached its own recordCall, so requiring a record would
+// itself race (see keychainLookupTimeoutStage's own negative-proof test for the exact
+// label-matching contract this relies on).
 test('Solana wallet keychain child enforces its own 50ms Keychain deadline with no parent envelope racing it', { timeout: 2_000 }, async t => {
   const keychain = await createTestKeychain(t, { mode: 'hang' });
   const result = await runProcess(process.execPath, [OPERATIONS_WALLET_KEYCHAIN_CHILD_PATH, SOLANA_WALLET_KEYCHAIN_CHILD_FLAG], {
@@ -262,12 +267,9 @@ test('Solana wallet keychain child enforces its own 50ms Keychain deadline with 
   assert.equal(result.code, 0, result.stderr);
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, false);
-  const stageCommand = keychainLookupTimeoutStage(parsed.error, 50);
-  assert.ok(stageCommand, `expected an exact 50ms Keychain-lookup timeout, got: ${parsed.error}`);
-  const records = await keychain.readRecords();
   assert.ok(
-    records.some(record => record.argv[0] === stageCommand),
-    `expected the fake ${stageCommand} Keychain command to actually be reached`,
+    keychainLookupTimeoutStage(parsed.error, 50),
+    `expected an exact 50ms Keychain-lookup timeout, got: ${parsed.error}`,
   );
 });
 
