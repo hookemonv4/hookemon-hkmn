@@ -9,8 +9,11 @@ creates a local cycle store, signer, or provider effect.
 ## Public interface
 
 - `createOperatorControl({ statePath, cycleRepository, policyEngine, now, triggerTick,
-  resumeActiveCycle, readCustody, recordHeldOwnerDecision })` returns frozen `{ status, execute }`
-  functions.
+  resumeActiveCycle, reconcileActiveCycle, readCustody, recordHeldOwnerDecision })` returns frozen
+  `{ status, execute }` functions. `reconcileActiveCycle` is the injection point for the composed
+  runner graph's serialized, lease-protected recovery call (e.g. the scheduler's
+  `recoverActiveCycle` path); this module never imports a stage driver or cycle-domain module to
+  reach it itself.
 - `status()` returns the configuration revision, active and known repository cycles, canonical
   lifecycle stages, provider requests, typed chain transaction evidence, custody buckets, cap
   usage, open held positions, telemetry-source availability, alerts, and payout state.
@@ -45,8 +48,34 @@ creates a local cycle store, signer, or provider effect.
   produces null loss and outstanding-cap projections, `alertSources.safetyTelemetry: false`, and a
   critical authority alert.
 - `resume`, `manual-approval`, `resume-cycle`, `run-cycle-now`, and exposure-increasing
-  configuration changes refuse to act while safety telemetry is unavailable. `pause`, `kill`, and
-  read-only `reconcile` remain available for safe-stop and inspection.
+  configuration changes refuse to act while safety telemetry is unavailable. `pause` and `kill`
+  remain available for safe-stop regardless. `reconcile` without a wired `reconcileActiveCycle`
+  stays read-only and available for inspection; wired, it requires safety telemetry the same as
+  `resume-cycle`, since it can invoke the same money-moving recovery.
+- A generic shared-state compare-and-swap failure (`'stale operator state revision'`) carries no
+  command-specific identity or postcondition — it only means some write happened after the caller's
+  expected revision, not that this exact patch was the one applied. `pause`, `resume`, `kill`, and
+  `update-configuration` recover from that failure by checking a real postcondition instead of
+  guessing: applying the same patch again to whatever is durably current now, and comparing every
+  field except `configurationRevision` against that current state. A match means this patch's
+  intended effect is already durably present regardless of who wrote it, and the call returns that
+  current state as success; a mismatch is a genuine conflict and the stale-revision error is
+  rethrown unchanged. This makes those four commands safe to retry (including a crash-recovered
+  retry through the audited command executor) without ever inferring "applied" from the error
+  message alone.
+- `manual-approval` requires a stable request identity (`assertRequestId`), same as `held-owner-decision`.
+  It recovers from its own authority's stale-revision failure the same way the four configuration
+  commands do, but against a different postcondition: a direct readback of
+  `approvalsByCycleDigest[cycleDigest]` in the current durable configuration. If that entry already
+  names the exact `cycleId` this call intended to approve, the approval is durably present regardless
+  of who wrote it or why the revision moved, and that recorded entry is returned as the real outcome;
+  otherwise the stale-revision error is rethrown unchanged. This closes the one command whose injected
+  authority (`policyEngine.recordManualApproval`) can be rejected by its own `mutateConfiguration`
+  dependency's revision check before that authority's own cycleDigest-keyed idempotency logic ever
+  runs — exactly the shape of a crash-after-effect-before-audit-completion replay, since the approval
+  itself is what advanced the revision the retry's `expectedRevision` still targets. Unlike
+  `run-cycle-now`/`reconcile`/`resume-cycle` below, this is fully self-contained in this module: no
+  C/I composition change is needed for this specific command.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
 - A held-owner decision binds position ID, held-evidence digest, request ID, expected position
@@ -58,6 +87,34 @@ creates a local cycle store, signer, or provider effect.
 - The service does not append audit records or deduplicate request IDs. Its caller persists the
   dispatch receipt before an effect and returns the stored receipt for a duplicate request.
 
+## Idempotent authority contract (required for `run-cycle-now`, `reconcile`, `resume-cycle`)
+
+`triggerTick`, `reconcileActiveCycle`, and `resumeActiveCycle` are called as `dependency({ requestId
+})`, where `requestId` is required (`assertRequestId`) and is the exact same stable request identity
+the audited command layer (`packages/dashboard/src/auth/audit-log.mjs`) assigned when the request was
+first dispatched — including on a crash-recovered retry of that same audit claim. `requestId` is
+carried through unchanged on every retry of the same original request; it is never regenerated.
+
+This module hands the identity down; it does not and cannot itself make the wrapped authority
+idempotent. A compliant `dependency({ requestId })` implementation must persist a durable
+postcondition keyed by `requestId` (for example: "a tick dispatched for this request already opened
+or advanced cycle X") and, on a repeat call with the same `requestId`, return that durable
+postcondition's outcome instead of performing its effect again. Passing the identity through is a
+necessary precondition for this, not a proof of it — this control layer has no way to verify a given
+authority implementation actually does the lookup. Until an authority does, a crash between the
+authority applying its effect and the audit log recording completion can still recover by invoking
+the effect again (e.g. `run-cycle-now` opening a second cycle); this is a known composition gap
+(`packages/adapters/src/app/compose.mjs` does not yet implement compliant lookups for these three
+dependencies) rather than a defect in the identity plumbing itself.
+
+This mirrors the fix already applied to `pause`/`resume`/`kill`/`update-configuration` above: those
+recover from a retry by checking whether the intended state is *already durably present* — a real,
+inspectable postcondition — never by trusting a bare identity or inferring success from a generic
+error message. The difference is only where the postcondition lives: for the four configuration
+commands it is the operator configuration itself, checked in this module; for these three recovery
+commands it must live in whatever durable state the injected authority owns (the cycle repository,
+C-owned), checked by that authority.
+
 ## State transitions
 
 - Configuration commands use the operator-state revision as their compare-and-swap value.
@@ -67,8 +124,10 @@ creates a local cycle store, signer, or provider effect.
   supplementary settlement. `resume-cycle` can recover that durable settlement after its main
   cycle is `COMPLETED`, while tick commands and normal recovery leave the main stage sequence
   closed. Recovery and tick commands return the result of their one injected authority call.
-- Reconcile reads repository state only. It never invokes a tick, recovery callback, signer, or
-  provider mutation.
+- Reconcile without a wired `reconcileActiveCycle` reads repository state only; it never invokes a
+  tick, recovery callback, signer, or provider mutation. Wired, it calls `reconcileActiveCycle()`
+  exactly once and returns its durable outcome (`RECOVERY_<status>`), same as `resume-cycle`; it
+  never calls `triggerTick` and so can never open a new cycle.
 
 ## Operational commands
 

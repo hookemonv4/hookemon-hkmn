@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, unlink, utimes, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   appendAuditEntry,
+  commandDigest,
   executeAuditedCommand,
   readAllAuditEntries,
   verifyAuditChain,
@@ -158,6 +159,36 @@ test('readAllAuditEntries returns an empty array for a missing file', async () =
   assert.deepEqual(await readAllAuditEntries(path), []);
 });
 
+test('a lock file older than the stale threshold is cleaned up by its durable modification time alone, never by an unreachable owner pid', async () => {
+  const path = await tempPath();
+  const lockPath = `${path}.lock`;
+  // A pid this host can never observe (e.g. from a different host sharing the log) — proving cleanup
+  // does not depend on being able to confirm or deny that pid's liveness at all.
+  await writeFile(lockPath, JSON.stringify({ token: 'foreign-token', pid: 999_999 }), { mode: 0o600 });
+  const old = new Date(Date.now() - 120_000);
+  await utimes(lockPath, old, old);
+
+  await appendAuditEntry(path, entry({ eventId: 'after-stale-lock' }));
+
+  const entries = await readAllAuditEntries(path);
+  assert.equal(entries.length, 1);
+});
+
+test('a fresh lock file is left alone even though its owner pid is unreachable from this host', async () => {
+  const path = await tempPath();
+  const lockPath = `${path}.lock`;
+  await writeFile(lockPath, JSON.stringify({ token: 'foreign-token', pid: 999_999 }), { mode: 0o600 });
+
+  const attempt = appendAuditEntry(path, entry({ eventId: 'blocked-by-fresh-lock' }));
+  let settled = false;
+  attempt.then(() => { settled = true; }, () => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(settled, false, 'a lock only 100ms old must not be treated as stale regardless of its recorded pid');
+
+  await unlink(lockPath);
+  await attempt;
+});
+
 test('concurrent appends to the same path are serialized without a sequence collision', async () => {
   const path = await tempPath();
   const results = await Promise.all(
@@ -295,6 +326,376 @@ test('a failed effect becomes uncertain and its retry reports the durable state 
   assert.equal(retry.replayed, true);
   assert.equal(retry.commandState, 'UNCERTAIN');
   assert.equal(retry.receipt.resultCode, 'COMMAND_UNCERTAIN');
+});
+
+function seedPreparedEntry(path, { requestId, occurredAt, claimToken = undefined }) {
+  return appendAuditEntry(path, {
+    eventId: 'seed-prepared',
+    occurredAt,
+    actor: { email: 'operator-console' },
+    actorRole: 'operator',
+    action: 'pause',
+    outcome: 'accepted',
+    resultCode: 'COMMAND_DISPATCHED',
+    observedVersion: 0,
+    note: null,
+    requestId,
+    commandDigest: commandDigest({ expectedVersion: 0, command: { type: 'pause' }, note: null }),
+    commandState: 'PREPARED',
+    ...(claimToken === undefined ? {} : { claimToken }),
+  });
+}
+
+test('a PREPARED command still within its lease is replayed, not re-executed', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const requestId = 'request-within-lease';
+  await seedPreparedEntry(path, { requestId, occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString(), claimToken: '11111111-1111-4111-8111-111111111111' });
+
+  const result = await executeAuditedCommand(auditedInput(path, {
+    requestId,
+    now: () => Date.UTC(2026, 0, 1, 0, 0, 1), // one second later, well inside the default lease
+    async effect() { effects += 1; },
+  }));
+
+  assert.equal(effects, 0);
+  assert.equal(result.replayed, true);
+  assert.equal(result.commandState, 'PREPARED');
+});
+
+test('a legacy PREPARED command with no claimToken ages out and is reclaimed exactly like a fresh orphan — no separate migration path', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const requestId = 'request-legacy-no-claim-token';
+  await seedPreparedEntry(path, { requestId, occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString() });
+
+  const result = await executeAuditedCommand(auditedInput(path, {
+    requestId,
+    leaseTtlMs: 1_000,
+    now: () => Date.UTC(2026, 0, 1, 0, 0, 5), // five seconds later, past a 1s lease
+    async effect() { effects += 1; },
+  }));
+  const records = await readAllAuditEntries(path);
+
+  assert.equal(effects, 1, 'a legacy record with no claimToken is still reclaimed once it is old enough');
+  assert.equal(result.replayed, false);
+  assert.equal(result.commandState, 'APPLIED');
+  assert.deepEqual(records.map(record => record.commandState), ['PREPARED', 'PREPARED', 'APPLIED']);
+  assert.equal(typeof records[1].claimToken, 'string', 'the reclaim entry is durably claimed going forward');
+
+  const retry = await executeAuditedCommand(auditedInput(path, { requestId, async effect() { throw new Error('must not run once resolved'); } }));
+  assert.equal(effects, 1, 'a retry after resolution never re-runs the effect');
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.commandState, 'APPLIED');
+});
+
+test('a stale claim is only ever reclaimed by age, never by a generic effect-error message — recovering it never fabricates APPLIED', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const requestId = 'request-orphan-genuine-failure';
+  await seedPreparedEntry(path, { requestId, occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString() });
+
+  await assert.rejects(executeAuditedCommand(auditedInput(path, {
+    requestId,
+    leaseTtlMs: 1_000,
+    now: () => Date.UTC(2026, 0, 1, 0, 0, 5),
+    async effect() {
+      effects += 1;
+      // The same message a stale operator-state CAS failure produces (see control.mjs) — but this
+      // log has no authority-specific way to know that means "already applied" and must not guess.
+      throw new Error('stale operator state revision');
+    },
+  })));
+
+  const retry = await executeAuditedCommand(auditedInput(path, { requestId, async effect() { throw new Error('must not run once resolved'); } }));
+  assert.equal(effects, 1);
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.commandState, 'UNCERTAIN');
+  assert.equal(retry.receipt.resultCode, 'COMMAND_UNCERTAIN');
+});
+
+test('a heartbeat renewal keeps a slow but genuinely alive effect from appearing orphaned to a concurrent attempt', async () => {
+  const path = await tempPath();
+  const requestId = 'request-heartbeat-keepalive';
+  const effectStarted = deferred();
+  const releaseEffect = deferred();
+  let effects = 0;
+
+  const slow = executeAuditedCommand(auditedInput(path, {
+    requestId,
+    leaseTtlMs: 80,
+    heartbeatIntervalMs: 25,
+    now: () => Date.now(),
+    async effect() {
+      effects += 1;
+      effectStarted.resolve();
+      await releaseEffect.promise;
+    },
+  }));
+  await effectStarted.promise;
+  // Wait past the 80ms lease without the concurrent call ever seeing it go stale, proving the
+  // heartbeat (every 25ms) renewed it durably in the meantime.
+  await new Promise(resolve => setTimeout(resolve, 200));
+
+  const concurrent = await executeAuditedCommand(auditedInput(path, {
+    requestId,
+    leaseTtlMs: 80,
+    now: () => Date.now(),
+    async effect() { effects += 1; },
+  }));
+  releaseEffect.resolve();
+  const slowResult = await slow;
+
+  assert.equal(effects, 1, 'the concurrent attempt replayed the still-live claim instead of reclaiming and re-executing');
+  assert.equal(concurrent.replayed, true);
+  assert.equal(concurrent.commandState, 'PREPARED');
+  assert.equal(slowResult.replayed, false);
+  assert.equal(slowResult.commandState, 'APPLIED');
+});
+
+async function executeAuditedCommandFromChild({ path, requestId, sideEffectDir, leaseTtlMs }) {
+  const modulePath = fileURLToPath(new URL('../../src/auth/audit-log.mjs', import.meta.url));
+  const source = `
+    import { executeAuditedCommand } from ${JSON.stringify(modulePath)};
+    import { open } from 'node:fs/promises';
+    import { join } from 'node:path';
+    process.stdout.write('ready\\n');
+    process.stdin.once('data', async () => {
+      try {
+        const result = await executeAuditedCommand({
+          path: process.env.HOOKEMON_AUDIT_TEST_PATH,
+          requestId: ${JSON.stringify(requestId)},
+          command: { type: 'pause' },
+          actor: { email: 'operator-console' },
+          actorRole: 'operator',
+          expectedVersion: 0,
+          observedVersion: 0,
+          note: null,
+          leaseTtlMs: ${JSON.stringify(leaseTtlMs)},
+          async effect() {
+            const marker = join(process.env.HOOKEMON_SIDE_EFFECT_DIR, \`\${process.pid}-\${Date.now()}\`);
+            const handle = await open(marker, 'wx');
+            await handle.close();
+            return { auditResultCode: 'CHILD_APPLIED' };
+          },
+        });
+        process.stdout.write(JSON.stringify({ replayed: result.replayed, commandState: result.commandState }) + '\\n');
+      } catch (error) {
+        process.stderr.write(String(error.stack || error));
+        process.exitCode = 1;
+      }
+    });
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '--eval', source], {
+    env: { ...process.env, HOOKEMON_AUDIT_TEST_PATH: path, HOOKEMON_SIDE_EFFECT_DIR: sideEffectDir },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const output = { stdout: '', stderr: '' };
+  child.stdout.on('data', chunk => { output.stdout += chunk; });
+  child.stderr.on('data', chunk => { output.stderr += chunk; });
+  await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.stdout.on('data', chunk => {
+      if (chunk.toString().includes('ready')) resolve();
+    });
+  });
+  return {
+    start() { child.stdin.end('go\n'); },
+    done: new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', code => {
+        if (code === 0) resolve(output);
+        else reject(new Error(`audit child ${requestId} failed: ${output.stderr}`));
+      });
+    }),
+  };
+}
+
+test('a claimant whose slow effect resolves after its claim was reclaimed cannot finalize over the new claimant\'s outcome', async () => {
+  const path = await tempPath();
+  const requestId = 'request-superseded-completion';
+  const effectStarted = deferred();
+  const releaseEffect = deferred();
+  let effects = 0;
+
+  const claimantA = executeAuditedCommand(auditedInput(path, {
+    requestId,
+    heartbeatIntervalMs: 10_000_000, // large enough that no renewal fires during this test
+    now: () => Date.UTC(2026, 0, 1),
+    async effect() {
+      effects += 1;
+      effectStarted.resolve();
+      await releaseEffect.promise;
+      return { auditResultCode: 'CLAIMANT_A_APPLIED' };
+    },
+  }));
+  await effectStarted.promise;
+
+  // A second claimant independently decides A's claim is stale (e.g. A's renewal genuinely failed to
+  // reach shared storage even though A is still alive and working) and reclaims, then finishes first —
+  // constructed directly at the durable-log level so the test does not depend on real lease timing.
+  const initial = (await readAllAuditEntries(path))[0];
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-reclaim',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 1)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: initial.resultCode,
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'PREPARED',
+    claimToken: '22222222-2222-4222-8222-222222222222',
+  });
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-applied',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 2)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: 'CLAIMANT_B_APPLIED',
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'APPLIED',
+  });
+
+  releaseEffect.resolve();
+  const resultA = await claimantA;
+
+  assert.equal(effects, 1);
+  assert.equal(resultA.replayed, true, 'A cannot report its own effect as the authoritative outcome once superseded');
+  assert.equal(resultA.commandState, 'APPLIED');
+  assert.equal(resultA.receipt.resultCode, 'CLAIMANT_B_APPLIED', 'the durable outcome is B\'s, not A\'s');
+
+  const finalRecords = await readAllAuditEntries(path);
+  assert.deepEqual(finalRecords.map(record => record.commandState), ['PREPARED', 'PREPARED', 'APPLIED']);
+  assert.equal(finalRecords.at(-1).resultCode, 'CLAIMANT_B_APPLIED', 'A never overwrote B\'s terminal record');
+});
+
+test('a superseded claimant whose effect fails cannot overwrite the new claimant\'s outcome with UNCERTAIN either', async () => {
+  const path = await tempPath();
+  const requestId = 'request-superseded-failure';
+  const effectStarted = deferred();
+  const releaseEffect = deferred();
+
+  const claimantA = executeAuditedCommand(auditedInput(path, {
+    requestId,
+    heartbeatIntervalMs: 10_000_000,
+    now: () => Date.UTC(2026, 0, 1),
+    async effect() {
+      effectStarted.resolve();
+      await releaseEffect.promise;
+      throw new Error('claimant A failed after being superseded');
+    },
+  }));
+  await effectStarted.promise;
+
+  const initial = (await readAllAuditEntries(path))[0];
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-reclaim-2',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 1)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: initial.resultCode,
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'PREPARED',
+    claimToken: '33333333-3333-4333-8333-333333333333',
+  });
+  await appendAuditEntry(path, {
+    eventId: 'claimant-b-applied-2',
+    occurredAt: new Date(Date.UTC(2026, 0, 1, 0, 2)).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: 'CLAIMANT_B_APPLIED_2',
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'APPLIED',
+  });
+
+  releaseEffect.resolve();
+  const resultA = await claimantA;
+
+  assert.equal(resultA.replayed, true);
+  assert.equal(resultA.commandState, 'APPLIED');
+  assert.equal(resultA.receipt.resultCode, 'CLAIMANT_B_APPLIED_2');
+  const finalRecords = await readAllAuditEntries(path);
+  assert.equal(finalRecords.at(-1).commandState, 'APPLIED', 'A\'s failure never recorded a spurious UNCERTAIN over B\'s success');
+});
+
+test('a compliant idempotent authority recognizes its own durable postcondition on a recovered retry, so this log never has to prove it by itself', async () => {
+  const path = await tempPath();
+  const requestId = 'request-idempotent-authority';
+  const appliedRequestIds = new Set(); // stands in for a durable, authority-owned postcondition store
+  let sideEffects = 0;
+  await seedPreparedEntry(path, { requestId, occurredAt: new Date(0).toISOString() });
+
+  async function idempotentEffect(receipt) {
+    // The receipt already carries the stable requestId — the identity a compliant authority needs to
+    // look up its own durable postcondition instead of trusting the audit claim alone.
+    if (appliedRequestIds.has(receipt.requestId)) return { auditResultCode: 'ALREADY_APPLIED' };
+    sideEffects += 1;
+    appliedRequestIds.add(receipt.requestId);
+    return { auditResultCode: 'APPLIED_NOW' };
+  }
+
+  const recovered = await executeAuditedCommand(auditedInput(path, { requestId, effect: idempotentEffect }));
+  assert.equal(recovered.receipt.resultCode, 'APPLIED_NOW');
+  assert.equal(sideEffects, 1);
+
+  const replay = await executeAuditedCommand(auditedInput(path, { requestId, effect: idempotentEffect }));
+  assert.equal(sideEffects, 1, 'a replay never invokes the effect again once resolved');
+  assert.equal(replay.replayed, true);
+});
+
+test('two independent child processes racing to recover the same orphaned claim run the effect exactly once', async () => {
+  const path = await tempPath();
+  const sideEffectDir = await mkdtemp(join(tmpdir(), 'hookemon-audit-side-effect-'));
+  const requestId = 'request-two-process-race';
+  // A legacy-shaped orphan (no claimToken) far enough in the past to be immediately reclaimable —
+  // simulates a crash that predates a live owner ever being recorded, and stands in for "two hosts"
+  // since each child is a fully independent OS process with its own process table, sharing nothing
+  // but this file and the lock beside it.
+  await seedPreparedEntry(path, { requestId, occurredAt: new Date(0).toISOString() });
+
+  const [childA, childB] = await Promise.all([
+    executeAuditedCommandFromChild({ path, requestId, sideEffectDir, leaseTtlMs: 1_000 }),
+    executeAuditedCommandFromChild({ path, requestId, sideEffectDir, leaseTtlMs: 1_000 }),
+  ]);
+  childA.start();
+  childB.start();
+  const [outputA, outputB] = await Promise.all([childA.done, childB.done]);
+
+  const sideEffects = await readdir(sideEffectDir);
+  assert.equal(sideEffects.length, 1, 'exactly one claimant dispatched the effect');
+  const resultA = JSON.parse(outputA.stdout.trim().split('\n').filter(Boolean).pop());
+  const resultB = JSON.parse(outputB.stdout.trim().split('\n').filter(Boolean).pop());
+  // Whichever child's check loses the race backs off immediately without waiting for the winner to
+  // finish, so its own immediate return can observe either the winner's still-fresh PREPARED claim
+  // or (if it happened to check slightly later) the winner's already-resolved APPLIED terminal state
+  // — both are correct outcomes of the same single execution. The durable log is the actual
+  // authority: it must end in exactly one terminal APPLIED state, with a valid chain throughout.
+  for (const result of [resultA, resultB]) {
+    assert.ok(['APPLIED', 'PREPARED'].includes(result.commandState), `unexpected commandState: ${result.commandState}`);
+  }
+  const records = await readAllAuditEntries(path);
+  assert.deepEqual(records.filter(record => record.commandState === 'APPLIED').map(record => record.resultCode), ['CHILD_APPLIED']);
+  const chain = await verifyAuditChain(path);
+  assert.equal(chain.valid, true);
 });
 
 test('a long-running effect does not hold the audit queue for a successor command', async () => {

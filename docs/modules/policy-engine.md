@@ -22,11 +22,18 @@ canonical micro-USDG integer strings.
 - The operator state configuration is the authority for allowlists, caps, pauses, approvals, and
   durable spend and cycle ledgers.
 - Runner-owned state validation applies the immutable `OPERATOR_HARD_CAPS` from
-  `packages/runner/src/operator/state-file.mjs`: 1,000 boosters per cycle, a 25,000,000 micro-USDG
-  unit price, a 50,000,000 micro-USDG cycle budget, and a 3,600,000,000 micro-USDG trailing-24-hour
-  budget. Startup and every configuration CAS enforce them. Policy digest derivation and admission
-  repeat the checks, so a persisted or direct over-cap configuration cannot expand spending
-  authority.
+  `packages/runner/src/operator/state-file.mjs`: 1,000 boosters per cycle; a 50,000,000 micro-USDG
+  unit-price ceiling anchored to the highest verified public catalog pack price (`pokemon_50`, $50,
+  H-funding-observations.md); a 150,000,000 micro-USDG cycle-budget ceiling and a 450,000,000
+  micro-USDG trailing-24-hour ceiling, each a small labeled multiple of the unit-price ceiling for a
+  modest multi-pack cycle and a modest number of cycles per day. These are pack-spend rails, not the
+  owner's separate $250 total top-up ceiling — the two are deliberately kept apart, since neither
+  bounds nor authorizes the other (a process can also recycle finalized returns without another
+  owner dollar). Startup and every configuration CAS enforce them. Policy digest derivation and
+  admission repeat the checks, so a persisted or direct over-cap configuration cannot expand
+  spending authority. The operator's own
+  `perCycleCapMicroUsdg`/`max24HourBudgetMicroUsdg`/`lossCapMicroUsdg` remain the tighter, day-to-day
+  operating limits; this fixed ceiling only bounds how far a configuration edit can ever raise them.
 - A production claim checks the allowlist, order request, cycle and trailing-24-hour offchain spend limits,
   per-cycle cap, loss cap, custody cap, held-position limits, unattributed deposits, and unvalued custody.
   It returns `HELD_LIMIT` when the open position count is greater than or equal to

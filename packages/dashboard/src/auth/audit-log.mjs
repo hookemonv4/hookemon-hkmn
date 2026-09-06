@@ -17,6 +17,12 @@ const MAX_LINE_BYTES = 65_536;
 const COMMAND_STATES = new Set(['PREPARED', 'APPLIED', 'REJECTED', 'UNCERTAIN']);
 const LOCK_RETRY_MS = 5;
 const LOCK_STALE_MS = 60_000;
+const claimTokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/** Default PREPARED claim lease: how long a claim stays authoritative without renewal before another
+ * claimant may treat it as orphaned. Renewed at half this interval while an effect is in flight (see
+ * `startClaimHeartbeat`), matching the ttlMs/renew-at-half convention this repo already uses for the
+ * cycle-exclusive lease (packages/runner/src/automation/exclusive-lease.mjs). */
+const DEFAULT_CLAIM_LEASE_TTL_MS = 30_000;
 
 function assertEntryInput(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('audit entry must be an object');
@@ -45,6 +51,14 @@ function assertEntryInput(entry) {
   if (Object.hasOwn(entry, 'commandState')) {
     if (!Object.hasOwn(entry, 'requestId') || !COMMAND_STATES.has(entry.commandState)) {
       throw new Error('audit entry commandState is invalid');
+    }
+  }
+  if (Object.hasOwn(entry, 'claimToken')) {
+    if (!Object.hasOwn(entry, 'commandState') || entry.commandState !== 'PREPARED') {
+      throw new Error('audit entry claimToken is only valid on a PREPARED command state');
+    }
+    if (typeof entry.claimToken !== 'string' || !claimTokenPattern.test(entry.claimToken)) {
+      throw new Error('audit entry claimToken must be a UUID');
     }
   }
 }
@@ -94,25 +108,15 @@ function parseLockOwner(value) {
   }
 }
 
-function ownerIsAlive(owner) {
-  if (owner === null) return false;
-  try {
-    process.kill(owner.pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code !== 'ESRCH';
-  }
-}
-
+// A PID-liveness check (`process.kill(pid, 0)`) only ever inspects the local host's process table: on
+// a host other than the one holding the lock, every remote PID looks absent, so a liveness check would
+// treat a genuinely-held remote lock as dead and unlink it out from under its owner. The lock's
+// filesystem modification time is instead a durable fact any host observes identically, making
+// time-based staleness the only check here that is safe across hosts (and immune to local PID reuse).
 async function removeDeadLock(lockPath) {
   try {
-    const [metadata, lockStat] = await Promise.all([
-      readFile(lockPath, 'utf8'),
-      stat(lockPath),
-    ]);
-    const owner = parseLockOwner(metadata);
-    if (ownerIsAlive(owner)) return false;
-    if (owner !== null || Date.now() - lockStat.mtimeMs >= LOCK_STALE_MS) {
+    const lockStat = await stat(lockPath);
+    if (Date.now() - lockStat.mtimeMs >= LOCK_STALE_MS) {
       await unlink(lockPath);
       return true;
     }
@@ -211,6 +215,7 @@ async function doAppend(path, entry) {
       commandDigest: entry.commandDigest,
     } : {}),
     ...(Object.hasOwn(entry, 'commandState') ? { commandState: entry.commandState } : {}),
+    ...(Object.hasOwn(entry, 'claimToken') ? { claimToken: entry.claimToken } : {}),
   };
   const hash = digest({ domain: 'hookemon.dashboard-audit-entry.v1', entry: unhashed });
   const record = { ...unhashed, hash };
@@ -297,7 +302,7 @@ function effectAuditResultCode(effectResult, fallback) {
   return effectResult.auditResultCode;
 }
 
-async function appendCommandState(path, initial, commandState, now, appliedResultCode) {
+async function appendCommandState(path, initial, commandState, now, appliedResultCode, claimToken = null) {
   return doAppend(path, {
     eventId: crypto.randomUUID(),
     occurredAt: new Date(now()).toISOString(),
@@ -311,17 +316,69 @@ async function appendCommandState(path, initial, commandState, now, appliedResul
     requestId: initial.requestId,
     commandDigest: initial.commandDigest,
     commandState,
+    ...(commandState === 'PREPARED' && claimToken !== null ? { claimToken } : {}),
   });
 }
 
-async function completeCommand(path, requestId, commandState, now, appliedResultCode) {
+/**
+ * Finalizes a PREPARED command — but only under the exact claimToken the caller actually ran its
+ * effect for. A claim can be reclaimed (a new claimToken) while the superseded claimant's effect call
+ * is still in flight (a lease renewal missed a beat, or the reclaim happened in the narrow window
+ * before the first renewal); that superseded claimant must never be able to overwrite whatever the new
+ * claimant durably records, whether the new claimant is still working or has already finished. This is
+ * the completion side of the same fence the heartbeat renewal (`startClaimHeartbeat`) already applies
+ * on the renewal side: both check the current durable claimToken before writing.
+ */
+async function completeCommand(path, requestId, commandState, now, appliedResultCode, claimToken) {
   return serializeWrite(path, async () => {
     const current = requestRecord(await readAllAuditEntries(path), requestId);
     if (current === null) throw new Error('audited command preparation is missing');
-    if (current.commandState !== 'PREPARED') return current;
+    // Not mine to record, either because someone already resolved it (the pre-existing case) or
+    // because a different claimToken now owns it (a reclaim raced ahead of us — the completion side
+    // of the fence startClaimHeartbeat already applies to renewals). Either way, our own outcome is
+    // not authoritative: report whatever is durably current instead of writing over it.
+    if (current.commandState !== 'PREPARED' || current.record.claimToken !== claimToken) {
+      return { initial: current.initial, record: current.record, commandState: current.commandState, mine: false };
+    }
     const record = await appendCommandState(path, current.initial, commandState, now, appliedResultCode);
-    return { initial: current.initial, record, commandState };
+    return { initial: current.initial, record, commandState, mine: true };
   });
+}
+
+/**
+ * Renews a PREPARED claim while its effect is in flight, so another claimant never sees it go stale
+ * merely because the effect is taking a while. Each renewal is itself a durable, lock-serialized
+ * append, so its freshness is visible to every host reading the same log — not a local, in-memory fact.
+ * A renewal that finds the claim already lost (a different claimToken now owns it) or already resolved
+ * (no longer PREPARED) simply stops; it never fights to reclaim what it does not durably still own.
+ * Returns a stop function; safe to call more than once.
+ */
+function startClaimHeartbeat({ path, requestId, claimToken, initial, now, leaseTtlMs, heartbeatIntervalMs }) {
+  let stopped = false;
+  let timer = null;
+  const renew = async () => {
+    if (stopped) return;
+    try {
+      await serializeWrite(path, async () => {
+        const current = requestRecord(await readAllAuditEntries(path), requestId);
+        if (stopped || current === null || current.commandState !== 'PREPARED' || current.record.claimToken !== claimToken) return;
+        await appendCommandState(path, initial, 'PREPARED', now, initial.resultCode, claimToken);
+      });
+    } catch {
+      // A missed renewal is not fatal here: either the next renewal catches up before the lease
+      // expires, or the lease's own bounded expiry is the correct, honest signal to a new claimant.
+    }
+    if (!stopped) {
+      timer = setTimeout(renew, heartbeatIntervalMs);
+      timer.unref?.();
+    }
+  };
+  timer = setTimeout(renew, heartbeatIntervalMs);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 /**
@@ -329,6 +386,32 @@ async function completeCommand(path, requestId, commandState, now, appliedResult
  * completion transitions are serialized; the effect runs outside the write lock. A retry observes
  * the actual PREPARED/APPLIED/REJECTED/UNCERTAIN state and never turns an unresolved effect into a
  * synthetic success.
+ *
+ * A PREPARED record left behind by a process that died before it could complete its own effect (a
+ * hard crash, not a normal thrown error — a normal error already resolves to UNCERTAIN inside the
+ * same call, see the catch block below) is detected purely from the durable claim's age: every
+ * PREPARED record — freshly reserved, reclaimed, or renewed — carries a random `claimToken` and its
+ * `occurredAt` timestamp, both written under the same cross-process/cross-host file lock every append
+ * already uses. A claim older than `leaseTtlMs` with no renewal is orphaned; a live claimant renews it
+ * (via `startClaimHeartbeat`) well before that, at half the lease interval, so a claim genuinely still
+ * in flight never appears stale to a second claimant. This is deliberately not PID-based: a local
+ * `process.kill` liveness check only ever sees the local host's process table (useless or actively
+ * wrong from a second host's point of view) and cannot distinguish a dead PID from one since reused by
+ * an unrelated process. A legacy PREPARED record from before this field existed has no claimToken but
+ * still carries `occurredAt`, so it ages out and becomes reclaimable exactly the same way — no separate
+ * migration path is needed.
+ *
+ * Reclaiming an orphan never assumes the crashed attempt's effect did or did not run: the retried
+ * effect is simply called again through the same authority, under a fresh claim so a second concurrent
+ * recovery attempt sees a live claim and backs off. Whether that authority is itself safe to call twice
+ * for the same intent (idempotent under its own compare-and-swap, as `operator/control.mjs` is) is the
+ * authority's responsibility, not this log's: this module never infers "already applied" from a generic
+ * error message, since a shared-state conflict error carries no command-specific identity or
+ * postcondition. Any effect failure — first attempt or recovered — is finalized UNCERTAIN alike; only an
+ * effect that actually returns successfully (because the authority itself recognized its own prior
+ * effect, or because this attempt genuinely just applied it) is finalized APPLIED. The original request
+ * ID's identity (eventId, commandDigest) is preserved through a reclaim, so the same request ID stays
+ * idempotent across the crash and the recovery.
  */
 export async function executeAuditedCommand({
   path,
@@ -341,10 +424,14 @@ export async function executeAuditedCommand({
   note = null,
   resultCode = 'COMMAND_DISPATCHED',
   now = Date.now,
+  leaseTtlMs = DEFAULT_CLAIM_LEASE_TTL_MS,
+  heartbeatIntervalMs = Math.max(1, Math.floor(leaseTtlMs / 2)),
   effect,
 }) {
   if (typeof requestId !== 'string' || requestId.length === 0) throw new Error('audited command requestId must be a nonempty string');
   if (typeof effect !== 'function') throw new Error('audited command effect must be a function');
+  if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs <= 0) throw new Error('audited command leaseTtlMs must be a positive integer');
+  if (!Number.isSafeInteger(heartbeatIntervalMs) || heartbeatIntervalMs <= 0) throw new Error('audited command heartbeatIntervalMs must be a positive integer');
   const requestedDigest = commandDigest({ expectedVersion, command, note });
 
   const reservation = await serializeWrite(path, async () => {
@@ -354,11 +441,21 @@ export async function executeAuditedCommand({
       if (existing.commandState !== 'PREPARED' && existing.record.commandState !== null && existing.record.commandState !== undefined) {
         return { execute: false, ...existing };
       }
-      if (existing.commandState === 'PREPARED') return { execute: false, ...existing };
+      if (existing.commandState === 'PREPARED') {
+        const claimedAtMs = Date.parse(existing.record.occurredAt);
+        const stale = !Number.isFinite(claimedAtMs) || now() - claimedAtMs >= leaseTtlMs;
+        if (!stale) return { execute: false, ...existing };
+        const claimToken = crypto.randomUUID();
+        const reclaimed = await appendCommandState(path, existing.initial, 'PREPARED', now, existing.initial.resultCode, claimToken);
+        return {
+          execute: true, recovered: true, initial: existing.initial, record: reclaimed, claimToken, commandState: 'PREPARED',
+        };
+      }
       const record = await appendCommandState(path, existing.initial, 'UNCERTAIN', now, resultCode);
       return { execute: false, initial: existing.initial, record, commandState: 'UNCERTAIN' };
     }
 
+    const claimToken = crypto.randomUUID();
     const record = await doAppend(path, {
       eventId: crypto.randomUUID(),
       occurredAt: new Date(now()).toISOString(),
@@ -372,12 +469,18 @@ export async function executeAuditedCommand({
       requestId,
       commandDigest: requestedDigest,
       commandState: 'PREPARED',
+      claimToken,
     });
-    return { execute: true, initial: record, record, commandState: 'PREPARED' };
+    return {
+      execute: true, initial: record, record, claimToken, commandState: 'PREPARED',
+    };
   });
   if (!reservation.execute) return commandResult(reservation.record, reservation.commandState, true);
 
   const preparedReceipt = receiptFromEntry(reservation.record);
+  const stopHeartbeat = startClaimHeartbeat({
+    path, requestId, claimToken: reservation.claimToken, initial: reservation.initial, now, leaseTtlMs, heartbeatIntervalMs,
+  });
   try {
     const effectResult = await effect(preparedReceipt);
     const commandState = effectResult?.auditCommandState === 'REJECTED'
@@ -394,11 +497,20 @@ export async function executeAuditedCommand({
       commandState,
       now,
       completionResultCode,
+      reservation.claimToken,
     );
+    // Our claim was reclaimed before we could durably record our own outcome (a missed heartbeat
+    // while genuinely still working, or a reclaim landing in the narrow window before the first
+    // renewal). Our effect call is no longer the authoritative one for this request: report whatever
+    // the new claimant durably shows instead of asserting our own possibly-superseded result.
+    if (!completed.mine) return commandResult(completed.record, completed.commandState, true);
     return commandResult(completed.record, completed.commandState, false);
   } catch (error) {
-    const completed = await completeCommand(path, requestId, 'UNCERTAIN', now, resultCode);
+    const completed = await completeCommand(path, requestId, 'UNCERTAIN', now, resultCode, reservation.claimToken);
+    if (!completed.mine) return commandResult(completed.record, completed.commandState, true);
     throw new AuditedCommandEffectError(receiptFromEntry(completed.record), completed.commandState, error);
+  } finally {
+    stopHeartbeat();
   }
 }
 
