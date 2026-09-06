@@ -69,6 +69,7 @@ async function productionEnv(t, overrides = {}) {
     HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
     HOOKEMON_PROVIDER_MODE: 'live',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
     ...overrides,
   });
 }
