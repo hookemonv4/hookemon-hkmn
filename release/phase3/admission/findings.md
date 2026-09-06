@@ -132,6 +132,28 @@ The reference promotion code ties `publicAuthorization`, `publicWrites`, and `re
 
 OPEN FACT A-06: The provider has not published a date, release artifact, or owner-visible transition criterion for these four blockers. Resolve through the public discovery document after a promoted release or a provider release record binding all four artifacts. Until then, no public submission path is available.
 
+## Resolved LIH-01: `launchIntentHash`/`agentAttestation` schema re-checked against the current live OpenAPI (2026-09-06)
+
+H2 re-fetched `https://programmable.market/openapi/custom-launch-v4.json` directly (not from cache or memory) at `2026-09-06`, rather than relying on this file's prior (2026-09-05) snapshot alone, per the instruction that an old findings file is evidence of a prior gap, not proof no current answer exists.
+
+Result: the live schema is unchanged in the relevant respect. `CustomLaunchCreateRequestV4.properties.launchIntentHash` is still only `{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}` — a format constraint, not a preimage formula. `agentAttestation`'s object shape matches exactly what `scripts/programmable/lib/package.mjs` already implements (`schemaVersion: "programmable.agent-launch-attestation.v2"`, `subjectLaunchIntentHash`, `agentId`, `checkedAt`, `checks[].{checkId,evidenceSha256}`, all `sha256:`-prefixed) — no schema drift found; the existing implementation's shape is current. The full route list (`GET capabilities`, `POST/GET custom-launches`, `GET custom-launches/{id}`, `GET finalized-custom-launches`) has no self-serve "compute intent hash" or "compute attestation" endpoint. `CustomLaunchPreflightV2`'s response does carry `requestHash` and `rawRequestSha256` (both `sha256:` pattern) — these are new facts not previously recorded here, but they describe a hash *of the submitted request*, returned *after* submission; they are not documented as the `launchIntentHash` preimage and must not be treated as one without an explicit provider statement.
+
+New, concrete, sourced fact: `https://programmable.market/policies/custom-launch-agent-remediation-v1.json` (fetched 2026-09-06, credential-free) states explicitly, under `packConfig`:
+
+```
+"derivedValuesAreCliOwned": true,
+"derivedValuesMustNotBeCopiedOrHandWritten": [
+  "source descriptor", "manifest digest", "address locators", "CREATE2 addresses",
+  "runtime hashes", "graph hash", "project metadata hash", "metadata-bound graph hash",
+  "launch profile hash", "launch intent hash", "funding intent hash", "funding nonce",
+  "verification bundle hash", "request bytes"
+]
+```
+
+This is a direct, current, provider-published statement that `launchIntentHash` (and the request-bytes/graph/verification-bundle hashes around it) is a value the provider's own CLI computes, and that hand-deriving or copying it is against the provider's own policy — it is not merely undocumented, it is explicitly declared not-ours-to-derive. This is consistent with, and gives concrete cause for, the four open public-discovery activation blockers already recorded above in this file, one of which is literally `public-cli-release`: the CLI that owns this derivation is not yet publicly released. `agentAttestation.subjectLaunchIntentHash` is bound to that same CLI-owned value, so it inherits the same block.
+
+**Updated resolution step (replaces the prior open-ended "obtain the preimage" framing):** this is not a research gap this task can close by reading more docs or reverse-engineering a hash function — it is blocked on the provider publicly releasing its own CLI (tracked as blocker `public-cli-release` in the public discovery document). No signature, hash, or attestation may be invented in its place. Re-check `activationStage`/`public-cli-release` on `https://programmable.market/.well-known/programmable.json` before the next funded attempt.
+
 ## Unverified boundaries
 
 - The preflight probe was intentionally incomplete, so it is not an admission test for a real graph.

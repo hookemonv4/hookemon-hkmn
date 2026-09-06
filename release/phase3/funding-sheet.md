@@ -1,5 +1,21 @@
 # Phase 3 funding sheet
 
+**Critical update (2026-09-06, H2):** while re-checking `agentAttestation`/`launchIntentHash`
+against the *current* provider discovery document (`https://programmable.market/.well-known/programmable.json`,
+fetched fresh, not from any cached/prior snapshot), the entire premise this sheet is priced against
+may be stale. That document now reports, for chain 4663: `apiVersion: "4"`, `profileVersion:
+"4.1.0"`, `publicAuthorization: true`, `publicWrites: true`, `releaseReady: true`,
+`activationStage: "public-api-wallet-handoff"`, and a new OpenAPI at
+`https://programmable.market/openapi/custom-launch-v4.1.json`. That v4.1 schema adds a new
+**required** top-level `fundingPlan` field to `CustomLaunchCreateRequestV4` that does not exist in
+our committed v4.0-pinned request/profile evidence (`release/phase3/admission/provider-documents.json`).
+See `release/phase3/admission/findings.md` ("Resolved LIH-01") for the full evidence. This sheet's
+dollar figures (Relay bridge/pack-purchase quotes) are still valid observations of their own
+routes, but the *admission-side* funding requirements (what the provider's own `fundingPlan`
+now demands) are **not priced here** and were not previously known to exist. Treat this sheet as
+covering only the pack-purchase/bridge leg, not the full current provider admission funding
+requirement, until a dedicated v4.1 compatibility review runs.
+
 Read-only funding sheet for the Hookemon V4 launch package. No key, secret, signature,
 transaction, or provider mutation was used to produce this sheet. All balances and quotes
 below are the public snapshot recorded in `H-funding-observations.md` and
@@ -42,57 +58,86 @@ the quote's own USD value where one was returned, and are otherwise left `null` 
 | Solana pack/open/sell/return message set (rent + fees) | Solana operator | SOL | `null` — only the single rent figure (`1855569` lamports) and one return-leg gas estimate (`19274` lamports) are priced; the full lifecycle is not simulated | `19920066` lamports | `null`, but at least `0` beyond the priced subset | `null` | gas + rent |
 | Solana USDC ATA creation (pack purchase leg), if not paid by the provider | Solana operator | SOL (rent) | `null` — unresolved whether Collector/Relay creates and pays for the missing ATA | n/a | `null` | `null` | rent |
 
-## 3. Cap conservation — current package does not fit
+## 3. Cap conservation — units are not fungible, so no blended dollar total is asserted
 
-Summing only the two dollar-quoted rows above (seed deficit + two-pack principal, both already
-converted at snapshot-time quotes):
+The prior version of this sheet summed a seed-deficit figure and the two-pack Relay quote into one
+dollar total. That conflated two different things: the $50.299908 figure is a real, timestamped
+Relay quote for a specific 50,309,869-atomic-USDG amount; applying that same implied rate to a
+much larger, differently-sized seed amount is an extrapolation this sheet does not make. No
+quote was ever taken for moving/seeding 240,000,000 atomic USDG, so no USD figure is stated for
+the seed. The corrected accounting keeps every amount in its own native unit and only converts to
+USD where a specific quote exists for that exact amount:
 
-```
-239.553996 (seed deficit, quoted parity) + 50.299908 (two-pack principal, Relay quote) = 289.853904
-```
+| Item | Raw amount | Native-unit deficit (after existing balance) | USD conversion available? |
+| --- | ---: | ---: | --- |
+| Canonical-market USDG seed (stale candidate `S = 240000000`) | `240000000` atomic USDG | `239553996` atomic USDG | **No** — no quote exists at this size; do not assume 1:1 |
+| Two-pack process principal (EXACT_OUTPUT, Relay quote) | `50309869` atomic USDG | `50309869` atomic USDG | **Yes** — `$50.299908`, quoted `2026-09-05T23:03:23.375Z`, this exact amount only |
+| Bridge approval + deposit gas envelope (max) | `92321815544000` wei | full amount (`0` ETH existing) | **No** — no ETH/USD quote was taken |
+| Robinhood admission/deployment/seed/factory gas | unresolved | unresolved | **No** — bytecode/addresses not yet materialized |
+| Solana pack/open/sell/return message set | unresolved beyond rent+one return-leg estimate | unresolved | **No** — full lifecycle not simulated |
 
-This **exceeds the $250 ceiling by at least $39.85**, before any of the following unpriced items
-are added: Robinhood bridge/approval gas (`≈0.0000923 ETH`), Robinhood admission/deployment/seed
-gas (unresolved — bytecode/addresses not yet materialized), and the unsimulated Solana
-pack/open/sell/return message set. The true shortfall is therefore **at least $39.85 and likely
-larger** once those items are priced. The stale `240000000`-atomic seed selection from
-`release/phase3/launch-inputs.json` cannot be combined with an owner-funded two-pack launch under
-the current $250 ceiling; this restates the counterfactual in `H-sol-prep.md` with the same
-numbers, it does not re-derive new prices.
+Because most rows have no USD conversion, this sheet **cannot and does not** state a single blended
+total against the $250 ceiling. What it can state precisely: the two-pack principal alone consumes
+a confirmed `$50.299908` of the ceiling if owner-funded. Every other row is a real, non-zero
+requirement whose USD size is currently unknown, not zero. No claim "the package fits $250" or
+"the package exceeds $250 by $X" is made here beyond that single priced row, since asserting a
+total would require inventing an exchange rate for the seed and a gas price for two unpriced
+chains — exactly what this revision was told not to do.
 
 No holder-payout reserve is included anywhere in this sheet, per the plan's separation of seed,
 gas, process capital, treasury funds, and finalized holder proceeds.
 
-## 4. Smaller feasible candidate (for owner decision, not a decision made here)
+## 4. Smaller feasible seed candidate — documented bounds actually available
 
 Reselecting the seed `S` is a product decision (it changes pool depth/tick math and every
 dependent manifest/allowance/refund artifact) and is out of this task's scope to choose
-unilaterally. What can be stated deterministically:
+unilaterally. On a documented minimum: **no minimum-seed or minimum-liquidity constant is
+committed anywhere in this repository's own contracts** (checked `RobinhoodBindings.sol`,
+`HookemonHook.sol`, `CanonicalMarket.sol`, and `release/phase3/launch-inputs.json` — none define
+one). Uniswap v4-core's own tick/liquidity-precision floor would set the real technical minimum,
+but `packages/contracts/lib/v4-core` is an uninitialized submodule in this worktree (`git submodule
+status` shows a `-` prefix), so that floor cannot be read and verified here rather than guessed.
+This is a concrete, resolvable gap, not a decision: initialize the pinned `v4-core` submodule at
+`46c6834698c48bc4a463a86d8420f4eb1d7f3b75` and read its `TickMath`/`LiquidityAmounts` minimum
+liquidity behavior before fixing a floor for `S`.
 
-- Every dollar spent on `S` competes directly with gas and process-pack capital inside the same
-  $250 ceiling; there is no second budget.
-- With the two-pack principal (`$50.30`) and a conservative combined-gas placeholder budget of
-  `$10` (Robinhood bridge/admission/seed gas plus Solana runway — still unpriced, so treat this as
-  a lower bound, not a quote), at most **≈ `$189.70`** of the ceiling remains available for the
-  seed deficit, i.e. a seed of roughly **`S ≤ 190,146,004` atomic USDG (~190.15 USDG)** after
-  crediting the launch wallet's existing `446004` atomic USDG — versus the stale `240000000`
-  candidate.
-- A one-pack-only first cycle instead of two would free the difference between the two-pack quote
-  (`$50.30`) and a one-pack quote; the one-pack `EXACT_INPUT` probe in `H-funding-observations.md`
-  did not deliver a full 25-USDC pack (`minimum 24212666` atomic USDC out), so a one-pack
-  `EXACT_OUTPUT` quote must be re-run before this alternative can be priced.
+What can be stated without inventing a number:
+
+- Every atomic unit spent on `S` competes with gas and process-pack capital inside the same $250
+  ceiling; there is no second budget.
+- The two-pack principal is a confirmed $50.299908 draw on that ceiling if owner-funded, leaving at
+  most $199.700092 of headroom for the seed plus every gas item — but since neither the seed's
+  USD value nor most of the gas items have a real quote, this headroom number is an upper bound on
+  what's left for unpriced items, not a proof that they fit.
+- A one-pack-only first cycle would reduce the confirmed principal below $50.30, but the
+  one-pack `EXACT_INPUT` probe in `H-funding-observations.md` did not deliver a full 25-USDC pack
+  (`minimum 24212666` atomic USDC out); a fresh one-pack `EXACT_OUTPUT` quote is needed before that
+  alternative has its own real number.
 - Any smaller-seed or fewer-pack candidate still needs items 3–5 of the "exact focused
   verification prerequisites" in `H-sol-prep.md` priced (deployable-bytecode gas, decoded provider
-  pack transaction, full Solana message-set simulation) before its total can be proven to fit
-  $250.
+  pack transaction, full Solana message-set simulation, and now also the v4.1 `fundingPlan`
+  requirement noted above) before its total can be proven to fit $250.
 
-**Approval needed from the owner before proceeding:** (a) the final seed `S` (bounded above by the
-arithmetic in this section, not fixed by this sheet), (b) whether the first cycle targets one or
-two packs, and (c) confirmation that the $50.30 two-pack principal (if kept) is owner top-up
-rather than an assumed-available process balance, since the process account is currently `0`
-USDG/ETH at Operations.
+**Approval needed from the owner before proceeding:** (a) the final seed `S`, to be fixed only
+after the v4-core minimum-liquidity floor is read and a real USDG/USD quote is taken at that exact
+size, (b) whether the first cycle targets one or two packs, (c) confirmation that the $50.30
+two-pack principal (if kept) is owner top-up rather than an assumed-available process balance,
+since the process account is currently `0` USDG/ETH at Operations, and (d) acknowledgement of the
+v4.1 compatibility gap in the notice at the top of this document before any of these numbers are
+used for a real funding action.
 
-## 5. Provenance and refresh requirement
+## 5. Unknown prior owner funding — tracked separately, not treated as free headroom
+
+The launch wallet's existing `446004` atomic USDG and the Solana operator's existing `19920066`
+lamports were already on those addresses at snapshot time; their origin (whether they were already
+counted against the owner's lifetime $250 ceiling, or are fresh/uncounted) is **not established by
+a public balance read**. Section 3/4 above treat them only as an offset against the amount that
+would otherwise need to move (a real, mechanical reduction of what must be sent), not as
+additional headroom inside the $250 cap. Before relying on any "remaining budget" figure, the
+owner should confirm whether either existing balance was already funded from, and counted against,
+the $250 ceiling this task was given.
+
+## 6. Provenance and refresh requirement
 
 Every raw balance/quote above must be re-read from the same public methods
 (`eth_chainId`, `eth_getBalance`, ERC-20 `balanceOf` via `eth_call`, `eth_gasPrice`,
