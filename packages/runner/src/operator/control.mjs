@@ -571,6 +571,23 @@ export function createOperatorControl({
     return actual;
   }
 
+  // Same reasoning as recoverIdempotentConfigurationMutation, applied to manual-approval's own
+  // authority (packages/runner/src/automation/policy-engine.mjs's recordManualApproval). That
+  // authority's injected mutateConfiguration dependency can reject a stale expectedRevision before
+  // ever reaching recordManualApproval's own cycleDigest-keyed idempotency check — exactly the shape
+  // of a crash-after-effect replay, since the approval itself is what advanced the revision the retry
+  // still expects. The one command-specific durable postcondition this control layer can check
+  // without guessing is a direct readback: does approvalsByCycleDigest[cycleDigest] already record
+  // this exact cycleId? If so, the approval is durably present regardless of who wrote it or why the
+  // revision moved, and that recorded approval is the real, authoritative answer — not an inferred
+  // one. If not, this is a genuine conflict and the stale-revision error is rethrown unchanged.
+  async function recoverIdempotentManualApproval(cycleId, cycleDigest, error) {
+    const actual = await readStateOrNull(statePath);
+    const existing = actual?.configuration?.approvalsByCycleDigest?.[cycleDigest];
+    if (!existing || existing.cycleId !== cycleId) throw error;
+    return Object.freeze({ cycleDigest, cycleId: existing.cycleId, approvedAtMs: existing.approvedAtMs });
+  }
+
   async function mutateConfiguration(expectedRevision, patch) {
     try {
       return await mutateOperatorState(statePath, expectedRevision, current => {
@@ -622,13 +639,20 @@ export function createOperatorControl({
         return deepFreeze({ action: 'update-configuration', revision: state.revision, configuration: structuredClone(state.configuration) });
       }
       case 'manual-approval': {
+        assertRequestId(requestId);
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const approval = await policyEngine.recordManualApproval({
-          cycleId: normalized.cycleId,
-          cycleDigest: normalized.cycleDigest,
-          expectedRevision: revision,
-        });
+        let approval;
+        try {
+          approval = await policyEngine.recordManualApproval({
+            cycleId: normalized.cycleId,
+            cycleDigest: normalized.cycleDigest,
+            expectedRevision: revision,
+          });
+        } catch (error) {
+          if (error?.message !== staleRevisionMessage) throw error;
+          approval = await recoverIdempotentManualApproval(normalized.cycleId, normalized.cycleDigest, error);
+        }
         const state = await readStateOrNull(statePath);
         return deepFreeze({
           action: 'manual-approval',

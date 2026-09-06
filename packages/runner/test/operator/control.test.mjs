@@ -821,11 +821,101 @@ test('manual approval delegates one exact digest-bound request to the policy eng
 
   const result = await control.execute({
     expectedRevision: 0,
+    requestId: 'manual-approval-1',
     command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest: hash('c') },
   });
 
   assert.deepEqual(calls, [{ cycleId: 'cycle-one', cycleDigest: hash('c'), expectedRevision: 0 }]);
   assert.deepEqual(result.approval, { cycleId: 'cycle-one', cycleDigest: hash('c'), approvedAtMs: nowMs });
+});
+
+test('manual approval requires a stable request identity', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('must not be called without a requestId'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  await assert.rejects(
+    control.execute({
+      expectedRevision: 0,
+      command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest: hash('c') },
+    }),
+    /requestId is invalid/,
+  );
+});
+
+test('a manual approval that crashed after its effect but before audit completion recovers by reading back the exact durable approval, not by failing UNCERTAIN', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const cycleDigest = hash('e');
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    // Stands in for production composition's injected mutateConfiguration: it rejects a stale
+    // expectedRevision before recordManualApproval's own cycleDigest idempotency check ever runs --
+    // exactly the shape of a crash-after-effect replay, since the approval itself is what advanced
+    // the revision this retry still expects.
+    policyEngine: { recordManualApproval: async () => { throw new Error('stale operator state revision'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  // An unrelated command first advances the revision (matching the real shape: the crashed attempt's
+  // own effect is what moves the revision the retry's expectedRevision still targets), then a
+  // policyEngine that performs a real, expectedRevision-honoring durable write -- mirroring
+  // production's actual mutateConfiguration dependency, unlike the always-succeeds-against-latest
+  // policyEngineForState() test helper -- durably records the approval.
+  await control.execute({
+    expectedRevision: 0,
+    requestId: 'seed-approval',
+    command: { type: 'update-configuration', configuration: { intervalMinutes: 10 } },
+  });
+  const seeded = await createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: {
+      recordManualApproval: async ({ cycleId, cycleDigest: digestValue, expectedRevision }) => {
+        const { mutateOperatorState } = await stateFileModule();
+        await mutateOperatorState(statePath, expectedRevision, current => ({
+          ...current,
+          configuration: {
+            ...current.configuration,
+            approvalsByCycleDigest: { ...current.configuration.approvalsByCycleDigest, [digestValue]: { cycleId, approvedAtMs: 5_000 } },
+          },
+        }));
+        return { cycleId, cycleDigest: digestValue, approvedAtMs: 5_000 };
+      },
+    },
+    readCustody: async () => safetyTelemetry(),
+  }).execute({
+    expectedRevision: 1,
+    requestId: 'real-approval',
+    command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest },
+  });
+  assert.equal(seeded.approval.cycleId, 'cycle-one');
+
+  // The retry replays the crashed attempt's original (now stale) expectedRevision.
+  const retried = await control.execute({
+    expectedRevision: 1,
+    requestId: 'real-approval',
+    command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest },
+  });
+  assert.deepEqual(retried.approval, { cycleId: 'cycle-one', cycleDigest, approvedAtMs: 5_000 });
+
+  // A retry for a cycleId that was never actually approved remains a real, reported conflict.
+  await assert.rejects(
+    control.execute({
+      expectedRevision: 1,
+      requestId: 'real-approval-other',
+      command: { type: 'manual-approval', cycleId: 'cycle-two', cycleDigest },
+    }),
+    /stale operator state revision/,
+  );
 });
 
 test('held owner decisions carry the audited request and position revision to the repository authority', async t => {

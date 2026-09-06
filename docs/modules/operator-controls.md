@@ -63,6 +63,19 @@ creates a local cycle store, signer, or provider effect.
   rethrown unchanged. This makes those four commands safe to retry (including a crash-recovered
   retry through the audited command executor) without ever inferring "applied" from the error
   message alone.
+- `manual-approval` requires a stable request identity (`assertRequestId`), same as `held-owner-decision`.
+  It recovers from its own authority's stale-revision failure the same way the four configuration
+  commands do, but against a different postcondition: a direct readback of
+  `approvalsByCycleDigest[cycleDigest]` in the current durable configuration. If that entry already
+  names the exact `cycleId` this call intended to approve, the approval is durably present regardless
+  of who wrote it or why the revision moved, and that recorded entry is returned as the real outcome;
+  otherwise the stale-revision error is rethrown unchanged. This closes the one command whose injected
+  authority (`policyEngine.recordManualApproval`) can be rejected by its own `mutateConfiguration`
+  dependency's revision check before that authority's own cycleDigest-keyed idempotency logic ever
+  runs — exactly the shape of a crash-after-effect-before-audit-completion replay, since the approval
+  itself is what advanced the revision the retry's `expectedRevision` still targets. Unlike
+  `run-cycle-now`/`reconcile`/`resume-cycle` below, this is fully self-contained in this module: no
+  C/I composition change is needed for this specific command.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
 - A held-owner decision binds position ID, held-evidence digest, request ID, expected position
