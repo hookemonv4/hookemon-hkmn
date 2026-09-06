@@ -71,6 +71,69 @@ function assertPackId(value) {
   return value;
 }
 
+function assertPolicyAdmissionAmount(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is invalid`);
+  if (typeof value.chainId !== 'string' || value.chainId.length === 0
+    || typeof value.assetId !== 'string' || value.assetId.length === 0
+    || !Number.isInteger(value.decimals) || value.decimals < 0) {
+    throw new Error(`${label} asset identity is invalid`);
+  }
+  return Object.freeze({
+    chainId: value.chainId,
+    assetId: value.assetId,
+    decimals: value.decimals,
+    amountAtomic: assertAmount(value.amountAtomic, `${label} amountAtomic`, { positive: true }).toString(),
+  });
+}
+
+/**
+ * Normalizes the quote-bound monetary record produced before a live cycle exists. The policy
+ * engine deliberately does not infer a unit quote from an aggregate quote: they are separate
+ * source-asset facts, while purchase targets remain separately typed destination-asset facts.
+ */
+function normalizePolicyAdmission(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.schema !== 'hookemon.policy-admission.v2') {
+    throw new Error('policy admission must use hookemon.policy-admission.v2');
+  }
+  assertCycleId(value.cycleId);
+  if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error('policy admission quantity is invalid');
+  if (typeof value.quoteDigest !== 'string' || !digestPattern.test(value.quoteDigest)) throw new Error('policy admission quoteDigest is invalid');
+  const unitPurchase = assertPolicyAdmissionAmount(value.unitPurchase, 'policy admission unitPurchase');
+  const aggregatePurchase = assertPolicyAdmissionAmount(value.aggregatePurchase, 'policy admission aggregatePurchase');
+  const unitFundingQuote = assertPolicyAdmissionAmount(value.unitFundingQuote, 'policy admission unitFundingQuote');
+  const aggregateFundingQuote = assertPolicyAdmissionAmount(value.aggregateFundingQuote, 'policy admission aggregateFundingQuote');
+  if (unitPurchase.chainId !== aggregatePurchase.chainId || unitPurchase.assetId !== aggregatePurchase.assetId
+    || unitPurchase.decimals !== aggregatePurchase.decimals
+    || BigInt(unitPurchase.amountAtomic) * BigInt(value.quantity) !== BigInt(aggregatePurchase.amountAtomic)) {
+    throw new Error('policy admission aggregatePurchase does not exactly equal unitPurchase times quantity');
+  }
+  if (unitFundingQuote.chainId !== aggregateFundingQuote.chainId || unitFundingQuote.assetId !== aggregateFundingQuote.assetId
+    || unitFundingQuote.decimals !== aggregateFundingQuote.decimals) {
+    throw new Error('policy admission funding quotes do not share one source asset identity');
+  }
+  const relay = value.relay;
+  if (!relay || relay.tradeType !== 'EXACT_OUTPUT' || typeof relay.requestId !== 'string' || relay.requestId.length === 0
+    || typeof relay.orderId !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId)
+    || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
+    || typeof relay.sender !== 'string' || relay.sender.length === 0 || typeof relay.recipient !== 'string' || relay.recipient.length === 0
+    || assertAmount(relay.destinationAmount, 'policy admission relay destinationAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic
+    || assertAmount(relay.destinationMinimumAmount, 'policy admission relay destinationMinimumAmount', { positive: true }).toString() !== aggregatePurchase.amountAtomic) {
+    throw new Error('policy admission Relay exact-output identity is invalid');
+  }
+  return Object.freeze({
+    schema: value.schema,
+    cycleId: value.cycleId,
+    quantity: value.quantity,
+    quoteDigest: value.quoteDigest,
+    unitPurchase,
+    aggregatePurchase,
+    unitFundingQuote,
+    aggregateFundingQuote,
+    relay: Object.freeze({ ...relay }),
+  });
+}
+
 function assertBoundary(value) {
   if (!['cycle-start', 'claim-process', 'purchase', 'signature', 'broadcast', 'mutation'].includes(value)) {
     throw new Error('policy boundary is invalid');
@@ -244,7 +307,7 @@ function legacyPolicyMaterial(configuration, configurationRevision) {
   };
 }
 
-function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = null }) {
   return digest({
     schema,
     cycleId,
@@ -252,22 +315,26 @@ function digestCyclePolicy({ schema, policy, cycleId, releaseAmountMicroUsdg, pa
     packId,
     mode: cycleMode(liveMode, mode),
     policy,
+    ...(admission === null ? {} : { admission }),
   });
 }
 
-export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
+export function deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined }) {
   const normalized = assertOperatorHardCaps(assertOperatorConfiguration(configuration));
   assertCycleId(cycleId);
   assertAmount(releaseAmountMicroUsdg, 'policy releaseAmountMicroUsdg', { positive: true });
   assertPackId(packId);
+  const normalizedAdmission = admission === undefined ? null : normalizePolicyAdmission(admission);
+  if (normalizedAdmission !== null && normalizedAdmission.cycleId !== cycleId) throw new Error('policy admission cycleId does not match cycle digest');
   return digestCyclePolicy({
-    schema: 'hookemon.policy-cycle.v3',
+    schema: normalizedAdmission === null ? 'hookemon.policy-cycle.v3' : 'hookemon.policy-cycle.v4',
     policy: policyMaterial(normalized),
     cycleId,
     releaseAmountMicroUsdg,
     packId,
     liveMode,
     mode,
+    admission: normalizedAdmission,
   });
 }
 
@@ -307,9 +374,10 @@ function deriveLegacyCyclePolicyDigest({ configuration, cycleId, releaseAmountMi
   });
 }
 
-function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode }) {
-  const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode });
+function matchingExistingCycleDigest({ configuration, existing, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission = undefined }) {
+  const current = deriveCyclePolicyDigest({ configuration, cycleId, releaseAmountMicroUsdg, packId, liveMode, mode, admission });
   if (existing.cycleDigest === current) return current;
+  if (admission !== undefined) return null;
   const versionThree = deriveVersionThreeCyclePolicyDigest({
     configuration,
     cycleId,
@@ -436,7 +504,16 @@ function admissionContext(input) {
   if (input.cycleId !== undefined && input.cycleId !== null) assertCycleId(input.cycleId);
   if (input.packId !== undefined && input.packId !== null) assertPackId(input.packId);
   const capUsdg = input.capUsdg === undefined ? null : assertAmount(input.capUsdg, 'policy capUsdg');
-  return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? null, packId: input.packId ?? null };
+  const admission = input.admission === undefined ? null : normalizePolicyAdmission(input.admission);
+  if (admission !== null) {
+    if (input.cycleId !== undefined && input.cycleId !== null && input.cycleId !== admission.cycleId) {
+      throw new Error('policy admission cycleId does not match policy context');
+    }
+    if (releaseAmount !== BigInt(admission.aggregateFundingQuote.amountAtomic)) {
+      throw new Error('policy release amount does not match admitted aggregate funding quote');
+    }
+  }
+  return { boundary, liveMode, mode, now, releaseAmount, capUsdg, cycleId: input.cycleId ?? admission?.cycleId ?? null, packId: input.packId ?? null, admission };
 }
 
 function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
@@ -505,6 +582,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       packId: context.packId,
       liveMode: context.liveMode,
       mode: context.mode,
+      admission: context.admission ?? undefined,
     });
     const cycleDigest = existing
       ? matchingExistingCycleDigest({
@@ -515,6 +593,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
         packId: context.packId,
         liveMode: context.liveMode,
         mode: context.mode,
+        admission: context.admission ?? undefined,
       })
       : derivedCycleDigest;
     if (cycleDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
@@ -555,7 +634,8 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
     if (custodyState.unattributed) return refused('UNATTRIBUTED_CUSTODY');
     if (custodyState.unvaluedExposure) return refused('UNVALUED_CUSTODY');
     if (!normalized.allowedPackIds.includes(context.packId)) return refused('PACK_NOT_ALLOWED');
-    if (context.releaseAmount > BigInt(normalized.maxUnitPriceMicroUsdg)) return refused('UNIT_PRICE_CAP');
+    const unitFundingAmount = context.admission === null ? context.releaseAmount : BigInt(context.admission.unitFundingQuote.amountAtomic);
+    if (unitFundingAmount > BigInt(normalized.maxUnitPriceMicroUsdg)) return refused('UNIT_PRICE_CAP');
     const existing = existingCycle(normalized, context.cycleId);
     if (!existing) return refused('CYCLE_POLICY_MISSING');
     const expectedDigest = matchingExistingCycleDigest({
@@ -566,6 +646,7 @@ function evaluateConfiguredPolicy({ configuration, custody, ...input }) {
       packId: context.packId,
       liveMode: context.liveMode,
       mode: context.mode,
+      admission: context.admission ?? undefined,
     });
     if (expectedDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
     const reservation = normalized.spendLedger.find(entry => entry.cycleDigest === expectedDigest);
