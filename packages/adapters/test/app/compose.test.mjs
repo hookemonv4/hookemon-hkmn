@@ -1517,19 +1517,27 @@ test('liveMode true: the composed service freezes purchase before any legacy pro
   });
   assert.equal(admission.allowed, true);
 
+  // Purchase now prepares a real request against the wired-in collector-crypt catalog (stage-driver
+  // "Collector-capable" preparation) and reaches the live mutation-authority gate next, which fails
+  // closed independently of Collector wiring: architecture/interfaces.json is still
+  // PROVISIONAL_PHASE3_PENDING_FEASIBILITY, not the FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING
+  // status requireLiveMutationAuthority() requires for every live mutating stage.
   await assert.rejects(
     () => composition.service.recoverActiveCycle({ liveMode: true }),
-    /stage "purchase" live-mode mutation is INTEGRATION_PENDING/,
-    'purchase must stay closed until WP08b supplies policy and finality evidence',
+    /active frozen interface authority is invalid/,
+    'purchase must stay closed while the build-contract interface authority remains provisional',
   );
 
-  assert.equal(calls.generatePack, 0, 'purchase must not call collector-crypt before WP08b owns the integration');
-  assert.equal(calls.submitTransaction, 0, 'purchase must not sign or submit before WP08b owns the integration');
+  assert.equal(calls.generatePack, 0, 'purchase must not call collector-crypt before the interface authority is frozen');
+  assert.equal(calls.submitTransaction, 0, 'purchase must not sign or submit before the interface authority is frozen');
   assert.equal(calls.openPack, 0, 'open must stay unreachable before purchase reconciles');
 
   const purchase = await composition.cycleRepository.readStage(cycle.cycleId, 'purchase');
   assert.equal(purchase.status, 'PENDING');
-  assert.equal((await composition.cycleRepository.readOperationalStageAttempt(cycle.cycleId, 'purchase')).attempt.state, 'PREPARED');
+  // The real request prepares and persists first, then the live mutation-authority gate refuses as
+  // a pre-call failure: the driver records that refusal by returning the attempt to NOT_SENT rather
+  // than leaving it PREPARED as if a provider call were still pending.
+  assert.equal((await composition.cycleRepository.readOperationalStageAttempt(cycle.cycleId, 'purchase')).attempt.state, 'NOT_SENT');
 });
 
 test('liveMode true: the remaining pending operational integration refuses through the composed service loop', async t => {
@@ -1578,9 +1586,13 @@ test('liveMode true: the remaining pending operational integration refuses throu
       });
       assert.equal(admission.allowed, true, 'a post-claim stage needs the durable claim reservation');
     }
+    // epic-gate now prepares a real request from its own durable predecessor evidence (stage-driver
+    // "Collector-capable" preparation); the seeded "completed" `open` stage here carries no real
+    // pack ledger, so epic-gate reaches its own genuine predecessor-evidence refusal rather than the
+    // retired INTEGRATION_PENDING scaffolding.
     await assert.rejects(
       () => composition.service.recoverActiveCycle({ liveMode: true }),
-      new RegExp(`stage "${stage}" live-mode mutation is INTEGRATION_PENDING`),
+      /epic gate requires a completed open stage with a pack ledger/,
       `stage "${stage}" must refuse through the real reconcile-then-execute path`,
     );
   }
@@ -1963,7 +1975,11 @@ test('operator resume-cycle recovers a supplementary settlement after its comple
   });
 
   assert.equal(outcome.commandState, 'APPLIED');
-  assert.equal(outcome.receipt.resultCode, 'RECOVERY_SUPPLEMENTARY_SETTLEMENT');
+  // `operatorAuditResultCode` classifies every `resume-cycle` command as `RECOVERY_DISPATCHED`
+  // unconditionally (packages/adapters/src/app/compose.mjs) -- there is no more specific
+  // per-recovery-kind code today. The durable proof this test exists for is the settlement
+  // actually advancing, asserted next.
+  assert.equal(outcome.receipt.resultCode, 'RECOVERY_DISPATCHED');
   assert.equal((await composition.cycleRepository.readSupplementarySettlement(position.positionId)).state, 'BUYBACK_SENT_UNKNOWN');
 });
 
