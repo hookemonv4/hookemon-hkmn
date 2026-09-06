@@ -98,6 +98,25 @@ export function nullableSignedMoney(value, invalid) {
   return value === undefined || value === null ? null : optionalSignedMoney(value, invalid);
 }
 
+const AMOUNT_KEYS = new Set(['chainId', 'assetId', 'units', 'decimals']);
+
+/** The frozen `Amount` shape (F-brief): `{ chainId, assetId, units, decimals }`. `units` is an
+ * unsigned atomic integer string in the asset's own native decimals — never converted or assumed
+ * equal to a same-named field on a different chain/asset. `null` means genuinely unknown; there is
+ * no all-zero placeholder, since a zero amount is itself a real, evidenced fact distinct from "not
+ * observed yet." */
+export function nullableAmount(value, invalid) {
+  if (value === null) return null;
+  const source = requiredRecord(value, invalid);
+  exactKeys(source, AMOUNT_KEYS, invalid);
+  requiredKeys(source, AMOUNT_KEYS, invalid);
+  if (typeof source.chainId !== 'string' || source.chainId.length === 0) invalid();
+  if (typeof source.assetId !== 'string' || source.assetId.length === 0) invalid();
+  if (!Number.isInteger(source.decimals) || source.decimals < 0 || source.decimals > 255) invalid();
+  if (typeof source.units !== 'string' || !/^(0|[1-9]\d{0,77})$/.test(source.units)) invalid();
+  return { chainId: source.chainId, assetId: source.assetId, units: source.units, decimals: source.decimals };
+}
+
 export function nonNegativeInteger(value, invalid) {
   if (!Number.isSafeInteger(value) || value < 0) invalid();
   return value;
