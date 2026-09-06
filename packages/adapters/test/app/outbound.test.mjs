@@ -368,7 +368,7 @@ function outboundIntent() {
     originAmount: quoteFixture.details.currencyIn.amount,
     quotedDestinationAmount: quoteFixture.details.currencyOut.amount,
     quotedDestinationMinimumAmount: quoteFixture.details.currencyOut.minimumAmount,
-    sender: EVM_ACCOUNT,
+    sender: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address,
     recipient: SOLANA_ACCOUNT,
     deadlineUnixSeconds: quoteFixture.protocol.v2.orderData.output.deadline,
   };
@@ -410,7 +410,7 @@ function finalizedOutboundSourceClient({ amountAtomic, transactionHash }) {
     status: 'success',
     logs: [{
       address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(EVM_ACCOUNT), addressTopic(RELAY_DEPOSITORY)],
+      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
       data: `0x${amount.toString(16).padStart(64, '0')}`,
       logIndex: 0n,
     }],
@@ -446,7 +446,7 @@ function finalizedOutboundSourceAndRefundClient({
     status: 'success',
     logs: [{
       address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(EVM_ACCOUNT), addressTopic(RELAY_DEPOSITORY)],
+      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
       data: `0x${sourceAmount.toString(16).padStart(64, '0')}`,
       logIndex: 0n,
     }],
@@ -459,7 +459,7 @@ function finalizedOutboundSourceAndRefundClient({
     logs: refundTransfers.map(({
       token = quoteFixture.details.currencyIn.currency.address,
       source = RELAY_DEPOSITORY,
-      recipient = EVM_ACCOUNT,
+      recipient = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address,
       amountAtomic,
     }, index) => ({
       address: token,
@@ -484,7 +484,7 @@ function finalizedOutboundSourceAndRefundClient({
   };
 }
 
-function outboundArchiveEvidence({ amountAtomic, sourceAccount = EVM_ACCOUNT }) {
+function outboundArchiveEvidence({ amountAtomic, sourceAccount = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) {
   const amount = BigInt(amountAtomic);
   return {
     async readErc20BalanceAtBlock({ account, blockNumber, blockHash }) {
@@ -566,7 +566,7 @@ function originRefundRelayClient(refundTxHash) {
   });
 }
 
-function outboundReconciliationRepository({
+async function outboundReconciliationRepository({
   transactionHash,
   relayRequestId,
   destinationAmountAtomic,
@@ -588,8 +588,11 @@ function outboundReconciliationRepository({
   };
   // The canonical two-step Relay envelope's other durable attempt: this shared repository is used
   // by every reconcile test in this file that does not itself exercise prerequisite-role/finality
-  // behavior, so it is already FINALIZED -- outbound.mjs never re-examines an attempt in that
-  // state, so a placeholder rawBytes here is never decoded.
+  // behavior. It is already FINALIZED, but `reconcileLiveOutbound` still validates a FINALIZED
+  // prerequisite's role from its own durable bytes, so this must be a real, canonically valid
+  // signed USDG approval -- never a placeholder -- for `OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT` (the
+  // Operations account these reconcile tests configure).
+  const canonicalApproval = await signOutboundApproval();
   const approvalRecord = {
     attempt: {
       schema: 'hookemon.chain-transaction-attempt.v1',
@@ -597,10 +600,10 @@ function outboundReconciliationRepository({
       stage: 'outbound',
       state: 'FINALIZED',
       requestDigest: `sha256:${'0'.repeat(64)}`,
-      rawBytes: '0x00',
+      rawBytes: canonicalApproval.rawBytes,
       nonce: '8',
       blockhash: null,
-      hash: `0x${'d'.repeat(64)}`,
+      hash: canonicalApproval.hash,
     },
   };
   const leg = {
@@ -751,7 +754,8 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
   ];
 
   for (const fixtureCase of cases) {
-    const cycleRepository = outboundReconciliationRepository({
+    // eslint-disable-next-line no-await-in-loop
+    const cycleRepository = await outboundReconciliationRepository({
       transactionHash: sourceTransactionHash,
       relayRequestId,
       destinationAmountAtomic,
@@ -773,7 +777,7 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -794,7 +798,7 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
       cycleId: 'cycle-outbound-reconcile',
       reservation: {
         chainId: '4663',
-        wallet: EVM_ACCOUNT.toLowerCase(),
+        wallet: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address.toLowerCase(),
         stage: 'outbound',
         fencingToken: '11111111-1111-4111-8111-111111111111',
         leaseAcquiredAtMs: 0,
@@ -816,7 +820,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
   const refundTransactionHash = `0x${'5'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
   const refundAmountAtomic = '24500000';
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId,
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -836,7 +840,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
       relay: originRefundRelayClient(refundTransactionHash),
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -872,7 +876,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
     transferCount: 1,
     observedToken: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
     observedSource: RELAY_DEPOSITORY.toLowerCase(),
-    observedRecipient: EVM_ACCOUNT.toLowerCase(),
+    observedRecipient: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address.toLowerCase(),
     observedAmountAtomic: refundAmountAtomic,
   });
 });
@@ -881,7 +885,7 @@ test('reconcileLiveOutbound rejects an origin refund credit that was not sent by
   const sourceTransactionHash = `0x${'2'.repeat(64)}`;
   const refundTransactionHash = `0x${'1'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId,
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -902,7 +906,7 @@ test('reconcileLiveOutbound rejects an origin refund credit that was not sent by
       relay: originRefundRelayClient(refundTransactionHash),
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -921,7 +925,7 @@ test('reconcileLiveOutbound does not treat a Solana debit as a refund without on
   const sourceTransactionHash = `0x${'4'.repeat(64)}`;
   const refundTransactionHash = `0x${'3'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId,
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -948,7 +952,7 @@ test('reconcileLiveOutbound does not treat a Solana debit as a refund without on
       solana: { client: destination.client },
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -974,7 +978,8 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
   ];
 
   for (const fixtureCase of cases) {
-    const cycleRepository = outboundReconciliationRepository({
+    // eslint-disable-next-line no-await-in-loop
+    const cycleRepository = await outboundReconciliationRepository({
       transactionHash: sourceTransactionHash,
       relayRequestId,
       destinationAmountAtomic,
@@ -998,7 +1003,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -1035,7 +1040,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -1061,7 +1066,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
 
 test('reconcileLiveOutbound retains the wallet nonce reservation while source finality is unresolved', async () => {
   const sourceTransactionHash = `0x${'7'.repeat(64)}`;
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId: 'relay-outbound-unfinalized',
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -1093,7 +1098,7 @@ test('reconcileLiveOutbound retains the wallet nonce reservation while source fi
       }).client },
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -1480,6 +1485,42 @@ test('reconcileLiveOutbound fails closed unless the durable outbound attempt set
     assert.deepEqual(cycleRepository.finalityCalls, [], fixtureCase.name);
     assert.deepEqual(cycleRepository.settlements, [], fixtureCase.name);
   }
+});
+
+test('reconcileLiveOutbound refuses an already-FINALIZED prerequisite whose durable role is invalid, even with the leg already SETTLED', async () => {
+  const sourceHash = `0x${'6'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-finalized-invalid';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  // Wrong spender: a durable FINALIZED attempt's role is still checked from its own bytes, never
+  // trusted merely because an earlier run marked it finalized.
+  const wrong = await signOutboundApproval({ spender: OUTBOUND_APPROVAL_OTHER_ACCOUNT.address });
+  const cycleRepository = outboundApprovalRepository({
+    relayRequestId,
+    destinationAmountAtomic,
+    sourceHash,
+    sourceState: 'FINALIZED',
+    legState: 'SETTLED',
+    legOverrides: {
+      destinationTxHash: 'relay-destination-observation',
+      finalizedAtDestination: { height: '88', hash: `0x${'c'.repeat(64)}`, timestampUnixSeconds: '1700000100' },
+      netDeltaAtomic: destinationAmountAtomic,
+    },
+    attempts: [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'FINALIZED', rawBytes: wrong.rawBytes }],
+  });
+
+  await assert.rejects(
+    () => reconcileLiveOutbound({
+      adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
+      config: outboundApprovalTestConfig(),
+      cycleRepository,
+      context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+    }),
+    error => error instanceof OutboundRecoveryRequiredError && error.recoveryState === 'OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS',
+  );
+  // No RPC (throwing clients above were never invoked) and no settlement or finality write, even
+  // though both the prerequisite and the leg already looked durably resolved.
+  assert.deepEqual(cycleRepository.finalityCalls, []);
+  assert.deepEqual(cycleRepository.settlements, []);
 });
 
 test('reconcileLiveOutbound reconciles a durably SETTLED leg whose approval attempt is still BROADCAST, without re-settling', async () => {

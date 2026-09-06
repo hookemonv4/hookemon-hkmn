@@ -1193,20 +1193,23 @@ async function assertOutboundApprovalAttemptRole(entry, {
 }
 
 /**
- * Resolves the leg's one durable prerequisite attempt: already-FINALIZED is a no-op (restart-safe,
- * `recordFinality` itself refuses conflicting evidence), not-yet-BROADCAST means nothing to read
- * yet, and BROADCAST is role-checked then independently finalized from its own receipt. A missing,
- * reverted, or non-canonical receipt leaves the attempt -- and therefore the whole stage --
- * unresolved rather than fabricating success from the deposit's separate evidence.
+ * Resolves the leg's one durable prerequisite attempt. Its role is verified from its own durable
+ * bytes unconditionally -- including when already FINALIZED, so a durable attempt that was never
+ * actually the expected approval cannot ride through as trusted just because some earlier run
+ * marked it finalized. Only the RPC finality read and the `recordFinality` write are skipped once
+ * FINALIZED (restart-safe: `recordFinality` itself also refuses conflicting evidence). Not-yet-
+ * BROADCAST means nothing to check or read yet. A missing, reverted, or non-canonical receipt
+ * leaves the attempt -- and therefore the whole stage -- unresolved rather than fabricating success
+ * from the deposit's separate evidence.
  */
 async function finalizeOutboundApprovalAttempt({
   cycleRepository, context, client, prerequisite, operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
 }) {
-  if (prerequisite.attempt.state === 'FINALIZED') return true;
-  if (prerequisite.attempt.state !== 'BROADCAST') return false;
+  if (!['BROADCAST', 'FINALIZED'].includes(prerequisite.attempt.state)) return false;
   await assertOutboundApprovalAttemptRole(prerequisite, {
     operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
   });
+  if (prerequisite.attempt.state === 'FINALIZED') return true;
   let finality;
   try {
     finality = await readOutboundPrerequisiteFinality(client, prerequisite.attempt.hash);
@@ -1302,22 +1305,23 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
     throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'the outbound leg does not have exactly one durable prerequisite chain attempt');
   }
   const [prerequisite] = prerequisites;
-  if (prerequisite.attempt.state !== 'FINALIZED') {
-    const prerequisiteClient = adapters?.robinhood?.client;
-    if (!prerequisiteClient) return null;
-    const resolved = await finalizeOutboundApprovalAttempt({
-      cycleRepository,
-      context,
-      client: prerequisiteClient,
-      prerequisite,
-      operationsAccount: configured.evm,
-      depository: configured.evmDepository,
-      amountAtomic: leg.sourceAmountAtomic,
-      sourceNonce: record.attempt.nonce,
-      sourceHash: leg.sourceTxHash,
-    });
-    if (!resolved) return null;
-  }
+  // A client is required only to read finality for a not-yet-finalized prerequisite; an
+  // already-FINALIZED one is still role-checked below from its own durable bytes alone, with no
+  // RPC involved.
+  const prerequisiteClient = adapters?.robinhood?.client;
+  if (prerequisite.attempt.state !== 'FINALIZED' && !prerequisiteClient) return null;
+  const resolved = await finalizeOutboundApprovalAttempt({
+    cycleRepository,
+    context,
+    client: prerequisiteClient,
+    prerequisite,
+    operationsAccount: configured.evm,
+    depository: configured.evmDepository,
+    amountAtomic: leg.sourceAmountAtomic,
+    sourceNonce: record.attempt.nonce,
+    sourceHash: leg.sourceTxHash,
+  });
+  if (!resolved) return null;
 
   if (leg.state === 'SETTLED') return outboundSettlementEvidence(leg);
   if (leg.state !== 'RECORDED') {
