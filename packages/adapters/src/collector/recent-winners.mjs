@@ -185,7 +185,9 @@ export function createRecentWinnersCollector({ trustedOperations, maxRetained = 
     if (trusted.operationId !== observation.operationId) return false;
     if (trusted.packIndex !== observation.packIndex) return false;
     if (trusted.mint !== null && observation.mint !== trusted.mint) return false;
-    if (trusted.wallet !== null && rawObservation.wallet !== undefined && rawObservation.wallet !== trusted.wallet) return false;
+    // When the trusted record requires a wallet, an observation must actually state the matching
+    // one — omitting the field must never bypass the requirement.
+    if (trusted.wallet !== null && rawObservation.wallet !== trusted.wallet) return false;
     return true;
   }
 

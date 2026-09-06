@@ -474,7 +474,15 @@ test('projectPayoutEvidence: a real finalized payout with a quarantined recipien
           totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
           dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
           recipients: [
-            { recipient: '0xaaa', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '70' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+            {
+              recipient: '0xaaa',
+              amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '70' },
+              state: 'FINALIZED',
+              nonce: 1,
+              transactionHash: '0x' + '1'.repeat(64),
+              finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '70' } },
+              refusalEvidence: null,
+            },
             { recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, state: 'REFUSED', nonce: 2, transactionHash: null, finalizedTransfer: null, refusalEvidence: { reason: 'REFUSED' } },
           ],
           quarantine: [
@@ -507,7 +515,15 @@ test('projectPayoutEvidence: every recipient finalized with zero liability repor
           totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
           dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
           recipients: [
-            { recipient: '0xaaa', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+            {
+              recipient: '0xaaa',
+              amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+              state: 'FINALIZED',
+              nonce: 1,
+              transactionHash: '0x' + '1'.repeat(64),
+              finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+              refusalEvidence: null,
+            },
           ],
           quarantine: [],
           heldPositionExclusions: [],
@@ -547,6 +563,112 @@ test('projectPayoutEvidence fails closed to all-null when the payout evidence ha
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
   assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
   assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+function payoutEvidenceStages({ recipients, quarantine = [], distributablePool = '100', totalAllocated = '100', dust = '0', cycleId = 'cycle-1' }) {
+  const usdg = amount => ({ chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: amount });
+  return {
+    payout: {
+      status: 'COMPLETE',
+      evidence: {
+        schema: 'hookemon.direct-payout-result.v1',
+        cycleId,
+        planDigest: 'sha256:' + 'a'.repeat(64),
+        distributablePool: usdg(distributablePool),
+        totalAllocated: usdg(totalAllocated),
+        dust: usdg(dust),
+        recipients,
+        quarantine,
+        heldPositionExclusions: [],
+      },
+    },
+  };
+}
+
+test('F4-sol-verification repro: a FINALIZED label alone, without transactionHash/finalizedTransfer, is never reported as paid', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      recipients: [{
+        recipient: '0xaaa',
+        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: null,
+        finalizedTransfer: null,
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null, 'no fabricated paid amount from the FINALIZED label alone');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null, 'no fabricated zero liability either');
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence fails closed when the evidence cycleId does not match the cycle actually being projected', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      cycleId: 'some-other-cycle',
+      recipients: [{
+        recipient: '0xaaa',
+        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: '0x' + '1'.repeat(64),
+        finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence fails closed when a quarantine entry does not pair 1:1 with a non-paid recipient', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      recipients: [{
+        recipient: '0xaaa',
+        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: '0x' + '1'.repeat(64),
+        finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+        refusalEvidence: null,
+      }],
+      // A quarantine entry with no corresponding non-paid recipient - must never be summed in.
+      quarantine: [{ recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' }],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence fails closed when totalAllocated + dust does not conserve against distributablePool', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      distributablePool: '100',
+      totalAllocated: '100',
+      dust: '5', // 100 + 5 != 100 - inconsistent with the plan's own conservation invariant
+      recipients: [{
+        recipient: '0xaaa',
+        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: '0x' + '1'.repeat(64),
+        finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
   assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
 });
 

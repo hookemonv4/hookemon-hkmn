@@ -33,6 +33,8 @@
 // `collectorPurchaseDebit`/`collectorBuybackProceeds`). Neither may be relabeled as the other's
 // asset or subtracted against it — see `outboundBridgeFee`'s and `projectCycleAccounting`'s own
 // comments for the two concrete anti-patterns this module previously had and no longer has.
+import { USDG_PAYOUT_CHAIN_ID, USDG_PAYOUT_DECIMALS } from '../../../runner/src/distribution/payout-plan.mjs';
+
 const ACCOUNTING_STAGES = Object.freeze(['funding', 'outbound', 'purchase', 'buyback', 'return', 'distribution', 'payout']);
 
 function isCompleteStage(stageRecord) {
@@ -99,18 +101,48 @@ function sameAsset(left, right) {
 }
 
 const PAYOUT_EVIDENCE_SCHEMA = 'hookemon.direct-payout-result.v1';
+// Reused from the authoritative producer (packages/runner/src/distribution/payout-plan.mjs) rather
+// than re-declared, so this projection's notion of "real USDG" can never silently drift from the
+// one payout.mjs itself enforces via assertUsdAmount.
+const EXPECTED_USDG_CHAIN_ID = String(USDG_PAYOUT_CHAIN_ID);
+const NON_PAID_RECIPIENT_STATES = new Set(['REFUSED', 'NONCE_INTERFERENCE']);
+
+function isExpectedUsdg(amount) {
+  return amount !== null && amount.chainId === EXPECTED_USDG_CHAIN_ID && amount.decimals === USDG_PAYOUT_DECIMALS;
+}
+
+/** A recipient is only ever counted as paid when it carries the same finality proof
+ * `stages/payout.mjs`'s own `normalizeAttempt`/`finalizingAttempt` require before a durable write
+ * ever sets `state: 'FINALIZED'`: a `transactionHash` and a `finalizedTransfer` whose own `amount`
+ * matches the recipient's allocated amount exactly. The `FINALIZED` label alone (e.g. a malformed
+ * or injected evidence bundle claiming it without the proof) is never sufficient. */
+function finalizedRecipientAmount(recipient, expectedAsset) {
+  if (recipient?.state !== 'FINALIZED') return null;
+  if (typeof recipient.transactionHash !== 'string' || recipient.transactionHash.length === 0) return null;
+  if (!recipient.finalizedTransfer || typeof recipient.finalizedTransfer !== 'object' || Array.isArray(recipient.finalizedTransfer)) return null;
+  const recipientAmount = publicAmount(recipient.amount);
+  const transferAmount = publicAmount(recipient.finalizedTransfer.amount);
+  if (recipientAmount === null || transferAmount === null) return null;
+  if (!sameAsset(recipientAmount, expectedAsset) || !sameAsset(transferAmount, expectedAsset)) return null;
+  if (transferAmount.units !== recipientAmount.units) return null;
+  return recipientAmount;
+}
 
 /**
  * Projects the payout stage's own finalized-transfer evidence (see `stages/payout.mjs`'s
  * `payoutTerminalEvidence` — durable `distributablePool`/`totalAllocated`/`dust`, each recipient's
- * final `state`/`amount`, and `quarantine` liabilities) into real paid/planned/liability/dust
- * amounts and a recipient count. The payout stage reaching `COMPLETE` only proves recipient
- * conservation was reached, not that every recipient was actually paid — some may be `REFUSED` or
- * `NONCE_INTERFERENCE` (durably recorded as `quarantine` liabilities instead of a transfer). Every
- * amount here is real USDG on chain 4663, verified against the evidence's own asset identity before
- * being labeled `*MicroUsdg`; a malformed or asset-inconsistent bundle fails closed to all `null`
- * rather than infer anything from the stage's `COMPLETE` label alone. */
-function projectPayoutEvidence(payoutStage) {
+ * final `state`/`amount`/`transactionHash`/`finalizedTransfer`, and `quarantine` liabilities) into
+ * real paid/planned/liability/dust amounts and a recipient count. The payout stage reaching
+ * `COMPLETE` only proves recipient conservation was reached, not that every recipient was actually
+ * paid — some may be `REFUSED` or `NONCE_INTERFERENCE` (durably recorded as `quarantine` liabilities
+ * instead of a transfer). Every amount here is verified to be real USDG on chain 4663 (the same
+ * identity `assertUsdAmount` enforces at write time) and every conservation/pairing invariant
+ * `stages/payout.mjs` itself enforces (`isDirectPayoutComplete`'s `paid + quarantined + dust ==
+ * distributablePool`, `assertPlan`'s `totalAllocated + dust == distributablePool`, and quarantine
+ * pairing exactly one-to-one with non-paid recipients) is re-verified here before trusting any of
+ * it — a malformed, asset-inconsistent, non-conserving, or mispaired bundle fails closed to all
+ * `null` rather than infer anything from the stage's `COMPLETE` label alone. */
+function projectPayoutEvidence(payoutStage, cycleId) {
   const allNull = Object.freeze({
     plannedHolderRewardsMicroUsdg: null,
     paidHolderRewardsMicroUsdg: null,
@@ -121,28 +153,58 @@ function projectPayoutEvidence(payoutStage) {
   });
   if (!isCompleteStage(payoutStage)) return allNull;
   const evidence = payoutStage.evidence;
-  if (!evidence || evidence.schema !== PAYOUT_EVIDENCE_SCHEMA || !Array.isArray(evidence.recipients) || !Array.isArray(evidence.quarantine)) {
+  if (
+    !evidence || evidence.schema !== PAYOUT_EVIDENCE_SCHEMA || evidence.cycleId !== cycleId
+    || !Array.isArray(evidence.recipients) || !Array.isArray(evidence.quarantine)
+  ) {
     return allNull;
   }
+  const distributablePool = publicAmount(evidence.distributablePool);
   const totalAllocated = publicAmount(evidence.totalAllocated);
   const dust = publicAmount(evidence.dust);
-  if (totalAllocated === null || dust === null || !sameAsset(totalAllocated, dust)) return allNull;
+  if (distributablePool === null || totalAllocated === null || dust === null) return allNull;
+  if (!isExpectedUsdg(distributablePool) || !sameAsset(distributablePool, totalAllocated) || !sameAsset(distributablePool, dust)) {
+    return allNull;
+  }
+  // Plan-level conservation (assertPlan's own invariant): totalAllocated + dust == distributablePool.
+  if (BigInt(totalAllocated.units) + BigInt(dust.units) !== BigInt(distributablePool.units)) return allNull;
 
   let paidAtomic = 0n;
+  let recipientCount = 0;
+  const nonPaidRecipients = [];
   for (const recipient of evidence.recipients) {
-    if (recipient?.state !== 'FINALIZED') continue;
+    if (!recipient || typeof recipient !== 'object') return allNull;
+    const finalized = finalizedRecipientAmount(recipient, distributablePool);
+    if (finalized !== null) {
+      paidAtomic += BigInt(finalized.units);
+      recipientCount += 1;
+      continue;
+    }
+    if (!NON_PAID_RECIPIENT_STATES.has(recipient.state)) return allNull;
     const amount = publicAmount(recipient.amount);
-    if (amount === null || !sameAsset(amount, totalAllocated)) return allNull;
-    paidAtomic += BigInt(amount.units);
+    if (amount === null || !sameAsset(amount, distributablePool)) return allNull;
+    nonPaidRecipients.push({ recipient: recipient.recipient, units: amount.units });
   }
-  const recipientCount = evidence.recipients.filter(recipient => recipient?.state === 'FINALIZED').length;
 
+  // Quarantine must pair exactly one-to-one with non-paid recipients — the same invariant
+  // finalizeDirectPayoutResult itself enforces before ever writing this evidence.
+  if (evidence.quarantine.length !== nonPaidRecipients.length) return allNull;
+  const remainingNonPaid = [...nonPaidRecipients];
   let liabilityAtomic = 0n;
   for (const liability of evidence.quarantine) {
     const amount = publicAmount(liability?.amount);
-    if (amount === null || !sameAsset(amount, totalAllocated)) return allNull;
+    if (amount === null || !sameAsset(amount, distributablePool)) return allNull;
+    const matchIndex = remainingNonPaid.findIndex(
+      entry => entry.recipient === liability?.recipient && entry.units === amount.units,
+    );
+    if (matchIndex === -1) return allNull;
+    remainingNonPaid.splice(matchIndex, 1);
     liabilityAtomic += BigInt(amount.units);
   }
+
+  // Full conservation (isDirectPayoutComplete's own invariant): paid + quarantined + dust ==
+  // distributablePool.
+  if (paidAtomic + liabilityAtomic + BigInt(dust.units) !== BigInt(distributablePool.units)) return allNull;
 
   return Object.freeze({
     plannedHolderRewardsMicroUsdg: totalAllocated.units,
@@ -231,7 +293,7 @@ export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   const packGainMicroUsdg = null;
   const packLossMicroUsdg = null;
 
-  const payoutEvidence = projectPayoutEvidence(payout);
+  const payoutEvidence = projectPayoutEvidence(payout, cycleId);
 
   return Object.freeze({
     packSpendMicroUsdg,

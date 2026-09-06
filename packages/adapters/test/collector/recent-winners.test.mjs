@@ -89,6 +89,14 @@ test('ingest drops an observation whose wallet conflicts with the trusted record
   assert.notEqual(accepted, null);
 });
 
+test('ingest drops an observation that omits wallet entirely when the trusted record requires one (F4-sol-verification repro)', () => {
+  const collector = createRecentWinnersCollector({
+    trustedOperations: trustedOperations({ wallet: 'ExpectedWallet111' }),
+  });
+  // No `wallet` field at all - omission must not bypass a required wallet match.
+  assert.equal(collector.ingest(event()), null);
+});
+
 test('a real repro: known memo paired with a foreign cycleId/operationId and arbitrary mint is rejected', () => {
   const collector = createRecentWinnersCollector({ trustedOperations: trustedOperations({ mint: 'RealMint' }) });
   const result = collector.ingest({
