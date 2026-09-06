@@ -9,6 +9,7 @@ import { Keypair, Transaction } from '@solana/web3.js';
 import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
+  SOLANA_RELAY_CHAIN_ID,
   SYSTEM_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   buildTransferCheckedInstruction,
@@ -186,7 +187,7 @@ function baseConfig(overrides = {}) {
 }
 
 /** In-memory fake covering the exact repository surface every stage module reads or writes. */
-function repository({ stages = {}, attempts = {}, batches = {}, intents = {} } = {}) {
+function repository({ stages = {}, attempts = {}, batches = {}, intents = {}, admission = { unitPurchase: { ...settlementAsset(), amountAtomic: '40' } } } = {}) {
   const held = [];
   const heldPositions = [];
   const ledgers = [];
@@ -203,6 +204,7 @@ function repository({ stages = {}, attempts = {}, batches = {}, intents = {} } =
     async describeCycle() {
       return {
         releaseAmount: '40',
+        admission,
         heldPositions: new Map(heldPositions.map(position => [position.positionId, position])),
         custodyLedgers: new Map(ledgers.map(({ ledger }) => [`${ledger.chainId} ${ledger.assetId}`, ledger])),
       };
@@ -599,6 +601,107 @@ test('reconcileLivePurchase holds the whole cycle when the batch call itself rem
   assert.equal(cycleRepository.held.length, 1);
   assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
   assert.match(cycleRepository.held[0].evidence.reason, /no durably generated pack/);
+});
+
+function purchaseRepositoryFixture({ admission } = {}) {
+  return repository({
+    batches: { purchase: { requestedAtMs: 1_000, packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1, packType: null }] } },
+    intents: { purchase: { recordedAtMs: 1_000, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+    ...(admission !== undefined ? { admission } : {}),
+  });
+}
+
+function forbiddenCollectorCrypt() {
+  return {
+    async getPackStatus() { throw new Error('must not call getPackStatus'); },
+    async generateYoloPacks() { throw new Error('must not call generateYoloPacks'); },
+  };
+}
+
+function forbiddenRpcClient() {
+  return createSolanaRpcClient({ fetchImpl: async () => { throw new Error('must not make an RPC read'); } });
+}
+
+test('reconcileLivePurchase normalizes a production Relay-namespaced admitted unitPurchase onto the native asset and reconciles a finalized matching debit', async () => {
+  const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const relayUnitPurchase = { chainId: String(SOLANA_RELAY_CHAIN_ID), assetId: SETTLEMENT_ASSET, decimals: CIRCLE_USD_DECIMALS, amountAtomic: '40' };
+  const cycleRepository = purchaseRepositoryFixture({ admission: { unitPurchase: relayUnitPurchase } });
+  const money = collectorMoneyConfiguration();
+  money.assets.solanaStablecoin = { chainId: String(SOLANA_RELAY_CHAIN_ID), assetId: SETTLEMENT_ASSET, decimals: CIRCLE_USD_DECIMALS };
+  money.minimums.solanaReceive = { ...money.assets.solanaStablecoin, amountAtomic: '0' };
+  money.solana.priorityFeeCap = { ...money.solana.priorityFeeCap, chainId: String(SOLANA_RELAY_CHAIN_ID) };
+  money.solana.lamportReserve = { ...money.solana.lamportReserve, chainId: String(SOLANA_RELAY_CHAIN_ID) };
+  const config = baseConfig({ execution: { profile: 'production' }, moneyConfiguration: money });
+  const rpc = rpcClient({ entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }] });
+
+  const reconciled = await reconcileLivePurchase({
+    adapters: {
+      collectorCrypt: { async getPackStatus() { return { memo: MEMO, pack: { transaction_signature: PURCHASE_SIGNATURE, token_mint: SETTLEMENT_ASSET }, send: null, buyback: [] }; } },
+      solana: { client: rpc },
+    },
+    config,
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+  });
+
+  assert.equal(reconciled.purchasedCount, 1);
+  assert.deepEqual(reconciled.packs[0], {
+    packIndex: 0, memo: MEMO, status: 'purchased', signature: PURCHASE_SIGNATURE, expectedCardCount: 1,
+    packCost: { ...settlementAsset(), amountAtomic: '40' },
+  });
+});
+
+test('reconcileLivePurchase refuses before any provider or RPC read when the cycle or its admission is absent', async () => {
+  const missingAdmission = purchaseRepositoryFixture({ admission: null });
+  const missingCycle = { ...purchaseRepositoryFixture(), async describeCycle() { return null; } };
+  for (const cycleRepository of [missingAdmission, missingCycle]) {
+    await assert.rejects(
+      () => reconcileLivePurchase({
+        adapters: { collectorCrypt: forbiddenCollectorCrypt(), solana: { client: forbiddenRpcClient() } },
+        config: baseConfig(),
+        cycleRepository,
+        context: { cycleId: CYCLE_ID },
+      }),
+      /requires a durable admission carrying the immutable admitted per-pack amount/,
+    );
+    assert.equal(cycleRepository.held.length, 0);
+  }
+});
+
+test('reconcileLivePurchase refuses before any provider or RPC read when the repository cannot describe the cycle at all', async () => {
+  const cycleRepository = purchaseRepositoryFixture();
+  delete cycleRepository.describeCycle;
+  await assert.rejects(
+    () => reconcileLivePurchase({
+      adapters: { collectorCrypt: forbiddenCollectorCrypt(), solana: { client: forbiddenRpcClient() } },
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+    }),
+    /requires cycleRepository\.describeCycle to read the immutable admitted per-pack amount/,
+  );
+  assert.equal(cycleRepository.held.length, 0);
+});
+
+test('reconcileLivePurchase refuses before any provider or RPC read when the admitted unitPurchase is missing, malformed, or names the wrong chain/mint/decimals', async () => {
+  const badUnitPurchases = [
+    undefined,
+    { ...settlementAsset(), chainId: '999', amountAtomic: '40' },
+    { ...settlementAsset(), assetId: CARD_ASSET, amountAtomic: '40' },
+    { ...settlementAsset(), decimals: CIRCLE_USD_DECIMALS + 1, amountAtomic: '40' },
+    { ...settlementAsset(), amountAtomic: '040' },
+    { ...settlementAsset(), amountAtomic: 'not-a-number' },
+  ];
+  for (const unitPurchase of badUnitPurchases) {
+    const cycleRepository = purchaseRepositoryFixture({ admission: { unitPurchase } });
+    await assert.rejects(() => reconcileLivePurchase({
+      adapters: { collectorCrypt: forbiddenCollectorCrypt(), solana: { client: forbiddenRpcClient() } },
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+    }));
+    assert.equal(cycleRepository.held.length, 0);
+  }
 });
 
 // --- open ------------------------------------------------------------------------------------

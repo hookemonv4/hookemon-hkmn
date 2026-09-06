@@ -639,6 +639,10 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
   }
   if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
   const asset = configuredSettlementAsset(config);
+  // Same canonical validation mutatePurchase already runs: proves MoneyConfigurationV1 is present
+  // and still names this native settlement asset before the durable admission is trusted for
+  // anything below.
+  const money = assertSolanaSignerMoneyConfiguration({ config, asset, stage: 'purchase reconciliation' });
   // The wallet that actually made this purchase is bound durably at the pre-call intent, not
   // re-derived from the live operator config -- a config change (wallet rotation, environment
   // swap) between purchase and a later restart/reconcile must never change which address this
@@ -647,10 +651,27 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
   if (intentRecord === null) throw new Error('purchase reconciliation requires the pre-call intent that must exist alongside any recorded batch');
   const playerAddress = intentRecord.intent.playerAddress;
   // Read from the cycle's own immutable admission, like playerAddress above, so a later
-  // configuration change cannot move the bound each finalized debit is reconciled against.
-  const admittedUnitPurchase = typeof cycleRepository.describeCycle === 'function'
-    ? ((await cycleRepository.describeCycle(context.cycleId))?.admission?.unitPurchase ?? null)
-    : null;
+  // configuration change cannot move the bound each finalized debit is reconciled against. The
+  // durable amount is typed in MoneyConfigurationV1's Relay namespace in production
+  // (docs/modules/composition-root.md:99-106) -- the same mapping mutatePurchase already applies
+  // to this exact admission before generating the batch -- so it is normalized onto the native
+  // settlement asset here too, before the reconcile loop's first provider or RPC read. The frozen
+  // cycle contract requires this immutable per-pack bound: a missing describeCycle, a missing
+  // cycle/admission, or a missing/malformed/wrong-identity admitted unitPurchase all refuse right
+  // here rather than falling back to an unbounded reconcile.
+  if (typeof cycleRepository.describeCycle !== 'function') {
+    throw new Error('purchase reconciliation requires cycleRepository.describeCycle to read the immutable admitted per-pack amount');
+  }
+  const cycle = await cycleRepository.describeCycle(context.cycleId);
+  if (cycle?.admission == null) {
+    throw new Error('purchase reconciliation requires a durable admission carrying the immutable admitted per-pack amount');
+  }
+  const admittedUnitPurchase = assertSolanaAdmittedPurchaseAmount({
+    money,
+    asset,
+    amount: cycle.admission.unitPurchase,
+    label: 'purchase reconciliation admitted unitPurchase',
+  });
 
   const outcomes = [];
   for (const pack of batch.packs) {
