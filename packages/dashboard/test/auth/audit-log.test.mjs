@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   appendAuditEntry,
+  commandDigest,
   executeAuditedCommand,
   readAllAuditEntries,
   verifyAuditChain,
@@ -295,6 +296,157 @@ test('a failed effect becomes uncertain and its retry reports the durable state 
   assert.equal(retry.replayed, true);
   assert.equal(retry.commandState, 'UNCERTAIN');
   assert.equal(retry.receipt.resultCode, 'COMMAND_UNCERTAIN');
+});
+
+test('a PREPARED command left by a live process is replayed, not re-executed', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const input = auditedInput(path, {
+    requestId: 'request-live-owner',
+    processIsAlive: () => true,
+    async effect() { effects += 1; },
+  });
+  await appendAuditEntry(path, {
+    eventId: 'orphan-check-live',
+    occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+    actor: { email: 'operator-console' },
+    actorRole: 'operator',
+    action: 'pause',
+    outcome: 'accepted',
+    resultCode: 'COMMAND_DISPATCHED',
+    observedVersion: 0,
+    note: null,
+    requestId: 'request-live-owner',
+    commandDigest: commandDigest({ expectedVersion: 0, command: { type: 'pause' }, note: null }),
+    commandState: 'PREPARED',
+    pid: process.pid,
+  });
+
+  const result = await executeAuditedCommand(input);
+
+  assert.equal(effects, 0);
+  assert.equal(result.replayed, true);
+  assert.equal(result.commandState, 'PREPARED');
+});
+
+test('a PREPARED command orphaned by a dead owner process is safely re-executed and resolved', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const input = auditedInput(path, {
+    requestId: 'request-orphaned',
+    processIsAlive: () => false,
+    async effect() { effects += 1; },
+  });
+  await appendAuditEntry(path, {
+    eventId: 'orphan-check-dead',
+    occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+    actor: { email: 'operator-console' },
+    actorRole: 'operator',
+    action: 'pause',
+    outcome: 'accepted',
+    resultCode: 'COMMAND_DISPATCHED',
+    observedVersion: 0,
+    note: null,
+    requestId: 'request-orphaned',
+    commandDigest: commandDigest({ expectedVersion: 0, command: { type: 'pause' }, note: null }),
+    commandState: 'PREPARED',
+    pid: 999_999,
+  });
+
+  const result = await executeAuditedCommand(input);
+  const records = await readAllAuditEntries(path);
+
+  assert.equal(effects, 1, 'the orphaned command is actually executed, not just replayed');
+  assert.equal(result.replayed, false);
+  assert.equal(result.commandState, 'APPLIED');
+  assert.deepEqual(records.map(record => record.commandState), ['PREPARED', 'PREPARED', 'APPLIED']);
+
+  const retry = await executeAuditedCommand({ ...input, processIsAlive: () => { throw new Error('must not be consulted once resolved'); } });
+  assert.equal(effects, 1, 'a retry after resolution never re-runs the effect');
+  assert.equal(retry.replayed, true);
+  assert.equal(retry.commandState, 'APPLIED');
+});
+
+test('an effect that fails after a dead owner already applied it is finalized as APPLIED, not stuck or duplicated', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const input = auditedInput(path, {
+    requestId: 'request-orphan-already-applied',
+    processIsAlive: () => false,
+    async effect() {
+      effects += 1;
+      throw new Error('stale operator state revision');
+    },
+  });
+  await appendAuditEntry(path, {
+    eventId: 'orphan-check-applied',
+    occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+    actor: { email: 'operator-console' },
+    actorRole: 'operator',
+    action: 'pause',
+    outcome: 'accepted',
+    resultCode: 'COMMAND_DISPATCHED',
+    observedVersion: 0,
+    note: null,
+    requestId: 'request-orphan-already-applied',
+    commandDigest: commandDigest({ expectedVersion: 0, command: { type: 'pause' }, note: null }),
+    commandState: 'PREPARED',
+    pid: 999_999,
+  });
+
+  const result = await executeAuditedCommand(input);
+
+  assert.equal(effects, 1);
+  assert.equal(result.replayed, false);
+  assert.equal(result.commandState, 'APPLIED');
+  assert.equal(result.receipt.resultCode, 'COMMAND_RECOVERED_ALREADY_APPLIED');
+});
+
+test('two concurrent recovery attempts for the same orphaned PREPARED command run the effect exactly once', async () => {
+  const path = await tempPath();
+  let effects = 0;
+  const started = deferred();
+  const release = deferred();
+  const requestId = 'request-orphan-race';
+  const commandDigestValue = commandDigest({ expectedVersion: 0, command: { type: 'pause' }, note: null });
+  await appendAuditEntry(path, {
+    eventId: 'orphan-check-race',
+    occurredAt: new Date(Date.UTC(2026, 0, 1)).toISOString(),
+    actor: { email: 'operator-console' },
+    actorRole: 'operator',
+    action: 'pause',
+    outcome: 'accepted',
+    resultCode: 'COMMAND_DISPATCHED',
+    observedVersion: 0,
+    note: null,
+    requestId,
+    commandDigest: commandDigestValue,
+    commandState: 'PREPARED',
+    pid: 999_999,
+  });
+
+  const first = executeAuditedCommand(auditedInput(path, {
+    requestId,
+    processIsAlive: pid => pid === process.pid,
+    async effect() {
+      effects += 1;
+      started.resolve();
+      await release.promise;
+    },
+  }));
+  await started.promise;
+  const second = await executeAuditedCommand(auditedInput(path, {
+    requestId,
+    processIsAlive: pid => pid === process.pid,
+    async effect() { effects += 1; },
+  }));
+  release.resolve();
+  const firstResult = await first;
+
+  assert.equal(effects, 1, 'the second recovery attempt sees the live reclaim and never runs its own effect');
+  assert.equal(second.replayed, true);
+  assert.equal(firstResult.replayed, false);
+  assert.equal(firstResult.commandState, 'APPLIED');
 });
 
 test('a long-running effect does not hold the audit queue for a successor command', async () => {

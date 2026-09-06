@@ -47,6 +47,12 @@ function assertEntryInput(entry) {
       throw new Error('audit entry commandState is invalid');
     }
   }
+  if (Object.hasOwn(entry, 'pid')) {
+    if (!Object.hasOwn(entry, 'commandState') || entry.commandState !== 'PREPARED') {
+      throw new Error('audit entry pid is only valid on a PREPARED command state');
+    }
+    if (!Number.isInteger(entry.pid) || entry.pid <= 0) throw new Error('audit entry pid must be a positive integer');
+  }
 }
 
 async function readLastLine(path) {
@@ -94,14 +100,18 @@ function parseLockOwner(value) {
   }
 }
 
-function ownerIsAlive(owner) {
-  if (owner === null) return false;
+function defaultProcessIsAlive(pid) {
   try {
-    process.kill(owner.pid, 0);
+    process.kill(pid, 0);
     return true;
   } catch (error) {
     return error?.code !== 'ESRCH';
   }
+}
+
+function ownerIsAlive(owner) {
+  if (owner === null) return false;
+  return defaultProcessIsAlive(owner.pid);
 }
 
 async function removeDeadLock(lockPath) {
@@ -211,6 +221,7 @@ async function doAppend(path, entry) {
       commandDigest: entry.commandDigest,
     } : {}),
     ...(Object.hasOwn(entry, 'commandState') ? { commandState: entry.commandState } : {}),
+    ...(Object.hasOwn(entry, 'pid') ? { pid: entry.pid } : {}),
   };
   const hash = digest({ domain: 'hookemon.dashboard-audit-entry.v1', entry: unhashed });
   const record = { ...unhashed, hash };
@@ -324,11 +335,41 @@ async function completeCommand(path, requestId, commandState, now, appliedResult
   });
 }
 
+async function reclaimPreparedReservation(path, initial, now) {
+  return doAppend(path, {
+    eventId: crypto.randomUUID(),
+    occurredAt: new Date(now()).toISOString(),
+    actor: initial.actor,
+    actorRole: initial.actorRole,
+    action: initial.action,
+    outcome: 'accepted',
+    resultCode: initial.resultCode,
+    observedVersion: initial.observedVersion,
+    note: initial.note,
+    requestId: initial.requestId,
+    commandDigest: initial.commandDigest,
+    commandState: 'PREPARED',
+    pid: process.pid,
+  });
+}
+
 /**
  * Reserve an append-only command record before invoking the authority. The short reservation and
  * completion transitions are serialized; the effect runs outside the write lock. A retry observes
  * the actual PREPARED/APPLIED/REJECTED/UNCERTAIN state and never turns an unresolved effect into a
  * synthetic success.
+ *
+ * A PREPARED record left behind by a process that died before it could complete its own effect (a
+ * hard crash, not a normal thrown error — a normal error already resolves to UNCERTAIN inside the
+ * same call, see the catch block below) is detected by checking whether its recorded owner PID is
+ * still alive. An orphaned PREPARED record is reclaimed under the current process's PID (so a second
+ * concurrent recovery attempt sees a live owner and backs off instead of running the effect twice)
+ * and its effect is safely retried: if the retried effect fails with the same stale-revision signal
+ * `operator/control.mjs` and `operator/state-file.mjs` already use for a failed compare-and-swap, the
+ * command is known to have been applied by the crashed attempt and is finalized as APPLIED without
+ * guessing at its original result; any other failure is finalized as UNCERTAIN exactly like a normal
+ * in-process failure. The original request ID's identity (eventId, commandDigest) is preserved either
+ * way, so the same request ID stays idempotent across the crash and the recovery.
  */
 export async function executeAuditedCommand({
   path,
@@ -341,6 +382,7 @@ export async function executeAuditedCommand({
   note = null,
   resultCode = 'COMMAND_DISPATCHED',
   now = Date.now,
+  processIsAlive = defaultProcessIsAlive,
   effect,
 }) {
   if (typeof requestId !== 'string' || requestId.length === 0) throw new Error('audited command requestId must be a nonempty string');
@@ -354,7 +396,14 @@ export async function executeAuditedCommand({
       if (existing.commandState !== 'PREPARED' && existing.record.commandState !== null && existing.record.commandState !== undefined) {
         return { execute: false, ...existing };
       }
-      if (existing.commandState === 'PREPARED') return { execute: false, ...existing };
+      if (existing.commandState === 'PREPARED') {
+        const ownerPid = existing.record.pid;
+        if (typeof ownerPid === 'number' && !processIsAlive(ownerPid)) {
+          const reclaimed = await reclaimPreparedReservation(path, existing.initial, now);
+          return { execute: true, recovered: true, initial: existing.initial, record: reclaimed, commandState: 'PREPARED' };
+        }
+        return { execute: false, ...existing };
+      }
       const record = await appendCommandState(path, existing.initial, 'UNCERTAIN', now, resultCode);
       return { execute: false, initial: existing.initial, record, commandState: 'UNCERTAIN' };
     }
@@ -372,6 +421,7 @@ export async function executeAuditedCommand({
       requestId,
       commandDigest: requestedDigest,
       commandState: 'PREPARED',
+      pid: process.pid,
     });
     return { execute: true, initial: record, record, commandState: 'PREPARED' };
   });
@@ -397,6 +447,10 @@ export async function executeAuditedCommand({
     );
     return commandResult(completed.record, completed.commandState, false);
   } catch (error) {
+    if (reservation.recovered && error?.message === 'stale operator state revision') {
+      const completed = await completeCommand(path, requestId, 'APPLIED', now, 'COMMAND_RECOVERED_ALREADY_APPLIED');
+      return commandResult(completed.record, completed.commandState, false);
+    }
     const completed = await completeCommand(path, requestId, 'UNCERTAIN', now, resultCode);
     throw new AuditedCommandEffectError(receiptFromEntry(completed.record), completed.commandState, error);
   }
