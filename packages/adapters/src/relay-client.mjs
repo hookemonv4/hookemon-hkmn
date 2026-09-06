@@ -44,6 +44,8 @@
 // real, read-only network calls — `simulateExecution` is the only "would have done X" stand-in,
 // used when the caller does not want to expose the raw steps for signing.
 
+import { digest } from '../../runner/src/cycle/journal.mjs';
+
 const RELAY_BASE_URL = 'https://api.relay.link';
 const ROBINHOOD_CHAIN_ID = 4663;
 const SOLANA_CHAIN_ID = 792703809;
@@ -179,6 +181,7 @@ function invariant(condition, ErrorClass, message, details) {
 }
 
 const CANONICAL_DECIMAL = /^(?:0|[1-9][0-9]*)$/;
+const QUOTE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 function assertCanonicalAmount(value, label) {
   invariant(
     typeof value === 'string' && CANONICAL_DECIMAL.test(value),
@@ -352,6 +355,24 @@ function assertTradeType(value, label = 'tradeType') {
   return value;
 }
 
+/** A content address for the fully parsed Relay response, including executable steps. */
+export function relayQuoteDigest(quote) {
+  invariant(quote && typeof quote === 'object' && quote.raw && typeof quote.raw === 'object', RelayMalformedResponseError, 'Relay quote digest requires a parsed quote with raw response');
+  return digest({
+    schema: 'hookemon.relay-quote.v1',
+    direction: quote.direction,
+    tradeType: quote.tradeType,
+    requestId: quote.requestId,
+    orderId: quote.orderId,
+    sender: quote.sender,
+    recipient: quote.recipient,
+    deadlineUnixSeconds: quote.deadlineUnixSeconds,
+    origin: quote.origin,
+    destination: quote.destination,
+    raw: quote.raw,
+  });
+}
+
 function assertQuoteIdentity(raw, { direction, origin, destination, user, recipient, amount, tradeType = 'EXACT_INPUT' }) {
   const sender = raw?.details?.sender;
   const quotedRecipient = raw?.details?.recipient;
@@ -478,7 +499,7 @@ export function parseQuoteResponse(raw, {
   );
 
   const identity = assertQuoteIdentity(raw, { direction, origin, destination, user, recipient, amount, tradeType });
-  return Object.freeze({
+  const parsed = {
     direction,
     tradeType,
     requestId: raw.requestId,
@@ -490,7 +511,8 @@ export function parseQuoteResponse(raw, {
     destination: Object.freeze(destination),
     stepCount: raw.steps.length,
     raw,
-  });
+  };
+  return Object.freeze({ ...parsed, quoteDigest: relayQuoteDigest(parsed) });
 }
 
 /** Refuses a quote at its exact deadline; callers must obtain a fresh quote from the same reserve. */
@@ -514,6 +536,7 @@ const RELAY_INTENT_KEYS = Object.freeze([
   'orderId',
   'direction',
   'tradeType',
+  'quoteDigest',
   'originChainId',
   'destinationChainId',
   'originAssetId',
@@ -543,6 +566,7 @@ function assertRelayIntent(value, label = 'Relay intent') {
   const route = ROUTES[value.direction];
   invariant(route !== undefined, RelayMalformedResponseError, `${label}.direction is invalid`);
   assertTradeType(value.tradeType, `${label}.tradeType`);
+  invariant(typeof value.quoteDigest === 'string' && QUOTE_DIGEST.test(value.quoteDigest), RelayMalformedResponseError, `${label}.quoteDigest is invalid`);
   invariant(value.originChainId === route.origin.chainId, RelayMalformedResponseError, `${label}.originChainId does not match its direction`);
   invariant(value.destinationChainId === route.destination.chainId, RelayMalformedResponseError, `${label}.destinationChainId does not match its direction`);
   invariant(typeof value.originAssetId === 'string' && value.originAssetId.length > 0, RelayMalformedResponseError, `${label}.originAssetId is invalid`);
@@ -812,6 +836,7 @@ export function createRelayClient({
       liveMode: false,
       direction: quoteResult.direction,
       tradeType: quoteResult.tradeType,
+      quoteDigest: relayQuoteDigest(quoteResult),
       requestId: quoteResult.requestId,
       quotedDestinationAmount: quoteResult.destination.amount,
       stepCount: quoteResult.stepCount,
@@ -838,6 +863,7 @@ export function createRelayClient({
       orderId: quoteResult.orderId,
       direction: quoteResult.direction,
       tradeType: quoteResult.tradeType,
+      quoteDigest: relayQuoteDigest(quoteResult),
       originChainId: quoteResult.origin.chainId,
       destinationChainId: quoteResult.destination.chainId,
       originAssetId: quoteResult.origin.address,
