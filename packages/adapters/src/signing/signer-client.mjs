@@ -344,6 +344,26 @@ function signedEnvelope(signed, family) {
   return Object.freeze({ [field]: key.slice(`${family}:`.length) });
 }
 
+/** Refuses a broadcast result that is not a well-formed, matching identifier for these exact
+ * authorized signed bytes — an EVM transaction hash or a Solana signature, per
+ * `expectedBroadcastIdentifier`'s own contract. Applies identically regardless of which of
+ * `wrapTransactionPolicySignerClient`'s two transport shapes (a caller-supplied `broadcast`
+ * callback or a backend's guarded `broadcastApproved`) produced the result — neither is a
+ * lesser-trusted seam than the other. */
+function assertBroadcastResultMatchesSignedBytes(envelope, family, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    fail('broadcast result must be an object');
+  }
+  const expectedIdentifier = expectedBroadcastIdentifier(envelope, family);
+  const identifierField = family === 'solana' ? 'signature' : 'transactionHash';
+  const actualIdentifier = typeof result[identifierField] === 'string' && family === 'evm'
+    ? result[identifierField].toLowerCase()
+    : result[identifierField];
+  if (actualIdentifier !== expectedIdentifier) {
+    fail(`broadcast result ${identifierField} does not match the signed ${family} transaction bytes`);
+  }
+}
+
 function decodedSignedMessageBytes(signed, family) {
   const envelope = signedEnvelope(signed, family);
   const field = family === 'solana' ? 'signedTxBase64' : 'signedTx';
@@ -552,28 +572,22 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
         ...(family === 'solana' ? { expectedCoSignerSignatures: approval.coSignerSignatures } : {}),
       });
       evaluateTransactionPolicy(canonicalPolicy, redecoded, { rules: policyRules });
+      // Both a directly-supplied `broadcast` callback and a backend's guarded `broadcastApproved`
+      // are a real chain RPC transport in exactly the same sense (`createPolicySigner`'s own
+      // `broadcast` argument is not a lesser-trusted seam than a backend's) — its returned
+      // identifier is checked against these exact authorized bytes before the approval is
+      // consumed either way. A mismatched or malformed result is refused and the approval is left
+      // in place, so a caller can retry the same signed bytes exactly like an RPC failure would.
       let result;
       if (broadcast !== undefined) {
         result = await broadcast(envelope);
+        assertBroadcastResultMatchesSignedBytes(envelope, family, result);
       } else if (typeof client.broadcastApproved === 'function') {
         // Mirrors `sign()`'s `signApproved` gate: a real chain RPC transport is reachable only
         // through this freshly-minted proof, immediately after the revalidation and policy
-        // re-check above — never through a caller holding a bare reference to the backend. The
-        // RPC's own returned identifier is then checked against these exact signed bytes; a
-        // mismatched or malformed result is refused before the approval is consumed, leaving it in
-        // place so a caller can retry the same signed bytes exactly like an RPC failure would.
+        // re-check above — never through a caller holding a bare reference to the backend.
         result = await client.broadcastApproved(envelope, issuePolicyEvaluationProof());
-        if (!result || typeof result !== 'object' || Array.isArray(result)) {
-          fail('broadcast result must be an object');
-        }
-        const expectedIdentifier = expectedBroadcastIdentifier(envelope, family);
-        const identifierField = family === 'solana' ? 'signature' : 'transactionHash';
-        const actualIdentifier = typeof result[identifierField] === 'string' && family === 'evm'
-          ? result[identifierField].toLowerCase()
-          : result[identifierField];
-        if (actualIdentifier !== expectedIdentifier) {
-          fail(`broadcast result ${identifierField} does not match the signed ${family} transaction bytes`);
-        }
+        assertBroadcastResultMatchesSignedBytes(envelope, family, result);
       } else {
         result = await client.broadcast(envelope);
       }
