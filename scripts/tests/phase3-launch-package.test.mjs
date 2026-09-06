@@ -17,6 +17,7 @@ const expectedPhaseThreeJsonPaths = [
   'release/phase3/address-manifest.schema.json',
   'release/phase3/admission/preflight-probe.json',
   'release/phase3/admission/provider-documents.json',
+  'release/phase3/admission/provider-statement-2026-09-05.json',
   'release/phase3/admission/route-log.json',
   'release/phase3/artifacts/custody.json',
   'release/phase3/artifacts/hook.json',

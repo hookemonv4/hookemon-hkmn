@@ -1707,6 +1707,7 @@ test('phase three submission normalization removes builder notes and binds mutab
     'release/phase3/admission/preflight-probe.json',
     'release/phase3/admission/provider-documents.json',
     'release/phase3/admission/route-log.json',
+    'release/phase3/admission/provider-statement-2026-09-05.json',
     'release/phase3/fork-pin.json',
     'release/phase3/genesis-evidence.json',
     'release/phase3/graph-gas-evidence.json',
