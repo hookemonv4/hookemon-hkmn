@@ -1,3 +1,13 @@
+import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
+import { assertQuoteUsable, DIRECTIONS, RELAY_CONSTANTS } from '../../relay-client.mjs';
+import {
+  buildRelayLegacyTransaction,
+  readBlockHeight,
+  readFinalizedRelaySourceDebit,
+  readUsableLatestBlockhash,
+  signedSolanaTransactionSignature,
+} from '../../solana-rpc.mjs';
+import { readTransactionPolicyApprovalContext, recoverTransactionPolicyBroadcast } from '../../signing/signer-client.mjs';
 import {
   advanceDirectPayout,
   createDirectPayoutState,
@@ -12,12 +22,30 @@ import {
   SUPPLEMENTARY_FINALIZED_RETURN_SCHEMA,
   SUPPLEMENTARY_RETURN_BOUNDARY_SCHEMA,
 } from './supplementary-payout.mjs';
+import {
+  assertReturnBroadcastHash,
+  assertReturnConfiguration,
+  assertReturnLamportReserve,
+  assertReturnMoneyConfiguration,
+  assertReturnQuote,
+  canonicalPositiveInteger,
+  createReturnPolicySigner,
+  extractRelaySolanaInstructionPlan,
+  readReturnLegDestinationProof,
+  returnPolicyRecoveryContext,
+  returnRecoveryContext,
+  typedAmount,
+} from './return.mjs';
 
-const CONFIRMED_SALE_SCHEMA = 'hookemon.supplementary-confirmed-sale.v1';
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const SOLANA_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 const ATOMIC = /^(?:0|[1-9][0-9]*)$/;
+// The canonical transaction policy's `stage` field is validated against runner-owned
+// OPERATIONAL_CYCLE_STAGES (money-schemas.mjs), a fixed, shared enum -- 'supplementary-return' is
+// not a member and money-schemas.mjs is not D-owned to extend. Reuse the existing 'return' value:
+// per-transaction replay protection comes from requestDigest (position-scoped, embedded in the
+// policy), not from this label, so reusing it is safe, not merely convenient.
+const RETURN_STAGE = 'return';
+const RETURN_ATTEMPT_SCHEMA = 'hookemon.supplementary-return-attempt.v1';
 
 export class SupplementaryMoneyError extends Error {}
 
@@ -25,97 +53,307 @@ function fail(message) {
   throw new SupplementaryMoneyError(message);
 }
 
-function exactObject(value, fields, label) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.getPrototypeOf(value) !== Object.prototype
-    || Object.keys(value).length !== fields.length
-    || !fields.every(field => Object.hasOwn(value, field))) {
-    fail(`${label} must use the exact schema`);
-  }
-  return value;
-}
-
 /**
- * CS's confirmed held-card resale evidence: the Solana-side sale proceeds attributable to exactly
- * one held position, already finalized on Solana. This is the sole permitted source for the
- * amount a supplementary return leg may bridge -- never a wallet-wide Solana balance, and never
- * the main cycle's custody ledger.
+ * The exact 48-hex-char paged-payout-state stage shape `persistPagedPayoutState`/
+ * `readPagedPayoutState` requires (`supplementaryPayoutPagedStagePattern` in
+ * `cycle-repository.mjs`). Derived from `positionId + ':return-leg'`, never from the same 48-hex
+ * slice `supplementaryPayoutStageId` uses, so a position's return-leg attempt record and its
+ * payout-leg recipient state never share one (cycleId, stage) key even though both live in the
+ * same durable paged-payout-state store.
  */
-export function assertConfirmedSale(value, settlement) {
-  exactObject(value, [
-    'schema',
-    'positionId',
-    'cycleId',
-    'manifestId',
-    'sourceWallet',
-    'mint',
-    'decimals',
-    'amountAtomic',
-    'transactionSignature',
-    'memo',
-    'sourceFinality',
-  ], 'supplementary confirmed sale');
-  if (value.schema !== CONFIRMED_SALE_SCHEMA
-    || value.positionId !== settlement.positionId
-    || value.cycleId !== settlement.cycleId
-    || value.manifestId !== settlement.manifestId) {
-    fail('supplementary confirmed sale does not bind its settlement');
-  }
-  if (typeof value.sourceWallet !== 'string' || !SOLANA_ADDRESS.test(value.sourceWallet)) {
-    fail('supplementary confirmed sale sourceWallet is invalid');
-  }
-  if (typeof value.mint !== 'string' || !SOLANA_ADDRESS.test(value.mint)) {
-    fail('supplementary confirmed sale mint is invalid');
-  }
-  if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
-    fail('supplementary confirmed sale decimals is invalid');
-  }
-  if (typeof value.amountAtomic !== 'string' || !ATOMIC.test(value.amountAtomic) || value.amountAtomic === '0') {
-    fail('supplementary confirmed sale amountAtomic is invalid');
-  }
-  if (typeof value.transactionSignature !== 'string' || !SOLANA_SIGNATURE.test(value.transactionSignature)) {
-    fail('supplementary confirmed sale transactionSignature is invalid');
-  }
-  if (typeof value.memo !== 'string' || value.memo.length === 0) {
-    fail('supplementary confirmed sale memo is invalid');
-  }
-  if (!value.sourceFinality || typeof value.sourceFinality !== 'object' || Array.isArray(value.sourceFinality)) {
-    fail('supplementary confirmed sale sourceFinality is invalid');
-  }
-  return Object.freeze(structuredClone(value));
+export function supplementaryReturnStageId(positionId) {
+  return `supplementary-${canonicalDigest({ schema: 'hookemon.supplementary-return-stage.v1', positionId }).slice(7, 55)}`;
 }
 
 /**
- * Builds the immutable, position-attributed request a live return-bridge executor must consume:
- * exactly CS's confirmed Solana proceeds for this position, bound to the durable settlement, with
- * the configured Operations EVM identity the bridged USDG must land on. Pure: does not call any
- * adapter, sign anything, or touch the repository. The actual Relay bridge execution (quote,
- * source-leg signing/broadcast, destination-leg proof reading) is an explicit dependency on the
- * real signing/relay/reconciliation machinery -- see docs/modules/supplementary-money.md for the
- * exact open item.
+ * Builds the immutable, position-attributed return-bridge request from CS's own confirmed-sale
+ * reconciliation (`reconcileSupplementaryBuybackSale`'s `{status:'CONFIRMED', memo, mint,
+ * signature, proceeds, createdAt}` result -- see CS-interface.json). This is the sole permitted
+ * source for the amount a supplementary return leg may bridge: never a wallet-wide Solana balance,
+ * never the main cycle's custody ledger. Pure: does not call any adapter, sign anything, or touch
+ * the repository.
  */
 export function prepareSupplementaryReturnRequest({ settlement, confirmedSale, config }) {
   const normalizedSettlement = assertSettlement(settlement);
   if (normalizedSettlement.state !== 'BUYBACK_SENT_UNKNOWN') {
     fail('supplementary return requires a buyback-sent-unknown settlement');
   }
-  const normalizedSale = assertConfirmedSale(confirmedSale, normalizedSettlement);
-  const operations = config?.accounts?.evm;
-  const usdgAddress = config?.contracts?.usdg;
-  if (typeof operations !== 'string' || !EVM_ADDRESS.test(operations.toLowerCase())) {
-    fail('supplementary return requires a configured Operations EVM account');
+  if (!confirmedSale || confirmedSale.status !== 'CONFIRMED') {
+    fail('supplementary return requires a confirmed buyback sale');
   }
-  if (typeof usdgAddress !== 'string' || !EVM_ADDRESS.test(usdgAddress.toLowerCase())) {
-    fail('supplementary return requires a configured USDG address');
+  const { memo, mint, signature, proceeds, createdAt } = confirmedSale;
+  if (typeof memo !== 'string' || memo.length === 0) fail('supplementary confirmed sale memo is invalid');
+  if (typeof signature !== 'string' || signature.length === 0) fail('supplementary confirmed sale signature is invalid');
+  if (typeof createdAt !== 'string' || createdAt.length === 0) fail('supplementary confirmed sale createdAt is invalid');
+  if (!proceeds || typeof proceeds !== 'object' || Array.isArray(proceeds)) fail('supplementary confirmed sale proceeds is invalid');
+  const configured = assertReturnConfiguration(config);
+  const money = assertReturnMoneyConfiguration(config, configured);
+  if (mint !== configured.solanaMint || proceeds.assetId !== configured.solanaMint) {
+    fail('supplementary confirmed sale mint does not match the configured Solana settlement asset');
+  }
+  if (proceeds.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID && String(proceeds.chainId) !== String(RELAY_CONSTANTS.SOLANA_CHAIN_ID)) {
+    fail('supplementary confirmed sale proceeds chainId is invalid');
+  }
+  if (proceeds.decimals !== money.assets.solanaStablecoin.decimals) {
+    fail('supplementary confirmed sale proceeds decimals do not match MoneyConfigurationV1');
+  }
+  if (typeof proceeds.amountAtomic !== 'string' || !ATOMIC.test(proceeds.amountAtomic) || proceeds.amountAtomic === '0') {
+    fail('supplementary confirmed sale proceeds amountAtomic is invalid');
   }
   return Object.freeze({
     schema: 'hookemon.supplementary-return-request.v1',
     positionId: normalizedSettlement.positionId,
     cycleId: normalizedSettlement.cycleId,
     manifestId: normalizedSettlement.manifestId,
-    confirmedSale: normalizedSale,
-    operations: operations.toLowerCase(),
-    usdgAddress: usdgAddress.toLowerCase(),
+    memo,
+    sourceSignature: signature,
+    createdAt,
+    solanaMint: mint,
+    solanaAmountAtomic: proceeds.amountAtomic,
+    operations: configured.evm,
+    solanaAccount: configured.solana,
+  });
+}
+
+function returnAttemptEnvelope(base, overrides = {}) {
+  return {
+    schema: RETURN_ATTEMPT_SCHEMA,
+    positionId: base.positionId,
+    cycleId: base.cycleId,
+    manifestId: base.manifestId,
+    requestDigest: base.requestDigest,
+    relayRequestId: base.relayRequestId,
+    inputAmount: base.inputAmount,
+    destinationAmount: base.destinationAmount,
+    intent: base.intent,
+    solanaInstructionPlan: base.solanaInstructionPlan,
+    state: 'PREPARED',
+    rawSignedBytes: null,
+    rawSignedBytesHash: null,
+    blockhash: null,
+    blockhashLastValidHeight: null,
+    sourceTransactionHash: null,
+    recoveryContext: null,
+    // persistPagedPayoutState/assertPagedPayoutState require a `recipients` array field on every
+    // paged-payout-state value (it pages the outer recipient list for real payout states); this
+    // attempt envelope has no recipients of its own, so it declares the empty case explicitly
+    // rather than borrowing an unrelated shape.
+    recipients: [],
+    ...overrides,
+  };
+}
+
+/**
+ * Drives the real Solana source leg of one held position's return bridge: quotes the exact
+ * confirmed-sale proceeds through Relay (never a wallet-wide balance), signs through the real B
+ * policy/canary-guarded Solana signer, and durably records signed bytes -- via
+ * `persistPagedPayoutState` under a position-scoped return-leg stage id, never the payout-leg
+ * stage id -- before ever broadcasting. Resumable: a restart after PREPARED or SIGNED reuses the
+ * exact persisted attempt instead of re-quoting or re-signing.
+ */
+export async function mutateSupplementaryReturn({
+  liveMode, adapters, config, signerClient, cycleRepository, context, confirmedSale, now = Date.now, preflightAuthority,
+}) {
+  if (liveMode !== true) fail('supplementary return mutation requires liveMode');
+  if (typeof cycleRepository?.readSupplementarySettlement !== 'function'
+    || typeof cycleRepository?.readPagedPayoutState !== 'function'
+    || typeof cycleRepository?.persistPagedPayoutState !== 'function') {
+    fail('supplementary return mutation requires cycleRepository supplementary/paged-payout-state methods');
+  }
+  const rawSettlement = await cycleRepository.readSupplementarySettlement(context.positionId);
+  if (!rawSettlement) fail('supplementary return mutation requires a known settlement');
+  const request = prepareSupplementaryReturnRequest({ settlement: rawSettlement, confirmedSale, config });
+  const stage = supplementaryReturnStageId(request.positionId);
+  const configured = assertReturnConfiguration(config);
+  const money = assertReturnMoneyConfiguration(config, configured);
+  const requestDigest = canonicalDigest({
+    schema: 'hookemon.supplementary-return-request-digest.v1',
+    positionId: request.positionId,
+    cycleId: request.cycleId,
+    manifestId: request.manifestId,
+    sourceSignature: request.sourceSignature,
+    solanaAmountAtomic: request.solanaAmountAtomic,
+  });
+  let attempt = await cycleRepository.readPagedPayoutState(request.cycleId, stage);
+  if (attempt === null || attempt === undefined) {
+    if (!adapters?.relay || typeof adapters.relay.quoteReturnBridge !== 'function') {
+      fail('supplementary return requires a configured Relay client');
+    }
+    const quote = await adapters.relay.quoteReturnBridge({
+      user: configured.solana,
+      recipient: configured.evm,
+      amount: request.solanaAmountAtomic,
+      originCurrency: configured.solanaMint,
+    });
+    assertReturnQuote(quote, configured, money);
+    assertQuoteUsable({ quote, nowMs: now() });
+    const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
+    const solanaInstructionPlan = extractRelaySolanaInstructionPlan({ steps: execution.steps, requestId: quote.requestId });
+    attempt = returnAttemptEnvelope({
+      positionId: request.positionId,
+      cycleId: request.cycleId,
+      manifestId: request.manifestId,
+      requestDigest,
+      relayRequestId: quote.requestId,
+      inputAmount: typedAmount(quote.origin),
+      destinationAmount: typedAmount(quote.destination),
+      intent: execution.intent,
+      solanaInstructionPlan,
+    });
+    await cycleRepository.persistPagedPayoutState(request.cycleId, stage, attempt);
+  }
+  if (attempt.requestDigest !== requestDigest) {
+    fail('supplementary return attempt does not match the prepared request');
+  }
+  const client = adapters?.solana?.client;
+  if (!client) fail('supplementary return requires a configured Solana RPC client');
+
+  if (attempt.state === 'PREPARED') {
+    const latest = await readUsableLatestBlockhash(client);
+    const blockhashLastValidHeight = canonicalPositiveInteger(
+      String(latest.lastValidBlockHeight),
+      'supplementary return latest blockhash last valid height',
+    );
+    const transaction = buildRelayLegacyTransaction({
+      feePayer: configured.solana,
+      recentBlockhash: latest.blockhash,
+      instructionPlan: attempt.solanaInstructionPlan,
+    });
+    const approved = await createReturnPolicySigner({
+      signerClient,
+      client,
+      configured,
+      request: { intent: attempt.intent, inputAmount: attempt.inputAmount },
+      transaction,
+      requestDigest,
+      blockhash: latest.blockhash,
+      blockhashLastValidHeight,
+      money,
+      now,
+      stage: RETURN_STAGE,
+      preflightAuthority,
+    });
+    await assertReturnLamportReserve({ client, configured, money, decoded: approved.decoded });
+    const signed = await approved.sign();
+    if (typeof signed?.signedTxBase64 !== 'string' || signed.signedTxBase64.length === 0) {
+      fail('supplementary return signer did not return serialized Solana bytes');
+    }
+    const approval = readTransactionPolicyApprovalContext(approved.policySigner, signed);
+    const rawSignedBytesHash = approval.signedMessageDigest;
+    const recoveryContext = returnRecoveryContext({
+      context,
+      requestDigest,
+      rawSignedBytesHash,
+      approval,
+      blockhashLastValidHeight,
+      stage: RETURN_STAGE,
+    });
+    attempt = {
+      ...attempt,
+      state: 'SIGNED',
+      rawSignedBytes: signed.signedTxBase64,
+      rawSignedBytesHash,
+      blockhash: latest.blockhash,
+      blockhashLastValidHeight,
+      recoveryContext,
+    };
+    await cycleRepository.persistPagedPayoutState(request.cycleId, stage, attempt);
+  }
+
+  if (attempt.state === 'SIGNED') {
+    const currentBlockHeight = await readBlockHeight(client);
+    if (currentBlockHeight > BigInt(attempt.blockhashLastValidHeight)) {
+      fail('supplementary return signed bytes have expired and cannot be re-signed automatically');
+    }
+    const approved = await createReturnPolicySigner({
+      signerClient,
+      client,
+      configured,
+      request: { intent: attempt.intent, inputAmount: attempt.inputAmount },
+      transaction: attempt.rawSignedBytes,
+      requestDigest,
+      blockhash: attempt.blockhash,
+      blockhashLastValidHeight: attempt.blockhashLastValidHeight,
+      money,
+      now,
+      stage: RETURN_STAGE,
+      preflightAuthority,
+    });
+    await assertReturnLamportReserve({ client, configured, money, decoded: approved.decoded });
+    const policyRecovery = returnPolicyRecoveryContext(attempt.recoveryContext);
+    const result = await recoverTransactionPolicyBroadcast({
+      client: approved.policySigner,
+      signed: { signedTxBase64: attempt.rawSignedBytes },
+      recoveryContext: policyRecovery,
+    });
+    const sourceTransactionHash = signedSolanaTransactionSignature(attempt.rawSignedBytes);
+    assertReturnBroadcastHash(result, sourceTransactionHash);
+    attempt = { ...attempt, state: 'BROADCAST', sourceTransactionHash };
+    await cycleRepository.persistPagedPayoutState(request.cycleId, stage, attempt);
+  }
+  return attempt;
+}
+
+/**
+ * Verifies the real, independent finality of a broadcast supplementary return leg -- the actual
+ * Solana source debit and the actual EVM destination credit, through the exact same generic
+ * proof-reading primitives (`readFinalizedRelaySourceDebit`, `readReturnLegDestinationProof`) the
+ * main cycle's return reconciliation uses -- then durably records the proven boundary. Read-only
+ * except for that one final durable write; safe to call any number of times before the proof is
+ * available (returns `null`).
+ */
+export async function reconcileSupplementaryReturn({ adapters, config, cycleRepository, context }) {
+  if (typeof cycleRepository?.readPagedPayoutState !== 'function'
+    || typeof cycleRepository?.readSupplementarySettlement !== 'function') {
+    fail('supplementary return reconciliation requires cycleRepository paged-payout-state and settlement reads');
+  }
+  const stage = supplementaryReturnStageId(context.positionId);
+  const attempt = await cycleRepository.readPagedPayoutState(context.cycleId, stage);
+  if (!attempt || attempt.state !== 'BROADCAST') return null;
+  if (!adapters?.solana?.client) return null;
+  const configured = assertReturnConfiguration(config);
+  let source;
+  try {
+    source = await readFinalizedRelaySourceDebit(adapters.solana.client, {
+      signature: attempt.sourceTransactionHash,
+      owner: configured.solana,
+      mint: attempt.inputAmount.assetId,
+      amountAtomic: attempt.inputAmount.amountAtomic,
+    });
+  } catch {
+    return null;
+  }
+  if (!adapters?.relay || !adapters?.robinhood?.client) return null;
+  let proof;
+  try {
+    adapters.relay.restoreIntent({ intent: attempt.intent });
+    const pointer = await adapters.relay.getTerminalDestinationTransactionPointer({ intentDigest: attempt.intent.requestId });
+    if (pointer === null) return null;
+    proof = await readReturnLegDestinationProof({
+      client: adapters.robinhood.client,
+      pointer,
+      leg: { relayRequestId: attempt.relayRequestId, sourceTxHash: attempt.sourceTransactionHash },
+      sourceFinality: source.finality,
+    });
+  } catch {
+    return null;
+  }
+  if (proof === null) return null;
+  const usdgAddress = config?.contracts?.usdg;
+  if (typeof usdgAddress !== 'string' || !EVM_ADDRESS.test(usdgAddress.toLowerCase())) {
+    fail('supplementary return reconciliation requires a configured USDG address');
+  }
+  const settlement = await cycleRepository.readSupplementarySettlement(context.positionId);
+  if (!settlement) return null;
+  return recordSupplementaryReturnBroadcast({
+    cycleRepository,
+    settlement,
+    finalizedReturnEvidence: {
+      operations: configured.evm,
+      usdgAddress: usdgAddress.toLowerCase(),
+      amountAtomic: proof.observedAmountAtomic,
+      finalityEvidence: proof,
+    },
   });
 }
 
@@ -224,7 +462,7 @@ export async function mutateSupplementaryPayout({
     const client = adapters?.robinhood?.client;
     if (client && typeof client.getBalance === 'function') {
       const required = BigInt(state.plan.feasibility.requiredNativeAmount.amountAtomic);
-      const observedRaw = await client.getBalance({ address: request.operations });
+      const observedRaw = await client.getBalance({ address: state.operations });
       const observed = typeof observedRaw === 'bigint' ? observedRaw : BigInt(observedRaw);
       const admission = evaluateDirectPayoutNativeGasAdmission({
         requiredNativeAmount: required.toString(),
