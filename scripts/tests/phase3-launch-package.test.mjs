@@ -78,13 +78,10 @@ function phaseThreeClosurePaths() {
 }
 
 // release/phase3/admission/provider-statement-2026-09-05.json is real, tracked admission evidence
-// (added alongside provider-documents.json and route-log.json), but release/phase3/submission.json's
-// own evidencePaths array -- generated release metadata this test does not own or hand-edit -- does
-// not yet list it, so the vendored builder's closure derivation correctly does not surface it. This
-// is an open wiring gap for whoever owns that metadata, not a defect in the on-disk evidence set.
-const expectedPhaseThreeClosurePaths = expectedPhaseThreeJsonPaths.filter(
-  (path) => path !== 'release/phase3/admission/provider-statement-2026-09-05.json',
-);
+// (added alongside provider-documents.json and route-log.json) and is now listed in
+// release/phase3/submission.json's evidencePaths, so the vendored builder's closure derivation
+// surfaces it like every other admission artifact.
+const expectedPhaseThreeClosurePaths = expectedPhaseThreeJsonPaths;
 
 function phaseThreeJsonRecords() {
   const closurePaths = phaseThreeClosurePaths()
