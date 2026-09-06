@@ -43,6 +43,7 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -81,6 +82,19 @@ const pagedPayoutPageItems = RECOVERY_LIMITS.payloadArrayItems;
 // is roughly 3x that, enough headroom for a third comparably-sized paged array (e.g. a stage's own
 // large `entries` list) without claiming to support an unbounded or 50,000-recipient target.
 const maximumPagedPages = 1_024;
+// A single array's own page-reference list is a further, tighter ceiling than the shared
+// maximumPagedPages budget above: serializePagedManifest/serializePagedStageEvidenceManifest still
+// serialize the whole manifest (including every array's page-reference list) through journal.mjs's
+// exported, bound-checked canonicalJson(), which enforces its own fixed default canonicalArrayItems
+// (512) regardless of this module's wider, explicitly justified maximumPagedPages override -- durable-
+// store.mjs cannot widen that check itself (journal.mjs is C-owned and exports no unbounded variant of
+// it). An independent review found that a value inside the (then-)advertised 64*1,024=65,536-item
+// ceiling could still be rejected deep inside manifest serialization once its own array needed more
+// than 512 pages (32,768+ items), rather than up front with a clear diagnosis -- the declared ceiling
+// must never promise more than every layer (validate, encode, serialize, decode, hash) actually
+// delivers. 64*512=32,768 items per array is the real ceiling every layer supports; this leaves ample
+// headroom over the justified 10,000-recipient/10,000-entry acceptance target this module commits to.
+const maximumPagedArrayItems = pagedPayoutPageItems * RECOVERY_LIMITS.canonicalArrayItems;
 // maximumPagedStateObjects justification (D-storage-requirements.md, 2026-09-06): measured against
 // the unmodified store, a fully-FINALIZED payout state (the worst case -- every recipient adds an
 // approvalContext object and a finalizedTransfer object, itself nested) costs ~7 canonical objects
@@ -1188,7 +1202,7 @@ function assertPagedPayoutState(cycleId, value) {
   assertBoundedCanonicalValue(value, 'paged payout state', {
     objects: maximumPagedStateObjects,
     arrays: maximumPagedStateArrays,
-    arrayItems: pagedPayoutPageItems * maximumPagedPages,
+    arrayItems: maximumPagedArrayItems,
     aggregateBytes: maximumPagedPayoutStateBytes,
   });
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -1216,7 +1230,7 @@ function assertPagedStageEvidence(cycleId, value) {
   assertBoundedCanonicalValue(value, 'paged stage evidence', {
     objects: maximumPagedStateObjects,
     arrays: maximumPagedStateArrays,
-    arrayItems: pagedPayoutPageItems * maximumPagedPages,
+    arrayItems: maximumPagedArrayItems,
     aggregateBytes: maximumPagedStageEvidenceStateBytes,
   });
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -1314,32 +1328,51 @@ function encodePagedValue(value, context) {
 }
 
 /**
- * A pure content address for stage evidence, independent of the random `generation` a real persist
- * call picks for its on-disk layout: `digest()` cannot hash a large evidence value directly (it is
- * bound-checked against journal.mjs's fixed default limits, e.g. 512 items per array, regardless of
- * the wider paged ceilings this module validates against), so this mirrors encodePagedValue's chunking
- * of any array longer than one page into `pagedPayoutPageItems`-sized slices, hashing each slice down
- * to one string before it is ever handed to `digest()`. The result depends only on the evidence's own
- * content -- never on a generation, schema wrapper, or page identifier -- so two persist calls for the
- * identical payload always produce the identical evidenceDigest even though each picks its own
- * generation for storage.
+ * Serializes an already-validated stage evidence value to canonical JSON text, for hashing into a
+ * whole-evidence content address. This intentionally does NOT chunk or otherwise transform large
+ * arrays before serializing (an earlier version did, hashing each 64-item chunk with journal.mjs's
+ * `digest()` and assembling an untagged array of those hash strings -- an independent review found
+ * that representation non-injective: a 65-item array and a hand-crafted 2-item array containing
+ * exactly its two chunk digests serialize identically, so a conflicting payload could be replayed as
+ * if it were the original). Hashing the full, untruncated canonical text of the whole (already
+ * type-validated) value has no such collision: two different evidence values can only produce the
+ * same digest via an actual SHA-256 collision, not a structural encoding ambiguity.
+ *
+ * `value` must already have passed `assertPagedStageEvidence` (or an equivalent call to
+ * `assertCanonicalPayoutValue` + `assertBoundedCanonicalValue`) so its structure (dense arrays, plain
+ * objects only, no symbols or prototype-pollution keys) and size are already proven; this function does
+ * not re-validate structure, only serializes it. journal.mjs's exported `canonicalJson()`/`digest()`
+ * cannot be used directly here regardless of validation order: they always bound-check against
+ * journal.mjs's fixed default limits (e.g. 512 items per array) even when the caller already proved a
+ * wider, explicitly justified ceiling is satisfied, and journal.mjs does not export its own unbounded
+ * serialization step separately from that check. This mirrors that unexported step's exact output
+ * format (sorted object keys, no whitespace, the same number/string encoding) since a caller already
+ * bounded the input by the same rules `assertBoundedCanonicalValue` enforces everywhere else in this
+ * module -- it does not weaken or bypass boundedness, it only defers the *serialization* step past a
+ * bound check this module's callers already performed with their own, wider, justified limits.
  */
-function evidenceContentDigest(value) {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return value;
-  if (Array.isArray(value)) {
-    const mapped = value.map(entry => evidenceContentDigest(entry));
-    if (mapped.length <= pagedPayoutPageItems) return mapped;
-    const chunks = [];
-    for (let start = 0; start < mapped.length; start += pagedPayoutPageItems) {
-      chunks.push(digest(mapped.slice(start, start + pagedPayoutPageItems)));
-    }
-    return chunks;
+function unboundedCanonicalJson(value) {
+  if (value === null) return 'null';
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Object.is(value, -0)) throw new Error('canonical number must be finite and not -0');
+    return JSON.stringify(value);
   }
-  const encoded = {};
-  for (const [key, entry] of Object.entries(value)) {
-    Object.defineProperty(encoded, key, { enumerable: true, value: evidenceContentDigest(entry) });
+  if (Array.isArray(value)) return `[${value.map(unboundedCanonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${unboundedCanonicalJson(value[key])}`).join(',')}}`;
   }
-  return encoded;
+  throw new Error(`canonical value has unsupported type ${typeof value}`);
+}
+
+/**
+ * A pure whole-evidence content address, independent of the random `generation` a real persist call
+ * picks for its on-disk layout, so two persist calls for the byte-identical payload always produce the
+ * identical evidenceDigest even though each picks its own generation for storage. Callers must pass an
+ * already-`assertPagedStageEvidence`-validated value (see `unboundedCanonicalJson` above).
+ */
+function wholeEvidenceDigest(value) {
+  return `sha256:${createHash('sha256').update(unboundedCanonicalJson(value)).digest('hex')}`;
 }
 
 function serializePagedManifest(schemas, { cycleId, stage, generation, pages, state }) {
@@ -1461,7 +1494,7 @@ function assertPagedReference(schemas, value, label) {
   exactObject(value, ['schema', 'kind', 'length', 'pages'], label);
   if (value.schema !== schemas.reference) throw new Error(`${label} schema is invalid`);
   if (!['sequence', 'recipient-map'].includes(value.kind)) throw new Error(`${label} kind is invalid`);
-  if (!Number.isInteger(value.length) || value.length < 0 || value.length > pagedPayoutPageItems * maximumPagedPages) {
+  if (!Number.isInteger(value.length) || value.length < 0 || value.length > maximumPagedArrayItems) {
     throw new Error(`${label} length is invalid`);
   }
   if (!Array.isArray(value.pages) || value.pages.length !== Math.ceil(value.length / pagedPayoutPageItems)) {
@@ -2011,6 +2044,50 @@ export class DurableCycleStore {
   }
 
   /**
+   * Reads back one manifest's full evidence and, unconditionally, recomputes its whole-evidence digest
+   * from the actually-decoded content and compares it to the manifest's own stored `evidenceDigest`
+   * field -- never trusting that stored field as proof by itself. An independent review found that
+   * without this recomputation, a self-consistent page-plus-page-reference-digest mutation (update a
+   * page's bytes, update the manifest's per-page reference digest to match) still passed every existing
+   * check as long as the attacker also left (or forgot to touch) the manifest's separate top-level
+   * `evidenceDigest` field, since nothing had ever recomputed it from the reconstructed value. Called
+   * both by `readPagedStageEvidence` and by `persistPagedStageEvidence`'s same-payload reuse path, so a
+   * same-payload retry can only ever return a handle for evidence proven durably intact, never a stale
+   * handle over a since-corrupted or since-deleted blob.
+   */
+  async #loadPagedStageEvidence(cycleId, stage, manifest) {
+    const stageDirectory = this.#stageEvidenceStageDirectory(cycleId, stage);
+    const generationDirectory = join(stageDirectory, manifest.generation);
+    await assertPrivateDirectory(generationDirectory, 'durable cycle store stage evidence generation directory');
+    const context = {
+      schemas: pagedStageEvidenceSchemas,
+      label: 'durable cycle store stage evidence manifest',
+      pageIds: new Set(),
+      readPage: async reference => {
+        const path = join(generationDirectory, pageFileName(reference.id));
+        const text = await readStableFile(path, maximumPagedStageEvidencePageBytes, `durable cycle store stage evidence page ${reference.id}`);
+        if (text === null) throw new Error('durable cycle store stage evidence page is missing');
+        const page = parsePagedPage(pagedStageEvidenceSchemas, text, `durable cycle store stage evidence page ${reference.id}`);
+        if (page.cycleId !== cycleId || page.stage !== stage || page.generation !== manifest.generation || page.pageId !== reference.id) {
+          throw new Error('durable cycle store stage evidence page identity mismatch');
+        }
+        if (digest(page) !== reference.digest) throw new Error('durable cycle store stage evidence page digest does not match its manifest');
+        return page;
+      },
+    };
+    const decoded = await decodePagedValue(manifest.state, context);
+    if (context.pageIds.size !== manifest.pageCount) throw new Error('durable cycle store stage evidence manifest page count does not match its state');
+    for (let pageId = 0; pageId < manifest.pageCount; pageId += 1) {
+      if (!context.pageIds.has(pageId)) throw new Error('durable cycle store stage evidence manifest omits a page');
+    }
+    const evidenceValue = assertPagedStageEvidence(cycleId, decoded);
+    if (wholeEvidenceDigest(evidenceValue) !== manifest.evidenceDigest) {
+      throw new Error('durable cycle store stage evidence does not match its own manifest digest');
+    }
+    return evidenceValue;
+  }
+
+  /**
    * Generic bounded paged storage for large stage evidence that does not fit the journal's bounded
    * payload (e.g. an eligibility-snapshot manifest's `entries` list beyond ~64 items). Shares its
    * page format, page-count ceiling, and object/array/byte ceilings with `persistPagedPayoutState`
@@ -2024,7 +2101,7 @@ export class DurableCycleStore {
     assertCycleId(cycleId);
     assertStageIdentifier(stage);
     const validatedEvidence = assertPagedStageEvidence(cycleId, evidence);
-    const evidenceDigest = digest(evidenceContentDigest(validatedEvidence));
+    const evidenceDigest = wholeEvidenceDigest(validatedEvidence);
     return this.#withLock(async () => {
       await ensurePrivateDirectory(this.#stageEvidenceDirectory, 'durable cycle store stage evidence directory');
       const cycleDirectory = this.#stageEvidenceCycleDirectory(cycleId);
@@ -2040,6 +2117,12 @@ export class DurableCycleStore {
           throw new Error('durable cycle store stage evidence manifest identity mismatch');
         }
         if (existingManifest.evidenceDigest === evidenceDigest) {
+          // A same-payload retry may reuse the existing handle only after its complete evidence is
+          // durably re-verified here -- a missing page or a manifest whose stored digest no longer
+          // matches its own reconstructed content is corruption, not a safe no-op, and must fail
+          // closed (propagate the thrown error) rather than mint a handle a caller could go on to
+          // journal as if the referenced evidence were still intact.
+          await this.#loadPagedStageEvidence(cycleId, stage, existingManifest);
           return Object.freeze({
             schema: pagedStageEvidenceHandleSchema,
             cycleId,
@@ -2093,33 +2176,15 @@ export class DurableCycleStore {
     }
     const manifest = parsePagedStageEvidenceManifest(manifestText, 'durable cycle store stage evidence manifest');
     if (manifest.cycleId !== cycleId || manifest.stage !== stage) throw new Error('durable cycle store stage evidence manifest identity mismatch');
+    // #loadPagedStageEvidence recomputes the whole-evidence digest from the actually-decoded pages and
+    // throws if it disagrees with the manifest's own stored evidenceDigest -- so by the time `expected`
+    // is compared below, manifest.evidenceDigest is already proven to describe the real returned
+    // content, not merely stored metadata an attacker could have edited independently of the pages.
+    const evidenceValue = await this.#loadPagedStageEvidence(cycleId, stage, manifest);
     if (expected !== null && (manifest.generation !== expected.generation || manifest.evidenceDigest !== expected.evidenceDigest)) {
       throw new Error('durable cycle store stage evidence does not match its expected reference');
     }
-    const generationDirectory = join(stageDirectory, manifest.generation);
-    await assertPrivateDirectory(generationDirectory, 'durable cycle store stage evidence generation directory');
-    const context = {
-      schemas: pagedStageEvidenceSchemas,
-      label: 'durable cycle store stage evidence manifest',
-      pageIds: new Set(),
-      readPage: async reference => {
-        const path = join(generationDirectory, pageFileName(reference.id));
-        const text = await readStableFile(path, maximumPagedStageEvidencePageBytes, `durable cycle store stage evidence page ${reference.id}`);
-        if (text === null) throw new Error('durable cycle store stage evidence page is missing');
-        const page = parsePagedPage(pagedStageEvidenceSchemas, text, `durable cycle store stage evidence page ${reference.id}`);
-        if (page.cycleId !== cycleId || page.stage !== stage || page.generation !== manifest.generation || page.pageId !== reference.id) {
-          throw new Error('durable cycle store stage evidence page identity mismatch');
-        }
-        if (digest(page) !== reference.digest) throw new Error('durable cycle store stage evidence page digest does not match its manifest');
-        return page;
-      },
-    };
-    const evidenceValue = await decodePagedValue(manifest.state, context);
-    if (context.pageIds.size !== manifest.pageCount) throw new Error('durable cycle store stage evidence manifest page count does not match its state');
-    for (let pageId = 0; pageId < manifest.pageCount; pageId += 1) {
-      if (!context.pageIds.has(pageId)) throw new Error('durable cycle store stage evidence manifest omits a page');
-    }
-    return assertPagedStageEvidence(cycleId, evidenceValue);
+    return evidenceValue;
   }
 
   readCycle(cycleId) {
