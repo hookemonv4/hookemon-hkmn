@@ -21,6 +21,7 @@ import {
   createTransactionPolicy,
   decodeProviderTransaction,
   evaluate,
+  expectedBroadcastIdentifier,
   readTransactionPolicyRules,
   revalidateSignedMessage,
 } from '../../src/signing/transaction-policy.mjs';
@@ -889,9 +890,9 @@ test('policy signer wrapper revalidates the returned bytes before an underlying 
         calls.push('sign');
         return { signedTx: evm.signedTx };
       },
-      async broadcast() {
+      async broadcast(signed) {
         calls.push('broadcast');
-        return { transactionHash: '0xaccepted' };
+        return { transactionHash: expectedBroadcastIdentifier(signed, 'evm') };
       },
     },
   });
@@ -903,7 +904,7 @@ test('policy signer wrapper revalidates the returned bytes before an underlying 
 
   const signed = await protectedClient.sign(evm.transaction);
   const broadcast = await protectedClient.broadcast(signed);
-  assert.equal(broadcast.transactionHash, '0xaccepted');
+  assert.equal(broadcast.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
   assert.deepEqual(calls, ['sign', 'broadcast']);
 
   const alteredCalls = [];
@@ -972,7 +973,7 @@ test('policy signer reauthorizes exact durable bytes after restart without signi
         },
         async broadcast(candidate) {
           broadcasts.push(candidate.signedTx);
-          return { transactionHash: '0xaccepted' };
+          return { transactionHash: expectedBroadcastIdentifier(candidate, 'evm') };
         },
       },
     }),
@@ -986,7 +987,7 @@ test('policy signer reauthorizes exact durable bytes after restart without signi
     recoveryContext,
   });
 
-  assert.equal(result.transactionHash, '0xaccepted');
+  assert.equal(result.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
   assert.equal(freshSignCalls, 0);
   assert.deepEqual(broadcasts, [evm.signedTx]);
 });
@@ -1052,7 +1053,7 @@ test('policy signer restores an exact approval before a guarded facade broadcast
         },
         async broadcast(candidate) {
           broadcasts.push(candidate.signedTx);
-          return { transactionHash: '0xaccepted' };
+          return { transactionHash: expectedBroadcastIdentifier(candidate, 'evm') };
         },
       },
     }),
@@ -1075,7 +1076,7 @@ test('policy signer restores an exact approval before a guarded facade broadcast
   });
   const result = await guardedFacade.broadcast(signed);
 
-  assert.equal(result.transactionHash, '0xaccepted');
+  assert.equal(result.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
   assert.equal(freshSignCalls, 0);
   assert.equal(guardedBroadcasts, 1);
   assert.deepEqual(broadcasts, [evm.signedTx]);
@@ -1097,7 +1098,7 @@ test('policy signer snapshots provider requests and signed bytes across asynchro
       },
       async broadcast(candidate) {
         submitted.push(candidate.signedTx);
-        return { transactionHash: '0xaccepted' };
+        return { transactionHash: expectedBroadcastIdentifier(candidate, 'evm') };
       },
     },
   });
