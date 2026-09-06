@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-05T23:55:35.823Z",
+  "generatedAt": "2026-09-06T00:05:28.940Z",
   "tasks": [
     {
       "id": "LAUNCH-A",
@@ -33,9 +33,7 @@
       "title": "Implement scalable holder settlement",
       "phase": "build",
       "risk": "high",
-      "deps": [
-        "LAUNCH-B"
-      ],
+      "deps": [],
       "reqs": [],
       "status": "ready"
     },
