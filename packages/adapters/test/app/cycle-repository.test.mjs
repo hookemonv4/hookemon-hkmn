@@ -1035,7 +1035,7 @@ test('readStage hard-fails when paged evidence is referenced but missing from du
   const reopened = await CycleRepository.open(directory);
   await assert.rejects(
     () => reopened.readStage(cycleId, 'eligibility-snapshot'),
-    /paged evidence is referenced but missing from durable storage/,
+    /durable cycle store stage evidence is missing/,
   );
 });
 

@@ -484,9 +484,14 @@ function assertPackOperationStageName(stage) {
   if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);
 }
 
-const STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA = 'hookemon.stage-evidence-page-reference.v1';
+// Mirrors durable-store.mjs's own (module-private) paged-stage-evidence handle schema string --
+// the wire-format tag `persistPagedStageEvidence` stamps on the immutable handle it returns, which
+// this module journals verbatim in place of oversized stage evidence. Duplicated as a literal
+// because the handle is a versioned cross-module contract, not an implementation detail reached
+// into from here.
+const STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA = 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1';
 
-/** True only for the exact compact marker completeStage journals in place of oversized evidence. */
+/** True only for the exact immutable handle completeStage journals in place of oversized evidence. */
 function isStageEvidencePageReference(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value)
     && Object.getPrototypeOf(value) === Object.prototype
@@ -3193,55 +3198,35 @@ export class CycleRepository {
   }
 
   /**
-   * Reconstructs oversized stage evidence from durable paged storage when `storedEvidence` is a
-   * compact page reference; returns `storedEvidence` unchanged otherwise. A reference whose blob
-   * is missing or whose recomputed digest disagrees is a hard failure, never a silent `null` --
-   * absence and corruption are distinct recovery facts.
+   * Reconstructs oversized stage evidence from durable paged storage when `storedEvidence` is the
+   * immutable handle `persistPagedStageEvidence` returned at completion time; returns
+   * `storedEvidence` unchanged otherwise. Passing the handle back in as `readPagedStageEvidence`'s
+   * `expected` argument makes a missing blob, an identity mismatch, or a manifest that no longer
+   * matches this exact handle a hard failure there -- never a silent `null` -- so absence and
+   * corruption stay distinct recovery facts.
    */
   async #resolveStageEvidence(cycleId, stage, storedEvidence) {
     if (!isStageEvidencePageReference(storedEvidence)) return storedEvidence;
-    if (storedEvidence.cycleId !== cycleId || storedEvidence.stage !== stage) {
-      throw new Error(`cycle-repository: stage "${stage}" paged evidence reference does not bind its own cycle and stage`);
-    }
-    const wrapped = await this.#store.readPagedStageEvidence(cycleId, stage);
-    if (wrapped === null) {
-      throw new Error(`cycle-repository: stage "${stage}" paged evidence is referenced but missing from durable storage`);
-    }
-    const full = wrapped.evidence;
-    if (digest(full) !== storedEvidence.evidenceDigest) {
-      throw new Error(`cycle-repository: stage "${stage}" paged evidence does not match its durable reference digest`);
-    }
-    return full;
+    const wrapped = await this.#store.readPagedStageEvidence(cycleId, stage, storedEvidence);
+    return wrapped.evidence;
   }
 
   /**
    * Evidence that fits one bounded journal payload is returned unchanged. Oversized evidence (for
    * example a real eligibility-snapshot manifest with more holders than the journal's 64-item
-   * array bound admits) is persisted through the durable paged-stage-evidence store first, then
-   * only a compact `{schema, cycleId, stage, evidenceDigest}` reference is returned for the
-   * journal to record -- the reference commits only after the blob is durable. A retry with the
-   * identical evidence reuses the existing blob (matched by digest) without rewriting it; a retry
-   * with different evidence for the same (cycleId, stage) is rejected rather than silently
-   * replacing the durably committed blob.
+   * array bound admits) is persisted through the durable paged-stage-evidence store first, wrapped
+   * as `{cycleId, evidence}` to satisfy that store's own cycleId-binding requirement without
+   * altering the evidence shape callers of readStage/completeStage see back. Only the immutable,
+   * content-addressed handle `persistPagedStageEvidence` returns is journaled -- the handle commits
+   * only after the blob is durable, a same-payload retry reuses it, and a differently-shaped retry
+   * for the same (cycleId, stage) is rejected by the store itself before any reference is journaled.
    */
   async #preparePagedStageEvidence(cycleId, stage, evidence) {
     if (fitsBoundedJournalPayload(evidence)) return evidence;
     if (typeof this.#store.persistPagedStageEvidence !== 'function' || typeof this.#store.readPagedStageEvidence !== 'function') {
       throw new Error(`cycle-repository completeStage: stage "${stage}" evidence exceeds the bounded journal payload and this store has no paged-stage-evidence support`);
     }
-    const evidenceDigest = digest(evidence);
-    const existing = await this.#store.readPagedStageEvidence(cycleId, stage);
-    if (existing !== null) {
-      if (digest(existing.evidence) !== evidenceDigest) {
-        throw new Error(`cycle-repository completeStage: stage "${stage}" already has different paged evidence durably stored`);
-      }
-      return Object.freeze({ schema: STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA, cycleId, stage, evidenceDigest });
-    }
-    // persistPagedStageEvidence requires its own top-level `cycleId` field on the object it
-    // stores; wrap the caller's evidence rather than injecting `cycleId` into it, so the exact
-    // evidence shape returned to callers of readStage/completeStage is never altered.
-    await this.#store.persistPagedStageEvidence(cycleId, stage, { cycleId, evidence: structuredClone(evidence) });
-    return Object.freeze({ schema: STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA, cycleId, stage, evidenceDigest });
+    return this.#store.persistPagedStageEvidence(cycleId, stage, { cycleId, evidence: structuredClone(evidence) });
   }
 
   async prepareStage(cycleId, stage) {
