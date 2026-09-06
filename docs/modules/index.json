@@ -86,7 +86,7 @@
     {
       "id": "relay-bridge-client",
       "path": "docs/modules/relay-bridge-client.md",
-      "sha256": "4ca997ac2d604e62d86925eb99c4d5d9d1ea5c973e40b3b6ca1b63260e64ea03"
+      "sha256": "e9ca8f1b875de4915bf2d518d2ca7c3ca5b11035972dc41607c7f66973cec74a"
     },
     {
       "id": "collector-crypt-adapter",
