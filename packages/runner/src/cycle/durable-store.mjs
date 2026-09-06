@@ -68,10 +68,42 @@ const maximumLegacyMigrationFenceBytes = 4_096;
 const maximumPagedPayoutPageBytes = 8_388_608;
 const maximumPagedPayoutStateBytes = 67_108_864;
 const pagedPayoutPageItems = RECOVERY_LIMITS.payloadArrayItems;
-const maximumPagedPayoutPages = RECOVERY_LIMITS.canonicalArrayItems;
+// Both paged domains below (payout state and generic stage evidence) share one page-count ceiling
+// and one whole-value object-count ceiling. Both are deliberately independent local constants, not
+// aliases of journal.mjs's shared RECOVERY_LIMITS defaults (canonicalArrayItems / canonicalObjects):
+// those defaults are a generic safety rail for every other bounded-value caller in this codebase,
+// and reusing them here by coincidence meant raising or lowering either for an unrelated reason would
+// silently change payout/stage-evidence paging capacity too.
+//
+// maximumPagedPages justification (D-storage-requirements.md, 2026-09-06): a 10,000-recipient
+// payout state pages two arrays against one shared budget -- `recipients` and `plan.allocations`,
+// 10,000 items each -- needing 2 * ceil(10,000 / 64) = 314 pages. 1,024 pages (65,536 item slots)
+// is roughly 3x that, enough headroom for a third comparably-sized paged array (e.g. a stage's own
+// large `entries` list) without claiming to support an unbounded or 50,000-recipient target.
+const maximumPagedPages = 1_024;
+// maximumPagedStateObjects justification (D-storage-requirements.md, 2026-09-06): measured against
+// the unmodified store, a fully-FINALIZED payout state (the worst case -- every recipient adds an
+// approvalContext object and a finalizedTransfer object, itself nested) costs ~7 canonical objects
+// per recipient plus ~22 fixed overhead objects for the state's own structure. For the 10,000-
+// recipient target: 7 * 10,000 + 22 = 70,022. 90,000 leaves ~28% margin for held-position-exclusion
+// or quarantine bookkeeping the linear fit does not already include, without being unbounded.
+const maximumPagedStateObjects = 90_000;
+// A separate, distinct ceiling from arrayItems above: canonicalArrays counts every distinct array in
+// the value, not the items inside them. A fully-FINALIZED recipient contributes its own small
+// `finalizedTransfer.logIndexes` array in addition to the two top-level `recipients`/
+// `plan.allocations` arrays -- one extra array per recipient. 25,000 covers 10,000 recipients each
+// contributing up to two such small arrays, with headroom, without being unbounded.
+const maximumPagedStateArrays = 25_000;
 const pagedPayoutManifestSchema = 'hookemon.durable-cycle-store.paged-payout-manifest.v1';
 const pagedPayoutPageSchema = 'hookemon.durable-cycle-store.paged-payout-page.v1';
 const pagedPayoutReferenceSchema = 'hookemon.durable-cycle-store.paged-payout-reference.v1';
+const pagedPayoutSchemas = { manifest: pagedPayoutManifestSchema, page: pagedPayoutPageSchema, reference: pagedPayoutReferenceSchema };
+const maximumPagedStageEvidencePageBytes = 8_388_608;
+const maximumPagedStageEvidenceStateBytes = 67_108_864;
+const pagedStageEvidenceManifestSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-manifest.v1';
+const pagedStageEvidencePageSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-page.v1';
+const pagedStageEvidenceReferenceSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-reference.v1';
+const pagedStageEvidenceSchemas = { manifest: pagedStageEvidenceManifestSchema, page: pagedStageEvidencePageSchema, reference: pagedStageEvidenceReferenceSchema };
 const privateDirectoryMode = 0o700;
 const lockDirectoryName = '.store-lock';
 const lockDatabaseFileName = 'lease.sqlite';
@@ -81,7 +113,10 @@ const lockDatabaseArtifactNames = new Set([
 ]);
 const stageIdentifierPattern = /^[a-z][a-z0-9-]{1,63}$/;
 const globalKeyPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,255}$/;
-const internalPagedSchemas = new Set([pagedPayoutManifestSchema, pagedPayoutPageSchema, pagedPayoutReferenceSchema]);
+const internalPagedSchemas = new Set([
+  pagedPayoutManifestSchema, pagedPayoutPageSchema, pagedPayoutReferenceSchema,
+  pagedStageEvidenceManifestSchema, pagedStageEvidencePageSchema, pagedStageEvidenceReferenceSchema,
+]);
 const forbiddenCanonicalKeys = new Set(['__proto__', 'prototype', 'constructor']);
 const openGuard = Symbol('durable-cycle-store-open-guard');
 const isoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -1153,7 +1188,9 @@ function assertPagedPayoutState(cycleId, value) {
   assertCycleId(cycleId);
   assertCanonicalPayoutValue(value, 'paged payout state');
   assertBoundedCanonicalValue(value, 'paged payout state', {
-    arrayItems: pagedPayoutPageItems * maximumPagedPayoutPages,
+    objects: maximumPagedStateObjects,
+    arrays: maximumPagedStateArrays,
+    arrayItems: pagedPayoutPageItems * maximumPagedPages,
     aggregateBytes: maximumPagedPayoutStateBytes,
   });
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -1169,6 +1206,31 @@ function assertPagedPayoutState(cycleId, value) {
   return structuredClone(value);
 }
 
+/**
+ * The generic counterpart to assertPagedPayoutState for any other large stage evidence (e.g. an
+ * eligibility-snapshot manifest's `entries`). Deliberately domain-agnostic: it requires only that the
+ * value is a plain, canonical, bounded object whose own `cycleId` matches the storage key -- no
+ * `recipients` field or other payout-specific shape.
+ */
+function assertPagedStageEvidence(cycleId, value) {
+  assertCycleId(cycleId);
+  assertCanonicalPayoutValue(value, 'paged stage evidence');
+  assertBoundedCanonicalValue(value, 'paged stage evidence', {
+    objects: maximumPagedStateObjects,
+    arrays: maximumPagedStateArrays,
+    arrayItems: pagedPayoutPageItems * maximumPagedPages,
+    aggregateBytes: maximumPagedStageEvidenceStateBytes,
+  });
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error('paged stage evidence must be a plain object');
+  }
+  const evidenceCycleId = Object.getOwnPropertyDescriptor(value, 'cycleId');
+  if (!evidenceCycleId || !Object.hasOwn(evidenceCycleId, 'value') || evidenceCycleId.value !== cycleId) {
+    throw new Error('paged stage evidence cycle identifier does not match its storage key');
+  }
+  return structuredClone(value);
+}
+
 function assertGeneration(value) {
   if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)) {
     throw new Error('paged payout generation is invalid');
@@ -1177,24 +1239,24 @@ function assertGeneration(value) {
 }
 
 function pageFileName(pageId) {
-  if (!Number.isInteger(pageId) || pageId < 0 || pageId >= maximumPagedPayoutPages) throw new Error('paged payout page identifier is invalid');
+  if (!Number.isInteger(pageId) || pageId < 0 || pageId >= maximumPagedPages) throw new Error('paged payout page identifier is invalid');
   return `${String(pageId).padStart(4, '0')}.json`;
 }
 
-function pageReference(kind, length, pages) {
+function pageReference(schemas, kind, length, pages) {
   return {
-    schema: pagedPayoutReferenceSchema,
+    schema: schemas.reference,
     kind,
     length,
     pages,
   };
 }
 
-function addPayoutPage(context, kind, entries) {
-  if (context.pages.length >= maximumPagedPayoutPages) throw new Error('paged payout state exceeds the page limit');
+function addPagedPage(context, kind, entries) {
+  if (context.pages.length >= maximumPagedPages) throw new Error(`${context.label} exceeds the page limit`);
   const pageId = context.pages.length;
   const page = {
-    schema: pagedPayoutPageSchema,
+    schema: context.schemas.page,
     cycleId: context.cycleId,
     stage: context.stage,
     generation: context.generation,
@@ -1207,40 +1269,55 @@ function addPayoutPage(context, kind, entries) {
   return { id: pageId, digest: digest(page) };
 }
 
-function encodePagedPayoutValue(value, context) {
+/**
+ * Recursively walks an arbitrary canonical value, replacing every array that does not already fit in
+ * one page with a compact page-reference and appending its split contents to `context.pages`. Shared
+ * by both paged domains below (payout state and generic stage evidence) via `context.schemas`; the
+ * two never mix pages or manifests since each domain uses its own schema strings and directory root.
+ */
+function encodePagedValue(value, context) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return value;
   if (Array.isArray(value)) {
-    const keys = recipientKeys(value, 'paged payout value');
+    // An array that already fits in a single page never needs a page of its own: a realistic
+    // FINALIZED-shape payout record commonly nests several small arrays (e.g. finality log indexes)
+    // beside its few genuinely large ones (recipients, allocations), and paging every one of them
+    // regardless of size would exhaust the shared page budget on one-item arrays long before it ever
+    // reaches a real 10,000-recipient target. This is purely an encode-side choice: decodePagedValue
+    // below already recognizes a plain inline array in addition to the page-reference shape, so an
+    // older manifest that did page a small array (written before this optimization) still reads back
+    // correctly -- this only changes what newly-written manifests look like, never what is readable.
+    if (value.length <= pagedPayoutPageItems) return value.map(entry => encodePagedValue(entry, context));
+    const keys = recipientKeys(value, 'paged value');
     const kind = keys === null ? 'sequence' : 'recipient-map';
     const pages = [];
     for (let start = 0; start < value.length; start += pagedPayoutPageItems) {
       const end = Math.min(start + pagedPayoutPageItems, value.length);
       if (kind === 'sequence') {
-        pages.push(addPayoutPage(context, kind, value.slice(start, end).map(entry => encodePagedPayoutValue(entry, context))));
+        pages.push(addPagedPage(context, kind, value.slice(start, end).map(entry => encodePagedValue(entry, context))));
         continue;
       }
       const entries = {};
       for (let index = start; index < end; index += 1) {
         Object.defineProperty(entries, keys[index], {
           enumerable: true,
-          value: { index, value: encodePagedPayoutValue(value[index], context) },
+          value: { index, value: encodePagedValue(value[index], context) },
         });
       }
-      pages.push(addPayoutPage(context, kind, entries));
+      pages.push(addPagedPage(context, kind, entries));
     }
-    return pageReference(kind, value.length, pages);
+    return pageReference(context.schemas, kind, value.length, pages);
   }
-  if (internalPagedSchemas.has(value.schema)) throw new Error('paged payout state uses a reserved schema');
+  if (internalPagedSchemas.has(value.schema)) throw new Error(`${context.label} uses a reserved schema`);
   const encoded = {};
   for (const [key, entry] of Object.entries(value)) {
-    Object.defineProperty(encoded, key, { enumerable: true, value: encodePagedPayoutValue(entry, context) });
+    Object.defineProperty(encoded, key, { enumerable: true, value: encodePagedValue(entry, context) });
   }
   return encoded;
 }
 
-function serializePagedPayoutManifest({ cycleId, stage, generation, pages, state }) {
+function serializePagedManifest(schemas, { cycleId, stage, generation, pages, state }) {
   const manifest = {
-    schema: pagedPayoutManifestSchema,
+    schema: schemas.manifest,
     cycleId,
     stage,
     generation,
@@ -1250,7 +1327,7 @@ function serializePagedPayoutManifest({ cycleId, stage, generation, pages, state
   return `${canonicalJson(manifest)}\n`;
 }
 
-function parsePagedPayoutManifest(text, label) {
+function parsePagedManifest(schemas, text, label) {
   let value;
   try {
     value = JSON.parse(text);
@@ -1259,17 +1336,17 @@ function parsePagedPayoutManifest(text, label) {
   }
   if (`${canonicalJson(value)}\n` !== text) throw new Error(`${label} bytes are not canonical JSON plus one newline`);
   exactObject(value, ['schema', 'cycleId', 'stage', 'generation', 'pageCount', 'state'], label);
-  if (value.schema !== pagedPayoutManifestSchema) throw new Error(`${label} schema is invalid`);
+  if (value.schema !== schemas.manifest) throw new Error(`${label} schema is invalid`);
   assertCycleId(value.cycleId);
   assertStageIdentifier(value.stage);
   assertGeneration(value.generation);
-  if (!Number.isInteger(value.pageCount) || value.pageCount < 0 || value.pageCount > maximumPagedPayoutPages) {
+  if (!Number.isInteger(value.pageCount) || value.pageCount < 0 || value.pageCount > maximumPagedPages) {
     throw new Error(`${label} page count is invalid`);
   }
   return value;
 }
 
-function parsePagedPayoutPage(text, label) {
+function parsePagedPage(schemas, text, label) {
   let value;
   try {
     value = JSON.parse(text);
@@ -1278,7 +1355,7 @@ function parsePagedPayoutPage(text, label) {
   }
   if (`${canonicalJson(value)}\n` !== text) throw new Error(`${label} bytes are not canonical JSON plus one newline`);
   exactObject(value, ['schema', 'cycleId', 'stage', 'generation', 'pageId', 'kind', 'entries'], label);
-  if (value.schema !== pagedPayoutPageSchema) throw new Error(`${label} schema is invalid`);
+  if (value.schema !== schemas.page) throw new Error(`${label} schema is invalid`);
   assertCycleId(value.cycleId);
   assertStageIdentifier(value.stage);
   assertGeneration(value.generation);
@@ -1292,11 +1369,11 @@ function parsePagedPayoutPage(text, label) {
   return value;
 }
 
-function assertPagedReference(value, label) {
+function assertPagedReference(schemas, value, label) {
   exactObject(value, ['schema', 'kind', 'length', 'pages'], label);
-  if (value.schema !== pagedPayoutReferenceSchema) throw new Error(`${label} schema is invalid`);
+  if (value.schema !== schemas.reference) throw new Error(`${label} schema is invalid`);
   if (!['sequence', 'recipient-map'].includes(value.kind)) throw new Error(`${label} kind is invalid`);
-  if (!Number.isInteger(value.length) || value.length < 0 || value.length > pagedPayoutPageItems * maximumPagedPayoutPages) {
+  if (!Number.isInteger(value.length) || value.length < 0 || value.length > pagedPayoutPageItems * maximumPagedPages) {
     throw new Error(`${label} length is invalid`);
   }
   if (!Array.isArray(value.pages) || value.pages.length !== Math.ceil(value.length / pagedPayoutPageItems)) {
@@ -1310,43 +1387,51 @@ function assertPagedReference(value, label) {
   });
 }
 
-async function decodePagedPayoutValue(value, context) {
+async function decodePagedValue(value, context) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return value;
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
-    throw new Error('paged payout manifest state is invalid');
+  if (Array.isArray(value)) {
+    // The inline-small-array optimization in encodePagedValue: a manifest written by this version
+    // never emits an array that is not already a page reference (see there), but decoding it here
+    // still requires no page lookups and no page-count bookkeeping either way.
+    const decoded = [];
+    for (const entry of value) decoded.push(await decodePagedValue(entry, context));
+    return decoded;
   }
-  if (value.schema === pagedPayoutReferenceSchema) {
-    const pages = assertPagedReference(value, 'paged payout reference');
+  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error(`${context.label} is invalid`);
+  }
+  if (value.schema === context.schemas.reference) {
+    const pages = assertPagedReference(context.schemas, value, `${context.label} reference`);
     const entries = [];
     const recipientEntries = new Map();
     for (const pageReferenceValue of pages) {
-      if (context.pageIds.has(pageReferenceValue.id)) throw new Error('paged payout page is referenced more than once');
+      if (context.pageIds.has(pageReferenceValue.id)) throw new Error(`${context.label} page is referenced more than once`);
       context.pageIds.add(pageReferenceValue.id);
       const page = await context.readPage(pageReferenceValue);
-      if (page.kind !== value.kind) throw new Error('paged payout page kind does not match its reference');
+      if (page.kind !== value.kind) throw new Error(`${context.label} page kind does not match its reference`);
       if (value.kind === 'sequence') {
-        for (const entry of page.entries) entries.push(await decodePagedPayoutValue(entry, context));
+        for (const entry of page.entries) entries.push(await decodePagedValue(entry, context));
         continue;
       }
       for (const [recipient, entry] of Object.entries(page.entries)) {
-        if (!globalKeyPattern.test(recipient) || recipientEntries.has(recipient)) throw new Error('paged payout recipient key is invalid or duplicated');
-        exactObject(entry, ['index', 'value'], `paged payout recipient ${recipient}`);
+        if (!globalKeyPattern.test(recipient) || recipientEntries.has(recipient)) throw new Error(`${context.label} recipient key is invalid or duplicated`);
+        exactObject(entry, ['index', 'value'], `${context.label} recipient ${recipient}`);
         if (!Number.isInteger(entry.index) || entry.index < 0 || entry.index >= value.length || entries[entry.index] !== undefined) {
-          throw new Error('paged payout recipient index is invalid or duplicated');
+          throw new Error(`${context.label} recipient index is invalid or duplicated`);
         }
-        entries[entry.index] = await decodePagedPayoutValue(entry.value, context);
+        entries[entry.index] = await decodePagedValue(entry.value, context);
         recipientEntries.set(recipient, entry.index);
       }
     }
-    if (entries.length !== value.length) throw new Error('paged payout page entries do not reconstruct their reference');
+    if (entries.length !== value.length) throw new Error(`${context.label} page entries do not reconstruct their reference`);
     for (let index = 0; index < entries.length; index += 1) {
-      if (entries[index] === undefined) throw new Error('paged payout page entries do not reconstruct their reference');
+      if (entries[index] === undefined) throw new Error(`${context.label} page entries do not reconstruct their reference`);
     }
     return entries;
   }
   const decoded = {};
   for (const [key, entry] of Object.entries(value)) {
-    Object.defineProperty(decoded, key, { enumerable: true, value: await decodePagedPayoutValue(entry, context) });
+    Object.defineProperty(decoded, key, { enumerable: true, value: await decodePagedValue(entry, context) });
   }
   return decoded;
 }
@@ -1480,6 +1565,7 @@ export class DurableCycleStore {
   #activeDirectory;
   #archiveDirectory;
   #payoutDirectory;
+  #stageEvidenceDirectory;
   #indexPath;
   #legacyLockPath;
   #lockDatabasePath;
@@ -1494,6 +1580,13 @@ export class DurableCycleStore {
     this.#activeDirectory = join(directory, 'active');
     this.#archiveDirectory = join(directory, 'archive');
     this.#payoutDirectory = join(directory, 'payout');
+    // Created lazily on first use (see persistPagedStageEvidence), unlike #payoutDirectory above,
+    // which every store bootstraps eagerly at open(). An existing store predating this feature has no
+    // 'stage-evidence' directory on disk yet; open()'s own bootstrap/availability checks intentionally
+    // do not require it (see stateDirectoryBootstrapEligibility/stateDirectoryAvailability), so an
+    // older store keeps opening exactly as before until something actually calls
+    // persistPagedStageEvidence for the first time.
+    this.#stageEvidenceDirectory = join(directory, 'stage-evidence');
     this.#indexPath = join(directory, 'index.json');
     this.#legacyLockPath = legacyLockPath(directory);
     this.#lockDatabasePath = lockDatabasePath(directory);
@@ -1763,8 +1856,8 @@ export class DurableCycleStore {
       const generation = randomToken();
       const generationDirectory = join(stageDirectory, generation);
       await ensurePrivateDirectory(generationDirectory, 'durable cycle store payout generation directory');
-      const context = { cycleId, stage, generation, pages: [] };
-      const encodedState = encodePagedPayoutValue(validatedState, context);
+      const context = { cycleId, stage, generation, pages: [], schemas: pagedPayoutSchemas, label: 'paged payout state' };
+      const encodedState = encodePagedValue(validatedState, context);
       for (const page of context.pages) {
         await atomicWriteFile(
           generationDirectory,
@@ -1775,7 +1868,7 @@ export class DurableCycleStore {
       await atomicWriteFile(
         stageDirectory,
         join(stageDirectory, 'manifest.json'),
-        serializePagedPayoutManifest({ cycleId, stage, generation, pages: context.pages, state: encodedState }),
+        serializePagedManifest(pagedPayoutSchemas, { cycleId, stage, generation, pages: context.pages, state: encodedState }),
       );
     });
   }
@@ -1793,17 +1886,19 @@ export class DurableCycleStore {
     const manifestPath = join(stageDirectory, 'manifest.json');
     const manifestText = await readStableFile(manifestPath, maximumPagedPayoutPageBytes, 'durable cycle store payout manifest');
     if (manifestText === null) return null;
-    const manifest = parsePagedPayoutManifest(manifestText, 'durable cycle store payout manifest');
+    const manifest = parsePagedManifest(pagedPayoutSchemas, manifestText, 'durable cycle store payout manifest');
     if (manifest.cycleId !== cycleId || manifest.stage !== stage) throw new Error('durable cycle store payout manifest identity mismatch');
     const generationDirectory = join(stageDirectory, manifest.generation);
     await assertPrivateDirectory(generationDirectory, 'durable cycle store payout generation directory');
     const context = {
+      schemas: pagedPayoutSchemas,
+      label: 'durable cycle store payout manifest',
       pageIds: new Set(),
       readPage: async reference => {
         const path = join(generationDirectory, pageFileName(reference.id));
         const text = await readStableFile(path, maximumPagedPayoutPageBytes, `durable cycle store payout page ${reference.id}`);
         if (text === null) throw new Error('durable cycle store payout page is missing');
-        const page = parsePagedPayoutPage(text, `durable cycle store payout page ${reference.id}`);
+        const page = parsePagedPage(pagedPayoutSchemas, text, `durable cycle store payout page ${reference.id}`);
         if (page.cycleId !== cycleId || page.stage !== stage || page.generation !== manifest.generation || page.pageId !== reference.id) {
           throw new Error('durable cycle store payout page identity mismatch');
         }
@@ -1811,12 +1906,102 @@ export class DurableCycleStore {
         return page;
       },
     };
-    const state = await decodePagedPayoutValue(manifest.state, context);
+    const state = await decodePagedValue(manifest.state, context);
     if (context.pageIds.size !== manifest.pageCount) throw new Error('durable cycle store payout manifest page count does not match its state');
     for (let pageId = 0; pageId < manifest.pageCount; pageId += 1) {
       if (!context.pageIds.has(pageId)) throw new Error('durable cycle store payout manifest omits a page');
     }
     return assertPagedPayoutState(cycleId, state);
+  }
+
+  #stageEvidenceCycleDirectory(cycleId) {
+    return join(this.#stageEvidenceDirectory, encodeURIComponent(cycleId));
+  }
+
+  #stageEvidenceStageDirectory(cycleId, stage) {
+    return join(this.#stageEvidenceCycleDirectory(cycleId), encodeURIComponent(stage));
+  }
+
+  /**
+   * Generic bounded paged storage for large stage evidence that does not fit the journal's bounded
+   * payload (e.g. an eligibility-snapshot manifest's `entries` list beyond ~64 items). Shares its
+   * page format, page-count ceiling, and object/array/byte ceilings with `persistPagedPayoutState`
+   * above (see `maximumPagedPages`/`maximumPagedStateObjects`/`maximumPagedStateArrays`), but writes
+   * under its own directory root and schema strings -- it never shares a manifest, a generation, or a
+   * page file with payout state, even for the same cycleId/stage. `evidence` needs no `recipients`
+   * field or any other payout-specific shape; the only requirement is that it is a plain, canonical,
+   * bounded object whose own `cycleId` field matches the storage key.
+   */
+  async persistPagedStageEvidence(cycleId, stage, evidence) {
+    assertCycleId(cycleId);
+    assertStageIdentifier(stage);
+    const validatedEvidence = assertPagedStageEvidence(cycleId, evidence);
+    return this.#withLock(async () => {
+      await ensurePrivateDirectory(this.#stageEvidenceDirectory, 'durable cycle store stage evidence directory');
+      const cycleDirectory = this.#stageEvidenceCycleDirectory(cycleId);
+      const stageDirectory = this.#stageEvidenceStageDirectory(cycleId, stage);
+      await ensurePrivateDirectory(cycleDirectory, 'durable cycle store stage evidence cycle directory');
+      await ensurePrivateDirectory(stageDirectory, 'durable cycle store stage evidence stage directory');
+
+      const generation = randomToken();
+      const generationDirectory = join(stageDirectory, generation);
+      await ensurePrivateDirectory(generationDirectory, 'durable cycle store stage evidence generation directory');
+      const context = { cycleId, stage, generation, pages: [], schemas: pagedStageEvidenceSchemas, label: 'paged stage evidence' };
+      const encodedEvidence = encodePagedValue(validatedEvidence, context);
+      for (const page of context.pages) {
+        await atomicWriteFile(
+          generationDirectory,
+          join(generationDirectory, pageFileName(page.pageId)),
+          `${canonicalJson(page)}\n`,
+        );
+      }
+      await atomicWriteFile(
+        stageDirectory,
+        join(stageDirectory, 'manifest.json'),
+        serializePagedManifest(pagedStageEvidenceSchemas, { cycleId, stage, generation, pages: context.pages, state: encodedEvidence }),
+      );
+    });
+  }
+
+  async readPagedStageEvidence(cycleId, stage) {
+    assertCycleId(cycleId);
+    assertStageIdentifier(stage);
+    const cycleDirectory = this.#stageEvidenceCycleDirectory(cycleId);
+    const stageDirectory = this.#stageEvidenceStageDirectory(cycleId, stage);
+    if (!(await privateDirectoryExists(this.#stageEvidenceDirectory, 'durable cycle store stage evidence directory'))
+      || !(await privateDirectoryExists(cycleDirectory, 'durable cycle store stage evidence cycle directory'))
+      || !(await privateDirectoryExists(stageDirectory, 'durable cycle store stage evidence stage directory'))) {
+      return null;
+    }
+    const manifestPath = join(stageDirectory, 'manifest.json');
+    const manifestText = await readStableFile(manifestPath, maximumPagedStageEvidencePageBytes, 'durable cycle store stage evidence manifest');
+    if (manifestText === null) return null;
+    const manifest = parsePagedManifest(pagedStageEvidenceSchemas, manifestText, 'durable cycle store stage evidence manifest');
+    if (manifest.cycleId !== cycleId || manifest.stage !== stage) throw new Error('durable cycle store stage evidence manifest identity mismatch');
+    const generationDirectory = join(stageDirectory, manifest.generation);
+    await assertPrivateDirectory(generationDirectory, 'durable cycle store stage evidence generation directory');
+    const context = {
+      schemas: pagedStageEvidenceSchemas,
+      label: 'durable cycle store stage evidence manifest',
+      pageIds: new Set(),
+      readPage: async reference => {
+        const path = join(generationDirectory, pageFileName(reference.id));
+        const text = await readStableFile(path, maximumPagedStageEvidencePageBytes, `durable cycle store stage evidence page ${reference.id}`);
+        if (text === null) throw new Error('durable cycle store stage evidence page is missing');
+        const page = parsePagedPage(pagedStageEvidenceSchemas, text, `durable cycle store stage evidence page ${reference.id}`);
+        if (page.cycleId !== cycleId || page.stage !== stage || page.generation !== manifest.generation || page.pageId !== reference.id) {
+          throw new Error('durable cycle store stage evidence page identity mismatch');
+        }
+        if (digest(page) !== reference.digest) throw new Error('durable cycle store stage evidence page digest does not match its manifest');
+        return page;
+      },
+    };
+    const evidence = await decodePagedValue(manifest.state, context);
+    if (context.pageIds.size !== manifest.pageCount) throw new Error('durable cycle store stage evidence manifest page count does not match its state');
+    for (let pageId = 0; pageId < manifest.pageCount; pageId += 1) {
+      if (!context.pageIds.has(pageId)) throw new Error('durable cycle store stage evidence manifest omits a page');
+    }
+    return assertPagedStageEvidence(cycleId, evidence);
   }
 
   readCycle(cycleId) {

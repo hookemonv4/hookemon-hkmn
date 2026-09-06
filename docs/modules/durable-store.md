@@ -16,6 +16,19 @@ the cross-process write lock; it holds no domain knowledge of cycles, packs, or 
   turns into its own owner-decision record on detected state loss, without writing anything.
 - `StateDirectoryLossError` is thrown by `open()` when the state directory's identity or witness no
   longer matches what was previously bootstrapped.
+- `persistPagedPayoutState(cycleId, stage, state)` / `readPagedPayoutState(cycleId, stage)` durably
+  store a direct-payout state whose `recipients` (and any other large array in its object graph)
+  exceed the journal's bounded payload. `state.cycleId` must equal `cycleId`, `state.recipients` must
+  be an array of unique-`recipient`-keyed objects; `readPagedPayoutState` returns `null` when nothing
+  has been persisted yet for that `(cycleId, stage)` pair.
+- `persistPagedStageEvidence(cycleId, stage, evidence)` / `readPagedStageEvidence(cycleId, stage)` are
+  the generic counterpart for any other large stage evidence (e.g. an eligibility-snapshot manifest's
+  `entries` beyond ~64 items) that does not fit the journal's bounded payload. `evidence` needs only a
+  matching `cycleId` field — no `recipients` shape or other payout-specific requirement. Shares its
+  page format, ceilings, and locking with the payout methods above but writes under its own directory
+  root and schema strings; it never shares a manifest, generation, or page file with payout state, even
+  for the identical `(cycleId, stage)` pair. `readPagedStageEvidence` returns `null` when nothing has
+  been persisted yet.
 
 ## Invariants
 
@@ -39,6 +52,28 @@ the cross-process write lock; it holds no domain knowledge of cycles, packs, or 
   `this.#queue`) so overlapping calls on the *same* open store instance never interleave; this is
   independent of and in addition to the cross-process file lock above, which is what actually
   protects two separate store instances (same process or different processes) against each other.
+- Paged storage ceilings (D-storage-requirements.md, 2026-09-06) are deliberately independent local
+  constants, never aliases of journal.mjs's shared `RECOVERY_LIMITS` defaults that every other
+  bounded-value caller in this codebase relies on: `maximumPagedPages` (1,024 — a 10,000-recipient
+  payout state pages two 10,000-item arrays, `recipients` and `plan.allocations`, against one shared
+  budget, needing 314 pages; this is ~3x that), `maximumPagedStateObjects` (90,000 — a fully-FINALIZED
+  10,000-recipient state measures ~7 objects/recipient + ~22 fixed overhead ≈ 70,022, plus margin),
+  and `maximumPagedStateArrays` (25,000 — a fully-FINALIZED recipient's own small nested arrays, e.g.
+  a finality record's `logIndexes`, count separately from array *items*). These are a justified
+  10,000-recipient/10,000-entry acceptance ceiling, not an unbounded allowance and not a promise of
+  50,000.
+- An array that already fits in one page (`length <= 64`) is written inline in the manifest rather
+  than as a page reference: paging every array regardless of size (the original behavior) exhausted
+  the shared page budget on realistic records with several small nested arrays long before reaching
+  10,000 recipients. This is a **backward-compatible format extension**: an older manifest that did
+  page a small array (written before this change) still decodes correctly, since decoding recognizes
+  both a plain inline array and a page-reference object; only newly-written manifests use the more
+  compact inline form. No migration step is needed — nothing has to rewrite old manifests.
+- `persistPagedStageEvidence`'s top-level `stage-evidence/` directory is created lazily, on first use,
+  unlike `payout/`, which every store bootstraps eagerly at `open()`. An existing store predating this
+  feature has no `stage-evidence/` directory on disk; `open()`'s bootstrap/availability checks
+  intentionally never require it, so an older store keeps opening exactly as before until something
+  actually calls `persistPagedStageEvidence`.
 
 ## State transitions
 
