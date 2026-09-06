@@ -86,6 +86,9 @@ function fakeCycleRepository(stages = new Map(), releaseAmount = '0', attempts =
       return record && !record.failed ? record.responseEvidence : null;
     },
     async readOperationalStageAttempt(cycleId, stage) { return attempts.get(stage) ?? null; },
+    // reconcileLivePurchase's first read: no pack batch has been durably recorded yet, the correct
+    // default for every existing caller of this shared fixture (none records one).
+    async readPackBatchRequest() { return null; },
     async prepareStageAttempt(cycleId, stage, attempt) {
       attempts.set(stage, { attempt, responseEvidence: null, reconciliationEvidence: null });
     },
@@ -968,7 +971,10 @@ test('the Collector-capable mutation stages reach their own real handler refusal
     liveMode: true,
     adapters: { collectorCrypt: throwingCollectorCrypt(), relay: throwingRelay(), robinhood: { client: null }, solana: { client: null } },
     signerClient: throwingSigner(),
-    config: baseConfig(),
+    // A canonical isolated Solana identity (same placeholder as the other config.accounts.solana
+    // fixtures in this file) is required so purchase's own prepareRequest clears its
+    // HOOKEMON_SOLANA_ACCOUNT precondition and reaches the boundary this test actually targets.
+    config: baseConfig({ accounts: { evm: null, solana: '11111111111111111111111111111111' } }),
     cycleRepository,
     ...fixtureStageDriverOptions,
   });
@@ -3070,7 +3076,9 @@ test('Collector-capable stages reach their own real refusal while the eligibilit
     liveMode: true,
     adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
     signerClient: null,
-    config: baseConfig(),
+    // Same canonical isolated Solana identity as the analogous test above, required to clear
+    // purchase's own HOOKEMON_SOLANA_ACCOUNT precondition before its real collector-crypt refusal.
+    config: baseConfig({ accounts: { evm: null, solana: '11111111111111111111111111111111' } }),
     cycleRepository,
     ...fixtureStageDriverOptions,
   });
