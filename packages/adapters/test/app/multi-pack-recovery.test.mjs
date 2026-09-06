@@ -64,16 +64,18 @@ function baseConfig(overrides = {}) {
 }
 
 /** In-memory fake covering the exact repository surface every stage module reads or writes. */
-function repository({ stages = {}, attempts = {}, batches = {} } = {}) {
+function repository({ stages = {}, attempts = {}, batches = {}, intents = {} } = {}) {
   const held = [];
   const heldPositions = [];
   const ledgers = [];
   const batchState = { ...batches };
+  const intentState = { ...intents };
   return {
     held,
     heldPositions,
     ledgers,
     batchState,
+    intentState,
     async readStage(_cycleId, stage) { return stages[stage] ?? { status: 'PENDING' }; },
     async readOperationalStageAttempt(_cycleId, stage) { return attempts[stage] ?? null; },
     async describeCycle() {
@@ -105,6 +107,13 @@ function repository({ stages = {}, attempts = {}, batches = {} } = {}) {
       if (batchState[stage]) return batchState[stage];
       const record = { requestedAtMs: 1_000, packs };
       batchState[stage] = record;
+      return record;
+    },
+    async readPackBatchIntent(_cycleId, stage) { return intentState[stage] ?? null; },
+    async recordPackBatchIntent(_cycleId, stage, intent) {
+      if (intentState[stage]) return intentState[stage];
+      const record = { recordedAtMs: 1_000, intent };
+      intentState[stage] = record;
       return record;
     },
   };
@@ -402,6 +411,77 @@ test('provider 429 on the batch call leaves the cycle safely pending, not sent-u
   );
   // Nothing was ever durably generated: the batch ledger stays empty and a later retry is safe.
   assert.equal(cycleRepository.batchState.purchase, undefined);
+});
+
+test('generate response lost before any memo returns: the pre-call intent is durable, the cycle holds once, and reconciliation never regenerates', async () => {
+  const cycleRepository = repository();
+  let generateCalls = 0;
+  const collectorCrypt = {
+    async generateYoloPacks() {
+      generateCalls += 1;
+      // The provider may have fully processed this request server-side; the connection just
+      // never returned a body. No memo of any kind reaches this process.
+      throw new Error('connection reset before any response body arrived');
+    },
+  };
+  const rpc = rpcClient();
+
+  // The provisional authority gate (exercised the same way in stages-collector-lifecycle.test.mjs)
+  // denies this call before it can reach generateYoloPacks at all; what matters here is that the
+  // durable pre-call intent is already written by the time that denial happens.
+  await assert.rejects(
+    () => mutatePurchase({
+      liveMode: true,
+      adapters: { collectorCrypt, solana: { client: rpc } },
+      signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: 'cycle-x', request: { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 } },
+    }),
+    /active frozen interface authority is invalid/,
+  );
+  assert.equal(generateCalls, 0);
+  assert.deepEqual(cycleRepository.intentState.purchase, {
+    recordedAtMs: 1_000,
+    intent: { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 },
+  });
+  assert.equal(cycleRepository.batchState.purchase, undefined);
+
+  // Now simulate the whole-cycle hold path directly: the stage attempt went sent-unknown (mutate
+  // reached the provider capability and then threw) and its deadline has passed with no batch
+  // ever durably generated.
+  const heldRepository = repository({
+    intents: { purchase: cycleRepository.intentState.purchase },
+    attempts: { purchase: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 0, responseEvidence: null, reconciliationEvidence: null } },
+  });
+  const result = await reconcileLivePurchase({
+    adapters: { collectorCrypt: {}, solana: { client: rpc } },
+    config: baseConfig(),
+    cycleRepository: heldRepository,
+    context: { cycleId: 'cycle-x', nowMs: 31 * 60 * 1000 },
+  });
+  assert.equal(result, null);
+  assert.equal(heldRepository.held.length, 1);
+  assert.equal(heldRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.deepEqual(heldRepository.held[0].evidence.intent, { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 });
+
+  // A second and third reconcile pass never call generate again and reach the identical hold.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const repeat = await reconcileLivePurchase({
+      adapters: { collectorCrypt: { async generateYoloPacks() { throw new Error('must never regenerate'); } }, solana: { client: rpc } },
+      config: baseConfig(),
+      cycleRepository: heldRepository,
+      context: { cycleId: 'cycle-x', nowMs: 31 * 60 * 1000 },
+    });
+    assert.equal(repeat, null);
+  }
+  // Every reconcile pass reaches the identical hold evidence (the real CycleRepository.holdCycle
+  // is itself idempotent for a matching terminal state and evidence; this fake simply records
+  // every call so this asserts that repeated content, not call count).
+  for (const call of heldRepository.held) {
+    assert.equal(call.terminalState, 'HELD_DATA_UNVERIFIED');
+    assert.deepEqual(call.evidence.intent, { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1 });
+  }
 });
 
 test('lost response: a durably generated pack whose sign/broadcast crashed mid-flight is never repurchased and reconciles once the debit is observed', async () => {

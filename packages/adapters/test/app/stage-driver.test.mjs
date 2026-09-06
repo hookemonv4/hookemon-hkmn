@@ -456,6 +456,117 @@ test('rejects supplementary handler injection outside the Node test runner', () 
   }
 });
 
+test('productionSupplementaryStageHandlers requires its own real adapters and signer client', () => {
+  assert.throws(
+    () => createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: fakeCycleRepository(),
+      productionSupplementaryStageHandlers: { PREPARED: { stage: 'supplementary-buyback', async reconcile() {} } },
+    }),
+    /requires supplementaryAdapters and supplementarySignerClient/,
+  );
+});
+
+test('productionSupplementaryStageHandlers cannot be combined with the Node-test-only seam', () => {
+  assert.throws(
+    () => createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: fakeCycleRepository(),
+      supplementaryStageHandlers: {},
+      supplementaryAdapters: {},
+      supplementarySignerClient: {},
+      productionSupplementaryStageHandlers: { PREPARED: { stage: 'supplementary-buyback', async reconcile() {} } },
+    }),
+    /cannot combine productionSupplementaryStageHandlers with the Node-test-only supplementaryStageHandlers seam/,
+  );
+});
+
+test('productionSupplementaryStageHandlers dispatches outside the Node test runner with real capabilities, unrestricted to observation-only', async () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    const position = {
+      positionId: `held:${'f'.repeat(64)}`,
+      cycleId: CYCLE_ID,
+      packId: 'base-pack',
+      memo: 'memo-supplementary-production',
+      mint: 'mint-supplementary-production',
+      cardRef: 'mint-supplementary-production',
+      costMicroUsdg: '25',
+      insuredValue: null,
+      reason: 'EPIC_THRESHOLD',
+      terminalState: 'HELD_OWNER_DECISION',
+      evidenceDigest: `sha256:${'1'.repeat(64)}`,
+      openedAtMs: 1_000,
+      ownerDecision: { choice: 'sell' },
+      resolution: null,
+    };
+    let settlement = {
+      positionId: position.positionId,
+      cycleId: CYCLE_ID,
+      manifestId: `${CYCLE_ID}:supplementary:3`,
+      state: 'PREPARED',
+      positionEvidenceDigest: position.evidenceDigest,
+    };
+    const repository = fakeCycleRepository();
+    repository.readSupplementarySettlement = async () => structuredClone(settlement);
+    repository.advanceSupplementarySettlement = async (positionId, input) => {
+      settlement = { ...settlement, state: input.nextState };
+      return structuredClone(settlement);
+    };
+    const productionAdapters = Object.freeze({ collectorCrypt: { async buyback() { return { signature: 'sig' }; } } });
+    const productionSignerClient = Object.freeze({ solana: { async sign() { return 'signed'; } } });
+    let receivedAdapters = null;
+    let receivedSignerClient = null;
+    const driver = createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: repository,
+      supplementaryAdapters: productionAdapters,
+      supplementarySignerClient: productionSignerClient,
+      productionSupplementaryStageHandlers: {
+        PREPARED: {
+          stage: 'supplementary-buyback',
+          mutation: 'buyback',
+          async reconcile({ adapters, signerClient, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
+            receivedAdapters = adapters;
+            receivedSignerClient = signerClient;
+            return injectedRepository.advanceSupplementarySettlement(position.positionId, {
+              expectedState: receivedSettlement.state,
+              nextState: 'BUYBACK_SENT_UNKNOWN',
+              evidence: { requestDigest: `sha256:${'2'.repeat(64)}` },
+            });
+          },
+        },
+      },
+    });
+
+    const result = await driver.runSupplementarySettlement({
+      position,
+      settlement,
+      nowMs: 1_001,
+      fencingToken: '11111111-1111-4111-8111-111111111111',
+      assertLease() {},
+    });
+
+    assert.equal(receivedAdapters, productionAdapters);
+    assert.equal(receivedSignerClient, productionSignerClient);
+    assert.equal(result.status, 'ADVANCED');
+    assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
+});
+
 test('liveMode false: execute() never reaches signerClient.sign or any collector-crypt/relay mutation, for every stage', async () => {
   const driver = driverWithThrowingEverything(false);
   for (const stage of AUTOMATED_CYCLE_STAGES) {

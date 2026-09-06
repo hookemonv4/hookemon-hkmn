@@ -12,7 +12,9 @@ import {
   assertCustodyLedger,
   assertOperationIdentity,
   assertPackBatchRequest,
+  assertPublicAmount,
   assertPublicCardEvent,
+  toPublicAmount,
   assertTransactionPolicy,
   assertTypedAmount,
   assertProviderMutationAttempt,
@@ -453,4 +455,23 @@ test('operation identity and public card events bind a stable per-pack identity'
   assert.deepEqual(assertPublicCardEvent(event), event);
   assert.throws(() => assertPublicCardEvent({ ...event, state: 'UNKNOWN' }), /state is invalid/);
   assert.equal(packOperationId('cycle-1', 2), operationId);
+});
+
+test('the public Amount contract uses units, never amountAtomic, and toPublicAmount preserves full precision', () => {
+  const internal = { chainId: 'solana-mainnet', assetId: 'mint', decimals: 6, amountAtomic: '900719925474099312345678' };
+  const publicAmount = toPublicAmount(internal);
+  assert.deepEqual(publicAmount, { chainId: 'solana-mainnet', assetId: 'mint', decimals: 6, units: '900719925474099312345678' });
+  assert.equal(Object.hasOwn(publicAmount, 'amountAtomic'), false);
+  assert.deepEqual(assertPublicAmount(publicAmount), publicAmount);
+  assert.throws(() => assertPublicAmount(internal), /public amount.*is invalid|must use the exact schema/);
+  assert.equal(toPublicAmount(null), null);
+
+  const event = {
+    cycleId: 'cycle-1', operationId: 'pack:cycle-1:0', packIndex: 0, memo: 'memo-0', mint: 'mint',
+    eventId: `sha256:${'0'.repeat(64)}`, sequence: '1', state: 'SOLD', name: null, imageUrl: null,
+    observedAt: '2026-09-06T00:00:00.000Z', finalizedAt: '2026-09-06T00:00:01.000Z', transactionId: 'sig',
+    proceeds: publicAmount,
+  };
+  assert.deepEqual(assertPublicCardEvent(event), event);
+  assert.throws(() => assertPublicCardEvent({ ...event, proceeds: internal }), /must use the exact schema/);
 });

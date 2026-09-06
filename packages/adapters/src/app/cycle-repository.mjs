@@ -7,7 +7,13 @@ import { lstat, open } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { DurableCycleStore, StateDirectoryLossError } from '../../../runner/src/cycle/durable-store.mjs';
-import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
+import {
+  assertBoundedCanonicalValue,
+  canonicalJson,
+  CycleJournal,
+  digest,
+  RECOVERY_LIMITS,
+} from '../../../runner/src/cycle/journal.mjs';
 import { isProcessRpcFinalizedErc20TransferProof } from '../robinhood-rpc.mjs';
 import { isProcessRpcRelayDestinationObservation } from '../solana-rpc.mjs';
 import { isProcessRpcOutboundRefundProof } from './stages/outbound.mjs';
@@ -133,6 +139,8 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'completeStage',
   'completeCycle',
   'holdCycle',
+  'recordPackBatchIntent',
+  'readPackBatchIntent',
   'recordPackBatchRequest',
   'readPackBatchRequest',
   'recordHeldPosition',
@@ -470,9 +478,55 @@ function assertStageName(stage, { allowLegacyRead = false } = {}) {
 }
 
 const PACK_OPERATION_STAGE_SET = new Set(PACK_OPERATION_STAGES);
+const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
 
 function assertPackOperationStageName(stage) {
   if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);
+}
+
+// Mirrors durable-store.mjs's own (module-private) paged-stage-evidence handle schema string --
+// the wire-format tag `persistPagedStageEvidence` stamps on the immutable handle it returns, which
+// this module journals verbatim in place of oversized stage evidence. Duplicated as a literal
+// because the handle is a versioned cross-module contract, not an implementation detail reached
+// into from here.
+const STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA = 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1';
+
+/** True only for the exact immutable handle completeStage journals in place of oversized evidence. */
+function isStageEvidencePageReference(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype
+    && value.schema === STAGE_EVIDENCE_PAGE_REFERENCE_SCHEMA;
+}
+
+/** Whether `value` fits one bounded journal-event payload unchanged (the journal's own limits). */
+function fitsBoundedJournalPayload(value) {
+  try {
+    assertBoundedCanonicalValue(value, 'stage evidence', {
+      objects: RECOVERY_LIMITS.payloadObjects,
+      arrays: RECOVERY_LIMITS.payloadArrays,
+      arrayItems: RECOVERY_LIMITS.payloadArrayItems,
+      aggregateBytes: RECOVERY_LIMITS.payloadAggregateBytes,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertPackBatchIntent(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== 3
+    || !Object.hasOwn(value, 'quantity') || !Object.hasOwn(value, 'packType') || !Object.hasOwn(value, 'expectedCardCountPerPack')) {
+    throw new Error(`${label} must use the exact schema`);
+  }
+  if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error(`${label} quantity is invalid`);
+  if (value.packType !== null && (typeof value.packType !== 'string' || !packTypeFieldPattern.test(value.packType))) {
+    throw new Error(`${label} packType is invalid`);
+  }
+  if (!Number.isInteger(value.expectedCardCountPerPack) || value.expectedCardCountPerPack < 1) {
+    throw new Error(`${label} expectedCardCountPerPack is invalid`);
+  }
+  return { quantity: value.quantity, packType: value.packType, expectedCardCountPerPack: value.expectedCardCountPerPack };
 }
 
 function assertPagedPayoutStage(stage) {
@@ -1520,6 +1574,31 @@ function evidenceDigest(domain, cycleId, stage, evidence) {
   return digest({ domain, cycleId, stage, evidence: cloneEvidence(evidence, `${domain} evidence`) });
 }
 
+/**
+ * `terminalAtMs`/`completedAtMs` were added after this event kind shipped. A stored entry from
+ * before that change legitimately omits it; a new one always carries it. Never fabricated from an
+ * HTTP request time -- only from this repository's own clock at the moment of the durable write.
+ */
+function assertOptionalTerminalAtMs(value, label) {
+  if (value === undefined) return null;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} terminalAtMs is invalid`);
+  return value;
+}
+
+function assertTerminalPayloadShape(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error(`${label} must be a plain object`);
+  }
+  canonicalJson(value);
+  const keys = Object.keys(value);
+  const required = ['terminalState', 'evidence'];
+  const hasRequired = required.every(field => Object.hasOwn(value, field));
+  const extra = keys.filter(key => !required.includes(key));
+  if (!hasRequired || (extra.length > 0 && (extra.length > 1 || extra[0] !== 'terminalAtMs'))) {
+    throw new Error(`${label} must use the exact schema`);
+  }
+}
+
 function exactObject(value, fields, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new Error(`${label} must be a plain object`);
@@ -2348,6 +2427,7 @@ export class CycleRepository {
     const payoutQuarantines = new Map();
     const evmNonceLocks = new Map();
     const packBatchRequests = new Map();
+    const packBatchIntents = new Map();
     const replayState = {
       stages,
       preparedStages,
@@ -2367,12 +2447,14 @@ export class CycleRepository {
       payoutQuarantines,
       evmNonceLocks,
       packBatchRequests,
+      packBatchIntents,
     };
     let completed = false;
     let terminalState = null;
     let heldEvidenceDigest = null;
     let ownerDecision = null;
     let terminalEvidence = null;
+    let terminalAtMs = null;
     let releaseAmount = null;
     let mode = null;
     let providerMode = null;
@@ -2432,6 +2514,18 @@ export class CycleRepository {
           throw new Error(`stored stage "${entry.payload.stage}" has conflicting completion evidence`);
         }
         stages.set(entry.payload.stage, { status: 'COMPLETE', evidence: entry.payload.evidence });
+      } else if (entry.kind === 'pack-batch-intent-recorded') {
+        assertPackOperationStageName(entry.payload.stage);
+        const intent = assertPackBatchIntent(entry.payload.intent, 'stored pack batch intent');
+        if (!Number.isSafeInteger(entry.payload.recordedAtMs) || entry.payload.recordedAtMs < 0) {
+          throw new Error('stored pack batch intent recordedAtMs is invalid');
+        }
+        const record = { recordedAtMs: entry.payload.recordedAtMs, intent };
+        const previous = packBatchIntents.get(entry.payload.stage);
+        if (previous && canonicalJson(previous.intent) !== canonicalJson(intent)) {
+          throw new Error(`stored pack batch intent for "${entry.payload.stage}" has conflicting fields`);
+        }
+        if (!previous) packBatchIntents.set(entry.payload.stage, record);
       } else if (entry.kind === 'pack-batch-request-recorded') {
         assertPackOperationStageName(entry.payload.stage);
         const packs = assertPackBatchRequest(entry.payload.packs, 'stored pack batch request');
@@ -2892,9 +2986,10 @@ export class CycleRepository {
         }
         evmNonceLocks.set(key, { ...previous, state: 'RELEASED', journalHead: entry.digest });
       } else if (entry.kind === 'cycle-terminal') {
-        exactObject(entry.payload, ['terminalState', 'evidence'], 'stored cycle terminal state');
+        assertTerminalPayloadShape(entry.payload, 'stored cycle terminal state');
         terminalState = assertCycleTerminalState(entry.payload.terminalState, 'stored cycle terminal state');
         terminalEvidence = cloneEvidence(entry.payload.evidence, 'stored cycle terminal evidence');
+        terminalAtMs = assertOptionalTerminalAtMs(entry.payload.terminalAtMs, 'stored cycle terminal state');
         if (terminalState === HELD_OWNER_DECISION) {
           heldEvidenceDigest = heldOwnerDecisionEvidenceDigest(cycleId, entry.payload.evidence);
         }
@@ -2912,9 +3007,13 @@ export class CycleRepository {
         if (ownerDecision !== null) throw new Error('stored cycle has a second held owner decision');
         ownerDecision = decision;
       } else if (entry.kind === 'cycle-completed') {
+        if (Object.keys(entry.payload).length > 1 || (Object.keys(entry.payload).length === 1 && !Object.hasOwn(entry.payload, 'completedAtMs'))) {
+          throw new Error('stored cycle-completed event must use the exact schema');
+        }
         assertCycleClosure(replayState);
         completed = true;
         terminalState = 'COMPLETED';
+        terminalAtMs = assertOptionalTerminalAtMs(entry.payload.completedAtMs, 'stored cycle-completed event');
       }
     }
     return {
@@ -2944,11 +3043,13 @@ export class CycleRepository {
       payoutQuarantines,
       evmNonceLocks,
       packBatchRequests,
+      packBatchIntents,
       completed,
       terminalState,
       heldEvidenceDigest,
       ownerDecision,
       terminalEvidence,
+      terminalAtMs,
       archived,
       version: stored.version,
       journalHead: stored.journalHead,
@@ -3043,7 +3144,7 @@ export class CycleRepository {
         ...(state.rehearsalSessionId === null ? {} : { rehearsalSessionId: state.rehearsalSessionId }),
       };
       return state.terminalState
-        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState }
+        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState, terminalAtMs: state.terminalAtMs }
         : { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile };
     }
     return null;
@@ -3090,7 +3191,42 @@ export class CycleRepository {
   async readStage(cycleId, stage) {
     assertStageName(stage, { allowLegacyRead: true });
     const state = await this.#replay(cycleId);
-    return state.stages.get(stage) ?? { status: 'PENDING' };
+    const stored = state.stages.get(stage) ?? { status: 'PENDING' };
+    if (stored.status !== 'COMPLETE') return stored;
+    const evidence = await this.#resolveStageEvidence(cycleId, stage, stored.evidence);
+    return evidence === stored.evidence ? stored : { status: 'COMPLETE', evidence };
+  }
+
+  /**
+   * Reconstructs oversized stage evidence from durable paged storage when `storedEvidence` is the
+   * immutable handle `persistPagedStageEvidence` returned at completion time; returns
+   * `storedEvidence` unchanged otherwise. Passing the handle back in as `readPagedStageEvidence`'s
+   * `expected` argument makes a missing blob, an identity mismatch, or a manifest that no longer
+   * matches this exact handle a hard failure there -- never a silent `null` -- so absence and
+   * corruption stay distinct recovery facts.
+   */
+  async #resolveStageEvidence(cycleId, stage, storedEvidence) {
+    if (!isStageEvidencePageReference(storedEvidence)) return storedEvidence;
+    const wrapped = await this.#store.readPagedStageEvidence(cycleId, stage, storedEvidence);
+    return wrapped.evidence;
+  }
+
+  /**
+   * Evidence that fits one bounded journal payload is returned unchanged. Oversized evidence (for
+   * example a real eligibility-snapshot manifest with more holders than the journal's 64-item
+   * array bound admits) is persisted through the durable paged-stage-evidence store first, wrapped
+   * as `{cycleId, evidence}` to satisfy that store's own cycleId-binding requirement without
+   * altering the evidence shape callers of readStage/completeStage see back. Only the immutable,
+   * content-addressed handle `persistPagedStageEvidence` returns is journaled -- the handle commits
+   * only after the blob is durable, a same-payload retry reuses it, and a differently-shaped retry
+   * for the same (cycleId, stage) is rejected by the store itself before any reference is journaled.
+   */
+  async #preparePagedStageEvidence(cycleId, stage, evidence) {
+    if (fitsBoundedJournalPayload(evidence)) return evidence;
+    if (typeof this.#store.persistPagedStageEvidence !== 'function' || typeof this.#store.readPagedStageEvidence !== 'function') {
+      throw new Error(`cycle-repository completeStage: stage "${stage}" evidence exceeds the bounded journal payload and this store has no paged-stage-evidence support`);
+    }
+    return this.#store.persistPagedStageEvidence(cycleId, stage, { cycleId, evidence: structuredClone(evidence) });
   }
 
   async prepareStage(cycleId, stage) {
@@ -3115,14 +3251,16 @@ export class CycleRepository {
     }
     const current = state.stages.get(stage) ?? { status: 'PENDING' };
     if (current.status === 'COMPLETE') {
-      if (canonicalJson(current.evidence) !== canonicalJson(evidence)) {
+      const currentEvidence = await this.#resolveStageEvidence(cycleId, stage, current.evidence);
+      if (canonicalJson(currentEvidence) !== canonicalJson(evidence)) {
         throw new Error(`cycle-repository completeStage: stage "${stage}" was already completed with different evidence`);
       }
       return; // idempotent retry
     }
     assertPreparedOrderedCompletion(state, stage);
     assertReconciledCompletion(state, stage, evidence);
-    await this.#append(cycleId, 'stage-completed', { stage, evidence }, {
+    const storedEvidence = await this.#preparePagedStageEvidence(cycleId, stage, evidence);
+    await this.#append(cycleId, 'stage-completed', { stage, evidence: storedEvidence }, {
       operation: 'completeStage',
       assertState: currentState => {
         const latest = currentState.stages.get(stage) ?? { status: 'PENDING' };
@@ -3142,7 +3280,7 @@ export class CycleRepository {
     }
     if (!state.completed) {
       assertCycleClosure(state);
-      await this.#append(cycleId, 'cycle-completed', {}, {
+      await this.#append(cycleId, 'cycle-completed', { completedAtMs: currentRepositoryTime(this.#now) }, {
         operation: 'completeCycle',
         assertState: assertCycleClosure,
       });
@@ -3185,12 +3323,55 @@ export class CycleRepository {
     await this.#append(cycleId, 'cycle-terminal', {
       terminalState,
       evidence: cloneEvidence(evidence, 'cycle terminal evidence'),
+      terminalAtMs: currentRepositoryTime(this.#now),
     }, {
       assertState: currentState => {
         if (currentState.terminalState) throw new Error('cycle-repository holdCycle terminal state changed while recording hold');
       },
       assertLease,
     });
+  }
+
+  /**
+   * Durably persists the exact quantity and pack code this cycle is about to request from a
+   * batch provider call, before that call is ever made. This is the pre-call counterpart to
+   * `recordPackBatchRequest`: an operator recovering a cycle whose batch call's response was
+   * lost with no memo at all still has a durable, human-readable record of what was attempted
+   * (cycle, quantity, pack code) to reconcile against provider support, rather than only the
+   * generic stage-attempt's opaque request digest.
+   */
+  async recordPackBatchIntent(cycleId, stage, intentValue) {
+    assertPackOperationStageName(stage);
+    const intent = assertPackBatchIntent(intentValue, `${stage} pack batch intent`);
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordPackBatchIntent: cycle is terminal as ${state.terminalState}`);
+    }
+    const existing = state.packBatchIntents.get(stage);
+    if (existing) {
+      if (canonicalJson(existing.intent) === canonicalJson(intent)) return structuredClone(existing);
+      throw new Error(`cycle-repository recordPackBatchIntent: stage "${stage}" already has a different pack batch intent`);
+    }
+    const recordedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'pack-batch-intent-recorded', { stage, intent, recordedAtMs }, {
+      operation: 'recordPackBatchIntent',
+      assertState: currentState => {
+        const latest = currentState.packBatchIntents.get(stage);
+        if (latest && canonicalJson(latest.intent) !== canonicalJson(intent)) {
+          throw new Error(`cycle-repository recordPackBatchIntent: stage "${stage}" changed while recording the pack batch intent`);
+        }
+      },
+    });
+    const latest = await this.#replay(cycleId);
+    return structuredClone(latest.packBatchIntents.get(stage));
+  }
+
+  /** @returns {Promise<{recordedAtMs: number, intent: {quantity: number, packType: string|null, expectedCardCountPerPack: number}}|null>} */
+  async readPackBatchIntent(cycleId, stage) {
+    assertPackOperationStageName(stage);
+    const state = await this.#replay(cycleId);
+    const record = state.packBatchIntents.get(stage);
+    return record ? structuredClone(record) : null;
   }
 
   /**
