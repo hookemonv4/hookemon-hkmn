@@ -226,7 +226,7 @@ test('limits held-position persistence to card-stage reconciliation', async () =
   });
   const attempts = new Map([
     ['open', sentUnknown('open')],
-    ['purchase', sentUnknown('purchase')],
+    ['return', sentUnknown('return')],
   ]);
   const repository = fakeCycleRepository(new Map(), '0', attempts);
   let heldWrites = 0;
@@ -263,7 +263,7 @@ test('limits held-position persistence to card-stage reconciliation', async () =
           return { decision: 'held' };
         },
       },
-      purchase: {
+      return: {
         async probe() { return null; },
         async prepareRequest() { return { request: 'unused' }; },
         async mutate() { throw new Error('reconciliation must not mutate'); },
@@ -277,7 +277,7 @@ test('limits held-position persistence to card-stage reconciliation', async () =
   });
 
   await driver.reconcile({ cycleId: CYCLE_ID, stage: 'open', nowMs: 1_000 });
-  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'purchase', nowMs: 1_000 });
+  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'return', nowMs: 1_000 });
   assert.equal(heldWrites, 1);
   assert.equal(wholeCycleHolds, 1);
 });
@@ -818,6 +818,7 @@ test('purchase request omits packType when no pack code is configured', async ()
     provider: 'collector-crypt',
     operation: 'purchase',
     playerAddress: 'PLAYER11111111111111111111111111111111111',
+    quantity: 1,
   });
 });
 
@@ -868,7 +869,7 @@ test('a live collector-only rehearsal journals and invokes the real open handler
   const attempts = new Map();
   const stages = new Map([['purchase', {
     status: 'COMPLETE',
-    evidence: { memo: 'collector-memo', expectedCardCount: 1 },
+    evidence: { quantity: 1, packs: [{ packIndex: 0, memo: 'collector-memo', status: 'purchased', expectedCardCount: 1 }] },
   }]]);
   const cycleRepository = fakeCycleRepository(stages, '0', attempts);
   let openCalls = 0;
@@ -2362,16 +2363,16 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     ...writeAheadRepository(),
     async holdCycle() { throw new Error('reconciliation must not receive a repository writer'); },
   };
-  await cycleRepository.prepareStageAttempt(CYCLE_ID, 'purchase', {
+  await cycleRepository.prepareStageAttempt(CYCLE_ID, 'return', {
     schema: 'hookemon.provider-mutation-attempt.v1',
     cycleId: CYCLE_ID,
-    stage: 'purchase',
+    stage: 'return',
     state: 'PREPARED',
     requestDigest: `sha256:${'a'.repeat(64)}`,
     responseDigest: null,
     reconciliationDigest: null,
   });
-  await cycleRepository.recordStageAttemptResponse(CYCLE_ID, 'purchase', { providerReceipt: 'provider-receipt-1' });
+  await cycleRepository.recordStageAttemptResponse(CYCLE_ID, 'return', { providerReceipt: 'provider-receipt-1' });
   let readCalls = 0;
   let leaseCurrent = true;
   const driver = createStageDriver({
@@ -2396,7 +2397,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     config: baseConfig(),
     cycleRepository,
     stageHandlers: {
-      purchase: {
+      return: {
         async probe() { return null; },
         async mutate() { throw new Error('mutation must not run during reconciliation'); },
         async reconcileLive({ adapters, cycleRepository }) {
@@ -2412,7 +2413,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
   await assert.rejects(
     () => driver.reconcile({
       cycleId: CYCLE_ID,
-      stage: 'purchase',
+      stage: 'return',
       intent: { journalHead: 'head-read-fence' },
       assertLease() {
         if (!leaseCurrent) throw new Error('lease expired before reconciliation read');
@@ -2421,7 +2422,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     /lease expired before reconciliation read/,
   );
   assert.equal(readCalls, 0);
-  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'purchase')).attempt.state, 'RESPONSE_RECORDED');
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'return')).attempt.state, 'RESPONSE_RECORDED');
 });
 
 test('does not repeat a provider mutation after a post-send error leaves an attempt unknown', async () => {

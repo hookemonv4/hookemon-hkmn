@@ -174,11 +174,15 @@ const RECONCILIATION_REPOSITORY_METHODS = Object.freeze([
   'readChainAttemptRecoveryContext',
   'readRelayLeg',
   'readClaimPreconditions',
+  'readPackBatchRequest',
   'listKnownCycleIds',
 ]);
 
 const READ_ONLY_LIVE_RECONCILIATION_STAGES = new Set(['eligibility-snapshot']);
-const CARD_HELD_POSITION_RECONCILIATION_STAGES = new Set(['open', 'epic-gate', 'buyback']);
+// 'purchase' carves no card (none exists yet before a card mints), but a batch purchase can leave
+// individual packs genuinely unattributable (lost response with no durable memo at all); it needs
+// the same cycle-level hold authority as the card-bearing stages for that irreducible case.
+const CARD_HELD_POSITION_RECONCILIATION_STAGES = new Set(['purchase', 'open', 'epic-gate', 'buyback']);
 const CHAIN_JOURNAL_REPOSITORY_METHODS = Object.freeze([
   'readChainTransactionAttempt',
   'prepareChainTransactionAttempt',
