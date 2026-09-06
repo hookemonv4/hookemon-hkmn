@@ -273,6 +273,112 @@ test('a foreign current balance remains unvalued until it is reconciled or class
   assert.equal(custody.unvaluedExposure, true);
 });
 
+function custodyLedgerV2({ cycleId, chainId, assetId, decimals = 6, verifiedCurrentBalance = null, expectedCycleAsset = null, ...buckets }) {
+  return {
+    ...custodyLedger({ cycleId, chainId, assetId, decimals, ...buckets }),
+    schema: 'hookemon.custody-ledger.v2',
+    verifiedCurrentBalance,
+    expectedCycleAsset,
+  };
+}
+
+function custodyBalanceObservation({ chainId, assetId, decimals = 6, amountAtomic = '999' }) {
+  return {
+    schema: 'hookemon.custody-balance-observation.v1',
+    account: '0x2222222222222222222222222222222222222222',
+    balance: { chainId, assetId, decimals, amountAtomic },
+    finality: { height: '18000000', hash: `0x${'3'.repeat(64)}`, timestampUnixSeconds: '1780000000' },
+  };
+}
+
+test('a canonical EVM USDG v2 row with a null observation and a positive unresolved claim is unvalued', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, claimed: '10', returnReceived: '3',
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, true);
+  assert.equal(custody.atRiskMicroUsdg, '7');
+});
+
+test('a canonical EVM USDG v2 row with a null observation and a nonzero current-custody bucket is unvalued', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, residual: '1',
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, true);
+});
+
+test('a canonical EVM USDG v2 row with a non-null observation is never marked unvalued by this rule', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, claimed: '10', returnReceived: '3',
+        verifiedCurrentBalance: custodyBalanceObservation({ chainId: evmUsdg.chainId, assetId: evmUsdg.assetId }),
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.atRiskMicroUsdg, '7');
+});
+
+test('a genuine first-write v2 row with both new fields null and zero buckets leaves the projection unaffected', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({ cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.outstandingMicroUsdg, '0');
+  assert.equal(custody.atRiskMicroUsdg, '0');
+});
+
+test('two cycles sharing one wallet observation are still reduced independently, never summed', async () => {
+  const sharedObservation = custodyBalanceObservation({ chainId: evmUsdg.chainId, assetId: evmUsdg.assetId });
+  const repository = custodyRepository({
+    alpha: {
+      cycleId: 'alpha',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'alpha', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+        claimed: '10', returnReceived: '0', verifiedCurrentBalance: sharedObservation,
+      })]]),
+    },
+    beta: {
+      cycleId: 'beta',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'beta', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+        claimed: '20', returnReceived: '5', verifiedCurrentBalance: sharedObservation,
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.atRiskMicroUsdg, '25');
+  assert.deepEqual(custody.cycles.map(cycle => [cycle.cycleId, cycle.atRiskMicroUsdg]), [
+    ['alpha', '10'],
+    ['beta', '15'],
+  ]);
+});
+
 test('accounting projection does not reconstruct retired rehearsal evidence at runtime', async () => {
   const source = await readFile(new URL('../../src/app/accounting-projection.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /String\.fromCharCode/);

@@ -740,6 +740,10 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
       const claimed = parsePolicyAtomic(ledger.claimed, 'custody ledger claimed');
       const returned = parsePolicyAtomic(ledger.returnReceived, 'custody ledger returnReceived');
       const unresolvedClaim = claimed > returned ? claimed - returned : 0n;
+      if (ledger.schema === 'hookemon.custody-ledger.v2' && ledger.verifiedCurrentBalance === null
+        && (unresolvedClaim > 0n || ledgerHasCurrentCustody(ledger))) {
+        unvaluedExposure = true;
+      }
       if (description.terminalState === 'COMPLETED') cycleRealizedLoss += unresolvedClaim;
       else cycleAtRisk += unresolvedClaim;
       cycleOutstanding += unresolvedClaim;

@@ -9,6 +9,7 @@ import {
   OPERATIONAL_CYCLE_STAGES,
   PROVIDER_MUTATION_ATTEMPT_STATES,
   assertChainTransactionAttempt,
+  assertCustodyBalanceObservation,
   assertCustodyLedger,
   assertOperationIdentity,
   assertPackBatchRequest,
@@ -106,6 +107,69 @@ test('validates atomic amounts and a per-cycle custody ledger with every require
   ]);
   assert.throws(() => assertCustodyLedger({ ...ledger, unexpected: '0' }), /exact schema/);
   assert.throws(() => assertCustodyLedger({ ...ledger, dust: '-1' }), /dust/);
+});
+
+function custodyBalanceObservation(overrides = {}) {
+  return {
+    schema: 'hookemon.custody-balance-observation.v1',
+    account: '0x2222222222222222222222222222222222222222',
+    balance: amount({ chainId: 'eip155:4663', assetId: 'eip155:4663/erc20:stablecoin', decimals: 6, amountAtomic: '12300000000' }),
+    finality: { height: '18000000', hash: `0x${'3'.repeat(64)}`, timestampUnixSeconds: '1780000000' },
+    ...overrides,
+  };
+}
+
+function custodyLedgerV2(overrides = {}) {
+  return custodyLedger({
+    schema: 'hookemon.custody-ledger.v2',
+    verifiedCurrentBalance: null,
+    expectedCycleAsset: null,
+    ...overrides,
+  });
+}
+
+test('validates CustodyBalanceObservationV1 and its byte-for-byte identity against a row', () => {
+  const observation = custodyBalanceObservation();
+  assert.deepEqual(assertCustodyBalanceObservation(observation), observation);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, unexpected: '0' }), /exact schema/);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, schema: 'hookemon.custody-balance-observation.v2' }), /schema/);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, account: '' }), /account/);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, finality: { ...observation.finality, hash: '' } }), /finality/);
+});
+
+test('hookemon.custody-ledger.v2 requires exactly twenty-one fields and canonical row identity', () => {
+  const v2 = custodyLedgerV2();
+  assert.deepEqual(assertCustodyLedger(v2), v2);
+  assert.equal(Object.keys(assertCustodyLedger(v2)).length, 21);
+
+  // Missing either new field is rejected -- exact field count, none fewer.
+  const { verifiedCurrentBalance, ...missingBalance } = v2;
+  assert.throws(() => assertCustodyLedger(missingBalance), /exact schema/);
+  const { expectedCycleAsset, ...missingExpected } = v2;
+  assert.throws(() => assertCustodyLedger(missingExpected), /exact schema/);
+
+  // A third schema string, and a v1 row carrying a v2 field, are both rejected.
+  assert.throws(() => assertCustodyLedger({ ...v2, schema: 'hookemon.custody-ledger.v3' }), /schema/);
+  assert.throws(() => assertCustodyLedger({ ...custodyLedger(), verifiedCurrentBalance: null }), /exact schema/);
+
+  // verifiedCurrentBalance.balance and expectedCycleAsset must equal the row's own identity exactly.
+  const observation = custodyBalanceObservation();
+  const valued = custodyLedgerV2({ verifiedCurrentBalance: observation });
+  assert.deepEqual(assertCustodyLedger(valued), valued);
+  assert.throws(
+    () => assertCustodyLedger(custodyLedgerV2({ verifiedCurrentBalance: { ...observation, balance: { ...observation.balance, decimals: 18 } } })),
+    /verifiedCurrentBalance/,
+  );
+  assert.throws(
+    () => assertCustodyLedger(custodyLedgerV2({ verifiedCurrentBalance: { ...observation, balance: { ...observation.balance, chainId: 'eip155:1' } } })),
+    /verifiedCurrentBalance/,
+  );
+  const expectation = amount({ chainId: 'eip155:4663', assetId: 'eip155:4663/erc20:stablecoin', decimals: 6, amountAtomic: '498000000' });
+  assert.deepEqual(assertCustodyLedger(custodyLedgerV2({ expectedCycleAsset: expectation })).expectedCycleAsset, expectation);
+  assert.throws(
+    () => assertCustodyLedger(custodyLedgerV2({ expectedCycleAsset: { ...expectation, assetId: 'eip155:4663/erc20:other' } })),
+    /expectedCycleAsset/,
+  );
 });
 
 test('allows provider attempts to advance only through the write-ahead state machine', () => {

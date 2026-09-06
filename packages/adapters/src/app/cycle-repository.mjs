@@ -733,6 +733,31 @@ function assertOutboundQuoteReplacementFreshness(replacement, selectedAtMs, labe
   }
 }
 
+function assertCustodyLedgerTransition(previous, next, label = 'cycle-repository custody ledger') {
+  if (!previous) return;
+  if (previous.decimals !== next.decimals) {
+    throw new Error(`${label} decimals are immutable for this cycle, chain, and asset`);
+  }
+  if (previous.schema === 'hookemon.custody-ledger.v2' && next.schema !== 'hookemon.custody-ledger.v2') {
+    throw new Error(`${label} cannot downgrade from hookemon.custody-ledger.v2 to v1 for this key`);
+  }
+  const previousBalance = previous.schema === 'hookemon.custody-ledger.v2' ? previous.verifiedCurrentBalance : null;
+  const nextBalance = next.schema === 'hookemon.custody-ledger.v2' ? next.verifiedCurrentBalance : null;
+  if (previousBalance === null) return;
+  if (nextBalance === null) {
+    throw new Error(`${label} cannot erase a previously recorded verifiedCurrentBalance`);
+  }
+  if (canonicalJson(nextBalance) === canonicalJson(previousBalance)) return;
+  const previousHeight = BigInt(previousBalance.finality.height);
+  const nextHeight = BigInt(nextBalance.finality.height);
+  if (nextHeight < previousHeight) {
+    throw new Error(`${label} verifiedCurrentBalance finality height cannot go backward`);
+  }
+  if (nextHeight === previousHeight) {
+    throw new Error(`${label} verifiedCurrentBalance conflicts with prior evidence at the same finality height`);
+  }
+}
+
 function custodyLedgerKey(ledger) {
   return `${ledger.chainId}\u0000${ledger.assetId}`;
 }
@@ -849,6 +874,23 @@ function evmNonceLockKey(chainId, wallet) {
 
 function relayLegKey(relayRequestId) {
   return relayRequestId;
+}
+
+/**
+ * ADR-0026: a row can never durably hold more than one unresolved expectation. True when a
+ * different RECORDED return-direction leg already targets the same resolved destination
+ * chain/asset as `leg` -- a distinct destination is unaffected and independent.
+ */
+function unresolvedReturnLegConflict(state, leg) {
+  for (const existing of state.relayLegs.values()) {
+    if (existing.relayRequestId === leg.relayRequestId) continue;
+    if (existing.direction === 'return' && existing.state === 'RECORDED'
+      && existing.destinationChainId === leg.destinationChainId
+      && existing.destinationAssetId === leg.destinationAssetId) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isEvmRelayChain(chainId) {
@@ -1193,6 +1235,7 @@ function returnSettlementCustodyLedger(state, leg) {
     return {
       ...previous,
       returnReceived: (BigInt(previous.returnReceived) + received).toString(),
+      ...(previous.schema === 'hookemon.custody-ledger.v2' ? { expectedCycleAsset: null } : {}),
     };
   }
   return {
@@ -1216,6 +1259,21 @@ function returnSettlementCustodyLedger(state, leg) {
     dust: '0',
     unattributed: '0',
   };
+}
+
+/**
+ * ADR-0026: a HELD_RELAY_* terminal return leg clears its row's `expectedCycleAsset` to `null` in
+ * its own atomic write -- current behavior otherwise writes no ledger row for a hold at all, so
+ * this returns `null` (no ledger write, unchanged from today) unless a v2 row with a populated
+ * expectation already exists for this leg's destination.
+ */
+function clearedReturnExpectationLedger(state, leg) {
+  const key = custodyLedgerKey({ chainId: leg.destinationChainId, assetId: leg.destinationAssetId });
+  const previous = state.custodyLedgers.get(key) ?? null;
+  if (previous === null || previous.schema !== 'hookemon.custody-ledger.v2' || previous.expectedCycleAsset === null) {
+    return null;
+  }
+  return { ...previous, expectedCycleAsset: null };
 }
 
 function assertReturnRelaySettlementInput(leg, value, state) {
@@ -1256,8 +1314,16 @@ function assertReturnRelaySettlementInput(leg, value, state) {
     if (canonicalJson(ledger) !== canonicalJson(expectedLedger)) {
       throw new Error('return relay settlement custody ledger does not bind the attributed net delta');
     }
-  } else if (value.custodyLedger !== null) {
-    throw new Error('return relay settlement hold cannot create payout custody');
+  } else {
+    const expectedClearing = clearedReturnExpectationLedger(state, transitioned);
+    if (expectedClearing === null) {
+      if (value.custodyLedger !== null) throw new Error('return relay settlement hold cannot create payout custody');
+    } else {
+      const ledger = assertCustodyLedger(value.custodyLedger, 'return relay hold custody ledger');
+      if (canonicalJson(ledger) !== canonicalJson(expectedClearing)) {
+        throw new Error('return relay settlement hold does not clear its custody ledger expectation exactly');
+      }
+    }
   }
   return { leg: transitioned, settlement: structuredClone(value) };
 }
@@ -1294,7 +1360,9 @@ function observedReturnRelaySettlement(state, leg, value) {
     netDeltaAtomic: proof.observedAmountAtomic,
     returnDestinationProof: proof,
     terminalState,
-    custodyLedger: terminalState === 'SETTLED' ? returnSettlementCustodyLedger(state, provisional) : null,
+    custodyLedger: terminalState === 'SETTLED'
+      ? returnSettlementCustodyLedger(state, provisional)
+      : clearedReturnExpectationLedger(state, provisional),
   };
   return assertRelaySettlementInput(leg, settlement, state);
 }
@@ -3284,10 +3352,8 @@ export class CycleRepository {
         const ledger = assertCustodyLedger(entry.payload.ledger, 'stored custody ledger', { allowLegacyBuckets: true });
         if (ledger.cycleId !== cycleId) throw new Error('stored custody ledger cycleId is invalid');
         const key = custodyLedgerKey(ledger);
-        const previous = custodyLedgers.get(key);
-        if (previous && previous.decimals !== ledger.decimals) {
-          throw new Error('stored custody ledger decimals are inconsistent for this cycle, chain, and asset');
-        }
+        const previous = custodyLedgers.get(key) ?? null;
+        assertCustodyLedgerTransition(previous, ledger, 'stored custody ledger');
         custodyLedgers.set(key, ledger);
       } else if (entry.kind === 'payout-dust-recorded') {
         const record = assertPayoutDustRecord(entry.payload.record, 'stored payout dust record');
@@ -5909,12 +5975,88 @@ export class CycleRepository {
     const key = custodyLedgerKey(ledger);
     await this.#append(cycleId, 'custody-ledger-recorded', { ledger }, {
       assertState: state => {
-        const previous = state.custodyLedgers.get(key);
-        if (previous && previous.decimals !== ledger.decimals) {
-          throw new Error('cycle-repository custody ledger decimals are immutable for this cycle, chain, and asset');
+        const previous = state.custodyLedgers.get(key) ?? null;
+        assertCustodyLedgerTransition(previous, ledger, 'cycle-repository custody ledger');
+      },
+    });
+  }
+
+  /**
+   * The only sanctioned way to record a return-direction RelayLegV1 from this revision forward
+   * (ADR-0026): the unsigned RECORDED leg and its custody ledger row's newly populated singular
+   * `expectedCycleAsset` are one atomic append. A second unresolved (RECORDED) return-direction
+   * leg for the same resolved destination chain/asset is refused before append, leaving the first
+   * leg's row-level expectation exactly as it was.
+   */
+  async recordReturnRelayLegExpectation(cycleId, legValue, ledgerValue) {
+    const leg = assertRelayLeg(legValue, 'return Relay leg expectation');
+    if (leg.cycleId !== cycleId || leg.direction !== 'return' || leg.state !== 'RECORDED' || leg.sourceTxHash !== null) {
+      throw new Error('cycle-repository recordReturnRelayLegExpectation requires an unsigned recorded return Relay leg for this cycle');
+    }
+    const ledger = assertCustodyLedger(ledgerValue, 'return relay leg expectation custody ledger');
+    if (ledger.cycleId !== cycleId) {
+      throw new Error('cycle-repository recordReturnRelayLegExpectation: custody ledger cycleId does not match');
+    }
+    if (ledger.chainId !== leg.destinationChainId || ledger.assetId !== leg.destinationAssetId || ledger.decimals !== leg.destinationDecimals) {
+      throw new Error('cycle-repository recordReturnRelayLegExpectation: custody ledger identity does not match the Relay leg destination');
+    }
+    if (ledger.schema !== 'hookemon.custody-ledger.v2' || ledger.expectedCycleAsset === null) {
+      throw new Error('cycle-repository recordReturnRelayLegExpectation requires a v2 custody ledger with a populated expectedCycleAsset');
+    }
+    if (ledger.expectedCycleAsset.amountAtomic !== leg.destinationAmountAtomic) {
+      throw new Error('cycle-repository recordReturnRelayLegExpectation: expectedCycleAsset amount does not match the Relay leg');
+    }
+
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordReturnRelayLegExpectation: cycle is terminal as ${state.terminalState}`);
+    }
+
+    const legKey = relayLegKey(leg.relayRequestId);
+    const currentLeg = state.relayLegs.get(legKey);
+    if (currentLeg) {
+      if (canonicalJson(currentLeg) !== canonicalJson(leg)) {
+        throw new Error('cycle-repository recordReturnRelayLegExpectation: Relay request id already has different evidence');
+      }
+      return structuredClone(currentLeg);
+    }
+    if (unresolvedReturnLegConflict(state, leg)) {
+      throw new Error('cycle-repository recordReturnRelayLegExpectation: an unresolved return leg for this destination already exists');
+    }
+
+    const ledgerKey = custodyLedgerKey(ledger);
+    const previousLedger = state.custodyLedgers.get(ledgerKey) ?? null;
+    assertCustodyLedgerTransition(previousLedger, ledger, 'cycle-repository recordReturnRelayLegExpectation custody ledger');
+    if (previousLedger !== null) {
+      if (previousLedger.expectedCycleAsset !== null) {
+        throw new Error('cycle-repository recordReturnRelayLegExpectation: custody ledger already carries an unresolved expectedCycleAsset');
+      }
+      const previousBaseline = { ...previousLedger, expectedCycleAsset: null };
+      const nextBaseline = { ...ledger, expectedCycleAsset: null };
+      if (canonicalJson(previousBaseline) !== canonicalJson(nextBaseline)) {
+        throw new Error('cycle-repository recordReturnRelayLegExpectation: custody ledger buckets must be unchanged when recording a return leg expectation');
+      }
+    }
+
+    await this.#appendEvents(cycleId, [
+      { kind: 'relay-leg-recorded', payload: { leg } },
+      { kind: 'custody-ledger-recorded', payload: { ledger } },
+    ], {
+      operation: 'recordReturnRelayLegExpectation',
+      assertState: currentState => {
+        if (currentState.relayLegs.has(legKey)) {
+          throw new Error('cycle-repository recordReturnRelayLegExpectation: Relay leg changed while recording');
+        }
+        if (unresolvedReturnLegConflict(currentState, leg)) {
+          throw new Error('cycle-repository recordReturnRelayLegExpectation: an unresolved return leg for this destination already exists');
+        }
+        const latestLedger = currentState.custodyLedgers.get(ledgerKey) ?? null;
+        if (canonicalJson(latestLedger) !== canonicalJson(previousLedger)) {
+          throw new Error('cycle-repository recordReturnRelayLegExpectation: custody ledger changed while recording expectation');
         }
       },
     });
+    return structuredClone(leg);
   }
 
   // Legacy attempt records remain readable for archived journals. New live paths use the typed

@@ -275,15 +275,57 @@ function completeLegacyCustodyBuckets(value) {
   return { ...value, ...Object.fromEntries(missing.map(bucket => [bucket, '0'])) };
 }
 
+export const CUSTODY_BALANCE_OBSERVATION_FIELDS = Object.freeze(['schema', 'account', 'balance', 'finality']);
+
+/** CustodyBalanceObservationV1 (ADR-0026): a finalized observed on-chain balance, not a valuation. */
+export function assertCustodyBalanceObservation(value, label = 'custody balance observation') {
+  assertPlainObject(value, CUSTODY_BALANCE_OBSERVATION_FIELDS, label);
+  if (value.schema !== 'hookemon.custody-balance-observation.v1') throw new Error(`${label} schema is invalid`);
+  assertNonEmptyString(value.account, `${label} account`);
+  const balance = assertTypedAmount(value.balance, `${label} balance`);
+  const finality = assertRelayFinality(value.finality, `${label} finality`);
+  return { schema: value.schema, account: value.account, balance, finality };
+}
+
+const CUSTODY_LEDGER_V2_FIELDS = Object.freeze(['verifiedCurrentBalance', 'expectedCycleAsset']);
+
+function assertCustodyRowIdentity(value, rowIdentity, label) {
+  if (value.chainId !== rowIdentity.chainId || value.assetId !== rowIdentity.assetId || value.decimals !== rowIdentity.decimals) {
+    throw new Error(`${label} identity must equal the custody ledger row's own chainId, assetId, and decimals`);
+  }
+}
+
+/**
+ * hookemon.custody-ledger.v1 or hookemon.custody-ledger.v2 (ADR-0026). v2 keeps every v1 field,
+ * bucket, and key unchanged and adds exactly `verifiedCurrentBalance` and `expectedCycleAsset`; a
+ * non-null value of either must carry the row's own canonical chainId/assetId/decimals exactly.
+ */
 export function assertCustodyLedger(value, label = 'custody ledger', { allowLegacyBuckets = false } = {}) {
   if (allowLegacyBuckets) value = completeLegacyCustodyBuckets(value);
-  assertPlainObject(value, ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS], label);
-  if (value.schema !== 'hookemon.custody-ledger.v1') throw new Error(`${label} schema is invalid`);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a plain object`);
+  if (value.schema !== 'hookemon.custody-ledger.v1' && value.schema !== 'hookemon.custody-ledger.v2') {
+    throw new Error(`${label} schema is invalid`);
+  }
+  const isV2 = value.schema === 'hookemon.custody-ledger.v2';
+  const fields = isV2
+    ? ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS, ...CUSTODY_LEDGER_V2_FIELDS]
+    : ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS];
+  assertPlainObject(value, fields, label);
   assertNonEmptyString(value.cycleId, `${label} cycleId`);
   assertNonEmptyString(value.chainId, `${label} chainId`);
   assertNonEmptyString(value.assetId, `${label} assetId`);
   if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) throw new Error(`${label} decimals is invalid`);
   for (const bucket of CUSTODY_LEDGER_BUCKETS) assertAtomic(value[bucket], `${label} ${bucket}`);
+  if (!isV2) return clone(value);
+  const rowIdentity = { chainId: value.chainId, assetId: value.assetId, decimals: value.decimals };
+  if (value.verifiedCurrentBalance !== null) {
+    const observation = assertCustodyBalanceObservation(value.verifiedCurrentBalance, `${label} verifiedCurrentBalance`);
+    assertCustodyRowIdentity(observation.balance, rowIdentity, `${label} verifiedCurrentBalance balance`);
+  }
+  if (value.expectedCycleAsset !== null) {
+    const expected = assertTypedAmount(value.expectedCycleAsset, `${label} expectedCycleAsset`);
+    assertCustodyRowIdentity(expected, rowIdentity, `${label} expectedCycleAsset`);
+  }
   return clone(value);
 }
 

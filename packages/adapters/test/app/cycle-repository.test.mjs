@@ -369,6 +369,61 @@ async function finalizedReturnFixture(t, {
   };
 }
 
+function expectationLedgerFor(leg, cycleId) {
+  return {
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId,
+    chainId: leg.destinationChainId,
+    assetId: leg.destinationAssetId,
+    decimals: leg.destinationDecimals,
+    claimed: '0',
+    bridgeOut: '0',
+    bridgeIn: '0',
+    packCost: '0',
+    buybackProceeds: '0',
+    returnInput: '0',
+    returnReceived: '0',
+    refunds: '0',
+    residual: '0',
+    heldAssets: '0',
+    heldPositions: '0',
+    payoutLiability: '0',
+    dust: '0',
+    unattributed: '0',
+    verifiedCurrentBalance: null,
+    expectedCycleAsset: {
+      chainId: leg.destinationChainId,
+      assetId: leg.destinationAssetId,
+      decimals: leg.destinationDecimals,
+      amountAtomic: leg.destinationAmountAtomic,
+    },
+  };
+}
+
+/** Same shape as `finalizedReturnFixture`, but the return leg is recorded through the ADR-0026
+ * atomic `recordReturnRelayLegExpectation` primitive, so its v2 custody ledger row already carries
+ * a populated `expectedCycleAsset` before settlement. */
+async function finalizedReturnExpectationFixture(t, {
+  proof = {},
+} = {}) {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const leg = returnRelayLeg(cycleId);
+  const recorded = await repository.recordReturnRelayLegExpectation(cycleId, leg, expectationLedgerFor(leg, cycleId));
+  const sourceTxHash = `return-source-${cycleId}`;
+  const attributed = await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
+  const requestDigest = await prepareReturnRelaySettlementAttempt(repository, cycleId, attributed, sourceTxHash);
+  return {
+    directory,
+    repository,
+    cycleId,
+    leg: attributed,
+    requestDigest,
+    submission: { returnDestinationProof: await returnDestinationProof(attributed, proof) },
+  };
+}
+
 async function assertRelayHoldRecoveryTuple({
   repository,
   cycleId,
@@ -2228,6 +2283,98 @@ test('custody ledgers freeze decimals for each cycle, chain, and asset in writes
   await assert.rejects(() => reopened.describeCycle(cycleId), /custody ledger decimals/);
 });
 
+function custodyLedgerV2(cycleId, overrides = {}) {
+  return {
+    ...custodyLedger(cycleId),
+    schema: 'hookemon.custody-ledger.v2',
+    verifiedCurrentBalance: null,
+    expectedCycleAsset: null,
+    ...overrides,
+  };
+}
+
+function custodyBalanceObservation(ledger, overrides = {}) {
+  return {
+    schema: 'hookemon.custody-balance-observation.v1',
+    account: '0x2222222222222222222222222222222222222222',
+    balance: { chainId: ledger.chainId, assetId: ledger.assetId, decimals: ledger.decimals, amountAtomic: '12300000000' },
+    finality: { height: '18000000', hash: `0x${'3'.repeat(64)}`, timestampUnixSeconds: '1780000000' },
+    ...overrides,
+  };
+}
+
+test('recordCustodyLedger refuses a v2-to-v1 downgrade for the same key', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const v2 = custodyLedgerV2(cycleId, { claimed: '1' });
+  await repository.recordCustodyLedger(cycleId, v2);
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, { claimed: '1' })),
+    /cannot downgrade/,
+  );
+  const state = await repository.describeCycle(cycleId);
+  const row = [...state.custodyLedgers.values()][0];
+  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+});
+
+test('recordCustodyLedger refuses erasing a previously recorded verifiedCurrentBalance', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const v2 = custodyLedgerV2(cycleId, { claimed: '1' });
+  const observation = custodyBalanceObservation(v2);
+  await repository.recordCustodyLedger(cycleId, { ...v2, verifiedCurrentBalance: observation });
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, { ...v2, verifiedCurrentBalance: null }),
+    /erase/,
+  );
+});
+
+test('recordCustodyLedger enforces monotonic, non-rewriting finality for verifiedCurrentBalance', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const v2 = custodyLedgerV2(cycleId, { claimed: '1' });
+  const observation = custodyBalanceObservation(v2);
+  await repository.recordCustodyLedger(cycleId, { ...v2, verifiedCurrentBalance: observation });
+
+  // A lower height is stale.
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, {
+      ...v2,
+      verifiedCurrentBalance: { ...observation, finality: { ...observation.finality, height: '17999999' } },
+    }),
+    /backward/,
+  );
+
+  // An equal height with a different hash, balance, account, or timestamp is conflicting evidence.
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, {
+      ...v2,
+      verifiedCurrentBalance: { ...observation, finality: { ...observation.finality, hash: `0x${'4'.repeat(64)}` } },
+    }),
+    /conflicts/,
+  );
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, {
+      ...v2,
+      verifiedCurrentBalance: { ...observation, balance: { ...observation.balance, amountAtomic: '1' } },
+    }),
+    /conflicts/,
+  );
+
+  // An exact, fully-identical replay is idempotent and succeeds.
+  await repository.recordCustodyLedger(cycleId, { ...v2, verifiedCurrentBalance: observation });
+
+  // A strictly greater height succeeds and replaces the observation.
+  const advanced = { ...observation, finality: { ...observation.finality, height: '18000001' } };
+  await repository.recordCustodyLedger(cycleId, { ...v2, verifiedCurrentBalance: advanced });
+  const state = await repository.describeCycle(cycleId);
+  const row = [...state.custodyLedgers.values()][0];
+  assert.deepEqual(row.verifiedCurrentBalance, advanced);
+});
+
 test('retired accounting stages remain readable for history but cannot be written into a new operational cycle', async t => {
   const repository = await CycleRepository.open(await tempDirectory(t));
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
@@ -3039,6 +3186,88 @@ test('settleRelayLeg holds a wrong-token or wrong-recipient return receipt as HE
       /terminal|transition/i,
     );
   }
+});
+
+test('recordReturnRelayLegExpectation appends the RECORDED leg and its ledger row expectedCycleAsset atomically', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const leg = returnRelayLeg(cycleId);
+  const ledger = expectationLedgerFor(leg, cycleId);
+  const recorded = await repository.recordReturnRelayLegExpectation(cycleId, leg, ledger);
+  assert.equal(recorded.state, 'RECORDED');
+
+  const reopened = await CycleRepository.open(directory);
+  const state = await reopened.describeCycle(cycleId);
+  assert.equal(state.relayLegs.get(leg.relayRequestId).state, 'RECORDED');
+  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === leg.destinationChainId && candidate.assetId === leg.destinationAssetId);
+  assert.deepEqual(row.expectedCycleAsset, ledger.expectedCycleAsset);
+
+  // Replaying the identical call is idempotent.
+  const replayed = await repository.recordReturnRelayLegExpectation(cycleId, leg, ledger);
+  assert.deepEqual(replayed, recorded);
+});
+
+test('recordReturnRelayLegExpectation refuses a second unresolved return leg for the same destination before append, leaving the first row unchanged', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const firstLeg = returnRelayLeg(cycleId);
+  const firstLedger = expectationLedgerFor(firstLeg, cycleId);
+  await repository.recordReturnRelayLegExpectation(cycleId, firstLeg, firstLedger);
+
+  const secondLeg = { ...returnRelayLeg(`${cycleId}-second`), cycleId };
+  const secondLedger = expectationLedgerFor(secondLeg, cycleId);
+  await assert.rejects(
+    () => repository.recordReturnRelayLegExpectation(cycleId, secondLeg, secondLedger),
+    /unresolved return leg/,
+  );
+
+  const state = await repository.describeCycle(cycleId);
+  assert.equal(state.relayLegs.get(secondLeg.relayRequestId), undefined);
+  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === firstLeg.destinationChainId && candidate.assetId === firstLeg.destinationAssetId);
+  assert.deepEqual(row.expectedCycleAsset, firstLedger.expectedCycleAsset);
+});
+
+test('a second cycle sharing the same destination is unaffected by another cycle\'s unresolved return leg', async t => {
+  const directory = await tempDirectory(t);
+  const first = await CycleRepository.open(directory);
+  const { cycleId: firstCycleId } = await first.createCycle({ releaseAmount: '1', mode: 'production' });
+  const firstLeg = returnRelayLeg(firstCycleId);
+  await first.recordReturnRelayLegExpectation(firstCycleId, firstLeg, expectationLedgerFor(firstLeg, firstCycleId));
+
+  const secondCycleId = 'cycle-return-expectation-sibling';
+  await createSiblingCycle(directory, secondCycleId);
+  const second = await CycleRepository.open(directory);
+  const secondLeg = { ...returnRelayLeg(secondCycleId), cycleId: secondCycleId };
+  const recorded = await second.recordReturnRelayLegExpectation(secondCycleId, secondLeg, expectationLedgerFor(secondLeg, secondCycleId));
+  assert.equal(recorded.state, 'RECORDED');
+});
+
+test('settleRelayLeg clears a v2 expectedCycleAsset in the same atomic append that credits returnReceived', async t => {
+  const fixture = await finalizedReturnExpectationFixture(t);
+  const settled = await fixture.repository.settleRelayLeg(fixture.cycleId, fixture.leg.relayRequestId, fixture.submission);
+  assert.equal(settled.state, 'SETTLED');
+
+  const reopened = await CycleRepository.open(fixture.directory);
+  const state = await reopened.describeCycle(fixture.cycleId);
+  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === fixture.leg.destinationChainId && candidate.assetId === fixture.leg.destinationAssetId);
+  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(row.expectedCycleAsset, null);
+  assert.equal(row.returnReceived, fixture.leg.destinationAmountAtomic);
+});
+
+test('settleRelayLeg clears a v2 expectedCycleAsset via its own atomic write when a return leg holds', async t => {
+  const fixture = await finalizedReturnExpectationFixture(t, { proof: { observedAmountAtomic: '15' } });
+  const settled = await fixture.repository.settleRelayLeg(fixture.cycleId, fixture.leg.relayRequestId, fixture.submission);
+  assert.equal(settled.state, 'HELD_RELAY_PARTIAL');
+
+  const reopened = await CycleRepository.open(fixture.directory);
+  const state = await reopened.describeCycle(fixture.cycleId);
+  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === fixture.leg.destinationChainId && candidate.assetId === fixture.leg.destinationAssetId);
+  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(row.expectedCycleAsset, null);
+  assert.equal(row.returnReceived, '0');
 });
 
 test('settleRelayLeg rejects a destination hash already attributed to another return leg after reopen', async t => {
