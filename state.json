@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-04T04:10:01.961Z",
+  "generatedAt": "2026-09-06T00:03:44.695Z",
   "currentPhase": "init",
   "phases": [
     {
       "phase": "init",
-      "result": "STALE",
-      "receipt": "r-00624"
+      "result": "FAILED",
+      "receipt": "r-00643"
     },
     {
       "phase": "spec",
