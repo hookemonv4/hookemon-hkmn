@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   cpSync, mkdtempSync, mkdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs';
@@ -614,6 +615,16 @@ test('rejects an unpinned fork-pin verifier package import before workflow execu
 
   assert.equal(result.result, 'FAILED');
   assert.match(result.errors.join('\n'), /fork-pin verifier import closure .*must not import an unpinned module/i);
+});
+
+test('the git-backed base control entry point loads every declared control descriptor blob from a real tree', () => {
+  const headTree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+
+  const report = controlDependencies.verifyBaseControlDependencies(REPO_ROOT, headTree, headTree);
+
+  const errors = report.errors.join('\n');
+  assert.doesNotMatch(errors, /must be a regular Git blob/);
+  assert.doesNotMatch(errors, /is missing or ambiguous in candidate tree/);
 });
 
 test('the base control checker rejects a candidate verifier import outside the pinned closure', () => {
