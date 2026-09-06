@@ -74,7 +74,7 @@ function returnConfig(operator) {
   return {
     chainId: 4663,
     accounts: { evm: PAYOUT_OPERATIONS, solana: operator },
-    contracts: { usdg: TOKEN },
+    contracts: { usdg: USDG_ADDRESS },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: moneyConfiguration(),
   };
@@ -228,7 +228,7 @@ function returnDestinationReceiptClient({ transactionHash, observedAmountAtomic 
   };
 }
 
-function fakeRepository({ initialSettlementState = 'BUYBACK_SENT_UNKNOWN' } = {}) {
+function fakeRepository({ initialSettlementState = 'BUYBACK_SENT_UNKNOWN', durableSale = confirmedSale() } = {}) {
   const cycleId = 'cycle-supplementary-money';
   let settlementRecord = settlement(cycleId, initialSettlementState);
   const pagedState = new Map();
@@ -240,6 +240,10 @@ function fakeRepository({ initialSettlementState = 'BUYBACK_SENT_UNKNOWN' } = {}
     async readSupplementarySettlement(positionId) {
       assert.equal(positionId, POSITION_ID);
       return settlementRecord;
+    },
+    async readSupplementarySettlementEvidence(positionId) {
+      assert.equal(positionId, POSITION_ID);
+      return { state: initialSettlementState, evidence: structuredClone(durableSale) };
     },
     async readPagedPayoutState(id, stage) {
       return structuredClone(pagedState.get(`${id} ${stage}`) ?? null);
@@ -318,7 +322,7 @@ test('mutateSupplementaryReturn signs durably before broadcast, resumes after a 
           throw new Error('broadcast interrupted after durable signature');
         }
         assert.equal(signedTxBase64, persistedBytes);
-        return { transactionHash: sourceTransactionHash };
+        return { signature: sourceTransactionHash };
       },
     },
   };
@@ -388,6 +392,24 @@ test('mutateSupplementaryReturn signs durably before broadcast, resumes after a 
     adapters: reconcileAdapters, config, cycleRepository: repository, context,
   });
   assert.equal(secondReconcile.state, 'RETURN_BROADCAST');
+});
+
+test('mutateSupplementaryReturn rejects a caller sale that is absent from its durable position settlement', async () => {
+  const operator = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_unused, i) => i + 11));
+  const repository = fakeRepository({ durableSale: confirmedSale({ signature: `${'h'.repeat(88)}` }) });
+  await assert.rejects(
+    () => mutateSupplementaryReturn({
+      liveMode: true,
+      adapters: {},
+      config: returnConfig(operator.publicKey.toBase58()),
+      signerClient: {},
+      cycleRepository: repository,
+      context: { cycleId: repository.cycleId, positionId: POSITION_ID },
+      confirmedSale: confirmedSale(),
+      preflightAuthority: createTestProfileMutationAuthority(),
+    }),
+    /does not match durable settlement evidence/,
+  );
 });
 
 test('a position\'s return-leg attempt never touches the payout-leg paged state for the same position', async () => {

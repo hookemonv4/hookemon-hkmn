@@ -35,7 +35,7 @@ import {
   readMplCoreAssetOwner,
   signedSolanaTransactionSignature,
 } from '../../solana-rpc.mjs';
-import { assertTypedAmount, createPreparedChainTransactionAttempt } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
 import { digest } from '../../../../runner/src/cycle/journal.mjs';
 import {
   decodeProviderTransaction,
@@ -52,13 +52,12 @@ import {
   isLiveCollectorOnlyRehearsal,
   requireCollectorOnlyMutationAuthority,
 } from '../../../rehearsal/collector-only-authorization.mjs';
+import { requireLiveMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import { assertSolanaSignerFeeEnvelope, assertSolanaSignerMoneyConfiguration } from './solana-money-controls.mjs';
 import { buildCollectorBuybackRequest } from './buyback.mjs';
-import { assertConfirmedSale } from './supplementary-money.mjs';
 
 export const SUPPLEMENTARY_BUYBACK_STAGE = 'supplementary-buyback';
-const CONFIRMED_SALE_SCHEMA = 'hookemon.supplementary-confirmed-sale.v1';
 const SOURCE_FINALITY_SCHEMA = 'hookemon.supplementary-buyback-source-finality.v1';
 const ATTEMPT_REQUEST_SCHEMA = 'hookemon.supplementary-buyback-attempt-request.v1';
 const HELD_POSITION_ID = /^held:[0-9a-f]{64}$/;
@@ -67,18 +66,16 @@ const CHAIN_ATTEMPT_STAGE = 'buyback';
 
 /**
  * Durable primitives this handler requires beyond the read-only set
- * `C-supplementary-handler-contract.md` already documents (`readChainTransactionAttempt`,
- * `readChainAttemptRecoveryContext`, `advanceSupplementarySettlement`). Not yet exposed on the
- * production supplementary-settlement facade as of that contract's commit (e3ae4db9) -- requested
- * in `C-inbox.md`. This handler fails closed (throws, does not degrade to a weaker guarantee) when
- * any of them is missing, so it never silently ships without durable pre-send intent or
- * signed-bytes-before-broadcast recovery.
+ * `C-supplementary-handler-contract.md` exposes these through the position-scoped supplementary
+ * namespace. The handler must never borrow the main-cycle chain-attempt namespace: a held resale
+ * can happen after its original cycle completed and needs an identity that cannot collide with it.
  */
 const REQUIRED_DURABLE_ATTEMPT_METHODS = Object.freeze([
-  'readChainTransactionAttempt',
-  'prepareChainTransactionAttempt',
-  'recordBroadcast',
-  'readChainAttemptRecoveryContext',
+  'readSupplementaryChainTransactionAttempt',
+  'prepareSupplementaryChainTransactionAttempt',
+  'recordSupplementarySignedTransactionWithRecoveryContext',
+  'recordSupplementaryBroadcast',
+  'readSupplementaryChainAttemptRecoveryContext',
 ]);
 
 function plainObject(value) {
@@ -191,17 +188,17 @@ function assertFencingToken(value) {
   return value;
 }
 
+function requireSupplementaryMutationAuthority(config) {
+  if (isLiveCollectorOnlyRehearsal(config)) return requireCollectorOnlyMutationAuthority(config);
+  return requireLiveMutationAuthority();
+}
+
 /** Fails closed rather than degrading to a weaker (memo-lookup-only) guarantee. */
 function assertProductionSupplementaryBuybackRepository(cycleRepository) {
   for (const method of REQUIRED_DURABLE_ATTEMPT_METHODS) {
     if (typeof cycleRepository?.[method] !== 'function') {
       throw new Error(`supplementary buyback requires cycleRepository.${method} for durable pre-send intent and signed-bytes recovery (see CS-inbox.md / C-inbox.md)`);
     }
-  }
-  if (typeof cycleRepository.recordSignedTransactionWithRecoveryContext !== 'function'
-    && (typeof cycleRepository.recordSignedTransaction !== 'function'
-      || typeof cycleRepository.persistChainAttemptRecoveryContext !== 'function')) {
-    throw new Error('supplementary buyback requires cycleRepository.recordSignedTransactionWithRecoveryContext (or recordSignedTransaction + persistChainAttemptRecoveryContext) for durable signed-bytes recovery');
   }
   if (typeof cycleRepository.advanceSupplementarySettlement !== 'function') {
     throw new Error('supplementary buyback requires cycleRepository.advanceSupplementarySettlement');
@@ -238,7 +235,9 @@ function sourceFinalityFromStatus(signature, status) {
  * chain attempt). Never invents a result: still-pending stays `PENDING`; a mismatch is
  * `DATA_UNVERIFIED`, never silently adopted.
  */
-async function verifiedSaleForSignature({ adapters, config, cycleRepository, position, signature, expectedAmount = null }) {
+async function verifiedSaleForSignature({
+  adapters, config, cycleRepository, position, signature, expectedAmount = null, createdAt,
+}) {
   let status;
   try {
     status = await readFinalizedSignatureStatus(adapters.solana.client, signature);
@@ -277,7 +276,18 @@ async function verifiedSaleForSignature({ adapters, config, cycleRepository, pos
   if (!leftOperator || proceeds === null || (expectedAmount !== null && !sameAmount(proceeds, expectedAmount))) {
     return { status: 'DATA_UNVERIFIED', reason: 'finalized card and settlement deltas did not match the expected sale', signature };
   }
-  return { status: 'CONFIRMED', signature, proceeds, sourceFinality: sourceFinalityFromStatus(signature, status) };
+  if (typeof createdAt !== 'string' || createdAt.length === 0) {
+    return { status: 'DATA_UNVERIFIED', reason: 'completed buyback record has no creation timestamp', signature };
+  }
+  return Object.freeze({
+    status: 'CONFIRMED',
+    memo: position.memo,
+    mint: asset.assetId,
+    signature,
+    proceeds,
+    createdAt,
+    sourceFinality: sourceFinalityFromStatus(signature, status),
+  });
 }
 
 /**
@@ -316,7 +326,13 @@ export async function reconcileSupplementaryBuybackSale({ adapters, config, cycl
     return { status: 'DATA_UNVERIFIED', reason: 'completed buyback check does not bind the memo, wallet, and card', check };
   }
   return verifiedSaleForSignature({
-    adapters, config, cycleRepository, position, signature: check.transactionSignature, expectedAmount: checkedAmount,
+    adapters,
+    config,
+    cycleRepository,
+    position,
+    signature: check.transactionSignature,
+    expectedAmount: checkedAmount,
+    createdAt: check.createdAt,
   });
 }
 
@@ -359,7 +375,7 @@ function walletFencingContext({ config, context, stage }) {
  */
 async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepository, context, position, prepared, requestDigest }) {
   const { money, proceedsAccount, offer, request } = prepared;
-  requireCollectorOnlyMutationAuthority(config);
+  requireSupplementaryMutationAuthority(config);
   const built = await adapters.collectorCrypt.buyback(request);
   const refundAmount = typedBuybackAmount(built.refundAmount, 'supplementary buyback refund amount');
   if (built.memo !== position.memo || !sameAmount(refundAmount, offer)) {
@@ -379,7 +395,7 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
     backend: {
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(signRequest) {
-        requireCollectorOnlyMutationAuthority(config);
+        requireSupplementaryMutationAuthority(config);
         const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: position.mint, wallet: config.accounts.solana });
         const refreshedOffer = typedBuybackAmount(refreshed.amount, 'supplementary buyback offer');
         if (!sameAmount(refreshedOffer, offer)) throw new Error('supplementary buyback offer changed before signing');
@@ -412,13 +428,14 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
     blockhash: decoded.blockhash,
     hash: rawSignedBytesHash,
   };
-  if (typeof cycleRepository.recordSignedTransactionWithRecoveryContext === 'function') {
-    return cycleRepository.recordSignedTransactionWithRecoveryContext(
-      position.cycleId, CHAIN_ATTEMPT_STAGE, requestDigest, signingMaterial, recoveryContext, null,
-    );
-  }
-  const record = await cycleRepository.recordSignedTransaction(position.cycleId, CHAIN_ATTEMPT_STAGE, requestDigest, signingMaterial);
-  await cycleRepository.persistChainAttemptRecoveryContext(position.cycleId, recoveryContext);
+  const record = await cycleRepository.recordSupplementarySignedTransactionWithRecoveryContext(
+    position.positionId, requestDigest, signingMaterial, {
+    positionId: position.positionId,
+    requestDigest,
+    rawSignedBytesHash,
+    context: recoveryContext,
+    },
+  );
   return record;
 }
 
@@ -427,13 +444,11 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
  * whether the attempt was just signed this call or recovered `SIGNED` from a prior crash.
  */
 async function broadcastRecordedBuyback({ adapters, config, cycleRepository, position, record, requestDigest }) {
-  const recoveryContext = await cycleRepository.readChainAttemptRecoveryContext(position.cycleId, {
-    stage: CHAIN_ATTEMPT_STAGE,
-    recipient: null,
-    requestDigest,
-    rawSignedBytesHash: record.attempt.hash,
-  });
-  if (!recoveryContext) throw new Error('supplementary buyback signed bytes have no durable policy recovery context');
+  const recoveryRecord = await cycleRepository.readSupplementaryChainAttemptRecoveryContext(position.positionId, requestDigest);
+  const recoveryContext = recoveryRecord?.context ?? null;
+  if (!recoveryContext || recoveryRecord.rawSignedBytesHash !== record.attempt.hash) {
+    throw new Error('supplementary buyback signed bytes have no durable policy recovery context');
+  }
   const buyback = configuredBuybackPolicy(config);
   const decodeOptions = trustedSolanaDecodeOptions({ adapters, config });
   const policySigner = createPolicySigner({
@@ -447,7 +462,7 @@ async function broadcastRecordedBuyback({ adapters, config, cycleRepository, pos
       if (!(await readBlockhashValidity(adapters.solana.client, record.attempt.blockhash))) {
         throw new Error('supplementary buyback provider transaction blockhash expired before submission');
       }
-      requireCollectorOnlyMutationAuthority(config);
+      requireSupplementaryMutationAuthority(config);
       return adapters.collectorCrypt.submitTransaction({ signedTransaction: signed.signedTxBase64 });
     },
   });
@@ -469,28 +484,34 @@ async function broadcastRecordedBuyback({ adapters, config, cycleRepository, pos
   if (returnedHash !== sourceTransactionHash) {
     throw new Error('supplementary buyback broadcaster returned a hash that does not match the persisted signed bytes');
   }
-  return cycleRepository.recordBroadcast(
-    position.cycleId, CHAIN_ATTEMPT_STAGE, requestDigest, Object.freeze({ transactionHash: sourceTransactionHash }),
+  return cycleRepository.recordSupplementaryBroadcast(
+    position.positionId, requestDigest, Object.freeze({ transactionHash: sourceTransactionHash }),
   );
 }
 
-function buildConfirmedSaleEvidence({ position, settlement, config, signature, proceeds, sourceFinality }) {
-  const value = {
-    schema: CONFIRMED_SALE_SCHEMA,
-    positionId: position.positionId,
-    cycleId: position.cycleId,
-    manifestId: settlement.manifestId,
-    sourceWallet: config.accounts.solana,
-    mint: proceeds.assetId,
-    decimals: proceeds.decimals,
-    amountAtomic: proceeds.amountAtomic,
-    transactionSignature: signature,
-    memo: position.memo,
-    sourceFinality,
-  };
-  // Self-validates against D's own hookemon.supplementary-confirmed-sale.v1 assertion
-  // (supplementary-money.mjs) so a schema drift fails loudly here rather than downstream.
-  return assertConfirmedSale(value, settlement);
+function buildConfirmedSaleEvidence({ position, settlement, config, confirmedSale }) {
+  if (!confirmedSale || confirmedSale.status !== 'CONFIRMED'
+    || confirmedSale.memo !== position.memo
+    || typeof confirmedSale.signature !== 'string' || confirmedSale.signature.length === 0
+    || typeof confirmedSale.createdAt !== 'string' || confirmedSale.createdAt.length === 0) {
+    throw new Error('supplementary buyback confirmed sale does not bind the held position identity');
+  }
+  const asset = configuredSettlementAsset(config);
+  if (confirmedSale.mint !== asset.assetId || !sameAsset(confirmedSale.proceeds, asset)) {
+    throw new Error('supplementary buyback confirmed sale does not bind the configured settlement asset');
+  }
+  // D5 consumes this precise identity/finality contract for the return bridge. Keep the
+  // provider's observed timestamp and finalized source evidence alongside the amount; neither is
+  // reconstructed from a later configuration or wallet-wide balance.
+  return Object.freeze({
+    status: 'CONFIRMED',
+    memo: confirmedSale.memo,
+    mint: confirmedSale.mint,
+    signature: confirmedSale.signature,
+    proceeds: confirmedSale.proceeds,
+    createdAt: confirmedSale.createdAt,
+    sourceFinality: confirmedSale.sourceFinality,
+  });
 }
 
 async function advanceToBuybackSentUnknown(cycleRepository, position, confirmedSale) {
@@ -529,7 +550,7 @@ export function createSupplementaryBuybackHandler() {
       const existing = await reconcileSupplementaryBuybackSale({ adapters, config, cycleRepository, position });
       if (existing.status === 'CONFIRMED') {
         return advanceToBuybackSentUnknown(cycleRepository, position, buildConfirmedSaleEvidence({
-          position, settlement, config, signature: existing.signature, proceeds: existing.proceeds, sourceFinality: existing.sourceFinality,
+          position, settlement, config, confirmedSale: existing,
         }));
       }
       if (existing.status === 'DATA_UNVERIFIED') {
@@ -540,7 +561,7 @@ export function createSupplementaryBuybackHandler() {
       }
 
       const requestDigest = buybackAttemptRequestDigest(position);
-      let record = await cycleRepository.readChainTransactionAttempt(position.cycleId, CHAIN_ATTEMPT_STAGE, requestDigest);
+      let record = await cycleRepository.readSupplementaryChainTransactionAttempt(position.positionId, requestDigest);
       let freshlyPrepared = false;
 
       if (record === null) {
@@ -558,11 +579,17 @@ export function createSupplementaryBuybackHandler() {
         // Durable intent BEFORE the ambiguous provider boundary: this write happens before
         // buyback() is ever called, so a crash between here and a signed attempt leaves a
         // discoverable PREPARED intent that is never blindly retried (see the branch below).
-        await cycleRepository.prepareChainTransactionAttempt(
-          position.cycleId, CHAIN_ATTEMPT_STAGE,
-          createPreparedChainTransactionAttempt({ cycleId: position.cycleId, stage: CHAIN_ATTEMPT_STAGE, requestDigest }),
-        );
-        record = await cycleRepository.readChainTransactionAttempt(position.cycleId, CHAIN_ATTEMPT_STAGE, requestDigest);
+        await cycleRepository.prepareSupplementaryChainTransactionAttempt(position.positionId, {
+          schema: 'hookemon.supplementary-chain-attempt.v1',
+          positionId: position.positionId,
+          requestDigest,
+          state: 'PREPARED',
+          rawBytes: null,
+          nonce: null,
+          blockhash: null,
+          hash: null,
+        });
+        record = await cycleRepository.readSupplementaryChainTransactionAttempt(position.positionId, requestDigest);
         freshlyPrepared = true;
 
         if (record.attempt.state === 'PREPARED') {
@@ -595,12 +622,11 @@ export function createSupplementaryBuybackHandler() {
 
       if (!['BROADCAST', 'FINALIZED'].includes(record.attempt.state)) return undefined;
 
-      const signature = signedSolanaTransactionSignature(record.attempt.rawBytes);
-      const confirmed = await verifiedSaleForSignature({ adapters, config, cycleRepository, position, signature });
+      const confirmed = await reconcileSupplementaryBuybackSale({ adapters, config, cycleRepository, position });
       if (confirmed.status !== 'CONFIRMED') return undefined; // still pending finality, or conflicting; never fabricated.
 
       return advanceToBuybackSentUnknown(cycleRepository, position, buildConfirmedSaleEvidence({
-        position, settlement, config, signature: confirmed.signature, proceeds: confirmed.proceeds, sourceFinality: confirmed.sourceFinality,
+        position, settlement, config, confirmedSale: confirmed,
       }));
     },
   });

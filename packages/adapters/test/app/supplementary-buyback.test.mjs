@@ -205,7 +205,7 @@ function fakeChainAttemptRepository({ openPacks = [{ packIndex: 0, memo: MEMO, d
   const recoveryContexts = new Map();
   const advances = [];
   const calls = [];
-  return {
+  const repository = {
     advances,
     calls,
     attempts,
@@ -256,6 +256,23 @@ function fakeChainAttemptRepository({ openPacks = [{ packIndex: 0, memo: MEMO, d
       return structuredClone(record);
     },
   };
+  // The production facade is position-scoped. Keep the legacy aliases above only so these focused
+  // tests can still inspect the same backing journal while exercising the real public facade.
+  repository.readSupplementaryChainTransactionAttempt = (_positionId, requestDigest) => repository.readChainTransactionAttempt(CYCLE_ID, 'buyback', requestDigest);
+  repository.prepareSupplementaryChainTransactionAttempt = async (_positionId, attempt) => repository.prepareChainTransactionAttempt(CYCLE_ID, 'buyback', attempt);
+  repository.recordSupplementarySignedTransactionWithRecoveryContext = async (_positionId, requestDigest, signingMaterial, value) => {
+    assert.equal(value.requestDigest, requestDigest);
+    assert.equal(value.rawSignedBytesHash, signingMaterial.hash);
+    const record = await repository.recordSignedTransactionWithRecoveryContext(CYCLE_ID, 'buyback', requestDigest, signingMaterial, value);
+    return record;
+  };
+  repository.readSupplementaryChainAttemptRecoveryContext = async (_positionId, requestDigest) => {
+    const prefix = `${chainAttemptKey('buyback', requestDigest)}\0`;
+    const entry = [...recoveryContexts.entries()].find(([key]) => key.startsWith(prefix));
+    return entry ? structuredClone(entry[1]) : null;
+  };
+  repository.recordSupplementaryBroadcast = (_positionId, requestDigest, evidence) => repository.recordBroadcast(CYCLE_ID, 'buyback', requestDigest, evidence);
+  return repository;
 }
 
 function reconcileInput({ adapters, signerClient, config: cfg, cycleRepository, position, settlement, fencingToken = FENCING_TOKEN }) {
@@ -333,7 +350,7 @@ test('reconcile fails closed when the repository does not expose durable chain-a
       position: heldPosition(),
       settlement: settlementFixture(),
     })),
-    /requires cycleRepository\.(readChainTransactionAttempt|prepareChainTransactionAttempt|recordBroadcast|readChainAttemptRecoveryContext)/,
+    /requires cycleRepository\.(readSupplementaryChainTransactionAttempt|prepareSupplementaryChainTransactionAttempt|recordSupplementaryBroadcast|readSupplementaryChainAttemptRecoveryContext)/,
   );
 });
 
@@ -399,16 +416,11 @@ test('reconcile recovers an already-confirmed Collector sale via the memo lookup
   const [advance] = cycleRepository.advances;
   assert.equal(advance.expectedState, 'PREPARED');
   assert.equal(advance.nextState, 'BUYBACK_SENT_UNKNOWN');
-  assert.equal(advance.evidence.schema, 'hookemon.supplementary-confirmed-sale.v1');
-  assert.equal(advance.evidence.positionId, POSITION_ID);
-  assert.equal(advance.evidence.cycleId, CYCLE_ID);
-  assert.equal(advance.evidence.manifestId, `${CYCLE_ID}:supplementary:1`);
-  assert.equal(advance.evidence.sourceWallet, OPERATOR);
   assert.equal(advance.evidence.mint, SETTLEMENT_ASSET);
-  assert.equal(advance.evidence.decimals, CIRCLE_USD_DECIMALS);
-  assert.equal(advance.evidence.amountAtomic, '85');
-  assert.equal(advance.evidence.transactionSignature, BUYBACK_SIGNATURE);
   assert.equal(advance.evidence.memo, MEMO);
+  assert.equal(advance.evidence.signature, BUYBACK_SIGNATURE);
+  assert.deepEqual(advance.evidence.proceeds, { ...settlementAsset(), amountAtomic: '85' });
+  assert.equal(advance.evidence.createdAt, '2026-01-01T00:00:00.000Z');
   assert.equal(advance.evidence.sourceFinality.signature, BUYBACK_SIGNATURE);
   assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
 });
@@ -569,8 +581,17 @@ test('reconcile records signed bytes before broadcasting, and a restart before b
 
   // "Restart": a fresh reconcile() call. The signer must never be asked to sign again; the exact
   // durably-recorded bytes are reauthorized and broadcast.
+  let restartChecks = 0;
   const collectorCryptOnRestart = {
-    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackCheck() {
+      restartChecks += 1;
+      if (restartChecks === 1) return { exists: false };
+      return {
+        exists: true, status: 'complete', buybackAmount: '85', playerWallet: OPERATOR,
+        nft: CARD_ASSET, transactionSignature: signedSolanaTransactionSignature(recordedBytes),
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    },
     async buyback() { throw new Error('must not resend: signed bytes already exist durably'); },
     async submitTransaction({ signedTransaction }) {
       assert.equal(signedTransaction, recordedBytes);
@@ -588,8 +609,7 @@ test('reconcile records signed bytes before broadcasting, and a restart before b
   assert.equal(signCalls, 1); // unchanged: no second sign
   assert.equal(cycleRepository.advances.length, 1);
   const [advance] = cycleRepository.advances;
-  assert.equal(advance.evidence.schema, 'hookemon.supplementary-confirmed-sale.v1');
-  assert.equal(advance.evidence.transactionSignature, signedSolanaTransactionSignature(recordedBytes));
+  assert.equal(advance.evidence.signature, signedSolanaTransactionSignature(recordedBytes));
   assert.equal(secondAttempt.state, 'BUYBACK_SENT_UNKNOWN');
 });
 
@@ -608,12 +628,23 @@ test('reconcile advances to BUYBACK_SENT_UNKNOWN with D\'s exact confirmed-sale 
     ],
   });
   let submitCalls = 0;
+  let submittedSignature = null;
+  let buybackChecks = 0;
   const collectorCrypt = {
-    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackCheck() {
+      buybackChecks += 1;
+      if (buybackChecks === 1) return { exists: false };
+      return {
+        exists: true, status: 'complete', buybackAmount: '85', playerWallet: OPERATOR,
+        nft: CARD_ASSET, transactionSignature: submittedSignature,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    },
     async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
     async buyback() { return { memo: MEMO, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, serializedTransaction: transaction }; },
     async submitTransaction({ signedTransaction }) {
       submitCalls += 1;
+      submittedSignature = signedSolanaTransactionSignature(signedTransaction);
       return { success: true, signature: signedSolanaTransactionSignature(signedTransaction), confirmationStatus: 'finalized' };
     },
   };
@@ -632,17 +663,11 @@ test('reconcile advances to BUYBACK_SENT_UNKNOWN with D\'s exact confirmed-sale 
   const [advance] = cycleRepository.advances;
   assert.equal(advance.expectedState, 'PREPARED');
   assert.equal(advance.nextState, 'BUYBACK_SENT_UNKNOWN');
-  assert.equal(advance.evidence.schema, 'hookemon.supplementary-confirmed-sale.v1');
-  assert.equal(advance.evidence.positionId, POSITION_ID);
-  assert.equal(advance.evidence.cycleId, CYCLE_ID);
-  assert.equal(advance.evidence.manifestId, `${CYCLE_ID}:supplementary:1`);
-  assert.equal(advance.evidence.sourceWallet, OPERATOR);
   assert.equal(advance.evidence.mint, SETTLEMENT_ASSET);
-  assert.equal(advance.evidence.decimals, CIRCLE_USD_DECIMALS);
-  assert.equal(advance.evidence.amountAtomic, '85');
   assert.equal(advance.evidence.memo, MEMO);
-  assert.equal(typeof advance.evidence.transactionSignature, 'string');
-  assert.equal(advance.evidence.transactionSignature.length > 0, true);
+  assert.deepEqual(advance.evidence.proceeds, { ...settlementAsset(), amountAtomic: '85' });
+  assert.equal(typeof advance.evidence.signature, 'string');
+  assert.equal(advance.evidence.signature.length > 0, true);
   assert.equal(advance.evidence.sourceFinality.schema, 'hookemon.supplementary-buyback-source-finality.v1');
   assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
 });

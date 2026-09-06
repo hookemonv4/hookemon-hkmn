@@ -152,6 +152,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   // supplies the real deploy block). HOOKEMON_DISTRIBUTION_DIR is the absolute directory this
   // process shares with the separate `bin/hookemon-verifier.mjs` process (pending/receipts/failed).
   'HOOKEMON_HKMN_ADDRESS',
+  'HOOKEMON_HKMN_DECIMALS',
   'HOOKEMON_HKMN_DEPLOY_BLOCK',
   'HOOKEMON_DISTRIBUTION_DIR',
   // WP-39: the production evidence profile's own configuration. HOOKEMON_DISTRIBUTION_PROFILE is
@@ -921,6 +922,10 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   });
 
   const hkmnAddress = readEvmAddress(env, 'HOOKEMON_HKMN_ADDRESS');
+  const hkmnDecimals = readAssetDecimals(env, 'HOOKEMON_HKMN_DECIMALS');
+  if (hkmnAddress !== null && hkmnDecimals === null) {
+    fail('HOOKEMON_HKMN_DECIMALS is required when HOOKEMON_HKMN_ADDRESS is configured');
+  }
   const hkmnDeployBlockRaw = readBudgetAmount(env, 'HOOKEMON_HKMN_DEPLOY_BLOCK', { defaultValue: '0' });
   const distributionDir = readAbsolutePath(env, 'HOOKEMON_DISTRIBUTION_DIR', { required: false });
   const distributionProfile = readString(env, 'HOOKEMON_DISTRIBUTION_PROFILE', { defaultValue: 'fixture' });
@@ -1008,7 +1013,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     minimums,
     nativeGasCaps,
     rehearsal,
-    hkmn: Object.freeze({ address: hkmnAddress, deployBlock: BigInt(hkmnDeployBlockRaw) }),
+    hkmn: Object.freeze({ address: hkmnAddress, deployBlock: BigInt(hkmnDeployBlockRaw), decimals: hkmnDecimals }),
     distribution: Object.freeze({
       dir: distributionDir,
       excludedHolderAddresses,

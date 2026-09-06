@@ -37,6 +37,12 @@ import { createObservability } from './observability.mjs';
 import { createStageDriver } from './stage-driver.mjs';
 import { projectCycleAccounting, projectPolicyCustody } from './accounting-projection.mjs';
 import { MoneyConfigurationRejected, validateMoneyConfiguration } from './environment.mjs';
+import { createSupplementaryBuybackHandler } from './stages/supplementary-buyback.mjs';
+import {
+  mutateSupplementaryPayout,
+  mutateSupplementaryReturn,
+  reconcileSupplementaryReturn,
+} from './stages/supplementary-money.mjs';
 
 export { validateMoneyConfiguration } from './environment.mjs';
 
@@ -551,6 +557,63 @@ function buildFeeSettlementObserver() {
   return { async observe(cycleId) { return { cycleId, status: 'PENDING_BENEFICIARY_CLAIMS' }; } };
 }
 
+function createProductionSupplementaryStageHandlers({ assertCanary }) {
+  const guarded = handler => Object.freeze({
+    stage: handler.stage,
+    async reconcile(input) {
+      await assertCanary();
+      return handler.reconcile(input);
+    },
+  });
+  const buyback = createSupplementaryBuybackHandler();
+  const returnHandler = {
+    stage: 'supplementary-return',
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position }) {
+      const sale = await cycleRepository.readSupplementarySettlementEvidence(position.positionId);
+      if (sale?.state !== 'BUYBACK_SENT_UNKNOWN' || !sale.evidence) {
+        throw new Error('supplementary return requires durable confirmed-sale evidence');
+      }
+      await mutateSupplementaryReturn({
+        liveMode: true,
+        adapters,
+        signerClient,
+        config,
+        cycleRepository,
+        context,
+        confirmedSale: sale.evidence,
+      });
+      return reconcileSupplementaryReturn({ adapters, config, cycleRepository, context });
+    },
+  };
+  const payoutHandler = {
+    stage: 'supplementary-payout',
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position }) {
+      const [boundary, snapshot] = await Promise.all([
+        cycleRepository.readSupplementarySettlementEvidence(position.positionId),
+        cycleRepository.readStage(position.cycleId, 'eligibility-snapshot'),
+      ]);
+      if (boundary?.state !== 'RETURN_BROADCAST' || !boundary.evidence
+        || snapshot?.status !== 'COMPLETE' || !snapshot.evidence) {
+        throw new Error('supplementary payout requires durable return and eligibility evidence');
+      }
+      return mutateSupplementaryPayout({
+        liveMode: true,
+        adapters,
+        signerClient,
+        config,
+        cycleRepository,
+        context: { ...context, eligibilityManifest: snapshot.evidence, returnBoundary: boundary.evidence },
+      });
+    },
+  };
+  return Object.freeze({
+    PREPARED: guarded(buyback),
+    BUYBACK_SENT_UNKNOWN: guarded(returnHandler),
+    RETURN_BROADCAST: guarded(payoutHandler),
+    PAYOUT_BROADCAST: guarded(payoutHandler),
+  });
+}
+
 /**
  * Builds the full composition from an explicit config object. Returns `{ scheduler, service,
  * shutdown }`:
@@ -1009,6 +1072,9 @@ export async function compose(config) {
       && (!resolved.rehearsal || resolved.rehearsal.proceedsAccount === undefined)) {
       throw new Error('compose fake rehearsal requires a dedicated proceeds account');
     }
+    const productionSupplementaryStageHandlers = liveMode === true && resolved.execution.profile === 'production'
+      ? createProductionSupplementaryStageHandlers({ assertCanary: requireUsdgStatusCanary })
+      : null;
     const stageDriver = mode === 'rehearsal' && resolved.execution.providerMode === 'fake'
       ? createRehearsalStageDriver({
         cycleRepository,
@@ -1026,6 +1092,9 @@ export async function compose(config) {
         cycleRepository,
         stageHandlers: resolved.stageHandlers ?? null,
         supplementaryStageHandlers: resolved.supplementaryStageHandlers ?? null,
+        supplementaryAdapters: productionSupplementaryStageHandlers === null ? null : adapters,
+        supplementarySignerClient: productionSupplementaryStageHandlers === null ? null : resolved.signerClient,
+        productionSupplementaryStageHandlers,
         preflightAuthority: resolved.preflightAuthority,
         readOperatorConfiguration: readConfiguration,
       }), resolved.restartInjector ?? null);

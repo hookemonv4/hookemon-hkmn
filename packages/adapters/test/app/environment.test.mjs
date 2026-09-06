@@ -337,17 +337,24 @@ test('readEnvironment defaults the new WP-33 fields to their safe, backward-comp
 test('readEnvironment defaults the new WP-36 distribution fields (HKMN never guessed, distribution directory unset)', () => {
   const config = readEnvironment(baseEnv());
   assert.equal(config.hkmn.address, null);
+  assert.equal(config.hkmn.decimals, null);
   assert.equal(config.hkmn.deployBlock, 0n);
   assert.equal(config.distribution.dir, null);
 });
 
-test('readEnvironment accepts HOOKEMON_HKMN_ADDRESS/HOOKEMON_HKMN_DEPLOY_BLOCK/HOOKEMON_DISTRIBUTION_DIR', () => {
+test('readEnvironment requires explicit HKMN precision with its address', () => {
+  assert.throws(
+    () => readEnvironment(baseEnv({ HOOKEMON_HKMN_ADDRESS: `0x${'7'.repeat(40)}` })),
+    /HOOKEMON_HKMN_DECIMALS is required/,
+  );
   const config = readEnvironment(baseEnv({
     HOOKEMON_HKMN_ADDRESS: `0x${'7'.repeat(40)}`,
+    HOOKEMON_HKMN_DECIMALS: '18',
     HOOKEMON_HKMN_DEPLOY_BLOCK: '12345',
     HOOKEMON_DISTRIBUTION_DIR: '/var/hookemon/distribution',
   }));
   assert.equal(config.hkmn.address, `0x${'7'.repeat(40)}`);
+  assert.equal(config.hkmn.decimals, 18);
   assert.equal(config.hkmn.deployBlock, 12345n);
   assert.equal(config.distribution.dir, '/var/hookemon/distribution');
 });

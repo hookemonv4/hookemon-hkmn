@@ -132,14 +132,11 @@ const STAGE_HANDLERS = Object.freeze({
   },
 });
 
-// Legacy provider handlers remain available for direct module tests and historical journal reads.
-// Their live entrypoints stay closed until the named work package replaces the handler.
-const LIVE_MUTATION_PENDING = Object.freeze({
-  purchase: 'collector idempotency, transaction policy, and finalized-delta reconciliation are pending WP08b',
-  open: 'collector status, mint custody, and finality reconciliation are pending WP08b',
-  'epic-gate': 'insured-value evidence and owner decision handling are pending WP08b',
-  buyback: 'buyback policy and finalized proceeds reconciliation are pending WP08b',
-});
+// The shipped lifecycle handlers are production-capable: each uses the write-ahead attempt,
+// policy signer, and independent reconciliation paths imported in the integrated launch graph.
+// Keep this map for historical journal compatibility, but do not mark a live stage pending when a
+// real handler exists.
+const LIVE_MUTATION_PENDING = Object.freeze({});
 const FAIL_CLOSED_UNJOURNALED_STAGES = new Set();
 const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 const DEFAULT_UNRESOLVED_CARD_DEADLINE_MINUTES = 30;
@@ -204,9 +201,8 @@ const SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS = Object.freeze([
   'persistPagedPayoutState',
   'prepareSupplementaryChainTransactionAttempt',
   'readSupplementaryChainTransactionAttempt',
-  'recordSupplementarySignedTransaction',
+  'recordSupplementarySignedTransactionWithRecoveryContext',
   'recordSupplementaryBroadcast',
-  'persistSupplementaryChainAttemptRecoveryContext',
   'readSupplementaryChainAttemptRecoveryContext',
 ]);
 const EMPTY_SUPPLEMENTARY_CAPABILITIES = Object.freeze({});
@@ -1006,10 +1002,6 @@ export function createStageDriver({
   const handlerConfig = () => stageConfigurationWithOperatorDeadline(config, readOperatorConfiguration);
   const activeSupplementaryHandlers = productionSupplementaryStageHandlers ?? supplementaryStageHandlers;
   const activeSupplementaryObservationOnly = productionSupplementaryStageHandlers === null;
-  const activeSupplementaryCapabilities = productionSupplementaryStageHandlers !== null
-    ? Object.freeze({ adapters: supplementaryAdapters, signerClient: supplementarySignerClient })
-    : Object.freeze({ adapters: EMPTY_SUPPLEMENTARY_CAPABILITIES, signerClient: null });
-
   return Object.freeze({
     /**
      * Reconciles one owner-approved held-position settlement outside the normal cycle stage
@@ -1050,9 +1042,19 @@ export function createStageDriver({
         ...(input.nowMs === undefined ? {} : { nowMs: input.nowMs }),
         ...(input.fencingToken === undefined ? {} : { fencingToken: input.fencingToken }),
       });
+      // Supplementary effects run outside the normal stage sequence, but they are still money
+      // effects. Bind both provider and signer capabilities to the current lease at invocation
+      // time so a stale worker cannot sign, submit, or read a reconciliation result after losing
+      // the position's cycle lease.
+      const supplementaryCapabilities = productionSupplementaryStageHandlers !== null
+        ? Object.freeze({
+          adapters: createLeaseFencedCapability(supplementaryAdapters, input.assertLease, () => {}),
+          signerClient: createLeaseFencedCapability(supplementarySignerClient, input.assertLease, () => {}),
+        })
+        : Object.freeze({ adapters: EMPTY_SUPPLEMENTARY_CAPABILITIES, signerClient: null });
       await handler.reconcile(Object.freeze({
-        adapters: activeSupplementaryCapabilities.adapters,
-        signerClient: activeSupplementaryCapabilities.signerClient,
+        adapters: supplementaryCapabilities.adapters,
+        signerClient: supplementaryCapabilities.signerClient,
         config: frozenCanonicalValue(currentHandlerConfig),
         cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
         context: frozenCanonicalValue(context),

@@ -1366,6 +1366,34 @@ test('supplementary chain attempt recovery context binds to the exact signed-byt
   );
 });
 
+test('atomically persists supplementary signed bytes and recovery context across restart', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+
+  await repository.recordSupplementarySignedTransactionWithRecoveryContext(positionId, requestDigest, {
+    rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash,
+  }, {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'durable' },
+  });
+
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
+  assert.equal((await reopened.readSupplementaryChainTransactionAttempt(positionId, requestDigest)).attempt.state, 'SIGNED');
+  assert.deepEqual(await reopened.readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest), {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'durable' },
+  });
+  await assert.rejects(
+    () => reopened.recordSupplementarySignedTransactionWithRecoveryContext(positionId, requestDigest, {
+      rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash,
+    }, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'different' } }),
+    /different signing material or recovery context/,
+  );
+});
+
 test('persists the completed eligibility evidence and zero-dust return source for a sell settlement across restart', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);

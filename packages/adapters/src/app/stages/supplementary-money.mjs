@@ -156,12 +156,20 @@ export async function mutateSupplementaryReturn({
 }) {
   if (liveMode !== true) fail('supplementary return mutation requires liveMode');
   if (typeof cycleRepository?.readSupplementarySettlement !== 'function'
+    || typeof cycleRepository?.readSupplementarySettlementEvidence !== 'function'
     || typeof cycleRepository?.readPagedPayoutState !== 'function'
     || typeof cycleRepository?.persistPagedPayoutState !== 'function') {
     fail('supplementary return mutation requires cycleRepository supplementary/paged-payout-state methods');
   }
   const rawSettlement = await cycleRepository.readSupplementarySettlement(context.positionId);
   if (!rawSettlement) fail('supplementary return mutation requires a known settlement');
+  const durableSale = await cycleRepository.readSupplementarySettlementEvidence(context.positionId);
+  if (durableSale?.state !== 'BUYBACK_SENT_UNKNOWN' || !durableSale.evidence) {
+    fail('supplementary return mutation requires durable confirmed-sale evidence');
+  }
+  if (canonicalDigest(durableSale.evidence) !== canonicalDigest(confirmedSale)) {
+    fail('supplementary return mutation confirmed sale does not match durable settlement evidence');
+  }
   const request = prepareSupplementaryReturnRequest({ settlement: rawSettlement, confirmedSale, config });
   const stage = supplementaryReturnStageId(request.positionId);
   const configured = assertReturnConfiguration(config);
@@ -309,13 +317,19 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
   }
   const stage = supplementaryReturnStageId(context.positionId);
   const attempt = await cycleRepository.readPagedPayoutState(context.cycleId, stage);
-  if (!attempt || attempt.state !== 'BROADCAST') return null;
+  if (!attempt || !['SIGNED', 'BROADCAST'].includes(attempt.state)) return null;
   if (!adapters?.solana?.client) return null;
   const configured = assertReturnConfiguration(config);
+  // A transport can accept the bytes then lose its response. The signature is deterministically
+  // encoded in the persisted signed transaction, so probe it before deciding that an expired
+  // blockhash needs any action. This is reconciliation only: it neither signs nor rebroadcasts.
+  const sourceTransactionHash = attempt.state === 'BROADCAST'
+    ? attempt.sourceTransactionHash
+    : signedSolanaTransactionSignature(attempt.rawSignedBytes);
   let source;
   try {
     source = await readFinalizedRelaySourceDebit(adapters.solana.client, {
-      signature: attempt.sourceTransactionHash,
+      signature: sourceTransactionHash,
       owner: configured.solana,
       mint: attempt.inputAmount.assetId,
       amountAtomic: attempt.inputAmount.amountAtomic,
@@ -332,7 +346,7 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
     proof = await readReturnLegDestinationProof({
       client: adapters.robinhood.client,
       pointer,
-      leg: { relayRequestId: attempt.relayRequestId, sourceTxHash: attempt.sourceTransactionHash },
+      leg: { relayRequestId: attempt.relayRequestId, sourceTxHash: sourceTransactionHash },
       sourceFinality: source.finality,
     });
   } catch {
@@ -342,6 +356,22 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
   const usdgAddress = config?.contracts?.usdg;
   if (typeof usdgAddress !== 'string' || !EVM_ADDRESS.test(usdgAddress.toLowerCase())) {
     fail('supplementary return reconciliation requires a configured USDG address');
+  }
+  const expectedToken = usdgAddress.toLowerCase();
+  const expectedRecipient = configured.evm.toLowerCase();
+  if (proof.observedToken?.toLowerCase() !== expectedToken
+    || proof.observedRecipient?.toLowerCase() !== expectedRecipient) {
+    fail('supplementary return destination proof does not credit configured Operations USDG');
+  }
+  if (BigInt(proof.observedAmountAtomic) < BigInt(attempt.destinationAmount.amountAtomic)) {
+    fail('supplementary return destination proof is below the durable Relay quote minimum');
+  }
+  if (attempt.state === 'SIGNED') {
+    await cycleRepository.persistPagedPayoutState(context.cycleId, stage, {
+      ...attempt,
+      state: 'BROADCAST',
+      sourceTransactionHash,
+    });
   }
   const settlement = await cycleRepository.readSupplementarySettlement(context.positionId);
   if (!settlement) return null;

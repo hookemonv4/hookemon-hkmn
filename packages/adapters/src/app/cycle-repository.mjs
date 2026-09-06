@@ -64,6 +64,7 @@ const POST_TERMINAL_RECORD_KINDS = new Set([
   'supplementary-settlement-advanced',
   'supplementary-chain-attempt-prepared',
   'supplementary-chain-attempt-signed',
+  'supplementary-chain-attempt-signed-with-recovery-context',
   'supplementary-chain-attempt-broadcast',
   'supplementary-chain-attempt-recovery-context-recorded',
 ]);
@@ -73,6 +74,7 @@ const POST_COMPLETION_RECORD_KINDS = new Set([
   'supplementary-settlement-advanced',
   'supplementary-chain-attempt-prepared',
   'supplementary-chain-attempt-signed',
+  'supplementary-chain-attempt-signed-with-recovery-context',
   'supplementary-chain-attempt-broadcast',
   'supplementary-chain-attempt-recovery-context-recorded',
 ]);
@@ -2816,6 +2818,28 @@ export class CycleRepository {
           throw new Error('stored supplementary chain transaction signing material is invalid');
         }
         supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt }));
+      } else if (entry.kind === 'supplementary-chain-attempt-signed-with-recovery-context') {
+        const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
+        const context = assertSupplementaryChainAttemptRecoveryContext(entry.payload.context, 'stored supplementary chain attempt recovery context');
+        const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
+        const previous = supplementaryChainAttempts.get(key);
+        if (!previous || previous.attempt.state !== 'PREPARED' || attempt.state !== 'SIGNED') {
+          throw new Error('stored atomic supplementary chain transaction signing transition is invalid');
+        }
+        const expected = transitionSupplementaryChainAttempt(previous.attempt, 'SIGNED', {
+          rawBytes: attempt.rawBytes, nonce: attempt.nonce, blockhash: attempt.blockhash, hash: attempt.hash,
+        });
+        if (canonicalJson(attempt) !== canonicalJson(expected)
+          || context.positionId !== attempt.positionId
+          || context.requestDigest !== attempt.requestDigest
+          || context.rawSignedBytesHash !== attempt.hash) {
+          throw new Error('stored atomic supplementary chain signing recovery context does not bind signed bytes');
+        }
+        if (supplementaryChainAttemptRecoveryContexts.has(key)) {
+          throw new Error('stored atomic supplementary chain signing recovery context already exists');
+        }
+        supplementaryChainAttempts.set(key, Object.assign({}, previous, { attempt }));
+        supplementaryChainAttemptRecoveryContexts.set(key, context);
       } else if (entry.kind === 'supplementary-chain-attempt-broadcast') {
         const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
         const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
@@ -3807,6 +3831,47 @@ export class CycleRepository {
         const latest = currentState.supplementaryChainAttempts.get(key);
         if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)) {
           throw new Error(`cycle-repository recordSupplementarySignedTransaction: "${requestDigest}" changed while recording signing material`);
+        }
+      },
+    });
+    return { ...current, attempt: signed };
+  }
+
+  /**
+   * Atomically records the only signed bytes a supplementary effect may broadcast and the exact
+   * policy-recovery material needed to resume them. A process crash can therefore expose either
+   * the PREPARED attempt or both values, never an unrecoverable signed attempt.
+   */
+  async recordSupplementarySignedTransactionWithRecoveryContext(positionId, requestDigest, signingMaterial, contextValue) {
+    const location = await this.#supplementarySettlementLocation(positionId, 'recordSupplementarySignedTransactionWithRecoveryContext');
+    const context = assertSupplementaryChainAttemptRecoveryContext(contextValue, 'supplementary chain attempt recovery context');
+    if (context.positionId !== positionId || context.requestDigest !== requestDigest) {
+      throw new Error('cycle-repository recordSupplementarySignedTransactionWithRecoveryContext context does not match its attempt');
+    }
+    const key = supplementaryChainAttemptKey(positionId, requestDigest);
+    const current = location.state.supplementaryChainAttempts.get(key);
+    if (!current) throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: no prepared attempt for "${requestDigest}"`);
+    const prepared = { ...current.attempt, state: 'PREPARED', rawBytes: null, nonce: null, blockhash: null, hash: null };
+    const signed = transitionSupplementaryChainAttempt(prepared, 'SIGNED', signingMaterial);
+    if (context.rawSignedBytesHash !== signed.hash) {
+      throw new Error('cycle-repository recordSupplementarySignedTransactionWithRecoveryContext context does not bind signed bytes');
+    }
+    const existingContext = location.state.supplementaryChainAttemptRecoveryContexts.get(key);
+    if (current.attempt.state === 'SIGNED') {
+      if (canonicalJson(current.attempt) !== canonicalJson(signed) || canonicalJson(existingContext) !== canonicalJson(context)) {
+        throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: "${requestDigest}" already has different signing material or recovery context`);
+      }
+      return structuredClone(current);
+    }
+    if (current.attempt.state !== 'PREPARED' || existingContext) {
+      throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: "${requestDigest}" cannot be re-signed`);
+    }
+    await this.#append(location.cycleId, 'supplementary-chain-attempt-signed-with-recovery-context', { attempt: signed, context }, {
+      assertState: currentState => {
+        const latest = currentState.supplementaryChainAttempts.get(key);
+        if (!latest || canonicalJson(latest.attempt) !== canonicalJson(current.attempt)
+          || currentState.supplementaryChainAttemptRecoveryContexts.has(key)) {
+          throw new Error(`cycle-repository recordSupplementarySignedTransactionWithRecoveryContext: "${requestDigest}" changed while recording signing material`);
         }
       },
     });
