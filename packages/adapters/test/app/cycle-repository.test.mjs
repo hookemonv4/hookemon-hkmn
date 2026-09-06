@@ -15,7 +15,7 @@ import { createStageDriver } from '../../src/app/stage-driver.mjs';
 import { ERC20_TRANSFER_TOPIC, readFinalizedErc20TransferProof } from '../../src/robinhood-rpc.mjs';
 import { createSolanaRpcClient, readFinalizedRelayDestinationObservation } from '../../src/solana-rpc.mjs';
 import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
-import { CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
+import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
 import { MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 
@@ -3530,4 +3530,67 @@ test('recordPackBatchIntent survives a repository reopen and rejects a conflicti
     () => reopened.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent({ quantity: 5 })),
     /already has a different pack batch intent/,
   );
+});
+
+test('a custody ledger journaled before heldPositions existed reopens with that bucket at zero', async t => {
+  // Writes a real cycle, then rewrites its journal entry into the pre-change thirteen-bucket shape so
+  // the reopen exercises the durable compatibility contract rather than a hand-built object.
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const cycle = await repository.createCycle({ releaseAmount: '25000000', mode: 'production' });
+  await repository.recordCustodyLedger(cycle.cycleId, custodyLedger(cycle.cycleId, { claimed: '25000000' }));
+
+  const cyclePath = join(directory, 'active', `${encodeURIComponent(cycle.cycleId)}.json`);
+  const stored = JSON.parse(await readFile(cyclePath, 'utf8'));
+  let rewritten = 0;
+  for (const entry of stored.cycle.entries) {
+    if (entry.kind !== 'custody-ledger-recorded') continue;
+    delete entry.payload.ledger.heldPositions;
+    rewritten += 1;
+  }
+  assert.equal(rewritten, 1, 'exactly one custody-ledger entry must be rewritten to the legacy shape');
+  // The journal is a hash chain, so the rewritten entries are re-digested the way the store does.
+  let previous = null;
+  for (const [index, entry] of stored.cycle.entries.entries()) {
+    entry.digest = digest({ cycleId: stored.cycle.cycleId, index, previousDigest: previous, kind: entry.kind, payload: entry.payload });
+    previous = entry.digest;
+  }
+  stored.cycle.journalHead = previous;
+  await writeFile(cyclePath, `${canonicalJson(stored)}\n`);
+
+  const reopened = await CycleRepository.open(directory);
+  const described = await reopened.describeCycle(cycle.cycleId);
+  const ledger = [...described.custodyLedgers.values()][0];
+  assert.equal(ledger.heldPositions, '0', 'the absent bucket reads as the truthful historical zero');
+  assert.equal(ledger.claimed, '25000000', 'every other bucket survives the compatibility read unchanged');
+});
+
+test('the legacy allowance covers only heldPositions, and never a write', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const cycle = await repository.createCycle({ releaseAmount: '25000000', mode: 'production' });
+
+  // A current write missing the bucket is still refused; compatibility is a read-only concession.
+  const { heldPositions: _dropped, ...withoutHeldPositions } = custodyLedger(cycle.cycleId);
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycle.cycleId, withoutHeldPositions),
+    /custody ledger/,
+    'a new write may not omit the canonical bucket',
+  );
+
+  // And a stored record missing any other bucket is not normalized into existence.
+  const cyclePath = join(directory, 'active', `${encodeURIComponent(cycle.cycleId)}.json`);
+  await repository.recordCustodyLedger(cycle.cycleId, custodyLedger(cycle.cycleId));
+  const stored = JSON.parse(await readFile(cyclePath, 'utf8'));
+  let previous = null;
+  for (const [index, entry] of stored.cycle.entries.entries()) {
+    if (entry.kind === 'custody-ledger-recorded') delete entry.payload.ledger.dust;
+    entry.digest = digest({ cycleId: stored.cycle.cycleId, index, previousDigest: previous, kind: entry.kind, payload: entry.payload });
+    previous = entry.digest;
+  }
+  stored.cycle.journalHead = previous;
+  await writeFile(cyclePath, `${canonicalJson(stored)}\n`);
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(() => reopened.describeCycle(cycle.cycleId), /custody ledger/);
 });

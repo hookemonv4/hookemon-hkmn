@@ -655,6 +655,44 @@ async function readOperatorLedgers(directory) {
   }
 }
 
+const POLICY_ENGINE_RELATIVE = 'packages/runner/src/automation/policy-engine.mjs';
+const PINNED_OPERATIONS_EVM = "const OPERATIONS_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';";
+const PINNED_OPERATIONS_SOLANA = "const OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';";
+
+/**
+ * Repoints the deployment-identity pins inside the copied source, and nothing else.
+ *
+ * The graph drives the literal CLI, which by design has no injection seam, so the only way to run it
+ * under isolated keys is to change what the copy considers the approved identity. That is done here,
+ * at the test boundary, against a throwaway tree: the production CLI reads the real repository, where
+ * the pins are the recorded Operations identities, and nothing in production configuration, state or
+ * environment can reach this transformation.
+ *
+ * Deliberately narrow. It rewrites exactly the two pinned constant declarations, requires each to be
+ * present exactly once before rewriting, and asserts every other byte of the file is unchanged --
+ * so it cannot silently relax a check, drop a validation, or grow to cover anything but identity.
+ */
+async function repointCopiedDeploymentIdentity(root, { evm, solana }) {
+  const path = join(root, POLICY_ENGINE_RELATIVE);
+  const original = await readFile(path, 'utf8');
+  for (const pin of [PINNED_OPERATIONS_EVM, PINNED_OPERATIONS_SOLANA]) {
+    if (original.split(pin).length !== 2) {
+      throw new Error(`isolated identity transformation could not find exactly one ${pin}`);
+    }
+  }
+  const rewritten = original
+    .replace(PINNED_OPERATIONS_EVM, `const OPERATIONS_EVM = '${evm.toLowerCase()}';`)
+    .replace(PINNED_OPERATIONS_SOLANA, `const OPERATIONS_SOLANA = '${solana}';`);
+  const changedLines = original.split('\n')
+    .map((line, index) => (line === rewritten.split('\n')[index] ? null : index))
+    .filter(index => index !== null);
+  if (changedLines.length !== 2) {
+    throw new Error(`isolated identity transformation changed ${changedLines.length} lines; only the two identity pins may change`);
+  }
+  await writeFile(path, rewritten);
+  return { path, changedLines };
+}
+
 async function isolatedSource(directory) {
   const root = join(directory, 'source');
   const copyFilter = path => !path.includes('/node_modules');
@@ -720,6 +758,8 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   const { root, binPath } = await isolatedSource(directory);
   const signer = await productionChildSigner(t, root, directory);
   operationsEvm = signer.evmAccount;
+  // Only the copied tree's identity pins move, and only to the keys this run actually holds.
+  await repointCopiedDeploymentIdentity(root, { evm: signer.evmAccount, solana: signer.solanaAccount });
   const authority = await testPolicyAuthority(t, directory);
   await activateTwoPackPolicy(directory);
   const observabilityPath = join(directory, 'observability.json');
@@ -750,7 +790,12 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   await authority.stop();
   authority.assertHealthy();
   const { stderr } = run;
-  const repository = await CycleRepository.open(join(directory, 'cycles'));
+  // Read back through the same copied tree the run used. The real tree validates a stored admission
+  // against the production pins, which this run's isolated keys deliberately are not.
+  const { CycleRepository: IsolatedCycleRepository } = await import(
+    `file://${join(root, 'packages/adapters/src/app/cycle-repository.mjs')}`
+  );
+  const repository = await IsolatedCycleRepository.open(join(directory, 'cycles'));
   const cycleIds = await repository.listKnownCycleIds();
   assert.equal(cycleIds.length, 1, `production graph did not durably admit one N=2 cycle: ${JSON.stringify({ run, calls: fixture.calls })}`);
   const cycle = await repository.describeCycle(cycleIds[0]);
@@ -776,4 +821,54 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   })}`);
   assert.equal(cycle.completed, true, 'the automatic N=2 production graph must converge before the scheduler window closes');
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
+});
+
+
+test('the isolated identity transformation touches only the two deployment pins', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-identity-transform-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = join(directory, 'source');
+  const path = join(root, POLICY_ENGINE_RELATIVE);
+  await cp(join(SOURCE_ROOT, 'packages', 'runner'), join(root, 'packages', 'runner'), {
+    recursive: true, filter: candidate => !candidate.includes('/node_modules'),
+  });
+  const before = await readFile(path, 'utf8');
+
+  const { changedLines } = await repointCopiedDeploymentIdentity(root, {
+    evm: `0x${'7'.repeat(40)}`,
+    solana: 'HWPRgtDGpBm8mByTGS57BWCsijMo53qPPSbskWDukfTc',
+  });
+  assert.equal(changedLines.length, 2, 'exactly the two pin declarations may change');
+
+  const after = await readFile(path, 'utf8');
+  const beforeLines = before.split('\n');
+  const afterLines = after.split('\n');
+  assert.equal(beforeLines.length, afterLines.length, 'no line may be added or removed');
+  for (const [index, line] of beforeLines.entries()) {
+    if (changedLines.includes(index)) continue;
+    assert.equal(afterLines[index], line, `line ${index} must be untouched`);
+  }
+  for (const changed of changedLines) {
+    assert.match(beforeLines[changed], /^const OPERATIONS_(EVM|SOLANA) = /, 'only a pin declaration may be rewritten');
+  }
+  // Every other guard the module exports is still present and still refuses a lookalike identity.
+  assert.ok(after.includes('testOnlyAdmissionIdentities'), 'the branded identity gate survives');
+  assert.ok(after.includes('not the approved production identity'), 'the refusal survives');
+});
+
+test('the transformation refuses a tree whose pins are not exactly the expected declarations', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-identity-transform-guard-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = join(directory, 'source');
+  const path = join(root, POLICY_ENGINE_RELATIVE);
+  await cp(join(SOURCE_ROOT, 'packages', 'runner'), join(root, 'packages', 'runner'), {
+    recursive: true, filter: candidate => !candidate.includes('/node_modules'),
+  });
+  // A tree already repointed once has no remaining production pin, so a second pass cannot run.
+  await repointCopiedDeploymentIdentity(root, { evm: `0x${'7'.repeat(40)}`, solana: 'HWPRgtDGpBm8mByTGS57BWCsijMo53qPPSbskWDukfTc' });
+  await assert.rejects(
+    () => repointCopiedDeploymentIdentity(root, { evm: `0x${'8'.repeat(40)}`, solana: 'HWPRgtDGpBm8mByTGS57BWCsijMo53qPPSbskWDukfTc' }),
+    /could not find exactly one/,
+  );
+  assert.ok((await readFile(path, 'utf8')).includes(`0x${'7'.repeat(40)}`), 'the refused pass changed nothing');
 });

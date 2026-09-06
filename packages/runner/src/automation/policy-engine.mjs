@@ -11,8 +11,12 @@ const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const USDG_ROUTE = Object.freeze({ chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 });
 const COLLECTOR_SETTLEMENT_ROUTE = Object.freeze({ chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 });
-const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
-const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+// The recorded Operations identities, not fixture placeholders. Same pair as
+// decisions/owner-inputs/launch-inputs-owner.json, release/phase3/launch-inputs.json,
+// RobinhoodBindings.sol's OPERATIONS_WALLET, and environment.mjs's pinned Solana key, so admission
+// is checked against the deployment the hook constructor and live execution already enforce.
+const OPERATIONS_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
+const OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 /**
  * The owner-approved deployment identity an admission may route funds to and be denominated in.
  *

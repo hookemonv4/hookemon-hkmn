@@ -278,7 +278,9 @@ function throwingAdapters() {
   };
   return {
     collectorCrypt: {
-      async getMachines() { return { machines: [] }; },
+      // The configured pack must exist in the catalog: purchase derives its per-pack card count
+      // from it, and admission prices from its exact catalog price.
+      async getMachines() { return { machines: [{ code: 'base-pack', price: '0.000005', contains: 1 }] }; },
       async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
       async getPackStatus() { return { memo: 'unused', pack: null, send: null, buyback: [] }; },
       generatePack: boom('collectorCrypt.generatePack'),
@@ -1418,7 +1420,9 @@ test('liveMode true: the composed service freezes purchase before any legacy pro
   const calls = { generatePack: 0, submitTransaction: 0, openPack: 0 };
   const adapters = {
     collectorCrypt: {
-      async getMachines() { return { machines: [] }; },
+      // The configured pack must exist in the catalog: purchase derives its per-pack card count
+      // from it, and admission prices from its exact catalog price.
+      async getMachines() { return { machines: [{ code: 'base-pack', price: '0.000005', contains: 1 }] }; },
       async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
       async generatePack({ playerAddress }) {
         calls.generatePack += 1;
@@ -2111,11 +2115,14 @@ function evmDigestSignerClient(role, privateKey) {
 
 const FULL_VAULT = `0x${'a'.repeat(40)}`;
 const FULL_HOOK = `0x${'b'.repeat(40)}`;
-const FULL_EVM_ACCOUNT = `0x${'c'.repeat(40)}`;
-const FULL_USDG = `0x${'e'.repeat(40)}`;
+// Pinned deployment identity, so a live composition is admitted against the same accounts and assets
+// production enforces rather than against a weakened check. Same pair as the policy engine's pins,
+// RobinhoodBindings.sol and the recorded owner inputs.
+const FULL_EVM_ACCOUNT = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
+const FULL_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const FULL_HKMN = `0x${'f'.repeat(40)}`;
 const FULL_RETURN_ESCROW = `0x${'d'.repeat(40)}`;
-const FULL_SOLANA_ACCOUNT = 'HWPRgtDGpBm8mByTGS57BWCsijMo53qPPSbskWDukfTc';
+const FULL_SOLANA_ACCOUNT = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 const FULL_ROUTE_DATA = '0x1234abcd';
 const FULL_SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const FULL_OPEN_TX_SIGNATURE = 'OpenTransactionSignature1111111111111111111111111111111111111111111111111111';

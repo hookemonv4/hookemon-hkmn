@@ -541,8 +541,8 @@ test('claim admission rejects configuration values above the fixed operator ceil
 const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
 
 function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds, requestId: overrideRequestId, orderId: overrideOrderId }) {
-  const sender = '0x000000000000000000000000000000000000dEaD';
-  const recipient = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+  const sender = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
+  const recipient = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
   const origin = {
     chainId: 4663, address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amount: unitFunding,
   };
@@ -609,7 +609,7 @@ function exactOutputAdmission({
     unitRelay: {
       tradeType: 'EXACT_OUTPUT', requestId: `relay-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`,
       quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds,
-      sender: '0x000000000000000000000000000000000000dEaD', recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto',
+      sender: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384', recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE',
       destinationAmount: unitPurchase, destinationMinimumAmount: unitPurchase,
     },
     unitRelayQuote,
@@ -617,8 +617,8 @@ function exactOutputAdmission({
     relay: {
       tradeType: 'EXACT_OUTPUT', requestId: 'relay-n2', orderId: `0x${'2'.repeat(64)}`,
       quoteDigest: relayQuote.quoteDigest,
-      deadlineUnixSeconds, sender: '0x000000000000000000000000000000000000dEaD',
-      recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto', destinationAmount: aggregatePurchase, destinationMinimumAmount: aggregatePurchase,
+      deadlineUnixSeconds, sender: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384',
+      recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE', destinationAmount: aggregatePurchase, destinationMinimumAmount: aggregatePurchase,
     },
   };
 }

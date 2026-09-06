@@ -6,8 +6,8 @@ import test from 'node:test';
 
 import { assertPolicyAdmission, createTestOnlyAdmissionIdentity } from '../../src/automation/policy-engine.mjs';
 
-const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
-const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+const OPERATIONS_EVM = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
+const OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const FUNDING = Object.freeze({ chainId: '4663', assetId: USDG, decimals: 6 });
