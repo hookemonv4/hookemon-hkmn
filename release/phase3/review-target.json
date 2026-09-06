@@ -903,10 +903,10 @@
       "sha256": "58efa8cc0fe6d5b278fd9f329dda7adcb6ee677b6a6f77ac307f265d7d402ebb"
     },
     {
-      "bytes": 10731,
+      "bytes": 10803,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "564427f1019189f1c9be665793b2773a250aa9a02fe39df3787cc3ecf7a834cd"
+      "sha256": "27cd27186a2b24973f9be03e6704183d3c2e316b4e1bfe681801d849489c6dce"
     },
     {
       "bytes": 2842,
@@ -957,10 +957,10 @@
       "sha256": "5dda08b88578c39d6dacc51d089b54f5831393dd31c00110b7289aa0b0cc7507"
     },
     {
-      "bytes": 15111,
+      "bytes": 14465,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/admission/provider-documents.json",
-      "sha256": "7bce7699339e9271d356654a2ef4da56bb58d50a106e61e0ebf17a1c0592ac8e"
+      "sha256": "c2d211bedbdb7a8831e8f255a3ff9fed72e3c8cacc732ce9dc86bce90dc8bbbd"
     },
     {
       "bytes": 6102,
@@ -1053,10 +1053,10 @@
       "sha256": "c32c3a438c455b5384adf0e04fe6650bec444b01d15b160ce27dac451d6d7fd7"
     },
     {
-      "bytes": 1719,
+      "bytes": 3376,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "30292346f9e28b0ac343e4b05bbefdead09a4b5aad9c4fff9587f9378892ec6d"
+      "sha256": "83915794a56be2b9f02a562ee19710a761030b7a3625a852469f1205be11c5e8"
     },
     {
       "bytes": 78639,
@@ -1077,10 +1077,10 @@
       "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
     },
     {
-      "bytes": 93193,
+      "bytes": 99708,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
+      "sha256": "680600e9ea179f374c1cb8605245e029a5c3981ede638b0aa67e76a108be32da"
     }
   ],
   "importResolutions": [
@@ -2334,7 +2334,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:27194cb1fbfc4dc519088318f910fa5d70484f581b8ce1e9a7dc68b7d1aa6dfc",
+  "reviewTargetHash": "sha256:9fb5c08f006247eb6ba248e55c89f9a491a887c84dab7a0f35fd617911cf26b3",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:b17a3d6e6c261a13f96df287854181e6090f92e6ed0669c661d18edb12ccca9c"
