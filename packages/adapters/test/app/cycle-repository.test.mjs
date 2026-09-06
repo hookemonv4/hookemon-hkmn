@@ -85,7 +85,7 @@ function onchainCycleIdFor(cycleId) {
   return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
 }
 
-function parsedAdmissionRelayQuote({ requestId, orderId, amountAtomic, purchaseAtomic }) {
+function parsedAdmissionRelayQuote({ requestId, orderId, amountAtomic, purchaseAtomic, deadlineUnixSeconds = 2_000_000_000 }) {
   const origin = { chainId: 4663, address: ADMISSION_USDG, decimals: 6, amount: amountAtomic };
   const destination = { chainId: 792703809, address: ADMISSION_SETTLEMENT_MINT, decimals: 6, amount: purchaseAtomic, minimumAmount: purchaseAtomic };
   const raw = {
@@ -98,13 +98,13 @@ function parsedAdmissionRelayQuote({ requestId, orderId, amountAtomic, purchaseA
     },
     protocol: { v2: { orderId, orderData: {
       inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
-      output: { chainId: 'solana', deadline: 2_000_000_000, calls: [], payments: [{ recipient: ADMISSION_SOLANA, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
+      output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient: ADMISSION_SOLANA, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
     } } },
     steps: [],
   };
   const quote = {
     direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender: ADMISSION_EVM, recipient: ADMISSION_SOLANA,
-    deadlineUnixSeconds: 2_000_000_000, origin, destination, stepCount: raw.steps.length, raw,
+    deadlineUnixSeconds, origin, destination, stepCount: raw.steps.length, raw,
   };
   return {
     ...quote,
@@ -143,9 +143,11 @@ function admissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
 }
 
 /** A complete, self-consistent quantity-1 admission, carrying finalized process liability evidence. */
-function admissionWithEvidence(cycleId, { amountAtomic = '1000000', purchaseAtomic = '500000', salt = cycleId, unitOrderByte = '1', aggregateOrderByte = '2' } = {}) {
-  const unitRelayQuote = parsedAdmissionRelayQuote({ requestId: `req-unit-${salt}`, orderId: `0x${unitOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic });
-  const relayQuote = parsedAdmissionRelayQuote({ requestId: `req-aggregate-${salt}`, orderId: `0x${aggregateOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic });
+function admissionWithEvidence(cycleId, {
+  amountAtomic = '1000000', purchaseAtomic = '500000', salt = cycleId, unitOrderByte = '1', aggregateOrderByte = '2', deadlineUnixSeconds = 2_000_000_000,
+} = {}) {
+  const unitRelayQuote = parsedAdmissionRelayQuote({ requestId: `req-unit-${salt}`, orderId: `0x${unitOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic, deadlineUnixSeconds });
+  const relayQuote = parsedAdmissionRelayQuote({ requestId: `req-aggregate-${salt}`, orderId: `0x${aggregateOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic, deadlineUnixSeconds });
   const asset = (address) => ({ chainId: '4663', assetId: address, decimals: 6 });
   const settlementAsset = (address) => ({ chainId: '792703809', assetId: address, decimals: 6 });
   return {
@@ -3794,6 +3796,13 @@ test('the legacy allowance covers only heldPositions, and never a write', async 
 
 const OUTBOUND_QUOTE_EXPIRY_DEADLINE = 2_000_000_000; // matches parsedAdmissionRelayQuote()
 const OUTBOUND_QUOTE_EXPIRED_OBSERVED_AT_MS = (OUTBOUND_QUOTE_EXPIRY_DEADLINE + 1) * 1000;
+// The repository's trusted clock for this whole test section: fixed exactly at the observed expiry
+// time, so recordOutboundQuoteExpired's observedAtMs-vs-now check and selectOutboundQuoteRefresh's
+// deadline-vs-selectedAtMs check both have a single, deterministic "now" to compare against.
+const OUTBOUND_QUOTE_REFRESH_NOW_MS = OUTBOUND_QUOTE_EXPIRED_OBSERVED_AT_MS;
+// A replacement deadline strictly later than OUTBOUND_QUOTE_REFRESH_NOW_MS -- fresh at selection
+// time, unlike the original's already-expired OUTBOUND_QUOTE_EXPIRY_DEADLINE.
+const OUTBOUND_QUOTE_REPLACEMENT_DEADLINE = OUTBOUND_QUOTE_EXPIRY_DEADLINE + 1000;
 
 function outboundQuoteExpiryEvidence(cycleId, admission, overrides = {}) {
   return {
@@ -3815,13 +3824,14 @@ function outboundQuoteExpiryEvidence(cycleId, admission, overrides = {}) {
   };
 }
 
-async function openCycleWithAdmission(t, { cycleId = 'cycle-quote-refresh', ...admissionOverrides } = {}) {
-  const repository = await CycleRepository.open(await tempDirectory(t));
+async function openCycleWithAdmission(t, { cycleId = 'cycle-quote-refresh', now = () => OUTBOUND_QUOTE_REFRESH_NOW_MS, ...admissionOverrides } = {}) {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, now);
   const admission = admissionWithEvidence(cycleId, admissionOverrides);
   await repository.createCycle({
     releaseAmount: admission.aggregateFundingQuote.amountAtomic, mode: 'production', cycleId, admission,
   });
-  return { repository, cycleId, admission };
+  return { repository, cycleId, admission, directory };
 }
 
 test('recordOutboundQuoteExpired persists REFRESH_REQUIRED before any outbound effect and is idempotent', async t => {
@@ -3839,9 +3849,11 @@ test('recordOutboundQuoteExpired persists REFRESH_REQUIRED before any outbound e
   const replayed = await repository.recordOutboundQuoteExpired(cycleId, evidence);
   assert.deepEqual(replayed, recorded);
 
-  // Changed evidence for the same cycle conflicts rather than silently overwriting.
+  // Changed evidence for the same cycle conflicts rather than silently overwriting. One tick
+  // earlier (not later) so this stays nonfuture relative to the fixed trusted repository time
+  // while still differing from the durable evidence and still actually expired at that time.
   await assert.rejects(
-    () => repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission, { observedAtMs: evidence.observedAtMs + 1 })),
+    () => repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission, { observedAtMs: evidence.observedAtMs - 1 })),
     /conflicting expiry evidence/,
   );
 });
@@ -3913,7 +3925,9 @@ test('selectOutboundQuoteRefresh atomically selects one replacement bound to the
   const evidence = outboundQuoteExpiryEvidence(cycleId, admission);
   const expired = await repository.recordOutboundQuoteExpired(cycleId, evidence);
 
-  const replacement = admissionWithEvidence(cycleId, { salt: `${cycleId}-replacement`, unitOrderByte: '3', aggregateOrderByte: '4' });
+  const replacement = admissionWithEvidence(cycleId, {
+    salt: `${cycleId}-replacement`, unitOrderByte: '3', aggregateOrderByte: '4', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
+  });
   const refreshPolicyDecisionDigest = `sha256:${'2'.repeat(64)}`;
   const selected = await repository.selectOutboundQuoteRefresh(cycleId, {
     predecessorExpiryDigest: expired.expiryDigest,
@@ -3990,7 +4004,7 @@ test('selectOutboundQuoteRefresh refuses once any outbound stage request digest 
   );
 });
 
-test('readFinalizedClaimCustodyEvidence is null until this cycle\'s own claim-process stage is durably COMPLETE', async t => {
+test('readFinalizedClaimCustodyEvidence is null until this cycle\'s own claim-process stage is durably COMPLETE, and stays null for arbitrary stage evidence with no finalized chain-owned proof', async t => {
   const { repository, cycleId } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-claim-evidence' });
   assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
 
@@ -4001,8 +4015,271 @@ test('readFinalizedClaimCustodyEvidence is null until this cycle\'s own claim-pr
   await repository.prepareStage(cycleId, 'claim-process');
   await repository.completeStage(cycleId, 'claim-process', { finalized: true });
 
+  // COMPLETE alone proves nothing: with no cycle-owned FINALIZED claim-process chain attempt at
+  // all, arbitrary caller-supplied stage evidence must never read back as finalized custody proof.
+  assert.equal(
+    await repository.readFinalizedClaimCustodyEvidence(cycleId), null,
+    'a COMPLETE claim-process stage with no finalized chain-owned attempt is never finalized evidence',
+  );
+});
+
+test('readFinalizedClaimCustodyEvidence requires exactly one finalized cycle-owned claim-process chain attempt whose finality evidence the completed stage evidence exactly matches, plus recorded custody', async t => {
+  const { repository, cycleId } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-claim-evidence-proven' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', { transactionId: 'tx-1' });
+  await repository.prepareStage(cycleId, 'claim-process');
+
+  const chainAttempt = preparedChainAttempt(cycleId, 'claim-process');
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', chainAttempt);
+  await repository.recordSignedTransaction(cycleId, 'claim-process', chainAttempt.requestDigest, {
+    rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash: '0xdeadbeef',
+  });
+  await repository.recordBroadcast(cycleId, 'claim-process', chainAttempt.requestDigest, { transactionHash: '0xdeadbeef' });
+  assert.equal(
+    await repository.readFinalizedClaimCustodyEvidence(cycleId), null,
+    'a BROADCAST, not yet FINALIZED, chain attempt is never finalized evidence',
+  );
+
+  const finalityEvidence = { transactionHash: '0xdeadbeef', blockNumber: '9' };
+  await repository.recordFinality(cycleId, 'claim-process', chainAttempt.requestDigest, finalityEvidence);
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null, 'the stage itself is not yet COMPLETE');
+
+  await repository.completeStage(cycleId, 'claim-process', finalityEvidence);
+  assert.equal(
+    await repository.readFinalizedClaimCustodyEvidence(cycleId), null,
+    'no custody has been recorded for this cycle yet',
+  );
+
+  const ledger = custodyLedger(cycleId, { heldAssets: '1000000' });
+  await repository.recordCustodyLedger(cycleId, ledger);
+
   const evidence = await repository.readFinalizedClaimCustodyEvidence(cycleId);
   assert.equal(evidence.cycleId, cycleId);
-  assert.deepEqual(evidence.claimEvidence, { finalized: true });
-  assert.deepEqual(evidence.custodyLedgers, []);
+  assert.deepEqual(evidence.claimEvidence, finalityEvidence);
+  assert.deepEqual(evidence.custodyLedgers, [ledger]);
+});
+
+test('readFinalizedClaimCustodyEvidence refuses completed stage evidence that does not canonically equal the finalized chain attempt\'s own finality evidence', async t => {
+  const { repository, cycleId } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-claim-evidence-mismatch' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', { transactionId: 'tx-1' });
+  await repository.prepareStage(cycleId, 'claim-process');
+
+  const chainAttempt = preparedChainAttempt(cycleId, 'claim-process');
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', chainAttempt);
+  await repository.recordSignedTransaction(cycleId, 'claim-process', chainAttempt.requestDigest, {
+    rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash: '0xdeadbeef',
+  });
+  await repository.recordBroadcast(cycleId, 'claim-process', chainAttempt.requestDigest, { transactionHash: '0xdeadbeef' });
+  await repository.recordFinality(cycleId, 'claim-process', chainAttempt.requestDigest, { transactionHash: '0xdeadbeef', blockNumber: '9' });
+
+  // completeStage does not itself require chain-evidence content equality, so a caller can still
+  // complete with unrelated evidence -- the accessor, not completeStage, must refuse to launder it.
+  await repository.completeStage(cycleId, 'claim-process', { finalized: true });
+  await repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, { heldAssets: '1000000' }));
+
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('readFinalizedClaimCustodyEvidence refuses more than one finalized cycle-owned claim-process chain attempt', async t => {
+  const { repository, cycleId } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-claim-evidence-multiple' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', { transactionId: 'tx-1' });
+  await repository.prepareStage(cycleId, 'claim-process');
+
+  const finalize = async (requestDigest, hash) => {
+    const attempt = preparedChainAttempt(cycleId, 'claim-process', requestDigest);
+    await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', attempt);
+    await repository.recordSignedTransaction(cycleId, 'claim-process', requestDigest, { rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash });
+    await repository.recordBroadcast(cycleId, 'claim-process', requestDigest, { transactionHash: hash });
+    const finalityEvidence = { transactionHash: hash, blockNumber: '9' };
+    await repository.recordFinality(cycleId, 'claim-process', requestDigest, finalityEvidence);
+    return finalityEvidence;
+  };
+  const first = await finalize(`sha256:${'a'.repeat(64)}`, '0xdeadbeef');
+  await finalize(`sha256:${'b'.repeat(64)}`, '0xfeedface');
+
+  await repository.completeStage(cycleId, 'claim-process', first);
+  await repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, { heldAssets: '1000000' }));
+
+  assert.equal(await repository.readFinalizedClaimCustodyEvidence(cycleId), null);
+});
+
+test('recordOutboundQuoteExpired refuses observedAtMs later than the repository\'s trusted current time', async t => {
+  const { repository, cycleId, admission } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-future-observed' });
+  const evidence = outboundQuoteExpiryEvidence(cycleId, admission, { observedAtMs: OUTBOUND_QUOTE_REFRESH_NOW_MS + 1 });
+  await assert.rejects(
+    () => repository.recordOutboundQuoteExpired(cycleId, evidence),
+    /observedAtMs is later than the repository's trusted current time/,
+  );
+});
+
+test('selectOutboundQuoteRefresh refuses a replacement whose deadline is not strictly later than the selection time', async t => {
+  const { repository, cycleId, admission } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-stale-replacement' });
+  const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
+  const selectedUnixSeconds = Math.floor(OUTBOUND_QUOTE_REFRESH_NOW_MS / 1000);
+
+  for (const [label, deadlineUnixSeconds, unitOrderByte, aggregateOrderByte] of [
+    ['equal', selectedUnixSeconds, 'e', 'f'],
+    ['past', selectedUnixSeconds - 1, 'c', 'd'],
+  ]) {
+    const replacement = admissionWithEvidence(cycleId, { salt: `${cycleId}-${label}`, unitOrderByte, aggregateOrderByte, deadlineUnixSeconds });
+    await assert.rejects(
+      () => repository.selectOutboundQuoteRefresh(cycleId, {
+        predecessorExpiryDigest: expired.expiryDigest, replacement, refreshPolicyDecisionDigest: `sha256:${'7'.repeat(64)}`,
+      }),
+      /replacement quote deadlines must be strictly later than the selection time/,
+      label,
+    );
+  }
+
+  const fresh = admissionWithEvidence(cycleId, {
+    salt: `${cycleId}-fresh`, unitOrderByte: 'a', aggregateOrderByte: '9', deadlineUnixSeconds: selectedUnixSeconds + 1,
+  });
+  const selected = await repository.selectOutboundQuoteRefresh(cycleId, {
+    predecessorExpiryDigest: expired.expiryDigest, replacement: fresh, refreshPolicyDecisionDigest: `sha256:${'8'.repeat(64)}`,
+  });
+  assert.equal(selected.state, 'ACTIVE');
+});
+
+test('selectOutboundQuoteRefresh checks the lease fence before any validation and commits nothing on failure', async t => {
+  const { repository, cycleId, admission } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-fence-immediate' });
+  const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
+  const replacement = admissionWithEvidence(cycleId, {
+    salt: `${cycleId}-fence`, unitOrderByte: '5', aggregateOrderByte: '6', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
+  });
+
+  await assert.rejects(
+    () => repository.selectOutboundQuoteRefresh(cycleId, {
+      predecessorExpiryDigest: expired.expiryDigest,
+      replacement,
+      refreshPolicyDecisionDigest: `sha256:${'a'.repeat(64)}`,
+      assertLease: () => { throw new Error('lease fenced: stale owner'); },
+    }),
+    /lease fenced: stale owner/,
+  );
+
+  const read = await repository.readOutboundQuoteRefresh(cycleId);
+  assert.equal(read.state, 'REFRESH_REQUIRED', 'a fenced-out selection must not mutate the projection');
+});
+
+test('selectOutboundQuoteRefresh refuses a selection whose lease is fenced out at the atomic append boundary', async t => {
+  const { repository, cycleId, admission } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-fence-race' });
+  const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
+  const replacement = admissionWithEvidence(cycleId, {
+    salt: `${cycleId}-fence-race`, unitOrderByte: '7', aggregateOrderByte: '8', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
+  });
+
+  let checks = 0;
+  const assertLease = () => {
+    checks += 1;
+    // Passes the up-front check, but a competing owner renews the lease before the atomic append commits.
+    if (checks > 1) throw new Error('lease fenced: renewed by another owner');
+  };
+
+  await assert.rejects(
+    () => repository.selectOutboundQuoteRefresh(cycleId, {
+      predecessorExpiryDigest: expired.expiryDigest, replacement, refreshPolicyDecisionDigest: `sha256:${'b'.repeat(64)}`, assertLease,
+    }),
+    /lease fenced: renewed by another owner/,
+  );
+  assert.ok(checks >= 2, 'the fence must be re-checked at the append boundary, not only up front');
+
+  const read = await repository.readOutboundQuoteRefresh(cycleId);
+  assert.equal(read.state, 'REFRESH_REQUIRED', 'the fenced-out attempt must not have committed a selection');
+});
+
+async function injectRawJournalEntry(directory, cycleId, kind, payload) {
+  const store = await DurableCycleStore.open(directory);
+  const stored = store.readCycle(cycleId);
+  const entry = new CycleJournal(cycleId, stored.entries).propose(kind, payload);
+  const transaction = store.begin(cycleId, { expectedVersion: stored.version, expectedJournalHead: stored.journalHead });
+  transaction.stageEvent(entry);
+  await store.commit(transaction);
+  return entry;
+}
+
+test('a stored outbound quote expiry event recorded after an outbound effect record is refused on replay', async t => {
+  const { cycleId, admission, directory } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-tamper-expiry-after-effect' });
+  await injectRawJournalEntry(directory, cycleId, 'stage-request-prepared', { stage: 'outbound', requestDigest: `sha256:${'d'.repeat(64)}` });
+  await injectRawJournalEntry(directory, cycleId, 'outbound-quote-expired', { evidence: outboundQuoteExpiryEvidence(cycleId, admission) });
+
+  const reopened = await CycleRepository.open(directory, () => OUTBOUND_QUOTE_REFRESH_NOW_MS);
+  await assert.rejects(
+    () => reopened.readOutboundQuoteRefresh(cycleId),
+    /recorded outbound quote expiry evidence after an outbound effect record/,
+  );
+});
+
+test('a stored outbound quote refresh selection recorded after an outbound chain attempt is refused on replay', async t => {
+  const { repository, cycleId, admission, directory } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-tamper-effect' });
+  const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
+
+  await injectRawJournalEntry(directory, cycleId, 'chain-attempt-prepared', {
+    stage: 'outbound', attempt: preparedChainAttempt(cycleId, 'outbound', `sha256:${'c'.repeat(64)}`),
+  });
+
+  const replacement = admissionWithEvidence(cycleId, {
+    salt: `${cycleId}-tamper`, unitOrderByte: '3', aggregateOrderByte: '4', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
+  });
+  await injectRawJournalEntry(directory, cycleId, 'outbound-quote-refresh-selected', {
+    predecessorExpiryDigest: expired.expiryDigest,
+    replacement,
+    replacementDigest: digest(replacement),
+    refreshPolicyDecisionDigest: `sha256:${'9'.repeat(64)}`,
+    selectedAtMs: OUTBOUND_QUOTE_REFRESH_NOW_MS,
+  });
+
+  const reopened = await CycleRepository.open(directory, () => OUTBOUND_QUOTE_REFRESH_NOW_MS);
+  await assert.rejects(
+    () => reopened.readOutboundQuoteRefresh(cycleId),
+    /selected an outbound quote refresh replacement after an outbound effect record/,
+  );
+});
+
+test('a stored outbound quote refresh selection naming a replacement with the wrong principal or identity is refused on replay', async t => {
+  const { repository, cycleId, admission, directory } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-tamper-identity' });
+  const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
+
+  const wrongPack = {
+    ...admissionWithEvidence(cycleId, {
+      salt: `${cycleId}-wrong-pack`, unitOrderByte: '5', aggregateOrderByte: '6', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
+    }),
+    packId: 'a-different-pack',
+  };
+  await injectRawJournalEntry(directory, cycleId, 'outbound-quote-refresh-selected', {
+    predecessorExpiryDigest: expired.expiryDigest,
+    replacement: wrongPack,
+    replacementDigest: digest(wrongPack),
+    refreshPolicyDecisionDigest: `sha256:${'0'.repeat(64)}`,
+    selectedAtMs: OUTBOUND_QUOTE_REFRESH_NOW_MS,
+  });
+
+  const reopened = await CycleRepository.open(directory, () => OUTBOUND_QUOTE_REFRESH_NOW_MS);
+  await assert.rejects(
+    () => reopened.readOutboundQuoteRefresh(cycleId),
+    /replacement pack\/quantity does not match/,
+  );
+});
+
+test('a stored outbound quote refresh selection naming an already-expired replacement is refused on replay', async t => {
+  const { repository, cycleId, admission, directory } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-tamper-stale' });
+  const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
+
+  const staleReplacement = admissionWithEvidence(cycleId, {
+    salt: `${cycleId}-stale`, unitOrderByte: '1', aggregateOrderByte: '2', deadlineUnixSeconds: Math.floor(OUTBOUND_QUOTE_REFRESH_NOW_MS / 1000),
+  });
+  await injectRawJournalEntry(directory, cycleId, 'outbound-quote-refresh-selected', {
+    predecessorExpiryDigest: expired.expiryDigest,
+    replacement: staleReplacement,
+    replacementDigest: digest(staleReplacement),
+    refreshPolicyDecisionDigest: `sha256:${'1'.repeat(64)}`,
+    selectedAtMs: OUTBOUND_QUOTE_REFRESH_NOW_MS,
+  });
+
+  const reopened = await CycleRepository.open(directory, () => OUTBOUND_QUOTE_REFRESH_NOW_MS);
+  await assert.rejects(
+    () => reopened.readOutboundQuoteRefresh(cycleId),
+    /replacement quote deadlines must be strictly later than the selection time/,
+  );
 });

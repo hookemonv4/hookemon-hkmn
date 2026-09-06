@@ -701,6 +701,38 @@ function hasOutboundEffectRecords(state) {
   return false;
 }
 
+/**
+ * The single replacement-vs-original validator write and replay both call: pack/quantity, the
+ * typed destination target, and the exact immutable claimed principal must match the original
+ * durable admission -- only request/order IDs, quote digests/deadlines, and normalized raw quote
+ * material may differ between the original and its replacement.
+ */
+function assertOutboundQuoteReplacementIdentity(normalized, admission, releaseAmount, label) {
+  if (!admission) throw new Error(`${label}: this cycle has no original durable admission to bind against`);
+  if (normalized.packId !== admission.packId || normalized.quantity !== admission.quantity) {
+    throw new Error(`${label}: replacement pack/quantity does not match the original admission`);
+  }
+  if (canonicalJson(normalized.aggregatePurchase) !== canonicalJson(admission.aggregatePurchase)
+    || canonicalJson(normalized.unitPurchase) !== canonicalJson(admission.unitPurchase)) {
+    throw new Error(`${label}: replacement destination target does not match the original admission`);
+  }
+  if (normalized.aggregateFundingQuote.amountAtomic !== releaseAmount) {
+    throw new Error(`${label}: replacement source amount does not exactly equal the immutable release amount`);
+  }
+}
+
+/**
+ * REQ-cycle-repository-2's one-replacement contract: equality and past both refuse, only a
+ * replacement whose deadlines are strictly later than the selection time may be selected.
+ */
+function assertOutboundQuoteReplacementFreshness(replacement, selectedAtMs, label) {
+  const selectedUnixSeconds = Math.floor(selectedAtMs / 1000);
+  if (replacement.relay.deadlineUnixSeconds <= selectedUnixSeconds
+    || replacement.unitRelay.deadlineUnixSeconds <= selectedUnixSeconds) {
+    throw new Error(`${label}: replacement quote deadlines must be strictly later than the selection time`);
+  }
+}
+
 function custodyLedgerKey(ledger) {
   return `${ledger.chainId}\u0000${ledger.assetId}`;
 }
@@ -3306,6 +3338,9 @@ export class CycleRepository {
       } else if (entry.kind === 'outbound-quote-expired') {
         const evidence = assertOutboundQuoteExpiryEvidence(entry.payload.evidence, cycleId);
         assertOutboundQuoteExpiryEvidenceMatchesAdmission(evidence, admission);
+        if (hasOutboundEffectRecords(replayState)) {
+          throw new Error('stored cycle recorded outbound quote expiry evidence after an outbound effect record');
+        }
         if (outboundQuoteRefresh) {
           if (outboundQuoteRefresh.state !== 'REFRESH_REQUIRED'
             || canonicalJson(outboundQuoteRefresh.expiry) !== canonicalJson(evidence)) {
@@ -3321,6 +3356,9 @@ export class CycleRepository {
         if (entry.payload.predecessorExpiryDigest !== outboundQuoteRefresh.expiryDigest) {
           throw new Error('stored cycle replacement selection does not bind the exact expiry predecessor');
         }
+        if (hasOutboundEffectRecords(replayState)) {
+          throw new Error('stored cycle selected an outbound quote refresh replacement after an outbound effect record');
+        }
         assertDigest(entry.payload.replacementDigest, 'stored outbound quote refresh replacementDigest');
         assertDigest(entry.payload.refreshPolicyDecisionDigest, 'stored outbound quote refresh refreshPolicyDecisionDigest');
         const replacement = assertDurableCycleAdmission(entry.payload.replacement, cycleId, null, 'stored outbound quote refresh replacement admission');
@@ -3330,6 +3368,10 @@ export class CycleRepository {
         if (!Number.isSafeInteger(entry.payload.selectedAtMs) || entry.payload.selectedAtMs <= 0) {
           throw new Error('stored outbound quote refresh selectedAtMs is invalid');
         }
+        assertOutboundQuoteReplacementIdentity(
+          replacement, admission, releaseAmount, 'stored outbound quote refresh replacement',
+        );
+        assertOutboundQuoteReplacementFreshness(replacement, entry.payload.selectedAtMs, 'stored outbound quote refresh replacement');
         outboundQuoteRefresh = Object.freeze({
           state: 'ACTIVE',
           expiry: outboundQuoteRefresh.expiry,
@@ -3642,6 +3684,9 @@ export class CycleRepository {
       if (state.terminalState) throw new Error(`cycle-repository recordOutboundQuoteExpired: cycle is terminal as ${state.terminalState}`);
       const evidence = assertOutboundQuoteExpiryEvidence(evidenceValue, cycleId);
       assertOutboundQuoteExpiryEvidenceMatchesAdmission(evidence, state.admission);
+      if (evidence.observedAtMs > currentRepositoryTime(this.#now)) {
+        throw new Error('cycle-repository recordOutboundQuoteExpired: observedAtMs is later than the repository\'s trusted current time');
+      }
       if (hasOutboundEffectRecords(state)) {
         throw new Error('cycle-repository recordOutboundQuoteExpired: an outbound stage request, Relay leg, or chain attempt already exists');
       }
@@ -3685,10 +3730,14 @@ export class CycleRepository {
    * minimal compatible version refuses both a greater and a smaller replacement source amount.
    */
   async selectOutboundQuoteRefresh(cycleId, {
-    predecessorExpiryDigest, replacement, refreshPolicyDecisionDigest, operations = null,
+    predecessorExpiryDigest, replacement, refreshPolicyDecisionDigest, operations = null, assertLease = null,
   }) {
     assertDigest(predecessorExpiryDigest, 'cycle-repository selectOutboundQuoteRefresh predecessorExpiryDigest');
     assertDigest(refreshPolicyDecisionDigest, 'cycle-repository selectOutboundQuoteRefresh refreshPolicyDecisionDigest');
+    if (assertLease !== null && typeof assertLease !== 'function') {
+      throw new Error('cycle-repository selectOutboundQuoteRefresh assertLease must be a function or null');
+    }
+    assertLease?.();
     let lastContention = null;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const state = await this.#replay(cycleId);
@@ -3708,22 +3757,13 @@ export class CycleRepository {
         operations,
         'cycle-repository selectOutboundQuoteRefresh replacement admission',
       );
-      if (!state.admission) {
-        throw new Error('cycle-repository selectOutboundQuoteRefresh: this cycle has no original durable admission to bind against');
-      }
-      if (normalized.packId !== state.admission.packId || normalized.quantity !== state.admission.quantity) {
-        throw new Error('cycle-repository selectOutboundQuoteRefresh: replacement pack/quantity does not match the original admission');
-      }
-      if (canonicalJson(normalized.aggregatePurchase) !== canonicalJson(state.admission.aggregatePurchase)
-        || canonicalJson(normalized.unitPurchase) !== canonicalJson(state.admission.unitPurchase)) {
-        throw new Error('cycle-repository selectOutboundQuoteRefresh: replacement destination target does not match the original admission');
-      }
-      if (normalized.aggregateFundingQuote.amountAtomic !== state.releaseAmount) {
-        throw new Error('cycle-repository selectOutboundQuoteRefresh: replacement source amount does not exactly equal the immutable release amount');
-      }
+      assertOutboundQuoteReplacementIdentity(
+        normalized, state.admission, state.releaseAmount, 'cycle-repository selectOutboundQuoteRefresh',
+      );
       const replacementDigest = digest(normalized);
       try {
         const selectedAtMs = currentRepositoryTime(this.#now);
+        assertOutboundQuoteReplacementFreshness(normalized, selectedAtMs, 'cycle-repository selectOutboundQuoteRefresh');
         await this.#append(cycleId, 'outbound-quote-refresh-selected', {
           predecessorExpiryDigest,
           replacement: normalized,
@@ -3743,6 +3783,7 @@ export class CycleRepository {
               throw new Error('cycle-repository selectOutboundQuoteRefresh: an outbound effect record appeared while selecting');
             }
           },
+          assertLease,
         });
         const after = await this.#replay(cycleId);
         return structuredClone(after.outboundQuoteRefresh);
@@ -3759,12 +3800,22 @@ export class CycleRepository {
   /**
    * Repository-owned finalized claim/custody evidence for this exact cycle -- never a wallet
    * balance, and never the pre-claim hook liability re-read as though it were still claimable.
-   * Returns `null` until this cycle's own `claim-process` stage is durably COMPLETE.
+   * Returns `null` until this cycle's own `claim-process` stage is durably COMPLETE behind exactly
+   * one cycle-owned `claim-process` chain attempt in `FINALIZED`, the completed stage evidence is
+   * canonically that attempt's own finality evidence (never arbitrary caller-supplied stage
+   * evidence), and this cycle has recorded custody. Missing, multiple, nonfinal, or mismatched
+   * stage/finality evidence returns `null`, never a partial or best-effort result.
    */
   async readFinalizedClaimCustodyEvidence(cycleId) {
     const state = await this.#replay(cycleId);
     const claimStage = state.stages.get('claim-process');
     if (!claimStage || claimStage.status !== 'COMPLETE') return null;
+    const finalizedAttempts = [...state.chainAttempts.values()]
+      .filter(record => record.attempt.stage === 'claim-process' && record.attempt.state === 'FINALIZED');
+    if (finalizedAttempts.length !== 1) return null;
+    const [finalized] = finalizedAttempts;
+    if (canonicalJson(claimStage.evidence) !== canonicalJson(finalized.finalityEvidence)) return null;
+    if (state.custodyLedgers.size === 0) return null;
     return Object.freeze({
       cycleId,
       claimEvidence: structuredClone(claimStage.evidence),
