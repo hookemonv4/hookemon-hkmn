@@ -1251,6 +1251,121 @@ test('starts a supplementary settlement for a held position after its main cycle
   assert.notEqual(next.cycleId, cycleId);
 });
 
+async function preparedSupplementarySettlement(repository, cycleId) {
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary',
+    mint: 'mint-supplementary',
+    cardRef: 'mint-supplementary',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  return position.positionId;
+}
+
+function supplementaryChainAttempt(positionId, overrides = {}) {
+  return {
+    schema: 'hookemon.supplementary-chain-attempt.v1',
+    positionId,
+    requestDigest: `sha256:${'7'.repeat(64)}`,
+    state: 'PREPARED',
+    rawBytes: null,
+    nonce: null,
+    blockhash: null,
+    hash: null,
+    ...overrides,
+  };
+}
+
+test('prepares, signs, and broadcasts a position-scoped supplementary chain attempt without colliding with the main cycle stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+
+  const prepared = await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  assert.deepEqual(prepared, { attempt: supplementaryChainAttempt(positionId), broadcastEvidence: null });
+  // Idempotent retry with identical evidence.
+  assert.deepEqual(await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId)), prepared);
+
+  const signed = await repository.recordSupplementarySignedTransaction(positionId, requestDigest, {
+    rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}`,
+  });
+  assert.equal(signed.attempt.state, 'SIGNED');
+  assert.deepEqual(
+    await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}` }),
+    signed,
+  );
+
+  const broadcast = await repository.recordSupplementaryBroadcast(positionId, requestDigest, { schema: 'hookemon.chain-observation.v1', observed: true });
+  assert.equal(broadcast.attempt.state, 'BROADCAST');
+  assert.deepEqual(broadcast.broadcastEvidence, { schema: 'hookemon.chain-observation.v1', observed: true });
+
+  assert.deepEqual(await repository.readSupplementaryChainTransactionAttempt(positionId, requestDigest), broadcast);
+  // Ordinary per-cycle chain attempts remain untouched: nothing was ever written under the
+  // 'buyback'/'return' stage keyspace for this cycleId.
+  assert.equal(await repository.readChainTransactionAttempt(cycleId, 'buyback', requestDigest), null);
+});
+
+test('recordSupplementarySignedTransaction refuses to re-sign an already-broadcast attempt', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}` });
+  await repository.recordSupplementaryBroadcast(positionId, requestDigest, { schema: 'hookemon.chain-observation.v1', observed: true });
+  await assert.rejects(
+    () => repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW2', nonce: '2', blockhash: null, hash: `hash:${'b'.repeat(64)}` }),
+    /already broadcast and cannot be re-signed/,
+  );
+});
+
+test('supplementary chain attempt recovery context binds to the exact signed-bytes hash and rejects a conflicting retry', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash });
+
+  await assert.rejects(
+    () => repository.persistSupplementaryChainAttemptRecoveryContext(positionId, {
+      positionId, requestDigest, rawSignedBytesHash: `hash:${'f'.repeat(64)}`, context: { approvalRef: 'x' },
+    }),
+    /does not bind signed bytes/,
+  );
+
+  const persisted = await repository.persistSupplementaryChainAttemptRecoveryContext(positionId, {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' },
+  });
+  assert.deepEqual(persisted, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' } });
+  assert.deepEqual(await repository.readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest), persisted);
+  // Idempotent identical retry.
+  assert.deepEqual(
+    await repository.persistSupplementaryChainAttemptRecoveryContext(positionId, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' } }),
+    persisted,
+  );
+  await assert.rejects(
+    () => repository.persistSupplementaryChainAttemptRecoveryContext(positionId, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'different' } }),
+    /conflicts with prior context/,
+  );
+});
+
 test('persists the completed eligibility evidence and zero-dust return source for a sell settlement across restart', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);

@@ -202,6 +202,12 @@ const SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS = Object.freeze([
   'resolveHeldPosition',
   'readPagedPayoutState',
   'persistPagedPayoutState',
+  'prepareSupplementaryChainTransactionAttempt',
+  'readSupplementaryChainTransactionAttempt',
+  'recordSupplementarySignedTransaction',
+  'recordSupplementaryBroadcast',
+  'persistSupplementaryChainAttemptRecoveryContext',
+  'readSupplementaryChainAttemptRecoveryContext',
 ]);
 const EMPTY_SUPPLEMENTARY_CAPABILITIES = Object.freeze({});
 
