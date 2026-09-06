@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createScheduler, DEFAULT_TICK_INTERVAL_MS } from '../../src/scheduler/scheduler.mjs';
+import { createScheduler, DEFAULT_TICK_INTERVAL_MS, RECONCILE_RETRY_MS } from '../../src/scheduler/scheduler.mjs';
 
 function manualClock() {
   let nextId = 1;
@@ -278,7 +278,7 @@ test('LEASE_HELD is an ordinary tick outcome, not a failure: the loop keeps tick
   scheduler.stop();
 });
 
-test('a state-file read failure does not crash the loop: it skips the tick, reports it, and reschedules', async () => {
+test('a state-file read failure does not crash the loop: it skips the tick, reports it, and retries as a bounded outage, not a 20-minute wait', async () => {
   const worker = fakeWorker();
   const events = [];
   const clock = manualClock();
@@ -289,6 +289,7 @@ test('a state-file read failure does not crash the loop: it skips the tick, repo
     schedule: clock.schedule,
     cancel: clock.cancel,
     onTick: event => events.push(event),
+    now: () => 0,
   });
   scheduler.start();
   await scheduler.settled();
@@ -297,8 +298,147 @@ test('a state-file read failure does not crash the loop: it skips the tick, repo
   assert.equal(events[0].type, 'TICK_STATE_READ_FAILED');
   assert.equal(worker.calls.length, 0);
   assert.equal(clock.pendingCount(), 1);
-  assert.equal(clock.pendingDelayMs(), DEFAULT_TICK_INTERVAL_MS);
+  assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS);
+  assert.equal(scheduler.getView().pendingReason, 'STATE_UNAVAILABLE');
+  assert.equal(scheduler.getView().nextReconcileAt, new Date(RECONCILE_RETRY_MS).toISOString());
+  assert.equal(scheduler.getView().nextCycleAt, null);
   scheduler.stop();
+});
+
+test('consecutive outage ticks back off, and a clean tick resets the backoff', async () => {
+  let attempt = 0;
+  const worker = fakeWorker({
+    runOnce: async () => {
+      attempt += 1;
+      if (attempt <= 2) throw new Error('rpc unavailable');
+      return { status: 'COMPLETE', cycleId: 'c1' };
+    },
+  });
+  const reader = stateReaderFrom([
+    configuration({ paused: false, liveMode: false }),
+    configuration({ paused: false, liveMode: false }),
+    configuration({ paused: false, liveMode: false }),
+  ]);
+  const clock = manualClock();
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+  });
+  scheduler.start();
+  await scheduler.settled();
+  assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS);
+
+  await tickOnce(scheduler, clock);
+  assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS * 2);
+
+  await tickOnce(scheduler, clock);
+  assert.equal(clock.pendingDelayMs(), 20 * 60_000, 'a clean tick returns to the ordinary interval cadence');
+  assert.equal(scheduler.getView().pendingReason, null);
+  scheduler.stop();
+});
+
+test('an already-open cycle still waiting to reconcile retries at the flat reconcile interval, not the 20-minute cadence', async () => {
+  const worker = fakeWorker({
+    runOnce: async () => ({ status: 'ACTIVE_CYCLE_NOT_RECONCILED', cycleId: null, stage: null, requiredProcessUsdg: '0' }),
+  });
+  const reader = stateReaderFrom([configuration({ paused: false, liveMode: false })]);
+  const clock = manualClock();
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    now: () => 0,
+  });
+  scheduler.start();
+  await scheduler.settled();
+
+  assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS);
+  assert.equal(scheduler.getView().nextReconcileAt, new Date(RECONCILE_RETRY_MS).toISOString());
+  assert.equal(scheduler.getView().nextCycleAt, null);
+  assert.equal(scheduler.getView().pendingReason, 'RECONCILING_PENDING_TRANSACTION');
+  scheduler.stop();
+});
+
+test('getView() reports automationEnabled and paused from the last observed configuration, and a paused scheduler still reconciles an active cycle without the 20-minute cadence', async () => {
+  const worker = fakeWorker({
+    recoverActiveCycle: async () => { throw new Error('provider RPC timed out'); },
+  });
+  const reader = stateReaderFrom([configuration({ paused: true, liveMode: true })]);
+  const clock = manualClock();
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    now: () => 0,
+  });
+  scheduler.start();
+  await scheduler.settled();
+
+  const view = scheduler.getView();
+  assert.equal(view.paused, true);
+  assert.equal(view.automationEnabled, false);
+  assert.equal(view.pendingReason, 'TICK_FAILED', 'the RPC outage is the precise reason, not the generic pause');
+  assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS, 'pause never blocks reconciling an already-open cycle');
+  scheduler.stop();
+});
+
+test('getView() reports SCHEDULER_STOPPED once stopped, and a fresh scheduler after a restart starts from a clean nextCycleAt', async () => {
+  const worker = fakeWorker();
+  const reader = stateReaderFrom([configuration({ paused: false, liveMode: false })]);
+  const clock = manualClock();
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    now: () => 0,
+  });
+  assert.equal(scheduler.getView().nextCycleAt, null, 'nothing scheduled before start()');
+  scheduler.start();
+  await scheduler.settled();
+  assert.equal(scheduler.getView().nextCycleAt, new Date(20 * 60_000).toISOString());
+  scheduler.stop();
+  assert.equal(scheduler.getView().pendingReason, 'SCHEDULER_STOPPED');
+
+  // A restart is a fresh createScheduler() call against the same state path (a real process restart);
+  // its view starts clean and is rebuilt from the very next tick, not from anything the old instance
+  // remembered in memory.
+  const restarted = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    now: () => 0,
+  });
+  assert.equal(restarted.getView().nextCycleAt, null);
+  restarted.start();
+  await restarted.settled();
+  assert.equal(restarted.getView().nextCycleAt, new Date(20 * 60_000).toISOString());
+  restarted.stop();
+});
+
+test('a manual triggerTick() updates getView() without scheduling a follow-up timer', async () => {
+  const worker = fakeWorker({ runOnce: async () => ({ status: 'WAITING_FOR_PROCESS_BUDGET', cycleId: null, stage: null, requiredProcessUsdg: '5000000' }) });
+  const reader = stateReaderFrom([configuration({ paused: false, liveMode: false })]);
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    now: () => 0,
+  });
+
+  await scheduler.triggerTick();
+
+  assert.equal(scheduler.getView().pendingReason, 'INSUFFICIENT_FUNDS');
 });
 
 test('a missing operator state file is reported distinctly from a corrupt one, and still reschedules safely', async () => {
