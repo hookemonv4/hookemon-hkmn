@@ -295,10 +295,18 @@ test('a long-running effect does not hold the audit queue for a successor comman
   }));
 
   try {
-    await Promise.race([
-      secondStartedSignal.promise,
-      new Promise(resolve => setTimeout(resolve, 250)),
-    ]);
+    let deadlockTimer;
+    const deadlockGuard = new Promise((resolve, reject) => {
+      deadlockTimer = setTimeout(
+        () => reject(new Error('deadlock: successor effect did not start while predecessor effect was still pending')),
+        5000,
+      );
+    });
+    try {
+      await Promise.race([secondStartedSignal.promise, deadlockGuard]);
+    } finally {
+      clearTimeout(deadlockTimer);
+    }
     assert.equal(secondStarted, true);
   } finally {
     releaseFirst.resolve();
