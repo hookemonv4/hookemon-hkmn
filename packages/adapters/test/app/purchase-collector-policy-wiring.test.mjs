@@ -134,13 +134,22 @@ function moneyConfiguration() {
   };
 }
 
-function config({ fixtureBinding = null, legacyPolicy = undefined } = {}) {
+function config({ fixtureBinding = null, legacyPolicy = undefined, blockhashHeights = null } = {}) {
   return {
     execution: { profile: 'rehearsal', providerMode: 'live' },
     rehearsal: { mode: 'collector-only', proceedsAccount: PROCEEDS_ACCOUNT, payoutRecipients: [RECIPIENT] },
     accounts: { solana: OPERATOR_ADDRESS, evm: null },
     pack: { code: PACK_TYPE },
-    solana: { chainId: CHAIN_ID, blockhashContextResolver: async blockhash => ({ blockhash, lastValidBlockHeight: String(LAST_VALID_BLOCK_HEIGHT) }) },
+    solana: {
+      chainId: CHAIN_ID,
+      // Per-candidate lookup so a positive fixture with two independently pinned blockhash/height
+      // pairs (one per pack) decodes each candidate against its own actual chain state, not a
+      // single fixed height shared by every pack.
+      blockhashContextResolver: async blockhash => ({
+        blockhash,
+        lastValidBlockHeight: String(blockhashHeights?.[blockhash] ?? LAST_VALID_BLOCK_HEIGHT),
+      }),
+    },
     collectorCrypt: {
       settlementAsset: settlementAsset(),
       packPrice: { ...settlementAsset(), amountAtomic: PACK_PRICE_ATOMIC },
@@ -154,13 +163,13 @@ function config({ fixtureBinding = null, legacyPolicy = undefined } = {}) {
   };
 }
 
-function requestFor(quantity) {
+function requestFor(quantity, unitPurchaseOverride = null) {
   return {
     provider: 'collector-crypt',
     operation: 'purchase',
     playerAddress: OPERATOR_ADDRESS,
     quantity,
-    unitPurchase: { ...settlementAsset(), amountAtomic: PACK_PRICE_ATOMIC },
+    unitPurchase: unitPurchaseOverride ?? { ...settlementAsset(), amountAtomic: PACK_PRICE_ATOMIC },
     aggregatePurchase: { ...settlementAsset(), amountAtomic: (BigInt(PACK_PRICE_ATOMIC) * BigInt(quantity)).toString() },
     expectedCardCountPerPack: 1,
   };
@@ -188,6 +197,10 @@ function repository() {
   };
 }
 
+function noIntentOrBatchRecorded(repo) {
+  return Object.keys(repo.intentState).length === 0 && Object.keys(repo.batchState).length === 0;
+}
+
 function jsonRpc(result, id = 1) {
   return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id, result }) };
 }
@@ -204,7 +217,10 @@ function tokenAccountResponse() {
   };
 }
 
-function rpcClient() {
+function rpcClient({
+  blockhashSequence = [{ blockhash: FIXED_BLOCKHASH, lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT }],
+  latestBlockhashSpy = { calls: 0 },
+} = {}) {
   return createSolanaRpcClient({
     fetchImpl: async (_url, init) => {
       const body = JSON.parse(init.body);
@@ -213,7 +229,13 @@ function rpcClient() {
       if (body.method === 'isBlockhashValid') return jsonRpc({ value: true }, body.id);
       if (body.method === 'getBlockHeight') return jsonRpc(CURRENT_BLOCK_HEIGHT, body.id);
       if (body.method === 'getLatestBlockhash') {
-        return jsonRpc({ value: { blockhash: FIXED_BLOCKHASH, lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT } }, body.id);
+        // Consumed only by mutatePurchase's own per-pack fresh-context read (never by decode,
+        // which is wired through config.solana.blockhashContextResolver instead), so each call
+        // proves one independent read immediately before that pack's policy/decode.
+        const index = Math.min(latestBlockhashSpy.calls, blockhashSequence.length - 1);
+        latestBlockhashSpy.calls += 1;
+        const pair = blockhashSequence[index];
+        return jsonRpc({ value: { blockhash: pair.blockhash, lastValidBlockHeight: pair.lastValidBlockHeight } }, body.id);
       }
       throw new Error(`unexpected RPC method ${body.method}`);
     },
@@ -279,28 +301,56 @@ function signerClientFixture(signSpy) {
 const PACK_MEMO_0 = 'purchase-cycle2-pack-0';
 const PACK_MEMO_1 = 'purchase-cycle2-pack-1';
 
-function baseArgs({ collectorCrypt, signSpy, cfg = config({ fixtureBinding: FIXTURE_BINDING }), cycleId = 'cycle-n2', quantity = 1 }) {
+function baseArgs({
+  collectorCrypt,
+  signSpy,
+  cfg = config({ fixtureBinding: FIXTURE_BINDING }),
+  cycleId = 'cycle-n2',
+  quantity = 1,
+  repo = repository(),
+  blockhashSequence,
+  latestBlockhashSpy,
+  unitPurchaseOverride = null,
+}) {
   return {
     liveMode: true,
-    adapters: { collectorCrypt, solana: { client: rpcClient() } },
+    adapters: { collectorCrypt, solana: { client: rpcClient({ blockhashSequence, latestBlockhashSpy }) } },
     signerClient: signerClientFixture(signSpy),
     config: cfg,
-    cycleRepository: repository(),
+    cycleRepository: repo,
     context: { cycleId, requestDigest: REQUEST_DIGEST },
-    request: requestFor(quantity),
+    request: requestFor(quantity, unitPurchaseOverride),
   };
 }
 
 // --- positive: N=2 --------------------------------------------------------------------------
 
 test('N=2: one generation call, two distinct memo-bound policies, exactly two signs and two submits, no other transport', async () => {
+  // Two independently pinned blockhash/height pairs -- one per pack -- so this test proves each
+  // durably recorded pack gets its own fresh context read immediately before its own policy and
+  // decode, not one context inferred for the whole batch.
+  const BLOCKHASH_PACK_0 = Keypair.generate().publicKey.toBase58();
+  const BLOCKHASH_PACK_1 = Keypair.generate().publicKey.toBase58();
+  const blockhashSequence = [
+    { blockhash: BLOCKHASH_PACK_0, lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT },
+    { blockhash: BLOCKHASH_PACK_1, lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT + 1000 },
+  ];
+  const cfg = config({
+    fixtureBinding: FIXTURE_BINDING,
+    blockhashHeights: {
+      [BLOCKHASH_PACK_0]: LAST_VALID_BLOCK_HEIGHT,
+      [BLOCKHASH_PACK_1]: LAST_VALID_BLOCK_HEIGHT + 1000,
+    },
+  });
   const packs = [
-    { memo: PACK_MEMO_0, transaction: buildCandidateTransaction({ memoValue: PACK_MEMO_0 }) },
-    { memo: PACK_MEMO_1, transaction: buildCandidateTransaction({ memoValue: PACK_MEMO_1 }) },
+    { memo: PACK_MEMO_0, transaction: buildCandidateTransaction({ memoValue: PACK_MEMO_0, blockhash: BLOCKHASH_PACK_0 }) },
+    { memo: PACK_MEMO_1, transaction: buildCandidateTransaction({ memoValue: PACK_MEMO_1, blockhash: BLOCKHASH_PACK_1 }) },
   ];
   let generateCalls = 0;
   const submitSpy = { calls: 0 };
   const signSpy = { calls: 0 };
+  const latestBlockhashSpy = { calls: 0 };
+  const repo = repository();
   const collectorCrypt = {
     async generateYoloPacks({ quantity }) {
       generateCalls += 1;
@@ -313,12 +363,16 @@ test('N=2: one generation call, two distinct memo-bound policies, exactly two si
     },
   };
 
-  const evidence = await mutatePurchase(baseArgs({ collectorCrypt, signSpy, quantity: 2 }));
+  const evidence = await mutatePurchase(baseArgs({
+    collectorCrypt, signSpy, cfg, quantity: 2, repo, blockhashSequence, latestBlockhashSpy,
+  }));
 
   assert.deepEqual(evidence, { quantity: 2, expectedCardCountPerPack: 1 });
   assert.equal(generateCalls, 1, 'purchase must call generateYoloPacks exactly once for the whole batch');
   assert.equal(signSpy.calls, 2, 'purchase must sign each of the two packs exactly once');
   assert.equal(submitSpy.calls, 2, 'purchase must submit each of the two signed packs exactly once');
+  assert.equal(latestBlockhashSpy.calls, 2, 'purchase must read one fresh blockhash context per durably recorded pack');
+  assert.equal(Object.keys(repo.intentState).length, 1, 'purchase must durably record exactly one batch intent');
 });
 
 // --- negative: missing binding/policy -------------------------------------------------------
@@ -326,17 +380,19 @@ test('N=2: one generation call, two distinct memo-bound policies, exactly two si
 test('missing binding/policy: neither a fixture binding nor a legacy policy refuses before generation, sign, or submit', async () => {
   let generateCalls = 0;
   const signSpy = { calls: 0 };
+  const repo = repository();
   const collectorCrypt = {
     async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
     async submitTransaction() { throw new Error('must not be called'); },
   };
 
   await assert.rejects(
-    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config() })),
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config(), repo })),
     /Collector purchase requires a pinned transaction policy/,
   );
   assert.equal(generateCalls, 0);
   assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
 });
 
 // --- negative: bad binding digest/settlement identity ----------------------------------------
@@ -344,6 +400,7 @@ test('missing binding/policy: neither a fixture binding nor a legacy policy refu
 test('bad binding digest: a fixture binding whose bytes do not match its expected digest refuses before generation, sign, or submit', async () => {
   let generateCalls = 0;
   const signSpy = { calls: 0 };
+  const repo = repository();
   const collectorCrypt = {
     async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
     async submitTransaction() { throw new Error('must not be called'); },
@@ -351,16 +408,18 @@ test('bad binding digest: a fixture binding whose bytes do not match its expecte
   const badFixture = { binding: RAW_BINDING, expectedDigest: `sha256:${'0'.repeat(64)}` };
 
   await assert.rejects(
-    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config({ fixtureBinding: badFixture }) })),
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config({ fixtureBinding: badFixture }), repo })),
     /digest does not match/,
   );
   assert.equal(generateCalls, 0);
   assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
 });
 
 test('bad binding settlement identity: a fixture binding whose settlement mint disagrees with the configured settlement asset refuses before generation', async () => {
   let generateCalls = 0;
   const signSpy = { calls: 0 };
+  const repo = repository();
   const collectorCrypt = {
     async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
     async submitTransaction() { throw new Error('must not be called'); },
@@ -370,11 +429,86 @@ test('bad binding settlement identity: a fixture binding whose settlement mint d
   const fixture = { binding, expectedDigest: digest(binding) };
 
   await assert.rejects(
-    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config({ fixtureBinding: fixture }) })),
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config({ fixtureBinding: fixture }), repo })),
     /settlement mint does not match/,
   );
   assert.equal(generateCalls, 0);
   assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
+});
+
+test('unknown fixture wrapper field: a fixture wrapper with an extra key beyond binding/expectedDigest refuses before generation', async () => {
+  let generateCalls = 0;
+  const signSpy = { calls: 0 };
+  const repo = repository();
+  const collectorCrypt = {
+    async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
+    async submitTransaction() { throw new Error('must not be called'); },
+  };
+  const fixtureWithExtraField = { binding: RAW_BINDING, expectedDigest: digest(RAW_BINDING), extra: 'unexpected' };
+
+  await assert.rejects(
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config({ fixtureBinding: fixtureWithExtraField }), repo })),
+    /must supply exactly binding and expectedDigest/,
+  );
+  assert.equal(generateCalls, 0);
+  assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
+});
+
+test('wrong unit asset: an admitted unitPurchase whose asset identity disagrees with the configured settlement asset refuses before generation', async () => {
+  let generateCalls = 0;
+  const signSpy = { calls: 0 };
+  const repo = repository();
+  const collectorCrypt = {
+    async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); },
+    async submitTransaction() { throw new Error('must not be called'); },
+  };
+  const wrongUnitPurchase = { chainId: CHAIN_ID, assetId: Keypair.generate().publicKey.toBase58(), decimals: CIRCLE_USD_DECIMALS, amountAtomic: PACK_PRICE_ATOMIC };
+
+  await assert.rejects(
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, repo, unitPurchaseOverride: wrongUnitPurchase })),
+    /admitted unitPurchase asset does not match the configured settlement asset/,
+  );
+  assert.equal(generateCalls, 0);
+  assert.equal(signSpy.calls, 0);
+  assert.ok(noIntentOrBatchRecorded(repo), 'refusal must leave zero durable intent and zero durable batch');
+});
+
+test('provider-callback mutation cannot splice a different binding/digest into an already-validated fixture', async () => {
+  // A mutable (unfrozen) fixture, distinct from the shared frozen FIXTURE_BINDING, so the
+  // provider callback below can mutate it in place during the generateYoloPacks await -- after
+  // mutatePurchase has already validated it and captured its own immutable trusted snapshot.
+  const mutableBinding = structuredClone(RAW_BINDING);
+  const mutableFixture = { binding: mutableBinding, expectedDigest: digest(mutableBinding) };
+  const hijackDestination = Keypair.generate();
+  const packs = [{
+    memo: PACK_MEMO_0,
+    transaction: buildCandidateTransaction({ memoValue: PACK_MEMO_0, destinationKey: hijackDestination.publicKey }),
+  }];
+  let generateCalls = 0;
+  const submitSpy = { calls: 0 };
+  const signSpy = { calls: 0 };
+  const collectorCrypt = {
+    async generateYoloPacks({ quantity }) {
+      generateCalls += 1;
+      assert.equal(quantity, 1);
+      // Splice attempt: rewrite the raw fixture's binding destination and expected digest, during
+      // the await, to describe a binding that matches this call's own (hijacked) candidate.
+      mutableFixture.binding.settlement.destination = hijackDestination.publicKey.toBase58();
+      mutableFixture.expectedDigest = digest(mutableFixture.binding);
+      return { packs };
+    },
+    async submitTransaction() { submitSpy.calls += 1; throw new Error('must not be called'); },
+  };
+
+  await assert.rejects(
+    () => mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg: config({ fixtureBinding: mutableFixture }) })),
+    TransactionPolicyError,
+  );
+  assert.equal(generateCalls, 1, 'the binding was valid at preflight, so generation still proceeds');
+  assert.equal(signSpy.calls, 0);
+  assert.equal(submitSpy.calls, 0);
 });
 
 // --- negative: candidate mismatches (generation already happened; refuse before sign/submit) --
