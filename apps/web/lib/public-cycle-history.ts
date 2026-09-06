@@ -75,6 +75,10 @@ function readPublicCycleHistory(
     if (!itemOrderDescends(items[index - 1], items[index])) invalid();
   }
   if (!source.historyComplete && (items.length !== 0 || source.nextCursor !== null)) invalid();
+  // The producer's own all-or-nothing rule: a source set missing even one cycle's verified
+  // terminalAtMs fails the WHOLE page closed (historyComplete:false, items:[]) rather than
+  // ordering the reachable subset -- a null terminalAt can never coexist with historyComplete:true.
+  if (source.historyComplete && items.some((item) => item.terminalAt === null)) invalid();
   return {
     schemaVersion: 1,
     profile: selected.id,
@@ -88,7 +92,10 @@ function readPublicCycleHistory(
 }
 
 function itemOrderDescends(previous: PublicCycleHistoryItem, current: PublicCycleHistoryItem): boolean {
-  if (previous.terminalAt === null || current.terminalAt === null) return true;
+  // A null terminalAt is never orderable against a neighbor -- historyComplete:true guarantees
+  // every item already has a real terminalAt (enforced above), so reaching a null here means the
+  // response is already invalid, not merely unorderable.
+  if (previous.terminalAt === null || current.terminalAt === null) return false;
   const previousMs = Date.parse(previous.terminalAt);
   const currentMs = Date.parse(current.terminalAt);
   if (previousMs !== currentMs) return previousMs > currentMs;

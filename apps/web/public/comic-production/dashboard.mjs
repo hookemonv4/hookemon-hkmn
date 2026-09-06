@@ -207,8 +207,11 @@ export const MAX_HISTORY_PAGE_SIZE = 20;
 const historyItemShape = record({
   cycleId: text, status: text, terminalAt: nullable(timestamp), updatedAt: nullable(timestamp),
 });
+// A null terminalAt is never orderable against a neighbor -- historyComplete:true guarantees every
+// item already has a real terminalAt (enforced below), so reaching a null here means the response
+// is already invalid, not merely unorderable.
 const historyItemOrderDescends = (previous, current) => {
-  if (previous.terminalAt === null || current.terminalAt === null) return true;
+  if (previous.terminalAt === null || current.terminalAt === null) return false;
   const previousMs = Date.parse(previous.terminalAt), currentMs = Date.parse(current.terminalAt);
   return previousMs !== currentMs ? previousMs > currentMs : previous.cycleId.localeCompare(current.cycleId) < 0;
 };
@@ -226,6 +229,10 @@ function readCycleHistoryShape(value) {
     if (!historyItemOrderDescends(value.items[index - 1], value.items[index])) return false;
   }
   if (!value.historyComplete && (value.items.length !== 0 || value.nextCursor !== null)) return false;
+  // The producer's own all-or-nothing rule: a source set missing even one cycle's verified
+  // terminalAtMs fails the WHOLE page closed (historyComplete:false, items:[]) rather than
+  // ordering the reachable subset -- a null terminalAt can never coexist with historyComplete:true.
+  if (value.historyComplete && value.items.some((item) => item.terminalAt === null)) return false;
   return true;
 }
 export function normalizePublicCycleHistory(value, expectedProfile) {

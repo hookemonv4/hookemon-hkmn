@@ -401,10 +401,12 @@ test('standalone dashboard.mjs normalizePublicCycleHistory accepts a real page a
   const incompleteEmpty = historyPage({ historyComplete: false, items: [], nextCursor: null });
   assert.deepEqual(normalizePublicCycleHistory(incompleteEmpty), incompleteEmpty);
 
-  const pendingTerminal = historyPage({
+  // historyComplete: true can never coexist with a null terminalAt anywhere in items -- the
+  // producer's own all-or-nothing rule fails the whole page closed instead.
+  const fakeComplete = historyPage({
     items: [{ cycleId: 'cycle-3', status: 'awaiting-terminal-timestamp', terminalAt: null, updatedAt: null }],
   });
-  assert.equal(normalizePublicCycleHistory(pendingTerminal).items[0].terminalAt, null);
+  assert.throws(() => normalizePublicCycleHistory(fakeComplete), /PUBLIC_CYCLE_HISTORY_INVALID/);
 });
 
 test('presentCard never shows a not-yet-finalized card event as if it had proceeds', () => {

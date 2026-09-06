@@ -166,13 +166,13 @@ test("normalizePublicCycleHistory rejects out-of-order items, an incomplete page
   assert.deepEqual(normalizePublicCycleHistory(incompleteEmpty, "testnet"), incompleteEmpty);
 
   // A missing terminalAtMs anywhere in the source set fails the whole page closed upstream
-  // (items: []) rather than reordering the reachable subset; the client-side validator only needs
-  // to accept that honest empty/incomplete shape, not synthesize an order for a null terminalAt.
-  const pendingTerminal = historyPage({
+  // (items: [], historyComplete: false) rather than reordering the reachable subset --
+  // historyComplete: true can never coexist with a null terminalAt anywhere in items, even a
+  // single-item page with nothing to compare it against.
+  const fakeComplete = historyPage({
     items: [{ cycleId: "cycle-3", status: "awaiting-terminal-timestamp", terminalAt: null, updatedAt: null }],
   });
-  const result = normalizePublicCycleHistory(pendingTerminal, "testnet");
-  assert.equal(result.items[0].terminalAt, null);
+  assert.throws(() => normalizePublicCycleHistory(fakeComplete, "testnet"), /PUBLIC_CYCLE_HISTORY_INVALID/);
 });
 
 test("normalizePublicCycleHistory rejects a mismatched profile and an unknown field", () => {
