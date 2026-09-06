@@ -36,7 +36,7 @@ Use the same attempt record for dry-run and preflight. Create the record explici
 
 ```sh
 node scripts/programmable/preflight.mjs \
-  --repository-url https://github.com/hookemonv4/hookemon-hkmn \
+  --repository-url "$(git remote get-url origin)" \
   --source-commit "$(git rev-parse HEAD)" \
   --source-tree "$(git rev-parse HEAD^{tree})" \
   --launch-attempt /private/tmp/hookemon-launch-attempt.json \
@@ -44,7 +44,7 @@ node scripts/programmable/preflight.mjs \
   --dry-run
 
 node scripts/programmable/preflight.mjs \
-  --repository-url https://github.com/hookemonv4/hookemon-hkmn \
+  --repository-url "$(git remote get-url origin)" \
   --source-commit "$(git rev-parse HEAD)" \
   --source-tree "$(git rev-parse HEAD^{tree})" \
   --launch-attempt /private/tmp/hookemon-launch-attempt.json

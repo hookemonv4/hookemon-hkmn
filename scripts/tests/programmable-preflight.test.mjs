@@ -122,7 +122,7 @@ function gitObject(expression) {
 
 function sourceFixture() {
   return {
-    repositoryUrl: 'https://github.com/hookemonv4/hookemon-hkmn',
+    repositoryUrl: 'https://example.invalid/example-org/example-repo',
     sourceCommit: gitObject('HEAD'),
     sourceTree: gitObject('HEAD^{tree}'),
   };
@@ -207,7 +207,7 @@ test('persists one random provider nonce and the canonical request bytes', (t) =
   t.after(() => rmSync(directory, { recursive: true, force: true }));
 
   const source = {
-    repositoryUrl: 'https://github.com/hookemonv4/hookemon-hkmn',
+    repositoryUrl: 'https://example.invalid/example-org/example-repo',
     sourceCommit: 'a'.repeat(40),
     sourceTree: 'b'.repeat(40),
   };

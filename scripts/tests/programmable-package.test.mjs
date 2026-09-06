@@ -447,7 +447,7 @@ test('requires source-bundle bytes to match the claimed source commit', () => {
 test('builds directory coverage from the claimed Git tree instead of dirty worktree bytes', (t) => {
   const directory = mkdtempSync(resolve(tmpdir(), 'programmable-source-bundle-git-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const gitIdentity = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
+  const gitIdentity = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@localhost', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@localhost' };
   const git = (...args) => execFileSync('git', ['-C', directory, ...args], { encoding: 'utf8', env: { ...process.env, ...gitIdentity } });
 
   mkdirSync(resolve(directory, 'source'), { recursive: true });
@@ -579,7 +579,7 @@ test('derives the provider source-bundle digest from the RFC 8785 bytes and one 
   assert.equal(independentDigest, '0x3da229b662d2bbad06132b04738e036e53d864c1bec0755806f43c5a116a9062');
   assert.equal(sourceBundleDigest(manifest), independentDigest);
   const source = {
-    repositoryUrl: 'https://github.com/hookemonv4/hookemon-hkmn',
+    repositoryUrl: 'https://example.invalid/example-org/example-repo',
     sourceCommit: 'a'.repeat(40),
     sourceTree: 'b'.repeat(40),
   };

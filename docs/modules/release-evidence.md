@@ -47,8 +47,8 @@ node --test scripts/tests/phase3-bytecode-binding.test.mjs scripts/tests/phase3-
 node scripts/programmable/verify-launch-package.mjs --allow-unverified
 node scripts/verify-deployment-manifest.mjs
 node scripts/verify-release-package-closure.mjs
-node scripts/programmable/preflight.mjs --repository-url https://github.com/hookemonv4/hookemon-hkmn --source-commit "$(git rev-parse HEAD)" --source-tree "$(git rev-parse HEAD^{tree})" --launch-attempt /private/tmp/hookemon-launch-attempt.json --new-launch-attempt --dry-run
-node scripts/programmable/preflight.mjs --repository-url https://github.com/hookemonv4/hookemon-hkmn --source-commit "$(git rev-parse HEAD)" --source-tree "$(git rev-parse HEAD^{tree})" --launch-attempt /private/tmp/hookemon-launch-attempt.json
+node scripts/programmable/preflight.mjs --repository-url "$(git remote get-url origin)" --source-commit "$(git rev-parse HEAD)" --source-tree "$(git rev-parse HEAD^{tree})" --launch-attempt /private/tmp/hookemon-launch-attempt.json --new-launch-attempt --dry-run
+node scripts/programmable/preflight.mjs --repository-url "$(git remote get-url origin)" --source-commit "$(git rev-parse HEAD)" --source-tree "$(git rev-parse HEAD^{tree})" --launch-attempt /private/tmp/hookemon-launch-attempt.json
 node scripts/programmable/preflight.mjs --status <requestId>
 node --test scripts/tests/programmable-preflight.test.mjs scripts/tests/programmable-package.test.mjs
 FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/contracts --match-path 'test/release/PhaseThreeReleasePlan.t.sol' -vv

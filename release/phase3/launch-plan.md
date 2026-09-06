@@ -55,7 +55,7 @@ Before either wallet action, run:
 
 ```sh
 node scripts/programmable/preflight.mjs \
-  --repository-url https://github.com/hookemonv4/hookemon-hkmn \
+  --repository-url "$(git remote get-url origin)" \
   --source-commit "$(git rev-parse HEAD)" \
   --source-tree "$(git rev-parse HEAD^{tree})"
 ```

@@ -35,7 +35,7 @@ the exact shortfall of the currently selected (stale) package.
 | `0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729` | Robinhood mainnet (4663) | launch authority, treasury beneficiary, metadata owner, seed payer/refund | `0` wei ETH | `446004` atomic USDG = `0.446004` USDG |
 | `0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384` | Robinhood mainnet (4663) | operations wallet, bounded process-claim recipient, bridge principal payer | `0` wei ETH | `0` atomic USDG |
 | `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` | Robinhood mainnet (4663) | immutable Programmable fee beneficiary | `0` wei ETH | `0` atomic USDG | not an owner-funded operating wallet; excluded from top-up rows |
-| `BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE` | Solana mainnet-beta | Collector Crypt operator (buy/open/sell, return-leg custody) | `19920066` lamports = `0.019920066` SOL | `0` — no USDC associated token account exists yet for mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
+| `BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE` | Solana mainnet-beta | Collector Crypt operator (buy/open/sell, return-leg custody) | `19920066` lamports = `0.019920066` SOL | `0` — no USD Coin associated token account exists yet for mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
 
 Robinhood `eth_gasPrice` at the pinned block was `419666000` wei (`0.419666` gwei); base fee
 `417376000` wei. Both EVM wallets need native ETH top-up before any transaction — a `0` balance
@@ -52,11 +52,11 @@ the quote's own USD value where one was returned, and are otherwise left `null` 
 | Item | Wallet | Asset | Raw amount required | Raw existing balance | Raw deficit | USD (quoted, snapshot time) | Kind |
 | --- | --- | --- | ---: | ---: | ---: | ---: | --- |
 | Canonical-market USDG seed (stale candidate `S = 240000000`) | Launch (`0xfc82…a729`) | USDG (6 dec) | `240000000` | `446004` | `239553996` | ≈ `$239.55` (USDG ≈ USD parity observed in the two-pack quote; not a fixed rate) | seed |
-| Two-pack process principal (EXACT_OUTPUT, `2×25` USDC to Solana operator) | Operations (`0xB54A…4384`) | USDG (6 dec) | `50309869` | `0` | `50309869` | `$50.299908` (Relay quote, `2026-09-05T23:03:23.375Z`) | process capital |
+| Two-pack process principal (EXACT_OUTPUT, `2×25` USD Coin to Solana operator) | Operations (`0xB54A…4384`) | USDG (6 dec) | `50309869` | `0` | `50309869` | `$50.299908` (Relay quote, `2026-09-05T23:03:23.375Z`) | process capital |
 | Bridge approval + deposit gas envelope (max, two-pack quote) | Operations | ETH (native) | `92321815544000` wei = `0.000092321815544` ETH | `0` | full amount | `null` — needs a timestamped ETH/USD quote at execution time | gas |
 | Programmable admission/launch, USDG-approval, seed-transaction, and factory/router gas | Launch | ETH (native) | `null` — bytecode/addresses unresolved (graph target addresses are not yet materialized) | `0` | `null` | `null` | gas |
 | Solana pack/open/sell/return message set (rent + fees) | Solana operator | SOL | `null` — only the single rent figure (`1855569` lamports) and one return-leg gas estimate (`19274` lamports) are priced; the full lifecycle is not simulated | `19920066` lamports | `null`, but at least `0` beyond the priced subset | `null` | gas + rent |
-| Solana USDC ATA creation (pack purchase leg), if not paid by the provider | Solana operator | SOL (rent) | `null` — unresolved whether Collector/Relay creates and pays for the missing ATA | n/a | `null` | `null` | rent |
+| Solana USD Coin ATA creation (pack purchase leg), if not paid by the provider | Solana operator | SOL (rent) | `null` — unresolved whether Collector/Relay creates and pays for the missing ATA | n/a | `null` | `null` | rent |
 
 ## 3. Cap conservation — units are not fungible, so no blended dollar total is asserted
 
@@ -110,8 +110,8 @@ What can be stated without inventing a number:
   USD value nor most of the gas items have a real quote, this headroom number is an upper bound on
   what's left for unpriced items, not a proof that they fit.
 - A one-pack-only first cycle would reduce the confirmed principal below $50.30, but the
-  one-pack `EXACT_INPUT` probe in `H-funding-observations.md` did not deliver a full 25-USDC pack
-  (`minimum 24212666` atomic USDC out); a fresh one-pack `EXACT_OUTPUT` quote is needed before that
+  one-pack `EXACT_INPUT` probe in `H-funding-observations.md` did not deliver a full 25 USD Coin pack
+  (`minimum 24212666` atomic USD Coin out); a fresh one-pack `EXACT_OUTPUT` quote is needed before that
   alternative has its own real number.
 - Any smaller-seed or fewer-pack candidate still needs items 3–5 of the "exact focused
   verification prerequisites" in `H-sol-prep.md` priced (deployable-bytecode gas, decoded provider
