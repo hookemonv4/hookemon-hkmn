@@ -49,11 +49,17 @@ function baseRequest(cycleId, { returnEvidence, returnDelta = usdg('0'), previou
   };
 }
 
-function fakePublicClient({ finalizedHash = FINALIZED_HASH, recheckHash = finalizedHash } = {}) {
+function fakePublicClient({ finalizedHash = FINALIZED_HASH, recheckHash = finalizedHash, calls = [] } = {}) {
   return {
     async getBlock({ blockTag, blockNumber } = {}) {
-      if (blockTag === 'finalized') return { number: FINALIZED_NUMBER, hash: finalizedHash, timestamp: 1_700_000_000n };
-      if (blockNumber === FINALIZED_NUMBER) return { number: FINALIZED_NUMBER, hash: recheckHash, timestamp: 1_700_000_001n };
+      if (blockTag === 'finalized') {
+        calls.push('finalized');
+        return { number: FINALIZED_NUMBER, hash: finalizedHash, timestamp: 1_700_000_000n };
+      }
+      if (blockNumber === FINALIZED_NUMBER) {
+        calls.push('recheck');
+        return { number: FINALIZED_NUMBER, hash: recheckHash, timestamp: 1_700_000_001n };
+      }
       throw new Error(`unexpected public block read ${String(blockTag ?? blockNumber)}`);
     },
   };
@@ -63,9 +69,11 @@ function fakeArchiveClient({
   value = 1_000_000n,
   blockNumber = FINALIZED_NUMBER,
   blockHash = FINALIZED_HASH,
+  calls = [],
 } = {}) {
   return {
     async readErc20BalanceAtBlock() {
+      calls.push('archive');
       return { value, blockNumber, blockHash };
     },
   };
@@ -301,6 +309,23 @@ test('reads the settled return delta plus carried predecessor dust, refusing to 
   assert.deepEqual(second, result);
   const stillUnconsumed = await repository.readPayoutDust(cycleId, { chainId: dustAmount.chainId, assetId: dustAmount.assetId, decimals: dustAmount.decimals });
   assert.equal(stillUnconsumed.source.cycleId, predecessorCycleId);
+});
+
+test('reads the finalized Operations USDG balance through the shared public/archive/public reader, never before the finalized head and never rechecking before the archive read', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const evidence = zeroProceedsEvidence(cycleId);
+  await completeReturnStage(repository, cycleId, evidence);
+
+  const calls = [];
+  const reader = createCycleAttributableFinalizedAvailableReader({
+    cycleRepository: repository,
+    publicClient: fakePublicClient({ calls }),
+    archiveClient: fakeArchiveClient({ calls }),
+  });
+  await reader(baseRequest(cycleId, { returnEvidence: evidence }));
+  assert.deepEqual(calls, ['finalized', 'archive', 'recheck']);
 });
 
 test('refuses a return stage with no completed evidence', async t => {

@@ -11,7 +11,8 @@
 // absence, or ambiguity rather than trusting the plan's own arithmetic.
 import { digest as canonicalDigest, canonicalJson } from '../../../runner/src/cycle/journal.mjs';
 import { createUsdgPayoutAmount, USDG_PAYOUT_CHAIN_ID, USDG_PAYOUT_DECIMALS } from '../../../runner/src/distribution/payout-plan.mjs';
-import { readBlockByNumber, readFinalizedBlock, ROBINHOOD_CHAIN_ID } from '../robinhood-rpc.mjs';
+import { ROBINHOOD_CHAIN_ID } from '../robinhood-rpc.mjs';
+import { createEvmCustodyBalanceObservationReader } from '../evm-custody-balance-observation.mjs';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const ATOMIC = /^(?:0|[1-9][0-9]*)$/;
@@ -194,34 +195,23 @@ async function reloadPreviousDust({ cycleRepository, cycleId, previousDust, prev
   }
 }
 
-/** Proves the Operations USDG balance at a finalized height using an archive read the public
- * client independently re-confirms at the same height, matching the public/archive/same-height-
- * public pattern already used for hook process-liability evidence (see stage-driver `claim-process`
- * and compose.mjs's `buildProcessLiabilityReader`). Never trusts a wallet-wide balance beyond the
- * exact attributed sum this cycle may spend. */
+/** Proves the Operations USDG balance at a finalized height through the dedicated EVM USDG
+ * `CustodyBalanceObservationV1` producer (evm-custody-balance-observation.mjs), which owns the
+ * public/archive/same-height-public read discipline. This function only pins the request identity
+ * and enforces the rule that reader deliberately never enforces itself: the observed wallet-wide
+ * balance is never distributable on its own, it must at least cover the exact cycle-attributed
+ * return-plus-dust sum. */
 async function reloadFinalizedOperationsUsdgBalance({ publicClient, archiveClient, usdgAddress, operations, attributedAtomic }) {
-  if (!publicClient) refuse('a public Robinhood RPC client is required for finalized balance evidence');
-  if (archiveClient === publicClient || !archiveClient || typeof archiveClient.readErc20BalanceAtBlock !== 'function') {
-    refuse('a distinct archive-capable historical evidence client is required for finalized balance evidence');
-  }
-  const finalized = await readFinalizedBlock(publicClient);
-  const observed = await archiveClient.readErc20BalanceAtBlock({
-    token: usdgAddress,
+  const observeBalance = createEvmCustodyBalanceObservationReader({ publicClient, archiveClient });
+  const observation = await observeBalance({
+    chainId: USDG_PAYOUT_CHAIN_ID,
+    assetId: usdgAddress,
+    decimals: USDG_PAYOUT_DECIMALS,
     account: operations,
-    blockNumber: finalized.number,
-    blockHash: finalized.hash,
   });
-  if (!observed || typeof observed.value !== 'bigint' || observed.value < 0n) {
-    refuse('the archive USDG balance read returned a malformed amount');
+  if (BigInt(observation.balance.amountAtomic) < attributedAtomic) {
+    refuse('the finalized Operations USDG balance is below the attributed return and dust');
   }
-  if (observed.blockNumber !== finalized.number || String(observed.blockHash).toLowerCase() !== finalized.hash.toLowerCase()) {
-    refuse('the archive USDG balance read did not bind the requested finalized block');
-  }
-  const recheck = await readBlockByNumber(publicClient, finalized.number);
-  if (String(recheck.hash).toLowerCase() !== finalized.hash.toLowerCase()) {
-    refuse('the public finalized block hash changed after the archive read');
-  }
-  if (observed.value < attributedAtomic) refuse('the finalized Operations USDG balance is below the attributed return and dust');
 }
 
 /**
