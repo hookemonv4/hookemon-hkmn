@@ -297,6 +297,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   if (forkProofNodeBlock !== null && forkProofNodeBlock !== canonicalNodeInstallBlock(pins)) {
     errors.push('fork-proof Node install block must match the canonical verified data flow');
   }
+  const forkProofPrNodeBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Node (fork-proof pull-request)', errors);
+  if (forkProofPrNodeBlock !== null && forkProofPrNodeBlock !== canonicalNodeInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Node install block must match the canonical verified data flow');
+  }
   const gitleaksBlock = workflowInstallRunBlock(workflow, 'Install pinned Gitleaks', errors);
   if (gitleaksBlock !== null && gitleaksBlock !== canonicalGitleaksInstallBlock(pins)) {
     errors.push('Gitleaks install block must match the canonical verified data flow');
@@ -308,6 +312,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   const forkProofFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof)', errors);
   if (forkProofFoundryBlock !== null && forkProofFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
     errors.push('fork-proof Foundry install block must match the canonical verified data flow');
+  }
+  const forkProofPrFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof pull-request)', errors);
+  if (forkProofPrFoundryBlock !== null && forkProofPrFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Foundry install block must match the canonical verified data flow');
   }
 }
 

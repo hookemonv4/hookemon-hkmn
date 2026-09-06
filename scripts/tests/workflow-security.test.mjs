@@ -115,34 +115,47 @@ test('CI runs the manifest-driven dashboard and contracts-js suites', () => {
   assert.match(workflow, /name: Verify the test manifest covers every test file\n\s+run: node scripts\/test-manifest\.mjs check/);
 });
 
-test('fork-proof runs only after a main push or a manual main dispatch and fails closed without its endpoint', () => {
+test('fork-proof runs the same read-only archive proof for a main push, a manual main dispatch, and a pull request head, and fails closed without its endpoint', () => {
   const forkProofPath = join(repoRoot, '.github', 'workflows', 'fork-proof.yml');
-  assert.equal(existsSync(forkProofPath), true, 'fork-proof must be a separate workflow so pull requests do not create a skipped job');
+  assert.equal(existsSync(forkProofPath), true, 'fork-proof must be a separate workflow so other pull requests do not create a skipped job');
   if (!existsSync(forkProofPath)) return;
   const forkProof = readFileSync(forkProofPath, 'utf8');
 
-  assert.deepEqual(workflowTriggerKeys(forkProof), ['push', 'workflow_dispatch']);
+  assert.deepEqual(workflowTriggerKeys(forkProof), ['push', 'pull_request', 'workflow_dispatch']);
   assert.match(forkProof, /^  push:\n    branches: \[main\]$/m);
-  assert.doesNotMatch(forkProof, /^  pull_request:/m);
+  assert.match(forkProof, /^  pull_request:$/m);
+  assert.doesNotMatch(forkProof, /pull_request_target/);
   assert.doesNotMatch(workflow, /^ {2}fork-proof:$/m);
-  assert.match(forkProof, /^  fork-proof:\n    environment: fork-proof$/m);
-  assert.doesNotMatch(forkProof, /^    if:/m, 'a non-main manual dispatch must fail instead of creating a skipped proof job');
+  assert.match(forkProof, /^permissions:\n  contents: read$/m);
+
+  assert.match(forkProof, /^  main:\n    name: fork-proof\n    if: github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\n    environment: fork-proof$/m);
   assert.match(forkProof, /name: Require main branch/);
   assert.match(forkProof, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/);
-  assert.match(forkProof, /name: Run the mandatory archive fork proof/);
-  assert.match(forkProof, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
-  assert.match(forkProof, /ROBINHOOD_FORK_PINNED: 'true'/);
-  assert.match(forkProof, /if \[\[ -z "\$\{ROBINHOOD_FORK_RPC_URL:-\}" \]\]; then\n\s+echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof\." >&2\n\s+exit 1/);
-  assert.match(
-    forkProof,
-    /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts -vv --match-path 'test\/integration\/RobinhoodV4ArchiveFork\.t\.sol'/,
-  );
-  assert.match(forkProof, /node scripts\/verify-fork-pin\.mjs/);
-  assert.ok(
-    forkProof.indexOf('node scripts/verify-fork-pin.mjs')
-      < forkProof.indexOf("forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'"),
-    'the archive pin must validate before Forge contacts the fork endpoint',
-  );
+
+  assert.match(forkProof, /^  pull-request:\n    name: fork-proof\n    if: github\.event_name == 'pull_request'\n    environment: fork-proof$/m);
+  assert.match(forkProof, /name: Require an exact PR head SHA/);
+  assert.match(forkProof, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(forkProof, /\[\[ "\$PR_HEAD_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(forkProof, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/, 'the PR job must prove the exact head, not a synthetic merge ref');
+
+  const jobBodies = forkProof.split(/^  (?=main:|pull-request:)/m).filter(body => /^(?:main|pull-request):/.test(body));
+  assert.equal(jobBodies.length, 2, 'fork-proof must define exactly the main and pull-request jobs');
+  for (const body of jobBodies) {
+    assert.match(body, /name: Run the mandatory archive fork proof/);
+    assert.match(body, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
+    assert.match(body, /ROBINHOOD_FORK_PINNED: 'true'/);
+    assert.match(body, /if \[\[ -z "\$\{ROBINHOOD_FORK_RPC_URL:-\}" \]\]; then\n\s+echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof\." >&2\n\s+exit 1/);
+    assert.match(
+      body,
+      /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts -vv --match-path 'test\/integration\/RobinhoodV4ArchiveFork\.t\.sol'/,
+    );
+    assert.match(body, /node scripts\/verify-fork-pin\.mjs/);
+    assert.ok(
+      body.indexOf('node scripts/verify-fork-pin.mjs')
+        < body.indexOf("forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'"),
+      'the archive pin must validate before Forge contacts the fork endpoint',
+    );
+  }
   assert.doesNotMatch(forkProof, /--ffi|EVENT_NAME|skipping the archive fork proof|continue-on-error/);
 });
 

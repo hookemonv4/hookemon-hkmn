@@ -329,6 +329,7 @@ test('verifies the exact runtime executable for the selected platform distributi
       { workflow: '.github/workflows/control-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-pin-canary.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },

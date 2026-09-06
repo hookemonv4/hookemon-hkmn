@@ -44,6 +44,10 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/fork-proof.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/identity-gate.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
