@@ -41,7 +41,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '1db099363c61964ddddba8c87c6f2b8d5ae70fd49370aa91d58f3843c1195b0a';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '45749a1721788195a2a457eeb4596b05b227bb3d5632075a4d37eac3112ed3c8';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '09cb482c0eaf071c57a03ab007d3baab62ed1907d74633881a133f46c9caee49';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -145,6 +145,40 @@ condition = "AND"
 paths = ['''(?:^|/)docs/modules/collector-crypt-adapter\.md$''']
 regexTarget = "secret"
 regexes = ['''^COLLECTOR_CRYPT_LIVE_SMOKE=1$''']
+
+[[rules.allowlists]]
+description = "Public Solana address-lookup-table key repeated across Solana transaction test fixtures misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)packages/adapters/test/fixtures/transactions/solana-context\.json$''',
+  '''(?:^|/)packages/adapters/test/fixtures/transactions/solana-v0-alt-wrong-resolution\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf$''']
+
+[[rules.allowlists]]
+description = "Public Solana token account identifier in the Solana transaction-context test fixture misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/fixtures/transactions/solana-context\.json$''']
+regexTarget = "secret"
+regexes = ['''^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse$''']
+
+[[rules.allowlists]]
+description = "Public Robinhood token contract address (lowercase form) test default misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''']
+regexTarget = "secret"
+regexes = ['''^0x5fc5360d0400a0fd4f2af552add042d716f1d168$''']
+
+[[rules.allowlists]]
+description = "Public Robinhood token contract address (checksummed form) in release Phase 3 launch inputs and graph draft misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)release/phase3/launch-inputs\.json$''',
+  '''(?:^|/)release/phase3/package/graph-draft\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168$''']
 `;
 
 function normalizeNodeVersion(version) {

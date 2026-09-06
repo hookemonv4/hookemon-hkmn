@@ -22,7 +22,7 @@
     },
     "workflow": {
       "path": ".github/workflows/v4-gates.yml",
-      "sha256": "1db099363c61964ddddba8c87c6f2b8d5ae70fd49370aa91d58f3843c1195b0a"
+      "sha256": "45749a1721788195a2a457eeb4596b05b227bb3d5632075a4d37eac3112ed3c8"
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
@@ -71,11 +71,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "8d23b73122dd2da9dca6ed0d76035d8ab8e0a9e6a545328ac4ad6d8385d352f3",
+      "sha256": "a46c81a9b55ffe14352acde7eb33853896af6ea6a77b2c4f2d21914fc32bb4c7",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "8d23b73122dd2da9dca6ed0d76035d8ab8e0a9e6a545328ac4ad6d8385d352f3"
+          "sha256": "a46c81a9b55ffe14352acde7eb33853896af6ea6a77b2c4f2d21914fc32bb4c7"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -114,7 +114,7 @@
       "version": "8.30.1",
       "config": {
         "path": ".gitleaks.toml",
-        "sha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029"
+        "sha256": "bd9a27202141d885852a67fa4f37aee06aaa3101909eee9ec8b9e07078a634c7"
       },
       "distributions": {
         "linux-x64": {

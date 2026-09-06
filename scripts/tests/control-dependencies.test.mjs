@@ -110,6 +110,40 @@ condition = "AND"
 paths = ['''(?:^|/)docs/modules/collector-crypt-adapter\.md$''']
 regexTarget = "secret"
 regexes = ['''^COLLECTOR_CRYPT_LIVE_SMOKE=1$''']
+
+[[rules.allowlists]]
+description = "Public Solana address-lookup-table key repeated across Solana transaction test fixtures misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)packages/adapters/test/fixtures/transactions/solana-context\.json$''',
+  '''(?:^|/)packages/adapters/test/fixtures/transactions/solana-v0-alt-wrong-resolution\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf$''']
+
+[[rules.allowlists]]
+description = "Public Solana token account identifier in the Solana transaction-context test fixture misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/fixtures/transactions/solana-context\.json$''']
+regexTarget = "secret"
+regexes = ['''^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse$''']
+
+[[rules.allowlists]]
+description = "Public Robinhood token contract address (lowercase form) test default misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''']
+regexTarget = "secret"
+regexes = ['''^0x5fc5360d0400a0fd4f2af552add042d716f1d168$''']
+
+[[rules.allowlists]]
+description = "Public Robinhood token contract address (checksummed form) in release Phase 3 launch inputs and graph draft misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)release/phase3/launch-inputs\.json$''',
+  '''(?:^|/)release/phase3/package/graph-draft\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168$''']
 `;
 const GITLEAKS_CONFIG_SHA256 = sha256(GITLEAKS_CONFIG);
 const CANONICAL_WORKFLOW = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'v4-gates.yml'), 'utf8');

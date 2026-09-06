@@ -363,8 +363,8 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   ];
 
   assert.equal((gitleaksConfig.match(/^\[\[rules\]\]$/gm) ?? []).length, 1);
-  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 5);
-  assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 3);
+  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 9);
+  assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 7);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/collector-crypt\/pack-status\\\.json/);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/robinhood-rpc\\\.test\\\.mjs/);
   assert.match(gitleaksConfig, /docs\/modules\/collector-crypt-adapter\\\.md/);
@@ -378,6 +378,14 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   assert.doesNotMatch(gitleaksConfig, /r-\d{5}\|r-/);
   assert.match(gitleaksConfig, /feasibility\/model\\\.mjs/);
   assert.match(gitleaksConfig, /tokenOrder: usdgIsCurrency0/);
+  assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/transactions\/solana-context\\\.json/);
+  assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/transactions\/solana-v0-alt-wrong-resolution\\\.json/);
+  assert.match(gitleaksConfig, /packages\/adapters\/test\/app\/return\\\.test\\\.mjs/);
+  assert.match(gitleaksConfig, /release\/phase3\/launch-inputs\\\.json/);
+  assert.match(gitleaksConfig, /release\/phase3\/package\/graph-draft\\\.json/);
+  assert.match(gitleaksConfig, /\^5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf\$/);
+  assert.match(gitleaksConfig, /\^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse\$/);
+  assert.match(gitleaksConfig, /\^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168\$/);
   assert.doesNotMatch(gitleaksConfig, /^\[\[allowlists\]\]$/m);
 });
 
