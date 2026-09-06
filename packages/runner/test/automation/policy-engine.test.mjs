@@ -746,6 +746,111 @@ test('N1 rejects a parsed Relay quote whose canonical digest or raw origin amoun
   );
 });
 
+test('quote refresh re-admits a replacement under current caps without a second reservation', async () => {
+  const cycleId = 'cycle-quote-refresh-success';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine, readConfiguration } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  const admitted = await engine.admit(request);
+  assert.equal(admitted.allowed, true);
+
+  const replacement = exactOutputAdmission({ cycleId, quantity: 1, deadlineUnixSeconds: 2_000_000 });
+  const decision = await engine.evaluateQuoteRefresh({
+    cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+    liveMode: true, admission, replacement,
+  });
+  assert.equal(decision.allowed, true);
+  assert.match(decision.refreshPolicyDecisionDigest, /^sha256:[0-9a-f]{64}$/);
+  // The refresh decision binds original+replacement together; it is never a stand-in for the
+  // cycle-policy digest that already governs the immutable original admission and reservation.
+  assert.notEqual(decision.refreshPolicyDecisionDigest, admitted.cycleDigest);
+  assert.equal(readConfiguration().spendLedger.length, 1);
+  assert.equal(readConfiguration().spendLedger[0].amountMicroUsdg, admission.aggregateFundingQuote.amountAtomic);
+});
+
+test('quote refresh refuses under a newly engaged kill switch without touching the reservation', async () => {
+  const cycleId = 'cycle-quote-refresh-kill-switch';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine, readConfiguration, replaceConfiguration } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  assert.equal((await engine.admit(request)).allowed, true);
+  replaceConfiguration({ ...readConfiguration(), killSwitch: true });
+
+  const replacement = exactOutputAdmission({ cycleId, quantity: 1, deadlineUnixSeconds: 2_000_000 });
+  assert.deepEqual(await engine.evaluateQuoteRefresh({
+    cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+    liveMode: true, admission, replacement,
+  }), { allowed: false, reason: 'KILL_SWITCH' });
+  assert.equal(readConfiguration().spendLedger.length, 1);
+});
+
+test('quote refresh refuses a replacement whose unit funding exceeds the current unit-price cap', async () => {
+  const cycleId = 'cycle-quote-refresh-unit-cap';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  assert.equal((await engine.admit(request)).allowed, true);
+
+  const replacement = exactOutputAdmission({
+    cycleId, quantity: 1, unitFunding: '25000001', aggregateFunding: '25000000', deadlineUnixSeconds: 2_000_000,
+  });
+  assert.deepEqual(await engine.evaluateQuoteRefresh({
+    cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+    liveMode: true, admission, replacement,
+  }), { allowed: false, reason: 'UNIT_PRICE_CAP' });
+});
+
+test('quote refresh refuses a replacement whose principal no longer equals the immutable release amount', async () => {
+  const cycleId = 'cycle-quote-refresh-principal-drift';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000001', maxCycleBudgetMicroUsdg: '25000001',
+    perCycleCapMicroUsdg: '25000001', max24HourBudgetMicroUsdg: '25000001',
+    lossCapMicroUsdg: '25000001', maxOutstandingCustodyMicroUsdg: '25000001',
+  });
+  const { engine } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  assert.equal((await engine.admit(request)).allowed, true);
+
+  const driftedReplacement = exactOutputAdmission({
+    cycleId, quantity: 1, aggregateFunding: '25000001', deadlineUnixSeconds: 2_000_000,
+  });
+  await assert.rejects(
+    () => engine.evaluateQuoteRefresh({
+      cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+      liveMode: true, admission, replacement: driftedReplacement,
+    }),
+    /release amount does not match the immutable admitted principal/,
+  );
+});
+
 test('a quote-bound admission without process liability evidence is refused, not silently accepted as equivalent', () => {
   const cycleId = 'cycle-evidence-absent';
   const admission = exactOutputAdmission({ cycleId, quantity: 1 });
