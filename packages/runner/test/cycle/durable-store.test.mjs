@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -508,11 +508,24 @@ test('rejects a replacement state directory even when its original identity mark
   const directory = join(parent, 'cycles');
   await DurableCycleStore.open(directory);
   const marker = await readFile(join(directory, '.store-identity.json'), 'utf8');
-  await rm(directory, { recursive: true, force: true });
+  const originalWitness = await stat(directory);
+  // Deleting and recreating a directory can let the filesystem hand the new
+  // directory the same inode the original just freed (observed on Linux
+  // ext4/tmpfs), which would make this replacement indistinguishable from a
+  // reopen by coincidence rather than by the guard under test. Renaming the
+  // original aside keeps its inode allocated so the replacement is
+  // necessarily distinct, on every POSIX filesystem.
+  await rename(directory, join(parent, 'cycles.original'));
   for (const child of ['active', 'archive', 'payout']) {
     await mkdir(join(directory, child), { recursive: true, mode: 0o700 });
   }
   await writeFile(join(directory, '.store-identity.json'), marker, { mode: 0o600 });
+  const replacementWitness = await stat(directory);
+  assert.notEqual(
+    `${replacementWitness.dev}:${replacementWitness.ino}`,
+    `${originalWitness.dev}:${originalWitness.ino}`,
+    'fixture precondition: the replacement directory must not reuse the original inode',
+  );
 
   const recovery = await readStateDirectoryRecovery(directory);
   assert.equal(recovery.detected, true);
