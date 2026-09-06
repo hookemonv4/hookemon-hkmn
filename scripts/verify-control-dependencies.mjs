@@ -47,7 +47,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '3bc9d10a4241cd2b2c3e416ce803c50f95dca749df453b3c501422425442078f';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'e70bd37f42c8427243fc00c3d1c15ee1a9049bd1a3f6edaa16862c2cce4f858f';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -216,6 +216,30 @@ paths = [
 ]
 regexTarget = "secret"
 regexes = ['''^EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v$''']
+
+[[rules.allowlists]]
+description = "Held-position key-set selector ternary in the imported web copy of the public cycle-status contract misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)apps/web/lib/public-cycle-status\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*const keys = schemaVersion === 5 \|\| schemaVersion === 6 \? HELD_POSITION_V5_KEY`
+  + String.raw`S : HELD_POSITION_V4_KEYS;\s*$''']
+
+[[rules.allowlists]]
+description = "Held-position key-set selector ternary in the imported web copy of the public community-snapshot contract misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)apps/web/lib/public-community-snapshot\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*const keys = schemaVersion === 7 \|\| schemaVersion === 8 \? HELD_POSITION_V7_KEY`
+  + String.raw`S : HELD_POSITION_V6_KEYS;\s*$''']
+
+[[rules.allowlists]]
+description = "Legacy wire-field exception SHA-256 digest declaration in the cleanroom scanner misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)scripts/check-cleanroom\.mjs$''']
+regexTarget = "line"
+regexes = ['''^\s*const APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST = '`
+  + String.raw`8f75379cdcbccf2b9fe6893111101ef5e96bd4d1311adf4cea3add5d1bfdfde4';\s*$''']
 `;
 
 function normalizeNodeVersion(version) {

@@ -574,7 +574,7 @@ test('GitHub gate installs content-addressed Gitleaks without a remote action', 
   assert.match(workflow, /gitleaks_version='8\.30\.1'/);
   assert.match(workflow, /551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb/);
   assert.match(workflow, /88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509/);
-  assert.match(workflow, /gitleaks_config_sha256='0e36cbca838179a2b422dd9b656a913990f634b7e745ebde4c8b7d52fb569925'/);
+  assert.match(workflow, /gitleaks_config_sha256='5360d3e697d5e52d87c5ffca2f10be4de022f07b8c88276bf80e4e528ec5963e'/);
   assert.doesNotMatch(workflow, /GITLEAKS_ENABLE_COMMENTS|GITLEAKS_ENABLE_UPLOAD_ARTIFACT|GITHUB_TOKEN/);
 });
 

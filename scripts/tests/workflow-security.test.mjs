@@ -378,8 +378,9 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   ];
 
   assert.equal((gitleaksConfig.match(/^\[\[rules\]\]$/gm) ?? []).length, 1);
-  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 12);
+  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 15);
   assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 8);
+  assert.equal((gitleaksConfig.match(/^regexTarget = "line"$/gm) ?? []).length, 7);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/collector-crypt\/pack-status\\\.json/);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/robinhood-rpc\\\.test\\\.mjs/);
   assert.match(gitleaksConfig, /docs\/modules\/collector-crypt-adapter\\\.md/);
@@ -408,7 +409,104 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   assert.match(gitleaksConfig, /packages\/adapters\/rehearsal\/collector-policy\/specimens\/purchase\\\.json/);
   assert.match(gitleaksConfig, /packages\/adapters\/rehearsal\/collector-policy\/specimens\/buyback\\\.json/);
   assert.match(gitleaksConfig, /\^EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\$/);
+  assert.match(gitleaksConfig, /apps\/web\/lib\/public-cycle-status\\\.ts/);
+  assert.match(gitleaksConfig, /apps\/web\/lib\/public-community-snapshot\\\.ts/);
+  assert.match(gitleaksConfig, /scripts\/check-cleanroom\\\.mjs/);
+  assert.match(gitleaksConfig, /const keys = schemaVersion === 5 \\\|\\\| schemaVersion === 6 \\\? HELD_POSITION_V5_KEYS : HELD_POSITION_V4_KEYS/);
+  assert.match(gitleaksConfig, /const keys = schemaVersion === 7 \\\|\\\| schemaVersion === 8 \\\? HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS/);
+  assert.match(gitleaksConfig, buildAssignmentPattern('APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST', extractAssignedValue(cleanroomSource, 'APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST')));
   assert.doesNotMatch(gitleaksConfig, /^\[\[allowlists\]\]$/m);
+});
+
+function allowlistBlock(descriptionFragment) {
+  const marker = `description = "${descriptionFragment}`;
+  const start = gitleaksConfig.indexOf(marker);
+  assert.ok(start !== -1, `expected an allowlist block matching: ${descriptionFragment}`);
+  const end = gitleaksConfig.indexOf('\n\n', start);
+  return gitleaksConfig.slice(start, end === -1 ? gitleaksConfig.length : end);
+}
+
+function extractedRegex(block, field) {
+  const match = block.match(new RegExp(`${field} = \\['''([\\s\\S]*?)'''\\]`));
+  assert.ok(match, `expected a ${field} entry in the block`);
+  return new RegExp(match[1]);
+}
+
+// Every fixture value below is read from the real, currently-approved source file at test time
+// (never retyped as a literal here) so this test cannot itself reintroduce the exact flagged
+// line/value as tracked source text -- the same requirement the scanner exception enforces.
+function realSourceLine(text, anchor) {
+  const idx = text.indexOf(anchor);
+  assert.ok(idx !== -1, `expected to find an anchor line containing: ${anchor}`);
+  const start = text.lastIndexOf('\n', idx) + 1;
+  const end = text.indexOf('\n', idx);
+  return text.slice(start, end === -1 ? text.length : end);
+}
+
+function extractAssignedValue(text, identifier) {
+  const marker = `${identifier} = '`;
+  const start = text.indexOf(marker);
+  assert.ok(start !== -1, `expected ${identifier} in source`);
+  const valueStart = start + marker.length;
+  const valueEnd = text.indexOf("'", valueStart);
+  return text.slice(valueStart, valueEnd);
+}
+
+function buildAssignmentPattern(identifier, value) {
+  return new RegExp(`${identifier} = '${value}'`);
+}
+
+function withReplacedSelector(line) {
+  return line.replace(/V(\d)_KEYS/, 'V9_KEYS');
+}
+
+const cleanroomSource = readFileSync(join(repoRoot, 'scripts', 'check-cleanroom.mjs'), 'utf8');
+
+test('Gitleaks imported-web-copy allowlists only match their own exact path and full line', () => {
+  const cycleStatusSource = readFileSync(join(repoRoot, 'apps', 'web', 'lib', 'public-cycle-status.ts'), 'utf8');
+  const communitySnapshotSource = readFileSync(join(repoRoot, 'apps', 'web', 'lib', 'public-community-snapshot.ts'), 'utf8');
+  const cycleStatusLine = realSourceLine(cycleStatusSource, 'const keys = schemaVersion === 5');
+  const communitySnapshotLine = realSourceLine(communitySnapshotSource, 'const keys = schemaVersion === 7');
+  const digestLine = realSourceLine(cleanroomSource, 'APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST = \'');
+  const digestValue = extractAssignedValue(cleanroomSource, 'APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST');
+  const changedDigestValue = digestValue.split('').reverse().join('');
+
+  const entries = [
+    {
+      block: allowlistBlock('Held-position key-set selector ternary in the imported web copy of the public cycle-status'),
+      matchingPath: 'apps/web/lib/public-cycle-status.ts',
+      matchingLine: cycleStatusLine,
+      changedLine: withReplacedSelector(cycleStatusLine),
+      unrelatedPath: 'packages/dashboard/src/contracts/public-cycle-status.mjs',
+    },
+    {
+      block: allowlistBlock('Held-position key-set selector ternary in the imported web copy of the public community-snapshot'),
+      matchingPath: 'apps/web/lib/public-community-snapshot.ts',
+      matchingLine: communitySnapshotLine,
+      changedLine: withReplacedSelector(communitySnapshotLine),
+      unrelatedPath: 'packages/dashboard/src/contracts/public-community-snapshot.mjs',
+    },
+    {
+      block: allowlistBlock('Legacy wire-field exception SHA-256 digest declaration'),
+      matchingPath: 'scripts/check-cleanroom.mjs',
+      matchingLine: digestLine,
+      changedLine: digestLine.replace(digestValue, changedDigestValue),
+      unrelatedPath: 'scripts/verify-control-dependencies.mjs',
+    },
+  ];
+
+  for (const entry of entries) {
+    const pathPattern = extractedRegex(entry.block, 'paths');
+    const linePattern = extractedRegex(entry.block, 'regexes');
+
+    assert.match(entry.matchingPath, pathPattern, 'must match its own exact approved path');
+    assert.match(entry.matchingLine, linePattern, 'must match its own exact approved line');
+
+    assert.doesNotMatch(entry.unrelatedPath, pathPattern, 'must not match an unrelated file with the same or similar name');
+    assert.doesNotMatch(`nested/${entry.matchingPath}.bak`, pathPattern, 'must not match a suffixed variant of the approved path');
+    assert.doesNotMatch(entry.changedLine, linePattern, 'must not match the same line with a changed selector value');
+    assert.doesNotMatch(`${entry.matchingLine}extra`, linePattern, 'must not match the exact line with trailing non-whitespace appended');
+  }
 });
 
 test('Gitleaks policy constants do not reproduce the permitted token-order match in tracked source', () => {

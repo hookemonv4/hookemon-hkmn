@@ -96,3 +96,24 @@ paths = [
 ]
 regexTarget = "secret"
 regexes = ['''^EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v$''']
+
+[[rules.allowlists]]
+description = "Held-position key-set selector ternary in the imported web copy of the public cycle-status contract misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)apps/web/lib/public-cycle-status\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*const keys = schemaVersion === 5 \|\| schemaVersion === 6 \? HELD_POSITION_V5_KEYS : HELD_POSITION_V4_KEYS;\s*$''']
+
+[[rules.allowlists]]
+description = "Held-position key-set selector ternary in the imported web copy of the public community-snapshot contract misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)apps/web/lib/public-community-snapshot\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*const keys = schemaVersion === 7 \|\| schemaVersion === 8 \? HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS;\s*$''']
+
+[[rules.allowlists]]
+description = "Legacy wire-field exception SHA-256 digest declaration in the cleanroom scanner misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)scripts/check-cleanroom\.mjs$''']
+regexTarget = "line"
+regexes = ['''^\s*const APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST = '8f75379cdcbccf2b9fe6893111101ef5e96bd4d1311adf4cea3add5d1bfdfde4';\s*$''']
