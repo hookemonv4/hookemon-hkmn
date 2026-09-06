@@ -22,7 +22,7 @@ import {
 } from '../../src/signing/transaction-policy.mjs';
 import { runSolanaWalletKeychainChildProcess } from '../../src/signing/operations-wallet-keychain-child.mjs';
 import { signRequestDigest } from '../../src/signing/signer-client.mjs';
-import { createTestKeychain } from '../fixtures/keychain/fixture.mjs';
+import { createTestKeychain, keychainLookupTimeoutStage } from '../fixtures/keychain/fixture.mjs';
 import { policyFor } from './policy-fixture.mjs';
 
 const SIGNER_BIN_PATH = fileURLToPath(new URL('../../bin/hookemon-keychain-signer.mjs', import.meta.url));
@@ -257,10 +257,25 @@ const KEYCHAIN_CHILD_EVM_PATH = fileURLToPath(new URL('../../src/signing/keychai
 const KEYCHAIN_CHILD_EVM_FLAG = '--hookemon-evm-keychain-child';
 const HANG_EVM_CHILD_IMPORT_PATH = fileURLToPath(new URL('../fixtures/keychain/hang-evm-child-import.mjs', import.meta.url));
 
+test('keychainLookupTimeoutStage rejects inherited labels and the wrong budget', () => {
+  assert.equal(keychainLookupTimeoutStage('toString timed out after 50ms', 50), null);
+  assert.equal(keychainLookupTimeoutStage('constructor timed out after 50ms', 50), null);
+  assert.equal(keychainLookupTimeoutStage('macOS Keychain lookup timed out after 550ms', 50), null);
+  assert.equal(keychainLookupTimeoutStage('macOS Keychain lookup timed out after 10000ms', 50), null);
+  assert.equal(keychainLookupTimeoutStage('macOS Keychain lookup timed out after 50ms', 50), 'find-generic-password');
+});
+
 // Spawns src/signing/keychain-child-evm.mjs directly with its own internal spawn flag,
 // bypassing runEvmKeychainChildProcess (and therefore its 550ms parent envelope) entirely.
 // With no parent deadline in the picture, only the child's own request-level 50ms
-// enforcement (in keychain-secret-store.mjs) can possibly resolve this call.
+// enforcement (in keychain-secret-store.mjs) can possibly resolve this call - but that
+// enforcement runs three labeled lookups at the same 50ms budget (default-keychain and
+// login-keychain discovery, then find-generic-password), and under cold-start contention
+// any one of the three can legitimately be the stage whose timer fires first. This asserts
+// the failure is exactly one of those three known 50ms outcomes, not a specific one. It does
+// not additionally check the fixture's own recorded calls: that 50ms timer starts right
+// after the fixture is spawned, before the (also cold-starting) fixture process can be
+// relied on to have reached its own recordCall, so requiring a record would itself race.
 test('EVM keychain child enforces its own 50ms Keychain deadline with no parent envelope racing it', { timeout: 2_000 }, async t => {
   const keychain = await createTestKeychain(t, { mode: 'hang' });
   const result = await runProcess(process.execPath, [KEYCHAIN_CHILD_EVM_PATH, KEYCHAIN_CHILD_EVM_FLAG], {
@@ -274,14 +289,11 @@ test('EVM keychain child enforces its own 50ms Keychain deadline with no parent 
     })}\n`,
   });
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), {
-    ok: false,
-    error: 'macOS Keychain lookup timed out after 50ms',
-  });
-  const records = await keychain.readRecords();
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, false);
   assert.ok(
-    records.some(record => record.argv[0] === 'find-generic-password'),
-    'expected the fake Keychain command to actually be reached',
+    keychainLookupTimeoutStage(parsed.error, 50),
+    `expected an exact 50ms Keychain-lookup timeout, got: ${parsed.error}`,
   );
 });
 
