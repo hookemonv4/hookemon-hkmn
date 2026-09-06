@@ -142,3 +142,39 @@ test('buildDurableCardFeed: an out-of-order later observation never regresses an
   assert.equal(afterStale.state, 'finalized', 'finalized never regresses to observed');
   assert.equal(collector.size(), 1);
 });
+
+test('F8-sol-verification repro: a later stage entry at the same packIndex but a foreign memo never rebinds its signature/mint onto the trusted identity', () => {
+  const { observations } = buildDurableCardFeed({
+    cycleId: CYCLE_ID,
+    packBatchRequestPacks: [{ packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: null }],
+    purchaseRequestedAtMs: REQUESTED_AT_MS,
+    stages: {
+      purchase: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'sig-0' }] } },
+      // A buyback entry at the same packIndex but a DIFFERENT memo -- a broken/foreign cross-stage
+      // ledger, never trusted as this pack's own SOLD outcome.
+      buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [
+        { packIndex: 0, memo: 'foreign-memo', mint: 'foreign-mint', decision: 'sold', signature: 'foreign-sig', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '999' } },
+      ] } },
+    },
+  });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].state, 'observed', 'falls back to the trusted PURCHASED fact, never the foreign SOLD one');
+  assert.equal(observations[0].transactionId, 'sig-0');
+  assert.equal(observations[0].proceeds, null);
+});
+
+test('F8-sol-verification repro: a self-contradictory purchase batch-request ledger (duplicate packIndex under two different memos) rejects the entire batch, not a partial publication', () => {
+  const { trustedOperations, observations } = buildDurableCardFeed({
+    cycleId: CYCLE_ID,
+    packBatchRequestPacks: [
+      { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: null },
+      { packIndex: 0, memo: 'memo-1', expectedCardCount: 1, packType: null },
+    ],
+    purchaseRequestedAtMs: REQUESTED_AT_MS,
+    stages: {
+      purchase: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'sig-0' }] } },
+    },
+  });
+  assert.equal(trustedOperations.size, 0, 'no partial trust for the non-conflicting entry either');
+  assert.equal(observations.length, 0);
+});

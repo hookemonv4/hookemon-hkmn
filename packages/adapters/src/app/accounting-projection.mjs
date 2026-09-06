@@ -119,10 +119,12 @@ function sameAsset(left, right) {
  *   - `undefined`: this pack's amount is required but missing, invalid, or the pack is in an
  *     unexpected (non-terminal) state — the whole aggregate becomes `null`, never a fabricated
  *     partial sum that silently drops the ambiguous pack.
- * Also fails closed to `null` on an empty/malformed `packs` array, a duplicate or contradictory
- * `packIndex`/`memo`/non-null `mint` across entries (never double-counted), or a mixed-asset sum
- * (two packs' amounts on different chains/assets/decimals) — the same asset-identity discipline
- * `sameAsset` enforces everywhere else in this module. A batch where every pack verifiably
+ * Also fails closed to `null` on an empty/malformed `packs` array, a pack entry missing its own
+ * canonical `packIndex`/`memo` identity (every per-pack evidence shape C documents always carries a
+ * `memo` — an entry without one is not a real record, never silently summed anyway), a duplicate or
+ * contradictory `packIndex`/`memo`/non-null `mint` across entries (never double-counted), or a
+ * mixed-asset sum (two packs' amounts on different chains/assets/decimals) — the same asset-identity
+ * discipline `sameAsset` enforces everywhere else in this module. A batch where every pack verifiably
  * contributes zero (e.g. every pack `not_purchased`) still returns `null`: the total is honestly
  * zero, but with no real evidence pack establishing an asset identity to tag it with, this module
  * has no trusted context to guess one (unlike payout's `trustedPayoutContext` anchor).
@@ -138,10 +140,8 @@ function sumPackAmounts(packs, select) {
     if (!pack || typeof pack !== 'object' || Array.isArray(pack)) return null;
     if (!Number.isInteger(pack.packIndex) || pack.packIndex < 0 || seenIndexes.has(pack.packIndex)) return null;
     seenIndexes.add(pack.packIndex);
-    if (typeof pack.memo === 'string') {
-      if (seenMemos.has(pack.memo)) return null;
-      seenMemos.add(pack.memo);
-    }
+    if (typeof pack.memo !== 'string' || pack.memo.length === 0 || seenMemos.has(pack.memo)) return null;
+    seenMemos.add(pack.memo);
     if (typeof pack.mint === 'string') {
       if (seenMints.has(pack.mint)) return null;
       seenMints.add(pack.mint);
@@ -167,14 +167,83 @@ function purchasePackAmount(pack) {
   return undefined;
 }
 
-/** `packs[i].decision === 'sold'` requires its own `proceeds`; `'held'` was carved out before ever
- * selling (real zero proceeds, tracked instead as a held-position custody fact elsewhere); any
- * other decision (e.g. a pre-reconcile `'submitted'`/`'unknown'`) is unexpected for durably-COMPLETE
+/** `packs[i].decision === 'sold'` requires both its own `proceeds` and its own `mint` (C's schema
+ * makes `mint` a mandatory, never-optional field on a sold-pack — a sold pack with no recorded mint
+ * is not a real, canonical identity, and its proceeds are never trusted). `'held'` was carved out
+ * before ever selling (real zero proceeds, tracked instead as a held-position custody fact
+ * elsewhere; `mint` may be legitimately absent there, per the shared held-pack shape); any other
+ * decision (e.g. a pre-reconcile `'submitted'`/`'unknown'`) is unexpected for durably-COMPLETE
  * evidence and fails the aggregate closed. */
 function buybackPackAmount(pack) {
-  if (pack.decision === 'sold') return pack.proceeds ?? undefined;
+  if (pack.decision === 'sold') {
+    if (typeof pack.mint !== 'string' || pack.mint.length === 0) return undefined;
+    return pack.proceeds ?? undefined;
+  }
   if (pack.decision === 'held') return null;
   return undefined;
+}
+
+/** Cross-checks C's own `quantity`/`purchasedCount` batch-level counters against the actual `packs`
+ * array before ever trusting a sum over it — a `packs` array missing one or more entries relative to
+ * `quantity` (or whose actual `purchased` count disagrees with `purchasedCount`) is an incomplete or
+ * internally-contradictory record, and every pack in it becomes unavailable rather than partially
+ * summing whichever subset happened to be present. */
+function purchaseCoverageValid(evidence) {
+  if (!Number.isInteger(evidence.quantity) || evidence.quantity !== evidence.packs.length) return false;
+  if (!Number.isInteger(evidence.purchasedCount)) return false;
+  const actualPurchased = evidence.packs.filter(pack => pack && typeof pack === 'object' && pack.status === 'purchased').length;
+  return actualPurchased === evidence.purchasedCount;
+}
+
+/** Same discipline as `purchaseCoverageValid`, plus the predecessor binding: buyback's own `packs`
+ * must cover exactly the packs that actually survived purchase (`purchase.evidence.purchasedCount`)
+ * — a buyback batch that is shorter/longer than what purchase actually produced is evidence of a
+ * broken or spoofed cross-stage ledger, never trusted for a partial sum. Requires purchase's own
+ * evidence to already be durably COMPLETE and coverage-valid; buyback proceeds are never computed
+ * from evidence whose predecessor cannot itself be verified. */
+function buybackCoverageValid(evidence, purchase) {
+  if (!Number.isInteger(evidence.soldCount)) return false;
+  const actualSold = evidence.packs.filter(pack => pack && typeof pack === 'object' && pack.decision === 'sold').length;
+  if (actualSold !== evidence.soldCount) return false;
+  if (!isCompleteStage(purchase) || !purchase.evidence || typeof purchase.evidence !== 'object'
+    || !Array.isArray(purchase.evidence.packs) || !purchaseCoverageValid(purchase.evidence)) {
+    return false;
+  }
+  return evidence.packs.length === purchase.evidence.purchasedCount;
+}
+
+/** `true` when `evidence` carries one of Task C's new multi-pack batch-level counter fields
+ * (`quantity`/`purchasedCount` for purchase, `soldCount` for buyback) — the marker that this is a
+ * genuinely new-shape record, even if its `packs` array is missing or malformed. Distinguishes that
+ * case from a genuine pre-migration legacy single-card record (which never carries these fields at
+ * all): a new-shape record missing `packs` is a broken/incomplete record and must fail closed, never
+ * silently fall back to reading a top-level `packCost`/`proceeds` field as if it were legacy. */
+function hasNewShapeMarker(evidence, markerFields) {
+  return markerFields.some(field => Object.hasOwn(evidence, field));
+}
+
+/** Resolves one purchase stage's `collectorPurchaseDebit`. */
+function purchaseDebit(purchase) {
+  if (!isCompleteStage(purchase)) return null;
+  const evidence = purchase.evidence;
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+  if (Array.isArray(evidence.packs)) {
+    return purchaseCoverageValid(evidence) ? sumPackAmounts(evidence.packs, purchasePackAmount) : null;
+  }
+  if (hasNewShapeMarker(evidence, ['quantity', 'purchasedCount'])) return null;
+  return publicAmount(evidence.packCost);
+}
+
+/** Resolves one buyback stage's `collectorBuybackProceeds`. */
+function buybackProceeds(buyback, purchase) {
+  if (!isCompleteStage(buyback)) return null;
+  const evidence = buyback.evidence;
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+  if (Array.isArray(evidence.packs)) {
+    return buybackCoverageValid(evidence, purchase) ? sumPackAmounts(evidence.packs, buybackPackAmount) : null;
+  }
+  if (hasNewShapeMarker(evidence, ['soldCount'])) return null;
+  return publicAmount(evidence.proceeds);
 }
 
 const PAYOUT_EVIDENCE_SCHEMA = 'hookemon.direct-payout-result.v1';
@@ -408,18 +477,11 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
   // the purchase/buyback stages' own finalized settlement evidence — never assumed equal to the
   // EVM bridge amounts above at any parity. Task C's current producer emits a per-pack
   // `{packs: [...]}` array (C-interface.json revision 2); an older completed cycle may still carry
-  // the legacy single-card `packCost`/`proceeds` shape (no `packs` array) — recognized explicitly
+  // the legacy single-card `packCost`/`proceeds` shape (no `packs` array, and no `quantity`/
+  // `purchasedCount`/`soldCount` marker either — see `hasNewShapeMarker`) — recognized explicitly
   // and read as before, never guessed at or forced through the new per-pack summation.
-  const collectorPurchaseDebit = isCompleteStage(purchase)
-    ? (Array.isArray(purchase.evidence?.packs)
-      ? sumPackAmounts(purchase.evidence.packs, purchasePackAmount)
-      : publicAmount(purchase?.evidence?.packCost))
-    : null;
-  const collectorBuybackProceeds = isCompleteStage(buyback)
-    ? (Array.isArray(buyback.evidence?.packs)
-      ? sumPackAmounts(buyback.evidence.packs, buybackPackAmount)
-      : publicAmount(buyback?.evidence?.proceeds))
-    : null;
+  const collectorPurchaseDebit = purchaseDebit(purchase);
+  const collectorBuybackProceeds = buybackProceeds(buyback, purchase);
 
   // No honest USDG-denominated pack-spend/buyback/gain/loss producer exists: the bridge amounts are
   // a different fact (custody movement) and the Collector amounts are a different asset (Solana
