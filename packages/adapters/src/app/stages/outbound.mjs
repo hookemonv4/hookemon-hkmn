@@ -143,6 +143,7 @@ function assertOutboundMoneyConfiguration(config, configured) {
 
 function assertOutboundQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.OUTBOUND) throw new Error('outbound requires an OUTBOUND Relay quote');
+  if (quote.tradeType !== 'EXACT_OUTPUT') throw new Error('outbound requires an EXACT_OUTPUT Relay quote');
   if (quote.origin?.chainId !== RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID || quote.origin?.address?.toLowerCase() !== USDG_ADDRESS) {
     throw new Error('outbound quote origin is not USDG on chain 4663');
   }
@@ -161,6 +162,65 @@ function assertOutboundQuote(quote, config, money = null) {
     throw new Error('outbound quote decimals do not match MoneyConfigurationV1 assets');
   }
   return quote;
+}
+
+function assertAdmittedAmount(value, expected, label) {
+  if (!value || typeof value !== 'object') throw new Error(`${label} is required`);
+  if (String(value.chainId) !== expected.chainId
+    || value.assetId !== expected.assetId
+    || value.decimals !== expected.decimals) {
+    throw new Error(`${label} asset identity does not match the configured money asset`);
+  }
+  return canonicalAmount(value.amountAtomic, `${label} amount`);
+}
+
+/**
+ * The admission is produced and durably bound by the policy layer before this stage. This stage
+ * deliberately has no quote fallback: the signed Relay steps must be for that one admission.
+ */
+function assertOutboundAdmission(admission, configured, money, cycleId) {
+  if (!admission || typeof admission !== 'object' || admission.schema !== 'hookemon.policy-admission.v2') {
+    throw new Error('outbound requires a durable policy-admission.v2 record');
+  }
+  if (admission.cycleId !== cycleId) throw new Error('outbound admission cycle identity does not match the request');
+  if (typeof admission.quoteDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(admission.quoteDigest)) {
+    throw new Error('outbound admission quote digest is invalid');
+  }
+  const usdg = { chainId: EVM_CHAIN_ID, assetId: USDG_ADDRESS, decimals: money.assets.usdg.decimals };
+  const solana = { chainId: SOLANA_CHAIN_ID, assetId: configured.solanaMint, decimals: money.assets.solanaStablecoin.decimals };
+  const unitFunding = assertAdmittedAmount(admission.unitFundingQuote, usdg, 'outbound admission unit funding quote');
+  const aggregateFunding = assertAdmittedAmount(admission.aggregateFundingQuote, usdg, 'outbound admission aggregate funding quote');
+  const aggregatePurchase = assertAdmittedAmount(admission.aggregatePurchase, solana, 'outbound admission aggregate purchase target');
+  if (aggregatePurchase === '0' || aggregateFunding === '0' || unitFunding === '0') {
+    throw new Error('outbound admission amounts must be positive');
+  }
+  const relay = admission.relay;
+  if (!relay || relay.tradeType !== 'EXACT_OUTPUT'
+    || typeof relay.requestId !== 'string' || relay.requestId.length === 0
+    || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId ?? '')
+    || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
+    || !equalEvmAddress(relay.sender, configured.evm) || relay.recipient !== configured.solana) {
+    throw new Error('outbound admission Relay identity is invalid');
+  }
+  if (canonicalAmount(relay.destinationAmount, 'outbound admission Relay destination amount') !== aggregatePurchase
+    || canonicalAmount(relay.destinationMinimumAmount, 'outbound admission Relay destination minimum amount') !== aggregatePurchase) {
+    throw new Error('outbound admission Relay destination does not exactly cover the aggregate purchase target');
+  }
+  const quote = admission.relayQuote;
+  if (!quote || typeof quote !== 'object') throw new Error('outbound admission is missing the immutable Relay quote');
+  return Object.freeze({ admission, relay, quote, aggregateFunding, aggregatePurchase });
+}
+
+function assertQuoteMatchesAdmission(quote, admitted) {
+  if (quote.requestId !== admitted.relay.requestId || quote.orderId !== admitted.relay.orderId
+    || quote.deadlineUnixSeconds !== admitted.relay.deadlineUnixSeconds
+    || quote.sender !== admitted.relay.sender || quote.recipient !== admitted.relay.recipient
+    || quote.tradeType !== 'EXACT_OUTPUT'
+    || quote.origin.amount !== admitted.aggregateFunding
+    || quote.destination.amount !== admitted.aggregatePurchase
+    || quote.destination.minimumAmount !== admitted.aggregatePurchase) {
+    throw new Error('outbound Relay quote differs from the durable policy admission');
+  }
 }
 
 /**
@@ -292,15 +352,10 @@ export async function prepareOutboundRequest({ adapters, config, cycleRepository
   const configured = assertOutboundConfiguration(config);
   const money = assertOutboundMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const amountAtomic = canonicalAmount(cycle?.releaseAmount, 'outbound cycle release amount');
-  if (amountAtomic === '0') throw new Error('outbound requires a positive cycle release amount');
-  const quote = await adapters.relay.quoteOutboundBridge({
-    user: configured.evm,
-    recipient: configured.solana,
-    amount: amountAtomic,
-    destinationCurrency: configured.solanaMint,
-  });
+  const admitted = assertOutboundAdmission(context.admission ?? cycle?.admission, configured, money, context.cycleId);
+  const { quote, aggregateFunding: amountAtomic } = admitted;
   assertOutboundQuote(quote, configured, money);
+  assertQuoteMatchesAdmission(quote, admitted);
   assertQuoteUsable({ quote, nowMs });
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
   const transactions = await verifiedOutboundPlans({

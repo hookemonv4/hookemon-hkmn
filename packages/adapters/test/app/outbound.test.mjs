@@ -28,6 +28,12 @@ function fixture(name) {
 
 const chains = fixture('chains.json');
 const quoteFixture = fixture('quote-outbound.json');
+// This fixture remains a deterministic recorded EVM envelope, but the admission path below
+// models an EXACT_OUTPUT quote: the requested USDC target and the minimum are both 25 USDC.
+quoteFixture.details.currencyOut.amount = '25000000';
+quoteFixture.details.currencyOut.minimumAmount = '25000000';
+quoteFixture.protocol.v2.orderData.output.payments[0].expectedAmount = '25000000';
+quoteFixture.protocol.v2.orderData.output.payments[0].minimumAmount = '25000000';
 const RELAY_DEPOSITORY = quoteFixture.steps[1].items[0].data.to;
 
 function response(body) {
@@ -44,8 +50,59 @@ function relayClient(quote = quoteFixture) {
   });
 }
 
+function admittedQuote() {
+  return {
+    direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
+    requestId: quoteFixture.requestId,
+    orderId: quoteFixture.protocol.v2.orderId,
+    sender: EVM_ACCOUNT,
+    recipient: SOLANA_ACCOUNT,
+    deadlineUnixSeconds: quoteFixture.protocol.v2.orderData.output.deadline,
+    origin: {
+      chainId: 4663,
+      address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+      decimals: 6,
+      amount: '25000000',
+    },
+    destination: {
+      chainId: 792703809,
+      address: SOLANA_MINT,
+      decimals: 6,
+      amount: '25000000',
+      minimumAmount: '25000000',
+    },
+    raw: quoteFixture,
+  };
+}
+
+function admission(cycleId, quote = admittedQuote()) {
+  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '25000000' };
+  const usdc = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '25000000' };
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    quoteDigest: `sha256:${'a'.repeat(64)}`,
+    quantity: 1,
+    unitFundingQuote: usdg,
+    aggregateFundingQuote: usdg,
+    aggregatePurchase: usdc,
+    relay: {
+      tradeType: 'EXACT_OUTPUT',
+      requestId: quote.requestId,
+      orderId: quote.orderId,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds,
+      sender: quote.sender,
+      recipient: quote.recipient,
+      destinationAmount: usdc.amountAtomic,
+      destinationMinimumAmount: usdc.amountAtomic,
+    },
+    relayQuote: quote,
+  };
+}
+
 function repository(releaseAmount = '25000000') {
-  return { async describeCycle() { return { releaseAmount }; } };
+  return { async describeCycle(cycleId) { return { releaseAmount, admission: admission(cycleId) }; } };
 }
 
 test('prepareOutboundRequest refuses an absent MoneyConfigurationV1 before requesting a Relay quote', async () => {
@@ -107,6 +164,34 @@ test('prepareOutboundRequest binds the same cycle reserve to the configured Sola
     quoteFixture.steps[0].items[0].data,
     quoteFixture.steps[1].items[0].data,
   ]);
+});
+
+test('prepareOutboundRequest consumes the admitted exact-output quote without requoting and refuses a short minimum output', async () => {
+  const shortQuote = admittedQuote();
+  shortQuote.destination.minimumAmount = '49999999';
+  const cycleId = 'cycle-outbound-admission-shortfall';
+  let requoteCalls = 0;
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: {
+        relay: {
+          async quoteOutboundBridge() { requoteCalls += 1; throw new Error('must not requote'); },
+          prepareExecution() { throw new Error('must not prepare a short quote'); },
+        },
+      },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository: { async describeCycle() { return { admission: admission(cycleId, shortQuote) }; } },
+      context: { cycleId },
+      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    }),
+    /differs from the durable policy admission/,
+  );
+  assert.equal(requoteCalls, 0);
 });
 
 test('prepareOutboundRequest fails closed when the exact configured Solana mint does not match the quote', async () => {
@@ -254,6 +339,7 @@ function outboundIntent() {
     requestId: quoteFixture.requestId,
     orderId: quoteFixture.protocol.v2.orderId,
     direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
     originChainId: 4663,
     destinationChainId: 792703809,
     originAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
