@@ -105,6 +105,16 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   available for non-paged compatibility callers.
 - `reservePayoutQuarantine` and `readPayoutQuarantine` manage recipient liabilities keyed by plan
   digest and recipient.
+- `recordPackBatchRequest(cycleId, stage, packs)` durably persists every pack a single batch
+  provider call generated (`packIndex`, `memo`, `expectedCardCount`, `packType`) before any of
+  their transactions are signed, for `stage` in `purchase`, `open`, `epic-gate`, or `buyback`
+  (`PACK_OPERATION_STAGES`). It is the sole restart guard against re-issuing a batch purchase whose
+  response was lost after the provider already committed it: a retried call with the identical
+  packs replays the original durable record and its `requestedAtMs` instead of raising a conflict.
+  Bounded to `MAXIMUM_PACK_BATCH_SIZE` (64) packs by the shared journal payload limit (documented
+  provider batch operations accept up to 100; the durable journal payload cannot). `stage` and
+  `packIndex` together key the record, so `purchase` and `open` batches for the same cycle stay
+  independent. `readPackBatchRequest(cycleId, stage)` returns `{requestedAtMs, packs}` or `null`.
 
 ## Invariants
 
@@ -306,6 +316,18 @@ node --test --test-timeout=120000 packages/runner/test/cycle/money-schemas.test.
   post-completion position archival with recoverable supplementary evidence, or a store-capacity
   exemption, and test new-cycle admission across the configured position cap. Verified safe
   alternative: keep `maxHeldPositions` at 10 or lower until that transition exists.
+- OPEN FACT: `policy-engine.mjs`'s `HELD_LIMIT` check runs once, at claim-process admission, before
+  a cycle starts. A single multi-pack cycle (purchase/open/epic-gate/buyback batches up to
+  `MAXIMUM_PACK_BATCH_SIZE`, see `packages/runner/src/cycle/money-schemas.mjs`) can record several
+  held positions within that one admitted cycle — for example every pack in the batch, in the worst
+  case — before the next admission check ever runs again. A configured `maxHeldPositions` below the
+  batch quantity therefore bounds the *count check's next trigger*, not how far one already-admitted
+  cycle's own batch can push the outstanding total. Resolve this by cross-checking the requested
+  pack quantity against remaining held-position headroom at purchase admission (needs
+  `listHeldPositions` exposed to the collector-only prepare-time repository facade in
+  `packages/adapters/src/app/stage-driver.mjs`, which does not yet grant it). Verified safe
+  alternative: keep the configured pack quantity at or below `maxHeldPositions` minus the current
+  outstanding held-position count until that admission-time check exists.
 - Reserve a frozen or cancelled recipient through `reservePayoutQuarantine` only after durable
   evidence establishes that its amount cannot become a normal final payment. A missing custody
   ledger is not a substitute for backing.

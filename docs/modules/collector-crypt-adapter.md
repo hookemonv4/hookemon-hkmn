@@ -8,7 +8,7 @@
 
 - `createCollectorCryptClient({ apiKey, baseUrl?, fetchImpl?, dryRun?, maxAttempts?, baseDelayMs?, maxDelayMs?, sleep?, readRetryableStatuses?, mutationRetryableStatuses?, timeoutMs? })` returns a frozen client. `timeoutMs` is a positive safe integer and applies to each HTTP attempt.
 - Read methods: `getMachines()`, `getStatus()`, `getBuybackAvailable({ nft, wallet? })`, `getBuybackCheck({ memo })`, `getPackStatus({ memo })`, and `getNfts({ code?, rarity?, page?, limit? })`.
-- Mutation methods: `generatePack(request)`, `openPack({ memo })`, `buyback(request)`, and `submitTransaction({ signedTransaction })`.
+- Mutation methods: `generatePack(request)`, `generateYoloPacks({ playerAddress, packType?, quantity, turbo?, altPlayerAddress?, altFundsRecipient? })`, `openPack({ memo })`, `buyback(request)`, and `submitTransaction({ signedTransaction })`. `generateYoloPacks` requests the documented batch pack-generation endpoint (`quantity` an integer 1 through 100, `MINIMUM_YOLO_PACK_QUANTITY`/`MAXIMUM_YOLO_PACK_QUANTITY`) and requires the response to carry a `packs` array of exactly `quantity` unique `{memo, transaction}` entries — the same per-pack shape `generatePack` already proves — failing closed on any other envelope. UNVERIFIED: the exact response envelope is not confirmed by an authenticated call; see `packages/adapters/test/fixtures/collector-crypt/README.md`.
 - `computeCollectorCryptRequestDigest(endpoint, request)` creates the canonical request digest used by the durable stage journal. `hasDryRunFlag(argv?)` recognizes an explicit dry-run flag.
 - `COLLECTOR_CRYPT_SETTLEMENT_ASSET` identifies the documented six-decimal Solana settlement asset
   used when parsing Collector buyback amounts. Purchase and buyback additionally require the
