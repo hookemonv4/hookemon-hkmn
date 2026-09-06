@@ -21,6 +21,13 @@ or moving custody.
   `GET /operator/api/identities` returns only public identities injected by the composed runner.
 - `GET /public/api/cycle-status` and `GET /public/api/community-dashboard` derive their read-only
   responses from the same authority snapshot.
+- `GET /public/api/cycle-history` returns a schema version 1, paginated, read-only page of terminal
+  cycles from the same authority snapshot, ordered by verified terminal completion time descending
+  (ties by cycle ID ascending). Optional `?limit=` (1-20, default 10) and `?cursor=` query an opaque
+  cursor from a prior page's `nextCursor`; any other query key, or an out-of-range `limit`, is
+  rejected as `QUERY_INVALID`. If any terminal cycle in the source set lacks a verified terminal
+  timestamp, the whole response fails closed: `historyComplete: false`, `items: []`,
+  `nextCursor: null`, rather than ordering only the reachable subset and hiding the gap.
 - `POST /operator/api/decisions` accepts `pause`, `resume`, `kill`, `run-cycle-now`,
   `resume-cycle`, `reconcile`, `manual-approval`, `held-owner-decision`, and
   `update-configuration`. Compatibility aliases normalize to one of those commands before dispatch.
@@ -38,6 +45,9 @@ or moving custody.
 - Cap and telemetry fields are copied from the authority snapshot. The dashboard does not calculate
   a balance, substitute a missing transaction identifier, or treat an empty alert list as a healthy
   telemetry source.
+- Cycle history never mints a terminal timestamp or an ordering it cannot prove. A page is only
+  ever computed from a source set where every returned item already carries a verified terminal
+  timestamp; the route does not substitute a missing one or infer order from array position.
 - The owner page labels supplied on-chain claim capacity as a six-hour value. Otherwise it labels
   the authority's fallback as an off-chain 24-hour ledger. Held-card information and wallet balances
   are shown only when present in the authority snapshot; the page does not infer either value or a
