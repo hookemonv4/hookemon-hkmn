@@ -63,7 +63,8 @@ import {
   loadCollectorPolicyBundle,
 } from '../src/signing/collector-policy-loader.mjs';
 import { createCollectorCryptClient } from '../src/collector-crypt.mjs';
-import { createSolanaRpcClient } from '../src/solana-rpc.mjs';
+import { createSolanaRpcClient, submitSignedTransaction } from '../src/solana-rpc.mjs';
+import { createRobinhoodClient, sendRawTransaction } from '../src/robinhood-rpc.mjs';
 import { runCollectorOnlyPreflight as runCollectorOnlyPreflightPlan } from '../rehearsal/collector-only-preflight.mjs';
 
 export { compositionInput, createProcessExec, parseArgv };
@@ -354,6 +355,33 @@ function compositionInput({
   };
 }
 
+/**
+ * The chain RPC transports that actually broadcast already-authorized signed bytes.
+ *
+ * The keychain command is sign-only and refuses a broadcast verb, so without these a live cycle
+ * signs and can never send. Supplying them also narrows the signer: the bare broadcast() is replaced
+ * by a path reachable only through a genuine transaction-policy evaluation proof, so holding a
+ * reference to the client is not enough to send arbitrary bytes.
+ */
+function chainBroadcastTransports(env) {
+  const transports = {};
+  if (env.robinhood?.rpcUrl) {
+    const client = createRobinhoodClient({ rpcUrl: env.robinhood.rpcUrl });
+    transports.evm = async signed => {
+      const serialized = typeof signed === 'string' ? signed : signed?.signedTx;
+      return { transactionHash: await sendRawTransaction(client, serialized) };
+    };
+  }
+  if (env.solana?.rpcUrl) {
+    const client = createSolanaRpcClient({ rpcUrl: env.solana.rpcUrl });
+    transports.solana = async signed => {
+      const serialized = typeof signed === 'string' ? signed : signed?.signedTxBase64 ?? signed?.signedTx;
+      return { signature: await submitSignedTransaction(client, serialized) };
+    };
+  }
+  return transports;
+}
+
 async function buildComposition({
   statePathOverride,
   withDashboard = false,
@@ -420,7 +448,10 @@ async function buildComposition({
   // Operations signer only after repository integrity, keychain readiness, and canary preflight passed.
   const signerClient = env.execution.providerMode === 'fake' || !constructSigner
     ? null
-    : await loadOperatorSignerClient(env, { exec: createProcessExec() });
+    : await loadOperatorSignerClient(env, {
+      exec: createProcessExec(),
+      broadcast: chainBroadcastTransports(env),
+    });
   return compose(compositionInput({
     env,
     statePath,

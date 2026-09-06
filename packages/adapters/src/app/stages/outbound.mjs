@@ -791,7 +791,11 @@ export async function mutateOutbound({
   now = Date.now,
 }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateOutbound reached without liveMode');
-  if (!signerClient?.evm || typeof signerClient.evm.sign !== 'function' || typeof signerClient.evm.broadcast !== 'function') {
+  // broadcast() or broadcastApproved(), the same pair signer-client.mjs itself accepts. A client
+  // wired to a real chain RPC transport deliberately exposes only the approved variant, so insisting
+  // on the bare method here would reject exactly the production configuration.
+  if (!signerClient?.evm || typeof signerClient.evm.sign !== 'function'
+    || (typeof signerClient.evm.broadcast !== 'function' && typeof signerClient.evm.broadcastApproved !== 'function')) {
     throw new Error('outbound requires an Operations EVM signer with sign and broadcast capabilities');
   }
   if (typeof context?.requestDigest !== 'string') throw new Error('outbound requires the durable stage request digest');

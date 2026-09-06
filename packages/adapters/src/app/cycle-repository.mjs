@@ -1257,12 +1257,40 @@ const OUTBOUND_RELAY_INTENT_FIELDS = Object.freeze([
   'sender',
   'recipient',
   'deadlineUnixSeconds',
+  // The canonical Relay intent carries which trade type was quoted and the digest of the quote it
+  // came from. Both are settlement identity: without them a restarted outbound cannot show that the
+  // intent it is resuming belongs to the quote the cycle was admitted under, which is exactly what
+  // stops a replacement quote inheriting an old authorization.
+  'tradeType',
+  'quoteDigest',
 ]);
 
-function assertOutboundRelayIntent(value, label) {
-  assertPlainExactObject(value, OUTBOUND_RELAY_INTENT_FIELDS, label);
+const OUTBOUND_RELAY_TRADE_TYPES = new Set(['EXACT_INPUT', 'EXACT_OUTPUT', 'EXPECTED_OUTPUT']);
+
+/**
+ * Recovery contexts written before the intent carried its trade type and quote digest have neither
+ * field. Replay completes them with null rather than a guessed value: a consumer comparing them
+ * against an admitted quote then refuses, which is the correct outcome for a record that cannot
+ * prove which quote it belongs to. Writes always supply both.
+ */
+function completeLegacyRelayIntent(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const missing = ['tradeType', 'quoteDigest'].filter(field => !Object.hasOwn(value, field));
+  if (missing.length === 0) return value;
+  return { ...value, ...Object.fromEntries(missing.map(field => [field, null])) };
+}
+
+function assertOutboundRelayIntent(value, label, { allowLegacyIntent = false } = {}) {
+  const candidate = allowLegacyIntent ? completeLegacyRelayIntent(value) : value;
+  assertPlainExactObject(candidate, OUTBOUND_RELAY_INTENT_FIELDS, label);
+  value = candidate;
   if (value.schema !== 'hookemon.relay-intent.v1' || value.direction !== 'OUTBOUND') {
     throw new Error(`${label} identity is invalid`);
+  }
+  const legacyIdentity = allowLegacyIntent && value.tradeType === null && value.quoteDigest === null;
+  if (!legacyIdentity && (!OUTBOUND_RELAY_TRADE_TYPES.has(value.tradeType)
+    || typeof value.quoteDigest !== 'string' || !digestPattern.test(value.quoteDigest))) {
+    throw new Error(`${label} does not bind its trade type and quote digest`);
   }
   if (typeof value.requestId !== 'string' || value.requestId.length === 0
     || typeof value.orderId !== 'string' || !evmTransactionHashPattern.test(value.orderId)
@@ -1299,7 +1327,7 @@ function assertOutboundRelayRoute(value, label) {
   });
 }
 
-function assertChainAttemptRecoveryContextInput(cycleId, value) {
+function assertChainAttemptRecoveryContextInput(cycleId, value, { allowLegacyIntent = false } = {}) {
   const requiredFields = [
     'stage',
     'recipient',
@@ -1351,6 +1379,7 @@ function assertChainAttemptRecoveryContextInput(cycleId, value) {
   const relayIntent = value.relayIntent === undefined || value.relayIntent === null ? null : assertOutboundRelayIntent(
     value.relayIntent,
     'chain attempt recovery context relayIntent',
+    { allowLegacyIntent },
   );
   const relayRoute = value.relayRoute === undefined || value.relayRoute === null ? null : assertOutboundRelayRoute(
     value.relayRoute,
@@ -1416,7 +1445,9 @@ function assertStoredChainAttemptRecoveryContext(cycleId, value) {
     throw new Error('stored chain attempt recovery context identity is invalid');
   }
   const { schema, cycleId: storedCycleId, ...input } = value;
-  return assertChainAttemptRecoveryContextInput(cycleId, input);
+  // Replay path: a context journaled before the intent carried its trade type and quote digest is
+  // still readable, with both left null rather than guessed.
+  return assertChainAttemptRecoveryContextInput(cycleId, input, { allowLegacyIntent: true });
 }
 
 function recoveryContextPublicValue(context) {
@@ -2554,6 +2585,7 @@ export class CycleRepository {
     const attemptCounts = new Map();
     const operationalAttempts = new Map();
     const chainAttempts = new Map();
+    const stageRequestDigests = new Map();
     const relayLegs = new Map();
     const standingAuthorityDecisions = new Map();
     const walletNonceReservations = new Map();
@@ -2576,6 +2608,7 @@ export class CycleRepository {
       preparedStages,
       operationalAttempts,
       chainAttempts,
+      stageRequestDigests,
       supplementaryChainAttempts,
       supplementaryChainAttemptRecoveryContexts,
       relayLegs,
@@ -3194,6 +3227,14 @@ export class CycleRepository {
         }
         payoutQuarantines.set(reservationKey, reservation);
         custodyLedgers.set(ledgerKey, reservation.ledger);
+      } else if (entry.kind === 'stage-request-prepared') {
+        assertStageName(entry.payload.stage);
+        if (typeof entry.payload.requestDigest !== 'string' || !digestPattern.test(entry.payload.requestDigest)) {
+          throw new Error('stored stage request digest is invalid');
+        }
+        const digests = stageRequestDigests.get(entry.payload.stage) ?? [];
+        if (!digests.includes(entry.payload.requestDigest)) digests.push(entry.payload.requestDigest);
+        stageRequestDigests.set(entry.payload.stage, digests);
       } else if (entry.kind === 'evm-nonce-lock-acquired') {
         const lock = assertEvmNonceLock(entry.payload.lock, 'stored EVM nonce lock');
         if (lock.cycleId !== cycleId) throw new Error('stored EVM nonce lock cycleId is invalid');
@@ -3257,6 +3298,7 @@ export class CycleRepository {
       attemptCounts,
       operationalAttempts,
       chainAttempts,
+      stageRequestDigests,
       supplementaryChainAttempts,
       supplementaryChainAttemptRecoveryContexts,
       relayLegs,
@@ -3446,6 +3488,27 @@ export class CycleRepository {
       cycleId: openedCycleId, releaseAmount, mode, providerMode, dryRun, rehearsalSessionId,
       admission: admitted,
     };
+  }
+
+  /**
+   * Durably records the stage-level request digest a signing boundary will demand.
+   *
+   * Chain-journal stages record their per-transaction attempts under per-plan digests, but the
+   * standing-authority guard resolves against the *stage* request digest. Without this that digest
+   * existed only inside one tick, so an external policy service had nothing to authorize against and
+   * every live signing attempt for such a stage failed closed. Recording it grants nothing on its
+   * own -- the artifact still has to carry a policy-signed intent for it.
+   *
+   * Idempotent for a repeated identical digest; a genuinely different prepared request adds its own.
+   */
+  async recordStageRequestDigest(cycleId, stage, requestDigest) {
+    assertStageName(stage);
+    if (typeof requestDigest !== 'string' || !digestPattern.test(requestDigest)) {
+      throw new Error('cycle-repository recordStageRequestDigest: request digest is invalid');
+    }
+    const state = await this.#replay(cycleId);
+    if ((state.stageRequestDigests.get(stage) ?? []).includes(requestDigest)) return;
+    await this.#append(cycleId, 'stage-request-prepared', { stage, requestDigest });
   }
 
   /** @returns {Promise<{status: 'COMPLETE', evidence: unknown}|{status: 'PENDING'}>} */

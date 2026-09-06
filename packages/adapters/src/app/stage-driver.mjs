@@ -1273,6 +1273,11 @@ export function createStageDriver({
         await cycleRepository.prepareStageAttempt(context.cycleId, context.stage, prepared);
       } else {
         assertChainJournal(cycleRepository);
+        // A chain-journal stage records its attempts under per-transaction digests, but the
+        // standing-authority guard below resolves against this stage-level digest. Publish it
+        // durably so an external policy service can authorize the boundary that will actually be
+        // reached; recording it authorizes nothing by itself.
+        await cycleRepository.recordStageRequestDigest?.(context.cycleId, context.stage, preparedRequestDigest);
       }
 
       // The service fences the lease before calling the driver. The journal write above can await

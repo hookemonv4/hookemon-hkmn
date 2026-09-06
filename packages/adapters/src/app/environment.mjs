@@ -1058,7 +1058,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
  *   each mutation.
  * @returns {Promise<{evm: object|null, solana: object|null, distributionSigner: object|null}>}
  */
-export async function loadOperatorSignerClient(config, { exec, preflightAuthority } = {}) {
+export async function loadOperatorSignerClient(config, { exec, preflightAuthority, broadcast } = {}) {
   if (config.signer.backend === 'keychain') {
     if (typeof exec !== 'function') fail('loadOperatorSignerClient requires an injected exec(...) function for the keychain backend');
     const { command, evmAccount, solanaAccount } = config.signer.keychain;
@@ -1074,7 +1074,18 @@ export async function loadOperatorSignerClient(config, { exec, preflightAuthorit
       && config.rehearsal?.mode === 'collector-only';
     return {
       evm: roles.includes(OPERATOR_EVM_ROLE)
-        ? createKeychainSignerClient({ role: OPERATOR_EVM_ROLE, liveMode: config.signer.liveMode, preflightAuthority, exec, command, account: evmAccount })
+        ? createKeychainSignerClient({
+          role: OPERATOR_EVM_ROLE,
+          liveMode: config.signer.liveMode,
+          preflightAuthority,
+          exec,
+          command,
+          account: evmAccount,
+          // Broadcasting is a chain-RPC concern; the sign-only keychain command refuses the verb
+          // outright. Supplying the transport also removes the bare broadcast() from this client,
+          // leaving only the policy-evaluated path.
+          ...(broadcast?.evm ? { broadcast: broadcast.evm } : {}),
+        })
         : null,
       solana: roles.includes(OPERATOR_SOLANA_ROLE)
         ? createKeychainSignerClient({
@@ -1084,6 +1095,7 @@ export async function loadOperatorSignerClient(config, { exec, preflightAuthorit
           exec,
           command,
           account: solanaAccount,
+          ...(broadcast?.solana ? { broadcast: broadcast.solana } : {}),
           ...(liveCollectorOnly && config.signer.liveMode === true
             ? { operationArgs: ['--parent-policy-evaluated'] }
             : {}),

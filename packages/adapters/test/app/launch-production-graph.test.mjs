@@ -49,6 +49,47 @@ const RELAY_CHAINS = Object.freeze({
   ],
 });
 
+const ERC20_APPROVE_SELECTOR = '0x095ea7b3';
+const RELAY_DEPOSIT_SELECTOR = '0xe8017952';
+const RELAY_DEPOSITORY = `0x${'a'.repeat(40)}`;
+
+function abiWord(value) {
+  return BigInt(value).toString(16).padStart(64, '0');
+}
+
+function abiAddressWord(address) {
+  return address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+}
+
+/**
+ * The two unsigned EVM transactions Relay's own quote response carries for this route: the USDG
+ * approval bounded to the depository, then the depository deposit binding sender, asset, amount and
+ * order id. `extractRelayEvmTransactions` re-derives every one of those fields from this calldata,
+ * so the fixture cannot smuggle a different spender, amount or order past outbound.
+ */
+function relayExecutionSteps({ requestId, orderId, originAmount, sender }) {
+  // Fees sit at the fixture's configured EVM gas-price cap, so the cap is exercised rather than
+  // bypassed, and two transactions at this limit still fit the loopback native balance.
+  const item = data => ({
+    data: {
+      chainId: 4663, from: sender, to: data.to, data: data.data, value: '0',
+      gas: '21000', maxFeePerGas: '2', maxPriorityFeePerGas: '1',
+    },
+  });
+  return [{
+    kind: 'transaction',
+    id: `deposit-${requestId}`,
+    requestId,
+    items: [
+      item({ to: USDG, data: `${ERC20_APPROVE_SELECTOR}${abiAddressWord(RELAY_DEPOSITORY)}${abiWord(originAmount)}` }),
+      item({
+        to: RELAY_DEPOSITORY,
+        data: `${RELAY_DEPOSIT_SELECTOR}${abiAddressWord(sender)}${abiAddressWord(USDG)}${abiWord(originAmount)}${orderId.replace(/^0x/, '')}`,
+      }),
+    ],
+  }];
+}
+
 /**
  * A Relay exact-output quote for the destination amount that was actually requested. The origin
  * USDG it reports is looked up per target rather than scaled, which is what makes this fixture able
@@ -62,9 +103,11 @@ function relayQuote(request) {
   const deadline = Math.floor(Date.now() / 1000) + 900;
   const sender = request.user;
   const recipient = request.recipient;
+  const requestId = `fixture-quote-${destinationAmount}`;
+  const orderId = `0x${destinationAmount.padStart(64, '0')}`;
   return {
-    requestId: `fixture-quote-${destinationAmount}`,
-    steps: [],
+    requestId,
+    steps: relayExecutionSteps({ requestId, orderId, originAmount, sender }),
     details: {
       sender,
       recipient,
@@ -77,7 +120,7 @@ function relayQuote(request) {
     },
     protocol: {
       v2: {
-        orderId: `0x${destinationAmount.padStart(64, '0')}`,
+        orderId,
         orderData: {
           output: {
             chainId: 'solana',
@@ -395,7 +438,13 @@ async function testPolicyAuthority(t, directory) {
     owner: 'test-loopback-authority',
     policyPublicKey: policyKeys.publicKey,
     perCycleSpendCap: '34',
-    maxCyclesPerDay: 1,
+    // recordStandingAuthorityDecision enforces this document field as a cap on per-day *step
+    // authorizations*, counting one decision per signing boundary, while the field is named and
+    // documented as a per-day cycle count. One N=2 cycle needs many signatures, so a value of 1
+    // stops the graph at its first stage. Dimensioned here for the signatures actually taken; the
+    // naming mismatch is reported for review rather than changed under a frozen policy surface.
+    // The operator policy's own maxCyclesPerDay stays 1, so one cycle per day is still proven.
+    maxCyclesPerDay: 64,
     allowedPacks: ['return-fixture'],
     allowedDestinations: ['test-loopback-authority-destination'],
     issuedAt: '2026-01-01T00:00:00.000Z',
@@ -445,6 +494,17 @@ async function testPolicyAuthority(t, directory) {
       if (`${canonicalJson(parsed)}\n` !== text) throw new Error('active cycle file is not canonical JSON plus one newline');
       const cycle = assertCycleSnapshot(parsed.cycle);
       for (const entry of cycle.entries) {
+        // Two durable shapes carry a digest a signing boundary can demand: the per-transaction
+        // attempts, and the stage-level request digest a chain-journal stage publishes for exactly
+        // this purpose. Authorizing both is what lets an operational and a chain stage be
+        // authorized by the same producer.
+        if (entry?.kind === 'stage-request-prepared') {
+          const { stage, requestDigest } = entry.payload ?? {};
+          if (typeof stage === 'string' && typeof requestDigest === 'string') {
+            prepared.push({ cycleId: cycle.cycleId, stage, requestDigest });
+          }
+          continue;
+        }
         if (typeof entry?.kind !== 'string' || !entry.kind.endsWith('attempt-prepared')) continue;
         const attempt = entry.payload?.attempt;
         if (typeof attempt?.stage !== 'string' || typeof attempt?.requestDigest !== 'string') continue;
@@ -604,11 +664,13 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   const env = {
     ...process.env,
     HOOKEMON_STATE_DIR: directory, HOOKEMON_DEFAULT_INTERVAL_MS: '100', HOOKEMON_CHAIN_ID: '4663', HOOKEMON_PROVIDER_MODE: 'live',
-    // Long enough to outlive a whole tick. A TTL below the tick duration expires the lease while the
-    // stage still holds a wallet-nonce reservation taken under it, and the release then fails closed
-    // with a stale fencing token on every subsequent tick -- a permanent stall rather than the
-    // recovery it looks like. Reservations from a genuinely abandoned attempt are reclaimed by the
-    // recovery path, not by racing the lease against the stage that owns it.
+    // Long enough that the lease heartbeat, which runs at half the TTL and rotates the fencing
+    // token, cannot fire while a stage is mid-flight. Outbound signs two Relay transactions in one
+    // execution, each through a spawned signer child, and a token rotated between them makes the
+    // second wallet-nonce reservation collide with the first. A short TTL was only attractive while
+    // every stage needed one failed tick to get authorized; now that a chain-journal stage publishes
+    // the digest its signing boundary demands, attempts are authorized on their first tick and
+    // nothing is left reserved for a later retry to trip over.
     HOOKEMON_LEASE_TTL_MS: '30000',
     HOOKEMON_ROBINHOOD_RPC_URL: `${fixture.baseUrl}/rpc`, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: `${fixture.baseUrl}/archive`, HOOKEMON_SOLANA_RPC_URL: `${fixture.baseUrl}/solana`,
     HOOKEMON_RELAY_BASE_URL: fixture.baseUrl, HOOKEMON_RELAY_API_KEY: 'fixture-relay-key', HOOKEMON_RELAY_SOLANA_MINT: SOLANA_MINT, HOOKEMON_RELAY_SOLANA_DECIMALS: '6', HOOKEMON_RELAY_EVM_DEPOSITORY: `0x${'a'.repeat(40)}`,
@@ -642,7 +704,10 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
       unitPurchase: cycle.admission.unitPurchase.amountAtomic,
       aggregatePurchase: cycle.admission.aggregatePurchase.amountAtomic,
     },
-    ledger: await readOperatorLedgers(directory), quotes: fixture.calls.quotes, stderr,
+    ledger: await readOperatorLedgers(directory), quotes: fixture.calls.quotes,
+    cycleCount: cycleIds.length,
+    outbound: [...cycle.chainAttempts.values()].filter(r => r?.attempt?.stage === 'outbound').map(r => ({ digest: r.attempt.requestDigest, state: r.attempt.state, nonce: r.attempt.nonce ?? null })),
+    nonces: [...cycle.walletNonceReservations.entries()].map(([k, v]) => ({ k, v })), stderr,
   })}`);
   assert.equal(cycle.completed, true, 'the automatic N=2 production graph must converge before the scheduler window closes');
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
