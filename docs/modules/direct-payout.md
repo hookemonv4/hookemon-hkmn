@@ -88,7 +88,9 @@ boundaries without changing the original cycle's holder set.
   settlement's manifest id, original frozen eligibility-snapshot evidence digest, and later
   repository-derived payout-source digest remain distinct from the main payout manifest.
   `readSupplementarySettlementEvidence(positionId)` is available only on the full repository while
-  recovery needs its provider or transaction facts; the narrow read client omits it.
+  recovery needs its provider or transaction facts; the narrow read client omits it. The actual
+  production handlers that drive this sequence's return and payout legs live in
+  `docs/modules/supplementary-money.md` (`packages/adapters/src/app/stages/supplementary-money.mjs`).
 - `createCycleRepositoryPayoutStore()` reads and writes recipient state through
   `readPagedPayoutState()` and `persistPagedPayoutState()`. Each retained recipient record contains
   its nonce, signed bytes, transaction hash, policy approval context, and finality or refusal

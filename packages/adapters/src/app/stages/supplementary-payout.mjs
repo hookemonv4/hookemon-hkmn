@@ -35,7 +35,7 @@ function freeze(value) {
   return Object.freeze(value);
 }
 
-function assertSettlement(value) {
+export function assertSettlement(value) {
   exactObject(value, [
     'positionId',
     'cycleId',
@@ -150,7 +150,7 @@ function assertPayoutSource(value, settlement, label = 'supplementary payout sou
   });
 }
 
-function assertReturnBoundaryEvidence(value, settlement, label) {
+export function assertReturnBoundaryEvidence(value, settlement, label) {
   exactObject(value, ['schema', 'positionId', 'cycleId', 'manifestId', 'finalizedReturnEvidence'], label);
   if (value.schema !== RETURN_BOUNDARY_SCHEMA || value.positionId !== settlement.positionId
     || value.cycleId !== settlement.cycleId || value.manifestId !== settlement.manifestId) {
@@ -405,6 +405,14 @@ function assertRequestForSettlement(request, settlement) {
     fail('supplementary payout request does not match its durable store');
   }
 }
+
+/**
+ * Schema tags for the immutable return-boundary evidence, exposed so `supplementary-money.mjs`
+ * can build a durable `RETURN_BROADCAST` transition without a second, divergent copy of these
+ * literal strings.
+ */
+export const SUPPLEMENTARY_RETURN_BOUNDARY_SCHEMA = RETURN_BOUNDARY_SCHEMA;
+export const SUPPLEMENTARY_FINALIZED_RETURN_SCHEMA = FINALIZED_RETURN_SCHEMA;
 
 /** Returns the durable paged-state namespace for one held-position payout. */
 export function supplementaryPayoutStageId(positionId) {
