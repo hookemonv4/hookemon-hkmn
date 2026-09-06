@@ -3704,6 +3704,28 @@ test('recordPackBatchIntent survives a repository reopen and rejects a conflicti
   );
 });
 
+test('recordPackBatchIntent accepts the canonical pack-code grammar, hyphen and underscore alike', async t => {
+  for (const packType of ['return-fixture', 'pokemon_50']) {
+    const repository = await CycleRepository.open(await tempDirectory(t));
+    const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+    const intent = packBatchIntent({ packType });
+    const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', intent);
+    assert.deepEqual(recorded.intent, intent);
+    assert.deepEqual(await repository.readPackBatchIntent(cycleId, 'purchase'), recorded);
+  }
+});
+
+test('recordPackBatchIntent refuses a pack code outside the canonical grammar', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  for (const packType of ['Pokemon_25', 'pokemon 25', '-pokemon25', '_pokemon25', 'pokemon/25', 'pokemon.25', 'p', 'p'.repeat(65)]) {
+    await assert.rejects(
+      () => repository.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent({ packType })),
+      /packType is invalid/,
+    );
+  }
+});
+
 test('a custody ledger journaled before heldPositions existed reopens with that bucket at zero', async t => {
   // Writes a real cycle, then rewrites its journal entry into the pre-change thirteen-bucket shape so
   // the reopen exercises the durable compatibility contract rather than a hand-built object.

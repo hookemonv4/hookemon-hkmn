@@ -489,7 +489,7 @@ function assertStageName(stage, { allowLegacyRead = false } = {}) {
 }
 
 const PACK_OPERATION_STAGE_SET = new Set(PACK_OPERATION_STAGES);
-const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
+const packTypeFieldPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
 function assertPackOperationStageName(stage) {
   if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);

@@ -12,6 +12,7 @@ import {
   assertCustodyLedger,
   assertOperationIdentity,
   assertPackBatchRequest,
+  assertPackBatchRequestEntry,
   assertPublicAmount,
   assertPublicCardEvent,
   toPublicAmount,
@@ -433,6 +434,22 @@ test('pack batch requests are bounded, index-ordered, and memo-unique', () => {
     () => assertPackBatchRequest([packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-0' })]),
     /unique/,
   );
+});
+
+test('pack batch request entries accept the canonical pack-code grammar, hyphen and underscore alike', () => {
+  for (const packType of ['return-fixture', 'pokemon_50']) {
+    const entry = packBatchEntry({ packType });
+    assert.deepEqual(assertPackBatchRequestEntry(entry), entry);
+  }
+});
+
+test('pack batch request entries refuse a pack code outside the canonical grammar', () => {
+  for (const packType of ['Pokemon_25', 'pokemon 25', '-pokemon25', '_pokemon25', 'pokemon/25', 'pokemon.25', 'p', 'p'.repeat(65)]) {
+    assert.throws(
+      () => assertPackBatchRequestEntry(packBatchEntry({ packType })),
+      /packType is invalid/,
+    );
+  }
 });
 
 test('operation identity and public card events bind a stable per-pack identity', () => {

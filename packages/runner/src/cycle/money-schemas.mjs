@@ -722,7 +722,7 @@ export function assertMoneyConfiguration(value, label = 'money configuration') {
 // evidence so several packs are never conflated with several cards returned by one operation.
 
 const packMemoPattern = /^[\x21-\x7e]{1,255}$/;
-const packTypeFieldPattern = /^[a-z][a-z0-9_]{0,63}$/;
+const packTypeFieldPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
 /** One durably generated pack request within a batch, before any signing risk. */
 export function assertPackBatchRequestEntry(value, label = 'pack batch request entry') {
