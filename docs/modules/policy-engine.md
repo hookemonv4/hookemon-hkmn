@@ -60,11 +60,15 @@ canonical micro-USDG integer strings.
   asset identity, and the reservation covers totalAtomic plus boundedOverheadAtomic.
 - A `policy-admission.v2` binds one typed catalog unit target, its checked aggregate target, a
   separate N=1 source funding quote, an aggregate source funding quote, and the `EXACT_OUTPUT`
-  Relay identity. Both the unit and aggregate quotes carry independently identified `EXACT_OUTPUT`
-  Relay evidence, deadlines, and quote digests. The canonical USDG/USDC routes and Operations
-  sender/recipient are required. The unit rail compares only `unitFundingQuote.amountAtomic`; per-cycle and
-  trailing-24-hour reservations compare only `aggregateFundingQuote.amountAtomic` once. The
-  aggregate quote is never divided by quantity and no USDG/USDC conversion is inferred.
+  Relay identity. `unitRelayQuote` is the full immutable, parser-shaped N=1 Relay response: policy
+  rechecks its raw request/order, route, accounts, deadline, order payments, exact amounts, and
+  the same canonical full-response digest produced by the Relay adapter. The persisted raw quote
+  is an integrity commitment, not a cryptographic Relay attestation; the quote planner must obtain
+  it through `parseQuoteResponse` before persistence. The canonical USDG/USDC routes and Operations
+  sender/recipient are required. The unit rail compares only the independently verified
+  `unitFundingQuote.amountAtomic`; per-cycle and trailing-24-hour reservations compare only
+  `aggregateFundingQuote.amountAtomic` once. The aggregate quote is never divided by quantity and
+  no USDG/USDC conversion is inferred.
 - The current digest excludes the generic configuration revision and binds every economic-policy
   field, including held-position limits and the unresolved-card deadline, so a pause or resume does
   not invalidate an admitted cycle. Existing version-3, version-2, and version-1 digests remain

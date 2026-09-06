@@ -96,6 +96,114 @@ function assertAdmissionRoute(amount, expected, label) {
   }
 }
 
+function immutableCanonicalValue(value, label) {
+  try {
+    return JSON.parse(canonicalJson(value));
+  } catch (error) {
+    throw new Error(`${label} is not canonical immutable data: ${error.message}`);
+  }
+}
+
+function freezeRecursively(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeRecursively(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function relayQuoteEvidenceDigest(quote) {
+  return digest({
+    schema: 'hookemon.relay-quote.v1',
+    direction: quote.direction,
+    tradeType: quote.tradeType,
+    requestId: quote.requestId,
+    orderId: quote.orderId,
+    sender: quote.sender,
+    recipient: quote.recipient,
+    deadlineUnixSeconds: quote.deadlineUnixSeconds,
+    origin: quote.origin,
+    destination: quote.destination,
+    raw: quote.raw,
+  });
+}
+
+function assertQuoteRouteLeg(value, expected, label, { destination = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || String(value.chainId) !== expected.chainId
+    || typeof value.address !== 'string' || value.address.toLowerCase() !== expected.assetId.toLowerCase()
+    || value.decimals !== expected.decimals
+    || assertAmount(value.amount, `${label} amount`, { positive: true }).toString() !== expected.amountAtomic
+    || (destination && assertAmount(value.minimumAmount, `${label} minimumAmount`, { positive: true }).toString() !== expected.amountAtomic)) {
+    throw new Error(`${label} does not bind the admitted asset amount`);
+  }
+}
+
+function assertRawRelayLeg(value, expected, label, { destination = false } = {}) {
+  const currency = value?.currency;
+  if (!currency || String(currency.chainId) !== expected.chainId
+    || typeof currency.address !== 'string' || currency.address.toLowerCase() !== expected.assetId.toLowerCase()
+    || currency.decimals !== expected.decimals
+    || value.amount !== expected.amountAtomic
+    || (destination && value.minimumAmount !== expected.amountAtomic)) {
+    throw new Error(`${label} does not bind the admitted asset amount`);
+  }
+}
+
+function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRelay }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('policy admission unitRelayQuote must be a parsed Relay quote');
+  }
+  const raw = immutableCanonicalValue(value.raw, 'policy admission unitRelayQuote raw response');
+  const quote = {
+    direction: value.direction,
+    tradeType: value.tradeType,
+    requestId: value.requestId,
+    orderId: value.orderId,
+    sender: value.sender,
+    recipient: value.recipient,
+    deadlineUnixSeconds: value.deadlineUnixSeconds,
+    origin: immutableCanonicalValue(value.origin, 'policy admission unitRelayQuote origin'),
+    destination: immutableCanonicalValue(value.destination, 'policy admission unitRelayQuote destination'),
+    stepCount: value.stepCount,
+    raw,
+    quoteDigest: value.quoteDigest,
+  };
+  if (quote.direction !== 'OUTBOUND' || quote.tradeType !== 'EXACT_OUTPUT'
+    || quote.requestId !== unitRelay.requestId || quote.orderId !== unitRelay.orderId
+    || quote.sender?.toLowerCase() !== OPERATIONS_EVM || quote.recipient !== OPERATIONS_SOLANA
+    || quote.deadlineUnixSeconds !== unitRelay.deadlineUnixSeconds
+    || !Number.isSafeInteger(quote.stepCount) || quote.stepCount < 0
+    || typeof quote.quoteDigest !== 'string' || !digestPattern.test(quote.quoteDigest)) {
+    throw new Error('policy admission unitRelayQuote identity is invalid');
+  }
+  assertQuoteRouteLeg(quote.origin, unitFundingQuote, 'policy admission unitRelayQuote origin');
+  assertQuoteRouteLeg(quote.destination, unitPurchase, 'policy admission unitRelayQuote destination', { destination: true });
+  if (!raw || raw.requestId !== quote.requestId || !Array.isArray(raw.steps) || raw.steps.length !== quote.stepCount
+    || raw.details?.sender?.toLowerCase() !== quote.sender.toLowerCase() || raw.details?.recipient !== quote.recipient
+    || raw.protocol?.v2?.orderId !== quote.orderId || raw.protocol.v2.orderData?.output?.deadline !== quote.deadlineUnixSeconds
+    || raw.protocol.v2.orderData.output?.chainId !== 'solana' || !Array.isArray(raw.protocol.v2.orderData.output.calls)
+    || raw.protocol.v2.orderData.output.calls.length !== 0) {
+    throw new Error('policy admission unitRelayQuote raw identity is invalid');
+  }
+  assertRawRelayLeg(raw.details.currencyIn, unitFundingQuote, 'policy admission unitRelayQuote raw origin');
+  assertRawRelayLeg(raw.details.currencyOut, unitPurchase, 'policy admission unitRelayQuote raw destination', { destination: true });
+  const payments = raw.protocol.v2.orderData.output.payments;
+  const inputs = raw.protocol.v2.orderData.inputs;
+  if (!Array.isArray(payments) || payments.length !== 1
+    || payments[0]?.recipient !== quote.recipient || payments[0]?.currency !== quote.destination.address
+    || payments[0]?.expectedAmount !== unitPurchase.amountAtomic || payments[0]?.minimumAmount !== unitPurchase.amountAtomic
+    || !Array.isArray(inputs) || inputs.length !== 1
+    || inputs[0]?.payment?.chainId !== 'robinhood' || inputs[0]?.payment?.currency?.toLowerCase() !== quote.origin.address.toLowerCase()
+    || inputs[0]?.payment?.amount !== unitFundingQuote.amountAtomic) {
+    throw new Error('policy admission unitRelayQuote raw order does not bind the admitted amounts');
+  }
+  if (quote.quoteDigest !== unitRelay.quoteDigest || quote.quoteDigest !== relayQuoteEvidenceDigest(quote)) {
+    throw new Error('policy admission unitRelayQuote digest does not match its immutable parsed evidence');
+  }
+  return freezeRecursively(quote);
+}
+
 /**
  * Normalizes the quote-bound monetary record produced before a live cycle exists. The policy
  * engine deliberately does not infer a unit quote from an aggregate quote: they are separate
@@ -148,6 +256,7 @@ function normalizePolicyAdmission(value) {
   if (typeof relay.quoteDigest !== 'string' || relay.quoteDigest !== value.quoteDigest) {
     throw new Error('policy admission aggregate Relay quote digest is invalid');
   }
+  const unitRelayQuote = normalizeUnitRelayQuote(value.unitRelayQuote, { unitFundingQuote, unitPurchase, unitRelay });
   return Object.freeze({
     schema: value.schema,
     cycleId: value.cycleId,
@@ -160,6 +269,7 @@ function normalizePolicyAdmission(value) {
     aggregateFundingQuote,
     relay: Object.freeze({ ...relay }),
     unitRelay: Object.freeze({ ...unitRelay }),
+    unitRelayQuote,
   });
 }
 
