@@ -28,7 +28,7 @@ const lockTokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 // 250,000,000 to all three fields) can either block legitimate catalog spend or silently license a
 // single cycle/day to consume the owner's entire lifetime top-up.
 //
-// USDC (the Collector catalog's listed price) and USDG (the atomic unit these rails are denominated
+// The Collector catalog's listed stablecoin and USDG (the atomic unit these rails are denominated
 // in) are different assets on different chains; there is no verified 1:1 parity between them. The
 // historical 50,309,869 USDG observation was a total N=2 exact-output quote and is retained only
 // as a test fixture. It is never a unit-price calibration: production admission uses a fresh N=1

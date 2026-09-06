@@ -64,11 +64,11 @@ canonical micro-USDG integer strings.
   rechecks its raw request/order, route, accounts, deadline, order payments, exact amounts, and
   the same canonical full-response digest produced by the Relay adapter. The persisted raw quote
   is an integrity commitment, not a cryptographic Relay attestation; the quote planner must obtain
-  it through `parseQuoteResponse` before persistence. The canonical USDG/USDC routes and Operations
+  it through `parseQuoteResponse` before persistence. The canonical USDG and Collector settlement routes and Operations
   sender/recipient are required. The unit rail compares only the independently verified
   `unitFundingQuote.amountAtomic`; per-cycle and trailing-24-hour reservations compare only
   `aggregateFundingQuote.amountAtomic` once. The aggregate quote is never divided by quantity and
-  no USDG/USDC conversion is inferred.
+  no cross-asset conversion is inferred.
 - The current digest excludes the generic configuration revision and binds every economic-policy
   field, including held-position limits and the unresolved-card deadline, so a pause or resume does
   not invalidate an admitted cycle. Existing version-3, version-2, and version-1 digests remain

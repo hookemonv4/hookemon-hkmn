@@ -10,7 +10,7 @@ const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const USDG_ROUTE = Object.freeze({ chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 });
-const USDC_ROUTE = Object.freeze({ chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 });
+const COLLECTOR_SETTLEMENT_ROUTE = Object.freeze({ chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 });
 const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
 const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
 const mutationBoundaries = new Set(['claim-process', 'purchase', 'signature', 'broadcast', 'mutation']);
@@ -222,8 +222,8 @@ function normalizePolicyAdmission(value) {
   const aggregatePurchase = assertPolicyAdmissionAmount(value.aggregatePurchase, 'policy admission aggregatePurchase');
   const unitFundingQuote = assertPolicyAdmissionAmount(value.unitFundingQuote, 'policy admission unitFundingQuote');
   const aggregateFundingQuote = assertPolicyAdmissionAmount(value.aggregateFundingQuote, 'policy admission aggregateFundingQuote');
-  assertAdmissionRoute(unitPurchase, USDC_ROUTE, 'policy admission unitPurchase');
-  assertAdmissionRoute(aggregatePurchase, USDC_ROUTE, 'policy admission aggregatePurchase');
+  assertAdmissionRoute(unitPurchase, COLLECTOR_SETTLEMENT_ROUTE, 'policy admission unitPurchase');
+  assertAdmissionRoute(aggregatePurchase, COLLECTOR_SETTLEMENT_ROUTE, 'policy admission aggregatePurchase');
   assertAdmissionRoute(unitFundingQuote, USDG_ROUTE, 'policy admission unitFundingQuote');
   assertAdmissionRoute(aggregateFundingQuote, USDG_ROUTE, 'policy admission aggregateFundingQuote');
   if (unitPurchase.chainId !== aggregatePurchase.chainId || unitPurchase.assetId !== aggregatePurchase.assetId
