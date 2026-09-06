@@ -21,11 +21,19 @@ const maximumLockBytes = 512;
 const lockOwnerFields = ['pid', 'token'];
 const lockTokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+// The owner's total funding ceiling ($250, see the launch-repair brief) is the only verified upper
+// bound on real spend; it replaces the prior 25,000,000 / 50,000,000 micro-USDG pair, which was sized
+// to the single Collector-only rehearsal pack price and blocked a production catalog with a different
+// unit price or a multi-pack cycle even though the operator's own configurable
+// perCycleCapMicroUsdg/max24HourBudgetMicroUsdg/lossCapMicroUsdg limits already bound real exposure
+// tighter than this fixed rail.
+const OWNER_FUNDING_CEILING_MICRO_USDG = '250000000';
+
 export const OPERATOR_HARD_CAPS = Object.freeze({
   maxBoostersPerCycle: '1000',
-  maxUnitPriceMicroUsdg: '25000000',
-  maxCycleBudgetMicroUsdg: '50000000',
-  max24HourBudgetMicroUsdg: '3600000000',
+  maxUnitPriceMicroUsdg: OWNER_FUNDING_CEILING_MICRO_USDG,
+  maxCycleBudgetMicroUsdg: OWNER_FUNDING_CEILING_MICRO_USDG,
+  max24HourBudgetMicroUsdg: OWNER_FUNDING_CEILING_MICRO_USDG,
   maxHeldPositions: '1000',
 });
 

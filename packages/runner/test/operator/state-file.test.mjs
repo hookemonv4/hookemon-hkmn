@@ -114,10 +114,10 @@ test('refuses a persisted configuration above the fixed operator ceilings at sta
   const { statePath } = await temporaryState(t);
   const configuration = {
     ...createDefaultOperatorConfiguration(),
-    maxUnitPriceMicroUsdg: '25000001',
-    maxCycleBudgetMicroUsdg: '50000001',
-    max24HourBudgetMicroUsdg: '3600000001',
-    perCycleCapMicroUsdg: '50000001',
+    maxUnitPriceMicroUsdg: '250000001',
+    maxCycleBudgetMicroUsdg: '250000001',
+    max24HourBudgetMicroUsdg: '250000001',
+    perCycleCapMicroUsdg: '250000001',
   };
   await writeFile(statePath, `${canonicalJson({
     schema: 'hookemon.operator-state.v2',

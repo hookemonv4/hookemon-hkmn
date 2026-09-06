@@ -891,12 +891,12 @@ test('configuration updates reject monetary values above the fixed operator ceil
     command: {
       type: 'update-configuration',
       configuration: {
-        maxUnitPriceMicroUsdg: '25000000',
-        maxCycleBudgetMicroUsdg: '50000000',
-        max24HourBudgetMicroUsdg: '3600000000',
-        perCycleCapMicroUsdg: '50000000',
-        lossCapMicroUsdg: '50000000',
-        maxOutstandingCustodyMicroUsdg: '50000000',
+        maxUnitPriceMicroUsdg: '250000000',
+        maxCycleBudgetMicroUsdg: '250000000',
+        max24HourBudgetMicroUsdg: '250000000',
+        perCycleCapMicroUsdg: '250000000',
+        lossCapMicroUsdg: '250000000',
+        maxOutstandingCustodyMicroUsdg: '250000000',
       },
     },
   });
@@ -905,7 +905,15 @@ test('configuration updates reject monetary values above the fixed operator ceil
   await assert.rejects(
     control.execute({
       expectedRevision: 1,
-      command: { type: 'update-configuration', configuration: { maxUnitPriceMicroUsdg: '25000001' } },
+      command: {
+        type: 'update-configuration',
+        configuration: {
+          maxUnitPriceMicroUsdg: '250000001',
+          maxCycleBudgetMicroUsdg: '250000001',
+          perCycleCapMicroUsdg: '250000001',
+          max24HourBudgetMicroUsdg: '250000001',
+        },
+      },
     }),
     /hard cap|ceiling/i,
   );
