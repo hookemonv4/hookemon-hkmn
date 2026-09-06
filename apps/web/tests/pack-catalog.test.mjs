@@ -48,6 +48,7 @@ test("provider failure has no stale or showcase fallback", async () => {
   const { fetcher } = upstream({ "/api/status": new Error("timeout") });
   const response = await handlePackCatalog(request("/api/packs"), fetcher); assert.equal(response.status, 503);
   const body = await response.json(); assert.equal(body.fetchedAt, null); assert.equal(body.packs, undefined); assert.equal(body.cards, undefined);
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "network");
   assert.equal((await handlePackCatalog(new Request("https://hookemon.com/api/packs", { method: "POST" }), fetcher)).status, 405);
 });
 
@@ -59,6 +60,33 @@ test("oversized streamed provider response is cancelled and rejected", async () 
   }));
   const response = await handlePackCatalog(request("/api/packs"), fetcher);
   assert.equal(response.status, 503); assert.equal(cancelled, true);
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "oversize");
+});
+
+test("classifies upstream HTTP failure status without leaking upstream body", async () => {
+  const fetcher = async url => url.pathname === "/api/status" ? Response.json(state) : new Response("upstream secret detail", { status: 502 });
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "http_502");
+  const body = await response.json(); assert.ok(!JSON.stringify(body).includes("upstream secret detail"));
+});
+
+test("classifies a timed-out provider request distinctly from a network failure", async () => {
+  const timeout = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  const { fetcher } = upstream({ "/api/status": timeout });
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "timeout");
+});
+
+test("classifies a non-JSON provider body distinctly from a schema rejection", async () => {
+  const fetcher = async url => url.pathname === "/api/status" ? Response.json(state) : new Response("not json");
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "invalid_json");
+});
+
+test("classifies a genuine catalogue schema rejection as invalid_schema, not a generic bucket", async () => {
+  const { fetcher } = upstream({ "/api/gachas/all": [{ ...pack, contains: 0 }] });
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "invalid_schema");
 });
 
 test("pack covers accept provider artwork and fall back past unsafe or missing URLs", () => {
