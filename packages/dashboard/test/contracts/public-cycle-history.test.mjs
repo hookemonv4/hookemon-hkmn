@@ -53,6 +53,21 @@ test('rejects items out of descending terminalAt order', () => {
   assert.throws(() => normalizePublicCycleHistory(input, 'mainnet'));
 });
 
+test('G6-terra-review repro: rejects historyComplete:true with a null terminalAt on the only item, never presented as completed history', () => {
+  const input = baseResponse();
+  input.items = [{ cycleId: 'cycle-1', status: 'paid-out', terminalAt: null, updatedAt: null }];
+  assert.throws(() => normalizePublicCycleHistory(input, 'mainnet'));
+});
+
+test('G6-terra-review repro: rejects historyComplete:true when one item among several has a null terminalAt', () => {
+  const input = baseResponse();
+  input.items = [
+    { cycleId: 'cycle-2', status: 'paid-out', terminalAt: '2026-01-01T00:00:05.000Z', updatedAt: null },
+    { cycleId: 'cycle-1', status: 'paid-out', terminalAt: null, updatedAt: null },
+  ];
+  assert.throws(() => normalizePublicCycleHistory(input, 'mainnet'));
+});
+
 test('rejects a non-empty items array when historyComplete is false (fail-closed shape must be entirely empty)', () => {
   const input = baseResponse();
   input.historyComplete = false;

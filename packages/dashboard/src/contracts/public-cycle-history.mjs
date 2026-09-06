@@ -59,6 +59,13 @@ function readPublicCycleHistory(value, expectedProfile) {
   if (Date.parse(asOf) > Date.parse(generatedAt)) invalid();
   if (typeof source.historyComplete !== 'boolean') invalid();
   const items = boundedArray(source.items, MAX_HISTORY_PAGE_SIZE, invalid).map(readItem);
+  // The whole-page fail-closed rule (see this module's own header) means a returned item may never
+  // carry a null terminalAt: if even one source cycle lacked a verified timestamp, the producer must
+  // have failed the entire response closed (historyComplete:false, items:[]) instead of reaching
+  // here at all. A null terminalAt on any item — even one item in an otherwise complete page — is
+  // the exact contradiction G6-terra-review found: reject it rather than render it as completed
+  // history (G6-terra-review.md).
+  if (items.some(item => item.terminalAt === null)) invalid();
   for (let index = 1; index < items.length; index += 1) {
     if (!itemOrderDescends(items[index - 1], items[index])) invalid();
   }
@@ -76,7 +83,10 @@ function readPublicCycleHistory(value, expectedProfile) {
 }
 
 function itemOrderDescends(previous, current) {
-  if (previous.terminalAt === null || current.terminalAt === null) return true;
+  // A null terminalAt is already rejected before this is ever called (see readPublicCycleHistory's
+  // own check above) — treating a null operand as "order not violated" would be exactly the
+  // fail-open gap G6-terra-review found, so this rejects rather than waves it through defensively.
+  if (previous.terminalAt === null || current.terminalAt === null) return false;
   const previousMs = Date.parse(previous.terminalAt);
   const currentMs = Date.parse(current.terminalAt);
   if (previousMs !== currentMs) return previousMs > currentMs;
