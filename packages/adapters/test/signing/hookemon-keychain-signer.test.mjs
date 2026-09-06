@@ -246,7 +246,11 @@ test('keychain signer refuses a serialized live Solana policy without trusted pa
   assert.match(result.stderr, /parent transaction policy evaluation with trusted chain resolvers/i);
 });
 
-test('keychain signer returns its bounded Keychain timeout to the caller', { timeout: 1_000 }, async t => {
+// The 50ms budget below only bounds the fake Keychain hang; this test's own wall-clock
+// deadline must also absorb two cold Node process spawns (signer + EVM keychain child,
+// each importing viem/@solana-web3.js) plus their nested 550ms kill-and-drain window,
+// which is unrelated startup cost that grows under CI CPU contention.
+test('keychain signer returns its bounded Keychain timeout to the caller', { timeout: 5_000 }, async t => {
   const keychain = await createTestKeychain(t, { mode: 'hang' });
   const result = await invokeSigner(keychain, {
     operation: 'probe',
