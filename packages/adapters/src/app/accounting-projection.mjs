@@ -108,6 +108,75 @@ function sameAsset(left, right) {
     && left.chainId === right.chainId && left.assetId === right.assetId && left.decimals === right.decimals;
 }
 
+/**
+ * Sums one purchase/buyback stage's per-pack evidence into a single typed `Amount`, per Task C's
+ * multi-pack `{packs: [...]}` lifecycle (C-interface.json revision 2). `select(pack)` must return:
+ *   - a typed-amount-shaped value: verified same-asset (via `sameAsset`, never merely same
+ *     decimals) and added to the running total with `BigInt` — never `Number` arithmetic.
+ *   - `null`: this pack genuinely contributes zero (a real, verified fact — e.g. a pack that was
+ *     never purchased, or a held pack carved out before ever being sold) — never conflated with an
+ *     unknown amount.
+ *   - `undefined`: this pack's amount is required but missing, invalid, or the pack is in an
+ *     unexpected (non-terminal) state — the whole aggregate becomes `null`, never a fabricated
+ *     partial sum that silently drops the ambiguous pack.
+ * Also fails closed to `null` on an empty/malformed `packs` array, a duplicate or contradictory
+ * `packIndex`/`memo`/non-null `mint` across entries (never double-counted), or a mixed-asset sum
+ * (two packs' amounts on different chains/assets/decimals) — the same asset-identity discipline
+ * `sameAsset` enforces everywhere else in this module. A batch where every pack verifiably
+ * contributes zero (e.g. every pack `not_purchased`) still returns `null`: the total is honestly
+ * zero, but with no real evidence pack establishing an asset identity to tag it with, this module
+ * has no trusted context to guess one (unlike payout's `trustedPayoutContext` anchor).
+ */
+function sumPackAmounts(packs, select) {
+  if (!Array.isArray(packs) || packs.length === 0) return null;
+  const seenIndexes = new Set();
+  const seenMemos = new Set();
+  const seenMints = new Set();
+  let asset = null;
+  let total = 0n;
+  for (const pack of packs) {
+    if (!pack || typeof pack !== 'object' || Array.isArray(pack)) return null;
+    if (!Number.isInteger(pack.packIndex) || pack.packIndex < 0 || seenIndexes.has(pack.packIndex)) return null;
+    seenIndexes.add(pack.packIndex);
+    if (typeof pack.memo === 'string') {
+      if (seenMemos.has(pack.memo)) return null;
+      seenMemos.add(pack.memo);
+    }
+    if (typeof pack.mint === 'string') {
+      if (seenMints.has(pack.mint)) return null;
+      seenMints.add(pack.mint);
+    }
+    const selected = select(pack);
+    if (selected === undefined) return null;
+    if (selected === null) continue;
+    const amount = publicAmount(selected);
+    if (amount === null) return null;
+    if (asset === null) asset = amount;
+    else if (!sameAsset(amount, asset)) return null;
+    total += BigInt(amount.units);
+  }
+  return asset === null ? null : Object.freeze({ ...asset, units: total.toString() });
+}
+
+/** `packs[i].status === 'purchased'` requires its own `packCost`; `'not_purchased'` verifiably cost
+ * nothing; any other status is unexpected for durably-COMPLETE evidence and fails the aggregate
+ * closed rather than silently skip it. */
+function purchasePackAmount(pack) {
+  if (pack.status === 'purchased') return pack.packCost ?? undefined;
+  if (pack.status === 'not_purchased') return null;
+  return undefined;
+}
+
+/** `packs[i].decision === 'sold'` requires its own `proceeds`; `'held'` was carved out before ever
+ * selling (real zero proceeds, tracked instead as a held-position custody fact elsewhere); any
+ * other decision (e.g. a pre-reconcile `'submitted'`/`'unknown'`) is unexpected for durably-COMPLETE
+ * evidence and fails the aggregate closed. */
+function buybackPackAmount(pack) {
+  if (pack.decision === 'sold') return pack.proceeds ?? undefined;
+  if (pack.decision === 'held') return null;
+  return undefined;
+}
+
 const PAYOUT_EVIDENCE_SCHEMA = 'hookemon.direct-payout-result.v1';
 // Reused from the authoritative producer (packages/runner/src/distribution/payout-plan.mjs) rather
 // than re-declared, so this projection's notion of "real USDG" can never silently drift from the
@@ -337,9 +406,20 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
 
   // The real, chain/asset-tagged Collector Crypt purchase debit / buyback proceeds (Solana), from
   // the purchase/buyback stages' own finalized settlement evidence — never assumed equal to the
-  // EVM bridge amounts above at any parity.
-  const collectorPurchaseDebit = isCompleteStage(purchase) ? publicAmount(purchase?.evidence?.packCost) : null;
-  const collectorBuybackProceeds = isCompleteStage(buyback) ? publicAmount(buyback?.evidence?.proceeds) : null;
+  // EVM bridge amounts above at any parity. Task C's current producer emits a per-pack
+  // `{packs: [...]}` array (C-interface.json revision 2); an older completed cycle may still carry
+  // the legacy single-card `packCost`/`proceeds` shape (no `packs` array) — recognized explicitly
+  // and read as before, never guessed at or forced through the new per-pack summation.
+  const collectorPurchaseDebit = isCompleteStage(purchase)
+    ? (Array.isArray(purchase.evidence?.packs)
+      ? sumPackAmounts(purchase.evidence.packs, purchasePackAmount)
+      : publicAmount(purchase?.evidence?.packCost))
+    : null;
+  const collectorBuybackProceeds = isCompleteStage(buyback)
+    ? (Array.isArray(buyback.evidence?.packs)
+      ? sumPackAmounts(buyback.evidence.packs, buybackPackAmount)
+      : publicAmount(buyback?.evidence?.proceeds))
+    : null;
 
   // No honest USDG-denominated pack-spend/buyback/gain/loss producer exists: the bridge amounts are
   // a different fact (custody movement) and the Collector amounts are a different asset (Solana
