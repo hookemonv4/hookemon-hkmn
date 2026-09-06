@@ -14,7 +14,12 @@ export const EXCLUDED_DIRECTORY_NAMES = new Set(['node_modules', '.git', '.workt
 export const EXCLUDED_PATHS = new Set(['packages/contracts/lib']);
 
 export const SUITES = Object.freeze({
-  runner: Object.freeze({ roots: Object.freeze(['packages/runner/test']) }),
+  // packages/domain rides in the runner suite rather than gaining its own. A new suite would satisfy
+  // this manifest's coverage check while never executing, because the gates workflow names each
+  // suite it runs and that workflow is outside this lane. Multi-root suites are the established
+  // pattern here (see contracts-js), and domain holds the shared cycle-status and dashboard-profile
+  // contracts the runner's own projections are written against.
+  runner: Object.freeze({ roots: Object.freeze(['packages/domain/test', 'packages/runner/test']) }),
   adapters: Object.freeze({ roots: Object.freeze(['packages/adapters/test']) }),
   dashboard: Object.freeze({ roots: Object.freeze(['packages/dashboard/test']) }),
   'contracts-js': Object.freeze({ roots: Object.freeze(['packages/contracts/test-js', 'packages/contracts/test/blind']) }),
