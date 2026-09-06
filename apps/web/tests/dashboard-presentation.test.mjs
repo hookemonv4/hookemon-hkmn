@@ -274,7 +274,7 @@ test('browser dashboard accepts the real backend schemaVersion 6/8 pair with sch
     eventId: 'evt-1', sequence: '1', state: 'finalized', name: 'Pikachu',
     imageUrl: 'https://images.example/pikachu.png',
     observedAt: '2026-09-04T11:58:00.000Z', finalizedAt: '2026-09-04T11:59:00.000Z', transactionId: null,
-    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '8000000', decimals: 6 },
+    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '8000000', decimals: 6 },
   }];
   const canonical = {
     status: normalizePublicCycleStatus(pair.status, 'testnet'),
@@ -295,7 +295,7 @@ test('standalone dashboard.mjs validates real bridge amounts, payout-liability f
     packSpendMicroUsdg: null, buybackMicroUsdg: null,
     outboundBridgeDebit: { chainId: 'eip155:4663', assetId: 'USDG', units: '5000000', decimals: 6 },
     inboundBridgeProceeds: null,
-    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '10000000', decimals: 6 },
+    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '10000000', decimals: 6 },
     collectorBuybackProceeds: null,
     packGainMicroUsdg: null, packLossMicroUsdg: null,
     quotedCosts: {

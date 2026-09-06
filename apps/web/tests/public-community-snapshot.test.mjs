@@ -313,8 +313,8 @@ function schemaVersion8Fixture() {
         buybackMicroUsdg: null,
         outboundBridgeDebit: null,
         inboundBridgeProceeds: null,
-        collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "spl:usdc-mint", units: "10000000", decimals: 6 },
-        collectorBuybackProceeds: { chainId: "solana:mainnet-beta", assetId: "spl:usdc-mint", units: "8000000", decimals: 6 },
+        collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "spl:stablecoin", units: "10000000", decimals: 6 },
+        collectorBuybackProceeds: { chainId: "solana:mainnet-beta", assetId: "spl:stablecoin", units: "8000000", decimals: 6 },
         packGainMicroUsdg: null,
         packLossMicroUsdg: null,
         quotedCosts: validCommunitySnapshot.latestCycle.roundAccounting.quotedCosts,
@@ -344,7 +344,7 @@ function schemaVersion8Fixture() {
       imageUrl: "https://images.example/pikachu.png",
       observedAt: "2026-08-19T10:58:00.000Z", finalizedAt: "2026-08-19T11:00:00.000Z",
       transactionId: null,
-      proceeds: { chainId: "solana:mainnet-beta", assetId: "spl:usdc-mint", units: "8000000", decimals: 6 },
+      proceeds: { chainId: "solana:mainnet-beta", assetId: "spl:stablecoin", units: "8000000", decimals: 6 },
     }],
     heldPositionCount: 1,
     heldPositions: [{ reason: "AWAITING_BUYBACK_WINDOW", ageSeconds: 15, cycleState: "opened" }],
@@ -358,7 +358,7 @@ test("accepts schemaVersion 8 with the frozen PublicCardEvent card feed and type
   assert.equal(result.cards[0].state, "finalized");
   assert.equal(result.latestCycle.roundAccounting.packSpendMicroUsdg, null);
   assert.deepEqual(result.latestCycle.roundAccounting.collectorBuybackProceeds, {
-    chainId: "solana:mainnet-beta", assetId: "spl:usdc-mint", units: "8000000", decimals: 6,
+    chainId: "solana:mainnet-beta", assetId: "spl:stablecoin", units: "8000000", decimals: 6,
   });
 });
 

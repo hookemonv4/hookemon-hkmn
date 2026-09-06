@@ -40,8 +40,8 @@ type OperatorState = {
   executionConnected: boolean;
 };
 
-// The Collector Crypt pack catalog is priced in Solana USDC, a different chain and asset from the
-// EVM USDG bridge/spend caps below -- never compared or summed together as if at parity.
+// The Collector Crypt pack catalog is priced in a Solana stablecoin, a different chain and asset
+// from the EVM USDG bridge/spend caps below -- never compared or summed together as if at parity.
 type Pack = {
   id: string;
   name: string;
@@ -679,7 +679,7 @@ export default function OperatorControlPanel() {
                     <span>
                       <strong>{pack.name}</strong>
                       <small>
-                        {formatMicroUsdc(pack.priceMicroUsdc)} (Collector Crypt, Solana USDC) · {pack.available} verfügbar
+                        {formatMicroStablecoin(pack.priceMicroUsdc)} (Collector Crypt, Solana stablecoin) · {pack.available} verfügbar
                       </small>
                     </span>
                   </label>
@@ -1144,15 +1144,15 @@ function formatMicroUsdg(value: string) {
   }
 }
 
-// The Collector Crypt pack catalog is priced in Solana USDC (a different chain/asset from the EVM
-// USDG fields above); formatted separately so it is never mistaken for a USDG amount.
-function formatMicroUsdc(value: string) {
+// The Collector Crypt pack catalog is priced in a Solana stablecoin (a different chain/asset from
+// the EVM USDG fields above); formatted separately so it is never mistaken for a USDG amount.
+function formatMicroStablecoin(value: string) {
   if (!/^(0|[1-9]\d{0,77})$/.test(value)) return "Nicht bestätigt";
   const amount = BigInt(value);
   const whole = amount / 1_000_000n;
   const rawFraction = (amount % 1_000_000n).toString().padStart(6, "0");
   const fraction = rawFraction.replace(/0+$/, "").padEnd(2, "0");
-  return `${new Intl.NumberFormat("de-DE", { useGrouping: true }).format(whole)},${fraction} USDC`;
+  return `${new Intl.NumberFormat("de-DE", { useGrouping: true }).format(whole)},${fraction} USD Coin`;
 }
 
 function formatOptionalMicroUsdg(value: string | undefined) {
