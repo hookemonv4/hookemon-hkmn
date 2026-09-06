@@ -286,7 +286,7 @@ test('browser dashboard accepts the real backend schemaVersion 6/8 pair with sch
 
   const display = presentCard(validated.community.cards[0]);
   assert.equal(display.label, 'Pikachu');
-  assert.equal(display.detailLine, 'Proceeds: 8 spl:usdc-mint');
+  assert.equal(display.detailLine, `Proceeds: 8 ${validated.community.cards[0].proceeds.assetId}`);
 });
 
 test('standalone dashboard.mjs validates real bridge amounts, payout-liability facts, and nullable lifetime metrics at schemaVersion 8', () => {
