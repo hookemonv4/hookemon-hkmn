@@ -29,12 +29,14 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - Recipient count alone never fails feasibility: `evaluatePayoutFeasibility` budgets the native fee
   from the actual recipient count (`recipientCount * measuredTransferGas * maxGasPriceWei`) and only
   refuses on the configured maximum, an insufficient native balance (reporting the exact
-  `deficitWei` in `reason`), or the shared `DIRECT_PAYOUT_RECIPIENT_LIMIT` technical ceiling
-  (50,000 -- a memory/canonical-JSON safety net, not a business rule). 1,025 and 1,026-recipient
+  `deficitWei` in `reason`), or the shared `DIRECT_PAYOUT_RECIPIENT_LIMIT` technical ceiling (2,500
+  -- the empirically measured honest capacity of the current durable payout store, not just a
+  memory/canonical-JSON safety net; see `docs/modules/direct-payout.md`). 1,025 and 1,026-recipient
   sets with sufficient gas are feasible and payable; see
   `packages/runner/test/distribution/payout-plan.test.mjs` and
-  `packages/adapters/test/app/payout-resume-scale.test.mjs` for a 10,000-holder correctness/load
-  case. It is still not yet an executable *storage* capacity check for very large sets: the
+  `packages/adapters/test/app/payout-resume-scale.test.mjs` for a correctness/load case at the
+  recipient-limit boundary. It is still not yet an executable *storage* capacity check for very
+  large sets: the
   eligibility-snapshot stage's own journal completion is bounded at 64 array items
   (`packages/runner/src/cycle/journal.mjs`), unlike direct-payout's already-paged recipient state.
   An owner-approved, cycle-repository-owned paged completion contract for this stage (requested via
@@ -56,7 +58,7 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
 - Supply a content-addressed launch manifest and two genuinely independent log sources before reconciling.
 - Keep measured transfer gas, gas-price ceiling, native reserve, native balance, and
   recipient/transaction limits current before reconciliation. The configured maximum and the
-  50,000-recipient technical ceiling are the only count-based limits; the actual gas budget scales
+  2,500-recipient technical ceiling are the only count-based limits; the actual gas budget scales
   with the real recipient count. No value above 64 is currently persistence-safe for production
   until the eligibility-snapshot stage's completion storage is paged (see C-inbox.md).
 - Do not configure a feasible large holder set until durable content-addressed manifest storage is available for the full entry array.

@@ -9,6 +9,7 @@ const {
   compileDirectPayoutPlan: compilePayoutPlan,
   createUsdgPayoutAmount,
   directPayoutPlanDigest,
+  DIRECT_PAYOUT_RECIPIENT_LIMIT,
   supplementaryPayoutPlanDigest,
 } = payoutPlan;
 
@@ -243,19 +244,20 @@ test('accepts 1,026 recipients: recipient count alone never truncates a feasible
   assert.equal(plan.outcome, 'ALLOCATED');
 });
 
-test('accepts 10,000 recipients and conserves every atomic unit (correctness/load boundary)', () => {
-  const entries = Array.from({ length: 10_000 }, (_, index) => holder(index, 1 + (index % 7)));
-  const manifest = eligibilityManifest(entries, { cycleId: 'cycle-10000' });
+test('accepts DIRECT_PAYOUT_RECIPIENT_LIMIT recipients and conserves every atomic unit (correctness/load boundary)', () => {
+  const count = DIRECT_PAYOUT_RECIPIENT_LIMIT;
+  const entries = Array.from({ length: count }, (_, index) => holder(index, 1 + (index % 7)));
+  const manifest = eligibilityManifest(entries, { cycleId: 'cycle-recipient-limit' });
   const plan = compileDirectPayoutPlan({
-    cycleId: 'cycle-10000',
+    cycleId: 'cycle-recipient-limit',
     eligibilityManifest: manifest,
     finalizedReturn: usdg('123456789'),
     previousDust: usdg('0'),
   });
 
-  assert.equal(plan.allocations.length, 10_000);
+  assert.equal(plan.allocations.length, count);
   const recipients = new Set(plan.allocations.map(allocation => allocation.recipient));
-  assert.equal(recipients.size, 10_000);
+  assert.equal(recipients.size, count);
   const paid = plan.allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount.amountAtomic), 0n);
   assert.equal(paid + BigInt(plan.dust.amountAtomic), 123456789n);
 });
