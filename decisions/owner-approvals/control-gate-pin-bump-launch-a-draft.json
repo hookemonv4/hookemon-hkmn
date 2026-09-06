@@ -2,12 +2,12 @@
   "schema": "hookemon.control-gate-pin-bump.v1",
   "authority": "OWNER",
   "action": "CONTROL_GATE_PIN_BUMP",
-  "rationale": "REPLACE_WITH_OWNER_RATIONALE -- codex/launch-a imports the reviewed codex/phase3-operations-wallet, codex/p3-held-decouple, and codex/p3-preflight-v4 backend lineages as single-parent commits onto canonical main (see A-baseline.json in the coordinator's run directory for the full file-by-file review record). Every changed control-surface file below is a content change carried by that reviewed import, not an independent edit to CI policy; verify the six listed digests against the actual diff (in particular the zero-before/parentless-push fix in control-gate.yml/identity-gate.yml/v4-gates.yml via the new scripts/ci/push-range.mjs, and the seed-intent binding hash update to RobinhoodV4ArchiveFork.t.sol) before signing.",
+  "rationale": "REPLACE_WITH_OWNER_RATIONALE -- codex/launch-a imports the reviewed codex/phase3-operations-wallet, codex/p3-held-decouple, and codex/p3-preflight-v4 backend lineages plus the website source (PR #1, db88106a) as single-parent/canonical-descendant commits onto canonical main (see A-baseline.json in the coordinator's run directory for the full file-by-file review record). Five of the six changed control-surface files below are content changes carried by the reviewed backend import (in particular the zero-before/parentless-push fix in control-gate.yml/identity-gate.yml/v4-gates.yml/fork-proof.yml via the new scripts/ci/push-range.mjs, and the seed-intent binding hash update to RobinhoodV4ArchiveFork.t.sol); the sixth, scripts/verify-control-dependencies.mjs, has one additional A-authored change on top of the import -- adding '.github/workflows/web-ci.yml' and '.github/workflows/deploy-web.yml' to PERMITTED_WORKFLOW_PATHS and pinning actions/setup-node so the already-open website PR's own workflows can be admitted. Verify all six digests against the actual diff before signing; this is the final, complete set for this branch -- no further control-surface edits are planned after this draft.",
   "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
   "baseTree": "37c0f955f76410e9c9863e77cdc33fd48ffd1306",
-  "candidateTree": "647eaa3f638da1d4950ee16b4a6eb06fb7222f30",
+  "candidateTree": "802ccb389c9153a5685b17b7c7eb82d06bd77e35",
   "basePinsSha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
-  "candidatePinsSha256": "564427f1019189f1c9be665793b2773a250aa9a02fe39df3787cc3ecf7a834cd",
+  "candidatePinsSha256": "4939d67a12637595a3ce85d30a89212991bd7b9d53aeb98968852cb75de7e56b",
   "baseChecker": {
     "path": "scripts/verify-control-dependencies.mjs",
     "blobId": "6b232b5f35dba49abc08c1759f3fec57831f8e9d"
@@ -18,7 +18,7 @@
     { "path": ".github/workflows/identity-gate.yml", "previousSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019", "sha256": "896a8df85ab356c84649bb942a9fd171b5dcd6883047cbe40c03a074cfe1e994" },
     { "path": ".github/workflows/v4-gates.yml", "previousSha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276", "sha256": "91f1be89863be27b0db808cbbf2b95051e4a2ae204d5fc350471bf400bf8d513" },
     { "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol", "previousSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8", "sha256": "bb0a05472623238a6f1b618f8c7c58ca1c486dbd4688631dd35b565e98aa2927" },
-    { "path": "scripts/verify-control-dependencies.mjs", "previousSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f", "sha256": "9299a5127357f9155d09111b365e3c9623ce58b54fd800142db43a1b4940a770" }
+    { "path": "scripts/verify-control-dependencies.mjs", "previousSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f", "sha256": "e4e1d1a52f5ae4ac615de647e2356c036dfdec5135d63f13b91d201b885e8c79" }
   ],
   "howToActivate": "This record is a proposal only (approvalToken is a placeholder, not a real approval). Once the owner sets approvalToken to the literal string \"OWNER APPROVED\" after independently verifying the six digests above against the actual candidate diff, copy this object (with the signed token) into product/dependency-verification.json's top-level \"controlGatePinBump\" field on this branch and re-run the control-gate CI check. No one other than the owner may set that token; an AI worker setting it themselves would be approving its own work, which AGENTS.md forbids outright."
 }
