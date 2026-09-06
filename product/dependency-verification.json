@@ -63,8 +63,8 @@
   },
   "workflowIntegrity": {
     "path": ".github/workflows/v4-gates.yml",
-    "expectedSha256": "2c79930495b18f7270f9cf415bcacac7dbd8c6ce4eac73a30f096305ada9669a",
-    "actualSha256": "2c79930495b18f7270f9cf415bcacac7dbd8c6ce4eac73a30f096305ada9669a"
+    "expectedSha256": "9eb984c4314d8d4cdb6d0f707646b70da90a39aa27a427a3c7e3696bd7a2d079",
+    "actualSha256": "9eb984c4314d8d4cdb6d0f707646b70da90a39aa27a427a3c7e3696bd7a2d079"
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
@@ -127,13 +127,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "56a9154f34c476dbab933b89313878274475f2f7c5e667241b57372b372d706a",
-      "actualSha256": "56a9154f34c476dbab933b89313878274475f2f7c5e667241b57372b372d706a",
+      "expectedSha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720",
+      "actualSha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "56a9154f34c476dbab933b89313878274475f2f7c5e667241b57372b372d706a",
-          "actualSha256": "56a9154f34c476dbab933b89313878274475f2f7c5e667241b57372b372d706a"
+          "sha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720",
+          "actualSha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720"
         },
         {
           "path": "scripts/lib/util.mjs",

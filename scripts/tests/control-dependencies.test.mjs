@@ -932,14 +932,14 @@ test('rejects adapters coverage that skips the install step', () => {
   const state = fixture();
   const workflowPath = join(state.root, '.github', 'workflows', 'v4-gates.yml');
   writeFileSync(workflowPath, CANONICAL_WORKFLOW.replace(
-    `cd packages/adapters\n          npm ci --ignore-scripts\n          cd - >/dev/null\n          ${ADAPTERS_TEST_COMMAND}`,
-    `cd packages/adapters\n          ${ADAPTERS_TEST_COMMAND}`,
+    'cd packages/adapters\n          npm ci --ignore-scripts\n          cd - >/dev/null',
+    'cd packages/adapters',
   ));
 
   const result = verifyFixture(state);
 
   assert.equal(result.result, 'FAILED', result.errors.join('\n'));
-  assert.match(result.errors.join('\n'), /Verify adapters dependencies workflow gate must match the canonical local-only command block/);
+  assert.match(result.errors.join('\n'), /Install adapters dependencies workflow gate must match the canonical local-only command block/);
 });
 
 test('rejects adapters coverage that swaps to an installed npm install', () => {
@@ -950,7 +950,7 @@ test('rejects adapters coverage that swaps to an installed npm install', () => {
   const result = verifyFixture(state);
 
   assert.equal(result.result, 'FAILED', result.errors.join('\n'));
-  assert.match(result.errors.join('\n'), /Verify adapters dependencies workflow gate must match the canonical local-only command block/);
+  assert.match(result.errors.join('\n'), /Install adapters dependencies workflow gate must match the canonical local-only command block/);
 });
 
 test('verifies the pinned adapters dependency set and lockfile integrity fields', () => {

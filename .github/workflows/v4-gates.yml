@@ -167,6 +167,12 @@ jobs:
           gitleaks git --no-banner --redact --ignore-gitleaks-allow \
             --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
             --log-opts="--full-history -m --text --no-textconv $range_base..$range_head" .
+      - name: Install adapters dependencies
+        shell: bash
+        run: |
+          cd packages/adapters
+          npm ci --ignore-scripts
+          cd - >/dev/null
       - name: Verify local Phase 2 runner
         shell: bash
         run: |
@@ -176,9 +182,6 @@ jobs:
       - name: Verify adapters dependencies
         shell: bash
         run: |
-          cd packages/adapters
-          npm ci --ignore-scripts
-          cd - >/dev/null
           files="$(node scripts/test-manifest.mjs list adapters)"
           node --test --test-timeout=120000 $files
       - name: Verify dashboard suite

@@ -41,7 +41,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '2c79930495b18f7270f9cf415bcacac7dbd8c6ce4eac73a30f096305ada9669a';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '9eb984c4314d8d4cdb6d0f707646b70da90a39aa27a427a3c7e3696bd7a2d079';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '09cb482c0eaf071c57a03ab007d3baab62ed1907d74633881a133f46c9caee49';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -72,15 +72,17 @@ const SUPPORTED_FOUNDRY_DISTRIBUTION = Object.freeze({
   executableSha256: '4f77da0810de94325734855d0ad58d70640aa8a5b2a837608ddf8c26da34355c',
 });
 const REQUIRED_LOCAL_PHASE2_GATE_BLOCKS = Object.freeze({
+  'Install adapters dependencies': Object.freeze([
+    'cd packages/adapters',
+    'npm ci --ignore-scripts',
+    'cd - >/dev/null',
+  ]),
   'Verify local Phase 2 runner': Object.freeze([
     'files="$(node scripts/test-manifest.mjs list runner)"',
     'node --test --test-timeout=120000 $files',
     'node packages/runner/src/cycle/verify-fixtures.mjs',
   ]),
   'Verify adapters dependencies': Object.freeze([
-    'cd packages/adapters',
-    'npm ci --ignore-scripts',
-    'cd - >/dev/null',
     'files="$(node scripts/test-manifest.mjs list adapters)"',
     'node --test --test-timeout=120000 $files',
   ]),
