@@ -13,6 +13,31 @@ test('an unconfigured (fresh) operator projects executionState unknown', async (
   assert.equal(status.cycle, null);
 });
 
+test('without a schedulerView, scheduler falls back to a conservative derivation from already-known fields', async () => {
+  const internalStatus = await projectCycleStatus({ activeCycleId: null, terminalCycles: [], configuration: null, now: Date.parse('2026-01-01T00:00:00.000Z') });
+  const status = buildPublicCycleStatus({ profileId: 'testnet', internalStatus, configuration: null });
+  assert.deepEqual(status.scheduler, {
+    nextCycleAt: status.nextCycleAt,
+    nextReconcileAt: null,
+    automationEnabled: false,
+    paused: internalStatus.paused,
+    pendingReason: null,
+  });
+});
+
+test('a real schedulerView (E-interface.json getView() shape) is passed through verbatim', async () => {
+  const internalStatus = await projectCycleStatus({ activeCycleId: null, terminalCycles: [], configuration: null, now: Date.parse('2026-01-01T00:00:00.000Z') });
+  const schedulerView = {
+    nextCycleAt: null,
+    nextReconcileAt: '2026-01-01T00:00:05.000Z',
+    automationEnabled: true,
+    paused: false,
+    pendingReason: 'RECONCILING_PENDING_TRANSACTION',
+  };
+  const status = buildPublicCycleStatus({ profileId: 'testnet', internalStatus, configuration: null, schedulerView });
+  assert.deepEqual(status.scheduler, schedulerView);
+});
+
 test('a paused, configured operator projects executionState paused with a synthesized nextCycleAt', async () => {
   const configuration = applyOperatorConfiguration(null, { paused: true, intervalMinutes: 25 });
   const internalStatus = await projectCycleStatus({
@@ -41,9 +66,11 @@ test('an active operator with an in-flight cycle reports a conservative cycle (n
 
 const FIXTURE_ACCOUNTING = Object.freeze({
   packSpendMicroUsdg: '5000000',
-  buybackMicroUsdg: '0',
-  packGainMicroUsdg: '0',
-  packLossMicroUsdg: '5000000',
+  buybackMicroUsdg: null,
+  collectorPurchaseDebit: Object.freeze({ chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 }),
+  collectorBuybackProceeds: null,
+  packGainMicroUsdg: null,
+  packLossMicroUsdg: null,
   quotedCosts: Object.freeze({
     outboundBridgeMicroUsdg: '5000',
     inboundBridgeMicroUsdg: null,

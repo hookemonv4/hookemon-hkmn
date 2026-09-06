@@ -112,9 +112,9 @@ async function readAuthorityProjection(ctx) {
       totals: { paidOut: completedCycles },
       heldPositions,
     },
-    // The repository status currently has no terminal timestamp. A one-item set is unambiguous;
-    // with more, omit `latestCycle` instead of guessing an order from an identifier.
-    unambiguousRepositoryCycles: terminals.length === 1 ? terminals : [],
+    // Every terminal cycle is passed through; buildPublicCommunitySnapshot itself decides whether
+    // "latest" is determinable (see its own header) — this route never pre-guesses an order.
+    terminalCycles: terminals,
     completedCycles,
     heldPositions,
   };
@@ -125,10 +125,23 @@ export function createCycleStatusHandler(ctx) {
     if (!methodAndQueryGuard(req, res)) return;
     try {
       const { configuration, internalStatus } = await readAuthorityProjection(ctx);
+      // `ctx.getSchedulerView` is an entirely optional live capability, the same pattern as
+      // `ctx.readAccounting`/`ctx.listRecentWinners` — typically bound to
+      // `packages/runner/src/scheduler/scheduler.mjs`'s `createScheduler().getView`. Its absence or
+      // failure degrades to buildPublicCycleStatus's own conservative fallback, never a 503.
+      let schedulerView = null;
+      if (typeof ctx.getSchedulerView === 'function') {
+        try {
+          schedulerView = ctx.getSchedulerView();
+        } catch (error) {
+          ctx.onError?.('cycle-status-scheduler-view', error);
+        }
+      }
       const status = buildPublicCycleStatus({
         profileId: ctx.profileId,
         internalStatus,
         configuration,
+        schedulerView,
       });
       sendJson(res, 200, status, { cache: 'public, max-age=5, stale-while-revalidate=30' });
     } catch (error) {
@@ -143,9 +156,22 @@ export function createCommunityDashboardHandler(ctx) {
     if (!methodAndQueryGuard(req, res)) return;
     try {
       const projection = await readAuthorityProjection(ctx);
+      // `ctx.listRecentWinners` is an entirely optional live capability, the same pattern as
+      // `ctx.readAccounting`/`ctx.triggerTick` — typically bound to
+      // `packages/adapters/src/collector/recent-winners.mjs`'s `createRecentWinnersCollector().list`.
+      // Its absence or failure must never break this route (recent-winners is purely observational),
+      // so a thrown/rejected call degrades to an empty card feed rather than a 503.
+      let recentWinners = [];
+      if (typeof ctx.listRecentWinners === 'function') {
+        try {
+          recentWinners = await ctx.listRecentWinners({ limit: 12 });
+        } catch (error) {
+          ctx.onError?.('community-dashboard-recent-winners', error);
+        }
+      }
       const snapshot = await buildPublicCommunitySnapshot({
         profileId: ctx.profileId,
-        repositoryCycles: projection.unambiguousRepositoryCycles,
+        repositoryCycles: projection.terminalCycles,
         generatedAt: projection.internalStatus.generatedAt,
         nextCycleAt: projection.internalStatus.nextRunAt,
         completedCycles: projection.completedCycles,
@@ -153,6 +179,7 @@ export function createCommunityDashboardHandler(ctx) {
         openedPacks: 0,
         heldPositions: projection.heldPositions,
         readAccounting: ctx.readAccounting ? cycleId => ctx.readAccounting(cycleId) : null,
+        recentWinners,
       });
       sendJson(res, 200, snapshot, { cache: 'public, max-age=30, stale-while-revalidate=60' });
     } catch (error) {
