@@ -143,13 +143,15 @@ test('buildDurableCardFeed: an out-of-order later observation never regresses an
   assert.equal(collector.size(), 1);
 });
 
-test('F8-sol-verification repro: a later stage entry at the same packIndex but a foreign memo never rebinds its signature/mint onto the trusted identity', () => {
-  const { observations } = buildDurableCardFeed({
+test('F9-sol-verification repro: a corrupt COMPLETE stage with a foreign memo rejects the cycle feed rather than falling back to PURCHASED', () => {
+  const { trustedOperations, observations } = buildDurableCardFeed({
     cycleId: CYCLE_ID,
     packBatchRequestPacks: [{ packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: null }],
     purchaseRequestedAtMs: REQUESTED_AT_MS,
     stages: {
       purchase: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'sig-0' }] } },
+      open: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', decision: 'opened', signature: 'open-sig-0', mint: 'mint-0' }] } },
+      epicGate: { status: 'COMPLETE', evidence: { packs: [{ packIndex: 0, memo: 'memo-0', decision: 'sell', mint: 'mint-0' }] } },
       // A buyback entry at the same packIndex but a DIFFERENT memo -- a broken/foreign cross-stage
       // ledger, never trusted as this pack's own SOLD outcome.
       buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [
@@ -157,10 +159,8 @@ test('F8-sol-verification repro: a later stage entry at the same packIndex but a
       ] } },
     },
   });
-  assert.equal(observations.length, 1);
-  assert.equal(observations[0].state, 'observed', 'falls back to the trusted PURCHASED fact, never the foreign SOLD one');
-  assert.equal(observations[0].transactionId, 'sig-0');
-  assert.equal(observations[0].proceeds, null);
+  assert.equal(trustedOperations.size, 0);
+  assert.equal(observations.length, 0);
 });
 
 test('F8-sol-verification repro: a self-contradictory purchase batch-request ledger (duplicate packIndex under two different memos) rejects the entire batch, not a partial publication', () => {
@@ -177,4 +177,68 @@ test('F8-sol-verification repro: a self-contradictory purchase batch-request led
   });
   assert.equal(trustedOperations.size, 0, 'no partial trust for the non-conflicting entry either');
   assert.equal(observations.length, 0);
+});
+
+function completeLifecycle() {
+  return {
+    purchase: { status: 'COMPLETE', evidence: { packs: [
+      { packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'purchase-sig-0' },
+      { packIndex: 1, memo: 'memo-1', status: 'purchased', signature: 'purchase-sig-1' },
+    ] } },
+    open: { status: 'COMPLETE', evidence: { packs: [
+      { packIndex: 0, memo: 'memo-0', decision: 'opened', signature: 'open-sig-0', mint: 'mint-0' },
+      { packIndex: 1, memo: 'memo-1', decision: 'opened', signature: 'open-sig-1', mint: 'mint-1' },
+    ] } },
+    epicGate: { status: 'COMPLETE', evidence: { packs: [
+      { packIndex: 0, memo: 'memo-0', decision: 'sell', mint: 'mint-0' },
+      { packIndex: 1, memo: 'memo-1', decision: 'sell', mint: 'mint-1' },
+    ] } },
+    buyback: { status: 'COMPLETE', evidence: { soldCount: 2, packs: [
+      { packIndex: 0, memo: 'memo-0', decision: 'sold', mint: 'mint-0', signature: 'sale-sig-0', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '40' } },
+      { packIndex: 1, memo: 'memo-1', decision: 'sold', mint: 'mint-1', signature: 'sale-sig-1', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '30' } },
+    ] } },
+  };
+}
+
+test('F9-sol-verification repro: every COMPLETE stage has one memo-and-mint-continuous row per predecessor', () => {
+  const malformed = completeLifecycle();
+  malformed.buyback.evidence.packs[1] = { ...malformed.buyback.evidence.packs[1], packIndex: 0, mint: 'foreign-mint' };
+  const result = buildDurableCardFeed({
+    cycleId: CYCLE_ID,
+    packBatchRequestPacks: packBatchRequestPacks(),
+    purchaseRequestedAtMs: REQUESTED_AT_MS,
+    stages: malformed,
+  });
+  assert.equal(result.trustedOperations.size, 0);
+  assert.equal(result.observations.length, 0);
+});
+
+test('F9-sol-verification repro: sold rows require a signature and a typed proceeds amount, while held rows cannot carry either', () => {
+  for (const change of [
+    stages => { delete stages.buyback.evidence.packs[0].signature; },
+    stages => { delete stages.buyback.evidence.packs[0].proceeds; },
+    stages => { stages.buyback.evidence.packs[1] = { ...stages.buyback.evidence.packs[1], decision: 'held', signature: 'contradictory-sig', proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, amountAtomic: '30' } }; stages.buyback.evidence.soldCount = 1; },
+  ]) {
+    const stages = completeLifecycle();
+    change(stages);
+    const result = buildDurableCardFeed({
+      cycleId: CYCLE_ID,
+      packBatchRequestPacks: packBatchRequestPacks(),
+      purchaseRequestedAtMs: REQUESTED_AT_MS,
+      stages,
+    });
+    assert.equal(result.trustedOperations.size, 0);
+    assert.equal(result.observations.length, 0);
+  }
+});
+
+test('F9-sol-verification repro: a unique but non-dense request ledger is rejected before any stage is trusted', () => {
+  const result = buildDurableCardFeed({
+    cycleId: CYCLE_ID,
+    packBatchRequestPacks: packBatchRequestPacks().map(request => ({ ...request, packIndex: request.packIndex + 1 })),
+    purchaseRequestedAtMs: REQUESTED_AT_MS,
+    stages: {},
+  });
+  assert.equal(result.trustedOperations.size, 0);
+  assert.equal(result.observations.length, 0);
 });

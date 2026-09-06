@@ -678,6 +678,78 @@ test('F8-sol-verification repro: a sold pack missing its own memo and mint never
   assert.equal(accounting.collectorBuybackProceeds, null);
 });
 
+test('F9-sol-verification repro: purchase evidence requires dense pack indexes and rejects a contradictory not_purchased debit or signature', async () => {
+  for (const packs of [
+    [
+      { packIndex: 1, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+      { packIndex: 2, memo: 'memo-1', status: 'purchased', packCost: solAmount('20') },
+    ],
+    [
+      { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+      { packIndex: 1, memo: 'memo-1', status: 'not_purchased', packCost: solAmount('999') },
+    ],
+    [
+      { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+      { packIndex: 1, memo: 'memo-1', status: 'not_purchased', signature: 'contradictory-sig' },
+    ],
+  ]) {
+    const accounting = await projectCycleAccounting({
+      cycleRepository: relayLegRepository({
+        stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 2, purchasedCount: 1 + Number(packs[1].status === 'purchased'), packs } } },
+      }),
+      cycleId: 'cycle-1',
+    });
+    assert.equal(accounting.collectorPurchaseDebit, null);
+  }
+});
+
+test('F9-sol-verification repro: buyback evidence binds each packIndex and memo to the purchased subset', async () => {
+  const purchase = {
+    status: 'COMPLETE', evidence: {
+      quantity: 3, purchasedCount: 2, packs: [
+        { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+        { packIndex: 1, memo: 'memo-1', status: 'not_purchased' },
+        { packIndex: 2, memo: 'memo-2', status: 'purchased', packCost: solAmount('10') },
+      ],
+    },
+  };
+  for (const packs of [
+    [
+      { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+      { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'held' },
+    ],
+    [
+      { packIndex: 0, memo: 'foreign-memo', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+      { packIndex: 2, memo: 'memo-2', mint: 'mint-2', decision: 'held' },
+    ],
+  ]) {
+    const accounting = await projectCycleAccounting({
+      cycleRepository: relayLegRepository({ stages: { purchase, buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs } } } }),
+      cycleId: 'cycle-1',
+    });
+    assert.equal(accounting.collectorBuybackProceeds, null);
+  }
+});
+
+test('F9-sol-verification repro: a held buyback record carrying sale evidence cannot contribute a partial total', async () => {
+  const accounting = await projectCycleAccounting({
+    cycleRepository: relayLegRepository({
+      stages: {
+        purchase: { status: 'COMPLETE', evidence: { quantity: 2, purchasedCount: 2, packs: [
+          { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+          { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+        ] } },
+        buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [
+          { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+          { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'held', signature: 'contradictory-sig', proceeds: solAmount('999') },
+        ] } },
+      },
+    }),
+    cycleId: 'cycle-1',
+  });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
 // The configured USDG token address, standing in for `config.contracts.usdg` at composition time.
 // Every "real" fixture in this file uses this exact assetId; a "foreign token" fixture deliberately
 // uses a different one to prove the asset anchor is a trusted, external identity, never derived from

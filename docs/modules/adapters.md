@@ -43,6 +43,17 @@ infrastructure.
   `createCycleRepositoryClient`, `createCycleRepositoryRunner`, and `compose()`. Composition keeps
   the writer private and gives the CLI and in-process dashboard that facade. WP10b owns the
   standalone dashboard migration.
+- `src/app/accounting-projection.mjs` projects Collector purchase debits and buyback proceeds only
+  from complete, dense per-pack evidence. Purchase indexes must cover `0..quantity-1`; a buyback
+  row must bind its `(packIndex, memo)` to the actual purchased predecessor subset. A
+  `not_purchased` row cannot carry purchase money or a signature, and a `held` row cannot carry
+  sale money or a signature. The projector retains exact atomic totals with `BigInt` and returns
+  `null` for any malformed or contradictory aggregate.
+- `src/collector/durable-card-feed.mjs` rebuilds public-card inputs from the durable request ledger
+  and stage evidence. It validates the dense request ledger and every COMPLETE stage as a full
+  predecessor transition before exposing any operation: memo identity is continuous throughout,
+  mint identity is continuous after open, and a sold row requires a signature plus a typed proceeds
+  amount. Corrupt complete evidence produces an empty cycle feed instead of a stale earlier state.
 - `src/app/stage-driver.mjs` dispatches exactly these operational stages:
   `eligibility-snapshot`, `claim-process`, `outbound`, `purchase`, `open`, `epic-gate`, `buyback`,
   `return`, and `payout`. Retired stages are not dispatched. Before an injected live handler can
@@ -171,6 +182,9 @@ infrastructure.
   expose writer methods. WP10b owns migration of a standalone read model.
 - A retry after a lost provider response is reconciliation-only. It cannot make a second mutation
   request while an operational attempt is `PREPARED`, `SENT_UNKNOWN`, or `RESPONSE_RECORDED`.
+- Public accounting never substitutes a partial total for incomplete per-pack evidence. Public card
+  reconstruction never resolves duplicate, missing, foreign, or contradictory COMPLETE rows by
+  array order, and never falls back from such a row to an earlier state.
 - Phase 3 dry-run and stage-driver construction never load the frozen legacy payout authority. A
   direct legacy live payout resolves that authority only when it reaches its mutation boundary and
   remains fail-closed while the active release is provisional.
@@ -235,6 +249,7 @@ node --test packages/runner/test/config/state-schema.test.mjs
 node --test packages/runner/test/automation/policy-wallets.test.mjs
 node --test packages/runner/test/operator/state-file.test.mjs
 node --test packages/adapters/test/app/cycle-repository.test.mjs packages/adapters/test/app/stage-driver.test.mjs
+node --test packages/adapters/test/app/accounting-projection.test.mjs packages/adapters/test/collector/durable-card-feed.test.mjs
 ```
 
 ## Recovery pointers
@@ -254,5 +269,8 @@ node --test packages/adapters/test/app/cycle-repository.test.mjs packages/adapte
 - A pending operational attempt is not a retry signal. Inspect its request digest and reconcile it
   from provider status or finality evidence; retain the cycle in a held state when the evidence is
   unavailable or unverifiable.
+- If accounting or card-feed reconstruction rejects a complete batch, repair or reconcile the
+  durable producer evidence as one ledger. Do not publish a partial total or manually select a
+  duplicate stage row.
 - Reuse the injected repository client inside a composed process. Composition hands the dashboard
   and CLI only the frozen client facade; WP10b owns standalone dashboard adoption.
