@@ -27,12 +27,17 @@ const FORK_PROOF_WORKFLOW_PATH = '.github/workflows/fork-proof.yml';
 const FORK_PIN_CANARY_WORKFLOW_PATH = '.github/workflows/fork-pin-canary.yml';
 const IDENTITY_GATE_WORKFLOW_PATH = '.github/workflows/identity-gate.yml';
 const CONTROL_GATE_WORKFLOW_PATH = '.github/workflows/control-gate.yml';
+// Not yet part of the base-checker's content-addressed control surface: extending that
+// protected pin set is its own owner-authorized base-checker migration, out of this
+// scope. Permitted here only so the launch gate does not trip the unlisted-workflow scan.
+const LAUNCH_GATE_WORKFLOW_PATH = '.github/workflows/launch-gate.yml';
 const PERMITTED_WORKFLOW_PATHS = new Set([
   V4_GATES_WORKFLOW_PATH,
   FORK_PROOF_WORKFLOW_PATH,
   FORK_PIN_CANARY_WORKFLOW_PATH,
   IDENTITY_GATE_WORKFLOW_PATH,
   CONTROL_GATE_WORKFLOW_PATH,
+  LAUNCH_GATE_WORKFLOW_PATH,
 ]);
 const COMMIT_IDENTITY_ALLOWLIST_PATH = 'scripts/check-commit-identity.mjs';
 const FORK_PIN_VERIFIER_PATH = 'scripts/verify-fork-pin.mjs';
@@ -41,7 +46,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'f73c7c08ff45405d78e2e6e4659a103246c8ffd191da2236063411e21bdbdff3';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '622a06fd3fc18f45611bf7a6e0995636a63ec889557878ccb1e31f6e2696cad4';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '3b2ef4a745828acf808adba0f81ceb9d5499f7015b19b4df4a7010a631e5b313';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -222,7 +227,11 @@ function workflowConstant(text, name, errors) {
 }
 
 function workflowInstallRunBlock(workflow, stepName, errors) {
-  const lines = workflow.replaceAll('\r\n', '\n').split('\n');
+  const normalized = workflow.replaceAll('\r\n', '\n');
+  // Drop the single trailing '' that String.split('\n') produces for a file ending in
+  // a newline; otherwise a step block that happens to end the file gets a phantom
+  // trailing empty content line that a mid-file step never would.
+  const lines = normalized.endsWith('\n') ? normalized.slice(0, -1).split('\n') : normalized.split('\n');
   const stepPattern = new RegExp(`^( *)- name: ${escapeRegex(stepName)}$`);
   const matches = lines
     .map((line, index) => ({ index, match: line.match(stepPattern) }))

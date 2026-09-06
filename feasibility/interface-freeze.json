@@ -15,7 +15,7 @@
     "feasibility/model-results.json": "sha256:a6105c4795ecd7cefe986482da2888ab62b765f2cf45740b84284633ece93325",
     "packages/contracts/foundry.toml": "sha256:2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258",
     "packages/contracts/remappings.txt": "sha256:1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "sha256:8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
+    "product/dependency-pins.json": "sha256:a3794e850950affe428be9c66675b8579b7977338e15e4bca9983d3127a1e1bb",
     "specs/requirements.json": "sha256:927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
   },
   "compatibilityVerdict": {

@@ -226,14 +226,3 @@ jobs:
         run: |
           files="$(node scripts/test-manifest.mjs list scripts)"
           node --test --test-timeout=120000 $files
-      - name: Verify Phase 3 launch package draft
-        run: node scripts/programmable/verify-launch-package.mjs --allow-unverified
-      - name: Verify release package closure
-        run: node scripts/verify-release-package-closure.mjs
-      - name: Verify delivery boundary
-        run: node scripts/check-delivery-boundary.mjs
-      - run: node scripts/v4.mjs trace check
-      - name: Verify deterministic state projection
-        run: |
-          node scripts/v4.mjs status --check
-          git diff --exit-code -- STATE.md state.json

@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { interfaceFreezeInputDigest } from '../../feasibility/verify-robinhood-binding.mjs';
 
 const repoRoot = join(import.meta.dirname, '..', '..');
 const workflow = readFileSync(join(repoRoot, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
+const launchGateWorkflow = readFileSync(join(repoRoot, '.github', 'workflows', 'launch-gate.yml'), 'utf8');
 const gitleaksConfig = readFileSync(join(repoRoot, '.gitleaks.toml'), 'utf8');
 const gitleaksPolicyConsumers = [
   'scripts/verify-control-dependencies.mjs',
@@ -358,10 +361,11 @@ test('MoneyRoles readRoles exposes the frozen role-control records', () => {
   ]);
 });
 
-test('CI runs the Phase 1 runner and delivery-boundary proofs', () => {
-  assert.match(workflow, /node scripts\/check-delivery-boundary\.mjs/);
+test('CI runs the Phase 1 runner proof; delivery-boundary runs only in the launch gate', () => {
+  assert.doesNotMatch(workflow, /node scripts\/check-delivery-boundary\.mjs/);
   assert.match(workflow, /files="\$\(node scripts\/test-manifest\.mjs list runner\)"\n\s+node --test --test-timeout=120000 \$files/);
   assert.match(workflow, /node packages\/runner\/src\/cycle\/verify-fixtures\.mjs/);
+  assert.match(launchGateWorkflow, /node scripts\/check-delivery-boundary\.mjs/);
 });
 
 test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the model label', () => {
@@ -429,9 +433,65 @@ test('v4 gates keeps explicit pull-request and push ranges for append-only and s
   assert.match(workflow, /"\$\{append_only_options\[@\]\}"/);
 });
 
-test('CI verifies the Phase 3 launch package in draft mode and checks release-package closure', () => {
-  assert.match(workflow, /node scripts\/programmable\/verify-launch-package\.mjs --allow-unverified/);
-  assert.match(workflow, /node scripts\/verify-release-package-closure\.mjs/);
+test('the required code gate carries no launch/release evidence; the launch gate verifies it strictly', () => {
+  assert.doesNotMatch(workflow, /verify-launch-package\.mjs/);
+  assert.doesNotMatch(workflow, /verify-release-package-closure\.mjs/);
+  assert.doesNotMatch(workflow, /verify-release-ready\.mjs/);
+  assert.doesNotMatch(workflow, /v4\.mjs status --check/);
+  assert.doesNotMatch(workflow, /v4\.mjs trace check/);
+  assert.match(launchGateWorkflow, /node scripts\/programmable\/verify-launch-package\.mjs\n/);
+  assert.doesNotMatch(launchGateWorkflow, /verify-launch-package\.mjs --allow-unverified/);
+  assert.match(launchGateWorkflow, /node scripts\/verify-release-package-closure\.mjs/);
+  assert.match(launchGateWorkflow, /node scripts\/verify-release-ready\.mjs/);
+  assert.match(launchGateWorkflow, /node scripts\/v4\.mjs status --check/);
+  assert.match(launchGateWorkflow, /node scripts\/v4\.mjs trace check/);
+  assert.match(launchGateWorkflow, /report\.launchEligible !== true/);
+  assert.match(launchGateWorkflow, /refs\/heads\/main/);
+  assert.doesNotMatch(launchGateWorkflow, /pull_request/);
+});
+
+test('the interface freeze digest for product/dependency-pins.json ignores CI-tool churn but still binds phase1Toolchain', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'interface-freeze-digest-'));
+  try {
+    mkdirSync(join(dir, 'product'));
+    const base = {
+      controlRuntime: { node: '24.19.0' },
+      contentAddresses: { workflow: { path: '.github/workflows/v4-gates.yml', sha256: 'a'.repeat(64) } },
+      securityTools: { gitleaks: { version: '8.30.1' } },
+      phase1Toolchain: { foundry: { version: '1.7.1' }, requirementsRevision: 56 },
+    };
+    const relativePath = 'product/dependency-pins.json';
+    const pinsPath = join(dir, relativePath);
+    writeFileSync(pinsPath, JSON.stringify(base));
+    const original = interfaceFreezeInputDigest(dir, relativePath);
+
+    const ciToolChurn = structuredClone(base);
+    ciToolChurn.contentAddresses.workflow.sha256 = 'b'.repeat(64);
+    ciToolChurn.securityTools.gitleaks.version = '9.0.0';
+    writeFileSync(pinsPath, JSON.stringify(ciToolChurn));
+    assert.equal(
+      interfaceFreezeInputDigest(dir, relativePath),
+      original,
+      'a CI-tool-only pin change must not change the interface freeze digest',
+    );
+
+    const interfaceChange = structuredClone(base);
+    interfaceChange.phase1Toolchain.foundry.version = '1.8.0';
+    writeFileSync(pinsPath, JSON.stringify(interfaceChange));
+    assert.notEqual(
+      interfaceFreezeInputDigest(dir, relativePath),
+      original,
+      'a phase1Toolchain change must still change the interface freeze digest',
+    );
+
+    const otherInputPath = join(dir, 'plain.txt');
+    writeFileSync(otherInputPath, 'unchanged\n');
+    const plainDigest = interfaceFreezeInputDigest(dir, 'plain.txt');
+    writeFileSync(otherInputPath, 'unchanged\n');
+    assert.equal(interfaceFreezeInputDigest(dir, 'plain.txt'), plainDigest, 'non-pins inputs still hash the whole file');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('fork-proof recovery and the control-supply-chain card document the protected environment and release verifiers', () => {
@@ -456,7 +516,9 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(card, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(card, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.doesNotMatch(card, /required reviewer/i);
-  assert.match(card, /verify-launch-package\.mjs --allow-unverified/);
+  assert.match(card, /\.github\/workflows\/launch-gate\.yml/);
+  assert.doesNotMatch(card, /verify-launch-package\.mjs --allow-unverified/);
+  assert.match(card, /verify-launch-package\.mjs/);
   assert.match(card, /node scripts\/test-manifest\.mjs check/);
   assert.match(card, /node scripts\/verify-release-ready\.mjs/);
   assert.match(card, /scripts\/check-commit-identity\.mjs/);

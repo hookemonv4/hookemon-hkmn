@@ -2,13 +2,14 @@
 
 ## Purpose
 
-The control supply chain content-addresses selected Node and Gitleaks executables, remote actions, five CI workflows, scanner policy, the commit-identity checker, the complete fork-pin verifier import closure, the complete control-verifier import closure, the archive proof, and the vendored base pack. Verification fails closed on a mismatch.
+The control supply chain content-addresses selected Node and Gitleaks executables, remote actions, five of the six CI workflows, scanner policy, the commit-identity checker, the complete fork-pin verifier import closure, the complete control-verifier import closure, the archive proof, and the vendored base pack. Verification fails closed on a mismatch.
 
 ## Public interface
 
 - `node scripts/verify-control-dependencies.mjs` verifies runtime and control pins.
 - `node scripts/verify-control-dependencies.mjs --write` refreshes the deterministic local verification artifact.
-- `.github/workflows/v4-gates.yml` runs required trace, clean-room, append-only, secret, test, launch-package, and closure checks, then the deterministic state check last so it never masks an earlier failure.
+- `.github/workflows/v4-gates.yml` runs the required code gate: clean-room, append-only, secret, and test checks, contract compilation, and the offline binding verifier's interface/schema invariants. It carries no operational launch or release-ledger evidence, so an ordinary code change cannot fail it on stale launch receipts.
+- `.github/workflows/launch-gate.yml` runs the separate, non-required operational launch gate on a push to `main` or manual dispatch bound to `refs/heads/main`: the deterministic state projection, task-trace check, delivery boundary, release-package closure, the strict (no-override) launch-package verification, `verify-release-ready.mjs`, and an explicit `launchEligible === true` assertion over a fresh Phase 2 readiness report. It is never a required pull-request status, so it reports and records operational launch readiness without blocking ordinary merges. It is a reporting/evidence gate, not an enforcement boundary: it does not itself technically prevent an operator with real credentials from launching outside it; live-action authority is enforced where it always was (`assertStartReadiness` before signer construction, per-effect authority) and by whoever controls production secrets and deploy access, not by this workflow's existence. It is permitted but not yet part of the base-checker's content-addressed control surface (see Invariants).
 - `.github/workflows/fork-proof.yml` runs the mandatory archive fork proof after a main push or a manual main dispatch.
 - `.github/workflows/identity-gate.yml` runs base-defined commit-identity validation for pull requests and main pushes.
 - `.github/workflows/control-gate.yml` runs base-defined control-surface validation for pull requests and main pushes.
@@ -16,10 +17,10 @@ The control supply chain content-addresses selected Node and Gitleaks executable
 - `node scripts/verify-fork-pin.mjs` validates the archive fork bundle after each fork workflow verifies every regular Git blob in its pinned import closure.
 - `node scripts/verify-control-dependencies.mjs --base-control <base-tree> <candidate-tree>` reads candidate control inputs as Git blobs using base-defined code.
 - `node scripts/test-manifest.mjs check` proves that every declared suite root is a non-empty repository directory, every tracked Node test has exactly one suite owner, and the test tree contains only regular files and directories.
-- `node scripts/verify-release-ready.mjs` evaluates deployment-manifest, traceability, receipt-bound red-team review, and owner-artifact readiness; a nonzero exit is the release refusal.
+- `node scripts/verify-release-ready.mjs` evaluates deployment-manifest, traceability, receipt-bound red-team review, and owner-artifact readiness; a nonzero exit is the release refusal. Runs in `launch-gate.yml`, not the required code gate.
 - `scripts/check-commit-identity.mjs <base-sha> <head-sha>` scans a commit range with the protected-base identity allowlist.
-- `node scripts/programmable/verify-launch-package.mjs --allow-unverified` validates the draft launch package in CI; the no-override command is the release gate.
-- `node scripts/verify-release-package-closure.mjs` validates release-package closure.
+- `node scripts/programmable/verify-launch-package.mjs` (no `--allow-unverified`) is the strict release gate, run in `launch-gate.yml`. The offline `feasibility/verify-robinhood-binding.mjs bindings/robinhood-chain.json --offline` invocation in the required code gate hashes only `product/dependency-pins.json`'s `phase1Toolchain` subtree for interface-freeze purposes, so unrelated CI-tool pin bumps (workflow content, Gitleaks/Node versions) cannot spuriously stale the frozen interface.
+- `node scripts/verify-release-package-closure.mjs` validates release-package closure. Runs in `launch-gate.yml`, not the required code gate.
 - `node scripts/check-append-only.mjs <base-sha> <head-sha> [--require-ancestor]` verifies receipt history.
 
 ## Invariants
@@ -27,7 +28,7 @@ The control supply chain content-addresses selected Node and Gitleaks executable
 - Node and Gitleaks downloads use fixed HTTPS release URLs plus archive and executable SHA-256 checks.
 - The local runtime executable must match the pinned platform digest.
 - Every remote GitHub Action invocation uses an allowlisted full commit SHA. Unsupported action syntax, local actions, workflow container keys, and symlink aliases fail closed.
-- The permitted workflow set is `.github/workflows/v4-gates.yml`, `.github/workflows/fork-proof.yml`, `.github/workflows/identity-gate.yml`, `.github/workflows/control-gate.yml`, and `.github/workflows/fork-pin-canary.yml`; each is a regular repository-internal file.
+- The permitted workflow set is `.github/workflows/v4-gates.yml`, `.github/workflows/fork-proof.yml`, `.github/workflows/identity-gate.yml`, `.github/workflows/control-gate.yml`, `.github/workflows/fork-pin-canary.yml`, and `.github/workflows/launch-gate.yml`; each is a regular repository-internal file. Content-addressed control-surface pinning (the base-checker's protected pin-bump migration) currently covers only the first five; extending it to `launch-gate.yml` is a distinct owner-authorized decision, not made here.
 - The commit-identity checker and its candidate digest must match the supported release. `identity-gate` checks out the exact pull-request base SHA or push merge-base, disables replacement refs, extracts the checker from that base tree, and treats the proposed commit only as Git data.
 - The `fork-pin` verifier import closure must match the supported release. The `fork-proof` job and canary reject symlinks, require `100644` Git blobs whose object IDs match the working files, check every closure digest, and only then execute the verifier.
 - `control-gate` checks out only the protected base, fetches the candidate as Git data, and runs the control verifier and its complete local import closure extracted from that base tree. It validates candidate `v4-gates.yml`, `fork-proof.yml`, `fork-pin-canary.yml`, `identity-gate.yml`, `control-gate.yml`, the complete fork-pin verifier closure, the complete control-verifier closure, the archive fork test, and `dependency-pins.json`. A v1 pin bump binds the base and candidate trees. A v2 pin bump requires exactly an explicit `OWNER APPROVED` token, base and candidate dependency-pin digests, the protected checker blob, and the complete changed control digest set; it deliberately has no commit-SHA fields.
@@ -69,7 +70,7 @@ node scripts/check-commit-identity.mjs <base-sha> <head-sha>
 node scripts/check-append-only.mjs <base-sha> <head-sha>
 ROBINHOOD_FORK_PINNED=true node scripts/verify-fork-pin.mjs
 ROBINHOOD_FORK_PINNED=true FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'
-node scripts/programmable/verify-launch-package.mjs --allow-unverified
+node scripts/programmable/verify-launch-package.mjs
 node scripts/verify-release-package-closure.mjs
 node --test scripts/tests/*.test.mjs
 ```

@@ -1087,8 +1087,8 @@ assertWorkflowTamperIsRejected('rejects removing a required workflow step', work
 ));
 
 assertWorkflowTamperIsRejected('rejects reordering required workflow steps', workflow => workflow.replace(
-  '      - run: node scripts/v4.mjs trace check\n      - name: Verify deterministic state projection\n        run: |\n          node scripts/v4.mjs status --check\n          git diff --exit-code -- STATE.md state.json\n',
-  '      - name: Verify deterministic state projection\n        run: |\n          node scripts/v4.mjs status --check\n          git diff --exit-code -- STATE.md state.json\n      - run: node scripts/v4.mjs trace check\n',
+  '      - name: Verify contracts-js suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list contracts-js)"\n          node --test --test-timeout=120000 $files\n      - name: Verify scripts suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list scripts)"\n          node --test --test-timeout=120000 $files',
+  '      - name: Verify scripts suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list scripts)"\n          node --test --test-timeout=120000 $files\n      - name: Verify contracts-js suite\n        shell: bash\n        run: |\n          files="$(node scripts/test-manifest.mjs list contracts-js)"\n          node --test --test-timeout=120000 $files',
 ));
 
 assertWorkflowTamperIsRejected('rejects replacing a required workflow step', workflow => workflow.replace(

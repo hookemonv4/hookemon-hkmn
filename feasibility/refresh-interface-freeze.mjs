@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { hashFile, readJson, writeJson } from '../scripts/lib/util.mjs';
+import { readJson, writeJson } from '../scripts/lib/util.mjs';
 import {
   INTERFACE_FREEZE_INPUTS,
+  interfaceFreezeInputDigest,
   validateInterfaceFreeze,
 } from './verify-robinhood-binding.mjs';
 import {
@@ -127,7 +128,7 @@ function buildFreeze() {
 
   const inputHashes = {};
   for (const relativePath of [...INTERFACE_FREEZE_INPUTS].sort()) {
-    inputHashes[relativePath] = `sha256:${hashFile(join(projectRoot, relativePath))}`;
+    inputHashes[relativePath] = interfaceFreezeInputDigest(projectRoot, relativePath);
   }
 
   return {

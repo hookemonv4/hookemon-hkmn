@@ -658,7 +658,7 @@ function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoo
   for (const input of INTERFACE_FREEZE_INPUTS) {
     assertDigest(freeze.inputHashes[input], `interface freeze input ${input}`);
     invariant(
-      freeze.inputHashes[input] === hashFile(projectRoot, input),
+      freeze.inputHashes[input] === interfaceFreezeInputDigest(projectRoot, input),
       `interface freeze input hash mismatch: ${input}`
     );
   }
@@ -838,7 +838,7 @@ export function validateInterfaceFreeze({ freeze, frozen, provisional, manifest,
   for (const input of INTERFACE_FREEZE_INPUTS) {
     assertDigest(freeze.inputHashes[input], `interface freeze input ${input}`);
     invariant(
-      freeze.inputHashes[input] === hashFile(projectRoot, input),
+      freeze.inputHashes[input] === interfaceFreezeInputDigest(projectRoot, input),
       `interface freeze input hash mismatch: ${input}`
     );
   }
@@ -1019,6 +1019,19 @@ function validateRuntimeSetDigest(manifest) {
 
 function hashFile(projectRoot, relativePath) {
   return sha256Bytes(readFileSync(path.join(projectRoot, relativePath)));
+}
+
+// product/dependency-pins.json mixes mutable CI-tool/control pins (workflow content
+// hash, Gitleaks/Node versions, npm dependency pins) with the phase1Toolchain build
+// pins that actually affect compiled interfaces (Foundry/solc settings, Robinhood chain
+// id, Uniswap dependency commits). Freezing the whole file coupled routine CI-tooling
+// edits to interface staleness; only phase1Toolchain is interface-relevant.
+export function interfaceFreezeInputDigest(projectRoot, relativePath) {
+  if (relativePath === "product/dependency-pins.json") {
+    const pins = JSON.parse(readFileSync(path.join(projectRoot, relativePath), "utf8"));
+    return digestCollection(pins.phase1Toolchain);
+  }
+  return hashFile(projectRoot, relativePath);
 }
 
 export function validateTrackedLocalProof(manifest, projectRoot) {
