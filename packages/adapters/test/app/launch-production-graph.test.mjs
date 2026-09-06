@@ -17,13 +17,12 @@ import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { assertCycleSnapshot } from '../../../runner/src/cycle/cycle-store.mjs';
 import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
+import { createTestKeychain } from '../fixtures/keychain/fixture.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
 
 const execFileAsync = promisify(execFile);
 const BIN_PATH = fileURLToPath(new URL('../../bin/hookemon-runner.mjs', import.meta.url));
 const SOURCE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
-const EVM_ACCOUNT = '0x000000000000000000000000000000000000dead';
-const SOLANA_ACCOUNT = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 
@@ -94,27 +93,74 @@ async function fixtureServer(t, directory) {
   return { baseUrl: `https://127.0.0.1:${server.address().port}`, caCert: paths.caCert, calls };
 }
 
-async function keychainCommand(directory) {
-  const path = join(directory, 'keychain.mjs');
-  await writeFile(path, [
-    `#!${process.execPath}`,
-    "import { readFileSync } from 'node:fs';",
-    "const input = JSON.parse(readFileSync(0, 'utf8'));",
-    "if (input.operation === 'probe') process.stdout.write(JSON.stringify({ ready: true }));",
-    "else throw new Error('N=2 graph fixture reached a signer mutation before its protocol is configured');",
-    '',
-  ].join('\n'), { mode: 0o700 });
-  return path;
+function runProcess(command, args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
+    child.once('error', reject);
+    child.once('close', code => resolve({ code, stdout, stderr }));
+  });
 }
 
-function observability(baseUrl, directory) {
+/**
+ * The real production child signer, not a stub. `hookemon-keychain-signer.mjs` runs unmodified from
+ * the isolated source copy and performs the actual EVM/Solana signing; only the macOS Keychain
+ * itself is replaced, through the production CLI's own documented
+ * `HOOKEMON_OPERATIONS_SECURITY_COMMAND` override, by the shared fake `security` fixture holding
+ * freshly generated per-run test keys. Key material never leaves that isolated directory and no
+ * signature here is ever broadcast.
+ */
+async function productionChildSigner(t, sourceRoot, directory) {
+  const keychain = await createTestKeychain(t);
+  // realpath, like the runner entrypoint above: tmpdir() hands out the `/var` symlink while
+  // `import.meta.url` resolves to `/private/var`, and each CLI's own main-module guard compares the
+  // two. Invoked through the symlinked path a bin imports cleanly and exits 0 having done nothing.
+  const walletBin = await realpath(join(sourceRoot, 'packages', 'adapters', 'bin', 'hookemon-wallet.mjs'));
+  const signerBin = await realpath(join(sourceRoot, 'packages', 'adapters', 'bin', 'hookemon-keychain-signer.mjs'));
+  const env = { ...process.env, ...keychain.env, HOOKEMON_OPERATIONS_SECURITY_COMMAND: keychain.command };
+  const wallets = {};
+  for (const identity of ['operations-evm', 'operations-solana']) {
+    const result = await runProcess(process.execPath, [
+      walletBin, 'generate', '--identity', identity, '--keychain-command', keychain.command,
+    ], env);
+    if (result.code !== 0 || result.stdout.length === 0) {
+      throw new Error(`graph fixture could not generate ${identity}: ${JSON.stringify(result)}`);
+    }
+    wallets[identity] = JSON.parse(result.stdout);
+  }
+  // `readEnvironment` refuses any unknown HOOKEMON_* variable, so the fake-Keychain wiring must not
+  // be exported to the runner at all. It belongs to the signer child anyway: this wrapper is the
+  // only test-owned link in the chain, and it adds nothing but the environment that stands in for a
+  // real macOS Keychain before exec'ing the unmodified production signer.
+  const command = join(directory, 'keychain-signer-with-test-keychain.mjs');
+  await writeFile(command, [
+    `#!${process.execPath}`,
+    "import { spawn } from 'node:child_process';",
+    `const env = { ...process.env, ...${JSON.stringify({ ...keychain.env, HOOKEMON_OPERATIONS_SECURITY_COMMAND: keychain.command })} };`,
+    `const child = spawn(process.execPath, [${JSON.stringify(signerBin)}, ...process.argv.slice(2)], { stdio: 'inherit', env });`,
+    "child.once('close', (code, signal) => process.exit(signal ? 1 : code ?? 1));",
+    '',
+  ].join('\n'), { mode: 0o700 });
+  return {
+    command,
+    // Lowercased: the launch manifest and canary role addresses are compared and digested in
+    // normalized form, so a checksummed literal would never match its own manifest digest.
+    evmAccount: wallets['operations-evm'].address.toLowerCase(),
+    solanaAccount: wallets['operations-solana'].publicKey,
+  };
+}
+
+function observability(baseUrl, directory, operations) {
   const hash = `0x${'a'.repeat(64)}`;
   const pin = address => ({ address, runtimeHash: hash });
   return {
     canaries: {
       chainId: 4663,
       contracts: { usdg: { proxy: pin(USDG), implementation: pin(`0x${'2'.repeat(40)}`), decimals: 6 }, poolManager: pin(`0x${'3'.repeat(40)}`), positionManager: pin(`0x${'4'.repeat(40)}`), router: pin(`0x${'5'.repeat(40)}`), quoter: pin(`0x${'6'.repeat(40)}`) },
-      roles: { hookAddress: `0x${'7'.repeat(40)}`, cycleId: `0x${'0'.repeat(64)}`, treasury: `0x${'8'.repeat(40)}`, operations: EVM_ACCOUNT },
+      roles: { hookAddress: `0x${'7'.repeat(40)}`, cycleId: `0x${'0'.repeat(64)}`, treasury: `0x${'8'.repeat(40)}`, operations },
       canonicalPool: { poolId: `0x${'f'.repeat(64)}` }, providerPolicyDigest: hash,
       nativeGasReserves: [{ chainId: 4663, assetId: 'native', decimals: 18, amountAtomic: '1' }, { chainId: 'solana', assetId: 'native', decimals: 9, amountAtomic: '1' }],
     },
@@ -123,11 +169,11 @@ function observability(baseUrl, directory) {
   };
 }
 
-function eligibilitySnapshotFixture() {
+function eligibilitySnapshotFixture(operations) {
   const launchManifest = {
     supply: { chainId: '4663', assetId: `0x${'d'.repeat(40)}`, decimals: 18, amountAtomic: '1' },
     hook: `0x${'c'.repeat(40)}`, poolManager: `0x${'3'.repeat(40)}`, custody: `0x${'b'.repeat(40)}`,
-    operations: EVM_ACCOUNT, treasury: `0x${'8'.repeat(40)}`, programmableRecipient: `0x${'4'.repeat(40)}`,
+    operations, treasury: `0x${'8'.repeat(40)}`, programmableRecipient: `0x${'4'.repeat(40)}`,
     launchContracts: [`0x${'b'.repeat(40)}`], burnAddresses: [`0x${'0'.repeat(36)}dead`], roleHistory: [],
   };
   return {
@@ -334,7 +380,7 @@ async function isolatedSource(directory) {
   if (!/Usage: hookemon-runner/.test(entrypointOutput)) {
     throw new Error('isolated production graph fixture did not execute the copied CLI entrypoint');
   }
-  return binPath;
+  return { root, binPath };
 }
 
 async function runProductionWindow(binPath, env, durationMs = 15000) {
@@ -363,14 +409,14 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-production-graph-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const fixture = await fixtureServer(t, directory);
-  const binPath = await isolatedSource(directory);
-  const keychain = await keychainCommand(directory);
+  const { root, binPath } = await isolatedSource(directory);
+  const signer = await productionChildSigner(t, root, directory);
   const authority = await testPolicyAuthority(t, directory);
   await activateTwoPackPolicy(directory);
   const observabilityPath = join(directory, 'observability.json');
   const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
-  await writeFile(observabilityPath, `${JSON.stringify(observability(fixture.baseUrl, directory))}\n`);
-  await writeFile(eligibilitySnapshotPath, `${JSON.stringify(eligibilitySnapshotFixture())}\n`);
+  await writeFile(observabilityPath, `${JSON.stringify(observability(fixture.baseUrl, directory, signer.evmAccount))}\n`);
+  await writeFile(eligibilitySnapshotPath, `${JSON.stringify(eligibilitySnapshotFixture(signer.evmAccount))}\n`);
   const env = {
     ...process.env,
     HOOKEMON_STATE_DIR: directory, HOOKEMON_DEFAULT_INTERVAL_MS: '100', HOOKEMON_CHAIN_ID: '4663', HOOKEMON_PROVIDER_MODE: 'live',
@@ -383,8 +429,8 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
     HOOKEMON_ROBINHOOD_RPC_URL: `${fixture.baseUrl}/rpc`, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: `${fixture.baseUrl}/archive`, HOOKEMON_SOLANA_RPC_URL: `${fixture.baseUrl}/solana`,
     HOOKEMON_RELAY_BASE_URL: fixture.baseUrl, HOOKEMON_RELAY_API_KEY: 'fixture-relay-key', HOOKEMON_RELAY_SOLANA_MINT: SOLANA_MINT, HOOKEMON_RELAY_SOLANA_DECIMALS: '6', HOOKEMON_RELAY_EVM_DEPOSITORY: `0x${'a'.repeat(40)}`,
     HOOKEMON_COLLECTOR_CRYPT_BASE_URL: `${fixture.baseUrl}/collector`, HOOKEMON_COLLECTOR_CRYPT_API_KEY: 'fixture-collector-key',
-    HOOKEMON_EVM_ACCOUNT: EVM_ACCOUNT, HOOKEMON_SOLANA_ACCOUNT: SOLANA_ACCOUNT, HOOKEMON_VAULT_ADDRESS: `0x${'b'.repeat(40)}`, HOOKEMON_HOOK_ADDRESS: `0x${'c'.repeat(40)}`, HOOKEMON_HKMN_ADDRESS: `0x${'d'.repeat(40)}`, HOOKEMON_HKMN_DECIMALS: '18',
-    HOOKEMON_SIGNER_BACKEND: 'keychain', HOOKEMON_SIGNER_LIVE_MODE: 'true', HOOKEMON_KEYCHAIN_COMMAND: keychain, HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm', HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
+    HOOKEMON_EVM_ACCOUNT: signer.evmAccount, HOOKEMON_SOLANA_ACCOUNT: signer.solanaAccount, HOOKEMON_VAULT_ADDRESS: `0x${'b'.repeat(40)}`, HOOKEMON_HOOK_ADDRESS: `0x${'c'.repeat(40)}`, HOOKEMON_HKMN_ADDRESS: `0x${'d'.repeat(40)}`, HOOKEMON_HKMN_DECIMALS: '18',
+    HOOKEMON_SIGNER_BACKEND: 'keychain', HOOKEMON_SIGNER_LIVE_MODE: 'true', HOOKEMON_KEYCHAIN_COMMAND: signer.command, HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm', HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
     HOOKEMON_STANDING_AUTHORITY_PATH: authority.documentPath, HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH: authority.ownerPublicKeyPath, HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH: authority.policyPublicKeyPath,
     HOOKEMON_PACK_CODE: 'return-fixture', HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0', HOOKEMON_MIN_SOLANA_RECEIVE: '0', HOOKEMON_MIN_RETURN_USDG: '0', HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0', HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0', HOOKEMON_EVM_GAS_PRICE_CAP: '2', HOOKEMON_EVM_NATIVE_RESERVE: '2', HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2', HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
     HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '85', HOOKEMON_BUDGET_PACK_PRICE_USDG: '17', HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0', HOOKEMON_BUDGET_RETURN_CAP_USDG: '0', HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0', HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath, HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath, NODE_EXTRA_CA_CERTS: fixture.caCert,
