@@ -28,10 +28,23 @@ boundaries without changing the original cycle's holder set.
   position, cycle, snapshot digest, return-source digest, boundary evidence, or manifest mismatch.
   `assertSupplementaryPayoutManifestUnchanged()` rejects a changed frozen plan.
 - `createDirectPayoutState()` and `initializeDirectPayout()` create or recover the durable payout
-  state; initialization returns an existing matching journal instead of overwriting it.
-  `advanceDirectPayout()` advances the first unresolved recipient. A dropped broadcast can use only
-  `recoverDroppedBroadcast()` with its retained bytes; a nonce consumed by another transaction
-  becomes a recipient `NONCE_INTERFERENCE` quarantine.
+  state; initialization returns an existing matching journal instead of overwriting it. Both accept
+  an optional `inFlightWindow` (default 1, byte-identical to fully serial dispatch) that bounds how
+  many recipients may hold a live, not-yet-finalized on-chain nonce at once.
+  `advanceDirectPayout()` advances any recipient inside that bounded in-flight window: a recipient
+  still `PREPARED` (not yet broadcast) always blocks every later recipient, since nonces are handed
+  out and broadcast strictly in order, but up to `inFlightWindow` already `SIGNED`/`BROADCAST`
+  recipients may await finality concurrently, so one slow confirmation does not stall the recipients
+  behind it. A dropped broadcast can use only `recoverDroppedBroadcast()` with its retained bytes; a
+  nonce consumed by another transaction becomes a recipient `NONCE_INTERFERENCE` quarantine.
+- `evaluateDirectPayoutBridgeAdmission()` and `evaluateDirectPayoutFrozenAssetAdmission()` are pure
+  pre-admission checks: the first refuses to admit an attributable distributable amount above the
+  actually finalized available proceeds and reports the exact deficit; the second refuses to admit
+  any recipient while USDG is frozen for the Operations sender, preserving the whole distributable
+  pool as unsent liability instead of partially dispatching. `ensureDirectPayoutState()` runs the
+  frozen-asset check before any recipient state is created and holds the cycle `HELD_UNAVAILABLE`
+  with the admission evidence when it fails; it never signs, broadcasts, or persists a recipient
+  record before that check has passed.
 - `recoverDroppedBroadcast()` reauthorizes and submits only the exact retained signed bytes. It
   requires the stored policy, approval, semantics, signed-message, and fencing-token digests. It
   reloads the authoritative paged payout state before reauthorization and refuses a stale attempt
@@ -88,9 +101,18 @@ boundaries without changing the original cycle's holder set.
   set by the stored eligibility-snapshot evidence digest. It cannot change the main manifest,
   substitute another cycle's attribution, use a later same-cycle snapshot, or accept a different
   manifest ordinal after the settlement is prepared.
-- `DIRECT_PAYOUT_RECIPIENT_LIMIT` bounds plan compilation and the feasibility gate at 1,025.
+- `DIRECT_PAYOUT_RECIPIENT_LIMIT` is a hard technical ceiling (50,000) protecting canonical-JSON and
+  in-memory bounds, not a payout-capacity business rule: recipient count alone never truncates a
+  feasible holder set. Real admission is feasibility-gated by the actual recipient count's gas
+  budget (`estimatedNativeFee = recipientCount * measuredTransferGas * maxGasPriceWei`, computed and
+  reported with its exact deficit in `eligibility-snapshot.mjs`), not by a fixed recipient cap.
   Recipient-keyed durable pages retain the full manifest outside bounded journal payload arrays;
   journal entries retain only compact state metadata and page roots.
+- A frozen eligibility manifest with no eligible holders compiles to an explicit
+  `outcome: 'NON_SPENDING_NO_ELIGIBLE_HOLDERS'` plan instead of throwing: `allocations` is empty,
+  `payableRecipientCount` is 0, and the entire distributable pool becomes durable dust for the
+  successor cycle. A plan with at least one eligible holder always compiles with
+  `outcome: 'ALLOCATED'`. No unallocated value is ever invented or dropped in either case.
 - A supplementary wrapper is deterministic for identical frozen inputs and is deeply immutable in
   memory. Its digest detects a changed ordinal, return evidence, allocation, zero-amount dust
   setting, or eligibility proof before an execution layer can bind it. `RETURN_BROADCAST` is the
@@ -165,6 +187,7 @@ boundaries without changing the original cycle's holder set.
 node --test --test-timeout=120000 packages/adapters/test/app/stages-payout.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/stage-driver.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/supplementary-payout.test.mjs
+node --test --test-timeout=120000 packages/adapters/test/app/payout-resume-scale.test.mjs
 node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.test.mjs
 ```
 
