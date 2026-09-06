@@ -202,13 +202,21 @@ async function reloadPreviousDust({ cycleRepository, cycleId, previousDust, prev
  * balance is never distributable on its own, it must at least cover the exact cycle-attributed
  * return-plus-dust sum. */
 async function reloadFinalizedOperationsUsdgBalance({ publicClient, archiveClient, usdgAddress, operations, attributedAtomic }) {
-  const observeBalance = createEvmCustodyBalanceObservationReader({ publicClient, archiveClient });
-  const observation = await observeBalance({
-    chainId: USDG_PAYOUT_CHAIN_ID,
-    assetId: usdgAddress,
-    decimals: USDG_PAYOUT_DECIMALS,
-    account: operations,
+  // Convert this reader's already independently validated raw request identity (a raw EVM chain id
+  // and a raw ERC20 address) into the exact canonical CAIP identity the producer requires -- never
+  // trusted from anywhere else, since `usdgAddress`/`operations` were already checked against
+  // `USDG_PAYOUT_CHAIN_ID`/an EVM address pattern by this file's own `assertRequest`.
+  const observeBalance = createEvmCustodyBalanceObservationReader({
+    publicClient,
+    archiveClient,
+    identity: {
+      chainId: `eip155:${USDG_PAYOUT_CHAIN_ID}`,
+      assetId: `eip155:${USDG_PAYOUT_CHAIN_ID}/erc20:${usdgAddress}`,
+      decimals: USDG_PAYOUT_DECIMALS,
+      account: operations,
+    },
   });
+  const observation = await observeBalance();
   if (BigInt(observation.balance.amountAtomic) < attributedAtomic) {
     refuse('the finalized Operations USDG balance is below the attributed return and dust');
   }

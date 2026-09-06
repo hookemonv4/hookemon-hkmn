@@ -70,10 +70,12 @@ function fakeArchiveClient({
   blockNumber = FINALIZED_NUMBER,
   blockHash = FINALIZED_HASH,
   calls = [],
+  requests = [],
 } = {}) {
   return {
-    async readErc20BalanceAtBlock() {
+    async readErc20BalanceAtBlock(request) {
       calls.push('archive');
+      requests.push(request);
       return { value, blockNumber, blockHash };
     },
   };
@@ -319,13 +321,20 @@ test('reads the finalized Operations USDG balance through the shared public/arch
   await completeReturnStage(repository, cycleId, evidence);
 
   const calls = [];
+  const requests = [];
   const reader = createCycleAttributableFinalizedAvailableReader({
     cycleRepository: repository,
     publicClient: fakePublicClient({ calls }),
-    archiveClient: fakeArchiveClient({ calls }),
+    archiveClient: fakeArchiveClient({ calls, requests }),
   });
   await reader(baseRequest(cycleId, { returnEvidence: evidence }));
   assert.deepEqual(calls, ['finalized', 'archive', 'recheck']);
+
+  // The producer converts the already-validated raw request identity into the canonical CAIP
+  // identity internally, but the archive client itself is still handed the raw ERC20 address and
+  // raw Operations account -- never a CAIP-wrapped string.
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0], { token: USDG, account: OPERATIONS, blockNumber: FINALIZED_NUMBER, blockHash: FINALIZED_HASH });
 });
 
 test('refuses a return stage with no completed evidence', async t => {
