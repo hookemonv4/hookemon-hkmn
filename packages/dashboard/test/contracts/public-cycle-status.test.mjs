@@ -174,3 +174,129 @@ test('rejects a non-object value', () => {
   assert.throws(() => normalizePublicCycleStatus('nope', 'mainnet'));
   assert.throws(() => normalizePublicCycleStatus([], 'mainnet'));
 });
+
+function v6RoundAccounting(overrides = {}) {
+  return {
+    packSpendMicroUsdg: null,
+    buybackMicroUsdg: null,
+    collectorPurchaseDebit: null,
+    collectorBuybackProceeds: null,
+    packGainMicroUsdg: null,
+    packLossMicroUsdg: null,
+    quotedCosts: {
+      outboundBridgeMicroUsdg: null, inboundBridgeMicroUsdg: null, collectorApiMicroUsdg: null,
+      evmNetworkMicroUsdg: null, solanaNetworkMicroUsdg: null, slippageMicroUsdg: null,
+    },
+    protectedCostsMicroUsdg: null, confirmedCostsMicroUsdg: null, cycleGainMicroUsdg: null, cycleLossMicroUsdg: null,
+    walletBalanceBeforeMicroUsdg: null, walletBalanceAfterMicroUsdg: null,
+    networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
+    feeReserveBeforeMicroUsdg: null, feeReserveTargetMicroUsdg: null, feeReserveTopUpMicroUsdg: null, feeReserveAfterMicroUsdg: null,
+    plannedHolderRewardsMicroUsdg: null, paidHolderRewardsMicroUsdg: null,
+    holderRewardsStatus: 'pending', distributionStatus: 'pending',
+    ...overrides,
+  };
+}
+
+function v6Status() {
+  return {
+    ...idleStatus(),
+    schemaVersion: 6,
+    heldPositionCount: 0,
+    heldPositions: [],
+    scheduler: {
+      nextCycleAt: null, nextReconcileAt: null, automationEnabled: false, paused: false, pendingReason: null,
+    },
+  };
+}
+
+test('schemaVersion 6 accepts an unknown (null) packSpend/buyback instead of an invented zero', () => {
+  const input = v6Status();
+  input.cycle = {
+    cycleId: 'cycle-1', status: 'purchase-pending', selectedPackId: null, maxBoostersPerCycle: null,
+    plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
+    roundAccounting: v6RoundAccounting(),
+  };
+  const result = normalizePublicCycleStatus(input, 'mainnet');
+  assert.equal(result.schemaVersion, 6);
+  assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, null);
+  assert.equal(result.cycle.roundAccounting.buybackMicroUsdg, null);
+  assert.equal(result.cycle.roundAccounting.packGainMicroUsdg, null);
+});
+
+test('schemaVersion 6 carries the real Collector-side (Solana) debit/proceeds as a distinct typed Amount from the EVM USDG bridge amount', () => {
+  const input = v6Status();
+  input.cycle = {
+    cycleId: 'cycle-1', status: 'settled', selectedPackId: null, maxBoostersPerCycle: null,
+    plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
+    roundAccounting: v6RoundAccounting({
+      packSpendMicroUsdg: '50', // real EVM USDG bridge debit
+      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6 }, // distinct real Solana debit
+      packGainMicroUsdg: '0',
+      packLossMicroUsdg: '50',
+    }),
+  };
+  const result = normalizePublicCycleStatus(input, 'mainnet');
+  assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, '50');
+  assert.deepEqual(result.cycle.roundAccounting.collectorPurchaseDebit, {
+    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6,
+  });
+});
+
+test('schemaVersion 6 rejects a malformed typed Amount (never silently drops it to null)', () => {
+  const input = v6Status();
+  input.cycle = {
+    cycleId: 'cycle-1', status: 'settled', selectedPackId: null, maxBoostersPerCycle: null,
+    plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
+    roundAccounting: v6RoundAccounting({
+      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '-1', decimals: 6 },
+    }),
+  };
+  assert.throws(() => normalizePublicCycleStatus(input, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
+
+test('schemaVersion 6 carries the real SchedulerView verbatim, with mutually-consistent next-wakeup fields', () => {
+  const input = v6Status();
+  input.scheduler = {
+    nextCycleAt: null,
+    nextReconcileAt: '2026-01-01T00:00:05.000Z',
+    automationEnabled: true,
+    paused: false,
+    pendingReason: 'RECONCILING_PENDING_TRANSACTION',
+  };
+  const result = normalizePublicCycleStatus(input, 'mainnet');
+  assert.deepEqual(result.scheduler, input.scheduler);
+});
+
+test('schemaVersion 6 rejects a scheduler missing a required field', () => {
+  const input = v6Status();
+  delete input.scheduler.pendingReason;
+  assert.throws(() => normalizePublicCycleStatus(input, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
+
+test('schemaVersion 3-5 do not require or accept a scheduler field', () => {
+  const input = idleStatus();
+  assert.equal(Object.hasOwn(normalizePublicCycleStatus(input, 'mainnet'), 'scheduler'), false);
+  assert.throws(() => normalizePublicCycleStatus({ ...input, scheduler: v6Status().scheduler }, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
+
+test('schemaVersion 3-5 still require packSpend/buyback as non-null money (unchanged legacy shape)', () => {
+  const input = idleStatus();
+  input.cycle = {
+    cycleId: 'cycle-1', status: 'x', selectedPackId: null, maxBoostersPerCycle: null,
+    plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
+    roundAccounting: {
+      packSpendMicroUsdg: null, buybackMicroUsdg: '1', packGainMicroUsdg: '0', packLossMicroUsdg: '0',
+      quotedCosts: {
+        outboundBridgeMicroUsdg: null, inboundBridgeMicroUsdg: null, collectorApiMicroUsdg: null,
+        evmNetworkMicroUsdg: null, solanaNetworkMicroUsdg: null, slippageMicroUsdg: null,
+      },
+      protectedCostsMicroUsdg: null, confirmedCostsMicroUsdg: null, cycleGainMicroUsdg: null, cycleLossMicroUsdg: null,
+      walletBalanceBeforeMicroUsdg: null, walletBalanceAfterMicroUsdg: null,
+      networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
+      feeReserveBeforeMicroUsdg: null, feeReserveTargetMicroUsdg: null, feeReserveTopUpMicroUsdg: null, feeReserveAfterMicroUsdg: null,
+      plannedHolderRewardsMicroUsdg: null, paidHolderRewardsMicroUsdg: null,
+      holderRewardsStatus: 'pending', distributionStatus: 'pending',
+    },
+  };
+  assert.throws(() => normalizePublicCycleStatus(input, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
