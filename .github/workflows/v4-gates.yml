@@ -213,6 +213,11 @@ jobs:
         run: |
           files="$(node scripts/test-manifest.mjs list dashboard)"
           node --test --test-timeout=120000 $files
+      - name: Verify domain suite
+        shell: bash
+        run: |
+          files="$(node scripts/test-manifest.mjs list domain)"
+          node --test --test-timeout=120000 $files
       - name: Initialize pinned top-level contract dependencies
         run: git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery
       - name: Verify Phase 1 build pins
