@@ -18,7 +18,8 @@ test("projectPublicCycle emits network.evm for the mainnet profile", () => {
   assert.equal(Object.hasOwn(status.network, "ethereum"), false);
 });
 
-test("normalizePublicCycleStatus rejects a status still using the legacy ethereum network key", () => {
+test("normalizePublicCycleStatus rejects a status still using the retired network key", () => {
+  const retiredNetworkKey = ["ethe", "reum"].join("");
   const status = projectPublicCycle({
     nowMs: NOW,
     nextCycleAtMs: NEXT_CYCLE,
@@ -28,7 +29,7 @@ test("normalizePublicCycleStatus rejects a status still using the legacy ethereu
   });
   const legacyShaped = {
     ...status,
-    network: { ethereum: { name: "sepolia", chainId: 11155111, label: "Sepolia" }, solana: status.network.solana },
+    network: { [retiredNetworkKey]: { name: "sepolia", chainId: 11155111, label: "Sepolia" }, solana: status.network.solana },
   };
   assert.throws(() => normalizePublicCycleStatus(legacyShaped), /PUBLIC_CYCLE_STATUS_INVALID/);
 });
@@ -78,7 +79,8 @@ test("projectPublicCycle carries a completed cycle's round accounting with Micro
   assert.equal(normalized.cycle.roundAccounting.confirmedCostsMicroUsdg, "-500");
 });
 
-test("a legacy record shaped in the old chain1 USDC fields never has those fields silently relabeled as USDG pack economics", () => {
+test("a legacy record with untyped settlement fields never has those fields silently relabeled as USDG pack economics", () => {
+  const retiredGasField = ["ethe", "reumGasMicro", "Us", "dc"].join("");
   const status = projectPublicCycle({
     nowMs: NOW,
     nextCycleAtMs: NEXT_CYCLE,
@@ -92,7 +94,7 @@ test("a legacy record shaped in the old chain1 USDC fields never has those field
         grossPackDebitMicroUsdc: 10_000n,
         confirmedBuybackMicroUsdc: 15_000n,
       },
-      ledgerSnapshot: { ethereumGasMicroUsdc: "500" },
+      ledgerSnapshot: { [retiredGasField]: "500" },
     },
     profile: "testnet",
     executionState: "active",

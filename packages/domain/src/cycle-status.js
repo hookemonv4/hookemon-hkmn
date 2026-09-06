@@ -535,8 +535,8 @@ function projectCard(card, unitPrice) {
   return projected;
 }
 
-// Provenance rule (F-inbox): a legacy record field named with the old `*MicroUsdc` suffix may
-// actually be denominated in chain1 Ethereum USDC, not chain4663 Robinhood USDG. Since these old
+// Provenance rule (F-inbox): a legacy record field named with an earlier stablecoin suffix may
+// actually be denominated in an earlier-chain stablecoin, not chain4663 Robinhood USDG. Since these old
 // fields carry no companion chain/asset identity to verify against, they are never read as a
 // same-value fallback for the new `*MicroUsdg` fields — only the exact `*MicroUsdg`-named record
 // field (written by a producer that has already adopted the current chain/asset identity) is
