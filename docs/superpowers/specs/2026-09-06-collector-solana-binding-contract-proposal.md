@@ -1,141 +1,125 @@
-# Collector purchase binding and Solana finalized-balance observation — joint contract-identity proposal
+# Collector purchase binding and custody-ledger evidence-construction contract — requirements revision 67 candidate
 
-**Status: DRAFT. Not an approval. Not a requirements/architecture revision. Not a claim of
-production or launch readiness.** This document proposes owner approval of two already-integrated,
-still-unwired, offline artifacts as exact, pinned contracts, so that any later authoritative patch
-(requirements, architecture, bindings, ADR, module cards) can cite them unambiguously by source
-identity instead of by informal description. Approving this document approves the two contracts
-below and nothing else: no live Collector identity, no live Solana custody identity, no
-composition, signing, or readiness fact becomes true by this proposal being accepted.
+**Status: DRAFT candidate for owner approval. Not itself an approval.** An independent review will
+first decide whether the exact bytes described below are ready before any owner question is asked.
+This document was corrected from an earlier draft that only promised future authoritative edits and
+that incorrectly stated `decisions/ADR-0026-custody-ledger-v2-migration.md` did not exist in this
+repository or on any branch; it exists at reviewed source `ce428937b40cf5ef1518791f3aa97736a0bdaf7f`
+and has been imported byte-for-byte (§1). This document now describes concrete, already-made edits,
+not a plan to make edits later.
 
-## 1. Exact integrated source identity
+## 1. Exact commit chain and imported bytes
 
-Base repository commit at proposal time: `bc7fdcaa41cb822f57315a4f8168711ebfafad48`.
+- Prior base: `bc7fdcaa41cb822f57315a4f8168711ebfafad48`.
+- `0d27f812` — the prior (corrected-from) DRAFT proposal commit on this branch.
+- ADR import commit (byte-for-byte, separate Conventional Commit) — imports, unmodified, from
+  reviewed source `ce428937b40cf5ef1518791f3aa97736a0bdaf7f`:
+  - `decisions/ADR-0026-custody-ledger-v2-migration.md` —
+    `sha256:1157569815b5da153388ab6431a19a09eedeeefbf39cda494a67e636bdf23ef5` — verified identical to
+    the source commit's blob (`git hash-object` matches `git rev-parse ce428937:<path>` exactly).
+  - `docs/audit/2026-09-04/custody-ledger-v2-shape-DRAFT.json` —
+    `sha256:a10c11db4867f1e46c6c9203c4b61872220c22cbce263cf47cc21ba3c7879dce` — same verification.
+- Requirements/interfaces candidate commit (this commit) — amends `specs/requirements.json` and
+  `architecture/interfaces.json` and this proposal document, per §2 below.
 
-Both artifacts below are already merged into that commit's history through two integration
-commits, each an exact cherry-pick of an independently reviewed candidate:
+The two files above are imported exactly as reviewed in `custody-spec-ready-report.md` and
+`custody-spec-ready-money-review.md` (both PASS for an owner decision on the EVM-only storage
+shape, no requirements/architecture amendment, no test run). This proposal does not alter either
+imported file's text.
 
-- `4edd52900ea152608bb0a8263293f6b56a34c5fc` — "feat(adapters): add offline Collector purchase
-  policy binding", cherry-picked from reviewed candidate `6105b0ae6f46e18d9933fb617a398d335c1079a9`.
-  Files: `docs/superpowers/specs/2026-09-06-collector-purchase-binding-contract.md`,
-  `packages/adapters/src/signing/collector-purchase-policy.mjs`,
-  `packages/adapters/test/signing/collector-purchase-policy.test.mjs`.
-- `e86156da59b98f9b872058869fb44b5737f2e9e3` — "feat(adapters): add pure Solana finalized
-  custody-balance observation helper", cherry-picked from reviewed candidate
-  `40740c06108a41a1da714e3334fab69612bfb275`. Files:
-  `docs/modules/solana-custody-balance-observation.md`,
-  `packages/adapters/src/solana-custody-balance-observation.mjs`,
-  `packages/adapters/test/solana-custody-balance-observation.test.mjs`,
-  `product/SOLANA_CUSTODY_CURRENT_BALANCE_OBSERVATION_DRAFT.md`.
+## 2. Exact candidate diff
 
-Immutable SHA-256 digests of the repository file bytes at `bc7fdcaa41cb822f57315a4f8168711ebfafad48`
-for the files this proposal binds:
+**`specs/requirements.json`:** `revision` 66 → 67. Two requirement records amended, both moved from
+`status: "approved"` to `status: "proposed"` (no other requirement record touched):
 
-| Path | SHA-256 |
-| --- | --- |
-| `packages/adapters/src/signing/collector-purchase-policy.mjs` | `e2528a63151b385098ceb2dc84accaf227c94c9ec08bab4c3fcb51b0debf2ae2` |
-| `docs/superpowers/specs/2026-09-06-collector-purchase-binding-contract.md` | `ebd83065d687bcfa1e84c31a87160b13e91858d4d9dccf6a3889954fef6036f9` |
-| `packages/adapters/src/solana-custody-balance-observation.mjs` | `08b85e992141a3e2abc8122d857cb3fd8c7d9e165b7cb44dd3fa7c75f54e0274` |
-| `docs/modules/solana-custody-balance-observation.md` | `b801f1450be8f3a96029f0c8ee3ff6909e5f28a74212dbf419a4d98801bc0b25` |
-| `product/SOLANA_CUSTODY_CURRENT_BALANCE_OBSERVATION_DRAFT.md` | `3a5d829aaf7d4b5657eb0355a47788bf414131ded02a655bdc3fae14f2497af5` |
+- `REQ-transaction-policy-1` — adds one sentence requiring a provider-specific purchase policy
+  (e.g. a Collector-crypt purchase binding) to be constructed only from binding bytes independently
+  digest-pinned against a separately supplied expected digest, plus durable per-cycle facts and an
+  independently observed RPC blockhash context — never from candidate transaction semantics, with
+  the candidate used only by the existing canonical decode/evaluate kernel. Adds matching edge
+  cases (binding digest mismatch; construction attempted from candidate-derived semantics) and a
+  matching negative-measurement clause.
+- `REQ-cycle-runner-3` — adds sentences naming, for the canonical EVM USDG row only,
+  `hookemon.custody-ledger.v2` per ADR-0026's `verifiedCurrentBalance`
+  (`CustodyBalanceObservationV1 | null`) and singular `expectedCycleAsset` (`TypedAmount | null`,
+  never a collection), and the `unvaluedExposure` admission rule. Names
+  `packages/adapters/src/solana-custody-balance-observation.mjs`'s pure
+  `combineFinalizedBalanceObservation`/`observeFinalizedBalanceWithRetry` combiner as an *allowed
+  evidence-construction contract* for a future non-EVM `verifiedCurrentBalance` — explicitly not
+  itself a durable producer, canonical chain/asset identity source, custody-ledger writer,
+  valuation, or live readiness proof. States a non-EVM-USDG row stays on `v1`, or, if migrated,
+  stays permanently unvalued and fail-closed until a separately approved evidence producer exists.
+  Adds a matching edge case and negative-measurement clause.
 
-## 2. Exact contracts proposed for approval
+**`architecture/interfaces.json`:** `requirementsRevision` 65 → 67; `architectureRevision` 9 → 10.
+Minimal field additions only, under the two existing interfaces named — no new module ID created:
 
-Two independent offline contracts, approved separately and only as described here:
+- `cycleExecution.custodyLedger` gains `scope`, an expanded `verifiedCurrentBalance` description,
+  a corrected singular `expectedCycleAssets` description, `admissionRule`,
+  `nonEvmEvidenceConstructionContract` (pinning
+  `packages/adapters/src/solana-custody-balance-observation.mjs` by
+  `sha256:08b85e992141a3e2abc8122d857cb3fd8c7d9e165b7cb44dd3fa7c75f54e0274`, its three exports, its
+  trust inputs, and its explicit non-producer/non-identity/non-writer/non-valuation/non-readiness
+  status), `source` (`decisions/ADR-0026-custody-ledger-v2-migration.md`, pinned by
+  `sha256:1157569815b5da153388ab6431a19a09eedeeefbf39cda494a67e636bdf23ef5`), and `liveBindingStatus`
+  stating no `bindings/index.json` entry exists until a real, independently approved binding path,
+  digest, and value exist.
+- `transactionPolicy` gains `providerSpecificPurchasePolicy`, pinning
+  `packages/adapters/src/signing/collector-purchase-policy.mjs` by
+  `sha256:e2528a63151b385098ceb2dc84accaf227c94c9ec08bab4c3fcb51b0debf2ae2`, its five exports, its
+  trust inputs, `integrationStatus: "UNWIRED_OFFLINE_MODULE_ONLY"`, and a `liveBindingStatus`
+  stating no live Collector identity or `bindings/index.json` entry exists.
 
-**(a) `CollectorPurchaseBindingV1` validation/factory**, from
-`packages/adapters/src/signing/collector-purchase-policy.mjs`:
-`COLLECTOR_PURCHASE_BINDING_SCHEMA`, `COLLECTOR_PURCHASE_BINDING_VERSION`,
-`CollectorPurchasePolicyError`, `assertCollectorPurchaseBindingV1(bindingInput, expectedDigest)`,
-`createCollectorPurchasePolicy({ binding, expectedDigest, cycleFacts, blockhashContext })`.
+**This proposal document:** rewritten in the requirements/interfaces candidate commit to describe
+the above as done, not promised.
 
-**(b) The pure two-source finalized observation combiner/retry interface**, from
-`packages/adapters/src/solana-custody-balance-observation.mjs`:
-`combineFinalizedBalanceObservation(sideA, sideB, { chainId, assetId, decimals, mint, owner, tokenProgramId, expectedGenesisHash? })`,
-`observeFinalizedBalanceWithRetry(readRound, request, { maxAttempts? })`,
-`SolanaCustodyObservationError`.
+No other file is part of this candidate. `bindings/index.json`,
+`architecture/provisional-interfaces.json`, any module card or `docs/modules/index.json`, gates,
+product delivery projection, runtime, tests, package files, receipts, and generated projections are
+untouched.
 
-Approving this proposal fixes these exact exports, at the exact digests above, as the named
-target for any future authoritative work that needs to refer to "the Collector purchase binding
-contract" or "the Solana finalized-balance observation contract." It does not merge, compose, or
-otherwise relate the two contracts to each other beyond both being pinned by this one document.
+## 3. Validation performed
 
-## 3. Trust-direction restatement
+- Both amended/imported JSON files parse (`jq empty specs/requirements.json`,
+  `jq empty architecture/interfaces.json`; both succeeded).
+- `jq` spot-checks confirm `revision: 67`, both amended requirement records' `status: "proposed"`,
+  and `interfaces.json`'s `requirementsRevision: 67` / `architectureRevision: 10`.
+- The imported ADR/JSON pair's blob identity against `ce428937` was verified with
+  `git hash-object`/`git rev-parse` (exact match, §1).
+- `node`-based repository structural checks (e.g. `scripts/v4.mjs trace check`) could not be run in
+  this environment: every `node` invocation beyond `node --version` was blocked by this session's
+  permission gate, including with sandbox restrictions disabled. This is recorded as an actual
+  limitation, not a passed check. A manual `jq` query against `tasks.json` shows neither
+  `REQ-transaction-policy-1` nor `REQ-cycle-runner-3` is currently referenced by any task entry —
+  unchanged from before this candidate, since `tasks.json` is not part of this candidate and was not
+  edited.
+- No adapter test was run, per instruction.
 
-For (a): binding input and its expected digest must come from two independently supplied sources
-(the binding bytes are never trusted to declare their own digest); candidate transaction bytes are
-never a legal argument anywhere in this contract and enter only the existing, already-approved
-`transaction-policy.mjs` decode/evaluate kernel, unchanged.
+## 4. Preserved scope and open facts (unchanged in substance from the prior draft)
 
-For (b): the observation helper receives a caller-pinned canonical `{chainId, assetId, decimals,
-mint, owner, tokenProgramId}` identity plus two independently configured read sides; it performs no
-RPC I/O, selects no chain/asset identity itself, and binds its output only to the identity the
-caller already supplied after both sides are proven to agree with each other and with that
-identity.
+- This is a **contract-shape candidate**, not a **live binding approval**, and not **launch
+  readiness**. No live Collector program/account/co-signer/mint identity, no `expectedDigest`
+  source or repository path, no canonical Solana custody chain/asset identity or Relay-label
+  mapping, no endpoint-independence policy, no durable producer, no monotonic-height/reorg
+  persistence, and no repository writer for any non-EVM row is approved or created by this
+  candidate.
+- ADR-0026's own scope statement stands as imported: the EVM USDG row is the only row this revision
+  gives a real `verifiedCurrentBalance` producer for; every other row is fail-closed and
+  permanently unvalued until a future, separately reviewed producer exists.
+- The Solana finalized-observation contract is bound here by its runtime source digest
+  (`packages/adapters/src/solana-custody-balance-observation.mjs`,
+  `sha256:08b85e992141a3e2abc8122d857cb3fd8c7d9e165b7cb44dd3fa7c75f54e0274`) and by
+  `product/SOLANA_CUSTODY_CURRENT_BALANCE_OBSERVATION_DRAFT.md`, not by
+  `docs/modules/solana-custody-balance-observation.md`'s current path: a separate documentation
+  cleanup may fold that module card into the existing custody-ledger module card and delete the
+  redundant standalone card, and this candidate's identity does not depend on that path surviving.
+- The sanitized Collector `/api/status` evidence remains catalog-only: machineStatus `running`, 72
+  gachas, open `pokemon_25`/`pokemon_50`/`pokemon_100` at prices 25/50/100, no currency field. It
+  does not prove cycle costs, a signing identity, or any provider instruction/account binding.
+- No owner approval, approval receipt, runtime-ready flag, binding value, or provider identity is
+  fabricated by this document.
 
-## 4. Preserved Collector limitations (unchanged by this proposal)
+## 5. Owner question
 
-`CollectorPurchaseBindingV1` v1 supports only the legacy Solana transaction format with an empty
-address-lookup-table set; a `v0`/ALT transaction is refused, not degraded. This proposal does not
-approve, and this module cannot supply: any live Collector program ID, settlement destination,
-mint, provider co-signer, or account layout; a repository file path or environment/preflight source
-for `expectedDigest`; any wiring into `compose.mjs`, `purchase.mjs`, `architecture/interfaces.json`,
-or `bindings/index.json`; `open`, `buyback`, or any non-purchase action; or any `runtime-ready`
-status. The sanitized `/api/status` evidence obtained under the owner's approved-reads exception
-(machineStatus `running`, 72 gachas, observed open pack codes `pokemon_25`/`pokemon_50`/`pokemon_100`
-at numeric prices 25/50/100, no currency field) proves only that catalog observation. It does not
-prove total cycle costs, an immutable signing identity, or any provider instruction/account
-binding, and this proposal does not treat it as such.
-
-## 5. Preserved Solana observation limitations (unchanged by this proposal)
-
-No canonical Solana custody chain/asset identity is approved by this or any prior document: Relay
-transport's `792703809` and the Collector-facing buyback-proceeds writer's `solana-mainnet` remain
-unreconciled, and this proposal does not pick one or map between them. Also unapproved: an
-endpoint-independence policy for the two configured RPC read sides; a durable producer; a
-monotonic persisted-height/reorg rule; a repository writer that persists this helper's output as
-custody evidence; or any Solana custody valuation. The pure helper in (b) validates agreement
-between two supplied sides and a caller-supplied identity — it cannot itself supply or satisfy any
-of the missing custody-ledger evidence above.
-
-## 6. Future authoritative patch plan (after owner approval of this document, and separately again after real binding facts exist)
-
-This proposal is exactly one step: **contract approval** — fixing the shape and trust rule of two
-offline artifacts. It is distinct from, and does not authorize, a later, separately reviewable
-**live binding approval** (real Collector program/account/co-signer/mint identity, a real
-`expectedDigest` and its source, a real Solana custody chain/asset identity and endpoint-
-independence policy), which is in turn distinct from overall **launch readiness** (composition,
-signing, broadcast, and the rest of `authoritative-launch-handoff.md`'s acceptance criteria).
-
-Only after both this contract approval and the corresponding live binding approval exist should a
-later change:
-
-- Amend `REQ-transaction-policy-1` and/or add a Collector-scoped requirement that names the
-  approved `expectedDigest` source and repository binding path for a live `collector-crypt`
-  binding.
-- Amend `REQ-cycle-runner-3` to bind its `verifiedCurrentBalance` custody-ledger fact to the
-  approved canonical Solana custody chain/asset identity and the (b) contract's output shape.
-- Add `transaction-policy`-style module-interface entries for `collector-purchase-policy` and
-  `solana-custody-balance-observation` to `architecture/interfaces.json`, each carrying the digests
-  in §1 as their pinned source identity.
-- Add an entry to `bindings/index.json` (following the existing `schemaVersion: 1` shape used by
-  `robinhood-chain-r54-a3`) once a real binding file, path, and digest exist.
-- Create the Solana counterpart of the custody-ledger migration decision — no
-  `decisions/ADR-0026-*.md` file exists in this repository yet, only the open questions already
-  recorded in `product/SOLANA_CUSTODY_CURRENT_BALANCE_OBSERVATION_DRAFT.md` — and update
-  `docs/modules/collector-purchase-policy.md` (does not yet exist) and
-  `docs/modules/solana-custody-balance-observation.md` from its current DRAFT framing once live
-  facts exist, registering both in `docs/modules/index.json`.
-
-None of the five patch items above is performed by this proposal or by its approval.
-
-## 7. Suggested owner question
-
-"Do you approve, exactly as pinned to commits `4edd52900ea152608bb0a8263293f6b56a34c5fc` and
-`e86156da59b98f9b872058869fb44b5737f2e9e3` and the digests in §1: (a) the five-export
-`CollectorPurchaseBindingV1` parser/factory and its externally-supplied-digest trust rule, and (b)
-the `combineFinalizedBalanceObservation` / `observeFinalizedBalanceWithRetry` /
-`SolanaCustodyObservationError` two-independent-source finalized-observation trust rule — as two
-independent offline contracts only, leaving every live Collector identity, every live Solana
-custody identity, all composition/signing, and all readiness unapproved and separately
-reviewable?"
+**Withheld.** An independent review will first decide whether the exact bytes in §1–§2 are ready
+for an owner decision. No owner question is posed in this revision of the document.
