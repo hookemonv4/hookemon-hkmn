@@ -389,7 +389,7 @@ test('getView() reports automationEnabled and paused from the last observed conf
   scheduler.stop();
 });
 
-test('getView() reports SCHEDULER_STOPPED once stopped, and a fresh scheduler after a restart starts from a clean nextCycleAt', async () => {
+test('a stopped scheduler\'s view has no future timer, and a fresh scheduler after a restart starts from a clean nextCycleAt', async () => {
   const worker = fakeWorker();
   const reader = stateReaderFrom([configuration({ paused: false, liveMode: false })]);
   const clock = manualClock();
@@ -406,7 +406,12 @@ test('getView() reports SCHEDULER_STOPPED once stopped, and a fresh scheduler af
   await scheduler.settled();
   assert.equal(scheduler.getView().nextCycleAt, new Date(20 * 60_000).toISOString());
   scheduler.stop();
-  assert.equal(scheduler.getView().pendingReason, 'SCHEDULER_STOPPED');
+  assert.equal(scheduler.getView().nextCycleAt, null, 'no timer is installed once stopped');
+  assert.equal(scheduler.getView().nextReconcileAt, null, 'no timer is installed once stopped');
+
+  // stop() itself neither runs a tick nor discovers anything new, so the last real tick's reason
+  // remains visible — it is not replaced by a synthetic "stopped" reason.
+  assert.equal(scheduler.getView().pendingReason, null);
 
   // A restart is a fresh createScheduler() call against the same state path (a real process restart);
   // its view starts clean and is rebuilt from the very next tick, not from anything the old instance
@@ -439,6 +444,44 @@ test('a manual triggerTick() updates getView() without scheduling a follow-up ti
   await scheduler.triggerTick();
 
   assert.equal(scheduler.getView().pendingReason, 'INSUFFICIENT_FUNDS');
+});
+
+test('a manual triggerTick() on a running scheduler never moves the displayed deadline away from the actual installed timer', async () => {
+  let manualObservedPending = false;
+  const worker = fakeWorker({
+    runOnce: async () => (manualObservedPending
+      ? { status: 'ACTIVE_CYCLE_NOT_RECONCILED', cycleId: null, stage: null, requiredProcessUsdg: '0' }
+      : { status: 'COMPLETE', cycleId: 'c1' }),
+  });
+  const reader = stateReaderFrom(Array.from({ length: 6 }, () => configuration({ paused: false, liveMode: false })));
+  const clock = manualClock();
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    now: () => 0,
+  });
+  scheduler.start();
+  await scheduler.settled();
+  assert.equal(clock.pendingDelayMs(), 20 * 60_000);
+  assert.equal(scheduler.getView().nextCycleAt, new Date(20 * 60_000).toISOString());
+
+  manualObservedPending = true;
+  const manual = await scheduler.triggerTick();
+
+  assert.equal(manual.result.status, 'ACTIVE_CYCLE_NOT_RECONCILED', 'the manual tick really did observe a pending operation');
+  assert.equal(clock.pendingCount(), 1, 'the manual tick installed no timer of its own');
+  assert.equal(clock.pendingDelayMs(), 20 * 60_000, 'the real installed timer is untouched by the manual tick');
+  assert.equal(
+    scheduler.getView().nextCycleAt,
+    new Date(20 * 60_000).toISOString(),
+    'the displayed deadline still matches the real installed timer, not the manual tick\'s five-second outcome',
+  );
+  assert.equal(scheduler.getView().nextReconcileAt, null);
+  assert.equal(scheduler.getView().pendingReason, 'RECONCILING_PENDING_TRANSACTION', 'the manual tick\'s finding is still surfaced');
+  scheduler.stop();
 });
 
 test('a missing operator state file is reported distinctly from a corrupt one, and still reschedules safely', async () => {

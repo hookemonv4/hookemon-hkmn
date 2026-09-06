@@ -293,8 +293,15 @@ export function createScheduler(options) {
   // nextCycleAt/nextReconcileAt for getView(). The two are mutually exclusive at any moment: either
   // the next wakeup is the ordinary new-cycle cadence, or it is a fast reconciliation/outage retry —
   // never both, since a single timer drives the loop and whichever is more urgent wins.
-  function applyScheduleOutcome(outcome) {
+  // Only a tick that actually drives the installed timer (scheduleAfter === true, i.e. the automatic
+  // loop) may change nextCycleAtMs/nextReconcileAtMs/the backoff counter: those fields describe the
+  // real, currently-scheduled wakeup, and a manual triggerTick() never touches the timer loop (see
+  // triggerTick's own doc comment) — installing no timer of its own and cancelling none. Updating the
+  // displayed deadline from a manual tick's outcome would show a wakeup that does not exist. A manual
+  // tick's pendingReason is still real, freshly-observed information and is always recorded.
+  function applyScheduleOutcome(outcome, { scheduleAfter }) {
     lastPendingReason = outcome.pendingReason ?? null;
+    if (!scheduleAfter) return null;
     if (outcome.requiresFastRetry === 'outage') {
       outageBackoffMs = outageBackoffMs === null
         ? reconcileRetryMs
@@ -328,7 +335,7 @@ export function createScheduler(options) {
     );
     tickChain = outcome.then(
       result => {
-        const delayMs = applyScheduleOutcome(result);
+        const delayMs = applyScheduleOutcome(result, { scheduleAfter });
         if (scheduleAfter) scheduleNext(delayMs);
       },
       () => {
@@ -375,12 +382,14 @@ export function createScheduler(options) {
      * `null` when there is nothing blocking. Reflects the most recently settled tick, automatic or
      * manually triggered. */
     getView() {
+      // Stopped means no timer is installed, full stop — neither field may report a future wakeup
+      // regardless of whatever the last automatic tick happened to compute before stop() ran.
       return Object.freeze({
-        nextCycleAt: nextCycleAtMs === null ? null : new Date(nextCycleAtMs).toISOString(),
-        nextReconcileAt: nextReconcileAtMs === null ? null : new Date(nextReconcileAtMs).toISOString(),
+        nextCycleAt: stopped || nextCycleAtMs === null ? null : new Date(nextCycleAtMs).toISOString(),
+        nextReconcileAt: stopped || nextReconcileAtMs === null ? null : new Date(nextReconcileAtMs).toISOString(),
         automationEnabled: lastAutomationEnabled,
         paused: lastConfigPaused,
-        pendingReason: stopped ? (lastPendingReason ?? 'SCHEDULER_STOPPED') : lastPendingReason,
+        pendingReason: lastPendingReason,
       });
     },
     /** Abort the signal passed to the in-flight worker call, if any. AutomatedCycleService checks this

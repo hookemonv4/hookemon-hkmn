@@ -45,12 +45,15 @@ serializes worker dispatch. It owns cadence and cancellation, not money limits o
 ## State transitions
 
 - A start wake-up queues one generation-tagged tick and schedules the next one after its outcome.
-- A manual `triggerTick` queues behind any active work, schedules no timer, but still updates
-  `getView()`'s bookkeeping (pendingReason, and — for the automatic-loop fields — the backoff state).
+- A manual `triggerTick` queues behind any active work and schedules no timer of its own — it never
+  changes `nextCycleAt`/`nextReconcileAt` or the backoff counter, only `pendingReason` (a fresh,
+  real finding). If a timer is already installed, `getView()` keeps showing that real deadline
+  throughout and after the manual tick, never the manual tick's own outcome.
 - State read, worker construction, and worker execution failures are emitted and leave the loop able
   to run a later tick, retried per the outage backoff above rather than the ordinary interval.
-- `stop()` freezes `getView()`'s `pendingReason` at `'SCHEDULER_STOPPED'` until `start()` runs a tick
-  again.
+- `stop()` clears `getView()`'s `nextCycleAt`/`nextReconcileAt` to `null` (no timer is installed);
+  `pendingReason` keeps showing the last real tick's finding, since `stop()` itself neither runs a
+  tick nor discovers anything new.
 
 ## Operational commands
 
