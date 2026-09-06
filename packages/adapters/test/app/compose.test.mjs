@@ -623,7 +623,10 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
             }],
           };
         },
-        submitTransaction: () => { throw new Error('submitTransaction must never be reached before a pinned policy exists'); },
+        submitTransaction: () => {
+          calls.submitTransaction += 1;
+          throw new Error('submitTransaction must never be reached before a pinned policy exists');
+        },
       },
       relay: {
         quoteOutboundBridge: () => { throw new Error('unused: outbound is already seeded complete'); },
