@@ -351,6 +351,33 @@ test('previous-chain path exception requires the exact bounded path token', () =
   assert.equal(scanDigestMarkers(`${canonicalPath}é`, [rule]).length, 1);
 });
 
+test('current repository URL exception only exempts the exact reviewed token on the approved web paths', () => {
+  const slug = ['hookemon', '-hkmn'].join('');
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.id === 'historical-repository' && candidate.length === slug.length
+    && candidate.sha256 === createHash('sha256').update(slug).digest('hex')
+  ));
+  assert.ok(rule);
+
+  const approvedPaths = [
+    'apps/web/app/SocialLinks.tsx',
+    'apps/web/README.md',
+    'apps/web/tests/rendered-html.test.mjs',
+  ];
+  const plainUrl = `https://github.com/hookemonv4/${slug}`;
+  const escapedUrl = `github\\.com\\/hookemonv4\\/${slug}`;
+
+  for (const file of approvedPaths) {
+    assert.deepEqual(scanDigestMarkers(plainUrl, [rule], file), []);
+    assert.deepEqual(scanDigestMarkers(escapedUrl, [rule], file), []);
+  }
+
+  assert.equal(scanDigestMarkers(plainUrl, [rule], 'apps/web/app/page.tsx').length, 1);
+  assert.equal(scanDigestMarkers(plainUrl, [rule], null).length, 1);
+  assert.equal(scanDigestMarkers(`org/${slug}`, [rule], approvedPaths[0]).length, 1);
+  assert.equal(scanDigestMarkers(`${plainUrl}x`, [rule], approvedPaths[0]).length, 1);
+});
+
 test('clean-room scanner permits the provider address enum only in Phase 3 JSON', () => {
   const root = fixture();
   try {

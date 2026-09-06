@@ -78,6 +78,27 @@ const approvedPathDelimiter = /[\s"'`()\[\]{},;]/;
 const identifierCharacter = /[A-Za-z0-9_$\\]|[^\x00-\x7f]/;
 const PHASE_THREE_JSON_PATH = /^release\/phase3\/[^/]+\.json$/;
 const PHASE_THREE_PROVIDER_ADDRESS_ENUM = ['nonzero', ['ethe', 'reum'].join(''), 'address'].join('-');
+// The historical-repository rule below (length 13) matches a slug that is, in fact, this
+// repository's own real, currently-live GitHub remote -- verified directly against the GitHub
+// API, not assumed. It is not retired; the digest predates a since-confirmed-wrong belief that
+// it had been renamed. Rather than remove detection everywhere (which could hide a genuine
+// future reference to whatever name actually gets retired later), this exempts only the exact
+// verified-current "github.com/hookemonv4/<slug>" URL token, and only on the small set of web
+// paths that are actually expected to state the public repository link.
+const RETIRED_REPO_SLUG_DIGEST = 'dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1';
+const APPROVED_CURRENT_REPO_URL_PATHS = new Set([
+  'apps/web/app/SocialLinks.tsx',
+  'apps/web/README.md',
+  'apps/web/tests/rendered-html.test.mjs',
+]);
+// Two exact reviewed shapes precede the slug in the approved files: the plain URL
+// ("github.com/hookemonv4/") and, in one test's regex-source literal, its backslash-escaped
+// form ("github\.com\/hookemonv4\/"). Each entry is an exact prefix length paired with the
+// full token's digest; no fuzzy/regex matching against the prefix itself.
+const APPROVED_CURRENT_REPO_URL_TOKENS = Object.freeze([
+  Object.freeze({ prefixLength: 'github.com/hookemonv4/'.length, digest: '74b269ab96858cef4ea0840f0d475ff3db31862a5f5f4d3f2ccc0ee68161f900' }),
+  Object.freeze({ prefixLength: 'github\\.com\\/hookemonv4\\/'.length, digest: '813a3fd959ccc41567501e603274fd93190126303586062ef39ae7164b09204e' }),
+]);
 
 // Exact full-token hashes keep the revision-56 exception fail-closed. New
 // identifiers require an explicit control change instead of inheriting a
@@ -139,6 +160,18 @@ function isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file) {
   return /:\s*"$/.test(prefix) && /^"\s*(?:[,}\]])/.test(suffix);
 }
 
+function isApprovedCurrentRepositoryUrlToken(text, offset, rule, file) {
+  if (!APPROVED_CURRENT_REPO_URL_PATHS.has(file ?? '')) return false;
+  return APPROVED_CURRENT_REPO_URL_TOKENS.some(({ prefixLength, digest }) => {
+    const tokenStart = offset - prefixLength;
+    const tokenEnd = tokenStart + prefixLength + rule.length;
+    if (tokenStart < 0 || tokenEnd > text.length) return false;
+    if (tokenStart > 0 && !boundaryCharacter.test(text[tokenStart - 1])) return false;
+    if (tokenEnd < text.length && !boundaryCharacter.test(text[tokenEnd])) return false;
+    return sha256Text(text.slice(tokenStart, tokenEnd).toLowerCase()) === digest;
+  });
+}
+
 function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   if (rule.sha256 === RETIRED_CYCLE_VAULT_DIGEST) {
     return isApprovedRevision56Identifier(text, offset, rule.length);
@@ -146,6 +179,9 @@ function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   if (rule.sha256 === PREVIOUS_CHAIN_NAME_DIGEST) {
     return isApprovedPreviousChainPathToken(text, offset)
       || isApprovedPhaseThreeProviderAddressEnum(text, offset, rule, file);
+  }
+  if (rule.sha256 === RETIRED_REPO_SLUG_DIGEST) {
+    return isApprovedCurrentRepositoryUrlToken(text, offset, rule, file);
   }
   return false;
 }
