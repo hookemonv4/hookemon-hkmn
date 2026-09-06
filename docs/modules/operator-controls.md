@@ -74,6 +74,34 @@ creates a local cycle store, signer, or provider effect.
 - The service does not append audit records or deduplicate request IDs. Its caller persists the
   dispatch receipt before an effect and returns the stored receipt for a duplicate request.
 
+## Idempotent authority contract (required for `run-cycle-now`, `reconcile`, `resume-cycle`)
+
+`triggerTick`, `reconcileActiveCycle`, and `resumeActiveCycle` are called as `dependency({ requestId
+})`, where `requestId` is required (`assertRequestId`) and is the exact same stable request identity
+the audited command layer (`packages/dashboard/src/auth/audit-log.mjs`) assigned when the request was
+first dispatched — including on a crash-recovered retry of that same audit claim. `requestId` is
+carried through unchanged on every retry of the same original request; it is never regenerated.
+
+This module hands the identity down; it does not and cannot itself make the wrapped authority
+idempotent. A compliant `dependency({ requestId })` implementation must persist a durable
+postcondition keyed by `requestId` (for example: "a tick dispatched for this request already opened
+or advanced cycle X") and, on a repeat call with the same `requestId`, return that durable
+postcondition's outcome instead of performing its effect again. Passing the identity through is a
+necessary precondition for this, not a proof of it — this control layer has no way to verify a given
+authority implementation actually does the lookup. Until an authority does, a crash between the
+authority applying its effect and the audit log recording completion can still recover by invoking
+the effect again (e.g. `run-cycle-now` opening a second cycle); this is a known composition gap
+(`packages/adapters/src/app/compose.mjs` does not yet implement compliant lookups for these three
+dependencies) rather than a defect in the identity plumbing itself.
+
+This mirrors the fix already applied to `pause`/`resume`/`kill`/`update-configuration` above: those
+recover from a retry by checking whether the intended state is *already durably present* — a real,
+inspectable postcondition — never by trusting a bare identity or inferring success from a generic
+error message. The difference is only where the postcondition lives: for the four configuration
+commands it is the operator configuration itself, checked in this module; for these three recovery
+commands it must live in whatever durable state the injected authority owns (the cycle repository,
+C-owned), checked by that authority.
+
 ## State transitions
 
 - Configuration commands use the operator-state revision as their compare-and-swap value.

@@ -659,7 +659,7 @@ export function createOperatorControl({
         }
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const result = await reconcileActiveCycle();
+        const result = await reconcileActiveCycle({ requestId: assertRequestId(requestId) });
         return deepFreeze({
           action: 'reconcile',
           resultCode: recoveryResultCode(result),
@@ -672,7 +672,7 @@ export function createOperatorControl({
         if (resumeActiveCycle === undefined) throw new Error('operator resume-cycle authority is unavailable');
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const result = await resumeActiveCycle();
+        const result = await resumeActiveCycle({ requestId: assertRequestId(requestId) });
         return deepFreeze({
           action: 'resume-cycle',
           resultCode: recoveryResultCode(result),
@@ -685,7 +685,7 @@ export function createOperatorControl({
         if (triggerTick === undefined) throw new Error('operator run-cycle-now authority is unavailable');
         const safetyTelemetry = await readSafetyTelemetry(readCustody);
         if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
-        const result = await triggerTick();
+        const result = await triggerTick({ requestId: assertRequestId(requestId) });
         return deepFreeze({
           action: 'run-cycle-now',
           resultCode: 'TICK_TRIGGERED',

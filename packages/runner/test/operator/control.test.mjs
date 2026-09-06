@@ -900,11 +900,13 @@ test('reconcile with a wired reconciliation authority triggers serialized recove
     cycleRepository: createRepository(),
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
     triggerTick: async () => { ticks += 1; return { tick: 'started' }; },
-    reconcileActiveCycle: async () => { reconciles += 1; return { status: 'IN_PROGRESS', cycleId: 'cycle-one' }; },
+    reconcileActiveCycle: async input => { reconciles += 1; assert.deepEqual(input, { requestId: 'reconcile-request-1' }); return { status: 'IN_PROGRESS', cycleId: 'cycle-one' }; },
     readCustody: async () => safetyTelemetry(),
   });
 
-  const result = await control.execute({ expectedRevision: 0, command: { type: 'reconcile' } });
+  const result = await control.execute({
+    expectedRevision: 0, requestId: 'reconcile-request-1', command: { type: 'reconcile' },
+  });
 
   assert.deepEqual(result, {
     action: 'reconcile',
@@ -914,6 +916,24 @@ test('reconcile with a wired reconciliation authority triggers serialized recove
   });
   assert.equal(reconciles, 1);
   assert.equal(ticks, 0, 'reconcile never opens a new cycle, wired or not');
+});
+
+test('reconcile with a wired authority requires a stable request identity, so a compliant authority can check its own durable postcondition', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository(),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    reconcileActiveCycle: async () => ({ status: 'NO_ACTIVE_CYCLE' }),
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'reconcile' } }),
+    /requestId is invalid/,
+  );
 });
 
 test('a wired reconcile refuses without safety telemetry, same as resume-cycle', async t => {
@@ -933,7 +953,7 @@ test('a wired reconcile refuses without safety telemetry, same as resume-cycle',
   );
 });
 
-test('resume-cycle and run-cycle-now each call their injected authority once', async t => {
+test('resume-cycle and run-cycle-now each call their injected authority once, threading the stable request identity', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
   let ticks = 0;
@@ -943,13 +963,13 @@ test('resume-cycle and run-cycle-now each call their injected authority once', a
     statePath,
     cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
-    triggerTick: async () => { ticks += 1; return { tick: 'started' }; },
-    resumeActiveCycle: async () => { resumes += 1; return { status: 'RESUMED', cycle: 'resumed' }; },
+    triggerTick: async input => { ticks += 1; assert.deepEqual(input, { requestId: 'run-now-1' }); return { tick: 'started' }; },
+    resumeActiveCycle: async input => { resumes += 1; assert.deepEqual(input, { requestId: 'resume-1' }); return { status: 'RESUMED', cycle: 'resumed' }; },
     readCustody: async () => safetyTelemetry(),
   });
 
   assert.deepEqual(
-    await control.execute({ expectedRevision: 0, command: { type: 'resume-cycle' } }),
+    await control.execute({ expectedRevision: 0, requestId: 'resume-1', command: { type: 'resume-cycle' } }),
     {
       action: 'resume-cycle',
       resultCode: 'RECOVERY_RESUMED',
@@ -958,7 +978,7 @@ test('resume-cycle and run-cycle-now each call their injected authority once', a
     },
   );
   assert.deepEqual(
-    await control.execute({ expectedRevision: 0, command: { type: 'run-cycle-now' } }),
+    await control.execute({ expectedRevision: 0, requestId: 'run-now-1', command: { type: 'run-cycle-now' } }),
     {
       action: 'run-cycle-now',
       resultCode: 'TICK_TRIGGERED',
@@ -968,6 +988,29 @@ test('resume-cycle and run-cycle-now each call their injected authority once', a
   );
   assert.equal(resumes, 1);
   assert.equal(ticks, 1);
+});
+
+test('resume-cycle and run-cycle-now each require a stable request identity, so a compliant authority can check its own durable postcondition instead of trusting a bare retry', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    triggerTick: async () => ({ tick: 'started' }),
+    resumeActiveCycle: async () => ({ status: 'RESUMED' }),
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'resume-cycle' } }),
+    /requestId is invalid/,
+  );
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'run-cycle-now' } }),
+    /requestId is invalid/,
+  );
 });
 
 test('configuration updates use the runner schema and reject unknown fields', async t => {
