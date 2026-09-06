@@ -62,6 +62,7 @@ jobs:
           PUBLIC_DASHBOARD_PROFILE: ${{ secrets.PUBLIC_DASHBOARD_PROFILE }}
           PUBLIC_CYCLE_STATUS_URL: ${{ secrets.PUBLIC_CYCLE_STATUS_URL }}
           PUBLIC_COMMUNITY_SNAPSHOT_URL: ${{ secrets.PUBLIC_COMMUNITY_SNAPSHOT_URL }}
+          PUBLIC_CYCLE_HISTORY_URL: ${{ secrets.PUBLIC_CYCLE_HISTORY_URL }}
           FORCE_COLOR: "0"
           WRANGLER_LOG_SANITIZE: "true"
           WRANGLER_SEND_METRICS: "false"
@@ -71,6 +72,7 @@ jobs:
           test -n "$PUBLIC_DASHBOARD_PROFILE"
           test -n "$PUBLIC_CYCLE_STATUS_URL"
           test -n "$PUBLIC_COMMUNITY_SNAPSHOT_URL"
+          test -n "$PUBLIC_CYCLE_HISTORY_URL"
           printf '%s' "$OPERATOR_CONTROL_SERVICE_URL" |
             npx --no-install wrangler secret put OPERATOR_CONTROL_SERVICE_URL \
               --config dist/server/wrangler.json
@@ -85,6 +87,9 @@ jobs:
               --config dist/server/wrangler.json
           printf '%s' "$PUBLIC_COMMUNITY_SNAPSHOT_URL" |
             npx --no-install wrangler secret put PUBLIC_COMMUNITY_SNAPSHOT_URL \
+              --config dist/server/wrangler.json
+          printf '%s' "$PUBLIC_CYCLE_HISTORY_URL" |
+            npx --no-install wrangler secret put PUBLIC_CYCLE_HISTORY_URL \
               --config dist/server/wrangler.json
 
       - name: Upload exact CI-approved Worker version
