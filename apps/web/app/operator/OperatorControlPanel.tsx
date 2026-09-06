@@ -1231,7 +1231,7 @@ function latestActuallyPaid(dashboard: Dashboard | null) {
   if (accounting) {
     return pendingMicroUsdg(
       accounting.paidHolderRewardsMicroUsdg,
-      humanizeStatus(accounting.distributionStatus),
+      germanStatus(accounting.distributionStatus),
     );
   }
   return pendingMicroUsdg(dashboard.latestCycle.paidMicroUsdg, "Nicht ausgeführt");
@@ -1283,10 +1283,10 @@ function nullableInteger(value: number | null) {
 
 function formatCycleStartProjectPool(dashboard: Dashboard | null) {
   if (!dashboard) return "Nicht beobachtet";
-  const pool = decodeCycleStartProjectPool({
-    cycleStartProjectPoolMicroUsdg: dashboard.metrics.cycleStartProjectPoolMicroUsdg,
-    cycleStartProjectPoolObservedAt: dashboard.cycleStartProjectPoolObservedAt,
-  });
+  const pool = decodeCycleStartProjectPool(
+    dashboard.metrics.cycleStartProjectPoolMicroUsdg,
+    dashboard.cycleStartProjectPoolObservedAt,
+  );
   if (pool.cycleStartProjectPoolMicroUsdg === null || pool.cycleStartProjectPoolObservedAt === null) {
     return "Nicht beobachtet";
   }
