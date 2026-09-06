@@ -305,8 +305,8 @@ test('a fresh cycle with no completed stages reports the honest all-null shape (
 
 function relayLeg({
   direction, state = 'SETTLED',
-  sourceChainId = '4663', sourceAssetId = '0xusdg', sourceDecimals = 6, sourceAmountAtomic = '0',
-  destinationChainId = '4663', destinationAssetId = '0xusdg', destinationDecimals = 6, destinationAmountAtomic = '0',
+  sourceChainId = '4663', sourceAssetId = EXPECTED_USDG_ASSET_ID, sourceDecimals = 6, sourceAmountAtomic = '0',
+  destinationChainId = '4663', destinationAssetId = EXPECTED_USDG_ASSET_ID, destinationDecimals = 6, destinationAmountAtomic = '0',
 }) {
   return {
     direction, state,
@@ -328,7 +328,7 @@ test('outboundBridgeDebit is the settled outbound bridge amount, never the alloc
     relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })]]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '50' });
+  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '50' });
   assert.equal(accounting.packSpendMicroUsdg, null, 'no honest same-asset USDG pack-economics producer exists');
   assert.equal(accounting.buybackMicroUsdg, null);
   assert.equal(accounting.packGainMicroUsdg, null);
@@ -406,7 +406,7 @@ test('inboundBridgeProceeds is the settled return bridge amount, never the Solan
     ]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '4995000' });
+  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '4995000' });
   assert.equal(accounting.buybackMicroUsdg, null);
   assert.equal(accounting.packGainMicroUsdg, null);
   assert.equal(accounting.packLossMicroUsdg, null);
@@ -447,11 +447,11 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
     },
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '50' });
+  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '50' });
   assert.deepEqual(accounting.collectorPurchaseDebit, {
     chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '49',
   });
-  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '48' });
+  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '48' });
   assert.deepEqual(accounting.collectorBuybackProceeds, {
     chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '47',
   });
@@ -459,6 +459,132 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
   // fees/slippage) - never equated, and packSpendMicroUsdg never reports either as pack economics.
   assert.notEqual(accounting.outboundBridgeDebit.units, accounting.collectorPurchaseDebit.units);
   assert.equal(accounting.packSpendMicroUsdg, null);
+});
+
+// The configured USDG token address, standing in for `config.contracts.usdg` at composition time.
+// Every "real" fixture in this file uses this exact assetId; a "foreign token" fixture deliberately
+// uses a different one to prove the asset anchor is a trusted, external identity, never derived from
+// the evidence itself. Real EVM-address-shaped (assertFinalizedPayoutTransferEvidence validates it
+// with the same viem isAddress() check stages/payout.mjs's own assertAddress uses).
+const EXPECTED_USDG_ASSET_ID = `0x${'a'.repeat(40)}`;
+// Standing in for config.accounts.evm (the configured Operations sender) at composition time.
+const OPERATIONS_ADDRESS = `0x${'1'.repeat(40)}`;
+const RECIPIENT_A = `0x${'2'.repeat(40)}`;
+const RECIPIENT_B = `0x${'3'.repeat(40)}`;
+
+/** A fully producer-shaped `finalizedTransfer` object (all 16 fields
+ * `stages/payout.mjs`'s own `normalizeFinalizedTransfer` requires), for the one fixture that must
+ * still project as paid. */
+function realFinalizedTransfer({ recipient, amountAtomic }) {
+  return {
+    from: OPERATIONS_ADDRESS, to: recipient,
+    amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic },
+    finalizedBlockNumber: '100', finalizedBlockHash: '0x' + 'b'.repeat(64),
+    receiptBlockNumber: '99', receiptBlockHash: '0x' + 'c'.repeat(64),
+    previousBlockNumber: '98', previousBlockHash: '0x' + 'd'.repeat(64),
+    sourceBalanceBeforeAtomic: '1000', sourceBalanceAfterAtomic: String(1000 - Number(amountAtomic)), sourceBalanceDeltaAtomic: amountAtomic,
+    recipientBalanceBeforeAtomic: '0', recipientBalanceAfterAtomic: amountAtomic, recipientBalanceDeltaAtomic: amountAtomic,
+    logIndexes: ['0'],
+  };
+}
+
+const trustedPayoutContext = Object.freeze({
+  expectedUsdgAssetId: EXPECTED_USDG_ASSET_ID,
+  operationsAddress: OPERATIONS_ADDRESS,
+});
+
+test('projectPayoutEvidence: without trustedPayoutContext, even a fully producer-shaped valid payout stays all-null/awaiting-verification', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
+          recipients: [{
+            recipient: RECIPIENT_A,
+            amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+            state: 'FINALIZED',
+            nonce: 1,
+            transactionHash: '0x' + '1'.repeat(64),
+            finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+            refusalEvidence: null,
+          }],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  // No trustedPayoutContext supplied - this projection has no immutable anchor for "which token is
+  // USDG" and no finality-proof validator of its own, so it must never guess.
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('F6-sol-verification repro: a non-empty malformed hash plus an amount-only finalizedTransfer never reports paid, even with trustedPayoutContext supplied', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      recipients: [{
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: 'not-a-transaction-hash',
+        finalizedTransfer: { amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' } },
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('F6-sol-verification repro: a fully shaped, internally consistent foreign chain-4663 six-decimal token never reports paid', async () => {
+  const foreignAssetId = '0xforeigntoken';
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          // Internally consistent (all three amounts agree, conservation holds) but NOT the
+          // configured USDG token - the exact class of foreign-token repro F6 demonstrated.
+          distributablePool: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '0' },
+          recipients: [{
+            recipient: RECIPIENT_A,
+            amount: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+            state: 'FINALIZED',
+            nonce: 1,
+            transactionHash: '0x' + '1'.repeat(64),
+            finalizedTransfer: {
+              ...realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+              amount: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+            },
+            refusalEvidence: null,
+          }],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null, 'a fully-formed but foreign chain-4663/six-decimal token must never pass as USDG');
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
 });
 
 test('projectPayoutEvidence: a real finalized payout with a quarantined recipient reports paid-with-liabilities, not paid', async () => {
@@ -470,30 +596,30 @@ test('projectPayoutEvidence: a real finalized payout with a quarantined recipien
           schema: 'hookemon.direct-payout-result.v1',
           cycleId: 'cycle-1',
           planDigest: 'sha256:' + 'a'.repeat(64),
-          distributablePool: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
-          totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
-          dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
           recipients: [
             {
-              recipient: '0xaaa',
-              amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '70' },
+              recipient: RECIPIENT_A,
+              amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '70' },
               state: 'FINALIZED',
               nonce: 1,
               transactionHash: '0x' + '1'.repeat(64),
-              finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '70' } },
+              finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '70' }),
               refusalEvidence: null,
             },
-            { recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, state: 'REFUSED', nonce: 2, transactionHash: null, finalizedTransfer: null, refusalEvidence: { reason: 'REFUSED' } },
+            { recipient: RECIPIENT_B, amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '30' }, state: 'REFUSED', nonce: 2, transactionHash: null, finalizedTransfer: null, refusalEvidence: { reason: 'REFUSED' } },
           ],
           quarantine: [
-            { recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' },
+            { recipient: RECIPIENT_B, amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' },
           ],
           heldPositionExclusions: [],
         },
       },
     },
   });
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
   assert.equal(accounting.plannedHolderRewardsMicroUsdg, '100');
   assert.equal(accounting.paidHolderRewardsMicroUsdg, '70');
   assert.equal(accounting.payoutLiabilityMicroUsdg, '30');
@@ -511,17 +637,17 @@ test('projectPayoutEvidence: every recipient finalized with zero liability repor
           schema: 'hookemon.direct-payout-result.v1',
           cycleId: 'cycle-1',
           planDigest: 'sha256:' + 'a'.repeat(64),
-          distributablePool: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
-          totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
-          dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
           recipients: [
             {
-              recipient: '0xaaa',
-              amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+              recipient: RECIPIENT_A,
+              amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
               state: 'FINALIZED',
               nonce: 1,
               transactionHash: '0x' + '1'.repeat(64),
-              finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+              finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
               refusalEvidence: null,
             },
           ],
@@ -531,7 +657,7 @@ test('projectPayoutEvidence: every recipient finalized with zero liability repor
       },
     },
   });
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
   assert.equal(accounting.paidHolderRewardsMicroUsdg, '100');
   assert.equal(accounting.payoutLiabilityMicroUsdg, '0');
   assert.equal(accounting.paidHolderRewardsRecipientCount, 1);
@@ -547,12 +673,12 @@ test('projectPayoutEvidence fails closed to all-null when the payout evidence ha
           schema: 'hookemon.direct-payout-result.v1',
           cycleId: 'cycle-1',
           planDigest: 'sha256:' + 'a'.repeat(64),
-          distributablePool: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
-          totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
-          dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
           recipients: [
             // Wrong asset for this recipient's amount - must fail closed, never silently sum it in.
-            { recipient: '0xaaa', amount: { chainId: 1, assetId: '0xother', decimals: 18, amountAtomic: '100' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+            { recipient: RECIPIENT_A, amount: { chainId: 1, assetId: '0xother', decimals: 18, amountAtomic: '100' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
           ],
           quarantine: [],
           heldPositionExclusions: [],
@@ -567,7 +693,7 @@ test('projectPayoutEvidence fails closed to all-null when the payout evidence ha
 });
 
 function payoutEvidenceStages({ recipients, quarantine = [], distributablePool = '100', totalAllocated = '100', dust = '0', cycleId = 'cycle-1' }) {
-  const usdg = amount => ({ chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: amount });
+  const usdg = amount => ({ chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: amount });
   return {
     payout: {
       status: 'COMPLETE',
@@ -590,8 +716,8 @@ test('F4-sol-verification repro: a FINALIZED label alone, without transactionHas
   const repository = relayLegRepository({
     stages: payoutEvidenceStages({
       recipients: [{
-        recipient: '0xaaa',
-        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
         state: 'FINALIZED',
         nonce: 1,
         transactionHash: null,
@@ -612,18 +738,18 @@ test('projectPayoutEvidence fails closed when the evidence cycleId does not matc
     stages: payoutEvidenceStages({
       cycleId: 'some-other-cycle',
       recipients: [{
-        recipient: '0xaaa',
-        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
         state: 'FINALIZED',
         nonce: 1,
         transactionHash: '0x' + '1'.repeat(64),
-        finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+        finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
         refusalEvidence: null,
       }],
       quarantine: [],
     }),
   });
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
   assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
   assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
 });
@@ -632,19 +758,19 @@ test('projectPayoutEvidence fails closed when a quarantine entry does not pair 1
   const repository = relayLegRepository({
     stages: payoutEvidenceStages({
       recipients: [{
-        recipient: '0xaaa',
-        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
         state: 'FINALIZED',
         nonce: 1,
         transactionHash: '0x' + '1'.repeat(64),
-        finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+        finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
         refusalEvidence: null,
       }],
       // A quarantine entry with no corresponding non-paid recipient - must never be summed in.
-      quarantine: [{ recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' }],
+      quarantine: [{ recipient: RECIPIENT_B, amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' }],
     }),
   });
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
   assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
   assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
 });
@@ -656,18 +782,18 @@ test('projectPayoutEvidence fails closed when totalAllocated + dust does not con
       totalAllocated: '100',
       dust: '5', // 100 + 5 != 100 - inconsistent with the plan's own conservation invariant
       recipients: [{
-        recipient: '0xaaa',
-        amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
         state: 'FINALIZED',
         nonce: 1,
         transactionHash: '0x' + '1'.repeat(64),
-        finalizedTransfer: { amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' } },
+        finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
         refusalEvidence: null,
       }],
       quarantine: [],
     }),
   });
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
   assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
   assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
 });
