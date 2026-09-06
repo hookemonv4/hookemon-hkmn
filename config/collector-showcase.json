@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-09-05",
+  "currency": "USD",
+  "valueType": "insuredValue",
+  "source": "Collector Crypt public asset API",
+  "cards": [
+    {
+      "itemName": "2005 #107 Rayquaza Gold Star HOLO R BGS 8 EX Deoxys",
+      "grade": "8-NM-MT",
+      "gradingCompany": "Beckett",
+      "gradingID": "0015554214",
+      "nftAddress": "3A5unBCuL8hKrmqM8cpWH4C7Ly9MkGF8briwpxdCwTdM",
+      "insuredValue": "40000",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/G7-UpVecMsF9fyxKMoVun6yRqahg-2fDLtHvwS9Lt34"
+    },
+    {
+      "itemName": "2011 #SL7 Lugia-Holo PSA 10 Call of Legends",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "gradingID": "28478646",
+      "nftAddress": "H1sSmJcCVdepcPQTVgD8JkjiMzn1AMRJ8i5HqawssH47",
+      "insuredValue": "250000",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/A7Vvp6B8ov3_jFmjR-gFmW2wf3J93_oL67PgCYK8Sn4"
+    },
+    {
+      "itemName": "2016 #231 PONCHO-WEARING PIKACHU PSA 10 POKEMON JAPANESE XY PROMO | RAYQUAZA PONCHO-WEARING PIKACHU BOX",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "gradingID": "110630657",
+      "nftAddress": "6aSSRLz6eNppavyKSygZqrL3PfQU5WT5FarjwMegE14E",
+      "insuredValue": "17500",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/-bohVu_T0vqivMHLHBvJq46JcuPFl0N3g-QWI2uIBHY"
+    },
+    {
+      "itemName": "2003 #146 Charizard-Holo PSA 10 Skyridge",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "gradingID": "25067462",
+      "nftAddress": "5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3",
+      "insuredValue": "135000",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/k-xZqCMa5kCE2IxBvf682ssG8BpLTT-qp03D3wpkCFo"
+    },
+    {
+      "itemName": "2021 #095 Full Art/Umbreon Vmax-Hyper PSA 10 Japanese Sword & Shield Eevee Heroes",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "gradingID": "91564783",
+      "nftAddress": "4ERfJkc6xoh1Codq7Zo7TdeCdznYua1q15HtmBmTf6Uq",
+      "insuredValue": "5400",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/DpcxDIltAT6DxRXoxe5hxa2N1hRec_hCh7cHZC3KFFY"
+    },
+    {
+      "itemName": "2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "gradingID": "24125808",
+      "nftAddress": "CKj6vBnWppVChNCN17F8UjQSLjmRVhxaVyVGFsbyxQDC",
+      "insuredValue": "45000",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/bSiRn8DaTiIF8wOhkfyUy6b2bmMgTBlRFpUmK6aHS_s"
+    },
+    {
+      "itemName": "2006 #101 Mew-Holo Gold Star PSA 9 EX Dragon Frontiers Pokemon",
+      "grade": "MINT 9",
+      "gradingCompany": "PSA",
+      "gradingID": "123599299",
+      "nftAddress": "CqGUW13AarrctjQvehYAQkFE2xhYwZEG1Ti7Kxw8m237",
+      "insuredValue": "11500",
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/9weuzxf7QdOYDfRw91Ysn9UMvwCL0aE1dwgXJxwNY9M"
+    }
+  ]
+}
