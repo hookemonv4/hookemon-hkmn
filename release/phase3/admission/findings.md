@@ -161,3 +161,103 @@ This is a direct, current, provider-published statement that `launchIntentHash` 
 - The owner-recorded 10-basis-point acceptance is not a claim that a hook fee, the published
   20-basis-point default, or any fee path is payable, inclusive, additive, or enforceable onchain.
 - No claim is made that USDG liquidity can be funded, approved, transferred, initialized, or minted through the current API.
+
+## LIH-01 follow-up: v4.1 CLI verified released; native-fee-kernel/funding-plan architecture conflict identified (2026-09-06, H2)
+
+Continuing LIH-01 per explicit coordinator direction that full v4.1 compatibility investigation is
+in scope. All facts below are fresh reads (`curl`, `python3`/`node` JSON parsing, `tar -tzf`/`-xzOf`
+listing — no execution of downloaded code) taken 2026-09-06, cross-checked against at least two
+independent provider sources each.
+
+### CLI release: verified, not blocked
+
+`https://programmable.market/.well-known/programmable.json` → `customLaunchApi.versions.v4` now
+reports `activationBlockers: []` (previously named `public-cli-release` among others — see the
+"Activation gate" section above). `cli.release` names GitHub release `programmable-launch-v4.1.0`
+in `programmablehq/PROGRAMMABLE`, tarball `programmable-launch-4.1.0.tgz`,
+sha256 `9d7d26a74b0b4aaa3b3d8acddc80f821cbd79511ee1ada6acc7b935aeb21cac5`. Downloaded that exact
+tarball and its published `.sha256` file directly from GitHub Releases: both the file's own hash
+and the separately-published checksum file match the discovery document's inline digest exactly
+(three independent sources agreeing). This is genuine evidence the CLI is released and installable,
+not merely a marketing claim; the `public-cli-release` blocker is stale and should be dropped from
+any future reference to it. No package was installed or executed — only listed (`tar -tzf`) and
+individual JSON/Solidity files were read (`tar -xzOf`).
+
+### Profile digests updated from 4.0.0 to 4.1.0
+
+Live `GET https://api.programmable.market/v4/chains/4663/capabilities` and the fetched
+`https://programmable.market/openapi/custom-launch-v4.1.json` (`CustomLaunchPreflightV2.properties.profile`)
+report identical, current values: `profileRevision: 2`, `profileVersion: "4.1.0"`, and four new
+`admission*Digest` consts plus a new `profileDigest`. `release/phase3/admission/provider-documents.json`
+(`capabilities.profile`, `capabilities.funding.modes`) and the regenerated
+`release/phase3/package/create-request.json`/`package-manifest.json` now carry these values.
+`capabilities.funding.modes` on the live endpoint is now `["wallet-transaction-value"]` only —
+`"none"` is no longer advertised as a supported funding mode for new launches, though it remains a
+syntactically valid schema enum value (`CustomLaunchCreateRequestV4.properties.funding.properties.mode.enum`
+still lists both). This distinction — schema-valid vs. currently-advertised-supported — is recorded
+precisely rather than collapsed into one claim.
+
+### `fundingPlan`: new required field, schema captured, template left null
+
+`CustomLaunchCreateRequestV4` in the v4.1 OpenAPI adds a required `fundingPlan` object
+(`programmable.robinhood-funding-plan.v1`, fetched from
+`https://programmable.market/schemas/custom-launch/v4.1/funding-plan.json`): `capitalSource` enum
+(`buyer-funded`/`creator-funded`/`hybrid`/`custom`), `pricingModel` enum
+(`concentrated-liquidity`/`custom-curve`/`auction`/`custom`), `nativeAllocations` (four wei-string
+fields), `maxLaunchValueWei`, `maxGasCostWei`, and `launchMode`
+(`fund-and-launch`/`build-only`). The schema's own `description` states: "Build-only permits local
+pack/preflight only; fresh create must reject before persistence or signing," and a conditional
+(`allOf`/`if`/`then`) requires `nativeAllocations.initialBuyWei` to be nonzero when
+`launchMode: "fund-and-launch"`. `scripts/programmable/lib/create-request-materializer.mjs` now
+validates this exact shape (schema version, enum membership against `provider-documents.json`,
+the nonzero-initial-buy conditional) and `provider-documents.json`'s `v4RequestContract` records
+the same enums as a new `fundingPlan` descriptor, mirroring the existing `funding`/`liquidityModel`
+pattern. The materialized Phase 3 template itself sets `fundingPlan: null` — like `nonce` or
+`sourceDescriptor`, this is a genuinely unresolved fact, not an oversight: which `launchMode`
+applies is exactly the open decision below.
+
+### Genuinely unresolved decision: native-ETH platform fee kernel vs. our USDG-quoted pool
+
+The discovery document's `platformFeePolicy` (`required: true`,
+`status: "required-exact-native-fee-kernel"`, `appliesTo: "new-robinhood-v4.1-api-custom-launches-only"`)
+is not marketing text — it is backed by a concrete reference contract shipped inside the verified
+CLI tarball itself: `package/examples/robinhood-v4-native20/project/src/robinhood-fee-v1/RobinhoodNativeFeeHookV1.sol`.
+Reading that source directly: its `_requirePool` check requires
+`Currency.unwrap(key.currency0) == address(0)` (Solidity's native-ETH sentinel) — i.e. the pool this
+reference kernel enforces **must** have native ETH as currency0. The same example's `README.md`
+states plainly: "This example builds a real ETH/token Uniswap v4 market... zero ETH supplied as
+starting liquidity... The launch wallet funds the first real ETH buy in the same atomic launch
+transaction." The mandatory `initialBuy` object in the discovery document
+(`minimumUsd: "1"`, `execution: "atomic-full-native-input-and-minimum-token-output"`,
+`assessmentBase: "gross-native-initial-buy-at-admission"`) matches this exactly.
+
+Our current, owner-accepted design is a **USDG/HKMN pool** (`packages/contracts/src/market/CanonicalMarket.sol`,
+`FeeAccounting.sol`'s 300 bps split — 10 bps Programmable, 40 bps treasury, 250 bps process — all
+USDG-denominated) with `funding.mode: "none"` and no atomic native-ETH initial buy. No currency in
+our pool is native ETH. I found no written provider statement that a non-ETH-quoted pool can satisfy
+the "exact native fee kernel" requirement via an alternative mechanism (e.g. a wrapped/bridged
+equivalent, or an `externalContracts[]`-bound adapter); the only concrete reference implementation
+shipped is ETH-quoted. I did **not** conclude the two are definitely incompatible — I could not find
+that written anywhere either — but I also did not find a supported path to reconcile them, and I am
+not inventing one.
+
+**This is the exact genuinely unresolved financial/architecture decision requiring an owner/coordinator
+call, not a scoped code fix:**
+
+1. Adopt the provider's native-ETH-quoted pool + `RobinhoodNativeFeeHookV1`-style kernel pattern for
+   a real (`fund-and-launch`) v4.1 launch — this would mean redesigning `CanonicalMarket.sol`/
+   `FeeAccounting.sol`'s USDG-denominated economics to an ETH-quoted pool, a materially different
+   contract change outside H's authority to make unilaterally (no reproduced defect, this is a new
+   design); or
+2. Confirm directly with the provider (support channel, not inferred from schema) whether a
+   USDG-quoted pool can satisfy `platformFeePolicy`/`fundingPlan` through some other accepted
+   mechanism this task did not find documented; or
+3. Use `fundingMode: "build-only"` indefinitely for local pack/preflight validation only, and
+   accept that a real (`fund-and-launch`) v4.1 Robinhood self-serve launch is not currently reachable
+   with the existing USDG-quoted architecture.
+
+No signature, hash, approval, or economic redesign was fabricated to resolve this. HKMN's existing
+300 bps USDG-denominated economics are preserved unchanged in source; only the request template's
+new required field is populated with schema-valid, zero-value, `build-only`-shaped test fixtures
+(in `scripts/tests/programmable-package.test.mjs`), never asserted as the real launch's committed
+choice.

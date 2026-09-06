@@ -163,6 +163,43 @@ test('materializes the recorded Phase 3 request envelope without fabricating unr
   );
 });
 
+test('validates the fundingPlan field added in provider profile 4.1.0', () => {
+  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const { request } = materializePhaseThreeCreateRequest({ root });
+  assert.equal(request.fundingPlan, null);
+  assert.ok(providerDocuments.v4RequestContract.required.includes('fundingPlan'));
+
+  const buildOnly = structuredClone(request);
+  buildOnly.fundingPlan = {
+    schemaVersion: 'programmable.robinhood-funding-plan.v1',
+    capitalSource: 'creator-funded',
+    pricingModel: 'concentrated-liquidity',
+    nativeAllocations: { initialLiquidityWei: '0', initialBuyWei: '0', reserveWei: '0', otherLaunchValueWei: '0' },
+    maxLaunchValueWei: '0',
+    maxGasCostWei: '0',
+    launchMode: 'build-only',
+  };
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(buildOnly, providerDocuments.v4RequestContract));
+
+  const zeroBuyFundAndLaunch = structuredClone(buildOnly);
+  zeroBuyFundAndLaunch.fundingPlan.launchMode = 'fund-and-launch';
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(zeroBuyFundAndLaunch, providerDocuments.v4RequestContract),
+    /fund-and-launch requires a nonzero initial buy at \/fundingPlan\/nativeAllocations\/initialBuyWei/,
+  );
+
+  const fundedLaunch = structuredClone(zeroBuyFundAndLaunch);
+  fundedLaunch.fundingPlan.nativeAllocations.initialBuyWei = '1000000000000000';
+  assert.doesNotThrow(() => validateRecordedV4RequestTemplate(fundedLaunch, providerDocuments.v4RequestContract));
+
+  const unknownCapitalSource = structuredClone(buildOnly);
+  unknownCapitalSource.fundingPlan.capitalSource = 'unsupported';
+  assert.throws(
+    () => validateRecordedV4RequestTemplate(unknownCapitalSource, providerDocuments.v4RequestContract),
+    /funding plan capital source is not recorded/,
+  );
+});
+
 test('records and enforces the nonce shape learned from the preflight probe', () => {
   const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
   assert.deepEqual(providerDocuments.v4RequestContract.nonce, {
