@@ -1,36 +1,29 @@
 // Maps terminal cycle facts supplied by the repository-backed operator authority onto the website's
 // public community-dashboard contract (contracts/public-community-snapshot.mjs, schemaVersion 8).
-// Lifetime aggregate amounts have no accounting-index evidence path, so they remain zero rather than
-// being reconstructed from incomplete lifecycle data. `latestCycle.roundAccounting` is read through
-// the optional composed accounting seam for one unambiguously selected repository cycle. `cards` is
-// read through the optional `recentWinners` seam — real, already-deduplicated `PublicCardEvent`s
-// (see recent-winners.mjs), the same "optional live capability the composition root wires in"
-// pattern `readAccounting` already uses.
+// Lifetime aggregate amounts have no durable accounting-index producer anywhere in this codebase, so
+// they are honestly `null` (F-sol-review correction: a required `'0'` would be indistinguishable
+// from a verified zero history) rather than being reconstructed from incomplete lifecycle data.
+// `latestCycle.roundAccounting` is read through the optional composed accounting seam for one
+// unambiguously selected repository cycle. `cards` is read through the optional `recentWinners` seam
+// — real, already-deduplicated `PublicCardEvent`s (see recent-winners.mjs), the same "optional live
+// capability the composition root wires in" pattern `readAccounting` already uses.
 import { readDashboardProfile } from '../contracts/dashboard-profile.mjs';
 import { normalizePublicCommunitySnapshot } from '../contracts/public-community-snapshot.mjs';
 
 const MAX_CARDS = 12; // must match public-community-snapshot.mjs's own MAX_CARDS.
 
-const ZERO_METRICS = Object.freeze({
+const UNKNOWN_METRICS = Object.freeze({
   latestObservedProjectPoolMicroUsdg: null,
-  totalCycleFundingMicroUsdg: '0',
-  totalCollectorSpendMicroUsdg: '0',
-  totalBuybacksReturnedMicroUsdg: '0',
-  totalBridgedBackMicroUsdg: '0',
-  totalRewardsPaidMicroUsdg: '0',
-  totalRewardsDeferredMicroUsdg: '0',
-  totalQuotedOperatingCostsMicroUsdg: '0',
-  latestRetainedReserveMicroUsdg: '0',
-  latestCycleReserveTargetMicroUsdg: '0',
+  totalCycleFundingMicroUsdg: null,
+  totalCollectorSpendMicroUsdg: null,
+  totalBuybacksReturnedMicroUsdg: null,
+  totalBridgedBackMicroUsdg: null,
+  totalRewardsPaidMicroUsdg: null,
+  totalRewardsDeferredMicroUsdg: null,
+  totalQuotedOperatingCostsMicroUsdg: null,
+  latestRetainedReserveMicroUsdg: null,
+  latestCycleReserveTargetMicroUsdg: null,
 });
-
-/** The reward-recipient-limit feature (a configurable payout batch size the legacy site exposes)
- * has no equivalent field in this integration head's operator configuration
- * (packages/runner/src/config/state-schema.mjs). This fixed value is a PLACEHOLDER_OWNER_DECISION:
- * it satisfies the contract's `recipientLimit` validator (must be 50 or a multiple of 100 in
- * [100,1000]) without asserting a real configured limit. Whichever work package wires holder-reward
- * chunking should replace this with the real configured value. */
-const PLACEHOLDER_REWARD_RECIPIENT_LIMIT = 200;
 
 const repositoryTerminalStatus = Object.freeze({
   COMPLETE: 'paid-out',
@@ -56,10 +49,11 @@ const repositoryTerminalStatus = Object.freeze({
  * @param {string} input.generatedAt - ISO timestamp.
  * @param {string|null} [input.nextCycleAt] - ISO timestamp or null (matches the cycle-status
  *   projection's own `nextCycleAt`, or null when no configuration has been written yet).
- * @param {number} [input.completedCycles] @param {number} [input.skippedCycles]
- *   @param {number} [input.openedPacks] - from the internal status projection's `totals` (paidOut
- *   count doubles as `completedCycles`; `skippedCycles`/`openedPacks` are not tracked anywhere in
- *   this integration head yet and default to 0 — honestly, not fabricated).
+ * @param {number} [input.completedCycles] - a real derived count (paidOut count from the internal
+ *   status projection's `totals`); defaults to `0`, itself a real fact ("no cycles have completed
+ *   yet"), never fabricated.
+ * @param {number|null} [input.skippedCycles] @param {number|null} [input.openedPacks] - not tracked
+ *   anywhere in this integration head; default `null` (unknown), never a fabricated `0`.
  * @param {(cycleId: string) => Promise<object>} [input.readAccounting] - entirely optional; when
  *   supplied, called once for the most recent terminal cycle (if any) and attached as
  *   `latestCycle.roundAccounting` — typically `packages/adapters/src/app/accounting-projection.mjs`'s
@@ -78,8 +72,8 @@ export async function buildPublicCommunitySnapshot({
   generatedAt,
   nextCycleAt = null,
   completedCycles = 0,
-  skippedCycles = 0,
-  openedPacks = 0,
+  skippedCycles = null,
+  openedPacks = null,
   readAccounting = null,
   heldPositions = [],
   recentWinners = [],
@@ -97,7 +91,7 @@ export async function buildPublicCommunitySnapshot({
     nextCycleAt,
     delayed: false,
     poolObservedAt: null,
-    metrics: { ...ZERO_METRICS, completedCycles, skippedCycles, openedPacks },
+    metrics: { ...UNKNOWN_METRICS, completedCycles, skippedCycles, openedPacks },
     latestCycle: latestTerminal ? await buildLatestCycle(latestTerminal, readAccounting) : null,
     cards: Array.isArray(recentWinners) ? recentWinners.slice(0, MAX_CARDS) : [],
     heldPositionCount: heldPositions.length,
@@ -130,8 +124,12 @@ async function buildLatestCycle(repositoryCycle, readAccounting) {
     reason: null,
     updatedAt: null,
     paidMicroUsdg: null,
-    payoutRecipientCount: 0,
-    rewardRecipientLimit: PLACEHOLDER_REWARD_RECIPIENT_LIMIT,
+    // The real finalized-recipient count, when accounting evidence has it (see
+    // accounting-projection.mjs's projectPayoutEvidence) — never a fabricated 0.
+    payoutRecipientCount: roundAccounting?.paidHolderRewardsRecipientCount ?? null,
+    // No real configured reward-recipient-limit source exists in this integration head — null is
+    // honest; the old always-200 placeholder was not.
+    rewardRecipientLimit: null,
     roundAccounting,
     transactions: [],
   };

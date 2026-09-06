@@ -283,8 +283,10 @@ test('a fresh cycle with no completed stages reports the honest all-null shape (
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
 
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.packSpendMicroUsdg, null, 'nothing was spent before the outbound bridge leg settles');
+  assert.equal(accounting.packSpendMicroUsdg, null);
   assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.outboundBridgeDebit, null);
+  assert.equal(accounting.inboundBridgeProceeds, null);
   assert.equal(accounting.collectorPurchaseDebit, null);
   assert.equal(accounting.collectorBuybackProceeds, null);
   assert.equal(accounting.packGainMicroUsdg, null);
@@ -296,10 +298,21 @@ test('a fresh cycle with no completed stages reports the honest all-null shape (
   assert.equal(accounting.protectedCostsMicroUsdg, null);
   assert.equal(accounting.confirmedCostsMicroUsdg, null);
   assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null);
+  assert.equal(accounting.payoutDustMicroUsdg, null);
+  assert.equal(accounting.paidHolderRewardsRecipientCount, null);
 });
 
-function relayLeg({ direction, state = 'SETTLED', sourceAmountAtomic = '0', destinationAmountAtomic = '0' }) {
-  return { direction, state, sourceAmountAtomic, destinationAmountAtomic };
+function relayLeg({
+  direction, state = 'SETTLED',
+  sourceChainId = '4663', sourceAssetId = '0xusdg', sourceDecimals = 6, sourceAmountAtomic = '0',
+  destinationChainId = '4663', destinationAssetId = '0xusdg', destinationDecimals = 6, destinationAmountAtomic = '0',
+}) {
+  return {
+    direction, state,
+    sourceChainId, sourceAssetId, sourceDecimals, sourceAmountAtomic,
+    destinationChainId, destinationAssetId, destinationDecimals, destinationAmountAtomic,
+  };
 }
 
 function relayLegRepository({ releaseAmount = '0', relayLegs = new Map(), stages = {} }) {
@@ -309,30 +322,29 @@ function relayLegRepository({ releaseAmount = '0', relayLegs = new Map(), stages
   };
 }
 
-test('packSpendMicroUsdg is the settled outbound bridge amount, never the allocated cycle budget', async () => {
+test('outboundBridgeDebit is the settled outbound bridge amount, never the allocated cycle budget; packSpendMicroUsdg has no honest USDG pack-economics producer and stays null', async () => {
   const repository = relayLegRepository({
     releaseAmount: '100', // the cycle's allocated budget
     relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })]]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.packSpendMicroUsdg, '50', 'real settled spend, not the budget of 100');
-  // No return leg is settled yet, so buyback (and anything derived from comparing it to spend) is
-  // honestly unknown, never a fabricated zero.
+  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '50' });
+  assert.equal(accounting.packSpendMicroUsdg, null, 'no honest same-asset USDG pack-economics producer exists');
   assert.equal(accounting.buybackMicroUsdg, null);
   assert.equal(accounting.packGainMicroUsdg, null);
   assert.equal(accounting.packLossMicroUsdg, null);
 });
 
-test('packSpendMicroUsdg stays null (unknown) until the outbound leg is durably settled', async () => {
+test('outboundBridgeDebit stays null (unknown) until the outbound leg is durably settled', async () => {
   const repository = relayLegRepository({
     releaseAmount: '100',
     relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', state: 'RECORDED', sourceAmountAtomic: '50' })]]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.packSpendMicroUsdg, null);
+  assert.equal(accounting.outboundBridgeDebit, null);
 });
 
-test('packSpendMicroUsdg stays null when more than one settled outbound leg exists (ambiguous, never guessed)', async () => {
+test('outboundBridgeDebit stays null when more than one settled outbound leg exists (ambiguous, never guessed)', async () => {
   const repository = relayLegRepository({
     releaseAmount: '100',
     relayLegs: new Map([
@@ -341,10 +353,10 @@ test('packSpendMicroUsdg stays null when more than one settled outbound leg exis
     ]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.packSpendMicroUsdg, null);
+  assert.equal(accounting.outboundBridgeDebit, null);
 });
 
-test('quotedCosts.outboundBridgeMicroUsdg is derived from the outbound stage evidence real quote amounts when present', async t => {
+test('quotedCosts.outboundBridgeMicroUsdg is always null: the quoted origin (USDG) and destination (Solana USDC) are different assets, never subtracted', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
   await completeStageInOrder(repository, cycleId, 'outbound', {
@@ -356,19 +368,10 @@ test('quotedCosts.outboundBridgeMicroUsdg is derived from the outbound stage evi
   });
 
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.quotedCosts.outboundBridgeMicroUsdg, '5000');
-});
-
-test('quotedCosts.outboundBridgeMicroUsdg stays null when the outbound evidence carries no real quote amounts (e.g. an injected test fake)', async t => {
-  const repository = await openRepository(t);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
-  await completeStageInOrder(repository, cycleId, 'outbound', { wouldBridgeOutbound: true, configured: true, quote: { wouldExecute: true, requestId: 'req-1' } });
-
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
   assert.equal(accounting.quotedCosts.outboundBridgeMicroUsdg, null);
 });
 
-test('holderRewardsStatus/distributionStatus advance only as return/distribution/payout durably complete', async t => {
+test('holderRewardsStatus fails closed to awaiting-verification when the payout stage is COMPLETE but carries no real finalized-payout evidence', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-accounting-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   let repository = await CycleRepository.open(directory, () => 1_000);
@@ -385,13 +388,16 @@ test('holderRewardsStatus/distributionStatus advance only as return/distribution
   assert.equal(accounting.distributionStatus, 'verified');
   assert.equal(accounting.holderRewardsStatus, 'distribution-verified');
 
+  // The payout stage completes with test-seed evidence ({ seeded: true }), not a real
+  // hookemon.direct-payout-result.v1 bundle — COMPLETE alone must never be read as "paid".
   await completeStageInOrder(repository, cycleId, 'payout', { seeded: true });
   accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
   assert.equal(accounting.distributionStatus, 'settled');
-  assert.equal(accounting.holderRewardsStatus, 'paid');
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
 });
 
-test('buybackMicroUsdg is the settled return bridge amount, never the Solana proceeds at an assumed USDG parity', async () => {
+test('inboundBridgeProceeds is the settled return bridge amount, never the Solana proceeds at an assumed USDG parity; buybackMicroUsdg stays null', async () => {
   const repository = relayLegRepository({
     releaseAmount: '5000000',
     relayLegs: new Map([
@@ -400,12 +406,13 @@ test('buybackMicroUsdg is the settled return bridge amount, never the Solana pro
     ]),
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.buybackMicroUsdg, '4995000');
-  assert.equal(accounting.packGainMicroUsdg, '0');
-  assert.equal(accounting.packLossMicroUsdg, '5000');
+  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '4995000' });
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.packGainMicroUsdg, null);
+  assert.equal(accounting.packLossMicroUsdg, null);
 });
 
-test('a completed production payout stage carrying only rehearsal Solana proceeds does not populate buybackMicroUsdg', async t => {
+test('a completed production payout stage carrying only rehearsal Solana proceeds does not populate inboundBridgeProceeds or buybackMicroUsdg', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
   await completeStageInOrder(repository, cycleId, 'purchase', { signature: 'purchase-1' });
@@ -415,6 +422,7 @@ test('a completed production payout stage carrying only rehearsal Solana proceed
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
   assert.equal(accounting.buybackMicroUsdg, null, 'no settled return bridge leg exists, so this is honestly unknown, not a rehearsal-derived figure');
+  assert.equal(accounting.inboundBridgeProceeds, null);
 });
 
 test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-Crypt-side (Solana) typed amounts, distinct from the EVM bridge amounts', async () => {
@@ -439,16 +447,107 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
     },
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
-  assert.equal(accounting.packSpendMicroUsdg, '50');
+  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '50' });
   assert.deepEqual(accounting.collectorPurchaseDebit, {
     chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '49',
   });
-  assert.equal(accounting.buybackMicroUsdg, '48');
+  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: '0xusdg', decimals: 6, units: '48' });
   assert.deepEqual(accounting.collectorBuybackProceeds, {
     chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6, units: '47',
   });
-  // The two are genuinely different real amounts (bridge fees/slippage) - never equated.
-  assert.notEqual(accounting.packSpendMicroUsdg, accounting.collectorPurchaseDebit.units);
+  // The bridge amount and the Collector amount are genuinely different real numbers (bridge
+  // fees/slippage) - never equated, and packSpendMicroUsdg never reports either as pack economics.
+  assert.notEqual(accounting.outboundBridgeDebit.units, accounting.collectorPurchaseDebit.units);
+  assert.equal(accounting.packSpendMicroUsdg, null);
+});
+
+test('projectPayoutEvidence: a real finalized payout with a quarantined recipient reports paid-with-liabilities, not paid', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
+          recipients: [
+            { recipient: '0xaaa', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '70' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+            { recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, state: 'REFUSED', nonce: 2, transactionHash: null, finalizedTransfer: null, refusalEvidence: { reason: 'REFUSED' } },
+          ],
+          quarantine: [
+            { recipient: '0xbbb', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' },
+          ],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, '100');
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, '70');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, '30');
+  assert.equal(accounting.payoutDustMicroUsdg, '0');
+  assert.equal(accounting.paidHolderRewardsRecipientCount, 1);
+  assert.equal(accounting.holderRewardsStatus, 'paid-with-liabilities');
+});
+
+test('projectPayoutEvidence: every recipient finalized with zero liability reports paid', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
+          recipients: [
+            { recipient: '0xaaa', amount: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+          ],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, '100');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, '0');
+  assert.equal(accounting.paidHolderRewardsRecipientCount, 1);
+  assert.equal(accounting.holderRewardsStatus, 'paid');
+});
+
+test('projectPayoutEvidence fails closed to all-null when the payout evidence has an asset-inconsistent amount', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: '0xusdg', decimals: 6, amountAtomic: '0' },
+          recipients: [
+            // Wrong asset for this recipient's amount - must fail closed, never silently sum it in.
+            { recipient: '0xaaa', amount: { chainId: 1, assetId: '0xother', decimals: 18, amountAtomic: '100' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+          ],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
 });
 
 test('collectorPurchaseDebit stays null while the purchase stage has not durably completed', async () => {

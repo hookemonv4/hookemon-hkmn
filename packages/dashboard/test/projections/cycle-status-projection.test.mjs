@@ -65,14 +65,16 @@ test('an active operator with an in-flight cycle reports a conservative cycle (n
 });
 
 const FIXTURE_ACCOUNTING = Object.freeze({
-  packSpendMicroUsdg: '5000000',
+  packSpendMicroUsdg: null,
   buybackMicroUsdg: null,
+  outboundBridgeDebit: Object.freeze({ chainId: '4663', assetId: '0xusdg', units: '5000000', decimals: 6 }),
+  inboundBridgeProceeds: null,
   collectorPurchaseDebit: Object.freeze({ chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 }),
   collectorBuybackProceeds: null,
   packGainMicroUsdg: null,
   packLossMicroUsdg: null,
   quotedCosts: Object.freeze({
-    outboundBridgeMicroUsdg: '5000',
+    outboundBridgeMicroUsdg: null,
     inboundBridgeMicroUsdg: null,
     collectorApiMicroUsdg: null,
     evmNetworkMicroUsdg: null,
@@ -90,6 +92,9 @@ const FIXTURE_ACCOUNTING = Object.freeze({
   feeReserveTargetMicroUsdg: null,
   feeReserveTopUpMicroUsdg: null,
   feeReserveAfterMicroUsdg: null,
+  payoutLiabilityMicroUsdg: null,
+  payoutDustMicroUsdg: null,
+  paidHolderRewardsRecipientCount: null,
   plannedHolderRewardsMicroUsdg: null,
   paidHolderRewardsMicroUsdg: null,
   holderRewardsStatus: 'not-started',

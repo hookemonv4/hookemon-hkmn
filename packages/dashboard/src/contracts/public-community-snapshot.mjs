@@ -22,6 +22,7 @@ import {
   money,
   nonNegativeInteger,
   nullableAmount,
+  nullableCount,
   nullableMoney,
   nullableSignedMoney,
   nullableText,
@@ -65,7 +66,11 @@ const ROUND_ACCOUNTING_KEYS = new Set([
 ]);
 // schemaVersion 8: same nullable/typed evolution as packages/dashboard/src/contracts/
 // public-cycle-status.mjs's schemaVersion 6 — see that file's header for the rationale.
-const ROUND_ACCOUNTING_V8_KEYS = new Set([...ROUND_ACCOUNTING_KEYS, 'collectorPurchaseDebit', 'collectorBuybackProceeds']);
+const ROUND_ACCOUNTING_V8_KEYS = new Set([
+  ...ROUND_ACCOUNTING_KEYS,
+  'outboundBridgeDebit', 'inboundBridgeProceeds', 'collectorPurchaseDebit', 'collectorBuybackProceeds',
+  'payoutLiabilityMicroUsdg', 'payoutDustMicroUsdg', 'paidHolderRewardsRecipientCount',
+]);
 const LEGACY_ROUND_ACCOUNTING_KEYS = new Set([
   'packSpendMicroUsdg', 'buybackMicroUsdg', 'protectedCostsMicroUsdg', 'confirmedCostsMicroUsdg',
   'feeReserveBeforeMicroUsdg', 'feeReserveTargetMicroUsdg', 'feeReserveTopUpMicroUsdg', 'feeReserveAfterMicroUsdg',
@@ -130,8 +135,21 @@ export function normalizePublicCommunitySnapshot(value, expectedProfile) {
     metrics.latestObservedProjectPoolMicroUsdg = metricsSource.latestObservedProjectPoolMicroUsdg === null
       ? null
       : money(metricsSource.latestObservedProjectPoolMicroUsdg, invalid);
-    for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key], invalid);
-    for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key], invalid);
+    // schemaVersion 8 (F-sol-review correction): no durable lifetime-aggregate producer exists, so
+    // these totals are honestly null until one does — a required '0' would be indistinguishable
+    // from a verified zero history. schemaVersion <8 keeps its original required-money shape for any
+    // still-current caller. Likewise skippedCycles/openedPacks (untracked anywhere) become nullable;
+    // completedCycles stays a required real count (derived from actual terminal cycles, never
+    // fabricated — a real zero when none have completed is not the same defect).
+    if (sourceSchemaVersion === 8) {
+      for (const key of MONEY_KEYS.slice(1)) metrics[key] = nullableMoney(metricsSource[key], invalid);
+      metrics.completedCycles = count(metricsSource.completedCycles, invalid);
+      metrics.skippedCycles = nullableCount(metricsSource.skippedCycles, invalid);
+      metrics.openedPacks = nullableCount(metricsSource.openedPacks, invalid);
+    } else {
+      for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key], invalid);
+      for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key], invalid);
+    }
 
     const result = {
       schemaVersion: sourceSchemaVersion === 8 ? 8 : (sourceSchemaVersion === 7 ? 7 : (sourceSchemaVersion === 6 ? 6 : (sourceSchemaVersion === 5 ? 5 : 4))),
@@ -219,11 +237,19 @@ function readLatestCycle(value, schemaVersion) {
     reason: source.reason === null ? null : boundedText(source.reason, invalid),
     updatedAt: optionalTimestamp(source.updatedAt, invalid),
     paidMicroUsdg: source.paidMicroUsdg === null ? null : money(source.paidMicroUsdg, invalid),
-    payoutRecipientCount: count(source.payoutRecipientCount, invalid),
+    // schemaVersion 8: no durable recipient-count producer exists yet (see
+    // community-snapshot-projection.mjs), so an unknown count is null, never a fabricated 0.
+    payoutRecipientCount: schemaVersion === 8
+      ? nullableCount(source.payoutRecipientCount, invalid)
+      : count(source.payoutRecipientCount, invalid),
     roundAccounting: readRoundAccounting(source.roundAccounting, schemaVersion, source.paidMicroUsdg),
     transactions,
   };
-  if (currentSchema) result.rewardRecipientLimit = recipientLimit(source.rewardRecipientLimit);
+  if (currentSchema) {
+    result.rewardRecipientLimit = schemaVersion === 8
+      ? nullableRecipientLimit(source.rewardRecipientLimit)
+      : recipientLimit(source.rewardRecipientLimit);
+  }
   return result;
 }
 
@@ -267,6 +293,8 @@ function readRoundAccountingV8(source) {
   const result = {
     packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg, invalid),
     buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg, invalid),
+    outboundBridgeDebit: nullableAmount(source.outboundBridgeDebit, invalid),
+    inboundBridgeProceeds: nullableAmount(source.inboundBridgeProceeds, invalid),
     collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit, invalid),
     collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds, invalid),
     packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg, invalid),
@@ -285,6 +313,11 @@ function readRoundAccountingV8(source) {
     feeReserveAfterMicroUsdg: nullableMoney(source.feeReserveAfterMicroUsdg, invalid),
     plannedHolderRewardsMicroUsdg: nullableMoney(source.plannedHolderRewardsMicroUsdg, invalid),
     paidHolderRewardsMicroUsdg: nullableMoney(source.paidHolderRewardsMicroUsdg, invalid),
+    payoutLiabilityMicroUsdg: nullableMoney(source.payoutLiabilityMicroUsdg, invalid),
+    payoutDustMicroUsdg: nullableMoney(source.payoutDustMicroUsdg, invalid),
+    paidHolderRewardsRecipientCount: source.paidHolderRewardsRecipientCount === null
+      ? null
+      : count(source.paidHolderRewardsRecipientCount, invalid),
     holderRewardsStatus: boundedText(source.holderRewardsStatus, invalid),
     distributionStatus: boundedText(source.distributionStatus, invalid),
   };
@@ -464,4 +497,11 @@ function recipientLimit(value) {
     || (value !== 50 && (value < 100 || value > 1000 || value % 100 !== 0))
   ) invalid();
   return value;
+}
+
+// schemaVersion 8 (F-sol-review correction): no real configured reward-recipient-limit source
+// exists in this integration head (see community-snapshot-projection.mjs's own header) — null is
+// honest; a fabricated placeholder (e.g. the old always-200 default) is not.
+function nullableRecipientLimit(value) {
+  return value === null ? null : recipientLimit(value);
 }

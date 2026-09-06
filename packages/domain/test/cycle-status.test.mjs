@@ -33,7 +33,7 @@ test("normalizePublicCycleStatus rejects a status still using the legacy ethereu
   assert.throws(() => normalizePublicCycleStatus(legacyShaped), /PUBLIC_CYCLE_STATUS_INVALID/);
 });
 
-test("projectPublicCycle carries a completed cycle's round accounting with MicroUsdg fields", () => {
+test("projectPublicCycle carries a completed cycle's round accounting with MicroUsdg fields; pack economics stay null (no honest same-asset USDG producer)", () => {
   const record = {
     cycleId: "cycle-1",
     status: "complete",
@@ -45,8 +45,6 @@ test("projectPublicCycle carries a completed cycle's round accounting with Micro
     inbound: { amountReceived: 100_000n },
     settlement: { status: "paid", paidThisCycleMicroUsdg: "40000" },
     roundAccounting: {
-      grossPackDebitMicroUsdg: 10_000n,
-      confirmedBuybackMicroUsdg: 15_000n,
       confirmedCostMicroUsdg: "-500",
       holderRewardsMicroUsdg: 40_000n,
     },
@@ -65,10 +63,14 @@ test("projectPublicCycle carries a completed cycle's round accounting with Micro
   });
 
   const accounting = status.cycle.roundAccounting;
-  assert.equal(accounting.packSpendMicroUsdg, "10000");
-  assert.equal(accounting.buybackMicroUsdg, "15000");
+  assert.equal(accounting.packSpendMicroUsdg, null);
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.outboundBridgeDebit, null);
+  assert.equal(accounting.collectorPurchaseDebit, null);
   assert.equal(accounting.confirmedCostsMicroUsdg, "-500");
   assert.equal(accounting.paidHolderRewardsMicroUsdg, "40000");
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null);
+  assert.equal(accounting.paidHolderRewardsRecipientCount, null);
   assert.equal(status.cycle.paidMicroUsdg, "40000");
 
   // Round-trips through the public validator, proving the emitted shape matches the contract.
@@ -76,17 +78,16 @@ test("projectPublicCycle carries a completed cycle's round accounting with Micro
   assert.equal(normalized.cycle.roundAccounting.confirmedCostsMicroUsdg, "-500");
 });
 
-test("a legacy record shaped in the old chain1 USDC fields is never silently relabeled as USDG", () => {
-  // grossPackDebitMicroUsdg/confirmedBuybackMicroUsdg are absent -> real amounts are unknown, not
-  // silently taken from the legacy *MicroUsdc fields and not invented as zero.
-  assert.throws(() => projectPublicCycle({
+test("a legacy record shaped in the old chain1 USDC fields never has those fields silently relabeled as USDG pack economics", () => {
+  const status = projectPublicCycle({
     nowMs: NOW,
     nextCycleAtMs: NEXT_CYCLE,
     record: {
       cycleId: "cycle-legacy",
       status: "complete",
       packs: [],
-      // Old, pre-EVM/USDG schema: legacy record field names, no chain/asset identity to verify.
+      // Old, pre-EVM/USDG schema: legacy record field names, no chain/asset identity to verify —
+      // and no longer read for pack economics at all (see projectRoundAccounting's own comment).
       roundAccounting: {
         grossPackDebitMicroUsdc: 10_000n,
         confirmedBuybackMicroUsdc: 15_000n,
@@ -95,7 +96,10 @@ test("a legacy record shaped in the old chain1 USDC fields is never silently rel
     },
     profile: "testnet",
     executionState: "active",
-  }), /PUBLIC_CYCLE_MONEY_INVALID/);
+  });
+  assert.equal(status.cycle.roundAccounting.packSpendMicroUsdg, null);
+  assert.equal(status.cycle.roundAccounting.buybackMicroUsdg, null);
+  assert.equal(status.cycle.roundAccounting.quotedCosts.evmNetworkMicroUsdg, null);
 });
 
 test("a negative confirmedCostsMicroUsdg from durable evidence is accepted as signed money", () => {

@@ -22,6 +22,17 @@
 // exactly the same unit `environment.mjs`'s `budget.*Usdg` fields and `cycleRepository`'s own
 // `releaseAmount` already use) — i.e. `cycleRepository`'s decimal-string amounts need no unit
 // conversion to become a `*MicroUsdg` field; see docs/modules/composition-root.md for the citation.
+//
+// Asset identity discipline: a `*MicroUsdg` field is only ever populated from evidence already
+// proven to be USDG on chain 4663 (payout evidence's own `assertUsdAmount`, or a relay leg's own
+// `sourceChainId`/`destinationChainId` fields for the EVM side of a bridge leg). `packSpendMicroUsdg`/
+// `buybackMicroUsdg`/`packGainMicroUsdg`/`packLossMicroUsdg` describe pack economics and have no
+// same-asset USDG producer today — the only settled USDG amounts available are bridge *movements*
+// (`outboundBridgeDebit`/`inboundBridgeProceeds`, kept as separately named typed fields), and the
+// actual Collector Crypt purchase/buyback debit is a different asset (Solana USDC,
+// `collectorPurchaseDebit`/`collectorBuybackProceeds`). Neither may be relabeled as the other's
+// asset or subtracted against it — see `outboundBridgeFee`'s and `projectCycleAccounting`'s own
+// comments for the two concrete anti-patterns this module previously had and no longer has.
 const ACCOUNTING_STAGES = Object.freeze(['funding', 'outbound', 'purchase', 'buyback', 'return', 'distribution', 'payout']);
 
 function isCompleteStage(stageRecord) {
@@ -31,26 +42,22 @@ function isCompleteStage(stageRecord) {
 /** `max(a - b, 0)` over two canonical unsigned-decimal strings, as a canonical unsigned-decimal
  * string — the same "gain/loss are the positive and negative half of one difference, one of the two
  * is always exactly '0'" shape `readLegacyRoundAccounting` in the website's own validator already
- * documents. */
+ * documents. Callers must have already verified both operands are the same asset — this function
+ * has no asset identity to check. */
 function subtractAtZero(a, b) {
   const result = BigInt(a) - BigInt(b);
   return result > 0n ? result.toString() : '0';
 }
 
-/** The real, already-fetched outbound bridge quote's origin/destination amounts (see
- * stage-driver.mjs's `probeOutbound`, which now records `quotedOriginAmount`/
- * `quotedDestinationAmount` on the outbound stage's evidence whenever the injected relay adapter's
- * `QuoteResult` actually carries them — real relay-client.mjs always does; an injected test fake may
- * not, in which case this honestly reports `null` rather than guessing a fee). Origin (USDG on
- * Robinhood Chain) and destination (Circle USD on Solana) are both six-decimal, ~1:1-pegged stables,
- * so "amount in minus amount out" is a reasonable, clearly-derived bridge-fee estimate — never a
- * fabricated number. */
-function outboundBridgeFee(outboundStage) {
-  const evidence = outboundStage?.evidence;
-  const origin = evidence?.quotedOriginAmount;
-  const destination = evidence?.quotedDestinationAmount;
-  if (typeof origin !== 'string' || typeof destination !== 'string') return null;
-  return subtractAtZero(origin, destination);
+/** The outbound bridge's quoted origin (USDG) and destination (Solana USDC) amounts are two
+ * different assets on two different chains. Equal decimals and an approximate peg are not a
+ * same-asset fee: `origin - destination` would silently mix a USDG figure with a USDC figure and
+ * report the difference as if it were a USDG cost. No same-asset bridge-fee evidence exists
+ * anywhere in the current stage evidence, so this honestly stays `null` rather than fabricate a
+ * cross-asset subtraction. A later work package may replace this once the relay adapter reports an
+ * actual same-asset protocol fee or a trusted conversion rate. */
+function outboundBridgeFee() {
+  return null;
 }
 
 /** The single relay leg of the given direction that is durably `SETTLED`, i.e. actually confirmed
@@ -67,28 +74,95 @@ function settledRelayLeg(relayLegs, direction) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-/** Projects a `money-schemas.mjs` `TypedAmount` (`{chainId, assetId, decimals, amountAtomic}`) into
- * the frozen public `Amount` shape (`{chainId, assetId, decimals, units}`) — a field rename at the
- * public boundary only, never a value conversion. Returns `null` for anything not shaped like a
- * typed amount, so a missing/malformed evidence field degrades to "unknown," never a fabricated
- * zero. */
+/** Projects a typed amount (`{chainId, assetId, decimals, amountAtomic}` — `chainId` may be a
+ * number, as `payout-plan.mjs`'s `createUsdgPayoutAmount`/`money-schemas.mjs`'s `assertTypedAmount`
+ * both produce, depending on the producer) into the frozen public `Amount` shape (`{chainId,
+ * assetId, decimals, units}`, `chainId` always a string) — a field rename/stringify at the public
+ * boundary only, never a value conversion. Returns `null` for anything not shaped like a typed
+ * amount, so a missing/malformed evidence field degrades to "unknown," never a fabricated zero. */
 function publicAmount(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const { chainId, assetId, decimals, amountAtomic } = value;
-  if (typeof chainId !== 'string' || chainId.length === 0) return null;
+  if ((typeof chainId !== 'string' || chainId.length === 0) && !Number.isInteger(chainId)) return null;
   if (typeof assetId !== 'string' || assetId.length === 0) return null;
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) return null;
   if (typeof amountAtomic !== 'string' || !/^(0|[1-9][0-9]*)$/.test(amountAtomic)) return null;
-  return Object.freeze({ chainId, assetId, decimals, units: amountAtomic });
+  return Object.freeze({ chainId: String(chainId), assetId, decimals, units: amountAtomic });
 }
 
-/** Workflow-state labels derived directly from which stages are durably COMPLETE — never a
- * fabricated dollar figure, just an honest description of where the cycle's holder-reward path
- * actually is. Distribution/payout never durably complete today (both still refuse under
- * liveMode:true — see stage-driver.mjs), so every real cycle reports 'not-started' until a later
- * work package lands their production mutation. */
-function rewardStatus(distributionStage, payoutStage) {
-  if (isCompleteStage(payoutStage)) return 'paid';
+/** Two typed amounts identify the exact same asset on the exact same chain (never merely "same
+ * decimals" — that was the cross-asset bug this projection previously had). Used to verify a
+ * payout evidence bundle is internally consistent before trusting any arithmetic across its parts. */
+function sameAsset(left, right) {
+  return left !== null && right !== null
+    && left.chainId === right.chainId && left.assetId === right.assetId && left.decimals === right.decimals;
+}
+
+const PAYOUT_EVIDENCE_SCHEMA = 'hookemon.direct-payout-result.v1';
+
+/**
+ * Projects the payout stage's own finalized-transfer evidence (see `stages/payout.mjs`'s
+ * `payoutTerminalEvidence` — durable `distributablePool`/`totalAllocated`/`dust`, each recipient's
+ * final `state`/`amount`, and `quarantine` liabilities) into real paid/planned/liability/dust
+ * amounts and a recipient count. The payout stage reaching `COMPLETE` only proves recipient
+ * conservation was reached, not that every recipient was actually paid — some may be `REFUSED` or
+ * `NONCE_INTERFERENCE` (durably recorded as `quarantine` liabilities instead of a transfer). Every
+ * amount here is real USDG on chain 4663, verified against the evidence's own asset identity before
+ * being labeled `*MicroUsdg`; a malformed or asset-inconsistent bundle fails closed to all `null`
+ * rather than infer anything from the stage's `COMPLETE` label alone. */
+function projectPayoutEvidence(payoutStage) {
+  const allNull = Object.freeze({
+    plannedHolderRewardsMicroUsdg: null,
+    paidHolderRewardsMicroUsdg: null,
+    payoutLiabilityMicroUsdg: null,
+    payoutDustMicroUsdg: null,
+    paidHolderRewardsRecipientCount: null,
+    holderRewardsPaidOut: false,
+  });
+  if (!isCompleteStage(payoutStage)) return allNull;
+  const evidence = payoutStage.evidence;
+  if (!evidence || evidence.schema !== PAYOUT_EVIDENCE_SCHEMA || !Array.isArray(evidence.recipients) || !Array.isArray(evidence.quarantine)) {
+    return allNull;
+  }
+  const totalAllocated = publicAmount(evidence.totalAllocated);
+  const dust = publicAmount(evidence.dust);
+  if (totalAllocated === null || dust === null || !sameAsset(totalAllocated, dust)) return allNull;
+
+  let paidAtomic = 0n;
+  for (const recipient of evidence.recipients) {
+    if (recipient?.state !== 'FINALIZED') continue;
+    const amount = publicAmount(recipient.amount);
+    if (amount === null || !sameAsset(amount, totalAllocated)) return allNull;
+    paidAtomic += BigInt(amount.units);
+  }
+  const recipientCount = evidence.recipients.filter(recipient => recipient?.state === 'FINALIZED').length;
+
+  let liabilityAtomic = 0n;
+  for (const liability of evidence.quarantine) {
+    const amount = publicAmount(liability?.amount);
+    if (amount === null || !sameAsset(amount, totalAllocated)) return allNull;
+    liabilityAtomic += BigInt(amount.units);
+  }
+
+  return Object.freeze({
+    plannedHolderRewardsMicroUsdg: totalAllocated.units,
+    paidHolderRewardsMicroUsdg: paidAtomic.toString(),
+    payoutLiabilityMicroUsdg: liabilityAtomic.toString(),
+    payoutDustMicroUsdg: dust.units,
+    paidHolderRewardsRecipientCount: recipientCount,
+    holderRewardsPaidOut: liabilityAtomic === 0n && paidAtomic === BigInt(totalAllocated.units),
+  });
+}
+
+/** Workflow-state label derived from real evidence, never from the payout stage's `COMPLETE` status
+ * alone — `COMPLETE` only proves recipient conservation was reached, which can include quarantined
+ * (`REFUSED`/`NONCE_INTERFERENCE`) recipients that were never actually paid. `payoutEvidence` is
+ * `projectPayoutEvidence`'s own output. */
+function rewardStatus(distributionStage, payoutStage, payoutEvidence) {
+  if (isCompleteStage(payoutStage)) {
+    if (payoutEvidence.paidHolderRewardsMicroUsdg === null) return 'awaiting-verification';
+    return payoutEvidence.holderRewardsPaidOut ? 'paid' : 'paid-with-liabilities';
+  }
   if (isCompleteStage(distributionStage)) return 'distribution-verified';
   return 'not-started';
 }
@@ -106,12 +180,14 @@ function distributionStatus(returnStage, distributionStage, payoutStage) {
  *   `describeCycle`); see cycle-repository.mjs.
  * @param {string} input.cycleId
  * @returns {Promise<object>} the exact schemaVersion-6 `RoundAccounting` shape
- *   `packages/dashboard/src/contracts/public-cycle-status.mjs`'s `readRoundAccounting` requires:
- *   `packSpendMicroUsdg`/`buybackMicroUsdg`/`packGainMicroUsdg`/`packLossMicroUsdg` are now
- *   nullable (an unknown amount is `null`, never an invented `'0'`), and two typed, independently
- *   nullable `Amount` fields (`collectorPurchaseDebit`, `collectorBuybackProceeds`) carry the real
- *   Collector-Crypt-side (Solana) debit/proceeds — a different chain and asset than the EVM USDG
- *   bridge amounts, and never assumed to equal them at any parity.
+ *   `packages/dashboard/src/contracts/public-cycle-status.mjs`'s `readRoundAccounting` requires.
+ *   `packSpendMicroUsdg`/`buybackMicroUsdg`/`packGainMicroUsdg`/`packLossMicroUsdg` describe pack
+ *   economics in USDG and have no honest producer today: the only settled USDG-denominated amounts
+ *   available are bridge movements (`outboundBridgeDebit`/`inboundBridgeProceeds`, typed and kept
+ *   separately), not the actual Collector Crypt purchase/buyback debit (which is denominated in
+ *   Solana USDC — `collectorPurchaseDebit`/`collectorBuybackProceeds`). Reporting a bridge amount or
+ *   a cross-asset figure under a `MicroUsdg`-labeled pack-economics field would misrepresent it, so
+ *   these four stay `null` until a same-asset USDG pack-economics producer exists.
  */
 export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   if (!cycleRepository || typeof cycleRepository.readStage !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
@@ -125,52 +201,49 @@ export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   ]);
   const [funding, outbound, purchase, buyback, returnStage, distribution, payout] = stages;
   void funding; // read for symmetry/future use; funding carries no accounting amount today.
+  void outbound; // no same-asset bridge-fee evidence exists yet — see outboundBridgeFee's own header.
 
-  // The cycle's allocated release amount (`description.releaseAmount`) is a budget, not a spend —
-  // reporting it here would equate "authorized to spend up to" with "actually spent." The real
-  // *bridge* spend is the amount of USDG that durably left operator custody on the Robinhood Chain
-  // to fund this cycle's purchase: the settled outbound bridge leg's own source amount. This is
-  // genuinely unknown (not zero) until that leg settles.
+  // Real, settled EVM-side bridge movements — how much USDG left/returned to operator custody.
+  // Explicitly named as bridge amounts, never folded into a pack-economics field: bridging
+  // fees/slippage/unspent balance mean this is not the same number as the actual Collector Crypt
+  // purchase/buyback debit (see collectorPurchaseDebit/collectorBuybackProceeds below).
   const outboundLeg = settledRelayLeg(description.relayLegs, 'outbound');
-  const packSpendMicroUsdg = outboundLeg !== null ? outboundLeg.sourceAmountAtomic : null;
-
-  // The real USDG the operator's treasury actually received back is the settled return bridge
-  // leg's own destination amount — never the Solana-side Collector Crypt proceeds taken at an
-  // assumed 1:1 parity with USDG (a different asset on a different chain). Genuinely unknown until
-  // that leg settles.
+  const outboundBridgeDebit = outboundLeg !== null
+    ? publicAmount({ chainId: outboundLeg.sourceChainId, assetId: outboundLeg.sourceAssetId, decimals: outboundLeg.sourceDecimals, amountAtomic: outboundLeg.sourceAmountAtomic })
+    : null;
   const returnLeg = settledRelayLeg(description.relayLegs, 'return');
-  const buybackMicroUsdg = returnLeg !== null ? returnLeg.destinationAmountAtomic : null;
+  const inboundBridgeProceeds = returnLeg !== null
+    ? publicAmount({ chainId: returnLeg.destinationChainId, assetId: returnLeg.destinationAssetId, decimals: returnLeg.destinationDecimals, amountAtomic: returnLeg.destinationAmountAtomic })
+    : null;
 
-  // The bridge amounts above answer "how much USDG moved"; they do not answer "how much did the
-  // pack actually cost on Collector Crypt" (bridging fees/slippage/unspent USDC can make the two
-  // differ) — that real, chain/asset-tagged fact is the purchase stage's own finalized settlement
-  // debit (see stages/purchase.mjs's reconcileLivePurchase `packCost`), kept as a distinct typed
-  // Amount rather than folded into packSpendMicroUsdg at an assumed parity.
+  // The real, chain/asset-tagged Collector Crypt purchase debit / buyback proceeds (Solana), from
+  // the purchase/buyback stages' own finalized settlement evidence — never assumed equal to the
+  // EVM bridge amounts above at any parity.
   const collectorPurchaseDebit = isCompleteStage(purchase) ? publicAmount(purchase?.evidence?.packCost) : null;
-
-  // Symmetrically, the buyback stage's own finalized settlement credit (see stages/buyback.mjs's
-  // `proceeds`) is the real Collector-Crypt-side (Solana) sale proceeds, before any bridge-back —
-  // kept distinct from buybackMicroUsdg (the EVM-side return amount) for the same reason.
   const collectorBuybackProceeds = isCompleteStage(buyback) ? publicAmount(buyback?.evidence?.proceeds) : null;
 
-  // Gain/loss are a comparison between two amounts; if either side is unknown the comparison itself
-  // is unknown, never derived from a fabricated stand-in.
-  const packGainMicroUsdg = packSpendMicroUsdg === null || buybackMicroUsdg === null
-    ? null
-    : subtractAtZero(buybackMicroUsdg, packSpendMicroUsdg);
-  const packLossMicroUsdg = packSpendMicroUsdg === null || buybackMicroUsdg === null
-    ? null
-    : subtractAtZero(packSpendMicroUsdg, buybackMicroUsdg);
+  // No honest USDG-denominated pack-spend/buyback/gain/loss producer exists: the bridge amounts are
+  // a different fact (custody movement) and the Collector amounts are a different asset (Solana
+  // USDC). Computing a "gain/loss" from either would either mix assets or silently relabel a bridge
+  // movement as pack economics — both are exactly the anti-patterns this projection must avoid.
+  const packSpendMicroUsdg = null;
+  const buybackMicroUsdg = null;
+  const packGainMicroUsdg = null;
+  const packLossMicroUsdg = null;
+
+  const payoutEvidence = projectPayoutEvidence(payout);
 
   return Object.freeze({
     packSpendMicroUsdg,
     buybackMicroUsdg,
+    outboundBridgeDebit,
+    inboundBridgeProceeds,
     collectorPurchaseDebit,
     collectorBuybackProceeds,
     packGainMicroUsdg,
     packLossMicroUsdg,
     quotedCosts: Object.freeze({
-      outboundBridgeMicroUsdg: outboundBridgeFee(outbound),
+      outboundBridgeMicroUsdg: outboundBridgeFee(),
       inboundBridgeMicroUsdg: null, // return never quotes today — see stage-driver.mjs's probeReturn.
       collectorApiMicroUsdg: null,
       evmNetworkMicroUsdg: null,
@@ -188,9 +261,12 @@ export async function projectCycleAccounting({ cycleRepository, cycleId }) {
     feeReserveTargetMicroUsdg: null,
     feeReserveTopUpMicroUsdg: null,
     feeReserveAfterMicroUsdg: null,
-    plannedHolderRewardsMicroUsdg: null,
-    paidHolderRewardsMicroUsdg: null,
-    holderRewardsStatus: rewardStatus(distribution, payout),
+    plannedHolderRewardsMicroUsdg: payoutEvidence.plannedHolderRewardsMicroUsdg,
+    paidHolderRewardsMicroUsdg: payoutEvidence.paidHolderRewardsMicroUsdg,
+    payoutLiabilityMicroUsdg: payoutEvidence.payoutLiabilityMicroUsdg,
+    payoutDustMicroUsdg: payoutEvidence.payoutDustMicroUsdg,
+    paidHolderRewardsRecipientCount: payoutEvidence.paidHolderRewardsRecipientCount,
+    holderRewardsStatus: rewardStatus(distribution, payout, payoutEvidence),
     distributionStatus: distributionStatus(returnStage, distribution, payout),
   });
 }

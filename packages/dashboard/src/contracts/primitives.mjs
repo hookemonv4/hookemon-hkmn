@@ -132,6 +132,10 @@ export function count(value, invalid) {
   return nonNegativeInteger(value, invalid);
 }
 
+export function nullableCount(value, invalid) {
+  return value === null ? null : count(value, invalid);
+}
+
 export function httpsUrl(value, invalid) {
   let url;
   try {

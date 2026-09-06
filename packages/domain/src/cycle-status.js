@@ -57,9 +57,20 @@ const PUBLIC_CARD_KEYS = new Set([
   "buybackMicroUsdg",
 ]);
 const LEGACY_PUBLIC_CARD_KEYS = new Set([...CARD_TEXT_FIELDS, "imageUrl"]);
+// Aligned with packages/dashboard/src/contracts/public-cycle-status.mjs's schemaVersion 6 (see that
+// file for the rationale): packSpendMicroUsdg/buybackMicroUsdg/packGainMicroUsdg/packLossMicroUsdg
+// have no honest same-asset USDG pack-economics producer and are nullable (this legacy record
+// format's own rehearsal fields never populate them). outboundBridgeDebit/inboundBridgeProceeds and
+// collectorPurchaseDebit/collectorBuybackProceeds are typed Amount|null fields kept distinct from
+// each other and never subtracted or relabeled. payoutLiabilityMicroUsdg/payoutDustMicroUsdg/
+// paidHolderRewardsRecipientCount are real payout-evidence facts, not inferred from a stage label.
 const ROUND_ACCOUNTING_KEYS = new Set([
   "packSpendMicroUsdg",
   "buybackMicroUsdg",
+  "outboundBridgeDebit",
+  "inboundBridgeProceeds",
+  "collectorPurchaseDebit",
+  "collectorBuybackProceeds",
   "packGainMicroUsdg",
   "packLossMicroUsdg",
   "quotedCosts",
@@ -76,6 +87,9 @@ const ROUND_ACCOUNTING_KEYS = new Set([
   "feeReserveAfterMicroUsdg",
   "plannedHolderRewardsMicroUsdg",
   "paidHolderRewardsMicroUsdg",
+  "payoutLiabilityMicroUsdg",
+  "payoutDustMicroUsdg",
+  "paidHolderRewardsRecipientCount",
   "holderRewardsStatus",
   "distributionStatus",
 ]);
@@ -260,10 +274,14 @@ function readRoundAccounting(value) {
   exactKeys(source, ROUND_ACCOUNTING_KEYS);
   requiredKeys(source, ROUND_ACCOUNTING_KEYS);
   const normalized = {
-    packSpendMicroUsdg: requiredMoney(source.packSpendMicroUsdg),
-    buybackMicroUsdg: requiredMoney(source.buybackMicroUsdg),
-    packGainMicroUsdg: requiredMoney(source.packGainMicroUsdg),
-    packLossMicroUsdg: requiredMoney(source.packLossMicroUsdg),
+    packSpendMicroUsdg: publicNullableMoney(source.packSpendMicroUsdg),
+    buybackMicroUsdg: publicNullableMoney(source.buybackMicroUsdg),
+    outboundBridgeDebit: publicNullableAmount(source.outboundBridgeDebit),
+    inboundBridgeProceeds: publicNullableAmount(source.inboundBridgeProceeds),
+    collectorPurchaseDebit: publicNullableAmount(source.collectorPurchaseDebit),
+    collectorBuybackProceeds: publicNullableAmount(source.collectorBuybackProceeds),
+    packGainMicroUsdg: publicNullableMoney(source.packGainMicroUsdg),
+    packLossMicroUsdg: publicNullableMoney(source.packLossMicroUsdg),
     quotedCosts: readQuotedCosts(source.quotedCosts),
     protectedCostsMicroUsdg: publicNullableMoney(source.protectedCostsMicroUsdg),
     confirmedCostsMicroUsdg: publicNullableSignedMoney(source.confirmedCostsMicroUsdg),
@@ -278,12 +296,30 @@ function readRoundAccounting(value) {
     feeReserveAfterMicroUsdg: publicNullableMoney(source.feeReserveAfterMicroUsdg),
     plannedHolderRewardsMicroUsdg: publicNullableMoney(source.plannedHolderRewardsMicroUsdg),
     paidHolderRewardsMicroUsdg: publicNullableMoney(source.paidHolderRewardsMicroUsdg),
+    payoutLiabilityMicroUsdg: publicNullableMoney(source.payoutLiabilityMicroUsdg),
+    payoutDustMicroUsdg: publicNullableMoney(source.payoutDustMicroUsdg),
+    paidHolderRewardsRecipientCount: source.paidHolderRewardsRecipientCount === null
+      ? null
+      : publicNonnegativeInteger(source.paidHolderRewardsRecipientCount),
     holderRewardsStatus: publicBoundedText(source.holderRewardsStatus),
     distributionStatus: publicBoundedText(source.distributionStatus),
   };
-  assertExclusive(normalized.packGainMicroUsdg, normalized.packLossMicroUsdg);
+  assertNullableExclusive(normalized.packGainMicroUsdg, normalized.packLossMicroUsdg);
   assertNullableExclusive(normalized.cycleGainMicroUsdg, normalized.cycleLossMicroUsdg);
   return normalized;
+}
+
+function publicNullableAmount(value) {
+  if (value === null) return null;
+  const source = requiredPublicRecord(value);
+  const AMOUNT_KEYS = new Set(["chainId", "assetId", "units", "decimals"]);
+  exactKeys(source, AMOUNT_KEYS);
+  requiredKeys(source, AMOUNT_KEYS);
+  if (typeof source.chainId !== "string" || source.chainId.length === 0) invalidPublicStatus();
+  if (typeof source.assetId !== "string" || source.assetId.length === 0) invalidPublicStatus();
+  if (!Number.isInteger(source.decimals) || source.decimals < 0 || source.decimals > 255) invalidPublicStatus();
+  if (typeof source.units !== "string" || !/^(0|[1-9]\d{0,77})$/.test(source.units)) invalidPublicStatus();
+  return { chainId: source.chainId, assetId: source.assetId, units: source.units, decimals: source.decimals };
 }
 
 function readQuotedCosts(value) {
@@ -509,19 +545,25 @@ function projectCard(card, unitPrice) {
 function projectRoundAccounting(record) {
   const accounting = record.roundAccounting;
   if (accounting === undefined || accounting === null) return null;
-  const packSpend = anyMoney(accounting.grossPackDebitMicroUsdg);
-  const buyback = anyMoney(accounting.confirmedBuybackMicroUsdg);
   const confirmedCosts = optionalAnySignedMoney(accounting.confirmedCostMicroUsdg);
-  const completeCost = confirmedCosts === null ? null : packSpend + BigInt(confirmedCosts);
   const planned = optionalAnyMoney(accounting.holderRewardsMicroUsdg);
   const paid = optionalAnyMoney(
     record.settlement?.paidThisCycleMicroUsdg ?? record.settlement?.paid,
   );
   return {
-    packSpendMicroUsdg: packSpend.toString(),
-    buybackMicroUsdg: buyback.toString(),
-    packGainMicroUsdg: subtractAtZero(buyback, packSpend).toString(),
-    packLossMicroUsdg: subtractAtZero(packSpend, buyback).toString(),
+    // This legacy rehearsal record format carries no verified same-asset USDG pack-economics
+    // evidence (its old grossPackDebitMicroUsdg/confirmedBuybackMicroUsdg fields have no chain/asset
+    // identity to verify — see this file's own provenance-rule comment above), and no typed bridge
+    // or Collector-side evidence either. All four stay null rather than reporting an unverifiable
+    // legacy figure as pack economics.
+    packSpendMicroUsdg: null,
+    buybackMicroUsdg: null,
+    outboundBridgeDebit: null,
+    inboundBridgeProceeds: null,
+    collectorPurchaseDebit: null,
+    collectorBuybackProceeds: null,
+    packGainMicroUsdg: null,
+    packLossMicroUsdg: null,
     quotedCosts: {
       outboundBridgeMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.outboundMicroUsdg),
       inboundBridgeMicroUsdg: optionalAnyMoney(record.ledgerSnapshot?.inboundMicroUsdg),
@@ -532,12 +574,11 @@ function projectRoundAccounting(record) {
     },
     protectedCostsMicroUsdg: optionalAnyMoney(accounting.protectedCostForecastMicroUsdg),
     confirmedCostsMicroUsdg: confirmedCosts,
-    cycleGainMicroUsdg: completeCost === null
-      ? null
-      : subtractAtZero(buyback, completeCost).toString(),
-    cycleLossMicroUsdg: completeCost === null
-      ? null
-      : subtractAtZero(completeCost, buyback).toString(),
+    // No honest packSpend baseline exists here (see above), so a total-cost-inclusive gain/loss
+    // cannot be honestly derived either — see accounting-projection.mjs, which never computes these
+    // for the same reason.
+    cycleGainMicroUsdg: null,
+    cycleLossMicroUsdg: null,
     walletBalanceBeforeMicroUsdg: optionalAnyMoney(record.roundEvidence?.walletBalanceBeforeMicroUsdg),
     walletBalanceAfterMicroUsdg: optionalAnyMoney(record.roundEvidence?.walletBalanceAfterMicroUsdg),
     networkFees: projectNetworkFees(record.roundEvidence?.networkFees),
@@ -547,6 +588,11 @@ function projectRoundAccounting(record) {
     feeReserveAfterMicroUsdg: optionalAnyMoney(accounting.feeReserveAfterMicroUsdg),
     plannedHolderRewardsMicroUsdg: planned,
     paidHolderRewardsMicroUsdg: paid,
+    // No typed finalized-recipient evidence exists in this legacy record format (see
+    // accounting-projection.mjs's projectPayoutEvidence for the real producer of these facts).
+    payoutLiabilityMicroUsdg: null,
+    payoutDustMicroUsdg: null,
+    paidHolderRewardsRecipientCount: null,
     holderRewardsStatus: requiredBoundedText(
       record.roundEvidence?.holderRewardsStatus ?? (planned === null ? "pending" : "computed"),
     ),
@@ -597,10 +643,6 @@ function optionalAnySignedMoney(value) {
   if (typeof value === "bigint" && value > -(10n ** 78n) && value < 10n ** 78n) return value.toString();
   if (typeof value === "string" && /^(0|-?[1-9]\d{0,77})$/.test(value)) return value;
   throw new TypeError("PUBLIC_CYCLE_MONEY_INVALID");
-}
-
-function subtractAtZero(minuend, subtrahend) {
-  return minuend > subtrahend ? minuend - subtrahend : 0n;
 }
 
 function optionalMoney(value) {

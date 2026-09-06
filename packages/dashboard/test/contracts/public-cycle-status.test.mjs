@@ -179,6 +179,8 @@ function v6RoundAccounting(overrides = {}) {
   return {
     packSpendMicroUsdg: null,
     buybackMicroUsdg: null,
+    outboundBridgeDebit: null,
+    inboundBridgeProceeds: null,
     collectorPurchaseDebit: null,
     collectorBuybackProceeds: null,
     packGainMicroUsdg: null,
@@ -192,6 +194,7 @@ function v6RoundAccounting(overrides = {}) {
     networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
     feeReserveBeforeMicroUsdg: null, feeReserveTargetMicroUsdg: null, feeReserveTopUpMicroUsdg: null, feeReserveAfterMicroUsdg: null,
     plannedHolderRewardsMicroUsdg: null, paidHolderRewardsMicroUsdg: null,
+    payoutLiabilityMicroUsdg: null, payoutDustMicroUsdg: null, paidHolderRewardsRecipientCount: null,
     holderRewardsStatus: 'pending', distributionStatus: 'pending',
     ...overrides,
   };
@@ -223,20 +226,24 @@ test('schemaVersion 6 accepts an unknown (null) packSpend/buyback instead of an 
   assert.equal(result.cycle.roundAccounting.packGainMicroUsdg, null);
 });
 
-test('schemaVersion 6 carries the real Collector-side (Solana) debit/proceeds as a distinct typed Amount from the EVM USDG bridge amount', () => {
+test('schemaVersion 6 keeps the EVM bridge debit and the real Collector-side (Solana) debit as two distinct typed Amount fields, never folded into packSpendMicroUsdg', () => {
   const input = v6Status();
   input.cycle = {
     cycleId: 'cycle-1', status: 'settled', selectedPackId: null, maxBoostersPerCycle: null,
     plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
     roundAccounting: v6RoundAccounting({
-      packSpendMicroUsdg: '50', // real EVM USDG bridge debit
+      outboundBridgeDebit: { chainId: '4663', assetId: '0xusdg', units: '50', decimals: 6 }, // real EVM USDG bridge debit
       collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6 }, // distinct real Solana debit
-      packGainMicroUsdg: '0',
-      packLossMicroUsdg: '50',
     }),
   };
   const result = normalizePublicCycleStatus(input, 'mainnet');
-  assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, '50');
+  // packSpendMicroUsdg has no honest same-asset USDG pack-economics producer, so it stays null even
+  // though a bridge debit and a Collector debit both exist.
+  assert.equal(result.cycle.roundAccounting.packSpendMicroUsdg, null);
+  assert.equal(result.cycle.roundAccounting.packGainMicroUsdg, null);
+  assert.deepEqual(result.cycle.roundAccounting.outboundBridgeDebit, {
+    chainId: '4663', assetId: '0xusdg', units: '50', decimals: 6,
+  });
   assert.deepEqual(result.cycle.roundAccounting.collectorPurchaseDebit, {
     chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6,
   });
@@ -250,6 +257,39 @@ test('schemaVersion 6 rejects a malformed typed Amount (never silently drops it 
     roundAccounting: v6RoundAccounting({
       collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '-1', decimals: 6 },
     }),
+  };
+  assert.throws(() => normalizePublicCycleStatus(input, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
+
+test('schemaVersion 6 projects real finalized payout evidence into paid/planned/liability/dust/count', () => {
+  const input = v6Status();
+  input.cycle = {
+    cycleId: 'cycle-1', status: 'settled', selectedPackId: null, maxBoostersPerCycle: null,
+    plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
+    roundAccounting: v6RoundAccounting({
+      plannedHolderRewardsMicroUsdg: '100',
+      paidHolderRewardsMicroUsdg: '70',
+      payoutLiabilityMicroUsdg: '30',
+      payoutDustMicroUsdg: '0',
+      paidHolderRewardsRecipientCount: 2,
+      holderRewardsStatus: 'paid-with-liabilities',
+    }),
+  };
+  const result = normalizePublicCycleStatus(input, 'mainnet');
+  const accounting = result.cycle.roundAccounting;
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, '100');
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, '70');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, '30');
+  assert.equal(accounting.paidHolderRewardsRecipientCount, 2);
+  assert.equal(accounting.holderRewardsStatus, 'paid-with-liabilities');
+});
+
+test('schemaVersion 6 rejects a negative paidHolderRewardsRecipientCount', () => {
+  const input = v6Status();
+  input.cycle = {
+    cycleId: 'cycle-1', status: 'settled', selectedPackId: null, maxBoostersPerCycle: null,
+    plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
+    roundAccounting: v6RoundAccounting({ paidHolderRewardsRecipientCount: -1 }),
   };
   assert.throws(() => normalizePublicCycleStatus(input, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);
 });

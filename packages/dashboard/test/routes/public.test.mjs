@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createCommunityDashboardHandler, createCycleStatusHandler } from '../../src/routes/public.mjs';
+import { createCommunityDashboardHandler, createCycleHistoryHandler, createCycleStatusHandler } from '../../src/routes/public.mjs';
 
-async function request(handler) {
+async function request(handler, url = '/public/api/cycle-status') {
   let status = null;
   const chunks = [];
   await handler(
-    { method: 'GET', url: '/public/api/cycle-status' },
+    { method: 'GET', url },
     {
       writeHead(nextStatus) { status = nextStatus; },
       end(chunk) { if (chunk) chunks.push(Buffer.from(chunk)); },
@@ -187,4 +187,86 @@ test('a failing listRecentWinners degrades to an empty card feed instead of a 50
 
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.cards, []);
+});
+
+function historyCtx(overrides = {}) {
+  return {
+    profileId: 'mainnet',
+    now: () => Date.UTC(2026, 0, 1, 0, 10),
+    operatorControl: {
+      async status() {
+        return {
+          configuration: { intervalMinutes: 20, maxBoostersPerCycle: 1, paused: false, executionPaused: false, killSwitch: false },
+          activeCycleId: null,
+          cycles: [
+            { cycleId: 'cycle-1', terminalState: 'COMPLETED', terminalAtMs: 1_000 },
+            { cycleId: 'cycle-2', terminalState: 'COMPLETED', terminalAtMs: 2_000 },
+          ],
+        };
+      },
+    },
+    ...overrides,
+  };
+}
+
+test('cycle-history lists terminal cycles newest-first and accepts a limit query param', async () => {
+  const handler = createCycleHistoryHandler(historyCtx());
+  const result = await request(handler, '/public/api/cycle-history?limit=1');
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.items.map(item => item.cycleId), ['cycle-2']);
+  assert.notEqual(result.body.nextCursor, null);
+});
+
+test('cycle-history supports cursor-based continuation across two requests', async () => {
+  const ctx = historyCtx();
+  const first = await request(createCycleHistoryHandler(ctx), '/public/api/cycle-history?limit=1');
+  const second = await request(
+    createCycleHistoryHandler(ctx),
+    `/public/api/cycle-history?limit=1&cursor=${encodeURIComponent(first.body.nextCursor)}`,
+  );
+  assert.deepEqual(second.body.items.map(item => item.cycleId), ['cycle-1']);
+  assert.equal(second.body.nextCursor, null);
+});
+
+test('cycle-history rejects an unknown query parameter', async () => {
+  const handler = createCycleHistoryHandler(historyCtx());
+  const result = await request(handler, '/public/api/cycle-history?foo=bar');
+  assert.equal(result.status, 400);
+});
+
+test('cycle-history rejects a limit above MAX_HISTORY_PAGE_SIZE', async () => {
+  const handler = createCycleHistoryHandler(historyCtx());
+  const result = await request(handler, '/public/api/cycle-history?limit=21');
+  assert.equal(result.status, 400);
+});
+
+test('cycle-history fails closed (historyComplete:false, empty items) when a terminal cycle lacks terminalAtMs', async () => {
+  const handler = createCycleHistoryHandler(historyCtx({
+    operatorControl: {
+      async status() {
+        return {
+          configuration: { intervalMinutes: 20, maxBoostersPerCycle: 1, paused: false, executionPaused: false, killSwitch: false },
+          activeCycleId: null,
+          cycles: [
+            { cycleId: 'cycle-1', terminalState: 'COMPLETED', terminalAtMs: 1_000 },
+            { cycleId: 'cycle-2', terminalState: 'COMPLETED' },
+          ],
+        };
+      },
+    },
+  }));
+  const result = await request(handler, '/public/api/cycle-history');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.historyComplete, false);
+  assert.deepEqual(result.body.items, []);
+});
+
+test('cycle-history rejects a non-GET method', async () => {
+  const handler = createCycleHistoryHandler(historyCtx());
+  let status = null;
+  await handler({ method: 'POST', url: '/public/api/cycle-history' }, {
+    writeHead(next) { status = next; },
+    end() {},
+  });
+  assert.equal(status, 405);
 });

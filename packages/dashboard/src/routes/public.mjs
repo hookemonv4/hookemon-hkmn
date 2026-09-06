@@ -2,6 +2,8 @@
 // the private dashboard and never open a lifecycle store or consult local cycle state.
 import { buildPublicCycleStatus } from '../projections/cycle-status-projection.mjs';
 import { buildPublicCommunitySnapshot } from '../projections/community-snapshot-projection.mjs';
+import { buildPublicCycleHistory } from '../projections/cycle-history-projection.mjs';
+import { MAX_HISTORY_PAGE_SIZE } from '../contracts/public-cycle-history.mjs';
 import { OperatorControlUnavailable } from '../projections/decision-application.mjs';
 import { OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 
@@ -175,8 +177,9 @@ export function createCommunityDashboardHandler(ctx) {
         generatedAt: projection.internalStatus.generatedAt,
         nextCycleAt: projection.internalStatus.nextRunAt,
         completedCycles: projection.completedCycles,
-        skippedCycles: 0,
-        openedPacks: 0,
+        // Not tracked anywhere in this integration head — honestly null, never a fabricated 0.
+        skippedCycles: null,
+        openedPacks: null,
         heldPositions: projection.heldPositions,
         readAccounting: ctx.readAccounting ? cycleId => ctx.readAccounting(cycleId) : null,
         recentWinners,
@@ -185,6 +188,67 @@ export function createCommunityDashboardHandler(ctx) {
     } catch (error) {
       ctx.onError?.('community-dashboard', error);
       sendJson(res, 503, { code: error instanceof OperatorControlUnavailable ? error.code : 'PUBLIC_COMMUNITY_SNAPSHOT_UNAVAILABLE' });
+    }
+  };
+}
+
+const HISTORY_QUERY_KEYS = new Set(['limit', 'cursor']);
+
+/** Unlike `methodAndQueryGuard` (which the two frozen routes above use and which rejects every
+ * query string), this route needs `limit`/`cursor` for real pagination — its own narrower guard
+ * validates exactly those two, and nothing else. */
+function historyQueryGuard(req, res) {
+  if (req.method !== 'GET') {
+    sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED' });
+    return null;
+  }
+  const queryIndex = req.url.indexOf('?');
+  const params = new URLSearchParams(queryIndex === -1 ? '' : req.url.slice(queryIndex + 1));
+  for (const key of params.keys()) {
+    if (!HISTORY_QUERY_KEYS.has(key)) {
+      sendJson(res, 400, { code: 'QUERY_INVALID' });
+      return null;
+    }
+  }
+  const limitParam = params.get('limit');
+  let limit = 10;
+  if (limitParam !== null) {
+    if (!/^[1-9][0-9]*$/.test(limitParam)) {
+      sendJson(res, 400, { code: 'QUERY_INVALID' });
+      return null;
+    }
+    limit = Number(limitParam);
+    if (limit > MAX_HISTORY_PAGE_SIZE) {
+      sendJson(res, 400, { code: 'QUERY_INVALID' });
+      return null;
+    }
+  }
+  const cursor = params.get('cursor');
+  return { limit, cursor };
+}
+
+export function createCycleHistoryHandler(ctx) {
+  return async function cycleHistoryHandler(req, res) {
+    const query = historyQueryGuard(req, res);
+    if (query === null) return;
+    try {
+      const projection = await readAuthorityProjection(ctx);
+      const history = buildPublicCycleHistory({
+        profileId: ctx.profileId,
+        terminalCycles: projection.terminalCycles,
+        generatedAt: projection.internalStatus.generatedAt,
+        asOf: typeof ctx.terminalCyclesObservedAt === 'function' ? ctx.terminalCyclesObservedAt() : undefined,
+        limit: query.limit,
+        cursor: query.cursor,
+      });
+      sendJson(res, 200, history, { cache: 'public, max-age=30, stale-while-revalidate=60' });
+    } catch (error) {
+      if (error?.code === 'PUBLIC_CYCLE_HISTORY_INVALID') {
+        sendJson(res, 400, { code: 'PUBLIC_CYCLE_HISTORY_INVALID' });
+        return;
+      }
+      ctx.onError?.('cycle-history', error);
+      sendJson(res, 503, { code: error instanceof OperatorControlUnavailable ? error.code : 'PUBLIC_CYCLE_HISTORY_UNAVAILABLE' });
     }
   };
 }

@@ -40,8 +40,10 @@ test('an empty repository-derived terminal set projects a zero-metrics snapshot 
     generatedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
   });
   assert.equal(snapshot.latestCycle, null);
-  assert.equal(snapshot.metrics.totalCycleFundingMicroUsdg, '0');
-  assert.equal(snapshot.metrics.completedCycles, 0);
+  assert.equal(snapshot.metrics.totalCycleFundingMicroUsdg, null, 'no durable aggregate producer exists, so this is unknown, not an invented zero');
+  assert.equal(snapshot.metrics.skippedCycles, null);
+  assert.equal(snapshot.metrics.openedPacks, null);
+  assert.equal(snapshot.metrics.completedCycles, 0, 'a real zero completed-cycle count is not fabricated');
 });
 
 test('a completed repository cycle projects as latestCycle status paid-out with no fabricated money fields', async () => {
@@ -71,10 +73,12 @@ test('a failed repository cycle projects as latestCycle status failed', async ()
 test('readAccounting, when supplied, is called with the most recent terminal cycle id and its result becomes latestCycle.roundAccounting', async () => {
   const calls = [];
   const fixtureAccounting = {
-    packSpendMicroUsdg: '5000000', buybackMicroUsdg: '4990000',
+    packSpendMicroUsdg: null, buybackMicroUsdg: null,
+    outboundBridgeDebit: { chainId: '4663', assetId: '0xusdg', units: '5000000', decimals: 6 },
+    inboundBridgeProceeds: { chainId: '4663', assetId: '0xusdg', units: '4990000', decimals: 6 },
     collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 },
     collectorBuybackProceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4990000', decimals: 6 },
-    packGainMicroUsdg: '0', packLossMicroUsdg: '10000',
+    packGainMicroUsdg: null, packLossMicroUsdg: null,
     quotedCosts: {
       outboundBridgeMicroUsdg: null, inboundBridgeMicroUsdg: null, collectorApiMicroUsdg: null,
       evmNetworkMicroUsdg: null, solanaNetworkMicroUsdg: null, slippageMicroUsdg: null,
@@ -84,6 +88,7 @@ test('readAccounting, when supplied, is called with the most recent terminal cyc
     networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
     feeReserveBeforeMicroUsdg: null, feeReserveTargetMicroUsdg: null, feeReserveTopUpMicroUsdg: null, feeReserveAfterMicroUsdg: null,
     plannedHolderRewardsMicroUsdg: null, paidHolderRewardsMicroUsdg: null,
+    payoutLiabilityMicroUsdg: null, payoutDustMicroUsdg: null, paidHolderRewardsRecipientCount: null,
     holderRewardsStatus: 'not-started', distributionStatus: 'settled',
   };
   const snapshot = await buildPublicCommunitySnapshot({

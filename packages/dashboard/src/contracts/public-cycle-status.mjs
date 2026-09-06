@@ -72,11 +72,21 @@ const ROUND_ACCOUNTING_KEYS = new Set([
   'feeReserveTargetMicroUsdg', 'feeReserveTopUpMicroUsdg', 'feeReserveAfterMicroUsdg',
   'plannedHolderRewardsMicroUsdg', 'paidHolderRewardsMicroUsdg', 'holderRewardsStatus', 'distributionStatus',
 ]);
-// schemaVersion 6: packSpend/buyback/packGain/packLoss become nullable (an unknown amount is `null`,
-// never an invented '0' — see F-brief's frozen `Amount` contract), and two typed `Amount|null`
-// fields distinguish the real Collector-Crypt-side (Solana) purchase debit/buyback proceeds from
-// the EVM-side USDG bridge amounts, which are a different chain/asset and never assumed at parity.
-const ROUND_ACCOUNTING_V6_KEYS = new Set([...ROUND_ACCOUNTING_KEYS, 'collectorPurchaseDebit', 'collectorBuybackProceeds']);
+// schemaVersion 6: packSpend/buyback/packGain/packLoss become nullable and, as of the F-sol-review
+// correction, are now *permanently* null — there is no honest same-asset USDG producer for pack
+// economics (see accounting-projection.mjs's own header for why). Four typed `Amount|null` fields
+// replace them with real, distinctly-labeled facts: `outboundBridgeDebit`/`inboundBridgeProceeds`
+// (the actual EVM-side USDG bridge movement) and `collectorPurchaseDebit`/`collectorBuybackProceeds`
+// (the actual Collector-Crypt-side Solana debit/proceeds) — never conflated or subtracted against
+// each other. `payoutLiabilityMicroUsdg`/`payoutDustMicroUsdg`/`paidHolderRewardsRecipientCount` are
+// real chain-4663 USDG facts projected from the payout stage's own finalized recipient evidence
+// (verified same-asset before being labeled `MicroUsdg`), not inferred from the stage's `COMPLETE`
+// status alone.
+const ROUND_ACCOUNTING_V6_KEYS = new Set([
+  ...ROUND_ACCOUNTING_KEYS,
+  'outboundBridgeDebit', 'inboundBridgeProceeds', 'collectorPurchaseDebit', 'collectorBuybackProceeds',
+  'payoutLiabilityMicroUsdg', 'payoutDustMicroUsdg', 'paidHolderRewardsRecipientCount',
+]);
 const QUOTED_COST_KEYS = new Set([
   'outboundBridgeMicroUsdg', 'inboundBridgeMicroUsdg', 'collectorApiMicroUsdg',
   'evmNetworkMicroUsdg', 'solanaNetworkMicroUsdg', 'slippageMicroUsdg',
@@ -335,6 +345,8 @@ function readRoundAccountingV6(source) {
   const result = {
     packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg, invalid),
     buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg, invalid),
+    outboundBridgeDebit: nullableAmount(source.outboundBridgeDebit, invalid),
+    inboundBridgeProceeds: nullableAmount(source.inboundBridgeProceeds, invalid),
     collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit, invalid),
     collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds, invalid),
     packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg, invalid),
@@ -353,6 +365,11 @@ function readRoundAccountingV6(source) {
     feeReserveAfterMicroUsdg: optionalMoney(source.feeReserveAfterMicroUsdg, invalid),
     plannedHolderRewardsMicroUsdg: optionalMoney(source.plannedHolderRewardsMicroUsdg, invalid),
     paidHolderRewardsMicroUsdg: optionalMoney(source.paidHolderRewardsMicroUsdg, invalid),
+    payoutLiabilityMicroUsdg: optionalMoney(source.payoutLiabilityMicroUsdg, invalid),
+    payoutDustMicroUsdg: optionalMoney(source.payoutDustMicroUsdg, invalid),
+    paidHolderRewardsRecipientCount: source.paidHolderRewardsRecipientCount === null
+      ? null
+      : nonNegativeInteger(source.paidHolderRewardsRecipientCount, invalid),
     holderRewardsStatus: boundedText(source.holderRewardsStatus, invalid),
     distributionStatus: boundedText(source.distributionStatus, invalid),
   };
