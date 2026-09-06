@@ -99,6 +99,16 @@ const APPROVED_CURRENT_REPO_URL_TOKENS = Object.freeze([
   Object.freeze({ prefixLength: 'github.com/hookemonv4/'.length, digest: '74b269ab96858cef4ea0840f0d475ff3db31862a5f5f4d3f2ccc0ee68161f900' }),
   Object.freeze({ prefixLength: 'github\\.com\\/hookemonv4\\/'.length, digest: '813a3fd959ccc41567501e603274fd93190126303586062ef39ae7164b09204e' }),
 ]);
+// The historical-architecture rule below (length 4) also matches the tail of a legacy wire-field
+// identifier, "priceMicroUsdc", that apps/web/app/operator/OperatorControlPanel.tsx must keep
+// reading unrenamed: per operator-pack-wire-contract.md, it is a documented legacy compatibility
+// input for a protected, out-of-repository backend whose actual current response schema is
+// unverified from here, so renaming the wire key could silently break real price data. This does
+// not broadly exempt "usdc" -- it requires the exact, complete identifier token (expanded to its
+// full alphanumeric boundary, not just the 4-char match) and only in this one file.
+const RETIRED_ASSET_TICKER_DIGEST = 'a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966';
+const APPROVED_LEGACY_WIRE_FIELD_PATH = 'apps/web/app/operator/OperatorControlPanel.tsx';
+const APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST = '8f75379cdcbccf2b9fe6893111101ef5e96bd4d1311adf4cea3add5d1bfdfde4';
 
 // Exact full-token hashes keep the revision-56 exception fail-closed. New
 // identifiers require an explicit control change instead of inheriting a
@@ -172,6 +182,15 @@ function isApprovedCurrentRepositoryUrlToken(text, offset, rule, file) {
   });
 }
 
+function isApprovedLegacyWireFieldToken(text, offset, file) {
+  if (file !== APPROVED_LEGACY_WIRE_FIELD_PATH) return false;
+  let tokenStart = offset;
+  let tokenEnd = offset + 4;
+  while (tokenStart > 0 && identifierCharacter.test(text[tokenStart - 1])) tokenStart -= 1;
+  while (tokenEnd < text.length && identifierCharacter.test(text[tokenEnd])) tokenEnd += 1;
+  return sha256Text(text.slice(tokenStart, tokenEnd).toLowerCase()) === APPROVED_LEGACY_WIRE_FIELD_TOKEN_DIGEST;
+}
+
 function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   if (rule.sha256 === RETIRED_CYCLE_VAULT_DIGEST) {
     return isApprovedRevision56Identifier(text, offset, rule.length);
@@ -182,6 +201,9 @@ function isApprovedCurrentMarkerContext(text, offset, rule, file) {
   }
   if (rule.sha256 === RETIRED_REPO_SLUG_DIGEST) {
     return isApprovedCurrentRepositoryUrlToken(text, offset, rule, file);
+  }
+  if (rule.sha256 === RETIRED_ASSET_TICKER_DIGEST) {
+    return isApprovedLegacyWireFieldToken(text, offset, file);
   }
   return false;
 }

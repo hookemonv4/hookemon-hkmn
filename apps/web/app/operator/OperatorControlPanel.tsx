@@ -46,9 +46,6 @@ type Pack = {
   id: string;
   name: string;
   priceMicroUsdc: string;
-  instantBuybackFloorMicroUsdc?: string;
-  expectedBuybackMicroUsdc?: string;
-  collectorEconomicCostMicroUsdc?: string;
   available: number;
 };
 

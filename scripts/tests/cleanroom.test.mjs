@@ -378,6 +378,27 @@ test('current repository URL exception only exempts the exact reviewed token on 
   assert.equal(scanDigestMarkers(`${plainUrl}x`, [rule], approvedPaths[0]).length, 1);
 });
 
+test('legacy wire-field exception only exempts the exact identifier in the one approved operator file', () => {
+  const ticker = ['usd', 'c'].join('');
+  const rule = DEFAULT_DIGEST_RULES.find(candidate => (
+    candidate.id === 'historical-architecture' && candidate.length === ticker.length
+    && candidate.sha256 === createHash('sha256').update(ticker).digest('hex')
+  ));
+  assert.ok(rule);
+
+  const approvedPath = 'apps/web/app/operator/OperatorControlPanel.tsx';
+  const wireField = ['price', 'Micro', 'Usdc'].join('');
+
+  assert.deepEqual(scanDigestMarkers(`pack.${wireField}`, [rule], approvedPath), []);
+  assert.deepEqual(scanDigestMarkers(`  ${wireField}: string;`, [rule], approvedPath), []);
+
+  assert.equal(scanDigestMarkers(`pack.${wireField}`, [rule], 'apps/web/app/page.tsx').length, 1);
+  assert.equal(scanDigestMarkers(`pack.${wireField}`, [rule], null).length, 1);
+  assert.equal(scanDigestMarkers(`const value = "${ticker}"`, [rule], approvedPath).length, 1);
+  assert.equal(scanDigestMarkers(`${wireField}Extra`, [rule], approvedPath).length, 1);
+  assert.equal(scanDigestMarkers(`total${wireField.slice('price'.length)}`, [rule], approvedPath).length, 1);
+});
+
 test('clean-room scanner permits the provider address enum only in Phase 3 JSON', () => {
   const root = fixture();
   try {
