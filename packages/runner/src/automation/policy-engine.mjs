@@ -20,8 +20,28 @@ const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
  * impossible to exercise under isolated keys. A caller that knows its configured accounts passes
  * them in, and the check is exactly as strict against those.
  */
-const DEFAULT_OPERATIONS_ACCOUNTS = Object.freeze({ evm: OPERATIONS_EVM, solana: OPERATIONS_SOLANA });
+const DEFAULT_OPERATIONS_ACCOUNTS = Object.freeze({
+  evm: OPERATIONS_EVM, solana: OPERATIONS_SOLANA,
+  fundingRoute: USDG_ROUTE, settlementRoute: COLLECTOR_SETTLEMENT_ROUTE,
+});
 
+function assertAdmissionRouteIdentity(value, fallback, label) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'object' || Array.isArray(value)
+    || typeof value.chainId !== 'string' || value.chainId.length === 0
+    || typeof value.assetId !== 'string' || value.assetId.length === 0
+    || !Number.isInteger(value.decimals) || value.decimals < 0) {
+    throw new Error(`policy ${label} route is invalid`);
+  }
+  return Object.freeze({ chainId: value.chainId, assetId: value.assetId, decimals: value.decimals });
+}
+
+/**
+ * The deployment identity an admission is checked against: which accounts it may route funds to and
+ * which two assets it may be denominated in. Supplied by composition from the same money
+ * configuration every other stage uses; the pinned production values remain the defaults, so an
+ * unconfigured caller keeps today's behaviour and the check is equally strict either way.
+ */
 function assertOperationsAccounts(value) {
   if (value === undefined || value === null) return DEFAULT_OPERATIONS_ACCOUNTS;
   if (typeof value !== 'object' || Array.isArray(value)
@@ -29,7 +49,12 @@ function assertOperationsAccounts(value) {
     || typeof value.solana !== 'string' || value.solana.length === 0) {
     throw new Error('policy operations accounts are invalid');
   }
-  return Object.freeze({ evm: value.evm.toLowerCase(), solana: value.solana });
+  return Object.freeze({
+    evm: value.evm.toLowerCase(),
+    solana: value.solana,
+    fundingRoute: assertAdmissionRouteIdentity(value.fundingRoute, USDG_ROUTE, 'funding'),
+    settlementRoute: assertAdmissionRouteIdentity(value.settlementRoute, COLLECTOR_SETTLEMENT_ROUTE, 'settlement'),
+  });
 }
 const mutationBoundaries = new Set(['claim-process', 'purchase', 'signature', 'broadcast', 'mutation']);
 const executionBoundaries = new Set(['signature', 'broadcast', 'mutation']);
@@ -246,10 +271,10 @@ function normalizePolicyAdmission(value, operationsAccounts) {
   const aggregatePurchase = assertPolicyAdmissionAmount(value.aggregatePurchase, 'policy admission aggregatePurchase');
   const unitFundingQuote = assertPolicyAdmissionAmount(value.unitFundingQuote, 'policy admission unitFundingQuote');
   const aggregateFundingQuote = assertPolicyAdmissionAmount(value.aggregateFundingQuote, 'policy admission aggregateFundingQuote');
-  assertAdmissionRoute(unitPurchase, COLLECTOR_SETTLEMENT_ROUTE, 'policy admission unitPurchase');
-  assertAdmissionRoute(aggregatePurchase, COLLECTOR_SETTLEMENT_ROUTE, 'policy admission aggregatePurchase');
-  assertAdmissionRoute(unitFundingQuote, USDG_ROUTE, 'policy admission unitFundingQuote');
-  assertAdmissionRoute(aggregateFundingQuote, USDG_ROUTE, 'policy admission aggregateFundingQuote');
+  assertAdmissionRoute(unitPurchase, operations.settlementRoute, 'policy admission unitPurchase');
+  assertAdmissionRoute(aggregatePurchase, operations.settlementRoute, 'policy admission aggregatePurchase');
+  assertAdmissionRoute(unitFundingQuote, operations.fundingRoute, 'policy admission unitFundingQuote');
+  assertAdmissionRoute(aggregateFundingQuote, operations.fundingRoute, 'policy admission aggregateFundingQuote');
   if (unitPurchase.chainId !== aggregatePurchase.chainId || unitPurchase.assetId !== aggregatePurchase.assetId
     || unitPurchase.decimals !== aggregatePurchase.decimals
     || BigInt(unitPurchase.amountAtomic) * BigInt(value.quantity) !== BigInt(aggregatePurchase.amountAtomic)) {
@@ -605,6 +630,9 @@ function evaluateExistingCycleExecution({ configuration, custodyState, context }
 
   const existing = existingCycle(configuration, context.cycleId);
   if (!existing || existing.releaseAmountMicroUsdg !== context.releaseAmount.toString()) return refused('CYCLE_POLICY_MISSING');
+  // The admission is part of the recorded digest, so every later boundary must re-present it.
+  // Omitting it here derived an admission-free digest that could never match what claim-process
+  // reserved, and refused every execution boundary of an admitted cycle as CYCLE_POLICY_DIGEST_CHANGED.
   const cycleDigest = matchingExistingCycleDigest({
     configuration,
     existing,
@@ -613,6 +641,8 @@ function evaluateExistingCycleExecution({ configuration, custodyState, context }
     packId: context.packId,
     liveMode: context.liveMode,
     mode: context.mode,
+    admission: context.admission ?? undefined,
+    operations: context.operations,
   });
   if (cycleDigest === null) return refused('CYCLE_POLICY_DIGEST_CHANGED');
   const reservation = configuration.spendLedger.find(entry => entry.cycleDigest === cycleDigest);

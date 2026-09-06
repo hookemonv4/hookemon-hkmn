@@ -619,8 +619,8 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
       if (typeof adapters?.relay?.quoteOutboundBridge !== 'function') {
         throw new Error('admission planner requires a Relay client');
       }
-      const settlementAsset = config.money.assets.solanaStablecoin;
-      const fundingAsset = config.money.assets.usdg;
+      const settlementAsset = config.moneyConfiguration.assets.solanaStablecoin;
+      const fundingAsset = config.moneyConfiguration.assets.usdg;
       const unitAtomic = admittedCatalogUnit({
         catalog: await adapters.collectorCrypt.getMachines(),
         packId,
@@ -638,7 +638,9 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
       // priced against which inventory state -- nondeterministic evidence.
       const unitQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: unitAtomic.toString() });
       const aggregateQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: aggregateAtomic.toString() });
-      if (unitQuote.requestId === aggregateQuote.requestId) {
+      // Only meaningful above one pack. At quantity 1 the unit and aggregate targets are the same
+      // amount, so one identical quote for both is the correct answer, not a reused one.
+      if (quantity > 1 && unitQuote.requestId === aggregateQuote.requestId) {
         throw new Error('admission planner received one Relay quote for both the unit and aggregate targets');
       }
       return Object.freeze({
@@ -675,12 +677,16 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
  */
 function buildProcessBalanceReader({ config, adapters }) {
   const client = adapters?.robinhood?.client ?? null;
+  // Absence of the capability is not an observation of zero. A composition with no balance-reading
+  // client reports null and the configured figure stands, exactly as before; a client that has the
+  // capability and fails reports '0' and refuses, because there a read really was attempted.
+  const capable = client !== null && typeof client.readContract === 'function' && typeof client.getBlock === 'function';
   return {
     async read() {
-      if (client === null) return null;
+      if (!capable) return null;
       try {
         const balance = await readTokenBalanceAtLatest(client, {
-          token: config.money.assets.usdg.assetId,
+          token: config.moneyConfiguration.assets.usdg.assetId,
           account: config.accounts.evm,
         });
         const finality = await confirmReadFinalized(client, balance.blockNumber);
@@ -1278,12 +1284,17 @@ export async function compose(config) {
       // previous unadmitted path, where decideCycleBudget still uses its configured static sum and
       // outbound still refuses for want of a repository-owned admission.
       ...(liveMode && mode === 'production'
-        && resolved.money?.assets?.solanaStablecoin && resolved.money?.assets?.usdg
+        && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.usdg
         && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
         ? {
           admissionPlanner: buildAdmissionPlanner({ config: resolved, adapters, readConfiguration }),
           processBalanceReader: buildProcessBalanceReader({ config: resolved, adapters }),
-          operationsAccounts: { evm: resolved.accounts.evm, solana: resolved.accounts.solana },
+          operationsAccounts: {
+            evm: resolved.accounts.evm,
+            solana: resolved.accounts.solana,
+            fundingRoute: resolved.moneyConfiguration.assets.usdg,
+            settlementRoute: resolved.moneyConfiguration.assets.solanaStablecoin,
+          },
         }
         : {}),
       cycleRepository,

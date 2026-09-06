@@ -30,6 +30,73 @@ const SOURCE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 
+const ROBINHOOD_CHAIN_ID = 4663;
+const RELAY_SOLANA_CHAIN_ID = 792703809;
+const BALANCE_OF_SELECTOR = '0x70a08231';
+// One pack costs 0.000008 settlement units, i.e. 8 atomic at 6 decimals, so an N=2 cycle targets 16.
+const PACK_PRICE = '0.000008';
+const PROCESS_USDG_ATOMIC = 1_000_000n;
+// Priced so the unit quote lands exactly on maxUnitPriceMicroUsdg and the aggregate exactly on the
+// per-cycle and 24-hour caps. The aggregate is deliberately NOT twice the unit: a linear pair would
+// let a division or multiplication bug pass unnoticed.
+const UNIT_FUNDING_ATOMIC = 17n;
+const AGGREGATE_FUNDING_ATOMIC = 33n;
+
+const RELAY_CHAINS = Object.freeze({
+  chains: [
+    { id: ROBINHOOD_CHAIN_ID, depositEnabled: true, erc20Currencies: [{ address: USDG, supportsBridging: true }] },
+    { id: RELAY_SOLANA_CHAIN_ID, depositEnabled: true, solverCurrencies: [{ address: SOLANA_MINT }] },
+  ],
+});
+
+/**
+ * A Relay exact-output quote for the destination amount that was actually requested. The origin
+ * USDG it reports is looked up per target rather than scaled, which is what makes this fixture able
+ * to fail a planner that derives one quote from the other.
+ */
+function relayQuote(request) {
+  const destinationAmount = String(request.amount);
+  const originAmount = destinationAmount === '8'
+    ? UNIT_FUNDING_ATOMIC.toString()
+    : AGGREGATE_FUNDING_ATOMIC.toString();
+  const deadline = Math.floor(Date.now() / 1000) + 900;
+  const sender = request.user;
+  const recipient = request.recipient;
+  return {
+    requestId: `fixture-quote-${destinationAmount}`,
+    steps: [],
+    details: {
+      sender,
+      recipient,
+      currencyIn: { currency: { chainId: ROBINHOOD_CHAIN_ID, address: USDG, symbol: 'USDG', decimals: 6 }, amount: originAmount },
+      currencyOut: {
+        currency: { chainId: RELAY_SOLANA_CHAIN_ID, address: SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
+        amount: destinationAmount,
+        minimumAmount: destinationAmount,
+      },
+    },
+    protocol: {
+      v2: {
+        orderId: `0x${destinationAmount.padStart(64, '0')}`,
+        orderData: {
+          output: {
+            chainId: 'solana',
+            deadline,
+            calls: [],
+            payments: [{
+              recipient, currency: SOLANA_MINT, expectedAmount: destinationAmount, minimumAmount: destinationAmount,
+            }],
+          },
+          inputs: [{
+            payment: { chainId: 'robinhood', currency: USDG, amount: originAmount },
+            refunds: [{ chainId: 'robinhood', currency: USDG, recipient: sender, deadline }],
+          }],
+        },
+      },
+    },
+  };
+}
+
 // The loopback chain's execution semantics: it derives every emitted event from the calldata it was
 // actually given, exactly as the deployed hook would. Nothing here is keyed on the runner's intent,
 // so a transaction carrying a different cycle, amount, or destination emits a correspondingly
@@ -91,11 +158,23 @@ async function fixtureServer(t, directory) {
   await writeFile(paths.extensions, 'subjectAltName=IP:127.0.0.1\n');
   await execFileAsync('/usr/bin/openssl', ['x509', '-req', '-in', paths.request, '-CA', paths.caCert, '-CAkey', paths.caKey, '-CAcreateserial', '-out', paths.cert, '-days', '1', '-extfile', paths.extensions]);
   const [key, cert] = await Promise.all([readFile(paths.key), readFile(paths.cert)]);
-  const calls = { evm: 0, solana: 0, methods: [] };
+  const calls = { evm: 0, solana: 0, methods: [], quotes: [] };
   const broadcasts = new Map();
   const server = createServer({ key, cert }, async (request, response) => {
     if (request.url === '/alert') { response.writeHead(204); response.end(); return; }
-    if (request.url === '/chains') { respond(response, { chains: [] }); return; }
+    if (request.url === '/chains') { respond(response, RELAY_CHAINS); return; }
+    // `new URL('/api/machines', base)` resolves against the origin, so the configured `/collector`
+    // prefix is not part of the request path the client actually sends.
+    if (request.url === '/api/machines') {
+      respond(response, { machines: [{ code: 'return-fixture', price: PACK_PRICE, contains: 1 }] });
+      return;
+    }
+    if (request.url === '/quote/v2') {
+      const quoteRequest = await body(request);
+      calls.quotes.push({ amount: quoteRequest.amount, tradeType: quoteRequest.tradeType });
+      respond(response, relayQuote(quoteRequest));
+      return;
+    }
     if (!['/rpc', '/archive', '/solana'].includes(request.url)) { response.writeHead(404); response.end(); return; }
     const rpc = await body(request);
     const reply = result => respond(response, { jsonrpc: '2.0', id: rpc.id, result });
@@ -121,7 +200,13 @@ async function fixtureServer(t, directory) {
         data: `0x${'1'.padStart(64, '0')}`, blockNumber: '0x1', logIndex: '0x0', blockHash: `0x${'1'.repeat(64)}`, removed: false,
         }] : []);
       }
-      if (rpc.method === 'eth_call') return reply(`0x${'0'.repeat(64)}`);
+      // balanceOf is answered with real process funds; every other static call keeps returning zero.
+      if (rpc.method === 'eth_call') {
+        const data = rpc.params?.[0]?.data ?? '';
+        return reply(data.startsWith(BALANCE_OF_SELECTOR)
+          ? `0x${PROCESS_USDG_ATOMIC.toString(16).padStart(64, '0')}`
+          : `0x${'0'.repeat(64)}`);
+      }
       // The loopback chain accepts raw bytes and reports them back; it never invents a transaction.
       // A receipt exists only for bytes this endpoint was actually handed, under the hash those
       // exact bytes keccak to, so nothing here can manufacture finality for an unsigned or
@@ -437,6 +522,19 @@ async function testPolicyAuthority(t, directory) {
   };
 }
 
+async function readOperatorLedgers(directory) {
+  try {
+    const state = JSON.parse(await readFile(join(directory, 'operator-state.json'), 'utf8'));
+    const configuration = state.configuration ?? {};
+    return {
+      cycleLedger: configuration.cycleLedger ?? null,
+      spendLedger: configuration.spendLedger ?? null,
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
 async function isolatedSource(directory) {
   const root = join(directory, 'source');
   const copyFilter = path => !path.includes('/node_modules');
@@ -536,7 +634,15 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
     stages: [...cycle.stages.keys()], prepared: [...cycle.preparedStages.keys()],
     chainAttempts: [...cycle.chainAttempts.values()].map(record => ({ stage: record?.attempt?.stage, state: record?.attempt?.state, requestDigest: record?.attempt?.requestDigest })),
     operationalAttempts: [...cycle.operationalAttempts.values()].map(record => ({ stage: record?.attempt?.stage, requestDigest: record?.attempt?.requestDigest })),
-    authorizations: authority.diagnostics, terminalState: cycle.terminalState, stderr,
+    authorizations: authority.diagnostics, terminalState: cycle.terminalState,
+    admission: cycle.admission === null ? null : {
+      quoteDigest: cycle.admission.quoteDigest,
+      unitFunding: cycle.admission.unitFundingQuote.amountAtomic,
+      aggregateFunding: cycle.admission.aggregateFundingQuote.amountAtomic,
+      unitPurchase: cycle.admission.unitPurchase.amountAtomic,
+      aggregatePurchase: cycle.admission.aggregatePurchase.amountAtomic,
+    },
+    ledger: await readOperatorLedgers(directory), quotes: fixture.calls.quotes, stderr,
   })}`);
   assert.equal(cycle.completed, true, 'the automatic N=2 production graph must converge before the scheduler window closes');
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');

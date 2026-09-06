@@ -476,6 +476,8 @@ export class AutomatedCycleService {
             liveMode: this.#liveMode,
             mode: this.#mode,
             capUsdg: this.#policyCapUsdg ?? undefined,
+            // Re-presented at every execution boundary because the recorded cycle digest includes it.
+            ...(cycle.admission ? { admission: cycle.admission, operations: this.#operationsAccounts ?? undefined } : {}),
           });
           assertPolicyDecision(policyDecision);
         }

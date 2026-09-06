@@ -2626,7 +2626,12 @@ export class CycleRepository {
           admission = assertDurableCycleAdmission(
             entry.payload.admission,
             cycleId,
-            { evm: entry.payload.admission?.relay?.sender ?? '', solana: entry.payload.admission?.relay?.recipient ?? '' },
+            {
+              evm: entry.payload.admission?.relay?.sender ?? '',
+              solana: entry.payload.admission?.relay?.recipient ?? '',
+              fundingRoute: entry.payload.admission?.aggregateFundingQuote ?? null,
+              settlementRoute: entry.payload.admission?.aggregatePurchase ?? null,
+            },
             'stored cycle admission',
           );
         }
