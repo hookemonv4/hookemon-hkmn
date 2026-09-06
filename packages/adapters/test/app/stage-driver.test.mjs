@@ -724,7 +724,12 @@ test('probeOutbound honestly reports null quote amounts when the injected adapte
 
 test('built-in outbound reconciliation completes a real CycleRepository stage from durable settlement evidence', async t => {
   const { repository, cycleId } = await durableCycle(t);
-  const operations = '0x000000000000000000000000000000000000dead';
+  // A real, signable test keypair -- not the file's usual placeholder dead-address literal --
+  // because the outbound stage now recovers the prerequisite approval's signer from its own raw
+  // bytes (packages/adapters/src/app/stages/outbound.mjs, assertOutboundApprovalAttemptRole) and
+  // that recovered address must equal the configured Operations account.
+  const operationsAccount = privateKeyToAccount(`0x${'6'.repeat(64)}`);
+  const operations = operationsAccount.address.toLowerCase();
   const depository = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
   const sourceAsset = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
   const solanaOwner = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
@@ -733,6 +738,7 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
   const destinationAmount = '24';
   const sourceHash = `0x${'a'.repeat(64)}`;
   const requestDigest = `sha256:${'b'.repeat(64)}`;
+  const approvalRequestDigest = `sha256:${'7'.repeat(64)}`;
   const fencingToken = '11111111-1111-4111-8111-111111111111';
   const relayRequestId = 'relay-driver-settlement';
 
@@ -753,6 +759,80 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
     chainId: '4663', wallet: operations, stage: 'outbound', fencingToken,
     leaseAcquiredAtMs: 0, leaseExpiresAtMs: Number.MAX_SAFE_INTEGER,
   });
+
+  // Shared by every step of this leg's Relay envelope, exactly as the real production planner
+  // shares one `request.intent`/route across every signed step (outbound.mjs, mutateOutbound).
+  // tradeType/quoteDigest are mandatory identity fields on the exact recovery-context schema
+  // (OUTBOUND_RELAY_INTENT_FIELDS, cycle-repository.mjs) binding this intent to the quote it was
+  // admitted under.
+  const relayIntent = {
+    schema: 'hookemon.relay-intent.v1',
+    requestId: relayRequestId,
+    orderId: `0x${'2'.repeat(64)}`,
+    direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
+    quoteDigest: `sha256:${'9'.repeat(64)}`,
+    originChainId: 4663,
+    destinationChainId: 792703809,
+    originAssetId: sourceAsset,
+    originDecimals: 6,
+    destinationAssetId: solanaMint,
+    destinationDecimals: 6,
+    originAmount: sourceAmount,
+    quotedDestinationAmount: destinationAmount,
+    quotedDestinationMinimumAmount: destinationAmount,
+    sender: operations,
+    recipient: solanaOwner,
+    deadlineUnixSeconds: 1700000200,
+  };
+  const relayRoute = { sourceSender: operations, sourceRecipient: depository, destinationOwner: solanaOwner };
+
+  // The canonical two-step Relay envelope's prerequisite: a real, offline-signed USDG
+  // `approve(depository, sourceAmount)` from the Operations account, at the nonce immediately
+  // preceding the deposit's own nonce 9 -- never placeholder `0x00` bytes, since
+  // `assertOutboundApprovalAttemptRole` now decodes and recovers the signer from these bytes
+  // before the stage may complete, whether or not this attempt is already FINALIZED.
+  const approvalNonce = 8;
+  const approvalRawBytes = await operationsAccount.signTransaction({
+    chainId: 4663,
+    to: sourceAsset,
+    data: `0x095ea7b3${depository.toLowerCase().replace(/^0x/, '').padStart(64, '0')}${BigInt(sourceAmount).toString(16).padStart(64, '0')}`,
+    value: 0n,
+    nonce: approvalNonce,
+    gas: 60000n,
+    maxFeePerGas: 2n,
+    maxPriorityFeePerGas: 1n,
+  });
+  const approvalHash = keccak256(approvalRawBytes);
+  await repository.prepareChainTransactionAttempt(cycleId, 'outbound', createPreparedChainTransactionAttempt({
+    cycleId,
+    stage: 'outbound',
+    requestDigest: approvalRequestDigest,
+  }));
+  await repository.recordSignedTransactionWithRecoveryContext(
+    cycleId,
+    'outbound',
+    approvalRequestDigest,
+    { rawBytes: approvalRawBytes, nonce: String(approvalNonce), blockhash: null, hash: approvalHash },
+    {
+      stage: 'outbound',
+      recipient: null,
+      requestDigest: approvalRequestDigest,
+      policyDigest: `sha256:${'2'.repeat(64)}`,
+      approvalDigest: `sha256:${'3'.repeat(64)}`,
+      fencingToken,
+      fencingTokenDigest: `sha256:${'4'.repeat(64)}`,
+      approvedSemanticsDigest: `sha256:${'5'.repeat(64)}`,
+      rawSignedBytesHash: approvalHash,
+      signedMessageDigest: `sha256:${'6'.repeat(64)}`,
+      relayQuoteDeadlineUnixSeconds: '1700000200',
+      relayIntent,
+      relayRoute,
+    },
+    null,
+  );
+  await repository.recordBroadcast(cycleId, 'outbound', approvalRequestDigest, { transactionHash: approvalHash });
+
   await repository.prepareChainTransactionAttempt(cycleId, 'outbound', createPreparedChainTransactionAttempt({
     cycleId,
     stage: 'outbound',
@@ -775,29 +855,8 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
       rawSignedBytesHash: sourceHash,
       signedMessageDigest: `sha256:${'1'.repeat(64)}`,
       relayQuoteDeadlineUnixSeconds: '1700000200',
-      relayIntent: {
-        schema: 'hookemon.relay-intent.v1',
-        requestId: relayRequestId,
-        orderId: `0x${'2'.repeat(64)}`,
-        direction: 'OUTBOUND',
-        originChainId: 4663,
-        destinationChainId: 792703809,
-        originAssetId: sourceAsset,
-        originDecimals: 6,
-        destinationAssetId: solanaMint,
-        destinationDecimals: 6,
-        originAmount: sourceAmount,
-        quotedDestinationAmount: destinationAmount,
-        quotedDestinationMinimumAmount: destinationAmount,
-        sender: operations,
-        recipient: solanaOwner,
-        deadlineUnixSeconds: 1700000200,
-      },
-      relayRoute: {
-        sourceSender: operations,
-        sourceRecipient: depository,
-        destinationOwner: solanaOwner,
-      },
+      relayIntent,
+      relayRoute,
     },
     { relayRequestId, sourceTxHash: sourceHash },
   );
@@ -805,8 +864,18 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
 
   const receiptBlockHash = `0x${'2'.repeat(64)}`;
   const parentBlockHash = `0x${'3'.repeat(64)}`;
+  const approvalReceiptBlockHash = `0x${'6'.repeat(64)}`;
   const sourceClient = {
     async getTransactionReceipt({ hash }) {
+      if (hash === approvalHash) {
+        return {
+          transactionHash: approvalHash,
+          blockNumber: 98n,
+          blockHash: approvalReceiptBlockHash,
+          status: 'success',
+          logs: [],
+        };
+      }
       assert.equal(hash, sourceHash);
       return {
         transactionHash: sourceHash,
@@ -829,6 +898,7 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
       if (blockTag === 'finalized') return { number: 101n, hash: `0x${'4'.repeat(64)}`, timestamp: 1_700_000_090n };
       if (blockNumber === 100n) return { number: 100n, hash: receiptBlockHash, parentHash: parentBlockHash, timestamp: 1_700_000_080n };
       if (blockNumber === 99n) return { number: 99n, hash: parentBlockHash, parentHash: `0x${'5'.repeat(64)}`, timestamp: 1_700_000_070n };
+      if (blockNumber === 98n) return { number: 98n, hash: approvalReceiptBlockHash, timestamp: 1_700_000_060n };
       throw new Error('unexpected outbound source block read');
     },
   };
@@ -903,6 +973,9 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
   await repository.completeStage(cycleId, 'outbound', evidence);
   assert.equal((await repository.readStage(cycleId, 'outbound')).status, 'COMPLETE');
   assert.equal((await repository.readChainTransactionAttempt(cycleId, 'outbound', requestDigest)).attempt.state, 'FINALIZED');
+  // The canonical two-step envelope's prerequisite reaches FINALIZED independently, from its own
+  // signed bytes and receipt -- proving the deposit's finality was never substituted for it.
+  assert.equal((await repository.readChainTransactionAttempt(cycleId, 'outbound', approvalRequestDigest)).attempt.state, 'FINALIZED');
   assert.ok(leaseChecks > 0, 'the reconciliation facade fences durable reads and writes with the active lease');
 
   const replay = await driver.reconcile(context);
