@@ -48,7 +48,7 @@ test("provider failure has no stale or showcase fallback", async () => {
   const { fetcher } = upstream({ "/api/status": new Error("timeout") });
   const response = await handlePackCatalog(request("/api/packs"), fetcher); assert.equal(response.status, 503);
   const body = await response.json(); assert.equal(body.fetchedAt, null); assert.equal(body.packs, undefined); assert.equal(body.cards, undefined);
-  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "network");
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "status_fetch_reject_other");
   assert.equal((await handlePackCatalog(new Request("https://hookemon.com/api/packs", { method: "POST" }), fetcher)).status, 405);
 });
 
@@ -74,7 +74,50 @@ test("classifies a timed-out provider request distinctly from a network failure"
   const timeout = new DOMException("The operation was aborted due to timeout", "TimeoutError");
   const { fetcher } = upstream({ "/api/status": timeout });
   const response = await handlePackCatalog(request("/api/packs"), fetcher);
-  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "timeout");
+  assert.equal(response.status, 503); assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "status_fetch_reject_timeout");
+});
+
+test("classifies a request-setup failure (URL/AbortSignal construction) before any fetcher call", async () => {
+  const original = AbortSignal.timeout;
+  AbortSignal.timeout = () => { throw new Error("setup boom"); };
+  try {
+    const { calls, fetcher } = upstream();
+    const response = await handlePackCatalog(request("/api/packs"), fetcher);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "catalogue_request_setup");
+    assert.equal(calls.length, 0);
+  } finally {
+    AbortSignal.timeout = original;
+  }
+});
+
+test("classifies a synchronous throw from calling fetcher(...) distinctly from an awaited rejection", async () => {
+  const { fetcher } = upstream();
+  const response = await handlePackCatalog(request("/api/packs"), (url, init) => {
+    if (new URL(url).pathname === "/api/status") throw new TypeError("boom during invocation");
+    return fetcher(url, init);
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "status_fetch_call_type_error");
+  assert.ok(!JSON.stringify(await response.json()).includes("boom during invocation"));
+});
+
+test("classifies a synchronous illegal-invocation throw from fetcher distinctly from a rejection", async () => {
+  const { fetcher } = upstream();
+  const patched = (url, init) => new URL(url).pathname === "/api/gachas/all"
+    ? (() => { throw new TypeError("Illegal invocation"); })()
+    : fetcher(url, init);
+  const response = await handlePackCatalog(request("/api/packs"), patched);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "catalogue_fetch_call_illegal_invocation");
+});
+
+test("classifies an asynchronously rejected TypeError distinctly from a synchronous throw", async () => {
+  const { fetcher } = upstream({ "/api/gachas/all": new TypeError("some other transport failure") });
+  const response = await handlePackCatalog(request("/api/packs"), fetcher);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("x-pack-catalog-diagnostic"), "catalogue_fetch_reject_type_error");
+  assert.ok(!JSON.stringify(await response.json()).includes("some other transport failure"));
 });
 
 test("classifies a non-JSON provider body distinctly from a schema rejection", async () => {
