@@ -42,8 +42,11 @@ import {
   reconcileLiveBuyback,
 } from '../../src/app/stages/buyback.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
+import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { MAXIMUM_PACK_BATCH_SIZE, createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
+
+const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 
 const CYCLE_ID = 'cycle-collector-lifecycle';
 const CHAIN_ID = 'solana-mainnet';
@@ -421,6 +424,89 @@ test('mutatePurchase refuses the provisional authority before requesting a fresh
   assert.equal(cycleRepository.batchState.purchase, undefined);
 });
 
+test('mutatePurchase admits the exact Node-test-profile capability to reach provider generation', async () => {
+  const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const cycleRepository = repository();
+  let generateCalls = 0;
+  const collectorCrypt = { async generateYoloPacks() { generateCalls += 1; throw new Error('reached provider generation'); } };
+  const rpc = rpcClient({ entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }] });
+
+  await assert.rejects(
+    () => mutatePurchase({
+      liveMode: true,
+      adapters: { collectorCrypt, solana: { client: rpc } },
+      signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+      // Reaching generateYoloPacks also requires an admitted unitPurchase amount and a pinned
+      // policy (both otherwise irrelevant to this test, since the provider call throws first).
+      config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy: {} } } }),
+      cycleRepository,
+      context: {
+        cycleId: CYCLE_ID,
+        request: {
+          provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, expectedCardCountPerPack: 1,
+          unitPurchase: { ...settlementAsset(), amountAtomic: '40' },
+        },
+      },
+      preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+    }),
+    /reached provider generation/,
+  );
+  assert.equal(generateCalls, 1);
+});
+
+test('mutatePurchase refuses a structural clone, an arbitrary object, and a serialized capability before any provider call', async () => {
+  for (const badCapability of [{ ...TEST_PROFILE_MUTATION_AUTHORITY }, { anything: true }, 'test-profile']) {
+    const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+    const cycleRepository = repository();
+    let generateCalls = 0;
+    const collectorCrypt = { async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); } };
+    const rpc = rpcClient({ entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }] });
+
+    await assert.rejects(
+      () => mutatePurchase({
+        liveMode: true,
+        adapters: { collectorCrypt, solana: { client: rpc } },
+        signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+        config: baseConfig(),
+        cycleRepository,
+        context: { cycleId: CYCLE_ID, request: { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, expectedCardCountPerPack: 1 } },
+        preflightAuthority: badCapability,
+      }),
+      /fixture authority is invalid/,
+    );
+    assert.equal(generateCalls, 0);
+  }
+});
+
+test('mutatePurchase refuses the exact capability outside the Node test runner', async () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    const source = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+    const cycleRepository = repository();
+    let generateCalls = 0;
+    const collectorCrypt = { async generateYoloPacks() { generateCalls += 1; throw new Error('must not be called'); } };
+    const rpc = rpcClient({ entries: [{ tokenAccount: source, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '100', postAmount: '60', decimals: CIRCLE_USD_DECIMALS }] });
+
+    await assert.rejects(
+      () => mutatePurchase({
+        liveMode: true,
+        adapters: { collectorCrypt, solana: { client: rpc } },
+        signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+        config: baseConfig(),
+        cycleRepository,
+        context: { cycleId: CYCLE_ID, request: { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, expectedCardCountPerPack: 1 } },
+        preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+      }),
+      /available only from the Node test runner/,
+    );
+    assert.equal(generateCalls, 0);
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
+});
+
 test('mutatePurchase reuses an already-recorded batch and returns without ever requesting live-mutation authority', async () => {
   const cycleRepository = repository({
     batches: { purchase: { requestedAtMs: 1_000, packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1, packType: null }] } },
@@ -553,6 +639,72 @@ test('mutateOpen refuses the provisional authority before opening any purchased 
     /active frozen interface authority is invalid/,
   );
   assert.equal(openCalls, 0);
+});
+
+test('mutateOpen admits the exact Node-test-profile capability to reach the provider open call', async () => {
+  const cycleRepository = repository({
+    stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+  });
+  let openCalls = 0;
+  await assert.rejects(
+    () => mutateOpen({
+      liveMode: true,
+      adapters: { collectorCrypt: { async openPack() { openCalls += 1; throw new Error('reached provider open'); } } },
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+      preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+    }),
+    /reached provider open/,
+  );
+  assert.equal(openCalls, 1);
+});
+
+test('mutateOpen refuses a structural clone, an arbitrary object, and a serialized capability before opening any pack', async () => {
+  for (const badCapability of [{ ...TEST_PROFILE_MUTATION_AUTHORITY }, { anything: true }, 'test-profile']) {
+    const cycleRepository = repository({
+      stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+    });
+    let openCalls = 0;
+    await assert.rejects(
+      () => mutateOpen({
+        liveMode: true,
+        adapters: { collectorCrypt: { async openPack() { openCalls += 1; throw new Error('must not be called'); } } },
+        config: baseConfig(),
+        cycleRepository,
+        context: { cycleId: CYCLE_ID },
+        preflightAuthority: badCapability,
+      }),
+      /fixture authority is invalid/,
+    );
+    assert.equal(openCalls, 0);
+  }
+});
+
+test('mutateOpen refuses the exact capability outside the Node test runner', async () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    const cycleRepository = repository({
+      stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+    });
+    let openCalls = 0;
+    await assert.rejects(
+      () => mutateOpen({
+        liveMode: true,
+        adapters: { collectorCrypt: { async openPack() { openCalls += 1; throw new Error('must not be called'); } } },
+        config: baseConfig(),
+        cycleRepository,
+        context: { cycleId: CYCLE_ID },
+        preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+      }),
+      /available only from the Node test runner/,
+    );
+    assert.equal(openCalls, 0);
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
 });
 
 test('reconcileLiveOpen resolves an opened pack from memo-bound status and finalized mint derivation', async () => {
@@ -730,6 +882,81 @@ test('mutateBuyback marks a pack unknown (not held) when the provisional authori
   assert.equal(evidence.packs[0].memo, MEMO);
   assert.equal(cycleRepository.held.length, 0);
   assert.equal(buybackCalls, 0);
+});
+
+test('mutateBuyback admits the exact Node-test-profile capability to reach the provider buyback call', async () => {
+  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { buybackCalls += 1; throw new Error('reached provider buyback'); },
+  };
+  // A thrown provider error inside sellPack's own try/catch resolves to "unknown" rather than a
+  // rejection, exactly like the (otherwise-denied) provisional-authority case above -- what this
+  // proves is that the provider was actually reached, via the incremented counter.
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: {},
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'unknown');
+  assert.equal(buybackCalls, 1);
+});
+
+test('mutateBuyback refuses a structural clone, an arbitrary object, and a serialized capability before any provider call', async () => {
+  for (const badCapability of [{ ...TEST_PROFILE_MUTATION_AUTHORITY }, { anything: true }, 'test-profile']) {
+    const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+    const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+    let buybackCalls = 0;
+    const collectorCrypt = {
+      async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+      async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+    };
+    const evidence = await mutateBuyback({
+      liveMode: true,
+      adapters: { collectorCrypt, solana: { client: rpc } },
+      signerClient: {},
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+      preflightAuthority: badCapability,
+    });
+    assert.equal(evidence.packs[0].decision, 'unknown');
+    assert.equal(buybackCalls, 0);
+  }
+});
+
+test('mutateBuyback refuses the exact capability outside the Node test runner', async () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+    const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+    let buybackCalls = 0;
+    const collectorCrypt = {
+      async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+      async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+    };
+    const evidence = await mutateBuyback({
+      liveMode: true,
+      adapters: { collectorCrypt, solana: { client: rpc } },
+      signerClient: {},
+      config: baseConfig(),
+      cycleRepository,
+      context: { cycleId: CYCLE_ID },
+      preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+    });
+    assert.equal(evidence.packs[0].decision, 'unknown');
+    assert.equal(buybackCalls, 0);
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
 });
 
 test('reconcileLiveBuyback confirms proceeds for a submitted sale and records the summed custody ledger', async () => {
