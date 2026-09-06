@@ -378,6 +378,9 @@ function buildAdapters(config) {
       ? null
       : createRelayClient({ baseUrl: config.relay.baseUrl, apiKey: config.relay.apiKey ?? undefined });
   const robinhoodClient = liveCollectorOnly ? null : createRobinhoodClient({ rpcUrl: config.robinhood.rpcUrl });
+  const secondaryLogClient = liveCollectorOnly || config.robinhood.archiveRpcUrl === null || config.robinhood.archiveRpcUrl === undefined
+    ? null
+    : createRobinhoodClient({ rpcUrl: config.robinhood.archiveRpcUrl });
   const solanaClient = createSolanaRpcClient({ rpcUrl: config.solana.rpcUrl });
   const historicalEvidenceClient = injectedEvidenceClient ?? archiveEvidenceClientFromConfig(config);
 
@@ -386,6 +389,7 @@ function buildAdapters(config) {
     relay,
     robinhood: {
       client: robinhoodClient,
+      ...(secondaryLogClient === null ? {} : { secondaryLogClient }),
       ...(historicalEvidenceClient === null ? {} : { historicalEvidenceClient }),
     },
     solana: { client: solanaClient },
