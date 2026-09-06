@@ -85,20 +85,20 @@
     {
       "system": "Relay quote",
       "failureClass": "expired-quote",
-      "expectedTerminalState": null,
+      "expectedTerminalState": "HELD_UNAVAILABLE",
       "expectedAttemptState": null,
-      "expectedNextStage": "refresh-after-readmission",
+      "expectedNextStage": "owner-decision",
       "owningWp": "WP07",
-      "test": "OPEN FACT (WP07): evidence=packages/adapters/test/app/stage-driver.test.mjs:2012; resolution=implement a policy/admission-boundary quote-refresh that proves no signed or broadcast attempt exists before atomically admitting one replacement quote for the same claimed principal; verified alternative=the current build retries the same immutable expired quote under generic scheduler outage backoff, which makes no progress but also creates no effect"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired Relay quote before any request or broadcast"
     },
     {
       "system": "Chain transaction",
       "failureClass": "expired-blockhash",
-      "expectedTerminalState": null,
+      "expectedTerminalState": "HELD_UNAVAILABLE",
       "expectedAttemptState": "BROADCAST",
-      "expectedNextStage": "reconcile-then-replace",
+      "expectedNextStage": "owner-decision",
       "owningWp": "WP08a",
-      "test": "OPEN FACT (WP08a): evidence=packages/adapters/test/app/stage-driver.test.mjs:2155; resolution=reconcile the original broadcast signature to finalized or to canonical expired-and-unlanded proof, then create exactly one linked replacement attempt with a fresh blockhash while retaining the original signed bytes and signature permanently; verified alternative=the current build keeps the attempt BROADCAST and observation-only, returning pending without a second effect"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired return blockhash while retaining a broadcast attempt after reopen"
     },
     {
       "system": "EVM transaction",
@@ -121,11 +121,11 @@
     {
       "system": "Wallet lease",
       "failureClass": "lost-lease",
-      "expectedTerminalState": null,
+      "expectedTerminalState": "HELD_UNAVAILABLE",
       "expectedAttemptState": "NOT_SENT",
-      "expectedNextStage": "retry-same-request-under-new-lease",
+      "expectedNextStage": "owner-decision",
       "owningWp": "WP07",
-      "test": "OPEN FACT (WP07): evidence=packages/adapters/test/app/stage-driver.test.mjs:2058; resolution=let a newly fenced owner retry the identical prepared request digest exactly once, and reclassify capability-boundary loss as SENT_UNKNOWN for reconciliation instead of retry; verified alternative=the current build records NOT_SENT with zero effect and lets the scheduler reacquire the lease on a later run without an automatic same-digest retry"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease before a provider effect and retains a NOT_SENT retry record"
     },
     {
       "system": "Repository recovery",
@@ -238,11 +238,11 @@
     {
       "system": "External signer",
       "failureClass": "keychain-interaction",
-      "expectedTerminalState": null,
+      "expectedTerminalState": "HELD_UNAVAILABLE",
       "expectedAttemptState": "NOT_SENT",
-      "expectedNextStage": "retry-after-signer-readiness",
+      "expectedNextStage": "owner-decision",
       "owningWp": "WP08a",
-      "test": "OPEN FACT (WP08a): evidence=packages/adapters/test/app/stage-driver.test.mjs:1950; resolution=persist a durable redacted signer-unavailable reason and next retry time, probe the same approved signer identity after bounded backoff, then retry the identical request once readiness returns; verified alternative=the current build records a redacted NOT_SENT denial while the scheduler applies generic outage backoff under a TICK_FAILED reason that is not durable or UI-visible after restart"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a keychain interaction denial with redacted OS text before any broadcast"
     },
     {
       "system": "Standing authority",

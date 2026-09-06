@@ -41,22 +41,38 @@ Test: packages/adapters/test/app/stage-driver.test.mjs — holds a keychain inte
 Alarm reason/code: OPEN FACT (WP08a): no dedicated alert code is emitted for a signing error.
 Resume command: none supported; restore signer readiness before a new signature is prepared.
 
-## Proposed revision 66 (draft, pending owner approval)
+## Proposed revision 66 (not implemented; not canonical)
 
-`transient-recovery-contract-review.md` classifies a pre-signature Keychain
-denial or timeout as proven-pre-effect-transient: no broadcast occurred, so an
-owner decision is not required to make progress. The draft proposes
-`terminal=null`, `attempt=NOT_SENT`, `next=retry-after-signer-readiness`:
-persist a bounded, redacted signer-unavailable reason and next retry time,
-probe the same approved signer identity after bounded backoff, then retry the
-identical request once readiness returns. This never exports a key,
-substitutes a signer, or creates a new request; if a signature might have been
-returned, the attempt stays in the effect-ambiguous class and reconciles the
-durable chain attempt instead of retrying.
+`decisions/ADR-0025-bounded-transient-recovery-classification.md` splits this
+single canonical cell into two proposed cases that must not share one tuple,
+because a timeout cannot prove a signature was not returned the way a
+synchronous denial can:
 
-OPEN FACT (WP08a): no implementation exists yet; the current build (evidenced
-above) records a redacted `NOT_SENT` denial while the scheduler treats the
-thrown error as generic `TICK_FAILED` with 5s-to-300s outage backoff, and the
-specific reason is not durable or UI-visible after restart. This section is a
-draft citation only — do not resume a held cycle against it until the revision
-is approved and implemented.
+- **Provable denial before any signature could exist**
+  (proven-pre-effect-transient): no broadcast occurred, so an owner decision
+  is not required to make progress. Proposed target: `terminal=null`,
+  `attempt=NOT_SENT`, `next=retry-after-signer-readiness` — persist a
+  bounded, redacted signer-unavailable reason and next retry time, probe the
+  same approved signer identity after bounded backoff, then retry the
+  identical request once readiness returns. This never exports a key,
+  substitutes a signer, or creates a new request.
+- **Timeout, or any outcome that cannot prove no signature was returned**
+  (effect-ambiguous, new proposed cell
+  `External signer:keychain-interaction-timeout`): a signature might have
+  been produced. Proposed target: `terminal=null`, `attempt=NOT_SENT`,
+  `next=reconcile-before-retry` — observation-only, no new signature or
+  provider mutation until canonical reconciliation resolves the durable chain
+  attempt.
+
+No implementation exists yet for either case, and the current build does not
+distinguish them; the current, canonical control above (recorded unchanged in
+`docs/audit/2026-09-04/failure-matrix.json`) records a redacted `NOT_SENT`
+denial for both while the scheduler treats the thrown error as generic
+`TICK_FAILED` with 5s-to-300s outage backoff, and the specific reason is not
+durable or UI-visible after restart. Both proposed rows are recorded in the
+non-canonical
+`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`,
+not in the canonical matrix. This section is a draft citation only — do not
+resume a held cycle against it until the revision is owner-approved through
+`gates/spec.json`'s `S5` item and this specific behavior is implemented and
+tested.

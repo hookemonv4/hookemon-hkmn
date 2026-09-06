@@ -33,20 +33,26 @@ Test: packages/adapters/test/app/stage-driver.test.mjs — holds an expired Rela
 Alarm reason/code: OPEN FACT (WP07): no dedicated alert code is emitted for quote expiry.
 Resume command: none supported; an approved reconciliation must resolve the original held cycle first.
 
-## Proposed revision 66 (draft, pending owner approval)
+## Proposed revision 66 (not implemented; not canonical)
 
-`transient-recovery-contract-review.md` classifies a pre-request, pre-signature
-expired quote as proven-pre-effect-transient, not semantic-invalid: no provider
-or chain attempt exists, so an owner decision is not required to make
-progress. The draft proposes `terminal=null`, `attempt=null`,
-`next=refresh-after-readmission`: the repository persists the expired quote's
-identity and deadline, and only after re-proving no signed or broadcast
-attempt exists does policy/admission atomically select one replacement quote
-for the same claimed principal, re-running full admission and ceilings. A
-quote is never silently substituted once signed bytes exist for it.
+`decisions/ADR-0025-bounded-transient-recovery-classification.md` classifies a
+pre-request, pre-signature expired quote as proven-pre-effect-transient, not
+semantic-invalid: no provider or chain attempt exists, so an owner decision is
+not required to make progress. The proposed target is `terminal=null`,
+`attempt=null`, `next=refresh-after-readmission`: the repository persists the
+expired quote's identity and deadline, and only after re-proving no signed or
+broadcast attempt exists does policy/admission atomically select one
+replacement quote for the same claimed principal, re-running full admission
+and ceilings. A quote is never silently substituted once signed bytes exist
+for it.
 
-OPEN FACT (WP07): no implementation exists yet; the current build (evidenced
-above) instead retries the same immutable expired quote under generic
-scheduler outage backoff, which cannot make progress but also creates no
-effect. This section is a draft citation only — do not resume a held cycle
-against it until the revision is approved and implemented.
+No implementation exists yet; the current, canonical control above (recorded
+unchanged in `docs/audit/2026-09-04/failure-matrix.json`) instead retries the
+same immutable expired quote under generic scheduler outage backoff, which
+cannot make progress but also creates no effect. The proposed row is recorded
+in the non-canonical
+`docs/audit/2026-09-04/failure-matrix-revision-66-transient-proposal-DRAFT.json`,
+not in the canonical matrix. This section is a draft citation only — do not
+resume a held cycle against it until the revision is owner-approved through
+`gates/spec.json`'s `S5` item and this specific behavior is implemented and
+tested.
