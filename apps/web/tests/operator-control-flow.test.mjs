@@ -13,6 +13,19 @@ test("keeps German configuration controls separate from canonical decision paylo
   assert.match(source, /Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet/);
   assert.match(source, /command\.type === "update-configuration"/);
   assert.doesNotMatch(source, /abort-active-cycle|cancel-active-cycle/);
+
+  const submitCommandBody = source.slice(
+    source.indexOf("async function submitCommand"),
+    source.indexOf("function saveConfiguration"),
+  );
+  assert.match(
+    submitCommandBody,
+    /await Promise\.all\(\[\s*loadBootstrap[\s\S]*?\]\);\s*setMessage\(successMessage\);/,
+  );
+  assert.match(
+    submitCommandBody,
+    /await loadBootstrap\(\{ replaceForm: false \}\);\s*setMessage\("Entscheidung wurde nicht angenommen\."\);/,
+  );
 });
 
 test("uses the authenticated operator proxy instead of a browser-side control service", async () => {
