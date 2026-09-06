@@ -4,6 +4,7 @@ export type PublicDashboardEnvironment = {
   PUBLIC_DASHBOARD_PROFILE?: string;
   PUBLIC_CYCLE_STATUS_URL?: string;
   PUBLIC_COMMUNITY_SNAPSHOT_URL?: string;
+  PUBLIC_CYCLE_HISTORY_URL?: string;
 };
 
 export function readPublicDashboardConfig(env: PublicDashboardEnvironment) {
@@ -16,10 +17,17 @@ export function readPublicDashboardConfig(env: PublicDashboardEnvironment) {
     env.PUBLIC_COMMUNITY_SNAPSHOT_URL,
     "/public/api/community-dashboard",
   );
-  if (cycleStatusUrl.origin !== communitySnapshotUrl.origin) {
+  const cycleHistoryUrl = exactPublicUrl(
+    env.PUBLIC_CYCLE_HISTORY_URL,
+    "/public/api/cycle-history",
+  );
+  if (
+    cycleStatusUrl.origin !== communitySnapshotUrl.origin ||
+    cycleStatusUrl.origin !== cycleHistoryUrl.origin
+  ) {
     throw new TypeError("PUBLIC_DASHBOARD_UPSTREAM_MISMATCH");
   }
-  return { profile, cycleStatusUrl, communitySnapshotUrl };
+  return { profile, cycleStatusUrl, communitySnapshotUrl, cycleHistoryUrl };
 }
 
 function exactPublicUrl(value: string | undefined, expectedPath: string): URL {

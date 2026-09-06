@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -21,7 +22,12 @@ import {
   type PublicCommunitySnapshot,
 } from "../lib/public-community-snapshot";
 import { isPublicCardEvent, presentCardEvent } from "../lib/public-card-event";
-import { dashboardExplorerHref } from "../lib/public-dashboard-profile";
+import { dashboardExplorerHref, type DashboardProfileId } from "../lib/public-dashboard-profile";
+import {
+  normalizePublicCycleHistory,
+  type PublicCycleHistory,
+  type PublicCycleHistoryItem,
+} from "../lib/public-cycle-history";
 import {
   buildPublicCycleProcess,
   hasLatestPayoutFacts,
@@ -288,6 +294,91 @@ export function PublicDeploymentDisclosure() {
     return <span>Testnet prototype only. Displayed assets have no production value.</span>;
   }
   return <span>Network status is loading. No deployment claim is being made.</span>;
+}
+
+type HistoryFeedState =
+  | { status: "loading" }
+  | { status: "unavailable" }
+  | { status: "ready"; page: PublicCycleHistory };
+
+/**
+ * Its own independent fetch against /api/cycle-history, deliberately not tied to the 5s
+ * status/community poller above: a cursor-paginated "load more" list must never be reset out
+ * from under the reader by an unrelated background refresh. A request-generation counter discards
+ * any response that arrives after a newer request has already started (e.g. a fast double-click,
+ * or the profile becoming known mid-flight), so responses can never apply out of order.
+ */
+function PublicCycleHistorySection({ profile }: { profile: DashboardProfileId | null }) {
+  const [feed, setFeed] = useState<HistoryFeedState>({ status: "loading" });
+  const [items, setItems] = useState<PublicCycleHistoryItem[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const generationRef = useRef(0);
+
+  const load = useCallback(async (cursor: string | null, append: boolean) => {
+    if (profile === null) return;
+    const generation = ++generationRef.current;
+    if (append) setLoadingMore(true);
+    try {
+      const url = new URL("/api/cycle-history", window.location.origin);
+      url.searchParams.set("limit", "10");
+      if (cursor !== null) url.searchParams.set("cursor", cursor);
+      const response = await fetch(url, { cache: "no-store", credentials: "omit" });
+      if (!response.ok) throw new Error("PUBLIC_CYCLE_HISTORY_UNAVAILABLE");
+      const page = normalizePublicCycleHistory(await response.json(), profile);
+      if (generationRef.current !== generation) return;
+      setFeed({ status: "ready", page });
+      setItems((current) => (append ? [...current, ...page.items] : page.items));
+    } catch {
+      if (generationRef.current !== generation) return;
+      if (!append) setFeed({ status: "unavailable" });
+    } finally {
+      if (generationRef.current === generation) setLoadingMore(false);
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    if (profile === null) return;
+    const initialLoad = window.setTimeout(() => void load(null, false), 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [profile, load]);
+
+  const page = feed.status === "ready" ? feed.page : null;
+
+  return (
+    <section aria-labelledby="cycle-history-title" className={styles.communityFreshness}>
+      <span id="cycle-history-title">Recent completed cycles</span>
+      {feed.status === "loading" ? <small>Loading verified history…</small> : null}
+      {feed.status === "unavailable" || (page && !page.historyComplete) ? (
+        <small>Cycle history unavailable: awaiting a verified terminal timestamp for every cycle.</small>
+      ) : null}
+      {page?.historyComplete ? (
+        items.length ? (
+          <nav className={styles.transactions} aria-label="Recent completed cycles">
+            {items.map((item) => (
+              <span key={item.cycleId}>
+                {item.cycleId}
+                <small>
+                  {humanize(item.status)} · {formatTimestamp(item.terminalAt)}
+                </small>
+              </span>
+            ))}
+          </nav>
+        ) : (
+          <small>No completed cycles yet.</small>
+        )
+      ) : null}
+      {page?.historyComplete && page.nextCursor !== null ? (
+        <button
+          className={styles.moreButton}
+          type="button"
+          disabled={loadingMore}
+          onClick={() => void load(page.nextCursor, true)}
+        >
+          {loadingMore ? "Loading…" : "Load more cycles"}
+        </button>
+      ) : null}
+    </section>
+  );
 }
 
 export default function PublicCycleTracker() {
@@ -585,6 +676,8 @@ export default function PublicCycleTracker() {
             <small>Historical totals are still being backfilled.</small>
           ) : null}
         </div>
+
+        <PublicCycleHistorySection key={environment.profile ?? "loading"} profile={environment.profile} />
 
         <div className={`live-cycle-screen ${styles.trackerGrid}`}>
           <article className={styles.actionsPanel}>

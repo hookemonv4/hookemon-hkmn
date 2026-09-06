@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readDashboardProfile } from '../lib/public-dashboard-profile.ts';
 import { normalizePublicCycleStatus } from '../lib/public-cycle-status.ts';
 import { normalizePublicCommunitySnapshot } from '../lib/public-community-snapshot.ts';
-import { dashboardTiming, formatMicroUsdg, historyPresentation, humanizeSchedulerReason, latestPayout, payoutPresentation, presentCard, processStep, safeCardImage, validateDashboardPair } from '../public/comic-production/dashboard.mjs';
+import { dashboardTiming, formatMicroUsdg, historyPresentation, humanizeSchedulerReason, latestPayout, normalizePublicCycleHistory, payoutPresentation, presentCard, processStep, safeCardImage, validateDashboardPair } from '../public/comic-production/dashboard.mjs';
 
 const generatedAt = '2026-09-04T12:00:00.000Z';
 const nextCycleAt = '2026-09-04T12:20:00.000Z';
@@ -362,6 +362,49 @@ test('dashboardTiming counts down to nextReconcileAt when no pendingReason block
   const timing = dashboardTiming(validateDashboardPair(canonical.status, canonical.community), now);
   assert.equal(timing.countdown, '00:05');
   assert.match(timing.note, /^Reconciling/);
+});
+
+function historyPage(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    profile: 'testnet',
+    network,
+    generatedAt: '2026-09-06T12:00:00.000Z',
+    asOf: '2026-09-06T11:59:55.000Z',
+    historyComplete: true,
+    items: [
+      { cycleId: 'cycle-2', status: 'complete', terminalAt: '2026-09-06T11:00:00.000Z', updatedAt: '2026-09-06T11:00:01.000Z' },
+      { cycleId: 'cycle-1', status: 'complete', terminalAt: '2026-09-06T10:00:00.000Z', updatedAt: '2026-09-06T10:00:01.000Z' },
+    ],
+    nextCursor: null,
+    ...overrides,
+  };
+}
+
+test('standalone dashboard.mjs normalizePublicCycleHistory accepts a real page and rejects out-of-order or fail-open shapes', () => {
+  const page = historyPage();
+  assert.deepEqual(normalizePublicCycleHistory(page), page);
+  assert.deepEqual(normalizePublicCycleHistory(page, 'testnet'), page);
+  assert.throws(() => normalizePublicCycleHistory(page, 'mainnet'), /PUBLIC_CYCLE_HISTORY_INVALID/);
+
+  const outOfOrder = historyPage({
+    items: [
+      { cycleId: 'cycle-1', status: 'complete', terminalAt: '2026-09-06T10:00:00.000Z', updatedAt: null },
+      { cycleId: 'cycle-2', status: 'complete', terminalAt: '2026-09-06T11:00:00.000Z', updatedAt: null },
+    ],
+  });
+  assert.throws(() => normalizePublicCycleHistory(outOfOrder), /PUBLIC_CYCLE_HISTORY_INVALID/);
+
+  const incompleteWithItems = historyPage({ historyComplete: false });
+  assert.throws(() => normalizePublicCycleHistory(incompleteWithItems), /PUBLIC_CYCLE_HISTORY_INVALID/);
+
+  const incompleteEmpty = historyPage({ historyComplete: false, items: [], nextCursor: null });
+  assert.deepEqual(normalizePublicCycleHistory(incompleteEmpty), incompleteEmpty);
+
+  const pendingTerminal = historyPage({
+    items: [{ cycleId: 'cycle-3', status: 'awaiting-terminal-timestamp', terminalAt: null, updatedAt: null }],
+  });
+  assert.equal(normalizePublicCycleHistory(pendingTerminal).items[0].terminalAt, null);
 });
 
 test('presentCard never shows a not-yet-finalized card event as if it had proceeds', () => {

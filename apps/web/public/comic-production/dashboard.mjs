@@ -198,6 +198,46 @@ const identities = {
   mainnet: 'robinhood|4663|Robinhood Chain|mainnet-beta|5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d|Solana',
 };
 
+// GET /public/api/cycle-history's contract, schemaVersion 1 (packages/dashboard/src/contracts/
+// public-cycle-history.mjs). A cycle whose terminalAt is not yet a verified timestamp is `null`,
+// never ordered against its neighbors as if it were -- itemOrderDescends treats a null terminalAt
+// as unorderable, matching the producer's own fail-closed pagination (a source set missing even
+// one terminalAtMs returns items:[]/historyComplete:false entirely, never a partial reorder).
+export const MAX_HISTORY_PAGE_SIZE = 20;
+const historyItemShape = record({
+  cycleId: text, status: text, terminalAt: nullable(timestamp), updatedAt: nullable(timestamp),
+});
+const historyItemOrderDescends = (previous, current) => {
+  if (previous.terminalAt === null || current.terminalAt === null) return true;
+  const previousMs = Date.parse(previous.terminalAt), currentMs = Date.parse(current.terminalAt);
+  return previousMs !== currentMs ? previousMs > currentMs : previous.cycleId.localeCompare(current.cycleId) < 0;
+};
+function readCycleHistoryShape(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value.schemaVersion !== 1) return false;
+  const shape = record({
+    schemaVersion: oneOf(1), profile: oneOf('testnet', 'mainnet'), network,
+    generatedAt: timestamp, asOf: timestamp, historyComplete: oneOf(true, false),
+    items: list(historyItemShape, MAX_HISTORY_PAGE_SIZE), nextCursor: nullable(text),
+  });
+  if (!shape(value)) return false;
+  if (Date.parse(value.asOf) > Date.parse(value.generatedAt)) return false;
+  for (let index = 1; index < value.items.length; index += 1) {
+    if (!historyItemOrderDescends(value.items[index - 1], value.items[index])) return false;
+  }
+  if (!value.historyComplete && (value.items.length !== 0 || value.nextCursor !== null)) return false;
+  return true;
+}
+export function normalizePublicCycleHistory(value, expectedProfile) {
+  if (!readCycleHistoryShape(value) || networkIdentity(value.network) !== identities[value.profile]) {
+    throw new TypeError('PUBLIC_CYCLE_HISTORY_INVALID');
+  }
+  if (expectedProfile !== undefined && value.profile !== expectedProfile) {
+    throw new TypeError('PUBLIC_CYCLE_HISTORY_INVALID');
+  }
+  return value;
+}
+
 export function validateDashboardPair(status, community) {
   if (!readStatusShape(status) || !readCommunityShape(community)
     || status.profile !== community.profile || community.badge !== status.profile.toUpperCase()
@@ -491,8 +531,79 @@ export function startDashboard(doc = document) {
       renderTiming(); tickTimer = setInterval(renderTiming, 1000); void poll();
     }
   };
+
+  // The cycle-history list is deliberately its own independent fetch loop, never reset by the
+  // main status/community poll above: a paginated "load more" list must not be wiped out from
+  // under the reader by an unrelated background refresh. A request-generation counter discards
+  // any response that arrives after a newer request has already started (e.g. a fast double-click
+  // on "Load more"), so responses can never apply out of order.
+  let historyItems = [], historyGeneration = 0, historyLoadingMore = false;
+  const renderHistory = (page, unavailable) => {
+    const statusNode = doc.getElementById('cycleHistoryStatus');
+    const listNode = doc.getElementById('cycleHistoryList');
+    const moreButton = doc.getElementById('cycleHistoryMore');
+    if (!listNode) return;
+    if (unavailable || (page && !page.historyComplete)) {
+      if (statusNode) statusNode.textContent = 'Cycle history unavailable: awaiting a verified terminal timestamp for every cycle.';
+      listNode.replaceChildren();
+      listNode.append(Object.assign(doc.createElement('p'), { className: 'empty-pulls', textContent: 'Cycle history unavailable.' }));
+      if (moreButton) moreButton.hidden = true;
+      return;
+    }
+    if (!page) return;
+    if (statusNode) statusNode.textContent = 'Verified cycle history';
+    listNode.replaceChildren();
+    if (!historyItems.length) {
+      listNode.append(Object.assign(doc.createElement('p'), { className: 'empty-pulls', textContent: 'No completed cycles yet.' }));
+    } else {
+      for (const item of historyItems) {
+        const article = doc.createElement('article');
+        article.append(
+          Object.assign(doc.createElement('h3'), { textContent: item.cycleId }),
+          Object.assign(doc.createElement('p'), {
+            textContent: `${item.status} · ${item.terminalAt ? formatTime(item.terminalAt) : 'Awaiting terminal timestamp'}`,
+          }),
+        );
+        listNode.append(article);
+      }
+    }
+    if (moreButton) {
+      moreButton.hidden = page.nextCursor === null;
+      moreButton.textContent = historyLoadingMore ? 'Loading…' : 'Load more cycles';
+      moreButton.disabled = historyLoadingMore;
+    }
+  };
+  const loadHistory = async (cursor, append) => {
+    const generation = ++historyGeneration;
+    if (append) { historyLoadingMore = true; renderHistory(lastHistoryPage, false); }
+    try {
+      const url = new URL('/api/cycle-history', location.origin);
+      url.searchParams.set('limit', '10');
+      if (cursor !== null) url.searchParams.set('cursor', cursor);
+      const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+      if (!response.ok) throw new Error('PUBLIC_CYCLE_HISTORY_UNAVAILABLE');
+      const page = normalizePublicCycleHistory(await response.json());
+      if (historyGeneration !== generation) return;
+      historyItems = append ? [...historyItems, ...page.items] : page.items;
+      lastHistoryPage = page;
+      historyLoadingMore = false;
+      renderHistory(page, false);
+    } catch {
+      if (historyGeneration !== generation) return;
+      historyLoadingMore = false;
+      if (!append) renderHistory(null, true);
+    }
+  };
+  let lastHistoryPage = null;
+  const historyMoreButton = doc.getElementById('cycleHistoryMore');
+  if (historyMoreButton) {
+    historyMoreButton.addEventListener('click', () => {
+      if (lastHistoryPage?.nextCursor) void loadHistory(lastHistoryPage.nextCursor, true);
+    });
+  }
+
   doc.addEventListener('visibilitychange', visibilityChanged);
-  render(); visibilityChanged();
+  render(); visibilityChanged(); void loadHistory(null, false);
   return () => { stopped = true; visibilityChanged(); doc.removeEventListener('visibilitychange', visibilityChanged); };
 }
 

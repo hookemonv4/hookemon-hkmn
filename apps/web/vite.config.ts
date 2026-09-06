@@ -7,6 +7,7 @@ const requiredWorkerSecrets = [
   "PUBLIC_DASHBOARD_PROFILE",
   "PUBLIC_CYCLE_STATUS_URL",
   "PUBLIC_COMMUNITY_SNAPSHOT_URL",
+  "PUBLIC_CYCLE_HISTORY_URL",
 ];
 
 const localBindingConfig = {

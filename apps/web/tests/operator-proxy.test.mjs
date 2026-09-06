@@ -11,6 +11,7 @@ const REQUIRED_WORKER_SECRETS = [
   "PUBLIC_DASHBOARD_PROFILE",
   "PUBLIC_CYCLE_STATUS_URL",
   "PUBLIC_COMMUNITY_SNAPSHOT_URL",
+  "PUBLIC_CYCLE_HISTORY_URL",
 ];
 const FORBIDDEN_EXECUTION_IMPORT = /\b(?:from\s*|import\s*\()\s*["'][^"']*(?:collector-executor|transaction|signer|scheduler|wallet|mainnet|rpc)[^"']*["']/i;
 

@@ -289,7 +289,7 @@ test("renders profile-aware community totals beside the live cycle", async () =>
   ]);
 
   assert.equal((source.match(/fetch\("\/api\/community-dashboard"/g) ?? []).length, 1);
-  assert.equal((source.match(/credentials:\s*"omit"/g) ?? []).length, 2);
+  assert.equal((source.match(/credentials:\s*"omit"/g) ?? []).length, 3);
   assert.match(source, /normalizePublicCommunitySnapshot/);
   assert.match(source, /resolveDashboardPresentation/);
   assert.match(source, /dashboardCommunity\?\.badge/);
@@ -309,6 +309,17 @@ test("renders profile-aware community totals beside the live cycle", async () =>
   assert.match(source, /Last pool observation/);
   assert.match(source, /Last verified snapshot/);
   assert.match(source, /latestDashboardCards\(cycle, dashboardCommunity\)/);
+  assert.match(source, /Recent completed cycles/);
+  assert.match(source, /normalizePublicCycleHistory/);
+  assert.match(source, /url\.searchParams\.set\("limit", "10"\)/);
+  assert.match(source, /Cycle history unavailable: awaiting a verified terminal timestamp/);
+  assert.match(source, /Load more cycles/);
+  // Out-of-order guard: a stale in-flight request (e.g. a fast double-click on "Load more") must
+  // never overwrite state written by a newer one.
+  assert.match(source, /generationRef\.current !== generation/);
+  // The history poller must stay independent of the 5s status\/community poll effect, so an
+  // unrelated background refresh never resets or duplicates already-loaded pages.
+  assert.doesNotMatch(source, /setItems\(\[\]\)/);
   assert.match(css, /\.testnetBadge/);
   assert.match(css, /\.primaryMetrics/);
   assert.match(css, /\.process/);

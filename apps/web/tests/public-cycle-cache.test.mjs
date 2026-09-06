@@ -51,6 +51,7 @@ test("coalesces concurrent misses and edge-caches only a validated success", asy
     PUBLIC_DASHBOARD_PROFILE: "testnet",
     PUBLIC_CYCLE_STATUS_URL: "https://operator.example/public/api/cycle-status",
     PUBLIC_COMMUNITY_SNAPSHOT_URL: "https://operator.example/public/api/community-dashboard",
+    PUBLIC_CYCLE_HISTORY_URL: "https://operator.example/public/api/cycle-history",
   };
   try {
     const first = proxyPublicCycleStatus(request, env, cache);
@@ -90,6 +91,7 @@ test("never puts failures in the public edge cache", async () => {
         PUBLIC_DASHBOARD_PROFILE: "testnet",
         PUBLIC_CYCLE_STATUS_URL: "https://operator.example/public/api/cycle-status",
         PUBLIC_COMMUNITY_SNAPSHOT_URL: "https://operator.example/public/api/community-dashboard",
+        PUBLIC_CYCLE_HISTORY_URL: "https://operator.example/public/api/cycle-history",
       },
       cache,
     );
@@ -130,6 +132,7 @@ test("isolates cache and in-flight loads by protected profile", async () => {
     ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
     PUBLIC_CYCLE_STATUS_URL: "https://operator.example/public/api/cycle-status",
     PUBLIC_COMMUNITY_SNAPSHOT_URL: "https://operator.example/public/api/community-dashboard",
+    PUBLIC_CYCLE_HISTORY_URL: "https://operator.example/public/api/cycle-history",
   };
   try {
     const testnet = proxyPublicCycleStatus(request, { ...base, PUBLIC_DASHBOARD_PROFILE: "testnet" }, cache);

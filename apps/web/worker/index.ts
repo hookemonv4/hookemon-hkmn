@@ -9,6 +9,7 @@ import {
 } from "./operator-proxy";
 import { proxyPublicCommunitySnapshot } from "./public-community-proxy";
 import { proxyPublicCycleStatus } from "./public-cycle-proxy";
+import { proxyPublicCycleHistory } from "./public-cycle-history-proxy";
 import { publicPageResponse } from "./public-page-routes";
 import { handlePackCatalog } from "./pack-catalog";
 
@@ -197,6 +198,10 @@ const worker = {
     if (url.pathname === "/api/community-dashboard") {
       const cache = (globalThis.caches as (CacheStorage & { default?: Cache }) | undefined)?.default;
       return proxyPublicCommunitySnapshot(request, env, cache);
+    }
+
+    if (url.pathname === "/api/cycle-history") {
+      return proxyPublicCycleHistory(request, env);
     }
 
     if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/") {
