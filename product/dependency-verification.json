@@ -6,7 +6,7 @@
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
     "basePinsSha256": "17d088c34248d17e2820dad373410d9b07ae724409bfe27539d0d9e69e313557",
-    "candidatePinsSha256": "4f0e5d53d8403f4562df2df0ab65a669bbe784b827aa2dd2dbb83275d34e279f",
+    "candidatePinsSha256": "db8df51e4597b0dc4fc4213f9583f8d96b694900ec6479b535f1d55ba2551f50",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
       "blobId": "84a177be870e28535eb9f33c2b381c20da8a4809"
@@ -15,12 +15,12 @@
       {
         "path": ".github/workflows/v4-gates.yml",
         "previousSha256": "df34bc9bd1ecf7d5ac4e34cd1a32e2694124cfbd23786a3b2ae3d65e39a9b374",
-        "sha256": "751b032462deb31ddc93f1c2d93e5cf39283dbaf03ee6c2facf1ca0c05bcc66d"
+        "sha256": "8b378f22361e15873482d8ce6cec96ba7e0f0d5e1b129c9a4aafa0f9b6a148d9"
       },
       {
         "path": "scripts/verify-control-dependencies.mjs",
         "previousSha256": "673dd77d5c0015434b72191e9cb5d190ef15417e701766d779c9c64d5c6cdeff",
-        "sha256": "66d3af290b0a3612466194cc99b6934a301e056e709b8d5ffafab66bcfc6e675"
+        "sha256": "67f17827cc532b739bdf9cf88cec1daa2c663667dc1fdc7f2c85755568c2f9cd"
       }
     ]
   },
