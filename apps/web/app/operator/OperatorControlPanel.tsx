@@ -18,33 +18,37 @@ import type { ActiveCycle, DashboardCard } from "./operator-types";
 import styles from "./operator.module.css";
 
 type Role = "viewer" | "operator";
-type Mode = "standard" | "community";
-type ManualPackOrder = { productId: string; quantity: number };
 
+// The real operator configuration schema (packages/runner/src/config/state-schema.mjs, owned by
+// C/E): a set of allowed pack IDs and one aggregate requested-order count, not a per-pack quantity
+// map. Which specific packs actually get purchased for that count is the automation's own policy
+// decision at execution time -- this UI never invents that allocation.
 type OperatorState = {
   version: number;
   desiredStatus: "active" | "paused";
-  mode: Mode;
-  communityPackIds: string[];
-  manualPackOrders: ManualPackOrder[];
+  allowedPackIds: string[];
+  requestedOrders: number;
   maxBoostersPerCycle: number;
-  cycleIntervalMinutes: number;
+  intervalMinutes: number;
   skipNextCycleSequence: number;
   runNowSequence: number;
   maxUnitPriceMicroUsdg: string | null;
   maxCycleBudgetMicroUsdg: string | null;
   max24HourBudgetMicroUsdg: string | null;
+  liveMode: boolean;
   configurationComplete: boolean;
   executionConnected: boolean;
 };
 
+// The Collector Crypt pack catalog is priced in Solana USDC, a different chain and asset from the
+// EVM USDG bridge/spend caps below -- never compared or summed together as if at parity.
 type Pack = {
   id: string;
   name: string;
-  priceMicroUsdg: string;
-  instantBuybackFloorMicroUsdg?: string;
-  expectedBuybackMicroUsdg?: string;
-  collectorEconomicCostMicroUsdg?: string;
+  priceMicroUsdc: string;
+  instantBuybackFloorMicroUsdc?: string;
+  expectedBuybackMicroUsdc?: string;
+  collectorEconomicCostMicroUsdc?: string;
   available: number;
 };
 
@@ -172,20 +176,20 @@ type DecisionResponse = {
   code?: string;
 };
 
+// Matches DECISION_TYPES in packages/dashboard/src/contracts/operator-contracts.mjs exactly.
+// "skip-next-cycle" was never a real command there (no alias either) -- retired, not sent.
 type Command =
   | { type: "activate" }
   | { type: "pause" }
-  | { type: "skip-next-cycle" }
   | { type: "run-cycle-now" }
   | { type: "reconcile" }
   | {
       type: "update-configuration";
       configuration: {
-        mode: Mode;
-        communityPackIds: string[];
-        manualPackOrders: ManualPackOrder[];
+        intervalMinutes: number;
+        allowedPackIds: string[];
+        requestedOrders: number;
         maxBoostersPerCycle: number;
-        cycleIntervalMinutes: number;
         maxUnitPriceMicroUsdg: string;
         maxCycleBudgetMicroUsdg: string;
         max24HourBudgetMicroUsdg: string;
@@ -193,23 +197,23 @@ type Command =
     };
 
 type FormState = {
-  mode: Mode;
-  communityPackIds: string[];
-  packQuantities: Record<string, string>;
+  allowedPackIds: string[];
+  requestedOrders: string;
   maxBoostersPerCycle: string;
-  cycleIntervalMinutes: string;
+  intervalMinutes: string;
   maxUnitPriceMicroUsdg: string;
   maxCycleBudgetMicroUsdg: string;
   max24HourBudgetMicroUsdg: string;
   note: string;
 };
 
+// intervalMinutes 5..1440 and maxBoostersPerCycle's floor of 1 are the protocol-level bounds from
+// state-schema.mjs itself (not a per-deployment hard cap), so they are safe fixed defaults.
 const EMPTY_FORM: FormState = {
-  mode: "standard",
-  communityPackIds: [],
-  packQuantities: {},
-  maxBoostersPerCycle: "100",
-  cycleIntervalMinutes: "20",
+  allowedPackIds: [],
+  requestedOrders: "0",
+  maxBoostersPerCycle: "1",
+  intervalMinutes: "20",
   maxUnitPriceMicroUsdg: "",
   maxCycleBudgetMicroUsdg: "",
   max24HourBudgetMicroUsdg: "",
@@ -296,17 +300,10 @@ export default function OperatorControlPanel() {
 
   const readOnly = bootstrap?.identity.role !== "operator";
   const controlsDisabled = loading || busy || readOnly || !bootstrap;
-  const catalogPacks = bootstrap?.catalog?.packs ?? [];
-  const reservePreview = computeReservePreview(catalogPacks, form);
   const dashboardPlaceholder = dashboardError ? "Nicht verfügbar" : "Wird geladen…";
   const hasUnsavedChanges = bootstrap
-    ? configurationSnapshotFromForm(form, catalogPacks) !== configurationSnapshotFromState(bootstrap.state)
+    ? configurationSnapshotFromForm(form) !== configurationSnapshotFromState(bootstrap.state)
     : false;
-
-  function quantityFor(packId: string) {
-    const value = Number(form.packQuantities[packId] ?? "0");
-    return Number.isSafeInteger(value) && value > 0 ? value : 0;
-  }
 
   async function submitCommand(command: Command, successMessage: string) {
     if (!bootstrap || controlsDisabled) return;
@@ -347,12 +344,6 @@ export default function OperatorControlPanel() {
 
   function saveConfiguration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const manualPackOrders = form.mode === "community"
-      ? catalogPacks.flatMap((pack) => {
-          const quantity = quantityFor(pack.id);
-          return quantity > 0 ? [{ productId: pack.id, quantity }] : [];
-        })
-      : [];
     let maxUnitPriceMicroUsdg;
     let maxCycleBudgetMicroUsdg;
     let max24HourBudgetMicroUsdg;
@@ -364,15 +355,19 @@ export default function OperatorControlPanel() {
       setError("Bitte alle USDG-Grenzen im deutschen Format eingeben, zum Beispiel 12,50.");
       return;
     }
+    const maxBoostersPerCycle = Number(form.maxBoostersPerCycle);
+    const requestedOrders = Math.min(
+      Math.max(0, Number(form.requestedOrders) || 0),
+      Number.isSafeInteger(maxBoostersPerCycle) ? maxBoostersPerCycle : 0,
+    );
     void submitCommand(
       {
         type: "update-configuration",
         configuration: {
-          mode: form.mode,
-          communityPackIds: manualPackOrders.map((order) => order.productId),
-          manualPackOrders,
-          maxBoostersPerCycle: Number(form.maxBoostersPerCycle),
-          cycleIntervalMinutes: Number(form.cycleIntervalMinutes),
+          intervalMinutes: Number(form.intervalMinutes),
+          allowedPackIds: [...form.allowedPackIds].sort(),
+          requestedOrders,
+          maxBoostersPerCycle,
           maxUnitPriceMicroUsdg,
           maxCycleBudgetMicroUsdg,
           max24HourBudgetMicroUsdg,
@@ -404,10 +399,6 @@ export default function OperatorControlPanel() {
     void submitCommand({ type: "run-cycle-now" }, "Sofortiger Zyklusstart wurde vorgemerkt.");
   }
 
-  function skipNextCycle() {
-    void submitCommand({ type: "skip-next-cycle" }, "Nächster planmäßiger Zyklus wird übersprungen.");
-  }
-
   function reconcile() {
     // The reconcile command re-reads and re-evaluates current repository state; it does not
     // itself trigger a fix or a new transaction (that happens automatically inside the scheduler
@@ -415,24 +406,24 @@ export default function OperatorControlPanel() {
     void submitCommand({ type: "reconcile" }, "Zustand wurde neu gelesen und protokolliert.");
   }
 
-  function setPackQuantity(pack: Pack, rawValue: string) {
-    const digits = rawValue.replace(/\D/g, "");
-    const requested = digits.length === 0 ? 0 : Number(digits);
-    const boosterLimit = Number(form.maxBoostersPerCycle);
-    const maximum = Math.min(
-      pack.available,
-      Number.isSafeInteger(boosterLimit) && boosterLimit > 0 ? boosterLimit : pack.available,
-    );
-    const quantity = Number.isSafeInteger(requested)
-      ? Math.min(Math.max(requested, 0), maximum)
-      : 0;
+  function togglePackAllowed(packId: string) {
     setForm((current) => ({
       ...current,
-      packQuantities: { ...current.packQuantities, [pack.id]: String(quantity) },
-      communityPackIds: quantity > 0
-        ? [...new Set([...current.communityPackIds, pack.id])]
-        : current.communityPackIds.filter((id) => id !== pack.id),
+      allowedPackIds: current.allowedPackIds.includes(packId)
+        ? current.allowedPackIds.filter((id) => id !== packId)
+        : [...current.allowedPackIds, packId].sort(),
     }));
+  }
+
+  function setRequestedOrders(rawValue: string) {
+    const digits = rawValue.replace(/\D/g, "");
+    // Bounded by the form's own maxBoostersPerCycle value, not a stale hardcoded ceiling --
+    // requestedOrders can never exceed the configured per-cycle booster limit.
+    const boosterLimit = Number(form.maxBoostersPerCycle);
+    const maximum = Number.isSafeInteger(boosterLimit) && boosterLimit > 0 ? boosterLimit : 0;
+    const requested = digits.length === 0 ? 0 : Number(digits);
+    const bounded = Number.isSafeInteger(requested) ? Math.min(Math.max(requested, 0), maximum) : 0;
+    setForm((current) => ({ ...current, requestedOrders: String(bounded) }));
   }
 
   return (
@@ -470,7 +461,7 @@ export default function OperatorControlPanel() {
         />
         <StatusCard
           label="Zyklusintervall"
-          value={`${dashboard?.cycleIntervalMinutes ?? bootstrap?.state.cycleIntervalMinutes ?? 20} Minuten`}
+          value={`${dashboard?.cycleIntervalMinutes ?? bootstrap?.state.intervalMinutes ?? 20} Minuten`}
           tone="neutral"
         />
         <StatusCard
@@ -521,12 +512,14 @@ export default function OperatorControlPanel() {
               <CurrentValue label="Zyklus-ID" value={dashboard.activeCycle.cycleId} />
               <CurrentValue label="Status" value={germanStatus(dashboard.activeCycle.status)} />
               <CurrentValue
-                label="Packauswahl"
-                value={dashboard.activeCycle.requestedOrders.length
-                  ? dashboard.activeCycle.requestedOrders
-                    .map((order) => `${order.quantity} × ${order.productId}`)
-                    .join(", ")
-                  : "Automatische Auswahl"}
+                label="Zugelassene Packs"
+                value={dashboard.activeCycle.allowedPackIds.length
+                  ? dashboard.activeCycle.allowedPackIds.join(", ")
+                  : "Keine Packs zugelassen"}
+              />
+              <CurrentValue
+                label="Angefragte Boosterzahl"
+                value={String(dashboard.activeCycle.requestedOrders)}
               />
               <CurrentValue label="Maximale Booster" value={nullableInteger(dashboard.activeCycle.maxBoostersPerCycle)} />
               <CurrentValue label="Maximaler Packpreis" value={nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
@@ -664,64 +657,51 @@ export default function OperatorControlPanel() {
           </p>
 
           <fieldset className={styles.fieldset} disabled={controlsDisabled}>
-            <legend>Packauswahl</legend>
-            <div className={styles.segmented}>
-              {(["standard", "community"] as const).map((mode) => (
-                <label key={mode}>
-                  <input
-                    type="radio"
-                    name="mode"
-                    value={mode}
-                    checked={form.mode === mode}
-                    onChange={() => setForm((current) => ({ ...current, mode }))}
-                  />
-                  <span>{mode === "standard" ? "Automatische Auswahl" : "Eigene Packauswahl"}</span>
-                </label>
-              ))}
-            </div>
+            <legend>Zugelassene Packs</legend>
             <p className={styles.help}>
-              Automatisch wählt die Sicherheitslogik ein zulässiges Pack. Bei eigener Auswahl legst du mehrere Packs und Mengen fest.
+              Die Automatisierung kauft ausschließlich aus den hier zugelassenen Packs. Welches
+              zugelassene Pack ein einzelner Kauf tatsächlich wählt, entscheidet die Sicherheitslogik
+              bei der Ausführung – diese Ansicht legt keine Kaufreihenfolge fest.
             </p>
+            <div className={styles.packList}>
+              {bootstrap?.catalog?.packs.length ? (
+                bootstrap.catalog.packs.map((pack) => (
+                  <label className={styles.packOption} key={pack.id}>
+                    <input
+                      type="checkbox"
+                      checked={form.allowedPackIds.includes(pack.id)}
+                      onChange={() => togglePackAllowed(pack.id)}
+                      aria-label={`${pack.name} zulassen`}
+                    />
+                    <span>
+                      <strong>{pack.name}</strong>
+                      <small>
+                        {formatMicroUsdc(pack.priceMicroUsdc)} (Collector Crypt, Solana USDC) · {pack.available} verfügbar
+                      </small>
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className={styles.empty}>Zurzeit sind keine Packs im Katalog verfügbar.</p>
+              )}
+            </div>
           </fieldset>
 
-          {form.mode === "community" ? (
-            <fieldset className={styles.fieldset} disabled={controlsDisabled}>
-              <legend>Menge je ausgewähltem Pack</legend>
-              <p className={styles.help}>Menge 0 schließt ein Pack aus. Alle positiven Mengen werden gemeinsam und vollständig angefragt.</p>
-              <div className={styles.packList}>
-                {bootstrap?.catalog?.packs.length ? (
-                  bootstrap.catalog.packs.map((pack) => (
-                    <div className={styles.packOption} key={pack.id}>
-                      <span>
-                        <strong>{pack.name}</strong>
-                        <small>
-                          {formatMicroUsdg(pack.priceMicroUsdg)} · {pack.available} verfügbar
-                          {pack.collectorEconomicCostMicroUsdg
-                            ? ` · ${formatMicroUsdg(pack.collectorEconomicCostMicroUsdg)} konservative Collector-Kosten`
-                            : ""}
-                        </small>
-                      </span>
-                      <label className={styles.packQuantity}>
-                        <span>Menge</span>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          max={Math.min(pack.available, Number(form.maxBoostersPerCycle || 0))}
-                          step={1}
-                          value={quantityFor(pack.id)}
-                          onChange={(event) => setPackQuantity(pack, event.target.value)}
-                          aria-label={`Menge für ${pack.name}`}
-                        />
-                      </label>
-                    </div>
-                  ))
-                ) : (
-                  <p className={styles.empty}>Zurzeit sind keine Packs im Katalog verfügbar.</p>
-                )}
-              </div>
-            </fieldset>
-          ) : null}
+          <label className={styles.textField} htmlFor="requested-orders">
+            <span>Angefragte Boosterzahl</span>
+            <input
+              id="requested-orders"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={Number(form.maxBoostersPerCycle) || 0}
+              step={1}
+              disabled={controlsDisabled}
+              value={form.requestedOrders}
+              onChange={(event) => setRequestedOrders(event.target.value)}
+            />
+            <small>0–{form.maxBoostersPerCycle || 0} · Gesamtmenge, nicht je Pack</small>
+          </label>
 
           <div className={styles.limitGrid}>
             <BoosterLimitField
@@ -745,18 +725,18 @@ export default function OperatorControlPanel() {
                 id="cycle-interval-minutes"
                 type="number"
                 inputMode="numeric"
-                min={15}
-                max={60}
+                min={5}
+                max={1440}
                 step={1}
                 required
-                value={form.cycleIntervalMinutes}
+                value={form.intervalMinutes}
                 disabled={controlsDisabled}
                 onChange={(event) => setForm((current) => ({
                   ...current,
-                  cycleIntervalMinutes: event.target.value.replace(/\D/g, ""),
+                  intervalMinutes: event.target.value.replace(/\D/g, ""),
                 }))}
               />
-              <small>15–60 Minuten · gilt ab dem nächsten neu gestarteten Zyklus</small>
+              <small>5–1440 Minuten · gilt ab dem nächsten neu gestarteten Zyklus</small>
             </label>
             <LimitField
               id="max-cycle-budget"
@@ -776,30 +756,19 @@ export default function OperatorControlPanel() {
             />
           </div>
 
-          <section className={styles.reservePreview} aria-label="Vorschau für Zyklusreserve">
+          <section className={styles.reservePreview} aria-label="Anfragezusammenfassung">
             <div>
-              <span>Gesamtmenge</span>
-              <strong>{formatNumber(reservePreview.totalQuantity)}</strong>
+              <span>Zugelassene Packs</span>
+              <strong>{formatNumber(form.allowedPackIds.length)}</strong>
             </div>
             <div>
-              <span>Collector-Bruttobelastung</span>
-              <strong>{formatMicroUsdg(reservePreview.grossCollectorDebitMicroUsdg.toString())}</strong>
-            </div>
-            <div>
-              <span>Packspezifische Collector-Kosten</span>
-              <strong>
-                {reservePreview.economicsComplete
-                  ? formatMicroUsdg(reservePreview.collectorEconomicCostMicroUsdg.toString())
-                  : "Aktualisierung erforderlich"}
-              </strong>
-            </div>
-            <div>
-              <span>Nächste Gebührenreserve (50 %)</span>
-              <strong>Wird bei Ausführung berechnet</strong>
+              <span>Angefragte Boosterzahl</span>
+              <strong>{formatNumber(Number(form.requestedOrders) || 0)}</strong>
             </div>
             <p>
-              Packkapital und vollständige geschützte Kostenprognose müssen vor dem Kauf gedeckt sein.
-              Die nächste Gebührenreserve beträgt 50 % dieser Prognose; fehlende Deckung überspringt den Zyklus sicher.
+              Welches zugelassene Pack tatsächlich gekauft wird und welche Collector-Kosten dabei
+              anfallen, entscheidet und berechnet die Sicherheitslogik erst bei der Ausführung. Diese
+              Ansicht erfindet keine Vorab-Zuteilung einzelner Packs.
             </p>
           </section>
 
@@ -855,14 +824,6 @@ export default function OperatorControlPanel() {
                 onClick={runCycleNow}
               >
                 Nächsten zulässigen Zyklus jetzt starten
-              </button>
-              <button
-                className={styles.secondaryButton}
-                type="button"
-                disabled={controlsDisabled || bootstrap?.state.desiredStatus !== "active"}
-                onClick={skipNextCycle}
-              >
-                Nächsten planmäßigen Zyklus überspringen
               </button>
               <button
                 className={styles.secondaryButton}
@@ -1084,17 +1045,11 @@ function BoosterLimitField({
 }
 
 function formFromState(state: OperatorState): FormState {
-  const orders = state.manualPackOrders?.length
-    ? state.manualPackOrders
-    : state.communityPackIds.map((productId) => ({ productId, quantity: 1 }));
   return {
-    mode: state.mode,
-    communityPackIds: [...state.communityPackIds],
-    packQuantities: Object.fromEntries(
-      orders.map((order) => [order.productId, String(order.quantity)]),
-    ),
-    maxBoostersPerCycle: String(state.maxBoostersPerCycle ?? 100),
-    cycleIntervalMinutes: String(state.cycleIntervalMinutes ?? 20),
+    allowedPackIds: [...state.allowedPackIds],
+    requestedOrders: String(state.requestedOrders ?? 0),
+    maxBoostersPerCycle: String(state.maxBoostersPerCycle ?? 1),
+    intervalMinutes: String(state.intervalMinutes ?? 20),
     maxUnitPriceMicroUsdg: germanMoneyFormValue(state.maxUnitPriceMicroUsdg),
     maxCycleBudgetMicroUsdg: germanMoneyFormValue(state.maxCycleBudgetMicroUsdg),
     max24HourBudgetMicroUsdg: germanMoneyFormValue(state.max24HourBudgetMicroUsdg),
@@ -1117,21 +1072,13 @@ function germanMoneyInput(value: string) {
   return fractions.length ? `${whole},${fraction}` : whole;
 }
 
-function configurationSnapshotFromForm(form: FormState, packs: Pack[]) {
+function configurationSnapshotFromForm(form: FormState) {
   try {
-    const orders = form.mode === "community"
-      ? packs.flatMap((pack) => {
-          const quantity = Number(form.packQuantities[pack.id] ?? "0");
-          return Number.isSafeInteger(quantity) && quantity > 0
-            ? [{ productId: pack.id, quantity }]
-            : [];
-        })
-      : [];
     return JSON.stringify({
-      mode: form.mode,
-      orders: normalizedOrders(orders),
+      allowedPackIds: [...form.allowedPackIds].sort(),
+      requestedOrders: Number(form.requestedOrders),
       maxBoostersPerCycle: Number(form.maxBoostersPerCycle),
-      cycleIntervalMinutes: Number(form.cycleIntervalMinutes),
+      intervalMinutes: Number(form.intervalMinutes),
       maxUnitPriceMicroUsdg: parseGermanUsdg(form.maxUnitPriceMicroUsdg),
       maxCycleBudgetMicroUsdg: parseGermanUsdg(form.maxCycleBudgetMicroUsdg),
       max24HourBudgetMicroUsdg: parseGermanUsdg(form.max24HourBudgetMicroUsdg),
@@ -1143,63 +1090,30 @@ function configurationSnapshotFromForm(form: FormState, packs: Pack[]) {
 
 function configurationSnapshotFromState(state: OperatorState) {
   return JSON.stringify({
-    mode: state.mode,
-    orders: normalizedOrders(state.mode === "community" ? state.manualPackOrders : []),
+    allowedPackIds: [...state.allowedPackIds].sort(),
+    requestedOrders: state.requestedOrders,
     maxBoostersPerCycle: state.maxBoostersPerCycle,
-    cycleIntervalMinutes: state.cycleIntervalMinutes,
+    intervalMinutes: state.intervalMinutes,
     maxUnitPriceMicroUsdg: state.maxUnitPriceMicroUsdg,
     maxCycleBudgetMicroUsdg: state.maxCycleBudgetMicroUsdg,
     max24HourBudgetMicroUsdg: state.max24HourBudgetMicroUsdg,
   });
 }
 
-function normalizedOrders(orders: ManualPackOrder[]) {
-  return orders
-    .map((order) => ({ productId: order.productId, quantity: order.quantity }))
-    .sort((left, right) => left.productId.localeCompare(right.productId));
-}
-
 function commandConfirmation(question: string, state: OperatorState, unsaved: boolean) {
-  const packs = state.mode === "community" && state.manualPackOrders.length
-    ? state.manualPackOrders.map((order) => `${order.quantity} × ${order.productId}`).join(", ")
-    : "Automatische Auswahl";
+  const packs = state.allowedPackIds.length ? state.allowedPackIds.join(", ") : "Keine Packs zugelassen";
   return [
     question,
     "",
     "Gespeicherte Konfiguration:",
-    `Packs: ${packs}`,
+    `Zugelassene Packs: ${packs}`,
+    `Angefragte Boosterzahl: ${state.requestedOrders}`,
     `Maximaler Packpreis: ${nullableMoney(state.maxUnitPriceMicroUsdg)}`,
     `Zyklusbudget: ${nullableMoney(state.maxCycleBudgetMicroUsdg)}`,
     `24-Stunden-Budget: ${nullableMoney(state.max24HourBudgetMicroUsdg)}`,
-    `Zyklusintervall: ${state.cycleIntervalMinutes} Minuten`,
+    `Zyklusintervall: ${state.intervalMinutes} Minuten`,
     ...(unsaved ? ["", "Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet."] : []),
   ].join("\n");
-}
-
-function computeReservePreview(packs: Pack[], form: FormState) {
-  let totalQuantity = 0;
-  let grossCollectorDebitMicroUsdg = BigInt(0);
-  let collectorEconomicCostMicroUsdg = BigInt(0);
-  let economicsComplete = true;
-  if (form.mode === "community") {
-    for (const pack of packs) {
-      const quantity = BigInt(Math.max(0, Number(form.packQuantities[pack.id] ?? "0") || 0));
-      if (quantity === BigInt(0)) continue;
-      totalQuantity += Number(quantity);
-      grossCollectorDebitMicroUsdg += BigInt(pack.priceMicroUsdg) * quantity;
-      if (!/^\d+$/.test(pack.collectorEconomicCostMicroUsdg ?? "")) {
-        economicsComplete = false;
-      } else {
-        collectorEconomicCostMicroUsdg += BigInt(pack.collectorEconomicCostMicroUsdg ?? "0") * quantity;
-      }
-    }
-  }
-  return {
-    totalQuantity,
-    grossCollectorDebitMicroUsdg,
-    collectorEconomicCostMicroUsdg,
-    economicsComplete,
-  };
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -1225,6 +1139,17 @@ function formatMicroUsdg(value: string) {
   } catch {
     return "Nicht bestätigt";
   }
+}
+
+// The Collector Crypt pack catalog is priced in Solana USDC (a different chain/asset from the EVM
+// USDG fields above); formatted separately so it is never mistaken for a USDG amount.
+function formatMicroUsdc(value: string) {
+  if (!/^(0|[1-9]\d{0,77})$/.test(value)) return "Nicht bestätigt";
+  const amount = BigInt(value);
+  const whole = amount / 1_000_000n;
+  const rawFraction = (amount % 1_000_000n).toString().padStart(6, "0");
+  const fraction = rawFraction.replace(/0+$/, "").padEnd(2, "0");
+  return `${new Intl.NumberFormat("de-DE", { useGrouping: true }).format(whole)},${fraction} USDC`;
 }
 
 function formatOptionalMicroUsdg(value: string | undefined) {
@@ -1469,22 +1394,14 @@ function decodeActiveCycle(value: unknown): ActiveCycle {
   const allowedPackIds = dashboardArray(raw.allowedPackIds, 10_000).map(dashboardText);
   const allowed = new Set(allowedPackIds);
   if (allowed.size !== allowedPackIds.length) throw new Error(DASHBOARD_RESPONSE_INVALID);
-  const seenOrders = new Set<string>();
-  const requestedOrders = dashboardArray(raw.requestedOrders, 10_000).map((value) => {
-    const order = dashboardRecord(value);
-    dashboardExactKeys(order, new Set(["productId", "quantity"]));
-    const productId = dashboardText(order.productId);
-    if (!allowed.has(productId) || seenOrders.has(productId)) {
-      throw new Error(DASHBOARD_RESPONSE_INVALID);
-    }
-    seenOrders.add(productId);
-    return { productId, quantity: dashboardInteger(order.quantity, 1, 10_000) };
-  });
+  // requestedOrders is one aggregate count (packages/runner/src/config/state-schema.mjs), not a
+  // per-pack allocation -- which specific allowed pack actually gets purchased is the automation's
+  // own policy decision, never invented here.
+  const requestedOrders = dashboardInteger(raw.requestedOrders, 0, 10_000);
   const maxBoostersPerCycle = raw.maxBoostersPerCycle === null
     ? null
     : dashboardInteger(raw.maxBoostersPerCycle, 1, 10_000);
-  const totalRequested = requestedOrders.reduce((total, order) => total + order.quantity, 0);
-  if (maxBoostersPerCycle !== null && totalRequested > maxBoostersPerCycle) {
+  if (maxBoostersPerCycle !== null && requestedOrders > maxBoostersPerCycle) {
     throw new Error(DASHBOARD_RESPONSE_INVALID);
   }
   return {

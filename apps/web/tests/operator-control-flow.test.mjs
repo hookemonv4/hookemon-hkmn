@@ -24,11 +24,9 @@ test("keeps German next-cycle form values separate from canonical decision paylo
 
   assert.match(source, /germanMoneyFormValue\(state\.maxUnitPriceMicroUsdg\)/);
   assert.match(source, /parseGermanUsdg\(form\.maxUnitPriceMicroUsdg\)/);
-  assert.match(source, /manualPackOrders = form\.mode === "community"/);
-  assert.match(source, /catalogPacks\.flatMap/);
-  assert.match(source, /quantity > 0 \? \[\{ productId: pack\.id, quantity \}\] : \[\]/);
-  assert.match(source, /Gesamtmenge/);
-  assert.match(source, /Collector-Bruttobelastung/);
+  assert.match(source, /togglePackAllowed\(packId: string\)/);
+  assert.match(source, /allowedPackIds:\s*\[\.\.\.form\.allowedPackIds\]\.sort\(\)/);
+  assert.match(source, /requestedOrders:\s*Number\(form\.requestedOrders\)/);
   assert.match(source, /configurationSnapshotFromState\(bootstrap\.state\)/);
   assert.match(source, /Gespeicherte Konfiguration:/);
   assert.match(source, /Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet/);
@@ -54,14 +52,11 @@ test("persists the exact website control flow through pause, pack changes, and r
   assert.equal(dashboard.body.schemaVersion, 2);
   assert.deepEqual(emptyAudit.body.decisions, []);
 
-  const configurationA = communityConfiguration({
-    communityPackIds: ["pokemon_25", "one-piece_10"],
-    manualPackOrders: [
-      { productId: "pokemon_25", quantity: 2 },
-      { productId: "one-piece_10", quantity: 1 },
-    ],
+  const configurationA = operatorConfiguration({
+    allowedPackIds: ["one-piece_10", "pokemon_25"],
+    requestedOrders: 3,
     maxBoostersPerCycle: 5,
-    cycleIntervalMinutes: 15,
+    intervalMinutes: 15,
     maxUnitPriceMicroUsdc: "60000000",
     maxCycleBudgetMicroUsdc: "150000000",
     max24HourBudgetMicroUsdc: "500000000",
@@ -79,7 +74,7 @@ test("persists the exact website control flow through pause, pack changes, and r
   for (const command of [
     { type: "activate" },
     { type: "run-cycle-now" },
-    { type: "skip-next-cycle" },
+    { type: "reconcile" },
     { type: "pause" },
   ]) {
     version = await accepted(handler, version, command);
@@ -88,13 +83,12 @@ test("persists the exact website control flow through pause, pack changes, and r
   const paused = await get(handler, "/operator/api/bootstrap");
   assert.equal(paused.body.state.desiredStatus, "paused");
   assert.equal(paused.body.state.runNowSequence, 3);
-  assert.equal(paused.body.state.skipNextCycleSequence, 4);
 
-  const configurationB = communityConfiguration({
-    communityPackIds: ["one-piece_10"],
-    manualPackOrders: [{ productId: "one-piece_10", quantity: 2 }],
+  const configurationB = operatorConfiguration({
+    allowedPackIds: ["one-piece_10"],
+    requestedOrders: 2,
     maxBoostersPerCycle: 4,
-    cycleIntervalMinutes: 30,
+    intervalMinutes: 30,
     maxUnitPriceMicroUsdc: "45000000",
     maxCycleBudgetMicroUsdc: "100000000",
     max24HourBudgetMicroUsdc: "600000000",
@@ -117,7 +111,7 @@ test("persists the exact website control flow through pause, pack changes, and r
       acceptedDecision("activate"),
       acceptedDecision("update-configuration"),
       acceptedDecision("pause"),
-      acceptedDecision("skip-next-cycle"),
+      acceptedDecision("reconcile"),
       acceptedDecision("run-cycle-now"),
       acceptedDecision("activate"),
       acceptedDecision("update-configuration"),
@@ -133,49 +127,36 @@ test("rejects unsafe website proposals without losing the append-only audit chai
   let version = 0;
   version = await accepted(handler, version, {
     type: "update-configuration",
-    configuration: communityConfiguration(),
+    configuration: operatorConfiguration(),
   });
 
   const rejectedConfigurations = [
     [
-      communityConfiguration({
-        communityPackIds: ["not-allowed"],
-        manualPackOrders: [{ productId: "not-allowed", quantity: 1 }],
-      }),
-      "COMMUNITY_PACK_UNAVAILABLE",
+      operatorConfiguration({ allowedPackIds: ["not-allowed"] }),
+      "ALLOWED_PACK_UNAVAILABLE",
     ],
     [
-      communityConfiguration({
-        communityPackIds: ["pokemon_25", "pokemon_25"],
-        manualPackOrders: [
-          { productId: "pokemon_25", quantity: 1 },
-          { productId: "pokemon_25", quantity: 1 },
-        ],
-      }),
-      "COMMUNITY_PACK_DUPLICATE",
+      operatorConfiguration({ allowedPackIds: ["pokemon_25", "pokemon_25"] }),
+      "ALLOWED_PACK_IDS_UNSORTED_OR_DUPLICATE",
     ],
     [
-      communityConfiguration({
-        manualPackOrders: [{ productId: "pokemon_25", quantity: 5 }],
-      }),
-      "MANUAL_PACK_STOCK_EXCEEDED",
+      operatorConfiguration({ allowedPackIds: ["pokemon_25", "one-piece_10"] }),
+      "ALLOWED_PACK_IDS_UNSORTED_OR_DUPLICATE",
     ],
     [
-      communityConfiguration({
-        manualPackOrders: [{ productId: "pokemon_25", quantity: 11 }],
-      }),
-      "MANUAL_PACK_QUANTITY_INVALID",
+      operatorConfiguration({ requestedOrders: 11, maxBoostersPerCycle: 10 }),
+      "REQUESTED_ORDERS_EXCEEDS_MAX_BOOSTERS",
     ],
     [
-      communityConfiguration({ maxUnitPriceMicroUsdc: "30000000" }),
-      "COMMUNITY_PACK_PRICE_EXCEEDS_LIMIT",
+      operatorConfiguration({ maxUnitPriceMicroUsdc: "300000000" }),
+      "MAX_UNIT_PRICE_HARD_CAP_EXCEEDED",
     ],
     [
-      communityConfiguration({
-        manualPackOrders: [{ productId: "pokemon_25", quantity: 2 }],
-        maxCycleBudgetMicroUsdc: "60000000",
+      operatorConfiguration({
+        maxUnitPriceMicroUsdc: "90000000",
+        maxCycleBudgetMicroUsdc: "50000000",
       }),
-      "MANUAL_PACK_BUDGET_EXCEEDED",
+      "BUDGET_ORDER_INVALID",
     ],
   ];
 
@@ -189,7 +170,7 @@ test("rejects unsafe website proposals without losing the append-only audit chai
   fixture.catalog = { ...freshCatalog(), fetchedAtMs: NOW_MS - 120_001 };
   await rejected(handler, version, {
     type: "update-configuration",
-    configuration: communityConfiguration(),
+    configuration: operatorConfiguration({ allowedPackIds: ["pokemon_25"] }),
   }, "CATALOG_STALE", 400);
   fixture.catalog = freshCatalog();
 
@@ -215,7 +196,7 @@ test("keeps pause available during catalog failure and sanitizes persistence fai
   const handler = fixture.handler();
   let version = await accepted(handler, 0, {
     type: "update-configuration",
-    configuration: communityConfiguration(),
+    configuration: operatorConfiguration(),
   });
   version = await accepted(handler, version, { type: "activate" });
 
@@ -322,13 +303,12 @@ function freshCatalog() {
   };
 }
 
-function communityConfiguration(overrides = {}) {
+function operatorConfiguration(overrides = {}) {
   return {
-    mode: "community",
-    communityPackIds: ["pokemon_25"],
-    manualPackOrders: [{ productId: "pokemon_25", quantity: 1 }],
+    allowedPackIds: ["pokemon_25"],
+    requestedOrders: 1,
     maxBoostersPerCycle: 10,
-    cycleIntervalMinutes: 20,
+    intervalMinutes: 20,
     maxUnitPriceMicroUsdc: "60000000",
     maxCycleBudgetMicroUsdc: "200000000",
     max24HourBudgetMicroUsdc: "1000000000",
@@ -338,11 +318,10 @@ function communityConfiguration(overrides = {}) {
 
 function stateConfiguration(state) {
   return {
-    mode: state.mode,
-    communityPackIds: state.communityPackIds,
-    manualPackOrders: state.manualPackOrders,
+    allowedPackIds: state.allowedPackIds,
+    requestedOrders: state.requestedOrders,
     maxBoostersPerCycle: state.maxBoostersPerCycle,
-    cycleIntervalMinutes: state.cycleIntervalMinutes,
+    intervalMinutes: state.intervalMinutes,
     maxUnitPriceMicroUsdc: state.maxUnitPriceMicroUsdc,
     maxCycleBudgetMicroUsdc: state.maxCycleBudgetMicroUsdc,
     max24HourBudgetMicroUsdc: state.max24HourBudgetMicroUsdc,
