@@ -246,21 +246,63 @@ test('keychain signer refuses a serialized live Solana policy without trusted pa
   assert.match(result.stderr, /parent transaction policy evaluation with trusted chain resolvers/i);
 });
 
-// The 50ms budget below only bounds the fake Keychain hang; this test's own wall-clock
-// deadline must also absorb two cold Node process spawns (signer + EVM keychain child,
-// each importing viem/@solana-web3.js) plus their nested 550ms kill-and-drain window,
-// which is unrelated startup cost that grows under CI CPU contention.
-test('keychain signer returns its bounded Keychain timeout to the caller', { timeout: 5_000 }, async t => {
+// Racing a real hung Keychain grandchild against the signer's own two cold Node/ESM
+// process spawns is inherently nondeterministic under CI load: depending on how fast the
+// EVM keychain child cold-starts, either its own 50ms request deadline fires first, or the
+// signer's outer 550ms parent envelope (50ms request + the fixed 500ms
+// CHILD_CLEANUP_ALLOWANCE_MS kill-and-drain window) fires first instead - both are
+// legitimate, correctly bounded production outcomes, so one flaky assertion cannot prove
+// both. The two tests below each pin one side of that race down deterministically instead.
+const KEYCHAIN_CHILD_EVM_PATH = fileURLToPath(new URL('../../src/signing/keychain-child-evm.mjs', import.meta.url));
+const KEYCHAIN_CHILD_EVM_FLAG = '--hookemon-evm-keychain-child';
+const HANG_EVM_CHILD_IMPORT_PATH = fileURLToPath(new URL('../fixtures/keychain/hang-evm-child-import.mjs', import.meta.url));
+
+// Spawns src/signing/keychain-child-evm.mjs directly with its own internal spawn flag,
+// bypassing runEvmKeychainChildProcess (and therefore its 550ms parent envelope) entirely.
+// With no parent deadline in the picture, only the child's own request-level 50ms
+// enforcement (in keychain-secret-store.mjs) can possibly resolve this call.
+test('EVM keychain child enforces its own 50ms Keychain deadline with no parent envelope racing it', { timeout: 2_000 }, async t => {
   const keychain = await createTestKeychain(t, { mode: 'hang' });
+  const result = await runProcess(process.execPath, [KEYCHAIN_CHILD_EVM_PATH, KEYCHAIN_CHILD_EVM_FLAG], {
+    env: signerEnvironment(keychain),
+    input: `${JSON.stringify({
+      operation: 'probe',
+      service: SERVICE,
+      account: 'operator-evm',
+      keychainCommand: keychain.command,
+      timeoutMs: 50,
+    })}\n`,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ok: false,
+    error: 'macOS Keychain lookup timed out after 50ms',
+  });
+  const records = await keychain.readRecords();
+  assert.ok(
+    records.some(record => record.argv[0] === 'find-generic-password'),
+    'expected the fake Keychain command to actually be reached',
+  );
+});
+
+// HANG_EVM_CHILD_IMPORT_PATH freezes the EVM keychain child before its own module graph
+// (and therefore its own 50ms deadline) ever runs, so only the signer's outer
+// parent-envelope kill deadline can possibly resolve this call - no fake Keychain command
+// is ever invoked.
+test('keychain signer surfaces its parent-envelope timeout when the EVM keychain child cannot start', { timeout: 5_000 }, async t => {
+  const keychain = await createTestKeychain(t);
   const result = await invokeSigner(keychain, {
     operation: 'probe',
     role: 'operator-evm',
     account: 'operator-evm',
     payload: { kind: 'hookemon-keychain-sign-only-readiness.v1' },
-    env: { HOOKEMON_KEYCHAIN_TIMEOUT_MS: '50' },
+    env: {
+      HOOKEMON_KEYCHAIN_TIMEOUT_MS: '50',
+      NODE_OPTIONS: `--import=${HANG_EVM_CHILD_IMPORT_PATH}`,
+    },
   });
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /timed out after 50ms/i);
+  assert.match(result.stderr, /^EVM keychain child timed out after 550ms\n?$/);
 });
 
 test('keychain signer re-encodes a binary Solana wire request before delegating to the Operations child', async t => {
