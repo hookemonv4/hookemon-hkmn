@@ -507,11 +507,20 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
   const collectorPurchaseDebit = purchaseDebit(purchase);
   const collectorBuybackProceeds = buybackProceeds(buyback, purchase);
 
-  // No honest USDG-denominated pack-spend/buyback/gain/loss producer exists: the bridge amounts are
-  // a different fact (custody movement) and the Collector amounts are a different asset (Solana
-  // settlement asset). Computing a "gain/loss" from either would either mix assets or silently relabel a bridge
-  // movement as pack economics — both are exactly the anti-patterns this projection must avoid.
-  const packSpendMicroUsdg = null;
+  // The one honest USDG-denominated pack-spend figure is the principal this cycle actually released,
+  // which is already USDG and needs no conversion. For an admitted cycle createCycle has bound that
+  // release amount to the origin amount of its own N-quantity exact-output quote, so this is the
+  // quoted principal rather than a configured guess. The Solana settlement debits above stay in
+  // their own asset and are never restated here at any parity, and buyback gain/loss stay null
+  // because computing them would have to mix the two assets. Reported only once purchase has durably
+  // completed, so an authorization that was never spent is not shown as spend.
+  // A zero release is not evidence of zero spend, it is absence of evidence, so it stays null; an
+  // admitted cycle's aggregate funding quote is positive by construction anyway.
+  const packSpendMicroUsdg = purchase?.status === 'COMPLETE'
+    && typeof description?.releaseAmount === 'string'
+    && /^[1-9][0-9]*$/.test(description.releaseAmount)
+    ? description.releaseAmount
+    : null;
   const buybackMicroUsdg = null;
   const packGainMicroUsdg = null;
   const packLossMicroUsdg = null;
