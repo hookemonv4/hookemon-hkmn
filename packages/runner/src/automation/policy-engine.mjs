@@ -14,20 +14,29 @@ const COLLECTOR_SETTLEMENT_ROUTE = Object.freeze({ chainId: '792703809', assetId
 const OPERATIONS_EVM = '0x000000000000000000000000000000000000dead';
 const OPERATIONS_SOLANA = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
 /**
- * The deployed Operations accounts an admission may route funds to. Pinned as the default so
- * production behaviour is unchanged when nothing supplies them, but they are deployment identity
- * rather than policy: a literal here cannot survive an account rotation and makes an admission
- * impossible to exercise under isolated keys. A caller that knows its configured accounts passes
- * them in, and the check is exactly as strict against those.
+ * The owner-approved deployment identity an admission may route funds to and be denominated in.
+ *
+ * These are frozen contract, not runtime configuration. Deriving them from the same environment that
+ * builds the admission would make the check tautological -- a consistently wrong deployment would
+ * validate against itself -- so nothing a composition, environment variable or operator state can
+ * set is able to move them. Rotating an account or asset is a spec decision that has to mint a new
+ * independently approved deployment-identity revision and policy digest; it cannot be enabled here.
+ *
+ * A test that must exercise isolated keys uses the separate test-only profile below, which
+ * production composition has no way to construct and which refuses to describe itself as live.
  */
-const DEFAULT_OPERATIONS_ACCOUNTS = Object.freeze({
+const PRODUCTION_ADMISSION_IDENTITY = Object.freeze({
   evm: OPERATIONS_EVM, solana: OPERATIONS_SOLANA,
   fundingRoute: USDG_ROUTE, settlementRoute: COLLECTOR_SETTLEMENT_ROUTE,
 });
 
-function assertAdmissionRouteIdentity(value, fallback, label) {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value !== 'object' || Array.isArray(value)
+// Only identities minted by createTestOnlyAdmissionIdentity are honoured. Membership of this set is
+// the sole way an override is accepted, and the factory is never imported by production code, so an
+// ordinary object -- however well shaped -- cannot stand in for the approved deployment identity.
+const testOnlyAdmissionIdentities = new WeakSet();
+
+function assertAdmissionRouteIdentity(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof value.chainId !== 'string' || value.chainId.length === 0
     || typeof value.assetId !== 'string' || value.assetId.length === 0
     || !Number.isInteger(value.decimals) || value.decimals < 0) {
@@ -37,25 +46,40 @@ function assertAdmissionRouteIdentity(value, fallback, label) {
 }
 
 /**
- * The deployment identity an admission is checked against: which accounts it may route funds to and
- * which two assets it may be denominated in. Supplied by composition from the same money
- * configuration every other stage uses; the pinned production values remain the defaults, so an
- * unconfigured caller keeps today's behaviour and the check is equally strict either way.
+ * Mints a deployment identity for tests that need isolated keys and fixture assets.
+ *
+ * Deliberately not reachable from production: composition never imports this, and the value it
+ * returns is recognised only by object identity, so it cannot be reconstructed from configuration or
+ * from a serialized copy that crossed a process boundary.
  */
-function assertOperationsAccounts(value) {
-  if (value === undefined || value === null) return DEFAULT_OPERATIONS_ACCOUNTS;
-  if (typeof value !== 'object' || Array.isArray(value)
-    || typeof value.evm !== 'string' || value.evm.length === 0
-    || typeof value.solana !== 'string' || value.solana.length === 0) {
-    throw new Error('policy operations accounts are invalid');
+export function createTestOnlyAdmissionIdentity({ evm, solana, fundingRoute, settlementRoute } = {}) {
+  if (typeof evm !== 'string' || evm.length === 0 || typeof solana !== 'string' || solana.length === 0) {
+    throw new Error('test-only admission identity requires evm and solana accounts');
   }
-  return Object.freeze({
-    evm: value.evm.toLowerCase(),
-    solana: value.solana,
-    fundingRoute: assertAdmissionRouteIdentity(value.fundingRoute, USDG_ROUTE, 'funding'),
-    settlementRoute: assertAdmissionRouteIdentity(value.settlementRoute, COLLECTOR_SETTLEMENT_ROUTE, 'settlement'),
+  const identity = Object.freeze({
+    evm: evm.toLowerCase(),
+    solana,
+    fundingRoute: assertAdmissionRouteIdentity(fundingRoute, 'funding'),
+    settlementRoute: assertAdmissionRouteIdentity(settlementRoute, 'settlement'),
   });
+  testOnlyAdmissionIdentities.add(identity);
+  return identity;
 }
+
+/** The approved production identity unless a caller presents a genuine test-only one. */
+function assertOperationsAccounts(value) {
+  // The pinned object itself is accepted so a resolved identity can be threaded on through the
+  // evaluation without being re-approved; equality is by object identity, so a lookalike literal
+  // still cannot pass.
+  if (value === undefined || value === null || value === PRODUCTION_ADMISSION_IDENTITY) {
+    return PRODUCTION_ADMISSION_IDENTITY;
+  }
+  if (!testOnlyAdmissionIdentities.has(value)) {
+    throw new Error('policy admission deployment identity is not the approved production identity');
+  }
+  return value;
+}
+
 const mutationBoundaries = new Set(['claim-process', 'purchase', 'signature', 'broadcast', 'mutation']);
 const executionBoundaries = new Set(['signature', 'broadcast', 'mutation']);
 
@@ -193,11 +217,11 @@ function assertRawRelayLeg(value, expected, label, { destination = false } = {})
   }
 }
 
-function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRelay, operations }) {
+function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRelay, operations, label = 'unitRelayQuote' }) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('policy admission unitRelayQuote must be a parsed Relay quote');
+    throw new Error(`policy admission ${label} must be a parsed Relay quote`);
   }
-  const raw = immutableCanonicalValue(value.raw, 'policy admission unitRelayQuote raw response');
+  const raw = immutableCanonicalValue(value.raw, `policy admission ${label} raw response`);
   const quote = {
     direction: value.direction,
     tradeType: value.tradeType,
@@ -206,8 +230,8 @@ function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRe
     sender: value.sender,
     recipient: value.recipient,
     deadlineUnixSeconds: value.deadlineUnixSeconds,
-    origin: immutableCanonicalValue(value.origin, 'policy admission unitRelayQuote origin'),
-    destination: immutableCanonicalValue(value.destination, 'policy admission unitRelayQuote destination'),
+    origin: immutableCanonicalValue(value.origin, `policy admission ${label} origin`),
+    destination: immutableCanonicalValue(value.destination, `policy admission ${label} destination`),
     stepCount: value.stepCount,
     raw,
     quoteDigest: value.quoteDigest,
@@ -218,19 +242,19 @@ function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRe
     || quote.deadlineUnixSeconds !== unitRelay.deadlineUnixSeconds
     || !Number.isSafeInteger(quote.stepCount) || quote.stepCount < 0
     || typeof quote.quoteDigest !== 'string' || !digestPattern.test(quote.quoteDigest)) {
-    throw new Error('policy admission unitRelayQuote identity is invalid');
+    throw new Error(`policy admission ${label} identity is invalid`);
   }
-  assertQuoteRouteLeg(quote.origin, unitFundingQuote, 'policy admission unitRelayQuote origin');
-  assertQuoteRouteLeg(quote.destination, unitPurchase, 'policy admission unitRelayQuote destination', { destination: true });
+  assertQuoteRouteLeg(quote.origin, unitFundingQuote, `policy admission ${label} origin`);
+  assertQuoteRouteLeg(quote.destination, unitPurchase, `policy admission ${label} destination`, { destination: true });
   if (!raw || raw.requestId !== quote.requestId || !Array.isArray(raw.steps) || raw.steps.length !== quote.stepCount
     || raw.details?.sender?.toLowerCase() !== quote.sender.toLowerCase() || raw.details?.recipient !== quote.recipient
     || raw.protocol?.v2?.orderId !== quote.orderId || raw.protocol.v2.orderData?.output?.deadline !== quote.deadlineUnixSeconds
     || raw.protocol.v2.orderData.output?.chainId !== 'solana' || !Array.isArray(raw.protocol.v2.orderData.output.calls)
     || raw.protocol.v2.orderData.output.calls.length !== 0) {
-    throw new Error('policy admission unitRelayQuote raw identity is invalid');
+    throw new Error(`policy admission ${label} raw identity is invalid`);
   }
-  assertRawRelayLeg(raw.details.currencyIn, unitFundingQuote, 'policy admission unitRelayQuote raw origin');
-  assertRawRelayLeg(raw.details.currencyOut, unitPurchase, 'policy admission unitRelayQuote raw destination', { destination: true });
+  assertRawRelayLeg(raw.details.currencyIn, unitFundingQuote, `policy admission ${label} raw origin`);
+  assertRawRelayLeg(raw.details.currencyOut, unitPurchase, `policy admission ${label} raw destination`, { destination: true });
   const payments = raw.protocol.v2.orderData.output.payments;
   const inputs = raw.protocol.v2.orderData.inputs;
   if (!Array.isArray(payments) || payments.length !== 1
@@ -239,10 +263,13 @@ function normalizeUnitRelayQuote(value, { unitFundingQuote, unitPurchase, unitRe
     || !Array.isArray(inputs) || inputs.length !== 1
     || inputs[0]?.payment?.chainId !== 'robinhood' || inputs[0]?.payment?.currency?.toLowerCase() !== quote.origin.address.toLowerCase()
     || inputs[0]?.payment?.amount !== unitFundingQuote.amountAtomic) {
-    throw new Error('policy admission unitRelayQuote raw order does not bind the admitted amounts');
+    throw new Error(`policy admission ${label} raw order does not bind the admitted amounts`);
   }
-  if (quote.quoteDigest !== unitRelay.quoteDigest || quote.quoteDigest !== relayQuoteEvidenceDigest(quote)) {
-    throw new Error('policy admission unitRelayQuote digest does not match its immutable parsed evidence');
+  // The recomputed value is named in the refusal so a caller can see which digest the engine derived
+  // from the evidence, rather than having to trust or re-implement the derivation.
+  const recomputed = relayQuoteEvidenceDigest(quote);
+  if (quote.quoteDigest !== unitRelay.quoteDigest || quote.quoteDigest !== recomputed) {
+    throw new Error(`policy admission ${label} digest does not match its immutable parsed evidence; recomputed ${recomputed}`);
   }
   return freezeRecursively(quote);
 }
@@ -305,7 +332,24 @@ function normalizePolicyAdmission(value, operationsAccounts) {
   if (typeof relay.quoteDigest !== 'string' || relay.quoteDigest !== value.quoteDigest) {
     throw new Error('policy admission aggregate Relay quote digest is invalid');
   }
-  const unitRelayQuote = normalizeUnitRelayQuote(value.unitRelayQuote, { unitFundingQuote, unitPurchase, unitRelay, operations });
+  const unitRelayQuote = normalizeUnitRelayQuote(value.unitRelayQuote, {
+    unitFundingQuote, unitPurchase, unitRelay, operations, label: 'unitRelayQuote',
+  });
+  // The aggregate quote is the one restart and outbound actually execute, so it gets exactly the
+  // same treatment: deep normalization of its parsed and raw evidence, and its digest recomputed
+  // from that evidence rather than trusted as supplied. Checking only that a supplied digest string
+  // matched another supplied string would let a self-consistent record accompany entirely different
+  // executable raw steps.
+  const relayQuote = normalizeUnitRelayQuote(value.relayQuote, {
+    unitFundingQuote: aggregateFundingQuote,
+    unitPurchase: aggregatePurchase,
+    unitRelay: relay,
+    operations,
+    label: 'relayQuote',
+  });
+  if (relayQuote.quoteDigest !== value.quoteDigest) {
+    throw new Error('policy admission relayQuote digest does not match the admitted quote digest');
+  }
   return Object.freeze({
     schema: value.schema,
     cycleId: value.cycleId,
@@ -319,6 +363,7 @@ function normalizePolicyAdmission(value, operationsAccounts) {
     relay: Object.freeze({ ...relay }),
     unitRelay: Object.freeze({ ...unitRelay }),
     unitRelayQuote,
+    relayQuote,
   });
 }
 

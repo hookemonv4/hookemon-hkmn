@@ -540,7 +540,7 @@ test('claim admission rejects configuration values above the fixed operator ceil
 // number in this file that is a measured quote, not a derived multiple or a round USD guess.
 const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
 
-function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds }) {
+function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds, requestId: overrideRequestId, orderId: overrideOrderId }) {
   const sender = '0x000000000000000000000000000000000000dEaD';
   const recipient = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
   const origin = {
@@ -550,8 +550,8 @@ function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnix
     chainId: 792703809, address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6,
     amount: unitPurchase, minimumAmount: unitPurchase,
   };
-  const requestId = `relay-unit-${cycleId}`;
-  const orderId = `0x${'1'.repeat(64)}`;
+  const requestId = overrideRequestId ?? `relay-unit-${cycleId}`;
+  const orderId = overrideOrderId ?? `0x${'1'.repeat(64)}`;
   const raw = {
     requestId,
     details: {
@@ -586,12 +586,22 @@ function exactOutputAdmission({
 } = {}) {
   const aggregatePurchase = (BigInt(unitPurchase) * BigInt(quantity)).toString();
   const unitRelayQuote = parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds });
+  // The aggregate quote is the one restart and outbound execute, so it now carries the same parsed
+  // and raw evidence as the unit quote and its digest is recomputed from that evidence too.
+  const relayQuote = parsedUnitRelayQuote({
+    cycleId,
+    unitFunding: aggregateFunding,
+    unitPurchase: aggregatePurchase,
+    deadlineUnixSeconds,
+    requestId: 'relay-n2',
+    orderId: `0x${'2'.repeat(64)}`,
+  });
   return {
     schema: 'hookemon.policy-admission.v2',
     cycleId,
     packId: 'base-pack',
     quantity,
-    quoteDigest: `sha256:${'b'.repeat(64)}`,
+    quoteDigest: relayQuote.quoteDigest,
     unitPurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: unitPurchase },
     aggregatePurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: aggregatePurchase },
     unitFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: unitFunding },
@@ -603,9 +613,10 @@ function exactOutputAdmission({
       destinationAmount: unitPurchase, destinationMinimumAmount: unitPurchase,
     },
     unitRelayQuote,
+    relayQuote,
     relay: {
       tradeType: 'EXACT_OUTPUT', requestId: 'relay-n2', orderId: `0x${'2'.repeat(64)}`,
-      quoteDigest: `sha256:${'b'.repeat(64)}`,
+      quoteDigest: relayQuote.quoteDigest,
       deadlineUnixSeconds, sender: '0x000000000000000000000000000000000000dEaD',
       recipient: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto', destinationAmount: aggregatePurchase, destinationMinimumAmount: aggregatePurchase,
     },

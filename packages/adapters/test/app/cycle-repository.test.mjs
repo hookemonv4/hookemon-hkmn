@@ -484,6 +484,10 @@ function outboundRelayIntent(leg, deadlineUnixSeconds) {
     requestId: leg.relayRequestId,
     orderId: `0x${'c'.repeat(64)}`,
     direction: 'OUTBOUND',
+    // Settlement identity the canonical Relay intent carries: which trade type was quoted and the
+    // digest of the quote it came from, so a resumed intent can be tied back to its admission.
+    tradeType: 'EXACT_OUTPUT',
+    quoteDigest: `sha256:${'d'.repeat(64)}`,
     originChainId: Number(leg.sourceChainId),
     destinationChainId: Number(leg.destinationChainId),
     originAssetId: leg.sourceAssetId,

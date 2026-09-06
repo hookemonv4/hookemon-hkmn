@@ -605,7 +605,7 @@ function admittedRelayIdentity(quote) {
  * Returns `null` when the configuration cannot admit a cycle at all, which the service reports as
  * WAITING_FOR_ADMISSION. Anything malformed throws instead of degrading into a cheaper cycle.
  */
-function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
+function buildAdmissionPlanner({ config, adapters, readConfiguration, processLiabilityReader = null }) {
   return {
     async plan({ cycleId, packId }) {
       const configuration = await readConfiguration();
@@ -621,6 +621,14 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
       }
       const settlementAsset = config.moneyConfiguration.assets.solanaStablecoin;
       const fundingAsset = config.moneyConfiguration.assets.usdg;
+      // Fails closed: with no attributable finalized process liability there is nothing that shows
+      // this cycle may spend process money, and a wallet balance or configured figure is not a
+      // substitute. Live production has no such reader yet, so no live cycle is admitted.
+      const liability = assertProcessLiabilityEvidence(
+        typeof processLiabilityReader?.read === 'function' ? await processLiabilityReader.read({ packId }) : null,
+        fundingAsset,
+      );
+      if (liability === null) return null;
       const unitAtomic = admittedCatalogUnit({
         catalog: await adapters.collectorCrypt.getMachines(),
         packId,
@@ -643,6 +651,9 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
       if (quantity > 1 && unitQuote.requestId === aggregateQuote.requestId) {
         throw new Error('admission planner received one Relay quote for both the unit and aggregate targets');
       }
+      if (BigInt(aggregateQuote.origin.amount) > BigInt(liability)) {
+        throw new Error('admission planner refuses an aggregate quote above the attributable process liability');
+      }
       return Object.freeze({
         schema: 'hookemon.policy-admission.v2',
         cycleId,
@@ -663,39 +674,42 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration }) {
 }
 
 /**
- * The attributable, finalized process USDG balance: what the admitted cycle may actually spend.
+ * Attributable finalized process liability, bound to the exact block it was observed at.
  *
- * This does not replace the operator's configured budget figure, which stays an intent check run
- * before anything is priced. It is the separate, evidenced check applied to the quoted principal --
- * the amount actually being authorized.
+ * A bare `balanceOf` on the Operations wallet is not this. The cycle's first money mutation is the
+ * claim that moves process funds from the hook into Operations, so a correctly empty Operations
+ * wallet would refuse a fundable cycle, while a wallet holding owner or unrelated USDG would be
+ * accepted as process money -- authorizing a spend of funds never attributed to the process. Nor is
+ * a configured figure evidence of anything.
  *
- * A configured literal is not admission evidence, and neither is a "latest" balance: the public RPC
- * only serves state reads at latest, so the read is taken there and then separately confirmed to sit
- * at or below the finalized head. An unfinalized read reports '0' rather than its value, so a
- * reorg-eligible balance can never fund a cycle. A read that fails reports '0' too -- absence of
- * evidence is not evidence of funds.
+ * The evidence this accepts is a finalized, attributed claimable amount for this process, carrying
+ * the asset it is denominated in and the exact block number and hash it was read at. A value read at
+ * `latest` and merely compared against a separately observed finalized head does not qualify: those
+ * are two unrelated reads and the balance carries no block identity of its own.
+ *
+ * No production reader exists yet -- the deployed hook exposes no claimable-process-liability view,
+ * and inventing one is not available to this composition -- so live admission fails closed here
+ * rather than substituting a weaker proof.
  */
-function buildProcessBalanceReader({ config, adapters }) {
-  const client = adapters?.robinhood?.client ?? null;
-  // Absence of the capability is not an observation of zero. A composition with no balance-reading
-  // client reports null and the configured figure stands, exactly as before; a client that has the
-  // capability and fails reports '0' and refuses, because there a read really was attempted.
-  const capable = client !== null && typeof client.readContract === 'function' && typeof client.getBlock === 'function';
-  return {
-    async read() {
-      if (!capable) return null;
-      try {
-        const balance = await readTokenBalanceAtLatest(client, {
-          token: config.moneyConfiguration.assets.usdg.assetId,
-          account: config.accounts.evm,
-        });
-        const finality = await confirmReadFinalized(client, balance.blockNumber);
-        return finality.finalized ? balance.value.toString() : '0';
-      } catch {
-        return '0';
-      }
-    },
-  };
+function assertProcessLiabilityEvidence(value, fundingAsset) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('process liability evidence must be a plain object');
+  }
+  const { amountAtomic, chainId, assetId, decimals, blockNumber, blockHash, finalized } = value;
+  if (finalized !== true) throw new Error('process liability evidence must be finalized');
+  if (typeof amountAtomic !== 'string' || !/^(0|[1-9][0-9]*)$/.test(amountAtomic)) {
+    throw new Error('process liability evidence amount is invalid');
+  }
+  if (chainId !== fundingAsset.chainId || assetId?.toLowerCase() !== fundingAsset.assetId.toLowerCase()
+    || decimals !== fundingAsset.decimals) {
+    throw new Error('process liability evidence is not denominated in the configured funding asset');
+  }
+  if (typeof blockNumber !== 'string' || !/^(0|[1-9][0-9]*)$/.test(blockNumber)
+    || typeof blockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(blockHash)) {
+    throw new Error('process liability evidence must bind the exact finalized block number and hash');
+  }
+  return amountAtomic;
 }
 
 function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMode }) {
@@ -1287,14 +1301,15 @@ export async function compose(config) {
         && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.usdg
         && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
         ? {
-          admissionPlanner: buildAdmissionPlanner({ config: resolved, adapters, readConfiguration }),
-          processBalanceReader: buildProcessBalanceReader({ config: resolved, adapters }),
-          operationsAccounts: {
-            evm: resolved.accounts.evm,
-            solana: resolved.accounts.solana,
-            fundingRoute: resolved.moneyConfiguration.assets.usdg,
-            settlementRoute: resolved.moneyConfiguration.assets.solanaStablecoin,
-          },
+          admissionPlanner: buildAdmissionPlanner({
+            config: resolved,
+            adapters,
+            readConfiguration,
+            // Production supplies nothing here: no deployed view reports attributable claimable
+            // process liability yet, so live admission fails closed rather than accepting a wallet
+            // balance or a configured figure as proof. A test supplies an isolated evidence source.
+            processLiabilityReader: config.processLiabilityReader ?? null,
+          }),
         }
         : {}),
       cycleRepository,

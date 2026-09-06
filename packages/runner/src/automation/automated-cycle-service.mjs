@@ -64,7 +64,6 @@ export class AutomatedCycleService {
   #budgetReader;
   #admissionPlanner;
   #operationsAccounts;
-  #processBalanceReader;
   #beforeComplete;
   #beforeMutation;
   #cycleRepository;
@@ -101,7 +100,7 @@ export class AutomatedCycleService {
       'feeSettlementObserver',
       'liveMode',
     ];
-    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'operationsAccounts', 'processBalanceReader'];
+    const optionalFields = ['packId', 'policyEngine', 'mode', 'providerMode', 'dryRun', 'policyCapUsdg', 'recoveryGuard', 'beforeComplete', 'beforeMutation', 'rehearsalSessionId', 'admissionPlanner', 'operationsAccounts'];
     const keys = Object.keys(config);
     if (!requiredFields.every(field => Object.hasOwn(config, field)) || keys.some(field => !requiredFields.includes(field) && !optionalFields.includes(field))) {
       throw new Error('automated cycle service configuration must use the exact schema');
@@ -181,9 +180,9 @@ export class AutomatedCycleService {
     this.#leaseStore = config.leaseStore;
     this.#budgetReader = config.budgetReader;
     this.#admissionPlanner = config.admissionPlanner ?? null;
+    // Only ever a branded test-only deployment identity. Production composition supplies nothing, so
+    // the policy engine and the durable store both fall back to the approved production pins.
     this.#operationsAccounts = config.operationsAccounts ?? null;
-    this.#processBalanceReader = config.processBalanceReader ?? null;
-    if (this.#processBalanceReader !== null) requireMethod(this.#processBalanceReader, 'read', 'processBalanceReader');
     if (this.#admissionPlanner !== null && typeof this.#admissionPlanner.plan !== 'function') {
       throw new Error('admissionPlanner must expose plan()');
     }
@@ -351,16 +350,13 @@ export class AutomatedCycleService {
           return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessUsdg: '0' };
         }
         assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
-        // The quoted principal is checked against evidenced funds, not the configured figure: the
-        // operator's number expresses intent, while only a finalized on-chain balance can authorize
-        // a spend. An unreadable or unfinalized balance reports '0' and refuses.
-        const observedProcessUsdg = admission === null || this.#processBalanceReader === null
-          ? null
-          : await this.#processBalanceReader.read();
-        const decision = admission === null ? gate : decideCycleBudget({
-          ...budget,
-          ...(observedProcessUsdg === null ? {} : { availableProcessUsdg: observedProcessUsdg }),
-        }, { admittedAggregateFundingUsdg: admission.aggregateFundingQuote.amountAtomic });
+        // The attributable finalized process liability is established by the planner, which refuses
+        // to admit at all without it, so nothing here substitutes a wallet balance or a configured
+        // figure for that proof. This only re-checks the quoted principal against the operator's own
+        // configured ceiling.
+        const decision = admission === null ? gate : decideCycleBudget(budget, {
+          admittedAggregateFundingUsdg: admission.aggregateFundingQuote.amountAtomic,
+        });
         if (!decision.ready) {
           return {
             status: decision.reason === 'ACTIVE_CYCLE' ? 'ACTIVE_CYCLE_NOT_RECONCILED' : 'WAITING_FOR_PROCESS_BUDGET',
@@ -395,7 +391,7 @@ export class AutomatedCycleService {
         cycle = await this.#cycleRepository.createCycle({
           releaseAmount: decision.releaseAmount,
           mode: this.#mode,
-          ...(admission === null ? {} : { cycleId: reservedCycleId, admission, operations: this.#operationsAccounts }),
+          ...(admission === null ? {} : { cycleId: reservedCycleId, admission, operations: this.#operationsAccounts ?? null }),
           ...(this.#providerMode === null ? {} : { providerMode: this.#providerMode }),
           ...(this.#dryRun ? { dryRun: true } : {}),
           ...(this.#rehearsalSessionId === null ? {} : { rehearsalSessionId: this.#rehearsalSessionId }),
@@ -477,7 +473,7 @@ export class AutomatedCycleService {
             mode: this.#mode,
             capUsdg: this.#policyCapUsdg ?? undefined,
             // Re-presented at every execution boundary because the recorded cycle digest includes it.
-            ...(cycle.admission ? { admission: cycle.admission, operations: this.#operationsAccounts ?? undefined } : {}),
+            ...(cycle.admission ? { admission: cycle.admission } : {}),
           });
           assertPolicyDecision(policyDecision);
         }
@@ -519,7 +515,7 @@ export class AutomatedCycleService {
               liveMode: this.#liveMode,
               mode: this.#mode,
               capUsdg: this.#policyCapUsdg ?? undefined,
-              ...(cycle.admission ? { admission: cycle.admission, operations: this.#operationsAccounts ?? undefined } : {}),
+              ...(cycle.admission ? { admission: cycle.admission } : {}),
             });
             assertPolicyDecision(policyDecision);
           }
@@ -532,7 +528,7 @@ export class AutomatedCycleService {
               liveMode: this.#liveMode,
               mode: this.#mode,
               capUsdg: this.#policyCapUsdg ?? undefined,
-              ...(cycle.admission ? { admission: cycle.admission, operations: this.#operationsAccounts ?? undefined } : {}),
+              ...(cycle.admission ? { admission: cycle.admission } : {}),
             });
             assertPolicyDecision(policyDecision);
           }

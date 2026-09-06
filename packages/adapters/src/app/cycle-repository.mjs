@@ -604,28 +604,20 @@ function assertReservedCycleId(value) {
  * Validates the quote-bound policy admission this cycle is opened under. Monetary rules are not
  * restated here: `assertPolicyAdmission` is the policy engine's own normalizer, so the record this
  * store accepts is exactly the record that engine will digest and that outbound will replay. What
- * this adds is the persistence-boundary obligation -- the record must name this cycle, and it must
- * carry the parsed aggregate Relay quote bound to the admitted quote digest, because outbound
- * reconstructs its intent from that quote after a restart and must never requote.
- *
- * The full value is stored, not the normalized subset: normalization drops `relayQuote`, which is
- * the evidence a restarted outbound needs.
+ * this adds is the persistence-boundary obligation that the record names this cycle.
  */
 function assertDurableCycleAdmission(value, cycleId, operations, label = 'cycle-repository admission') {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new Error(`${label} must be a plain object`);
   }
-  assertPolicyAdmission(value, operations);
-  if (value.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
-  const quote = value.relayQuote;
-  if (!quote || typeof quote !== 'object' || Array.isArray(quote) || Object.getPrototypeOf(quote) !== Object.prototype) {
-    throw new Error(`${label} must carry the parsed aggregate Relay quote`);
-  }
-  if (quote.quoteDigest !== value.quoteDigest || quote.tradeType !== 'EXACT_OUTPUT') {
-    throw new Error(`${label} aggregate Relay quote is not the admitted exact-output quote`);
-  }
-  canonicalJson(value);
-  return Object.freeze(structuredClone(value));
+  // The policy engine's own normalizer authenticates both quotes deeply -- parsed and raw evidence,
+  // route legs, order binding, and each quote digest recomputed from that evidence rather than
+  // trusted as supplied. What is persisted is that normalized result, so the stored record cannot
+  // contain executable raw steps the checks never saw.
+  const normalized = assertPolicyAdmission(value, operations);
+  if (normalized.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
+  canonicalJson(normalized);
+  return Object.freeze(structuredClone(normalized));
 }
 
 function custodyLedgerKey(ledger) {
@@ -2653,20 +2645,11 @@ export class CycleRepository {
         assertReleaseAmount(entry.payload.releaseAmount);
         releaseAmount = entry.payload.releaseAmount;
         if (Object.hasOwn(entry.payload, 'admission')) {
-          // Replay validates identity and structure only. The Operations accounts a stored
-          // admission was admitted against are not re-derived here: they are composition identity,
-          // and the policy engine re-checks them against current configuration on every boundary.
-          admission = assertDurableCycleAdmission(
-            entry.payload.admission,
-            cycleId,
-            {
-              evm: entry.payload.admission?.relay?.sender ?? '',
-              solana: entry.payload.admission?.relay?.recipient ?? '',
-              fundingRoute: entry.payload.admission?.aggregateFundingQuote ?? null,
-              settlementRoute: entry.payload.admission?.aggregatePurchase ?? null,
-            },
-            'stored cycle admission',
-          );
+          // Replay re-validates against the approved deployment identity, never against values
+          // taken from the stored record. Deriving the expectation from the record would let a
+          // stored admission certify its own accounts and assets, which is exactly the check this
+          // is here to perform.
+          admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, null, 'stored cycle admission');
         }
         if (Object.hasOwn(entry.payload, 'mode')) {
           mode = assertCycleMode(entry.payload.mode, 'stored cycle mode');

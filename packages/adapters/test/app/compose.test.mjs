@@ -48,6 +48,25 @@ import { privateKeyToAccount, serializeSignature, sign as signSecp256k1 } from '
 const DASHBOARD_CREDENTIAL = 'd'.repeat(40);
 const SOLANA_MAINNET_GENESIS_HASH = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 
+// Isolated, test-only attributable process liability. Production has no such reader, so live
+// admission fails closed there; a test that needs a live cycle supplies this explicitly rather than
+// letting a wallet balance or a configured figure stand in for attribution evidence.
+function testProcessLiabilityReader(amountAtomic = '1000000') {
+  return {
+    async read() {
+      return {
+        amountAtomic,
+        chainId: '4663',
+        assetId: FULL_USDG,
+        decimals: 6,
+        blockNumber: '10',
+        blockHash: `0x${'1'.repeat(64)}`,
+        finalized: true,
+      };
+    },
+  };
+}
+
 const SUFFICIENT_BUDGET = Object.freeze({
   availableProcessUsdg: '10',
   packPriceUsdg: '1',
@@ -2369,6 +2388,7 @@ test('liveMode true fails closed before claim signing when canonical nonce reads
   };
 
   const composition = await compose({
+    processLiabilityReader: testProcessLiabilityReader(),
     stateDir,
     statePath,
     workerOwner: 'test-worker',
