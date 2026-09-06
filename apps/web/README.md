@@ -59,7 +59,7 @@ node scripts/verify-cloudflare-deploy.mjs config dist/server/wrangler.json
 ./node_modules/.bin/wrangler deploy --config dist/server/wrangler.json
 ```
 
-Configure these five encrypted Worker secret names. Keep their values out of the
+Configure these six encrypted Worker secret names. Keep their values out of the
 repository, browser-visible environment, command output, and documentation:
 
 - `OPERATOR_CONTROL_SERVICE_URL`: the HTTPS origin of `hookemon-operator-control`
@@ -72,8 +72,11 @@ repository, browser-visible environment, command output, and documentation:
 - `PUBLIC_COMMUNITY_SNAPSHOT_URL`: the full HTTPS URL of the redacted aggregate
   dashboard route, with the exact shape
   `https://<operator-control-host>/public/api/community-dashboard` and no query or fragment
+- `PUBLIC_CYCLE_HISTORY_URL`: the full HTTPS URL of the paginated cycle-history route,
+  with the exact shape `https://<operator-control-host>/public/api/cycle-history` and
+  no query or fragment
 
-The generated deployment config declares all five names as required secrets, and
+The generated deployment config declares all six names as required secrets, and
 `verify-cloudflare-deploy.mjs` rejects the deployment target if any name is missing.
 Wrangler then checks that every required secret is already configured on
 `hookemon-web` before deploying. In the Cloudflare dashboard, use **Workers & Pages**
