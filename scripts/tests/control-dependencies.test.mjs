@@ -151,6 +151,7 @@ const CANONICAL_FORK_PIN_CANARY = readFileSync(join(REPO_ROOT, '.github', 'workf
 const CANONICAL_FORK_PROOF = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'fork-proof.yml'), 'utf8');
 const CANONICAL_IDENTITY_GATE = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'identity-gate.yml'), 'utf8');
 const CANONICAL_CONTROL_GATE = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'control-gate.yml'), 'utf8');
+const CANONICAL_LAUNCH_GATE = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'launch-gate.yml'), 'utf8');
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -199,6 +200,7 @@ function fixture() {
   writeFileSync(join(root, '.github', 'workflows', 'fork-pin-canary.yml'), CANONICAL_FORK_PIN_CANARY);
   writeFileSync(join(root, '.github', 'workflows', 'identity-gate.yml'), CANONICAL_IDENTITY_GATE);
   writeFileSync(join(root, '.github', 'workflows', 'control-gate.yml'), CANONICAL_CONTROL_GATE);
+  writeFileSync(join(root, '.github', 'workflows', 'launch-gate.yml'), CANONICAL_LAUNCH_GATE);
   writeFileSync(join(root, 'scripts', 'check-commit-identity.mjs'), COMMIT_IDENTITY_ALLOWLIST_SCRIPT);
   writeFileSync(join(root, 'scripts', 'verify-fork-pin.mjs'), FORK_PIN_VERIFIER_SCRIPT);
   cpSync(RELEASE_CLOSURE_BUILDER_ROOT, join(root, 'scripts', 'programmable', 'vendor', 'programmable-v4-hook-builder'), {
@@ -241,6 +243,7 @@ function fixture() {
       forkPinCanary: { path: '.github/workflows/fork-pin-canary.yml', sha256: sha256(CANONICAL_FORK_PIN_CANARY) },
       identityGate: { path: '.github/workflows/identity-gate.yml', sha256: sha256(CANONICAL_IDENTITY_GATE) },
       controlGate: { path: '.github/workflows/control-gate.yml', sha256: sha256(CANONICAL_CONTROL_GATE) },
+      launchGate: { path: '.github/workflows/launch-gate.yml', sha256: sha256(CANONICAL_LAUNCH_GATE) },
       archiveForkProofTest: { path: ARCHIVE_FORK_PROOF_TEST_PATH, sha256: ARCHIVE_FORK_PROOF_TEST_SHA256 },
       githubActions: ACTIONS,
     },
@@ -366,6 +369,7 @@ test('verifies the exact runtime executable for the selected platform distributi
       { workflow: '.github/workflows/fork-proof.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/identity-gate.yml', ref: CHECKOUT_SHA },
+      { workflow: '.github/workflows/launch-gate.yml', ref: CHECKOUT_SHA },
       { workflow: '.github/workflows/v4-gates.yml', ref: CHECKOUT_SHA },
     ],
   });
@@ -626,6 +630,7 @@ test('the base control checker rejects a candidate verifier import outside the p
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -670,6 +675,7 @@ test('the base control checker permits an owner-approved verifier pin bump with 
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -722,6 +728,7 @@ function v2PinBumpFixture() {
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256, bytes: Buffer.from(candidateVerifier) }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256, bytes: Buffer.from(FORK_PIN_VERIFIER_IMPORT_SCRIPT) }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '8'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.closure[0].sha256, bytes: Buffer.from(CONTROL_DEPENDENCY_VERIFIER_SCRIPT) }],
@@ -862,6 +869,7 @@ test('the base control checker rejects a coordinated candidate control-surface m
     ['.github/workflows/fork-pin-canary.yml', { mode: '100644', type: 'blob', blobId: '2'.repeat(40), sha256: candidatePins.contentAddresses.forkPinCanary.sha256 }],
     ['.github/workflows/identity-gate.yml', { mode: '100644', type: 'blob', blobId: '3'.repeat(40), sha256: candidatePins.contentAddresses.identityGate.sha256 }],
     ['.github/workflows/control-gate.yml', { mode: '100644', type: 'blob', blobId: '4'.repeat(40), sha256: candidatePins.contentAddresses.controlGate.sha256 }],
+    ['.github/workflows/launch-gate.yml', { mode: '100644', type: 'blob', blobId: 'd'.repeat(40), sha256: candidatePins.contentAddresses.launchGate.sha256 }],
     ['scripts/verify-fork-pin.mjs', { mode: '100644', type: 'blob', blobId: '5'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[0].sha256 }],
     [FORK_PIN_VERIFIER_IMPORT_PATH, { mode: '100644', type: 'blob', blobId: '6'.repeat(40), sha256: candidatePins.controlScripts.forkPinVerifier.closure[1].sha256 }],
     ['scripts/verify-control-dependencies.mjs', { mode: '100644', type: 'blob', blobId: '7'.repeat(40), sha256: candidatePins.controlScripts.controlDependencyVerifier.sha256 }],
@@ -1174,6 +1182,86 @@ assertWorkflowTamperIsRejected('rejects replacing a required workflow step', wor
 ));
 
 assertWorkflowTamperIsRejected('rejects an unknown additional step', workflow => `${workflow}\n      - name: Unknown step\n        run: true\n`);
+
+function assertLaunchGateTamperIsRejected(name, transform, messagePattern) {
+  test(name, () => {
+    const state = fixture();
+    const workflowPath = join(state.root, '.github', 'workflows', 'launch-gate.yml');
+    const tampered = transform(CANONICAL_LAUNCH_GATE);
+    assert.notEqual(tampered, CANONICAL_LAUNCH_GATE);
+    writeFileSync(workflowPath, tampered);
+    const pinsPath = join(state.root, 'product', 'dependency-pins.json');
+    const pins = readJson(pinsPath);
+    pins.contentAddresses.launchGate.sha256 = sha256(tampered);
+    writeJson(pinsPath, pins);
+
+    const result = verifyFixture(state);
+
+    assert.equal(result.result, 'FAILED', result.errors.join('\n'));
+    assert.match(result.errors.join('\n'), messagePattern);
+  });
+}
+
+const REQUIRED_LAUNCH_GATE_COMMANDS = [
+  'node scripts/v4.mjs status --check',
+  'git diff --exit-code -- STATE.md state.json',
+  'node scripts/v4.mjs trace check',
+  'node scripts/check-delivery-boundary.mjs',
+  'node scripts/verify-release-package-closure.mjs',
+  'node scripts/programmable/verify-launch-package.mjs',
+  'node scripts/verify-release-ready.mjs',
+  'if (report.launchEligible !== true)',
+];
+
+for (const command of REQUIRED_LAUNCH_GATE_COMMANDS) {
+  assertLaunchGateTamperIsRejected(
+    `rejects a launch-gate workflow missing the mandatory step: ${command}`,
+    workflow => workflow.replaceAll(command, ''),
+    /launch-gate workflow must run/,
+  );
+}
+
+assertLaunchGateTamperIsRejected(
+  'rejects a launch-gate workflow that weakens the strict launch-package check with --allow-unverified',
+  workflow => workflow.replace(
+    'node scripts/programmable/verify-launch-package.mjs',
+    'node scripts/programmable/verify-launch-package.mjs --allow-unverified',
+  ),
+  /launch-gate workflow must not weaken the launch-package check/,
+);
+
+assertLaunchGateTamperIsRejected(
+  'rejects a launch-gate workflow that adds an automatic push trigger',
+  workflow => workflow.replace(
+    'on:\n  workflow_dispatch:',
+    'on:\n  push:\n    branches: [main]\n  workflow_dispatch:',
+  ),
+  /launch-gate workflow must be dispatch-only/,
+);
+
+assertLaunchGateTamperIsRejected(
+  'rejects a launch-gate workflow that drops the mainSha input requirement',
+  workflow => workflow.replaceAll('mainSha', 'launchRef').replaceAll('MAIN_SHA_INPUT', 'LAUNCH_REF_INPUT'),
+  /launch-gate workflow must require an explicit mainSha input/,
+);
+
+assertLaunchGateTamperIsRejected(
+  'rejects a launch-gate workflow that drops the protected-main-branch assertion',
+  workflow => workflow.replace(/refs\/heads\/main/g, 'refs/heads/anything'),
+  /launch-gate workflow must assert the protected main branch/,
+);
+
+test('the launch-gate workflow is pinned to the same control surface as the other five workflows', () => {
+  const state = fixture();
+  const result = verifyFixture(state);
+
+  assert.equal(result.result, 'PASSED', result.errors.join('\n'));
+  assert.deepEqual(result.launchGate, {
+    path: '.github/workflows/launch-gate.yml',
+    expectedSha256: sha256(CANONICAL_LAUNCH_GATE),
+    actualSha256: sha256(CANONICAL_LAUNCH_GATE),
+  });
+});
 
 test('rejects a Darwin Node example URL even with correctly shaped digests', () => {
   const state = fixture();

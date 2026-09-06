@@ -448,6 +448,9 @@ test('the required code gate carries no launch/release evidence; the launch gate
   assert.match(launchGateWorkflow, /report\.launchEligible !== true/);
   assert.match(launchGateWorkflow, /refs\/heads\/main/);
   assert.doesNotMatch(launchGateWorkflow, /pull_request/);
+  assert.doesNotMatch(launchGateWorkflow, /^ {2}push:/m);
+  assert.match(launchGateWorkflow, /mainSha/);
+  assert.match(launchGateWorkflow, /required:\s*true/);
 });
 
 test('the interface freeze digest for product/dependency-pins.json ignores CI-tool churn but still binds phase1Toolchain', () => {

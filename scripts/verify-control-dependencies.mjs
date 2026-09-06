@@ -27,9 +27,6 @@ const FORK_PROOF_WORKFLOW_PATH = '.github/workflows/fork-proof.yml';
 const FORK_PIN_CANARY_WORKFLOW_PATH = '.github/workflows/fork-pin-canary.yml';
 const IDENTITY_GATE_WORKFLOW_PATH = '.github/workflows/identity-gate.yml';
 const CONTROL_GATE_WORKFLOW_PATH = '.github/workflows/control-gate.yml';
-// Not yet part of the base-checker's content-addressed control surface: extending that
-// protected pin set is its own owner-authorized base-checker migration, out of this
-// scope. Permitted here only so the launch gate does not trip the unlisted-workflow scan.
 const LAUNCH_GATE_WORKFLOW_PATH = '.github/workflows/launch-gate.yml';
 const PERMITTED_WORKFLOW_PATHS = new Set([
   V4_GATES_WORKFLOW_PATH,
@@ -51,6 +48,7 @@ const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ec
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
 const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
+const SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256 = 'fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_MANIFEST_SHA256 = 'd3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b';
@@ -611,6 +609,68 @@ function verifyControlGateIntegrity(root, pins, errors) {
     expectedSha256: pin.sha256 ?? null,
     actualSha256,
   };
+}
+
+function verifyLaunchGateIntegrity(root, pins, errors) {
+  const pin = pins.contentAddresses?.launchGate ?? {};
+  const path = join(root, LAUNCH_GATE_WORKFLOW_PATH);
+  let actualSha256 = null;
+  try {
+    actualSha256 = hashFile(path);
+  } catch {
+    errors.push('launch-gate workflow could not be read');
+  }
+  if (pin.path !== LAUNCH_GATE_WORKFLOW_PATH) {
+    errors.push(`launch-gate path must be ${LAUNCH_GATE_WORKFLOW_PATH}`);
+  }
+  if (pin.sha256 !== SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256) {
+    errors.push('launch-gate digest must match the supported release');
+  }
+  if (actualSha256 !== null && actualSha256 !== pin.sha256) {
+    errors.push(`launch-gate digest mismatch: expected ${pin.sha256 ?? '(missing)'}, got ${actualSha256}`);
+  }
+  if (actualSha256 !== null && actualSha256 !== SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256) {
+    errors.push('launch-gate content mismatch: workflow must match the supported release');
+  }
+  return {
+    path: LAUNCH_GATE_WORKFLOW_PATH,
+    expectedSha256: pin.sha256 ?? null,
+    actualSha256,
+  };
+}
+
+const REQUIRED_LAUNCH_GATE_COMMANDS = Object.freeze([
+  'node scripts/v4.mjs status --check',
+  'git diff --exit-code -- STATE.md state.json',
+  'node scripts/v4.mjs trace check',
+  'node scripts/check-delivery-boundary.mjs',
+  'node scripts/verify-release-package-closure.mjs',
+  'node scripts/programmable/verify-launch-package.mjs',
+  'node scripts/verify-release-ready.mjs',
+  'if (report.launchEligible !== true)',
+]);
+
+function verifyLaunchGateSemantics(workflow, errors) {
+  for (const command of REQUIRED_LAUNCH_GATE_COMMANDS) {
+    if (!workflow.includes(command)) {
+      errors.push(`launch-gate workflow must run: ${command}`);
+    }
+  }
+  if (workflow.includes('verify-launch-package.mjs --allow-unverified')) {
+    errors.push('launch-gate workflow must not weaken the launch-package check with --allow-unverified');
+  }
+  const triggerStart = workflow.indexOf('on:\n');
+  const triggerEnd = workflow.indexOf('\njobs:\n', triggerStart);
+  const triggerBlock = triggerStart === -1 || triggerEnd === -1 ? workflow : workflow.slice(triggerStart, triggerEnd);
+  if (!triggerBlock.includes('workflow_dispatch') || /^ {2}(?:pull_request|push):/m.test(triggerBlock)) {
+    errors.push('launch-gate workflow must be dispatch-only, never a pull_request or push trigger');
+  }
+  if (!workflow.includes('refs/heads/main')) {
+    errors.push('launch-gate workflow must assert the protected main branch');
+  }
+  if (!workflow.includes('mainSha')) {
+    errors.push('launch-gate workflow must require an explicit mainSha input bound to the checked-out commit');
+  }
 }
 
 function verifyCommitIdentityAllowlistIntegrity(root, pins, errors) {
@@ -1219,6 +1279,7 @@ function controlSurfaceDescriptors(pins, errors, source) {
   add('fork-pin canary workflow', FORK_PIN_CANARY_WORKFLOW_PATH, pins.contentAddresses?.forkPinCanary);
   add('identity-gate workflow', IDENTITY_GATE_WORKFLOW_PATH, pins.contentAddresses?.identityGate);
   add('control-gate workflow', CONTROL_GATE_WORKFLOW_PATH, pins.contentAddresses?.controlGate);
+  add('launch-gate workflow', LAUNCH_GATE_WORKFLOW_PATH, pins.contentAddresses?.launchGate);
   const forkPinVerifier = pins.controlScripts?.forkPinVerifier ?? {};
   const closure = forkPinVerifier.closure;
   if (!Array.isArray(closure) || closure.length !== 2) {
@@ -1821,6 +1882,12 @@ export function verifyControlDependencies(rootPath, options = {}) {
   } catch {
     // The integrity check below records the missing workflow.
   }
+  let launchGateWorkflow = '';
+  try {
+    launchGateWorkflow = readFileSync(join(root, LAUNCH_GATE_WORKFLOW_PATH), 'utf8');
+  } catch {
+    // The integrity check below records the missing workflow.
+  }
 
   errors.push(...actionScan.syntaxErrors);
   const workflowIntegrity = verifyWorkflowIntegrity(workflowSet.canonicalPath, pins, errors);
@@ -1828,6 +1895,8 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const forkPinCanary = verifyForkPinCanaryIntegrity(root, pins, errors);
   const identityGate = verifyIdentityGateIntegrity(root, pins, errors);
   const controlGate = verifyControlGateIntegrity(root, pins, errors);
+  const launchGate = verifyLaunchGateIntegrity(root, pins, errors);
+  verifyLaunchGateSemantics(launchGateWorkflow, errors);
   const commitIdentityAllowlist = verifyCommitIdentityAllowlistIntegrity(root, pins, errors);
   const forkPinVerifier = verifyForkPinVerifierIntegrity(root, pins, errors);
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
@@ -1932,6 +2001,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
     forkPinCanary,
     identityGate,
     controlGate,
+    launchGate,
     controlScripts: {
       commitIdentityAllowlist,
       forkPinVerifier,

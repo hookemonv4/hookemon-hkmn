@@ -90,6 +90,11 @@
     "expectedSha256": "cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74",
     "actualSha256": "cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74"
   },
+  "launchGate": {
+    "path": ".github/workflows/launch-gate.yml",
+    "expectedSha256": "fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4",
+    "actualSha256": "fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4"
+  },
   "controlScripts": {
     "commitIdentityAllowlist": {
       "path": "scripts/check-commit-identity.mjs",
@@ -131,13 +136,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "ca339304e90bd201a2e6246b83944f7f9f2ab2ee7534ce8d3b6a4110985ea11e",
-      "actualSha256": "ca339304e90bd201a2e6246b83944f7f9f2ab2ee7534ce8d3b6a4110985ea11e",
+      "expectedSha256": "0aa029037fb145989068e2c449b5a80c0b01280ec31628a65376560489583e7d",
+      "actualSha256": "0aa029037fb145989068e2c449b5a80c0b01280ec31628a65376560489583e7d",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "ca339304e90bd201a2e6246b83944f7f9f2ab2ee7534ce8d3b6a4110985ea11e",
-          "actualSha256": "ca339304e90bd201a2e6246b83944f7f9f2ab2ee7534ce8d3b6a4110985ea11e"
+          "sha256": "0aa029037fb145989068e2c449b5a80c0b01280ec31628a65376560489583e7d",
+          "actualSha256": "0aa029037fb145989068e2c449b5a80c0b01280ec31628a65376560489583e7d"
         },
         {
           "path": "scripts/lib/util.mjs",
