@@ -133,6 +133,19 @@ record.
   Its Solana memo must equal the recorded `relayRequestId`, and its mint and net credit must exactly
   match the recorded destination amount. Missing timestamp, memo, amount, or asset evidence leaves
   the leg unsettled.
+- An outbound leg's Relay envelope is exactly two EVM transactions per source: the USDG approval,
+  then the depository deposit that carries `leg.sourceTxHash`. Both durable chain attempts must
+  independently reach `FINALIZED` chain evidence before the outbound stage may complete; the
+  deposit's own finalized ERC20 transfer proof is never treated as evidence for the approval that
+  precedes it. The approval's own durably recorded raw bytes must decode to exactly its expected
+  role — a zero-value call to USDG `approve(depository, leg.sourceAmountAtomic)`, signed by
+  Operations, at the nonce immediately preceding the deposit's own reserved nonce — before its own
+  receipt is read; a missing, extra, wrong-identity, or role-mismatched prerequisite attempt is a
+  hard refusal, never silently accepted (`packages/adapters/src/app/stages/outbound.mjs`,
+  `assertOutboundApprovalAttemptRole`/`finalizeOutboundApprovalAttempt`). This check runs before
+  any settled- or held-leg fast path, so a restart that finds the leg already `SETTLED` with its
+  approval attempt still `BROADCAST` still proves and finalizes it rather than skipping it because
+  the deposit and destination already succeeded.
 - An outbound `HELD_RELAY_REFUND` requires a request-bound OUTBOUND `REFUND` pointer plus one
   finalized origin-chain USDG Transfer from the persisted EVM depository to Operations observed
   through this process's Robinhood RPC client. The refund transfer must be positive, no larger than
@@ -196,7 +209,10 @@ record.
    are exact, the canonical destination block time is within the persisted interval from source
    timestamp through quote deadline, and the destination memo equals the recorded request ID.
    Positive partial, late, and wrong-asset observations enter their named terminal recovery state
-   and wait for an idempotent owner decision.
+   and wait for an idempotent owner decision. Independently of the leg's own settlement, the
+   outbound stage cannot complete until its preceding USDG approval attempt is also durably
+   `FINALIZED` from its own role-checked receipt (see Invariants above); this can resolve before or
+   after the leg reaches `SETTLED`, but never by inference from the deposit's proof.
 8. An outbound refund enters `HELD_RELAY_REFUND` only after a restored durable intent authenticates
    the Relay refund pointer and the process-observed Robinhood receipt proves one origin USDG
    credit from its persisted depository to Operations. A destination-side debit cannot enter that
@@ -245,3 +261,8 @@ node packages/adapters/test/relay-client.live-chains.mjs
 - When a terminal Relay pointer, source finality, or process-RPC destination receipt is absent,
   retain the leg `RECORDED` and do not attribute custody or start payout. A duplicate source or
   destination hash remains rejected across every cycle.
+- When the outbound approval attempt's receipt is missing, reverted, or non-canonical, or its own
+  durable raw bytes do not decode to the exact expected role, leave that attempt — and the whole
+  outbound stage — unresolved (`OutboundRecoveryRequiredError` with `OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS`
+  for a missing, extra, or role-invalid prerequisite). Do not substitute the deposit's own finality,
+  and do not re-sign: the durable attempt is retried on its own recorded bytes only.

@@ -4,7 +4,7 @@ import {
   assertQuoteUsable,
   relayQuoteDigest,
 } from '../../relay-client.mjs';
-import { keccak256 } from 'viem';
+import { keccak256, parseTransaction, recoverTransactionAddress } from 'viem';
 import {
   ERC20_TRANSFER_TOPIC,
   readBlockByNumber,
@@ -1133,34 +1133,89 @@ async function readOutboundPrerequisiteFinality(client, hash) {
 }
 
 /**
- * Finalizes every durable outbound chain attempt other than the one bound to the leg's own
- * `sourceTxHash`. Each is read and validated on its own transaction hash; a missing, unfinalized,
- * reverted, or non-canonical prerequisite receipt leaves that attempt -- and therefore the whole
- * stage -- unresolved rather than fabricating success from the source leg's separate evidence.
- * Restart-safe: `recordFinality` itself is idempotent against identical evidence and refuses
- * conflicting evidence, so re-deriving the same finalized receipt after a restart is a no-op.
+ * Fails closed unless this durable outbound attempt is exactly the canonical USDG approval the
+ * matched deposit required: its own recorded raw bytes decode to a zero-value chain-4663 call to
+ * USDG `approve(depository, leg.sourceAmountAtomic)`, signed by the Operations account, at the
+ * nonce immediately preceding the deposit's own reserved nonce. Reuses the exact calldata decoding
+ * this stage already trusts before signing (`calldataWords`/`evmAddressFromWord`/
+ * `atomicAmountFromWord`, the same primitives `assertOutboundRelayEnvelope` above verifies
+ * pre-signature) -- never a new decoder, and never inferred from the deposit's own, separate
+ * evidence.
  */
-async function finalizeOutboundPrerequisites({ cycleRepository, context, client, prerequisites }) {
-  let allFinalized = true;
-  for (const entry of prerequisites) {
-    if (entry.attempt.state === 'FINALIZED') continue;
-    if (entry.attempt.state !== 'BROADCAST') {
-      allFinalized = false;
-      continue;
-    }
-    let finality;
-    try {
-      finality = await readOutboundPrerequisiteFinality(client, entry.attempt.hash);
-    } catch {
-      finality = null;
-    }
-    if (finality === null) {
-      allFinalized = false;
-      continue;
-    }
-    await cycleRepository.recordFinality(context.cycleId, 'outbound', entry.attempt.requestDigest, finality);
+async function assertOutboundApprovalAttemptRole(entry, {
+  operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
+}) {
+  const { attempt } = entry;
+  const refuse = (message, cause) => {
+    throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', message, cause === undefined ? {} : { cause });
+  };
+  if (typeof attempt.hash === 'string' && attempt.hash.toLowerCase() === sourceHash.toLowerCase()) {
+    refuse('an outbound prerequisite attempt duplicates the deposit transaction hash');
   }
-  return allFinalized;
+  if (typeof attempt.rawBytes !== 'string' || attempt.rawBytes.length === 0) {
+    refuse('an outbound prerequisite attempt has no durable signed bytes');
+  }
+  if (keccak256(attempt.rawBytes).toLowerCase() !== String(attempt.hash).toLowerCase()) {
+    refuse('an outbound prerequisite attempt hash does not match its own durable raw bytes');
+  }
+  let parsed;
+  let signer;
+  try {
+    parsed = parseTransaction(attempt.rawBytes);
+    signer = await recoverTransactionAddress({ serializedTransaction: attempt.rawBytes });
+  } catch (error) {
+    refuse('an outbound prerequisite attempt raw bytes do not decode as a signed EVM transaction', error);
+  }
+  if (!equalEvmAddress(signer, operationsAccount)) {
+    refuse('the outbound prerequisite attempt was not signed by the Operations account');
+  }
+  if (String(parsed.chainId) !== EVM_CHAIN_ID || !equalEvmAddress(parsed.to, USDG_ADDRESS) || BigInt(parsed.value ?? 0n) !== 0n) {
+    refuse('the outbound prerequisite attempt is not a zero-value chain-4663 USDG call');
+  }
+  let spenderWord;
+  let amountWord;
+  try {
+    [spenderWord, amountWord] = calldataWords(parsed.data ?? '0x', ERC20_APPROVE_SELECTOR, 2, 'outbound prerequisite approval');
+  } catch (error) {
+    refuse('the outbound prerequisite attempt is not a canonical USDG approval call', error);
+  }
+  if (!equalEvmAddress(evmAddressFromWord(spenderWord, 'outbound prerequisite approval spender'), depository)) {
+    refuse('the outbound prerequisite approval spender is not the configured Relay depository');
+  }
+  if (atomicAmountFromWord(amountWord, 'outbound prerequisite approval amount') !== amountAtomic) {
+    refuse('the outbound prerequisite approval amount does not equal the leg source amount');
+  }
+  if (parsed.nonce === null || parsed.nonce === undefined
+    || sourceNonce === null || sourceNonce === undefined
+    || BigInt(parsed.nonce) + 1n !== BigInt(sourceNonce)) {
+    refuse('the outbound prerequisite attempt nonce does not immediately precede the deposit nonce');
+  }
+}
+
+/**
+ * Resolves the leg's one durable prerequisite attempt: already-FINALIZED is a no-op (restart-safe,
+ * `recordFinality` itself refuses conflicting evidence), not-yet-BROADCAST means nothing to read
+ * yet, and BROADCAST is role-checked then independently finalized from its own receipt. A missing,
+ * reverted, or non-canonical receipt leaves the attempt -- and therefore the whole stage --
+ * unresolved rather than fabricating success from the deposit's separate evidence.
+ */
+async function finalizeOutboundApprovalAttempt({
+  cycleRepository, context, client, prerequisite, operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
+}) {
+  if (prerequisite.attempt.state === 'FINALIZED') return true;
+  if (prerequisite.attempt.state !== 'BROADCAST') return false;
+  await assertOutboundApprovalAttemptRole(prerequisite, {
+    operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
+  });
+  let finality;
+  try {
+    finality = await readOutboundPrerequisiteFinality(client, prerequisite.attempt.hash);
+  } catch {
+    finality = null;
+  }
+  if (finality === null) return false;
+  await cycleRepository.recordFinality(context.cycleId, 'outbound', prerequisite.attempt.requestDigest, finality);
+  return true;
 }
 
 function isExactOutboundDestinationCredit(leg, observation) {
@@ -1227,38 +1282,54 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
   }
   const leg = legs[0];
   if (typeof leg.sourceTxHash !== 'string' || leg.sourceTxHash.length === 0) return null;
-  const records = stateValues(cycle?.chainAttempts)
-    .filter(record => record?.attempt?.stage === 'outbound'
-      && typeof record.attempt.hash === 'string'
-      && record.attempt.hash.toLowerCase() === leg.sourceTxHash.toLowerCase());
-  if (leg.state === 'SETTLED') return outboundSettlementEvidence(leg);
-  if (leg.state !== 'RECORDED') {
-    if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && records.length === 1 && records[0].attempt?.state === 'FINALIZED') {
-      const configured = assertOutboundConfiguration(config);
-      await releaseOutboundWalletNonce({ cycleRepository, configured, context });
-    }
-    return null;
-  }
+  const allOutboundAttempts = stateValues(cycle?.chainAttempts).filter(candidate => candidate?.attempt?.stage === 'outbound');
+  const records = allOutboundAttempts.filter(record => typeof record.attempt.hash === 'string'
+    && record.attempt.hash.toLowerCase() === leg.sourceTxHash.toLowerCase());
   if (records.length !== 1) {
     throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'the outbound Relay leg cannot be matched to one durable chain attempt');
   }
   const record = records[0];
-  if (!['SIGNED', 'BROADCAST', 'FINALIZED'].includes(record.attempt.state)) return null;
   const configured = assertOutboundConfiguration(config);
+
+  // The durable outbound attempt set must be exactly the canonical two-step Relay envelope: the
+  // deposit matched above, and exactly one prerequisite -- the USDG approval that must precede it
+  // (`assertOutboundRelayEnvelope` above enforces this same two-step shape before either is ever
+  // signed). It is proven and independently finalized here, before any settled- or held-leg fast
+  // path below, so a restart that finds the leg already SETTLED still proves and finalizes the
+  // approval rather than skipping it because the deposit and destination already succeeded.
+  const prerequisites = allOutboundAttempts.filter(candidate => candidate.attempt.requestDigest !== record.attempt.requestDigest);
+  if (prerequisites.length !== 1) {
+    throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'the outbound leg does not have exactly one durable prerequisite chain attempt');
+  }
+  const [prerequisite] = prerequisites;
+  if (prerequisite.attempt.state !== 'FINALIZED') {
+    const prerequisiteClient = adapters?.robinhood?.client;
+    if (!prerequisiteClient) return null;
+    const resolved = await finalizeOutboundApprovalAttempt({
+      cycleRepository,
+      context,
+      client: prerequisiteClient,
+      prerequisite,
+      operationsAccount: configured.evm,
+      depository: configured.evmDepository,
+      amountAtomic: leg.sourceAmountAtomic,
+      sourceNonce: record.attempt.nonce,
+      sourceHash: leg.sourceTxHash,
+    });
+    if (!resolved) return null;
+  }
+
+  if (leg.state === 'SETTLED') return outboundSettlementEvidence(leg);
+  if (leg.state !== 'RECORDED') {
+    if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && record.attempt?.state === 'FINALIZED') {
+      await releaseOutboundWalletNonce({ cycleRepository, configured, context });
+    }
+    return null;
+  }
+  if (!['SIGNED', 'BROADCAST', 'FINALIZED'].includes(record.attempt.state)) return null;
   const robinhoodClient = adapters?.robinhood?.client;
   const solanaClient = adapters?.solana?.client;
   if (!robinhoodClient) return null;
-
-  // Every other durable outbound chain attempt (the USDG approval that must precede the deposit)
-  // must independently finalize on its own hash before this stage may complete --
-  // `assertReconciledCompletion` (cycle-repository.mjs) requires every chain attempt for a stage to
-  // be FINALIZED, and the deposit's own success below is never treated as proof the approval
-  // succeeded.
-  const prerequisites = stateValues(cycle?.chainAttempts)
-    .filter(candidate => candidate?.attempt?.stage === 'outbound' && candidate.attempt.requestDigest !== record.attempt.requestDigest);
-  if (!(await finalizeOutboundPrerequisites({ cycleRepository, context, client: robinhoodClient, prerequisites }))) {
-    return null;
-  }
 
   let sourceProof;
   try {
