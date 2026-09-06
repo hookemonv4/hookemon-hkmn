@@ -227,6 +227,9 @@ function rpc({ frozen = new Set(), nonce = 0n, balance = 1_000_000n, receiptForH
     },
     async getTransactionCount() { return observedNonce; },
     async getBalance() { return balance; },
+    async readCycleAttributableFinalizedAvailable() {
+      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '999999999999999999999999' };
+    },
     async sendRawTransaction({ serializedTransaction }) {
       broadcasts.push(serializedTransaction);
       return { transactionHash: `0x${'0'.repeat(64)}` };
