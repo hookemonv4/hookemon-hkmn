@@ -5,22 +5,22 @@
   "controlGatePinBump": {
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "afe90ecc00e47aadc5757abad57c229bf04c4719c0b39a0dca4abf729bef8765",
-    "candidatePinsSha256": "2c9acff3f3856f9c671ad57a93349839c44fe434ee09c677f642c3d883657b5b",
+    "basePinsSha256": "938f76eb2495d0e34cc048238e6333c29664ebbcc8e3f279766e0c97cbdf39c0",
+    "candidatePinsSha256": "915d4152304226cba404ffcffb5fce2070685cb67b4174039e17d7270e72ede4",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "4b7dc3759176a4aa12485a225bf087936a2f817d"
+      "blobId": "c25c157b46e9a1806129de15dcdd9c1013255c48"
     },
     "controls": [
       {
         "path": ".github/workflows/v4-gates.yml",
-        "previousSha256": "c09e3f2fd139d861c51018f629ded62fca062269a67b2cc415b3fa523db92ba2",
-        "sha256": "3bc9d10a4241cd2b2c3e416ce803c50f95dca749df453b3c501422425442078f"
+        "previousSha256": "3bc9d10a4241cd2b2c3e416ce803c50f95dca749df453b3c501422425442078f",
+        "sha256": "e70bd37f42c8427243fc00c3d1c15ee1a9049bd1a3f6edaa16862c2cce4f858f"
       },
       {
         "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "762b4eaea6ebf5cf311f15026b7685fb106d8eefa17927856539a75ba72f3e63",
-        "sha256": "472206694f78ec03f3586eefc93cab14e465bf7f9b3cd28a3f347ba8e2cfbbff"
+        "previousSha256": "477d9486bf4c22e4f0d426f3a79c2bb768a0ece5fa0a10aaa96414c9f214d113",
+        "sha256": "977cea11543a73fdb7fb5f46d621e78679ed87e3eecc6236ed117687f9127cab"
       }
     ]
   },
