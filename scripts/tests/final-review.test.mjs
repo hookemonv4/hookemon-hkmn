@@ -128,6 +128,7 @@ test('init I6 binds the exact current control surface without mutable projection
     '.github/workflows/fork-pin-canary.yml',
     '.github/workflows/fork-proof.yml',
     '.github/workflows/identity-gate.yml',
+    '.github/workflows/launch-gate.yml',
     '.github/workflows/v4-gates.yml',
     '.gitignore',
     '.gitleaks.toml',
