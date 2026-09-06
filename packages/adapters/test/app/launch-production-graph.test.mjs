@@ -23,7 +23,9 @@ import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authori
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { createTestKeychain } from '../fixtures/keychain/fixture.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
-import { deriveAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '../../src/solana-rpc.mjs';
+import {
+  buildTransferCheckedInstruction, buildUnsignedTransaction, deriveAssociatedTokenAddress, TOKEN_PROGRAM_ID,
+} from '../../src/solana-rpc.mjs';
 
 const execFileAsync = promisify(execFile);
 const BIN_PATH = fileURLToPath(new URL('../../bin/hookemon-runner.mjs', import.meta.url));
@@ -270,6 +272,42 @@ function outboundDestinationTransaction(owner) {
   };
 }
 
+// Purchase's own settlement leg: the admitted per-pack price (aggregatePurchase / 2, matching this
+// fixture's activateTwoPackPolicy admission) and a fixed Collector settlement recipient, pinned
+// independently here -- before any candidate response exists -- exactly as
+// collector-policy-offline-implementation-scope.md requires (never derive a destination, program,
+// signer/account role, mint, decimals, amount, or memo grammar from candidate bytes). This literal
+// is a syntactically valid but otherwise arbitrary base58 Solana address, the same shape convention
+// already used by stages-collector-lifecycle.test.mjs's own fixture; it names no live account and
+// carries no owner approval, provider identity, or runtime-ready policy.
+const UNIT_PURCHASE_ATOMIC = AGGREGATE_PURCHASE_ATOMIC / 2n;
+const COLLECTOR_SETTLEMENT_RECIPIENT = '8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe';
+
+/**
+ * One syntactically valid, unsigned legacy Solana transaction for a single generated pack: one
+ * exact SPL `TransferChecked` from the isolated run's own Operations settlement ATA to the
+ * independently fixed `COLLECTOR_SETTLEMENT_RECIPIENT`, for the admitted per-pack amount. Built
+ * entirely from installed decoder/instruction-builder code (`solana-rpc.mjs`) and this fixture's
+ * own already-configured identities/facts -- never from a candidate response, since this is the
+ * request side. No trusted allowlist, policy, or authority is constructed or implied here.
+ */
+function unsignedPurchaseTransaction(operationsSolana) {
+  const source = deriveAssociatedTokenAddress(operationsSolana, SOLANA_MINT).toBase58();
+  const instruction = buildTransferCheckedInstruction({
+    source,
+    destination: COLLECTOR_SETTLEMENT_RECIPIENT,
+    owner: operationsSolana,
+    mint: SOLANA_MINT,
+    amount: UNIT_PURCHASE_ATOMIC,
+    decimals: 6,
+  });
+  return buildUnsignedTransaction({
+    feePayer: operationsSolana,
+    recentBlockhash: '11111111111111111111111111111111',
+    instructions: [instruction],
+  });
+}
+
 async function body(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -309,15 +347,45 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
       respond(response, { machines: [{ code: 'return-fixture', price: PACK_PRICE, contains: 1 }] });
       return;
     }
-    // Purchase's own Collector mutation endpoints. A truthful response shape was built and
-    // verified for each (two unique memos with syntactically valid unsigned transactions for the
-    // isolated Operations address; observation-only pack status), then removed once actual
-    // execution proved none of the three is reachable today -- see the frontier comment below this
-    // fixture for the real, earlier defect that stops the batch before any of them is called. Only
-    // the call count survives, so a future fix that reaches this far is still measured precisely.
-    if (request.url === '/api/generateYoloPacks') { calls.collectorGenerateYoloPacks += 1; response.writeHead(404); response.end(); return; }
-    if (request.url.startsWith('/api/pack/status')) { calls.collectorPackStatus += 1; response.writeHead(404); response.end(); return; }
-    if (request.url === '/api/submitTransaction') { calls.collectorSubmitTransaction += 1; response.writeHead(404); response.end(); return; }
+    // Purchase's own Collector mutation endpoints. Independently configured here -- exactly two
+    // unique memos, each carrying a syntactically valid unsigned transaction for the isolated run's
+    // own Operations address -- before any candidate ever exists; nothing here reads back or
+    // derives an allowlist, destination, signer/account role, mint, decimals, amount, or memo
+    // grammar from what purchase.mjs later does with these bytes.
+    if (request.url === '/api/generateYoloPacks') {
+      calls.collectorGenerateYoloPacks += 1;
+      const generateRequest = await body(request);
+      const operationsSolana = operationsSolanaAccount();
+      if (generateRequest.playerAddress !== operationsSolana || generateRequest.quantity !== 2) {
+        response.writeHead(422, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: 'unexpected generateYoloPacks request shape', received: generateRequest }));
+        return;
+      }
+      respond(response, {
+        packs: [0, 1].map(packIndex => ({
+          memo: `graph-purchase-pack-${packIndex}`,
+          transaction: unsignedPurchaseTransaction(operationsSolana),
+        })),
+      });
+      return;
+    }
+    // Observation-only: no purchase was ever actually completed by this provider, so every poll
+    // truthfully reports no award yet, matching the documented waiting shape.
+    if (request.url.startsWith('/api/pack/status')) {
+      calls.collectorPackStatus += 1;
+      const memo = new URL(request.url, 'https://fixture.invalid').searchParams.get('memo');
+      respond(response, { memo, pack: null, send: null, buyback: [] });
+      return;
+    }
+    // Must never be reached without an independently pinned Collector purchase policy (see the
+    // frontier comment below): recorded and failed loudly with a non-success status, rather than
+    // thrown into the server, so the test's own assertion on this counter is what surfaces it.
+    if (request.url === '/api/submitTransaction') {
+      calls.collectorSubmitTransaction += 1;
+      response.writeHead(500, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: 'production graph fixture: submitTransaction must never be reached without a pinned policy' }));
+      return;
+    }
     if (request.url === '/quote/v2') {
       const quoteRequest = await body(request);
       calls.quotes.push({ amount: quoteRequest.amount, tradeType: quoteRequest.tradeType });
@@ -965,54 +1033,57 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   // Purchase now durably reads its own settlement ATA (this fixture's `getAccountInfo`) and passes
   // the priority-fee envelope check before attempting to record its batch.
   //
-  // `bot-pack-type-parity` (cherry-picked as `fix(cycle): align pack type validators`) closed the
-  // `cycle-repository.mjs`/`environment.mjs` pack-code mismatch this comment previously named:
-  // purchase now durably records its batch intent for this fixture's hyphenated
-  // `HOOKEMON_PACK_CODE`, `'return-fixture'`.
+  // `bot-pack-type-parity` and `bot-pack-code-canonical` (cherry-picked as `fix(cycle): align pack
+  // type validators` and `fix(cycle): align production pack code validators`) closed every
+  // pack-code/packType mismatch this comment previously named, including `collector-crypt.mjs`'s
+  // own separate client-side `packTypePattern`. Purchase now durably records its batch intent, and
+  // this fixture's `generateYoloPacks` response (two unique memos, syntactically valid unsigned
+  // legacy transactions built from this fixture's own configured identities and existing
+  // `solana-rpc.mjs` helpers -- never derived from any candidate) is genuinely reached and durably
+  // recorded as the batch request.
   //
-  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after the
-  // pack-type-parity fix) is a distinct, real production defect outside this file's write-set,
-  // still one step earlier than the expected Collector-policy refusal: `collector-crypt.mjs` keeps
-  // its own separate `packTypePattern` (collector-crypt.mjs:74, `/^[a-z][a-z0-9_]{0,63}$/`, no
-  // hyphen), enforced client-side by `validateGenerateYoloPacksRequest` (collector-crypt.mjs:241)
-  // before `generateYoloPacks` (collector-crypt.mjs:545) ever attempts an HTTP call. This pattern
-  // was not touched by the reviewed parity fix (which only aligned `cycle-repository.mjs` and
-  // `money-schemas.mjs`), so it throws "collector-crypt generateYoloPacks packType must be a
-  // lowercase machine code" on every tick, still before any Collector Crypt HTTP call, still before
-  // the Collector-policy refusal this comment anticipates. Closing it requires reconciling this
-  // third pattern with `environment.mjs`'s `packCodePattern` (environment.mjs:211,
-  // `/^[a-z0-9][a-z0-9_-]{1,63}$/`), out of this file's write-set. The validator throws inside
-  // `generateYoloPacks` itself, before `postMutation`/`fetch` ever runs, so truthful
-  // `generateYoloPacks`/`pack/status`/`submitTransaction` fixture response bodies (two unique
-  // memos, syntactically valid unsigned transactions for the isolated Operations address,
-  // observation-only status) stay left out as still unreachable -- this run's own zero call counts
-  // below are the proof -- and only each endpoint's call count is asserted, at zero.
+  // The verified next blocker (reproduced 2026-09-06 against this exact env/config, after both
+  // pack-code fixes) is a real production defect outside this file's write-set, earlier than the
+  // expected Collector-policy refusal and unrelated to the offline Collector policy work
+  // (`collector-policy-offline-implementation-scope.md`, still unwired and not imported here):
+  // `decodeAndSignProviderTransaction`'s `trustedSolanaDecodeOptions` (purchase.mjs:72-74) requires
+  // `config.solana.blockhashContextResolver`, but nothing in the composed production config ever
+  // sets it -- only `rehearsal.mjs` and `return.mjs` build their own local resolver for their own
+  // use. This literal-CLI harness has no composition or stage injection seam (see this file's own
+  // header), so this cannot be worked around here; every purchase mutate tick throws "Collector
+  // purchase requires a trusted Solana blockhashContextResolver" before evaluating any transaction
+  // policy, before `signer.sign`, and before `submitTransaction`. Closing it requires wiring a
+  // trusted resolver into `config.solana` for the production purchase/buyback path, out of this
+  // file's write-set.
   assert.equal(cycle.stages.get('outbound')?.status, 'COMPLETE', `outbound must durably settle from Solana destination-chain evidence; ${await diagnostics()}`);
   const purchase = cycle.preparedStages.get('purchase') ?? null;
   assert.ok(purchase, `purchase must durably reach the PREPARED operation boundary once outbound settles; ${await diagnostics()}`);
   assert.ok(fixture.calls.evm > 0 && fixture.calls.solana > 0, 'production graph must use both loopback chain protocols');
   assert.match(
     stderr,
-    /collector-crypt generateYoloPacks packType must be a lowercase machine code/,
-    `every purchase mutate tick must refuse collector-crypt.mjs's own separate packType pattern; ${await diagnostics()}`,
+    /Collector purchase requires a trusted Solana blockhashContextResolver/,
+    `every purchase mutate tick must refuse to decode without a trusted blockhash context resolver; ${await diagnostics()}`,
   );
   const purchaseIntent = await repository.readPackBatchIntent(cycleIds[0], 'purchase');
   assert.deepEqual(
     purchaseIntent && { quantity: purchaseIntent.intent.quantity, packType: purchaseIntent.intent.packType },
     { quantity: 2, packType: 'return-fixture' },
-    `purchase must now durably record its batch intent for the hyphenated pack code (the parity fix); ${await diagnostics()}`,
+    `purchase must durably record its batch intent for the hyphenated pack code; ${await diagnostics()}`,
   );
-  assert.equal(
-    await repository.readPackBatchRequest(cycleIds[0], 'purchase'), null,
-    `purchase must never durably record generated pack memos while collector-crypt.mjs's own packType validation refuses first; ${await diagnostics()}`,
+  const purchaseBatch = await repository.readPackBatchRequest(cycleIds[0], 'purchase');
+  assert.equal(purchaseBatch?.packs?.length, 2, `purchase must durably record exactly the two generated pack memos; ${await diagnostics()}`);
+  assert.deepEqual(
+    purchaseBatch?.packs?.map(pack => pack.memo).sort(),
+    ['graph-purchase-pack-0', 'graph-purchase-pack-1'],
+    `the two durably recorded memos must be exactly the ones this fixture generated; ${await diagnostics()}`,
   );
   const purchaseAttempt = await repository.readOperationalStageAttempt(cycleIds[0], 'purchase');
   assert.equal(
     purchaseAttempt?.attempt?.state, 'SENT_UNKNOWN',
-    `purchase's operational attempt must be marked SENT_UNKNOWN once its mutate call was entered, even though the packType validation refused before any Collector HTTP call; ${await diagnostics()}`,
+    `purchase's operational attempt must be marked SENT_UNKNOWN once its mutate call was entered, even though decoding refused before any signing or submission; ${await diagnostics()}`,
   );
-  assert.equal(fixture.calls.collectorGenerateYoloPacks, 0, `purchase must never call generateYoloPacks; ${await diagnostics()}`);
-  assert.equal(fixture.calls.collectorPackStatus, 0, `purchase must never poll pack status with no batch to reconcile; ${await diagnostics()}`);
+  assert.equal(fixture.calls.collectorGenerateYoloPacks, 1, `purchase must call generateYoloPacks exactly once, never a duplicate batch; ${await diagnostics()}`);
+  assert.equal(fixture.calls.collectorPackStatus, 0, `purchase must never poll pack status before decoding ever succeeds; ${await diagnostics()}`);
   assert.equal(fixture.calls.collectorSubmitTransaction, 0, `purchase must never submit a signed transaction; ${await diagnostics()}`);
   assert.notEqual(cycle.stages.get('purchase')?.status, 'COMPLETE', `purchase must not be claimed complete; ${await diagnostics()}`);
   assert.equal(cycle.terminalState, null, `the cycle must have no terminal success or failure; ${await diagnostics()}`);
