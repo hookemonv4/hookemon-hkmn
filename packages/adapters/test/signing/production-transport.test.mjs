@@ -24,6 +24,7 @@ import {
   OPERATOR_EVM_ROLE,
   OPERATOR_SOLANA_ROLE,
   SignerClientError,
+  createPolicySigner,
   readTransactionPolicyApprovalContext,
   recoverTransactionPolicyBroadcast,
   signRequestDigest,
@@ -31,6 +32,7 @@ import {
 } from '../../src/signing/signer-client.mjs';
 import {
   decodeProviderTransaction,
+  expectedBroadcastIdentifier,
   readTransactionPolicyRules,
 } from '../../src/signing/transaction-policy.mjs';
 import { createTestKeychain } from '../fixtures/keychain/fixture.mjs';
@@ -241,33 +243,75 @@ test('invoke() refuses a bare function anywhere in a request before it reaches t
 
 // --- 3. RPC broadcast is injected behind the facade; the sign-only child never sees `broadcast` ---
 
-test('createKeychainSignerClient broadcasts through an injected chain RPC transport, never sending "broadcast" to the sign-only command', async () => {
-  const calls = [];
+test('an injected chain RPC transport is not reachable through a bare reference to the raw client (Sol review High finding 2)', async () => {
   const rpcCalls = [];
   const client = createKeychainSignerClient({
     role: OPERATOR_EVM_ROLE,
     liveMode: true,
     ...fixtureSignerOptions,
     exec: async ({ input }) => {
-      calls.push(JSON.parse(input).operation);
+      const operation = JSON.parse(input).operation;
+      if (operation === 'broadcast') throw new Error('the sign-only command must never be invoked for broadcast');
       return { code: 0, stdout: JSON.stringify({ signedTx: '0xdeadbeef' }), stderr: '' };
     },
     command: '/opt/hookemon/bin/hookemon-keychain-sign',
     account: 'operator-evm',
-    broadcast: async (signed, context) => {
-      rpcCalls.push({ signed, context });
+    broadcast: async signed => {
+      rpcCalls.push(signed);
       return { transactionHash: '0xaccepted' };
     },
   });
 
-  const signed = await client.sign({ to: '0xabc' });
-  const broadcast = await client.broadcast(signed);
+  // No plain broadcast() at all: a caller holding only this raw client reference has no way to
+  // reach the injected RPC transport, however it constructs the argument.
+  assert.equal(client.broadcast, undefined);
+  assert.equal(typeof client.broadcastApproved, 'function');
+  await assert.rejects(
+    () => client.broadcastApproved({ signedTx: '0xarbitrary' }, {}),
+    error => error instanceof SignerClientError && /genuine parent transaction-policy evaluation proof/.test(error.message),
+  );
+  await assert.rejects(
+    () => client.broadcastApproved({ signedTx: '0xarbitrary' }, Object.freeze({})),
+    error => error instanceof SignerClientError && /genuine parent transaction-policy evaluation proof/.test(error.message),
+  );
+  assert.equal(rpcCalls.length, 0, 'the injected RPC must never be reached without a genuine proof');
+});
 
-  assert.deepEqual(calls, ['sign']);
-  assert.equal(broadcast.transactionHash, '0xaccepted');
-  assert.equal(rpcCalls.length, 1);
-  assert.deepEqual(rpcCalls[0].signed, { signedTx: '0xdeadbeef' });
-  assert.equal(rpcCalls[0].context.role, OPERATOR_EVM_ROLE);
+test('createPolicySigner reaches the injected chain RPC transport only after real policy evaluation, and never sends "broadcast" to the sign-only command', async t => {
+  const keychain = await createTestKeychain(t);
+  const wallet = await generateWallet(keychain, 'operations-evm');
+  const transaction = evmTransaction(wallet.address);
+  const decoded = await decodeProviderTransaction({ family: 'evm', transaction });
+  const policy = policyFor(decoded, TRANSACTION_POLICY_SCHEMA);
+  const policyRules = readTransactionPolicyRules(policy);
+  const { exec, command, env } = realExecOptions(keychain);
+  const execOperations = [];
+  const rpcCalls = [];
+
+  const backend = createKeychainSignerClient({
+    role: OPERATOR_EVM_ROLE,
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec: async call => { execOperations.push(JSON.parse(call.input).operation); return exec(call); },
+    command,
+    account: 'operator-evm',
+    broadcast: async signed => {
+      rpcCalls.push(signed);
+      return { transactionHash: expectedBroadcastIdentifier(signed, 'evm') };
+    },
+  });
+  const signer = createPolicySigner({ backend, policy, rules: policyRules, decodeOptions: { family: 'evm' } });
+
+  await withKeychainEnv(keychain, env, async () => {
+    const signed = await signer.sign({
+      transaction, transactionPolicy: policy, transactionPolicyRules: policyRules, transactionDecodeOptions: { family: 'evm' }, liveMode: true,
+    });
+    const broadcast = await signer.broadcast(signed);
+
+    assert.deepEqual(execOperations, ['sign']);
+    assert.equal(broadcast.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
+    assert.deepEqual(rpcCalls, [signed]);
+  });
 });
 
 test('without an injected broadcast transport, the keychain command still fails loudly on a broadcast operation rather than returning a plausible-looking result', async t => {
@@ -309,11 +353,11 @@ test('an EVM transaction signs through the real keychain child and broadcasts th
     account: 'operator-evm',
     broadcast: async signed => {
       rpcCalls.push(signed);
-      return { transactionHash: '0xaccepted' };
+      return { transactionHash: expectedBroadcastIdentifier(signed, 'evm') };
     },
   });
-  const policySigner = wrapTransactionPolicySignerClient({
-    client: rawClient,
+  const policySigner = createPolicySigner({
+    backend: rawClient,
     policy,
     rules: policyRules,
     decodeOptions: { family: 'evm' },
@@ -330,8 +374,49 @@ test('an EVM transaction signs through the real keychain child and broadcasts th
     assert.equal(await recoverTransactionAddress({ serializedTransaction: signed.signedTx }), wallet.address);
 
     const broadcast = await policySigner.broadcast(signed);
-    assert.equal(broadcast.transactionHash, '0xaccepted');
+    assert.equal(broadcast.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
     assert.deepEqual(rpcCalls, [{ signedTx: signed.signedTx }]);
+  });
+});
+
+test('a broadcast result with a mismatched transaction hash is refused, and the approval survives for a retry', async t => {
+  const keychain = await createTestKeychain(t);
+  const wallet = await generateWallet(keychain, 'operations-evm');
+  const transaction = evmTransaction(wallet.address);
+  const decoded = await decodeProviderTransaction({ family: 'evm', transaction });
+  const policy = policyFor(decoded, TRANSACTION_POLICY_SCHEMA);
+  const policyRules = readTransactionPolicyRules(policy);
+  const { exec, command, env } = realExecOptions(keychain);
+  let rpcAttempts = 0;
+
+  const rawClient = createKeychainSignerClient({
+    role: OPERATOR_EVM_ROLE,
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec,
+    command,
+    account: 'operator-evm',
+    broadcast: async signed => {
+      rpcAttempts += 1;
+      // A malfunctioning or malicious RPC returning a hash for a different transaction.
+      return rpcAttempts === 1
+        ? { transactionHash: `0x${'0'.repeat(64)}` }
+        : { transactionHash: expectedBroadcastIdentifier(signed, 'evm') };
+    },
+  });
+  const policySigner = createPolicySigner({ backend: rawClient, policy, rules: policyRules, decodeOptions: { family: 'evm' } });
+
+  await withKeychainEnv(keychain, env, async () => {
+    const signed = await policySigner.sign({
+      transaction, transactionPolicy: policy, transactionPolicyRules: policyRules, transactionDecodeOptions: { family: 'evm' }, liveMode: true,
+    });
+    await assert.rejects(() => policySigner.broadcast(signed), /broadcast result transactionHash does not match/);
+    // The approval was not consumed by the refused attempt -- retrying the exact same signed
+    // bytes (an "unknown RPC outcome remains pending until reconciled" retry) still succeeds
+    // without asking the child to sign again.
+    const retried = await policySigner.broadcast(signed);
+    assert.equal(retried.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
+    assert.equal(rpcAttempts, 2);
   });
 });
 
@@ -389,19 +474,54 @@ test('a Solana purchase-shaped bare-transaction request signs through the real c
     exec,
     command,
     account: 'operator-solana',
-    operationArgs: ['--parent-policy-evaluated'],
     broadcast: async signed => {
       rpcCalls.push(signed);
-      return { signature: 'fake-solana-signature' };
+      return { signature: expectedBroadcastIdentifier(signed, 'solana') };
     },
   });
-  const policySigner = wrapTransactionPolicySignerClient({ client: rawClient, policy, rules: policyRules, decodeOptions });
+  const policySigner = createPolicySigner({ backend: rawClient, policy, rules: policyRules, decodeOptions });
 
   await withKeychainEnv(keychain, env, async () => {
     const signed = await policySigner.sign(transactionBase64);
     const broadcast = await policySigner.broadcast(signed);
-    assert.equal(broadcast.signature, 'fake-solana-signature');
+    assert.equal(broadcast.signature, expectedBroadcastIdentifier(signed, 'solana'));
     assert.deepEqual(rpcCalls, [signed]);
+  });
+});
+
+test('a Solana broadcast result with a mismatched signature is refused, and the approval survives for a retry', async t => {
+  const keychain = await createTestKeychain(t);
+  const wallet = await generateWallet(keychain, 'operations-solana');
+  const transactionBase64 = solanaSelfTransferBytes(wallet.publicKey);
+  const decodeOptions = solanaResolvers(SystemProgram.programId.toBase58(), '100');
+  const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction: transactionBase64, lastValidBlockHeight: '100' });
+  const policy = policyFor(decoded, TRANSACTION_POLICY_SCHEMA);
+  const policyRules = readTransactionPolicyRules(policy);
+  const { exec, command, env } = realExecOptions(keychain);
+  let rpcAttempts = 0;
+
+  const rawClient = createKeychainSignerClient({
+    role: OPERATOR_SOLANA_ROLE,
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec,
+    command,
+    account: 'operator-solana',
+    broadcast: async signed => {
+      rpcAttempts += 1;
+      return rpcAttempts === 1
+        ? { signature: 'not-the-real-signature' }
+        : { signature: expectedBroadcastIdentifier(signed, 'solana') };
+    },
+  });
+  const policySigner = createPolicySigner({ backend: rawClient, policy, rules: policyRules, decodeOptions });
+
+  await withKeychainEnv(keychain, env, async () => {
+    const signed = await policySigner.sign(transactionBase64);
+    await assert.rejects(() => policySigner.broadcast(signed), /broadcast result signature does not match/);
+    const retried = await policySigner.broadcast(signed);
+    assert.equal(retried.signature, expectedBroadcastIdentifier(signed, 'solana'));
+    assert.equal(rpcAttempts, 2);
   });
 });
 
@@ -435,10 +555,9 @@ test('a changed Solana recipient is refused before it ever reaches the keychain 
     exec: async call => { execCalls.push(JSON.parse(call.input).operation); return exec(call); },
     command,
     account: 'operator-solana',
-    operationArgs: ['--parent-policy-evaluated'],
     broadcast: async () => { throw new Error('must not broadcast a transaction the parent policy never approved'); },
   });
-  const policySigner = wrapTransactionPolicySignerClient({ client: rawClient, policy, rules: policyRules, decodeOptions });
+  const policySigner = createPolicySigner({ backend: rawClient, policy, rules: policyRules, decodeOptions });
 
   await withKeychainEnv(keychain, env, async () => {
     // The policy was built for a self-transfer; a transfer to an outsider must never reach the
@@ -463,15 +582,15 @@ test('signed bytes recover and broadcast through a freshly constructed real faca
   const policyRules = readTransactionPolicyRules(policy);
   const { exec, command, env } = realExecOptions(keychain);
 
-  function buildSigner(broadcast) {
+  function buildSigner(exec_, broadcast) {
     const rawClient = createKeychainSignerClient({
-      role: OPERATOR_EVM_ROLE, liveMode: true, ...fixtureSignerOptions, exec, command, account: 'operator-evm', broadcast,
+      role: OPERATOR_EVM_ROLE, liveMode: true, ...fixtureSignerOptions, exec: exec_, command, account: 'operator-evm', broadcast,
     });
-    return wrapTransactionPolicySignerClient({ client: rawClient, policy, rules: policyRules, decodeOptions: { family: 'evm' } });
+    return createPolicySigner({ backend: rawClient, policy, rules: policyRules, decodeOptions: { family: 'evm' } });
   }
 
   await withKeychainEnv(keychain, env, async () => {
-    const beforeRestart = buildSigner(async () => { throw new Error('the pre-restart process must not broadcast'); });
+    const beforeRestart = buildSigner(exec, async () => { throw new Error('the pre-restart process must not broadcast'); });
     const signed = await beforeRestart.sign({
       transaction, transactionPolicy: policy, transactionPolicyRules: policyRules, transactionDecodeOptions: { family: 'evm' }, liveMode: true,
     });
@@ -485,21 +604,14 @@ test('signed bytes recover and broadcast through a freshly constructed real faca
       return exec(call);
     };
     const rpcCalls = [];
-    const afterRestart = buildSigner(async signedTx => { rpcCalls.push(signedTx); return { transactionHash: '0xaccepted' }; });
-    const afterRestartWithCounting = wrapTransactionPolicySignerClient({
-      client: createKeychainSignerClient({
-        role: OPERATOR_EVM_ROLE, liveMode: true, ...fixtureSignerOptions, exec: execAfterRestart, command, account: 'operator-evm',
-        broadcast: async signedTx => { rpcCalls.push(signedTx); return { transactionHash: '0xaccepted' }; },
-      }),
-      policy,
-      rules: policyRules,
-      decodeOptions: { family: 'evm' },
+    const afterRestart = buildSigner(execAfterRestart, async signedTx => {
+      rpcCalls.push(signedTx);
+      return { transactionHash: expectedBroadcastIdentifier(signedTx, 'evm') };
     });
-    void afterRestart;
 
-    const result = await recoverTransactionPolicyBroadcast({ client: afterRestartWithCounting, signed, recoveryContext });
+    const result = await recoverTransactionPolicyBroadcast({ client: afterRestart, signed, recoveryContext });
 
-    assert.equal(result.transactionHash, '0xaccepted');
+    assert.equal(result.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
     assert.equal(signCallsAfterRestart, 0, 'recovery must broadcast durable bytes without asking the child to sign again');
     assert.deepEqual(rpcCalls, [signed]);
   });

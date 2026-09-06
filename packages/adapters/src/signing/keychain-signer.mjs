@@ -113,17 +113,22 @@ function redactErrorText(text) {
  * @param {string} input.command - absolute path to (or name of) the keychain command-line tool.
  * @param {string} input.account - a keychain entry identifier (never a secret — a label, e.g.
  *   "hookemon-operator-evm"), forwarded to the tool so it knows which stored key to use.
- * @param {string[]} [input.args] - extra fixed arguments to pass to every invocation.
- * @param {string[]} [input.operationArgs] - extra fixed arguments passed after the operation,
- *   role, and account. The Operations child uses this only for a parent-policy marker on the
- *   explicitly selected Collector-only live Solana path.
+ * @param {string[]} [input.args] - extra fixed arguments to pass to every invocation. There is no
+ *   equivalent per-operation knob: the Solana `--parent-policy-evaluated` CLI marker is derived
+ *   internally (see `signApproved` below), never accepted as caller configuration, so no caller can
+ *   construct a client that asserts a parent policy evaluation it never performed.
  * @param {(signed: object|string, context: {role: string}) => Promise<object>} [input.broadcast] -
  *   injected chain RPC transport. When supplied, `broadcast()` sends already-authorized signed
  *   bytes directly through this function instead of the sign-only keychain command — the command
  *   never receives a `broadcast` operation. Omit only for a role or caller that still relies on the
  *   keychain command's own (sign-only) `broadcast` verb; production Operations EVM/Solana clients
- *   always supply this.
- * @returns {{role: string, sign: Function, broadcast?: Function}}
+ *   always supply this. When supplied, the plain `broadcast()` this function would otherwise expose
+ *   is replaced by a `broadcastApproved()` reachable only through a genuine parent
+ *   transaction-policy evaluation proof (see `signer-client.mjs`'s `assertPolicyEvaluationProof`) —
+ *   a caller holding a bare reference to this client can no longer send it arbitrary signed bytes to
+ *   broadcast; only `createPolicySigner`/`wrapTransactionPolicySignerClient`'s own guarded broadcast
+ *   path can.
+ * @returns {{role: string, sign: Function, broadcast?: Function, signApproved?: Function, broadcastApproved?: Function}}
  */
 export function createKeychainSignerClient({
   role,
@@ -133,7 +138,6 @@ export function createKeychainSignerClient({
   command,
   account,
   args = [],
-  operationArgs = [],
   timeoutMs = DEFAULT_TIMEOUT_MS,
   transactionPolicy,
   transactionPolicyRules,
@@ -157,9 +161,6 @@ export function createKeychainSignerClient({
   if (!Array.isArray(args) || args.some(entry => typeof entry !== 'string')) {
     throw new SignerClientError('keychain signer args must be an array of strings');
   }
-  if (!Array.isArray(operationArgs) || operationArgs.some(entry => typeof entry !== 'string')) {
-    throw new SignerClientError('keychain signer operationArgs must be an array of strings');
-  }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new SignerClientError('keychain signer timeoutMs must be a positive safe integer');
   }
@@ -167,7 +168,7 @@ export function createKeychainSignerClient({
     throw new SignerClientError('keychain signer broadcast must be a function when supplied');
   }
 
-  async function invoke(operation, payload) {
+  async function invoke(operation, payload, { includeParentPolicyMarker = false } = {}) {
     const transportPayload = role === OPERATOR_SOLANA_ROLE && operation === 'sign'
       ? solanaSignTransportPayload(payload)
       : payload;
@@ -194,7 +195,10 @@ export function createKeychainSignerClient({
             role,
             '--account',
             account,
-            ...(operation === 'sign' ? operationArgs : []),
+            // Never caller configuration (see this function's own header comment): set only by
+            // `signApproved` below, which the wrapping `wrapSignerClient` never reaches without a
+            // proof `signer-client.mjs` mints exclusively after a real policy evaluation.
+            ...(includeParentPolicyMarker ? ['--parent-policy-evaluated'] : []),
           ],
           input: line,
           timeoutMs,
@@ -238,15 +242,26 @@ export function createKeychainSignerClient({
       return invoke('sign', request);
     },
   };
+  if (role === OPERATOR_SOLANA_ROLE) {
+    // The only place this module ever sets the `--parent-policy-evaluated` CLI marker.
+    // `wrapSignerClient` (signer-client.mjs) refuses to call this at all unless its second
+    // argument is a proof `signer-client.mjs` minted immediately after a real
+    // `evaluateTransactionPolicy` call — there is no path from caller configuration to this marker.
+    inner.signApproved = async request => invoke('sign', request, { includeParentPolicyMarker: true });
+  }
   if (ROLE_CAPABILITIES[role].broadcast) {
-    // Production Operations EVM/Solana broadcasting is a chain RPC concern, never a sign-only
-    // keychain command concern (WP-33's own boundary: this module never holds key material, and the
-    // command's `sign` verb is the only thing that needs to). When a real transport is injected,
-    // `invoke('broadcast', ...)` — and the command's explicit refusal of that operation — is never
-    // reached at all.
-    inner.broadcast = broadcast === undefined
-      ? async signed => invoke('broadcast', signed)
-      : async signed => broadcast(signed, { role });
+    if (broadcast === undefined) {
+      // Production Operations EVM/Solana broadcasting is a chain RPC concern, never a sign-only
+      // keychain command concern (WP-33's own boundary: this module never holds key material, and
+      // the command's `sign` verb is the only thing that needs to). This fallback exists only for a
+      // caller that has not yet wired a real transport; the command refuses the operation outright.
+      inner.broadcast = async signed => invoke('broadcast', signed);
+    } else {
+      // A real chain RPC transport is exposed only as `broadcastApproved`, never as a plain
+      // `broadcast` — see this function's own header comment. `wrapSignerClient` requires a genuine
+      // policy-evaluation proof before this ever runs.
+      inner.broadcastApproved = async signed => broadcast(signed, { role });
+    }
   }
 
   const client = wrapSignerClient({ role, liveMode, inner, preflightAuthority });
@@ -255,8 +270,8 @@ export function createKeychainSignerClient({
   // before `inner.sign()` (this module's `invoke()`) ever runs — narrowing only inside `invoke()`
   // would be too late for a caller who passes the full return/outbound-shaped envelope straight
   // into this exported `sign()`. Narrow (and refuse a lingering function) here, at the one place
-  // every caller of this client's `sign()` must pass through, whether directly or wrapped again by
-  // a stage-level `wrapTransactionPolicySignerClient`.
+  // every caller of this client's `sign()`/`signApproved()` must pass through, whether directly or
+  // wrapped again by a stage-level `wrapTransactionPolicySignerClient`.
   function transportSignRequest(request) {
     const narrowed = role === OPERATOR_SOLANA_ROLE ? solanaSignTransportPayload(request) : request;
     assertJsonTransportSafe(narrowed, `${role} sign request`);
@@ -265,7 +280,9 @@ export function createKeychainSignerClient({
   const transportClient = Object.freeze({
     role: client.role,
     sign: request => client.sign(transportSignRequest(request)),
+    ...(client.signApproved ? { signApproved: (request, proof) => client.signApproved(transportSignRequest(request), proof) } : {}),
     ...(client.broadcast ? { broadcast: signed => client.broadcast(signed) } : {}),
+    ...(client.broadcastApproved ? { broadcastApproved: (signed, proof) => client.broadcastApproved(signed, proof) } : {}),
   });
 
   const policyClient = transactionPolicy === undefined
