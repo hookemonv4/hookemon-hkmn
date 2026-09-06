@@ -23,6 +23,7 @@ record.
     `supportsBridging`/presence in `erc20Currencies`/`solverCurrencies`) and never calls `/quote/v2`
     when that check fails. The configured Solana mint overrides only the Solana leg;
     USDG remains fixed on chain 4663. Returns a typed `QuoteResult` (`requestId`, `orderId`,
+    `tradeType`, `quoteDigest`,
     `origin`/`destination` `{chainId, address, decimals, amount, minimumAmount}`, sender,
     recipient, order deadline, and `raw`).
   - `simulateExecution({ quote })` — always allowed; a structured "would execute" record, no state
@@ -86,6 +87,13 @@ record.
 - Every amount this module reads or emits is a canonical unsigned decimal integer string
   (`^(?:0|[1-9][0-9]*)$`), converted to `BigInt` only for comparison; a malformed amount from
   Relay is a hard `RelayMalformedResponseError`, never coerced.
+- `EXACT_INPUT` binds the request amount to `currencyIn.amount`. `EXACT_OUTPUT` binds it to
+  `currencyOut.amount` and retains Relay's computed `currencyIn.amount` as the authorized source
+  amount. Relay documents that exact-output amount includes associated fees in its
+  [trade-type reference](https://docs.relay.link/references/api/api_core_concepts/trade-types).
+- `quoteDigest` is a SHA-256 content address over the parsed quote identity and Relay's complete
+  raw executable response. The durable admission and serialized Relay intent retain it; changing
+  steps, route, amount, identity, or deadline cannot reuse the prior admission.
 - `assertRouteEnabled` is checked before every quote, for both currencies and both chains, using
   only fields independently re-verified against the live API on 2026-09-02 (see the module's
   header comment for the exact evidence per endpoint); a quote is never trusted without it passing
