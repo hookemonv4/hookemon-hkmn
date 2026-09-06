@@ -380,6 +380,141 @@ test('freezes the operations-wallet stage order', () => {
   ]);
 });
 
+/**
+ * ADR-0025 `refresh-after-readmission`'s repository surface, minimal enough for the orchestration
+ * tests below: one active cycle carrying an immutable `admission`, plus the quote-refresh
+ * projection accessors and selector `AutomatedCycleService` reads and calls directly.
+ */
+function refreshFixtureRepository({ admission, releaseAmount = '55000000' } = {}) {
+  const stages = new Map();
+  const selectCalls = [];
+  const completed = [];
+  let active = { cycleId: 'cycle-refresh-1', releaseAmount, mode: 'rehearsal', admission };
+  let refresh = { state: 'REFRESH_REQUIRED', expiryDigest: `sha256:${'1'.repeat(64)}` };
+  return {
+    get selectCalls() { return selectCalls; },
+    get completed() { return completed; },
+    async readActiveCycle() { return active; },
+    async createCycle() { throw new Error('must not create a new cycle while one is already active'); },
+    async readStage(_cycleId, stage) { return stages.get(stage) ?? { status: 'PENDING' }; },
+    async prepareStage(cycleId, stage) {
+      const prepared = { status: 'PREPARED', intentId: `${cycleId}:${stage}` };
+      stages.set(stage, prepared);
+      return prepared;
+    },
+    async completeStage(_cycleId, stage, evidence) { stages.set(stage, { status: 'COMPLETE', evidence }); },
+    async completeCycle() { completed.push(active.cycleId); active = null; },
+    async readClaimPreconditions() { return { unattributed: false, unresolvedObligations: false }; },
+    async readOutboundQuoteRefresh() { return refresh; },
+    async readFinalizedClaimCustodyEvidence() { return { cycleId: 'cycle-refresh-1' }; },
+    async selectOutboundQuoteRefresh(cycleId, args) {
+      selectCalls.push({ cycleId, ...args });
+      refresh = { state: 'ACTIVE', replacement: args.replacement };
+    },
+  };
+}
+
+/** The same reconcile/execute-then-reconcile provider shape `fixture()`'s stageDriver uses. */
+function providerStageDriver() {
+  const providerEvidence = new Map();
+  const executions = [];
+  return {
+    executions,
+    driver: {
+      async reconcile(context) {
+        return providerEvidence.get(`${context.cycleId}:${context.stage}`) ?? null;
+      },
+      async execute(context) {
+        executions.push(context.stage);
+        providerEvidence.set(`${context.cycleId}:${context.stage}`, { transactionId: `${context.cycleId}-${context.stage}` });
+      },
+      async commit() {},
+    },
+  };
+}
+
+test('reports a benign wait instead of a crash loop when a quote refresh is durably required but no refresh capability is wired', async () => {
+  const cycleRepository = refreshFixtureRepository({ admission: { cycleId: 'cycle-refresh-1', marker: 'original' } });
+  const { driver, executions } = providerStageDriver();
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => readyBudget() },
+    cycleRepository,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: driver,
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+    liveMode: false,
+  });
+
+  const result = await service.recoverActiveCycle();
+  assert.deepEqual(result, { status: 'WAITING_FOR_QUOTE_REFRESH', cycleId: 'cycle-refresh-1', stage: 'outbound' });
+  assert.deepEqual(executions, ['eligibility-snapshot', 'claim-process']);
+  assert.equal(cycleRepository.selectCalls.length, 0);
+  assert.equal(cycleRepository.completed.length, 0);
+});
+
+test('a later tick fetches and atomically selects a replacement, then proceeds through outbound normally', async () => {
+  const originalAdmission = { cycleId: 'cycle-refresh-1', marker: 'original' };
+  const cycleRepository = refreshFixtureRepository({ admission: originalAdmission });
+  const { driver, executions } = providerStageDriver();
+  const planCalls = [];
+  const evaluateCalls = [];
+  const replacement = { schema: 'hookemon.policy-admission.v2', cycleId: 'cycle-refresh-1', marker: 'replacement' };
+  const quoteRefreshPlanner = {
+    async plan(input) { planCalls.push(input); return replacement; },
+  };
+  const policyEngine = {
+    async evaluate() { return { allowed: true }; },
+    async admit() { return { allowed: true, cycleDigest: 'sha256:policy' }; },
+    async evaluatePurchase() { return { allowed: true, cycleDigest: 'sha256:policy' }; },
+    async assertExecutionAllowed() { return { allowed: true }; },
+    async evaluateQuoteRefresh(input) {
+      evaluateCalls.push(input);
+      return { allowed: true, refreshPolicyDecisionDigest: `sha256:${'2'.repeat(64)}` };
+    },
+  };
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => readyBudget() },
+    cycleRepository,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: driver,
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+    liveMode: false,
+    policyEngine,
+    quoteRefreshPlanner,
+  });
+
+  const result = await service.recoverActiveCycle();
+  assert.equal(result.status, 'COMPLETE');
+  assert.deepEqual(executions, ['eligibility-snapshot', 'claim-process', 'outbound', 'purchase', 'open', 'epic-gate', 'buyback', 'return', 'payout']);
+
+  assert.equal(planCalls.length, 1);
+  assert.equal(planCalls[0].cycleId, 'cycle-refresh-1');
+  assert.equal(planCalls[0].admission, originalAdmission);
+  assert.deepEqual(planCalls[0].custody, { cycleId: 'cycle-refresh-1' });
+
+  assert.equal(evaluateCalls.length, 1);
+  assert.equal(evaluateCalls[0].admission, originalAdmission);
+  assert.equal(evaluateCalls[0].replacement, replacement);
+
+  assert.equal(cycleRepository.selectCalls.length, 1);
+  assert.deepEqual(cycleRepository.selectCalls[0], {
+    cycleId: 'cycle-refresh-1',
+    predecessorExpiryDigest: `sha256:${'1'.repeat(64)}`,
+    replacement,
+    refreshPolicyDecisionDigest: `sha256:${'2'.repeat(64)}`,
+    operations: null,
+    assertLease: cycleRepository.selectCalls[0].assertLease,
+  });
+});
+
 test('reconciles a crash after broadcast without executing the stage twice', async () => {
   const { service, executions, commits } = fixture({ crashStage: 'outbound' });
   await assert.rejects(() => service.runOnce(), /simulated crash/);
