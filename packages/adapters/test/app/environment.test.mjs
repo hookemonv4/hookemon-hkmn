@@ -598,7 +598,7 @@ test('loadOperatorSignerClient constructs only the selected Solana Operations ro
   assert.equal(typeof client.solana.sign, 'function');
   await client.solana.sign('AQ==');
   assert.deepEqual(calls[0].args, [
-    'sign', '--role', 'operator-solana', '--account', 'operator-solana', '--parent-policy-evaluated',
+    'sign', '--role', 'operator-solana', '--account', 'operator-solana',
   ]);
 });
 
