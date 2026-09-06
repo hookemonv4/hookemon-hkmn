@@ -13,6 +13,7 @@ env:
   GIT_NO_REPLACE_OBJECTS: '1'
 jobs:
   pull-request:
+    name: identity-gate
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -40,6 +41,7 @@ jobs:
           git show "${range_base}:scripts/check-commit-identity.mjs" > "$RUNNER_TEMP/check-commit-identity.mjs"
           node "$RUNNER_TEMP/check-commit-identity.mjs" "$range_base" "$range_head"
   push:
+    name: identity-gate
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

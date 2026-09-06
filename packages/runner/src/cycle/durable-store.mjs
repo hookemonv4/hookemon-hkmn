@@ -20,6 +20,7 @@
 // a later cycle even after its original cycle has been archived.
 import {
   chmod,
+  link,
   lstat,
   mkdir,
   open,
@@ -128,6 +129,63 @@ function stateDirectoryIdentityPath(directory) {
   return join(directory, '.store-identity.json');
 }
 
+// A directory's own (device, inode) can be reused by the filesystem
+// immediately after deletion (observed on Linux ext4/tmpfs), so it alone
+// cannot distinguish a genuine reopen from a deleted-and-replaced directory
+// that had its identity marker bytes copied back in. A sibling hard link
+// living outside the state directory closes that gap: as long as the link
+// survives, its target inode can never be handed to an unrelated new file,
+// so a byte-identical copy written into a replacement directory is
+// necessarily a different inode and is detected deterministically.
+function stateDirectoryWitnessLinkPath(directory) {
+  return join(dirname(directory), `${basename(directory)}.identity-witness.json`);
+}
+
+async function stateDirectoryWitnessLinkStatus(markerPath, witnessPath) {
+  let witnessStat;
+  try {
+    witnessStat = await lstat(witnessPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing';
+    throw error;
+  }
+  if (witnessStat.isSymbolicLink() || !witnessStat.isFile()) return 'mismatch';
+  const markerStat = await lstat(markerPath, { bigint: true });
+  if (markerStat.dev !== witnessStat.dev || markerStat.ino !== witnessStat.ino) return 'mismatch';
+  return 'linked';
+}
+
+async function linkStateDirectoryWitness(markerPath, witnessPath) {
+  try {
+    await link(markerPath, witnessPath);
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      const [markerStat, witnessStat] = await Promise.all([
+        lstat(markerPath, { bigint: true }),
+        lstat(witnessPath, { bigint: true }),
+      ]);
+      if (markerStat.dev === witnessStat.dev && markerStat.ino === witnessStat.ino) return;
+      // A witness that already exists and does not point at the marker this
+      // bootstrap just wrote is either a genuine crash-retry artifact or
+      // evidence of tampering; either way this bootstrap cannot tell which,
+      // so it must not delete or replace it. Deleting it would erase the
+      // only evidence of the mismatch and let a forged witness be silently
+      // replaced by whichever bootstrap runs last.
+      throw new Error('durable cycle store identity witness already exists and does not match the current marker; bootstrap is ambiguous, preserve the orphan witness for review');
+    } else if (error?.code === 'EXDEV') {
+      throw new Error('durable cycle store state directory and its parent must share one filesystem for the identity witness link');
+    } else {
+      throw error;
+    }
+  }
+  const parentHandle = await open(dirname(witnessPath), 'r');
+  try {
+    await parentHandle.sync();
+  } finally {
+    await parentHandle.close();
+  }
+}
+
 function lockDirectoryPath(directory) {
   return join(directory, lockDirectoryName);
 }
@@ -219,7 +277,8 @@ async function stateDirectoryAvailability(directory, expectedIdentity) {
       const childInfo = await lstat(join(directory, child));
       if (childInfo.isSymbolicLink() || !childInfo.isDirectory()) return 'unavailable';
     }
-    const stateIdentity = await readStateDirectoryIdentity(stateDirectoryIdentityPath(directory));
+    const markerPath = stateDirectoryIdentityPath(directory);
+    const stateIdentity = await readStateDirectoryIdentity(markerPath);
     if (stateIdentity === null) return 'identity-marker-missing';
     if (stateIdentity.storeId !== expectedIdentity.storeId) return 'identity-marker-mismatch';
     if (!await hasOnlyExpectedLockDatabaseArtifacts(lockDirectoryPath(directory))) return 'unavailable';
@@ -227,6 +286,17 @@ async function stateDirectoryAvailability(directory, expectedIdentity) {
     if (stateIdentity.directoryDevice !== witness.directoryDevice || stateIdentity.directoryInode !== witness.directoryInode) {
       return 'identity-directory-mismatch';
     }
+    // The directory-level (device, inode) check above is exactly what a
+    // filesystem reusing a deleted directory's inode defeats, so it cannot
+    // by itself prove continuity. The sibling witness link is the only
+    // check immune to that reuse; a store with no witness cannot be told
+    // apart from one that was just attacked this way, so a missing link
+    // fails closed the same as a mismatched one rather than falling back
+    // to the weaker checks already evaluated above. There is no automatic
+    // backfill: minting a witness from an unverified marker would simply
+    // re-derive trust from the same checks this closes the gap in.
+    const linkStatus = await stateDirectoryWitnessLinkStatus(markerPath, stateDirectoryWitnessLinkPath(directory));
+    if (linkStatus !== 'linked') return 'identity-directory-mismatch';
     await readdir(directory);
     return 'available';
   } catch (error) {
@@ -753,14 +823,17 @@ async function acquireLock(lockPath, legacyPath) {
 }
 
 async function releaseLock(lock) {
+  // Unlink the legacy fence before dropping the SQLite exclusive lease: a waiting acquirer
+  // is unblocked the instant the lease is released, and would otherwise be able to observe
+  // (and lose a TOCTOU race against) a fence file we are still in the middle of removing.
   let failure = null;
   try {
-    releaseSqliteLock(lock.database);
+    await releaseLegacyMigrationFence(lock.legacyFence);
   } catch (error) {
     failure = error;
   }
   try {
-    await releaseLegacyMigrationFence(lock.legacyFence);
+    releaseSqliteLock(lock.database);
   } catch (error) {
     if (failure === null) failure = error;
   }
@@ -818,14 +891,15 @@ function acquireLockSync(lockPath, legacyPath) {
 }
 
 function releaseLockSync(lock) {
+  // See releaseLock: fence must be unlinked while the SQLite exclusive lease is still held.
   let failure = null;
   try {
-    releaseSqliteLock(lock.database);
+    releaseLegacyMigrationFenceSync(lock.legacyFence);
   } catch (error) {
     failure = error;
   }
   try {
-    releaseLegacyMigrationFenceSync(lock.legacyFence);
+    releaseSqliteLock(lock.database);
   } catch (error) {
     if (failure === null) failure = error;
   }
@@ -1515,21 +1589,28 @@ export class DurableCycleStore {
         if (stateDirectory.isSymbolicLink() || !stateDirectory.isDirectory()) {
           throw new Error('durable cycle store state directory is unavailable during bootstrap');
         }
+        const markerPath = stateDirectoryIdentityPath(directory);
         await atomicWriteFile(
           directory,
-          stateDirectoryIdentityPath(directory),
+          markerPath,
           serializeStateDirectoryIdentity({
             schema: stateDirectoryIdentitySchema,
             storeId: identity.storeId,
             ...stateDirectoryWitness(stateDirectory),
           }),
         );
+        await linkStateDirectoryWitness(markerPath, stateDirectoryWitnessLinkPath(directory));
         await atomicWriteFile(
           dirname(lockedRecovery.identityPath),
           lockedRecovery.identityPath,
           serializeStoreIdentity(identity),
         );
       }
+      // No else branch backfills a missing witness for an already-identified
+      // store: readStateDirectoryRecovery/stateDirectoryAvailability already
+      // reject that case (STATE_DIRECTORY_LOSS thrown above), and a store
+      // that reaches here with identity !== null therefore already has a
+      // verified witness link.
       store.#index = await store.#loadIndex();
       const cycles = await store.#loadActiveCycles();
       store.#activeCycleIds = new Set(cycles.map(cycle => cycle.cycleId));

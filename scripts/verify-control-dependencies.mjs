@@ -27,12 +27,14 @@ const FORK_PROOF_WORKFLOW_PATH = '.github/workflows/fork-proof.yml';
 const FORK_PIN_CANARY_WORKFLOW_PATH = '.github/workflows/fork-pin-canary.yml';
 const IDENTITY_GATE_WORKFLOW_PATH = '.github/workflows/identity-gate.yml';
 const CONTROL_GATE_WORKFLOW_PATH = '.github/workflows/control-gate.yml';
+const LAUNCH_GATE_WORKFLOW_PATH = '.github/workflows/launch-gate.yml';
 const PERMITTED_WORKFLOW_PATHS = new Set([
   V4_GATES_WORKFLOW_PATH,
   FORK_PROOF_WORKFLOW_PATH,
   FORK_PIN_CANARY_WORKFLOW_PATH,
   IDENTITY_GATE_WORKFLOW_PATH,
   CONTROL_GATE_WORKFLOW_PATH,
+  LAUNCH_GATE_WORKFLOW_PATH,
 ]);
 const COMMIT_IDENTITY_ALLOWLIST_PATH = 'scripts/check-commit-identity.mjs';
 const FORK_PIN_VERIFIER_PATH = 'scripts/verify-fork-pin.mjs';
@@ -41,11 +43,12 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276';
-const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = '8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = 'c09e3f2fd139d861c51018f629ded62fca062269a67b2cc415b3fa523db92ba2';
+const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
-const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = 'd917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019';
-const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = '08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50';
+const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
+const SUPPORTED_CONTROL_GATE_WORKFLOW_SHA256 = 'cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74';
+const SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256 = 'fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4';
 const SUPPORTED_COMMIT_IDENTITY_ALLOWLIST_SHA256 = '9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba';
 const SUPPORTED_FORK_PIN_VERIFIER_SHA256 = '09249c50f08b092305e497b6a9430d3acab0131c689ce58862f1f700668ef94a';
 const SUPPORTED_RELEASE_CLOSURE_BUILDER_MANIFEST_SHA256 = 'd3dd54f13b39f251a1cabb1253b19d155075409f68671eec07790eff12375c5b';
@@ -72,15 +75,17 @@ const SUPPORTED_FOUNDRY_DISTRIBUTION = Object.freeze({
   executableSha256: '4f77da0810de94325734855d0ad58d70640aa8a5b2a837608ddf8c26da34355c',
 });
 const REQUIRED_LOCAL_PHASE2_GATE_BLOCKS = Object.freeze({
+  'Install adapters dependencies': Object.freeze([
+    'cd packages/adapters',
+    'npm ci --ignore-scripts',
+    'cd - >/dev/null',
+  ]),
   'Verify local Phase 2 runner': Object.freeze([
     'files="$(node scripts/test-manifest.mjs list runner)"',
     'node --test --test-timeout=120000 $files',
     'node packages/runner/src/cycle/verify-fixtures.mjs',
   ]),
   'Verify adapters dependencies': Object.freeze([
-    'cd packages/adapters',
-    'npm ci --ignore-scripts',
-    'cd - >/dev/null',
     'files="$(node scripts/test-manifest.mjs list adapters)"',
     'node --test --test-timeout=120000 $files',
   ]),
@@ -145,6 +150,40 @@ condition = "AND"
 paths = ['''(?:^|/)docs/modules/collector-crypt-adapter\.md$''']
 regexTarget = "secret"
 regexes = ['''^COLLECTOR_CRYPT_LIVE_SMOKE=1$''']
+
+[[rules.allowlists]]
+description = "Public Solana address-lookup-table key repeated across Solana transaction test fixtures misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)packages/adapters/test/fixtures/transactions/solana-context\.json$''',
+  '''(?:^|/)packages/adapters/test/fixtures/transactions/solana-v0-alt-wrong-resolution\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf$''']
+
+[[rules.allowlists]]
+description = "Public Solana token account identifier in the Solana transaction-context test fixture misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/fixtures/transactions/solana-context\.json$''']
+regexTarget = "secret"
+regexes = ['''^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse$''']
+
+[[rules.allowlists]]
+description = "Public Robinhood token contract address (lowercase form) test default misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''']
+regexTarget = "secret"
+regexes = ['''^0x5fc5360d0400a0fd4f2af552add042d716f1d168$''']
+
+[[rules.allowlists]]
+description = "Public Robinhood token contract address (checksummed form) in release Phase 3 launch inputs and graph draft misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)release/phase3/launch-inputs\.json$''',
+  '''(?:^|/)release/phase3/package/graph-draft\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168$''']
 `;
 
 function normalizeNodeVersion(version) {
@@ -186,7 +225,11 @@ function workflowConstant(text, name, errors) {
 }
 
 function workflowInstallRunBlock(workflow, stepName, errors) {
-  const lines = workflow.replaceAll('\r\n', '\n').split('\n');
+  const normalized = workflow.replaceAll('\r\n', '\n');
+  // Drop the single trailing '' that String.split('\n') produces for a file ending in
+  // a newline; otherwise a step block that happens to end the file gets a phantom
+  // trailing empty content line that a mid-file step never would.
+  const lines = normalized.endsWith('\n') ? normalized.slice(0, -1).split('\n') : normalized.split('\n');
   const stepPattern = new RegExp(`^( *)- name: ${escapeRegex(stepName)}$`);
   const matches = lines
     .map((line, index) => ({ index, match: line.match(stepPattern) }))
@@ -297,6 +340,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   if (forkProofNodeBlock !== null && forkProofNodeBlock !== canonicalNodeInstallBlock(pins)) {
     errors.push('fork-proof Node install block must match the canonical verified data flow');
   }
+  const forkProofPrNodeBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Node (fork-proof pull-request)', errors);
+  if (forkProofPrNodeBlock !== null && forkProofPrNodeBlock !== canonicalNodeInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Node install block must match the canonical verified data flow');
+  }
   const gitleaksBlock = workflowInstallRunBlock(workflow, 'Install pinned Gitleaks', errors);
   if (gitleaksBlock !== null && gitleaksBlock !== canonicalGitleaksInstallBlock(pins)) {
     errors.push('Gitleaks install block must match the canonical verified data flow');
@@ -308,6 +355,10 @@ function verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors) {
   const forkProofFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof)', errors);
   if (forkProofFoundryBlock !== null && forkProofFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
     errors.push('fork-proof Foundry install block must match the canonical verified data flow');
+  }
+  const forkProofPrFoundryBlock = workflowInstallRunBlock(forkProofWorkflow, 'Install pinned Foundry (fork-proof pull-request)', errors);
+  if (forkProofPrFoundryBlock !== null && forkProofPrFoundryBlock !== canonicalFoundryInstallBlock(pins)) {
+    errors.push('fork-proof pull-request Foundry install block must match the canonical verified data flow');
   }
 }
 
@@ -558,6 +609,68 @@ function verifyControlGateIntegrity(root, pins, errors) {
     expectedSha256: pin.sha256 ?? null,
     actualSha256,
   };
+}
+
+function verifyLaunchGateIntegrity(root, pins, errors) {
+  const pin = pins.contentAddresses?.launchGate ?? {};
+  const path = join(root, LAUNCH_GATE_WORKFLOW_PATH);
+  let actualSha256 = null;
+  try {
+    actualSha256 = hashFile(path);
+  } catch {
+    errors.push('launch-gate workflow could not be read');
+  }
+  if (pin.path !== LAUNCH_GATE_WORKFLOW_PATH) {
+    errors.push(`launch-gate path must be ${LAUNCH_GATE_WORKFLOW_PATH}`);
+  }
+  if (pin.sha256 !== SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256) {
+    errors.push('launch-gate digest must match the supported release');
+  }
+  if (actualSha256 !== null && actualSha256 !== pin.sha256) {
+    errors.push(`launch-gate digest mismatch: expected ${pin.sha256 ?? '(missing)'}, got ${actualSha256}`);
+  }
+  if (actualSha256 !== null && actualSha256 !== SUPPORTED_LAUNCH_GATE_WORKFLOW_SHA256) {
+    errors.push('launch-gate content mismatch: workflow must match the supported release');
+  }
+  return {
+    path: LAUNCH_GATE_WORKFLOW_PATH,
+    expectedSha256: pin.sha256 ?? null,
+    actualSha256,
+  };
+}
+
+const REQUIRED_LAUNCH_GATE_COMMANDS = Object.freeze([
+  'node scripts/v4.mjs status --check',
+  'git diff --exit-code -- STATE.md state.json',
+  'node scripts/v4.mjs trace check',
+  'node scripts/check-delivery-boundary.mjs',
+  'node scripts/verify-release-package-closure.mjs',
+  'node scripts/programmable/verify-launch-package.mjs',
+  'node scripts/verify-release-ready.mjs',
+  'if (report.launchEligible !== true)',
+]);
+
+function verifyLaunchGateSemantics(workflow, errors) {
+  for (const command of REQUIRED_LAUNCH_GATE_COMMANDS) {
+    if (!workflow.includes(command)) {
+      errors.push(`launch-gate workflow must run: ${command}`);
+    }
+  }
+  if (workflow.includes('verify-launch-package.mjs --allow-unverified')) {
+    errors.push('launch-gate workflow must not weaken the launch-package check with --allow-unverified');
+  }
+  const triggerStart = workflow.indexOf('on:\n');
+  const triggerEnd = workflow.indexOf('\njobs:\n', triggerStart);
+  const triggerBlock = triggerStart === -1 || triggerEnd === -1 ? workflow : workflow.slice(triggerStart, triggerEnd);
+  if (!triggerBlock.includes('workflow_dispatch') || /^ {2}(?:pull_request|push):/m.test(triggerBlock)) {
+    errors.push('launch-gate workflow must be dispatch-only, never a pull_request or push trigger');
+  }
+  if (!workflow.includes('refs/heads/main')) {
+    errors.push('launch-gate workflow must assert the protected main branch');
+  }
+  if (!workflow.includes('mainSha')) {
+    errors.push('launch-gate workflow must require an explicit mainSha input bound to the checked-out commit');
+  }
 }
 
 function verifyCommitIdentityAllowlistIntegrity(root, pins, errors) {
@@ -1084,32 +1197,70 @@ function verifyArchiveForkProofTestIntegrity(root, pins, errors) {
     errors,
   );
 }
-function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
-  const closure = pin.closure;
-  const invocation = `node ${FORK_PIN_VERIFIER_PATH}`;
-  const invocationIndex = workflow.indexOf(invocation);
+// A multi-job workflow (fork-proof.yml has separate main/pull-request jobs) can diverge
+// per job. A whole-file `indexOf` only ever finds the first job's assignment/check pair,
+// so a stale or missing pin in a later job is invisible. Scope every check to the job
+// text that actually invokes the verifier.
+function splitWorkflowJobs(workflow) {
+  const jobsMarker = '\njobs:\n';
+  const jobsMarkerIndex = workflow.indexOf(jobsMarker);
+  if (jobsMarkerIndex === -1) return [{ id: null, text: workflow }];
+  const jobsBody = workflow.slice(jobsMarkerIndex + jobsMarker.length);
+  const starts = [...jobsBody.matchAll(/^  ([A-Za-z0-9_-]+):$/gm)];
+  if (starts.length === 0) return [{ id: null, text: workflow }];
+  return starts.map((match, index) => ({
+    id: match[1],
+    text: jobsBody.slice(match.index, starts[index + 1]?.index ?? jobsBody.length),
+  }));
+}
 
-  if (!Array.isArray(closure) || invocationIndex === -1) {
+export function verifyForkPinVerifierWorkflow(workflow, label, pin, errors) {
+  const closure = pin.closure;
+  if (!Array.isArray(closure)) {
     errors.push(`${label} must verify the complete supported fork-pin verifier closure before execution`);
     return;
   }
-  for (const entry of closure) {
-    const variable = `fork_pin_${entry.path.replaceAll(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '')}_sha256`;
-    const assignment = `${variable}='${entry.sha256 ?? ''}'`;
-    const check = `verify_regular_git_blob '${entry.path}' "$${variable}"`;
-    const assignmentIndex = workflow.indexOf(assignment);
-    const checkIndex = workflow.indexOf(check);
-    if (assignmentIndex === -1 || checkIndex === -1) {
-      errors.push(`${label} must verify the supported fork-pin verifier closure before execution`);
-      continue;
-    }
-    if (assignmentIndex > checkIndex || checkIndex > invocationIndex) {
-      errors.push(`${label} must verify each fork-pin verifier closure entry before execution`);
+  const invocation = `node ${FORK_PIN_VERIFIER_PATH}`;
+  const applicableJobs = splitWorkflowJobs(workflow).filter(job => job.text.includes(invocation));
+  if (applicableJobs.length === 0) {
+    errors.push(`${label} must verify the complete supported fork-pin verifier closure before execution`);
+    return;
+  }
+  for (const job of applicableJobs) {
+    const jobLabel = job.id === null ? label : `${label} job ${job.id}`;
+    const invocationIndex = job.text.indexOf(invocation);
+    for (const entry of closure) {
+      const variable = `fork_pin_${entry.path.replaceAll(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '')}_sha256`;
+      const assignment = `${variable}='${entry.sha256 ?? ''}'`;
+      const check = `verify_regular_git_blob '${entry.path}' "$${variable}"`;
+      const assignmentIndex = job.text.indexOf(assignment);
+      const checkIndex = job.text.indexOf(check);
+      if (assignmentIndex === -1 || checkIndex === -1) {
+        errors.push(`${jobLabel} must verify the supported fork-pin verifier closure before execution`);
+        continue;
+      }
+      if (assignmentIndex > checkIndex || checkIndex > invocationIndex) {
+        errors.push(`${jobLabel} must verify each fork-pin verifier closure entry before execution`);
+      }
     }
   }
 }
 
 const CONTROL_PIN_BUMP_SCHEMA = 'hookemon.control-gate-pin-bump.v1';
+// v1 binds candidateTree, but the approval record itself changes that commit's tree and therefore
+// its SHA. v2 instead binds only deterministic content available before the record is written.
+const CONTROL_PIN_BUMP_SCHEMA_V2 = 'hookemon.control-gate-pin-bump.v2';
+const CONTROL_PIN_BUMP_V2_KEYS = [
+  'schema', 'approvalToken', 'basePinsSha256', 'candidatePinsSha256', 'baseChecker', 'controls',
+];
+
+function sameKeys(object, expectedKeys) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return false;
+  const actualKeys = Object.keys(object);
+  if (actualKeys.length !== expectedKeys.length) return false;
+  const expected = new Set(expectedKeys);
+  return actualKeys.every(key => expected.has(key));
+}
 
 function controlSurfaceDescriptors(pins, errors, source) {
   const descriptors = [];
@@ -1128,6 +1279,7 @@ function controlSurfaceDescriptors(pins, errors, source) {
   add('fork-pin canary workflow', FORK_PIN_CANARY_WORKFLOW_PATH, pins.contentAddresses?.forkPinCanary);
   add('identity-gate workflow', IDENTITY_GATE_WORKFLOW_PATH, pins.contentAddresses?.identityGate);
   add('control-gate workflow', CONTROL_GATE_WORKFLOW_PATH, pins.contentAddresses?.controlGate);
+  add('launch-gate workflow', LAUNCH_GATE_WORKFLOW_PATH, pins.contentAddresses?.launchGate);
   const forkPinVerifier = pins.controlScripts?.forkPinVerifier ?? {};
   const closure = forkPinVerifier.closure;
   if (!Array.isArray(closure) || closure.length !== 2) {
@@ -1176,23 +1328,10 @@ function sameControlChanges(actual, expected) {
   ));
 }
 
-function baseCheckerPinBumpErrors({
-  candidateVerification,
-  baseTree,
-  candidateTree,
-  basePinsSha256,
-  candidatePinsSha256,
-  baseCheckerBlob,
-  changes,
+function baseCheckerPinBumpErrorsV1({
+  bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
 }) {
   const errors = [];
-  const bump = candidateVerification?.controlGatePinBump;
-  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
-    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
-  }
-  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
-    errors.push('control pin bump must use the base-checker schema');
-  }
   if (bump.approvalToken !== 'OWNER APPROVED') {
     errors.push('control pin bump requires an explicit OWNER APPROVED token');
   }
@@ -1209,6 +1348,51 @@ function baseCheckerPinBumpErrors({
     errors.push('control pin bump must enumerate the exact control-surface digest changes');
   }
   return errors;
+}
+
+function baseCheckerPinBumpErrorsV2({
+  bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes,
+}) {
+  const errors = [];
+  if (!sameKeys(bump, CONTROL_PIN_BUMP_V2_KEYS)) {
+    errors.push(`control pin bump v2 must contain exactly ${CONTROL_PIN_BUMP_V2_KEYS.join(', ')}`);
+    return errors;
+  }
+  if (bump.approvalToken !== 'OWNER APPROVED') {
+    errors.push('control pin bump requires an explicit OWNER APPROVED token');
+  }
+  if (bump.basePinsSha256 !== basePinsSha256 || bump.candidatePinsSha256 !== candidatePinsSha256) {
+    errors.push('control pin bump must bind the exact base and candidate dependency-pin bytes');
+  }
+  if (bump.baseChecker?.path !== CONTROL_DEPENDENCY_VERIFIER_PATH || bump.baseChecker?.blobId !== baseCheckerBlob) {
+    errors.push('control pin bump must bind the protected base checker blob');
+  }
+  if (!sameControlChanges(bump.controls, changes)) {
+    errors.push('control pin bump must enumerate the exact control-surface digest changes');
+  }
+  return errors;
+}
+
+function baseCheckerPinBumpErrors({
+  candidateVerification,
+  baseTree,
+  candidateTree,
+  basePinsSha256,
+  candidatePinsSha256,
+  baseCheckerBlob,
+  changes,
+}) {
+  const bump = candidateVerification?.controlGatePinBump;
+  if (!bump || typeof bump !== 'object' || Array.isArray(bump)) {
+    return ['candidate control pins differ from the protected base without a base-checker-approved owner pin bump'];
+  }
+  if (bump.schema === CONTROL_PIN_BUMP_SCHEMA_V2) {
+    return baseCheckerPinBumpErrorsV2({ bump, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
+  }
+  if (bump.schema !== CONTROL_PIN_BUMP_SCHEMA) {
+    return ['control pin bump must use a supported base-checker schema'];
+  }
+  return baseCheckerPinBumpErrorsV1({ bump, baseTree, candidateTree, basePinsSha256, candidatePinsSha256, baseCheckerBlob, changes });
 }
 
 function candidateBlob(candidateBlobs, path) {
@@ -1698,6 +1882,12 @@ export function verifyControlDependencies(rootPath, options = {}) {
   } catch {
     // The integrity check below records the missing workflow.
   }
+  let launchGateWorkflow = '';
+  try {
+    launchGateWorkflow = readFileSync(join(root, LAUNCH_GATE_WORKFLOW_PATH), 'utf8');
+  } catch {
+    // The integrity check below records the missing workflow.
+  }
 
   errors.push(...actionScan.syntaxErrors);
   const workflowIntegrity = verifyWorkflowIntegrity(workflowSet.canonicalPath, pins, errors);
@@ -1705,12 +1895,20 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const forkPinCanary = verifyForkPinCanaryIntegrity(root, pins, errors);
   const identityGate = verifyIdentityGateIntegrity(root, pins, errors);
   const controlGate = verifyControlGateIntegrity(root, pins, errors);
+  const launchGate = verifyLaunchGateIntegrity(root, pins, errors);
+  verifyLaunchGateSemantics(launchGateWorkflow, errors);
   const commitIdentityAllowlist = verifyCommitIdentityAllowlistIntegrity(root, pins, errors);
   const forkPinVerifier = verifyForkPinVerifierIntegrity(root, pins, errors);
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
   const controlDependencyVerifier = verifyControlDependencyVerifierIntegrity(root, pins, errors);
   const archiveForkProofTest = verifyArchiveForkProofTestIntegrity(root, pins, errors);
-  verifyForkPinVerifierWorkflow(forkProofWorkflow, FORK_PROOF_WORKFLOW_PATH, pins.controlScripts?.forkPinVerifier ?? {}, errors);
+  verifyForkPinVerifierWorkflow(forkProofWorkflow, FORK_PROOF_WORKFLOW_PATH, {
+    ...pins.controlScripts?.forkPinVerifier,
+    closure: [
+      ...(pins.controlScripts?.forkPinVerifier?.closure ?? []),
+      { path: ARCHIVE_FORK_PROOF_TEST_PATH, sha256: pins.contentAddresses?.archiveForkProofTest?.sha256 },
+    ],
+  }, errors);
   verifyForkPinVerifierWorkflow(forkPinCanaryWorkflow, FORK_PIN_CANARY_WORKFLOW_PATH, pins.controlScripts?.forkPinVerifier ?? {}, errors);
   verifyInstallerDataFlow(pins, workflow, forkProofWorkflow, errors);
   verifyLocalPhase2Gates(workflow, errors);
@@ -1803,6 +2001,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
     forkPinCanary,
     identityGate,
     controlGate,
+    launchGate,
     controlScripts: {
       commitIdentityAllowlist,
       forkPinVerifier,

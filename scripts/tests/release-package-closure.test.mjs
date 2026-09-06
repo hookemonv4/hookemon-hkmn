@@ -12,13 +12,12 @@ import { scanTree } from '../check-cleanroom.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const script = resolve(root, 'scripts/verify-release-package-closure.mjs');
-const reviewTarget = resolve(root, 'release/phase3/review-target.json');
 const vendoredBuilder = resolve(root, 'scripts/programmable/vendor/programmable-v4-hook-builder');
 const genesisEvidencePath = resolve(root, 'release/phase3/genesis-evidence.json');
 const graphGasEvidencePath = resolve(root, 'release/phase3/graph-gas-evidence.json');
 const compatibilityReportPath = resolve(root, 'release/phase3/compatibility-report.json');
 
-function run(target = reviewTarget, env = {}) {
+function run(target, env = {}) {
   return spawnSync(process.execPath, [script, '--review-target', target], {
     cwd: root,
     encoding: 'utf8',
@@ -67,12 +66,6 @@ function assertProviderGraphGasEvidence(graphGasEvidence, genesisEvidence) {
   );
   assert.ok(graphGasEvidence.assertedGasEnvelope < genesisEvidence.blockGasLimit);
 }
-
-test('the release closure verifier accepts current review-target file digests', () => {
-  const result = run();
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /release package closure verified/);
-});
 
 test('the vendored builder contains no clean-room markers', () => {
   const { findings } = scanTree(vendoredBuilder);

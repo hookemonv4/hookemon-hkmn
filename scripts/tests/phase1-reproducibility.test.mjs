@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -27,7 +27,6 @@ import {
 } from '../verify-phase1-reproducibility.mjs';
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
-const root = resolve(import.meta.dirname, '../..');
 
 const artifact = {
   abi: [
@@ -217,21 +216,63 @@ test('requires a trusted manifest digest, unique paths, and the exact runner set
   }
 });
 
-test('the production default runner set matches the actual local candidate', () => {
-  const manifestBytes = readFileSync(join(root, 'release/phase1/local-candidate.json'));
-  const manifest = JSON.parse(manifestBytes);
-  const candidateRunnerPaths = manifest.files
-    .map((file) => file.path)
-    .filter((path) => path.startsWith('packages/runner/'))
-    .sort();
-  assert.equal(expectedRunnerPaths.length, 24);
-  assert.ok(expectedRunnerPaths.includes('packages/runner/test/cycle/security.test.mjs'));
-  assert.deepEqual([...expectedRunnerPaths].sort(), candidateRunnerPaths);
-  assert.doesNotThrow(() => validateCandidateManifest({
-    checkout: root,
-    manifestBytes,
-    expectedManifestSha256: sha256(manifestBytes),
-  }));
+// Mirrors the runner paths independently declared in verify-phase1-release.mjs's
+// requiredCandidatePaths (lines 300-323), not derived from expectedRunnerPaths itself,
+// so this test still catches a default-set replacement rather than only echoing it back.
+const productionRunnerPaths = [
+  'packages/runner/src/cycle/authorization.mjs',
+  'packages/runner/src/cycle/bindings.mjs',
+  'packages/runner/src/cycle/blockhash-validity.mjs',
+  'packages/runner/src/cycle/collector.mjs',
+  'packages/runner/src/cycle/cycle-runner.mjs',
+  'packages/runner/src/cycle/cycle-store.mjs',
+  'packages/runner/src/cycle/decoder.mjs',
+  'packages/runner/src/cycle/execution-accounting.mjs',
+  'packages/runner/src/cycle/journal.mjs',
+  'packages/runner/src/cycle/preflight.mjs',
+  'packages/runner/src/cycle/receipt-registry.mjs',
+  'packages/runner/src/cycle/reducer.mjs',
+  'packages/runner/src/cycle/schemas.mjs',
+  'packages/runner/src/cycle/verify-fixtures.mjs',
+  'packages/runner/src/distribution/manifest.mjs',
+  'packages/runner/src/distribution/merkle-sum.mjs',
+  'packages/runner/src/distribution/reconcile.mjs',
+  'packages/runner/test/cycle/fixture-crypto.mjs',
+  'packages/runner/test/cycle/fixture-cycle.mjs',
+  'packages/runner/test/cycle/security.test.mjs',
+  'packages/runner/test/distribution/holder-candidate.test.mjs',
+  'packages/runner/test/distribution/manifest.test.mjs',
+  'packages/runner/test/distribution/reconcile.test.mjs',
+  'packages/runner/test/integration/phase-one-local-loop-adapter.mjs',
+];
+
+test('validateCandidateManifest accepts the production default 24-path runner set', () => {
+  assert.equal(productionRunnerPaths.length, 24);
+  assert.deepEqual([...expectedRunnerPaths].sort(), [...productionRunnerPaths].sort());
+
+  const fixture = mkdtempSync(join(tmpdir(), 'hookemon-repro-default-runner-set-'));
+  try {
+    const files = productionRunnerPaths.map((path) => {
+      const content = `// fixture content for ${path}\n`;
+      mkdirSync(join(fixture, ...path.split('/').slice(0, -1)), { recursive: true });
+      writeFileSync(join(fixture, path), content);
+      return { path, sha256: sha256(content) };
+    });
+    const manifestBytes = Buffer.from(JSON.stringify({ files }));
+
+    // No expectedRunnerPaths override: this exercises the module's real production default
+    // against a test-owned literal list, so replacing the default constant with a different
+    // set (not just changing its length) is still caught.
+    const result = validateCandidateManifest({
+      checkout: fixture,
+      manifestBytes,
+      expectedManifestSha256: sha256(manifestBytes),
+    });
+
+    assert.equal(result.runnerSourceCount, 24);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 function writeFakeArtifact(outDirectory, filename, source, contract) {

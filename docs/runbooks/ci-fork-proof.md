@@ -74,6 +74,6 @@ and [manual workflow guide](https://docs.github.com/en/actions/how-tos/manage-wo
 Failure-matrix cells: none (not in frozen matrix)
 Owning work package: WP16
 Expected outcome: terminal=none; attempt=none; next=owner-decision
-Test: scripts/tests/workflow-security.test.mjs — fork-proof runs only after a main push or a manual main dispatch and fails closed without its endpoint
+Test: scripts/tests/workflow-security.test.mjs — fork-proof runs the same read-only archive proof for a main push, a manual main dispatch, and a pull request head, and fails closed without its endpoint
 Alarm reason/code: `CANARY_DRIFT` for endpoint, archive-pin, or archive-suite failure.
 Resume command: `rerun fork-proof from main after the environment secret and archive material are valid`.

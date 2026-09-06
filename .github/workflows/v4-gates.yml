@@ -85,11 +85,6 @@ jobs:
         run: node scripts/verify-control-dependencies.mjs
       - name: Verify the test manifest covers every test file
         run: node scripts/test-manifest.mjs check
-      - name: Verify deterministic state projection
-        run: |
-          node scripts/v4.mjs status --check
-          git diff --exit-code -- STATE.md state.json
-      - run: node scripts/v4.mjs trace check
       - run: node scripts/check-cleanroom.mjs .
       - name: Install pinned Gitleaks
         shell: bash
@@ -99,7 +94,7 @@ jobs:
           gitleaks_url='https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz'
           gitleaks_archive_sha256='551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
           gitleaks_executable_sha256='88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509'
-          gitleaks_config_sha256='b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029'
+          gitleaks_config_sha256='bd9a27202141d885852a67fa4f37aee06aaa3101909eee9ec8b9e07078a634c7'
           gitleaks_archive="${RUNNER_TEMP}/gitleaks_${gitleaks_version}_linux_x64.tar.gz"
           gitleaks_root="${RUNNER_TEMP}/gitleaks-${gitleaks_version}"
           gitleaks_executable="${gitleaks_root}/gitleaks"
@@ -172,8 +167,12 @@ jobs:
           gitleaks git --no-banner --redact --ignore-gitleaks-allow \
             --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
             --log-opts="--full-history -m --text --no-textconv $range_base..$range_head" .
-      - name: Verify delivery boundary
-        run: node scripts/check-delivery-boundary.mjs
+      - name: Install adapters dependencies
+        shell: bash
+        run: |
+          cd packages/adapters
+          npm ci --ignore-scripts
+          cd - >/dev/null
       - name: Verify local Phase 2 runner
         shell: bash
         run: |
@@ -183,9 +182,6 @@ jobs:
       - name: Verify adapters dependencies
         shell: bash
         run: |
-          cd packages/adapters
-          npm ci --ignore-scripts
-          cd - >/dev/null
           files="$(node scripts/test-manifest.mjs list adapters)"
           node --test --test-timeout=120000 $files
       - name: Verify dashboard suite
@@ -195,17 +191,19 @@ jobs:
           node --test --test-timeout=120000 $files
       - name: Initialize pinned top-level contract dependencies
         run: git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery
-      - name: Verify Phase 1 build pins
-        run: >-
-          node --input-type=module --eval
-          'import { validateBuildPins } from "./feasibility/verify-robinhood-binding.mjs";
-          console.log(JSON.stringify({ status: "VERIFIED_BUILD_PINS", buildPins: validateBuildPins(process.cwd()) }, null, 2));'
       - name: Initialize pinned contract dependency closure
         run: |
           git -C packages/contracts/lib/v4-core submodule update --init --recursive
           git -C packages/contracts/lib/v4-periphery submodule update --init lib/permit2
       - name: Initialize pinned launch dependencies
         run: git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory
+      - name: Initialize pinned launch dependency closure
+        run: git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts
+      - name: Verify Phase 1 build pins
+        run: >-
+          node --input-type=module --eval
+          'import { validateBuildPins } from "./feasibility/verify-robinhood-binding.mjs";
+          console.log(JSON.stringify({ status: "VERIFIED_BUILD_PINS", buildPins: validateBuildPins(process.cwd()) }, null, 2));'
       - name: Verify Phase 1 contracts
         run: |
           FOUNDRY_LIBS='["lib/v4-core"]' forge fmt --check --root packages/contracts
@@ -228,7 +226,3 @@ jobs:
         run: |
           files="$(node scripts/test-manifest.mjs list scripts)"
           node --test --test-timeout=120000 $files
-      - name: Verify Phase 3 launch package draft
-        run: node scripts/programmable/verify-launch-package.mjs --allow-unverified
-      - name: Verify release package closure
-        run: node scripts/verify-release-package-closure.mjs

@@ -44,11 +44,19 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/fork-proof.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/identity-gate.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
         "workflow": ".github/workflows/identity-gate.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/launch-gate.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
@@ -59,13 +67,13 @@
   },
   "workflowIntegrity": {
     "path": ".github/workflows/v4-gates.yml",
-    "expectedSha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276",
-    "actualSha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276"
+    "expectedSha256": "c09e3f2fd139d861c51018f629ded62fca062269a67b2cc415b3fa523db92ba2",
+    "actualSha256": "c09e3f2fd139d861c51018f629ded62fca062269a67b2cc415b3fa523db92ba2"
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21",
-    "actualSha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
+    "expectedSha256": "b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975",
+    "actualSha256": "b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
@@ -74,13 +82,18 @@
   },
   "identityGate": {
     "path": ".github/workflows/identity-gate.yml",
-    "expectedSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019",
-    "actualSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019"
+    "expectedSha256": "65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb",
+    "actualSha256": "65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb"
   },
   "controlGate": {
     "path": ".github/workflows/control-gate.yml",
-    "expectedSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50",
-    "actualSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50"
+    "expectedSha256": "cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74",
+    "actualSha256": "cfacbe4a87600a4aa3d7fbe3708d7f709aaf419c1eb565c1f223ac55dc8c4f74"
+  },
+  "launchGate": {
+    "path": ".github/workflows/launch-gate.yml",
+    "expectedSha256": "fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4",
+    "actualSha256": "fdd1504ca96f46fb69de1575c771b03c065588c0756d2cfc729f126308d504e4"
   },
   "controlScripts": {
     "commitIdentityAllowlist": {
@@ -123,13 +136,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
-      "actualSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
+      "expectedSha256": "c7c4e57852cb0c49e2995f94d8841bf6fa63d9450c272be47d9396519120f42a",
+      "actualSha256": "c7c4e57852cb0c49e2995f94d8841bf6fa63d9450c272be47d9396519120f42a",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
-          "actualSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
+          "sha256": "c7c4e57852cb0c49e2995f94d8841bf6fa63d9450c272be47d9396519120f42a",
+          "actualSha256": "c7c4e57852cb0c49e2995f94d8841bf6fa63d9450c272be47d9396519120f42a"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -175,15 +188,15 @@
       "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
       "config": {
         "path": ".gitleaks.toml",
-        "expectedSha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029",
-        "actualSha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029"
+        "expectedSha256": "bd9a27202141d885852a67fa4f37aee06aaa3101909eee9ec8b9e07078a634c7",
+        "actualSha256": "bd9a27202141d885852a67fa4f37aee06aaa3101909eee9ec8b9e07078a634c7"
       },
       "workflow": {
         "version": "8.30.1",
         "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
         "archiveSha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
         "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
-        "configSha256": "b35dc0878da8330f3de5c3854c0833fa8af599ae5482f0e2a0a4eef27442f029"
+        "configSha256": "bd9a27202141d885852a67fa4f37aee06aaa3101909eee9ec8b9e07078a634c7"
       }
     }
   },
@@ -198,29 +211,5 @@
       "lockfileVersion": 3,
       "resolvedEntryCount": 89
     }
-  },
-  "controlGatePinBump": {
-    "schema": "hookemon.control-gate-pin-bump.v1",
-    "approvalToken": "DRAFT_UNSIGNED",
-    "baseTree": "513e48fde602a11165a949aee2adab3bd7b2e2cb",
-    "candidateTree": "UNCOMMITTED_DRAFT",
-    "basePinsSha256": "424e759a826a06a4b42c265d4386bf0f954862659a919fb543c42a9edb05e43e",
-    "candidatePinsSha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
-    "baseChecker": {
-      "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "c9f23621ad2e5f417622f58cf1c179fd1649453f"
-    },
-    "controls": [
-      {
-        "path": ".github/workflows/fork-proof.yml",
-        "previousSha256": "98377853771897e42de785b7434e2c8b09d9fef5affdb09a0b8b1e38beafa309",
-        "sha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21"
-      },
-      {
-        "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "7aa86a0ca84796980bdfce068c2ebbe63e2f69f038732227542a80e94e92dbaf",
-        "sha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f"
-      }
-    ]
   }
 }

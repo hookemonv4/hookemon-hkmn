@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { interfaceFreezeInputDigest } from '../../feasibility/verify-robinhood-binding.mjs';
 
 const repoRoot = join(import.meta.dirname, '..', '..');
 const workflow = readFileSync(join(repoRoot, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
+const launchGateWorkflow = readFileSync(join(repoRoot, '.github', 'workflows', 'launch-gate.yml'), 'utf8');
 const gitleaksConfig = readFileSync(join(repoRoot, '.gitleaks.toml'), 'utf8');
 const gitleaksPolicyConsumers = [
   'scripts/verify-control-dependencies.mjs',
@@ -73,24 +76,35 @@ test('CI installs the pinned Foundry release and runs the Phase 1 contract proof
   assert.match(workflow, /git -C packages\/contracts\/lib\/v4-core submodule update --init --recursive/);
   assert.match(workflow, /git -C packages\/contracts\/lib\/v4-periphery submodule update --init lib\/permit2/);
   assert.match(workflow, /git submodule update --init packages\/contracts\/lib\/liquidity-launcher packages\/contracts\/lib\/uerc20-factory/);
+  assert.match(workflow, /git -C packages\/contracts\/lib\/uerc20-factory submodule update --init lib\/solady lib\/openzeppelin-contracts/);
   assert.match(workflow, /FOUNDRY_LIBS='\["lib\/v4-core"\]' forge fmt --check --root packages\/contracts/);
   assert.match(workflow, /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts --match-path 'test\/bindings\/\*\.t\.sol' -vvv/);
   assert.match(workflow, /FOUNDRY_LIBS='\["lib\/v4-core"\]' forge test --root packages\/contracts --match-path 'test\/market\/\*\.t\.sol' -vvv/);
   assert.match(workflow, /node feasibility\/verify-robinhood-binding\.mjs bindings\/robinhood-chain\.json --offline/);
   assert.ok(
     workflow.indexOf('git submodule update --init packages/contracts/lib/v4-core packages/contracts/lib/v4-periphery')
-      < workflow.indexOf('node --input-type=module --eval'),
-    'top-level Gitlinks must be initialized before validating nested pins',
+      < workflow.indexOf('git -C packages/contracts/lib/v4-core submodule update --init --recursive'),
+    'top-level v4 Gitlinks must be initialized before the v4 nested closure',
   );
   assert.ok(
-    workflow.indexOf('node --input-type=module --eval')
-      < workflow.indexOf('git -C packages/contracts/lib/v4-core submodule update --init --recursive'),
-    'build pins must be validated before initializing the dependency closure',
+    workflow.indexOf('git -C packages/contracts/lib/v4-core submodule update --init --recursive')
+      < workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory'),
+    'the v4 nested closure must be initialized before the top-level launch Gitlinks',
   );
   assert.ok(
     workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory')
+      < workflow.indexOf('git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts'),
+    'uerc20-factory must be initialized before its nested compile dependencies',
+  );
+  assert.ok(
+    workflow.indexOf('git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts')
+      < workflow.indexOf('node --input-type=module --eval'),
+    'all four pinned dependency init stages must complete before validateBuildPins reads any Gitlink OID',
+  );
+  assert.ok(
+    workflow.indexOf('node --input-type=module --eval')
       < workflow.indexOf('forge fmt --check --root packages/contracts'),
-    'launch dependencies must be initialized before compiling the contracts',
+    'build pins must be validated before compiling the contracts',
   );
 });
 
@@ -115,34 +129,47 @@ test('CI runs the manifest-driven dashboard and contracts-js suites', () => {
   assert.match(workflow, /name: Verify the test manifest covers every test file\n\s+run: node scripts\/test-manifest\.mjs check/);
 });
 
-test('fork-proof runs only after a main push or a manual main dispatch and fails closed without its endpoint', () => {
+test('fork-proof runs the same read-only archive proof for a main push, a manual main dispatch, and a pull request head, and fails closed without its endpoint', () => {
   const forkProofPath = join(repoRoot, '.github', 'workflows', 'fork-proof.yml');
-  assert.equal(existsSync(forkProofPath), true, 'fork-proof must be a separate workflow so pull requests do not create a skipped job');
+  assert.equal(existsSync(forkProofPath), true, 'fork-proof must be a separate workflow so other pull requests do not create a skipped job');
   if (!existsSync(forkProofPath)) return;
   const forkProof = readFileSync(forkProofPath, 'utf8');
 
-  assert.deepEqual(workflowTriggerKeys(forkProof), ['push', 'workflow_dispatch']);
+  assert.deepEqual(workflowTriggerKeys(forkProof), ['push', 'pull_request', 'workflow_dispatch']);
   assert.match(forkProof, /^  push:\n    branches: \[main\]$/m);
-  assert.doesNotMatch(forkProof, /^  pull_request:/m);
+  assert.match(forkProof, /^  pull_request:$/m);
+  assert.doesNotMatch(forkProof, /pull_request_target/);
   assert.doesNotMatch(workflow, /^ {2}fork-proof:$/m);
-  assert.match(forkProof, /^  fork-proof:\n    environment: fork-proof$/m);
-  assert.doesNotMatch(forkProof, /^    if:/m, 'a non-main manual dispatch must fail instead of creating a skipped proof job');
+  assert.match(forkProof, /^permissions:\n  contents: read$/m);
+
+  assert.match(forkProof, /^  main:\n    name: fork-proof\n    if: github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\n    environment: fork-proof$/m);
   assert.match(forkProof, /name: Require main branch/);
   assert.match(forkProof, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/);
-  assert.match(forkProof, /name: Run the mandatory archive fork proof/);
-  assert.match(forkProof, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
-  assert.match(forkProof, /ROBINHOOD_FORK_PINNED: 'true'/);
-  assert.match(forkProof, /if \[\[ -z "\$\{ROBINHOOD_FORK_RPC_URL:-\}" \]\]; then\n\s+echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof\." >&2\n\s+exit 1/);
-  assert.match(
-    forkProof,
-    /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts -vv --match-path 'test\/integration\/RobinhoodV4ArchiveFork\.t\.sol'/,
-  );
-  assert.match(forkProof, /node scripts\/verify-fork-pin\.mjs/);
-  assert.ok(
-    forkProof.indexOf('node scripts/verify-fork-pin.mjs')
-      < forkProof.indexOf("forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'"),
-    'the archive pin must validate before Forge contacts the fork endpoint',
-  );
+
+  assert.match(forkProof, /^  pull-request:\n    name: fork-proof\n    if: github\.event_name == 'pull_request'\n    environment: fork-proof$/m);
+  assert.match(forkProof, /name: Require an exact PR head SHA/);
+  assert.match(forkProof, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(forkProof, /\[\[ "\$PR_HEAD_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(forkProof, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/, 'the PR job must prove the exact head, not a synthetic merge ref');
+
+  const jobBodies = forkProof.split(/^  (?=main:|pull-request:)/m).filter(body => /^(?:main|pull-request):/.test(body));
+  assert.equal(jobBodies.length, 2, 'fork-proof must define exactly the main and pull-request jobs');
+  for (const body of jobBodies) {
+    assert.match(body, /name: Run the mandatory archive fork proof/);
+    assert.match(body, /ROBINHOOD_FORK_RPC_URL: \$\{\{ secrets\.ROBINHOOD_FORK_RPC_URL \}\}/);
+    assert.match(body, /ROBINHOOD_FORK_PINNED: 'true'/);
+    assert.match(body, /if \[\[ -z "\$\{ROBINHOOD_FORK_RPC_URL:-\}" \]\]; then\n\s+echo "ROBINHOOD_FORK_RPC_URL is required for the mandatory archive fork proof\." >&2\n\s+exit 1/);
+    assert.match(
+      body,
+      /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts -vv --match-path 'test\/integration\/RobinhoodV4ArchiveFork\.t\.sol'/,
+    );
+    assert.match(body, /node scripts\/verify-fork-pin\.mjs/);
+    assert.ok(
+      body.indexOf('node scripts/verify-fork-pin.mjs')
+        < body.indexOf("forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'"),
+      'the archive pin must validate before Forge contacts the fork endpoint',
+    );
+  }
   assert.doesNotMatch(forkProof, /--ffi|EVENT_NAME|skipping the archive fork proof|continue-on-error/);
 });
 
@@ -215,6 +242,18 @@ test('identity gate checks out the trusted base and executes no pull-request sou
   assert.match(identityWorkflow, /git show "\$\{range_base\}:scripts\/check-commit-identity\.mjs"/);
   assert.doesNotMatch(identityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.doesNotMatch(identityWorkflow, /node scripts\/check-commit-identity\.mjs/);
+});
+
+test('base-defined gates publish the configured required check names', () => {
+  const workflows = [
+    ['control-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'control-gate.yml'), 'utf8')],
+    ['identity-gate', readFileSync(join(repoRoot, '.github', 'workflows', 'identity-gate.yml'), 'utf8')],
+  ];
+
+  for (const [checkName, source] of workflows) {
+    assert.match(source, new RegExp(`^  pull-request:\\n    name: ${checkName}$`, 'm'));
+    assert.match(source, new RegExp(`^  push:\\n    name: ${checkName}$`, 'm'));
+  }
 });
 
 test('the canary permits only the default branch and fails closed when its endpoint is absent', () => {
@@ -322,10 +361,11 @@ test('MoneyRoles readRoles exposes the frozen role-control records', () => {
   ]);
 });
 
-test('CI runs the Phase 1 runner and delivery-boundary proofs', () => {
-  assert.match(workflow, /node scripts\/check-delivery-boundary\.mjs/);
+test('CI runs the Phase 1 runner proof; delivery-boundary runs only in the launch gate', () => {
+  assert.doesNotMatch(workflow, /node scripts\/check-delivery-boundary\.mjs/);
   assert.match(workflow, /files="\$\(node scripts\/test-manifest\.mjs list runner\)"\n\s+node --test --test-timeout=120000 \$files/);
   assert.match(workflow, /node packages\/runner\/src\/cycle\/verify-fixtures\.mjs/);
+  assert.match(launchGateWorkflow, /node scripts\/check-delivery-boundary\.mjs/);
 });
 
 test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the model label', () => {
@@ -338,8 +378,8 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   ];
 
   assert.equal((gitleaksConfig.match(/^\[\[rules\]\]$/gm) ?? []).length, 1);
-  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 5);
-  assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 3);
+  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 9);
+  assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 7);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/collector-crypt\/pack-status\\\.json/);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/robinhood-rpc\\\.test\\\.mjs/);
   assert.match(gitleaksConfig, /docs\/modules\/collector-crypt-adapter\\\.md/);
@@ -353,6 +393,14 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   assert.doesNotMatch(gitleaksConfig, /r-\d{5}\|r-/);
   assert.match(gitleaksConfig, /feasibility\/model\\\.mjs/);
   assert.match(gitleaksConfig, /tokenOrder: usdgIsCurrency0/);
+  assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/transactions\/solana-context\\\.json/);
+  assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/transactions\/solana-v0-alt-wrong-resolution\\\.json/);
+  assert.match(gitleaksConfig, /packages\/adapters\/test\/app\/return\\\.test\\\.mjs/);
+  assert.match(gitleaksConfig, /release\/phase3\/launch-inputs\\\.json/);
+  assert.match(gitleaksConfig, /release\/phase3\/package\/graph-draft\\\.json/);
+  assert.match(gitleaksConfig, /\^5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf\$/);
+  assert.match(gitleaksConfig, /\^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse\$/);
+  assert.match(gitleaksConfig, /\^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168\$/);
   assert.doesNotMatch(gitleaksConfig, /^\[\[allowlists\]\]$/m);
 });
 
@@ -385,9 +433,68 @@ test('v4 gates keeps explicit pull-request and push ranges for append-only and s
   assert.match(workflow, /"\$\{append_only_options\[@\]\}"/);
 });
 
-test('CI verifies the Phase 3 launch package in draft mode and checks release-package closure', () => {
-  assert.match(workflow, /node scripts\/programmable\/verify-launch-package\.mjs --allow-unverified/);
-  assert.match(workflow, /node scripts\/verify-release-package-closure\.mjs/);
+test('the required code gate carries no launch/release evidence; the launch gate verifies it strictly', () => {
+  assert.doesNotMatch(workflow, /verify-launch-package\.mjs/);
+  assert.doesNotMatch(workflow, /verify-release-package-closure\.mjs/);
+  assert.doesNotMatch(workflow, /verify-release-ready\.mjs/);
+  assert.doesNotMatch(workflow, /v4\.mjs status --check/);
+  assert.doesNotMatch(workflow, /v4\.mjs trace check/);
+  assert.match(launchGateWorkflow, /node scripts\/programmable\/verify-launch-package\.mjs\n/);
+  assert.doesNotMatch(launchGateWorkflow, /verify-launch-package\.mjs --allow-unverified/);
+  assert.match(launchGateWorkflow, /node scripts\/verify-release-package-closure\.mjs/);
+  assert.match(launchGateWorkflow, /node scripts\/verify-release-ready\.mjs/);
+  assert.match(launchGateWorkflow, /node scripts\/v4\.mjs status --check/);
+  assert.match(launchGateWorkflow, /node scripts\/v4\.mjs trace check/);
+  assert.match(launchGateWorkflow, /report\.launchEligible !== true/);
+  assert.match(launchGateWorkflow, /refs\/heads\/main/);
+  assert.doesNotMatch(launchGateWorkflow, /pull_request/);
+  assert.doesNotMatch(launchGateWorkflow, /^ {2}push:/m);
+  assert.match(launchGateWorkflow, /mainSha/);
+  assert.match(launchGateWorkflow, /required:\s*true/);
+});
+
+test('the interface freeze digest for product/dependency-pins.json ignores CI-tool churn but still binds phase1Toolchain', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'interface-freeze-digest-'));
+  try {
+    mkdirSync(join(dir, 'product'));
+    const base = {
+      controlRuntime: { node: '24.19.0' },
+      contentAddresses: { workflow: { path: '.github/workflows/v4-gates.yml', sha256: 'a'.repeat(64) } },
+      securityTools: { gitleaks: { version: '8.30.1' } },
+      phase1Toolchain: { foundry: { version: '1.7.1' }, requirementsRevision: 56 },
+    };
+    const relativePath = 'product/dependency-pins.json';
+    const pinsPath = join(dir, relativePath);
+    writeFileSync(pinsPath, JSON.stringify(base));
+    const original = interfaceFreezeInputDigest(dir, relativePath);
+
+    const ciToolChurn = structuredClone(base);
+    ciToolChurn.contentAddresses.workflow.sha256 = 'b'.repeat(64);
+    ciToolChurn.securityTools.gitleaks.version = '9.0.0';
+    writeFileSync(pinsPath, JSON.stringify(ciToolChurn));
+    assert.equal(
+      interfaceFreezeInputDigest(dir, relativePath),
+      original,
+      'a CI-tool-only pin change must not change the interface freeze digest',
+    );
+
+    const interfaceChange = structuredClone(base);
+    interfaceChange.phase1Toolchain.foundry.version = '1.8.0';
+    writeFileSync(pinsPath, JSON.stringify(interfaceChange));
+    assert.notEqual(
+      interfaceFreezeInputDigest(dir, relativePath),
+      original,
+      'a phase1Toolchain change must still change the interface freeze digest',
+    );
+
+    const otherInputPath = join(dir, 'plain.txt');
+    writeFileSync(otherInputPath, 'unchanged\n');
+    const plainDigest = interfaceFreezeInputDigest(dir, 'plain.txt');
+    writeFileSync(otherInputPath, 'unchanged\n');
+    assert.equal(interfaceFreezeInputDigest(dir, 'plain.txt'), plainDigest, 'non-pins inputs still hash the whole file');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('fork-proof recovery and the control-supply-chain card document the protected environment and release verifiers', () => {
@@ -412,7 +519,9 @@ test('fork-proof recovery and the control-supply-chain card document the protect
   assert.match(card, /Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`\./);
   assert.match(card, /ROBINHOOD_FORK_PINNED=true node scripts\/verify-fork-pin\.mjs/);
   assert.doesNotMatch(card, /required reviewer/i);
-  assert.match(card, /verify-launch-package\.mjs --allow-unverified/);
+  assert.match(card, /\.github\/workflows\/launch-gate\.yml/);
+  assert.doesNotMatch(card, /verify-launch-package\.mjs --allow-unverified/);
+  assert.match(card, /verify-launch-package\.mjs/);
   assert.match(card, /node scripts\/test-manifest\.mjs check/);
   assert.match(card, /node scripts\/verify-release-ready\.mjs/);
   assert.match(card, /scripts\/check-commit-identity\.mjs/);

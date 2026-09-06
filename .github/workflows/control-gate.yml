@@ -13,6 +13,7 @@ env:
   GIT_NO_REPLACE_OBJECTS: '1'
 jobs:
   pull-request:
+    name: control-gate
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -60,6 +61,7 @@ jobs:
           git show "${range_base}:scripts/lib/util.mjs" > "${base_control_root}/scripts/lib/util.mjs"
           node "${base_control_root}/scripts/verify-control-dependencies.mjs" --base-control "$range_base" "$range_head"
   push:
+    name: control-gate
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

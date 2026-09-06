@@ -1,0 +1,85 @@
+name: launch-gate
+on:
+  workflow_dispatch:
+    inputs:
+      mainSha:
+        description: Full 40-hex commit SHA of the current protected origin/main this launch handoff evidence is bound to.
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: launch-gate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  launch-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Require the protected main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "the launch gate must be dispatched from refs/heads/main, got ${{ github.ref }}" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require the dispatched mainSha to equal the checked-out protected origin/main
+        shell: bash
+        env:
+          MAIN_SHA_INPUT: ${{ inputs.mainSha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$MAIN_SHA_INPUT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "mainSha must be a full lowercase 40-hex commit SHA" >&2
+            exit 1
+          fi
+          current_main_sha="$(git rev-parse HEAD)"
+          if [[ "$current_main_sha" != "$MAIN_SHA_INPUT" ]]; then
+            echo "mainSha $MAIN_SHA_INPUT does not match the checked-out protected origin/main $current_main_sha" >&2
+            exit 1
+          fi
+      - name: Install pinned Node
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version='24.19.0'
+          node_url='https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz'
+          node_archive_sha256='14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647'
+          node_executable_sha256='bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12'
+          node_archive="${RUNNER_TEMP}/node-v${node_version}-linux-x64.tar.xz"
+          node_root="${RUNNER_TEMP}/node-v${node_version}-linux-x64"
+          node_executable="${node_root}/bin/node"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$node_archive" "$node_url"
+          printf '%s  %s\n' "$node_archive_sha256" "$node_archive" | sha256sum --check
+          tar -xJf "$node_archive" -C "$RUNNER_TEMP"
+          printf '%s  %s\n' "$node_executable_sha256" "$node_executable" | sha256sum --check
+          echo "${node_root}/bin" >> "$GITHUB_PATH"
+          [[ "$("$node_executable" --version)" == "v${node_version}" ]]
+      - name: Verify deterministic state projection
+        run: |
+          node scripts/v4.mjs status --check
+          git diff --exit-code -- STATE.md state.json
+      - run: node scripts/v4.mjs trace check
+      - name: Verify delivery boundary
+        run: node scripts/check-delivery-boundary.mjs
+      - name: Verify release package closure
+        run: node scripts/verify-release-package-closure.mjs
+      - name: Verify Phase 3 launch package
+        run: node scripts/programmable/verify-launch-package.mjs
+      - name: Verify release readiness
+        run: node scripts/verify-release-ready.mjs
+      - name: Verify Phase 2 launch eligibility
+        run: >-
+          node --input-type=module --eval
+          'import { readFileSync } from "node:fs";
+          import { buildReadinessReport } from "./scripts/verify-phase2-readiness.mjs";
+          const manifest = JSON.parse(readFileSync("bindings/robinhood-chain.json", "utf8"));
+          const report = await buildReadinessReport({ manifest });
+          console.log(JSON.stringify(report, null, 2));
+          if (report.launchEligible !== true) { console.error(`launch not eligible: ${report.overallStatus}`); process.exit(1); }'

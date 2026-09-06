@@ -112,7 +112,9 @@ const EXPECTED_DEPENDENCY_GITLINK_PATHS = [
   "packages/contracts/lib/uerc20-factory",
   "packages/contracts/lib/v4-core/lib/solmate",
   "packages/contracts/lib/v4-periphery/lib/permit2",
-  "packages/contracts/lib/v4-core/lib/openzeppelin-contracts"
+  "packages/contracts/lib/v4-core/lib/openzeppelin-contracts",
+  "packages/contracts/lib/uerc20-factory/lib/solady",
+  "packages/contracts/lib/uerc20-factory/lib/openzeppelin-contracts"
 ];
 const EXPECTED_LOCAL_PROOF_PATHS = [
   "feasibility/model.mjs",
@@ -658,7 +660,7 @@ function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoo
   for (const input of INTERFACE_FREEZE_INPUTS) {
     assertDigest(freeze.inputHashes[input], `interface freeze input ${input}`);
     invariant(
-      freeze.inputHashes[input] === hashFile(projectRoot, input),
+      freeze.inputHashes[input] === interfaceFreezeInputDigest(projectRoot, input),
       `interface freeze input hash mismatch: ${input}`
     );
   }
@@ -838,7 +840,7 @@ export function validateInterfaceFreeze({ freeze, frozen, provisional, manifest,
   for (const input of INTERFACE_FREEZE_INPUTS) {
     assertDigest(freeze.inputHashes[input], `interface freeze input ${input}`);
     invariant(
-      freeze.inputHashes[input] === hashFile(projectRoot, input),
+      freeze.inputHashes[input] === interfaceFreezeInputDigest(projectRoot, input),
       `interface freeze input hash mismatch: ${input}`
     );
   }
@@ -1019,6 +1021,19 @@ function validateRuntimeSetDigest(manifest) {
 
 function hashFile(projectRoot, relativePath) {
   return sha256Bytes(readFileSync(path.join(projectRoot, relativePath)));
+}
+
+// product/dependency-pins.json mixes mutable CI-tool/control pins (workflow content
+// hash, Gitleaks/Node versions, npm dependency pins) with the phase1Toolchain build
+// pins that actually affect compiled interfaces (Foundry/solc settings, Robinhood chain
+// id, Uniswap dependency commits). Freezing the whole file coupled routine CI-tooling
+// edits to interface staleness; only phase1Toolchain is interface-relevant.
+export function interfaceFreezeInputDigest(projectRoot, relativePath) {
+  if (relativePath === "product/dependency-pins.json") {
+    const pins = JSON.parse(readFileSync(path.join(projectRoot, relativePath), "utf8"));
+    return digestCollection(pins.phase1Toolchain);
+  }
+  return hashFile(projectRoot, relativePath);
 }
 
 export function validateTrackedLocalProof(manifest, projectRoot) {
@@ -1397,7 +1412,7 @@ export function validateBuildPins(projectRoot) {
   const gitlinks = pins.uniswap?.dependencyGitlinks;
   validateDeclaredGitlinkCoverage(gitlinks);
   for (const pin of gitlinks) {
-    const nested = /^packages\/contracts\/lib\/(v4-core|v4-periphery)\/(.+)$/.exec(pin.path);
+    const nested = /^packages\/contracts\/lib\/(v4-core|v4-periphery|uerc20-factory)\/(.+)$/.exec(pin.path);
     const repositoryRoot = nested
       ? path.join(projectRoot, "packages/contracts/lib", nested[1])
       : projectRoot;

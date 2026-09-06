@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { createTestKeychain } from './fixtures/keychain/fixture.mjs';
+import { createTestKeychain, keychainLookupTimeoutStage } from './fixtures/keychain/fixture.mjs';
 
 const BIN_PATH = fileURLToPath(new URL('../bin/hookemon-wallet.mjs', import.meta.url));
 const DEFAULT_SERVICE = 'hookemon-operations';
@@ -198,11 +198,28 @@ test('hookemon-wallet probe preserves a Keychain interaction denial in stderr', 
   }
 });
 
-test('EVM Keychain child reports a bounded timeout for an unresponsive security command', { timeout: 1_000 }, async t => {
-  const keychain = await createTestKeychain(t, { mode: 'hang' });
+// These wrapper calls race a real hung Keychain grandchild against the child process's own
+// cold Node/ESM startup: either the child's own 50ms request deadline fires first, or the
+// wrapper's fixed 550ms parent envelope (50ms request + CHILD_CLEANUP_ALLOWANCE_MS) fires
+// first instead - both are legitimate, correctly bounded production outcomes, so asserting
+// only one message is flaky by construction (see packages/adapters/test/signing/
+// hookemon-keychain-signer.test.mjs for the same race and fix on the CLI path). The EVM
+// child's own 50ms deadline is already proven independently, deterministically, in that
+// file ("EVM keychain child enforces its own 50ms Keychain deadline with no parent envelope
+// racing it"), so both wrapper tests below are narrowed to strictly prove the outer
+// parent-envelope bound instead of duplicating that coverage; the Solana inner deadline had
+// no such independent proof yet, so one is added here.
+const OPERATIONS_WALLET_KEYCHAIN_CHILD_PATH = fileURLToPath(new URL('../src/signing/operations-wallet-keychain-child.mjs', import.meta.url));
+const SOLANA_WALLET_KEYCHAIN_CHILD_FLAG = '--hookemon-solana-wallet-keychain-child';
+const HANG_CHILD_IMPORT_PATH = fileURLToPath(new URL('./fixtures/keychain/hang-evm-child-import.mjs', import.meta.url));
+
+test('EVM Keychain child wrapper surfaces its parent-envelope timeout when the child cannot start', { timeout: 2_000 }, async t => {
+  const keychain = await createTestKeychain(t);
   const { runEvmKeychainChildProcess } = await import('../src/signing/keychain-child-evm.mjs');
   const previous = Object.fromEntries(Object.keys(keychain.env).map(key => [key, process.env[key]]));
+  const previousNodeOptions = process.env.NODE_OPTIONS;
   Object.assign(process.env, keychain.env);
+  process.env.NODE_OPTIONS = `--import=${HANG_CHILD_IMPORT_PATH}`;
   try {
     await assert.rejects(
       () => runEvmKeychainChildProcess({
@@ -211,9 +228,11 @@ test('EVM Keychain child reports a bounded timeout for an unresponsive security 
         account: EVM.account,
         keychainCommand: keychain.command,
       }, { timeoutMs: 50 }),
-      /timed out after 50ms/i,
+      /^Error: EVM keychain child timed out after 550ms$/,
     );
   } finally {
+    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = previousNodeOptions;
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -221,11 +240,46 @@ test('EVM Keychain child reports a bounded timeout for an unresponsive security 
   }
 });
 
-test('Solana Keychain child reports a bounded timeout for an unresponsive security command', { timeout: 1_000 }, async t => {
+// Spawns operations-wallet-keychain-child.mjs directly with its own internal spawn flag,
+// bypassing runSolanaWalletKeychainChildProcess (and therefore its 550ms parent envelope)
+// entirely, so only the child's own request-level 50ms enforcement can resolve the call -
+// but that enforcement runs three labeled lookups at the same 50ms budget (default-keychain
+// and login-keychain discovery, then find-generic-password), and under cold-start
+// contention any one of the three can legitimately be the stage whose timer fires first.
+// This asserts the failure is exactly one of those three known 50ms outcomes, not a
+// specific one. It does not additionally check the fixture's own recorded calls: that 50ms
+// timer starts right after the fixture is spawned, before the (also cold-starting) fixture
+// process can be relied on to have reached its own recordCall, so requiring a record would
+// itself race (see keychainLookupTimeoutStage's own negative-proof test for the exact
+// label-matching contract this relies on).
+test('Solana wallet keychain child enforces its own 50ms Keychain deadline with no parent envelope racing it', { timeout: 2_000 }, async t => {
   const keychain = await createTestKeychain(t, { mode: 'hang' });
+  const result = await runProcess(process.execPath, [OPERATIONS_WALLET_KEYCHAIN_CHILD_PATH, SOLANA_WALLET_KEYCHAIN_CHILD_FLAG], {
+    env: { ...process.env, ...keychain.env },
+    input: `${JSON.stringify({
+      operation: 'probe',
+      service: DEFAULT_SERVICE,
+      account: SOLANA.account,
+      keychainCommand: keychain.command,
+      timeoutMs: 50,
+    })}\n`,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, false);
+  assert.ok(
+    keychainLookupTimeoutStage(parsed.error, 50),
+    `expected an exact 50ms Keychain-lookup timeout, got: ${parsed.error}`,
+  );
+});
+
+test('Solana Keychain child wrapper surfaces its parent-envelope timeout when the child cannot start', { timeout: 2_000 }, async t => {
+  const keychain = await createTestKeychain(t);
   const { runSolanaWalletKeychainChildProcess } = await import('../src/signing/operations-wallet-keychain-child.mjs');
   const previous = Object.fromEntries(Object.keys(keychain.env).map(key => [key, process.env[key]]));
+  const previousNodeOptions = process.env.NODE_OPTIONS;
   Object.assign(process.env, keychain.env);
+  process.env.NODE_OPTIONS = `--import=${HANG_CHILD_IMPORT_PATH}`;
   try {
     await assert.rejects(
       () => runSolanaWalletKeychainChildProcess({
@@ -234,9 +288,11 @@ test('Solana Keychain child reports a bounded timeout for an unresponsive securi
         account: SOLANA.account,
         keychainCommand: keychain.command,
       }, { timeoutMs: 50 }),
-      /timed out after 50ms/i,
+      /^Error: Solana wallet keychain child timed out after 550ms$/,
     );
   } finally {
+    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = previousNodeOptions;
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
