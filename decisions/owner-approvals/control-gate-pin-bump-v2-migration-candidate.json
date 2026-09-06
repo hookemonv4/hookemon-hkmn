@@ -2,7 +2,7 @@
   "schema": "hookemon.control-gate-pin-bump.v2",
   "authority": "OWNER",
   "action": "CONTROL_GATE_PIN_BUMP",
-  "rationale": "REPLACE_WITH_OWNER_RATIONALE -- this record supersedes decisions/owner-approvals/control-gate-pin-bump-launch-a-draft.json (v1), which is kept in place only as a frozen record of the discovered structural impossibility, not as a candidate for signature. v1 requires the signed record to state the exact commit SHA (candidateTree) of the commit that will contain it; that commit's tree necessarily changes when the record is added to product/dependency-verification.json, so it changes its own resulting SHA -- a commit cannot state its own hash inside itself. This v2 schema (scripts/verify-control-dependencies.mjs: CONTROL_PIN_BUMP_SCHEMA_V2, baseCheckerPinBumpErrorsV2) drops baseTree/candidateTree entirely and binds only deterministic content that is fully known before the record is authored: the exact bytes of product/dependency-pins.json (basePinsSha256/candidatePinsSha256), the exact base checker blob this approval was reviewed against (baseChecker), and the exact enumerated control-surface digest changes (controls) via the existing sameControlChanges comparison -- unchanged from v1. Positive/negative tests proving this in scripts/tests/control-dependencies.test.mjs: 'the base control checker permits a v2 owner-approved pin bump with no commit-SHA binding', 'a v2 pin bump approval does not depend on the commit-SHA that ships it' (same approval object checked against two different candidateTree values, both pass), 'rejects a v2 pin bump whose approval token is not a formal owner token', 'rejects a v2 pin bump record carrying a v1-only field' (exact-keys check via sameKeys/CONTROL_PIN_BUMP_V2_KEYS), and 'rejects a v2 pin bump approved for one control-surface change but shipped with another' (an unrelated pinned control file mutated after the approval was computed is refused, proving an unchanged approval cannot admit altered controls it never enumerated). The controls entry below is the actual, real digest change for scripts/verify-control-dependencies.mjs itself between baseTree 37c0f955f76410e9c9863e77cdc33fd48ffd1306 and the current candidate content on codex/launch-a (git hash-object scripts/verify-control-dependencies.mjs), covering both A1's earlier admission of web-ci.yml/deploy-web.yml into PERMITTED_WORKFLOW_PATHS and this v2 schema addition itself. product/dependency-pins.json was corrected this turn (its controlDependencyVerifier pin was stale, still declaring the pre-v2 checker digest -- a bookkeeping bug in a prior turn, not a security-relevant control change; fixed so the pin file is internally consistent with the actual tracked checker bytes, per Terra's A5 finding), so candidatePinsSha256 below reflects the corrected file, not the earlier, wrong value.",
+  "rationale": "REPLACE_WITH_OWNER_RATIONALE -- this record supersedes decisions/owner-approvals/control-gate-pin-bump-launch-a-draft.json (v1), which is kept in place only as a frozen record of the discovered structural impossibility, not as a candidate for signature. v1 requires the signed record to state the exact commit SHA (candidateTree) of the commit that will contain it; that commit's tree necessarily changes when the record is added to product/dependency-verification.json, so it changes its own resulting SHA -- a commit cannot state its own hash inside itself. This v2 schema (scripts/verify-control-dependencies.mjs: CONTROL_PIN_BUMP_SCHEMA_V2, baseCheckerPinBumpErrorsV2) drops baseTree/candidateTree entirely and binds only deterministic content that is fully known before the record is authored: the exact bytes of product/dependency-pins.json (basePinsSha256/candidatePinsSha256), the exact base checker blob this approval was reviewed against (baseChecker), and the exact enumerated control-surface digest changes (controls) via the existing sameControlChanges comparison -- unchanged from v1. Positive/negative tests proving this in scripts/tests/control-dependencies.test.mjs: 'the base control checker permits a v2 owner-approved pin bump with no commit-SHA binding', 'a v2 pin bump approval does not depend on the commit-SHA that ships it' (same approval object checked against two different candidateTree values, both pass), 'rejects a v2 pin bump whose approval token is not a formal owner token', 'rejects a v2 pin bump record carrying a v1-only field' (exact-keys check via sameKeys/CONTROL_PIN_BUMP_V2_KEYS), and 'rejects a v2 pin bump approved for one control-surface change but shipped with another' (an unrelated pinned control file mutated after the approval was computed is refused, proving an unchanged approval cannot admit altered controls it never enumerated). The controls entries below are the complete actual control-surface digest delta between protected base 37c0f955f76410e9c9863e77cdc33fd48ffd1306 and candidate 157852aabcf13d31e5ecad2bd2353358d3fb7eaf: four protected CI workflows, the Robinhood archive-fork integration test, and this verifier. product/dependency-pins.json was corrected this turn (its controlDependencyVerifier pin was stale, still declaring the pre-v2 checker digest -- a bookkeeping bug in a prior turn, not a security-relevant control change; fixed so the pin file is internally consistent with the actual tracked checker bytes, per Terra's A5 finding), so candidatePinsSha256 below reflects the corrected file, not the earlier, wrong value.",
   "approvalToken": "DRAFT_UNSIGNED_NOT_YET_APPROVED",
   "basePinsSha256": "8d73bc29f27d72173539d21fd21241ab17ae8f2044f7f9e177e4d798a2f779e7",
   "candidatePinsSha256": "72a48f64a32ec5ff194f4165ca9c56071002740505e284dd74c7cf79552b5d75",
@@ -11,6 +11,31 @@
     "blobId": "6b232b5f35dba49abc08c1759f3fec57831f8e9d"
   },
   "controls": [
+    {
+      "path": ".github/workflows/control-gate.yml",
+      "previousSha256": "08b6c64a76b55303ae019942cf9438c2001967b471d8139990ec0d1a183a6c50",
+      "sha256": "45b7339b63b4b334620ab8eac8b873b08788c42af6e8159490baca00ed6916bb"
+    },
+    {
+      "path": ".github/workflows/fork-proof.yml",
+      "previousSha256": "8127fd545380aead60865a100412a5490c592fd8cac156f879783cf078a25a21",
+      "sha256": "ad9cdcb2b2d596a43900cbe082e273723b97db7c851c30e0fa7807aed7657ffe"
+    },
+    {
+      "path": ".github/workflows/identity-gate.yml",
+      "previousSha256": "d917cb396aff6e2883fa2d083379bd1869b35522c02b6a38bce3bed4dbd7d019",
+      "sha256": "896a8df85ab356c84649bb942a9fd171b5dcd6883047cbe40c03a074cfe1e994"
+    },
+    {
+      "path": ".github/workflows/v4-gates.yml",
+      "previousSha256": "fdbe6a32fc961dae0094850108ed66852061782c41b1755424de1d3d9cd1b276",
+      "sha256": "2945c9c7946eb2c3fa113142d2b46d8f03d8f387305a1b5ed6198baa3a79a5b9"
+    },
+    {
+      "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
+      "previousSha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8",
+      "sha256": "bb0a05472623238a6f1b618f8c7c58ca1c486dbd4688631dd35b565e98aa2927"
+    },
     {
       "path": "scripts/verify-control-dependencies.mjs",
       "previousSha256": "e9a9422e0a1c414cac3cb3e5d6ece28bcbdff1daa1d29347c4a954ae6654c49f",
@@ -27,9 +52,9 @@
   "evidenceChecksForReviewer": [
     "git diff 37c0f955f76410e9c9863e77cdc33fd48ffd1306 <candidate-commit> -- scripts/verify-control-dependencies.mjs   # confirm the only functional change is the v1/v2 dispatch plus the v2 validator; no unrelated logic changed",
     "node --test scripts/tests/control-dependencies.test.mjs   # confirm all v1 and v2 pin-bump tests pass",
-    "sha256(scripts/verify-control-dependencies.mjs) at the candidate commit equals controls[0].sha256 above (git hash-object scripts/verify-control-dependencies.mjs at that commit)",
+    "For every controls entry, SHA-256 of that path at candidate 157852aabcf13d31e5ecad2bd2353358d3fb7eaf equals sha256 and SHA-256 at base 37c0f955f76410e9c9863e77cdc33fd48ffd1306 equals previousSha256.",
     "sha256(product/dependency-pins.json) at the candidate commit equals candidatePinsSha256 above -- confirms the pin file is internally consistent with the actual current checker bytes (this was the exact drift Terra's A5 review found; it is now corrected, not byte-identical to base -- base and candidate dependency-pins.json bytes DIFFER, exactly because this checker file's own pin changed)",
-    "no other file in product/dependency-verification.json's controlGatePinBump-relevant control set changed (controls array has exactly one entry)",
+    "Compare the base and candidate digests for the control-surface set defined by controlSurfaceDescriptors in scripts/verify-control-dependencies.mjs; confirm its six changed paths are exactly the controls array.",
     "cat .github/workflows/control-gate.yml, confirm it still extracts the checker from the base ref only, not the candidate -- the fact making the bootstrap problem above a proof, not a claim"
   ],
   "recommendedResolution": "This candidate is content-correct and test-verified, but per bootstrapIntervention above there is no route to a genuine required-check PASSED result for its own admission without one explicit, logged, owner-only exception to the no-bypass policy. A is not recommending the owner take that exception; A is stating plainly that no alternative exists. If the owner declines the exception, this migration should remain an unmerged, documented proposal indefinitely. A did not and will not set approvalToken to \"OWNER APPROVED\" itself, will not flip any gate result, and will not modify product/dependency-pins.json or product/dependency-verification.json to pre-empt that decision (the one edit made to dependency-pins.json this turn was a routine bookkeeping correction restoring internal consistency with already-tracked file bytes, not a content-approval action)."
