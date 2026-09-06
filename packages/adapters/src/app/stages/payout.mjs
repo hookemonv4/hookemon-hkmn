@@ -615,6 +615,36 @@ function normalizeFinalizedTransfer(value, index, attempt, operations) {
   };
 }
 
+/**
+ * Read-only seam for external projections (e.g. public accounting) that need to verify a
+ * FINALIZED recipient's persisted evidence without re-implementing or weakening the producer's
+ * canonical finality-proof validator. Reuses the exact same 16-field schema/endpoint/amount/
+ * block/balance-delta/log-index checks that gate a live FINALIZED transition in
+ * `normalizeAttempt` -- never a duplicated, amount-only check -- plus a transaction-hash format
+ * check the raw evidence alone does not carry. Throws `DirectPayoutError` on any malformed,
+ * incomplete, or mismatched evidence.
+ *
+ * Callers MUST supply `operations`, `recipient`, and `amount` from their own trusted context
+ * (the frozen plan, configured USDG asset, and configured Operations address) -- never derived
+ * from the evidence under verification. This is what binds the asset to the actually-configured
+ * USDG contract instead of any syntactically valid same-chain, same-decimals token the evidence
+ * happens to assert.
+ */
+export function assertFinalizedPayoutTransferEvidence({ transactionHash, finalizedTransfer, operations, recipient, amount }) {
+  if (typeof transactionHash !== 'string' || !TRANSACTION_HASH.test(transactionHash)) {
+    fail('finalized payout transfer evidence transactionHash is invalid');
+  }
+  const expectedOperations = assertAddress(operations, 'finalized payout transfer evidence operations');
+  const expectedRecipient = assertAddress(recipient, 'finalized payout transfer evidence recipient');
+  const expectedAmount = assertUsdAmount(amount, 'finalized payout transfer evidence amount');
+  return normalizeFinalizedTransfer(
+    finalizedTransfer,
+    'external verification',
+    { recipient: expectedRecipient, amount: expectedAmount },
+    expectedOperations,
+  );
+}
+
 function normalizeReplacementHistory(value, index, attempt, { maxGasPriceWei }) {
   if (!Array.isArray(value)) fail(`direct payout recipient attempt ${index} replacementHistory is invalid`);
   return value.map((entry, historyIndex) => {

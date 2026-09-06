@@ -8,6 +8,13 @@
 // `ctx.readAccounting` seam, the same "optional live capability the composition root wires in"
 // pattern `ctx.triggerTick`/`ctx.requestRecovery` already use).
 //
+// Payout evidence requires trusted context (see `projectCycleAccounting`'s own `trustedPayoutContext`
+// doc): this module has no immutable anchor for "which token is actually the configured USDG" or
+// "which address is actually Operations." It calls `stages/payout.mjs`'s own exported, read-only
+// `assertFinalizedPayoutTransferEvidence` for finality-proof verification (never a reimplemented,
+// divergent duplicate), but that call still needs the trusted asset/Operations identity from the
+// caller's own config/cycle binding — without it, every payout amount stays `null`.
+//
 // Honesty rule (AGENTS.md R4/R5 — never guess a money-relevant value): every field below is either a
 // real amount actually read back from a stage's own durably-recorded evidence, a value derived from
 // two such real amounts by plain arithmetic (never assumed), or `null` ("nothing observed yet").
@@ -34,6 +41,7 @@
 // asset or subtracted against it — see `outboundBridgeFee`'s and `projectCycleAccounting`'s own
 // comments for the two concrete anti-patterns this module previously had and no longer has.
 import { USDG_PAYOUT_CHAIN_ID, USDG_PAYOUT_DECIMALS } from '../../../runner/src/distribution/payout-plan.mjs';
+import { assertFinalizedPayoutTransferEvidence, DirectPayoutError } from './stages/payout.mjs';
 
 const ACCOUNTING_STAGES = Object.freeze(['funding', 'outbound', 'purchase', 'buyback', 'return', 'distribution', 'payout']);
 
@@ -107,24 +115,38 @@ const PAYOUT_EVIDENCE_SCHEMA = 'hookemon.direct-payout-result.v1';
 const EXPECTED_USDG_CHAIN_ID = String(USDG_PAYOUT_CHAIN_ID);
 const NON_PAID_RECIPIENT_STATES = new Set(['REFUSED', 'NONCE_INTERFERENCE']);
 
-function isExpectedUsdg(amount) {
-  return amount !== null && amount.chainId === EXPECTED_USDG_CHAIN_ID && amount.decimals === USDG_PAYOUT_DECIMALS;
-}
-
-/** A recipient is only ever counted as paid when it carries the same finality proof
- * `stages/payout.mjs`'s own `normalizeAttempt`/`finalizingAttempt` require before a durable write
- * ever sets `state: 'FINALIZED'`: a `transactionHash` and a `finalizedTransfer` whose own `amount`
- * matches the recipient's allocated amount exactly. The `FINALIZED` label alone (e.g. a malformed
- * or injected evidence bundle claiming it without the proof) is never sufficient. */
-function finalizedRecipientAmount(recipient, expectedAsset) {
+/**
+ * A recipient is only ever counted as paid when `stages/payout.mjs`'s own exported, read-only
+ * `assertFinalizedPayoutTransferEvidence` accepts its `transactionHash`/`finalizedTransfer` — the
+ * exact same ~16-field schema/endpoint/amount/block/balance-delta/log-index checks that gate a live
+ * FINALIZED transition, never a re-implemented or weakened duplicate. `operations`/`amount` are
+ * built from `trustedPayoutContext` (the caller's own immutable cycle/config binding), never from
+ * the evidence under verification — this is what rejects a fully-formed but foreign chain-4663/
+ * six-decimal token even when its shape and amount otherwise match. Any thrown error (malformed
+ * hash, incomplete proof, wrong endpoints, wrong amount/asset, ...) means "not verified," never
+ * "assume paid."
+ */
+function finalizedRecipientAmount(recipient, expectedAsset, operationsAddress) {
   if (recipient?.state !== 'FINALIZED') return null;
-  if (typeof recipient.transactionHash !== 'string' || recipient.transactionHash.length === 0) return null;
-  if (!recipient.finalizedTransfer || typeof recipient.finalizedTransfer !== 'object' || Array.isArray(recipient.finalizedTransfer)) return null;
   const recipientAmount = publicAmount(recipient.amount);
-  const transferAmount = publicAmount(recipient.finalizedTransfer.amount);
-  if (recipientAmount === null || transferAmount === null) return null;
-  if (!sameAsset(recipientAmount, expectedAsset) || !sameAsset(transferAmount, expectedAsset)) return null;
-  if (transferAmount.units !== recipientAmount.units) return null;
+  if (recipientAmount === null || !sameAsset(recipientAmount, expectedAsset)) return null;
+  try {
+    assertFinalizedPayoutTransferEvidence({
+      transactionHash: recipient.transactionHash,
+      finalizedTransfer: recipient.finalizedTransfer,
+      operations: operationsAddress,
+      recipient: recipient.recipient,
+      amount: {
+        chainId: USDG_PAYOUT_CHAIN_ID,
+        assetId: expectedAsset.assetId,
+        decimals: expectedAsset.decimals,
+        amountAtomic: recipientAmount.units,
+      },
+    });
+  } catch (error) {
+    if (error instanceof DirectPayoutError) return null;
+    throw error;
+  }
   return recipientAmount;
 }
 
@@ -135,14 +157,24 @@ function finalizedRecipientAmount(recipient, expectedAsset) {
  * real paid/planned/liability/dust amounts and a recipient count. The payout stage reaching
  * `COMPLETE` only proves recipient conservation was reached, not that every recipient was actually
  * paid — some may be `REFUSED` or `NONCE_INTERFERENCE` (durably recorded as `quarantine` liabilities
- * instead of a transfer). Every amount here is verified to be real USDG on chain 4663 (the same
- * identity `assertUsdAmount` enforces at write time) and every conservation/pairing invariant
- * `stages/payout.mjs` itself enforces (`isDirectPayoutComplete`'s `paid + quarantined + dust ==
- * distributablePool`, `assertPlan`'s `totalAllocated + dust == distributablePool`, and quarantine
- * pairing exactly one-to-one with non-paid recipients) is re-verified here before trusting any of
- * it — a malformed, asset-inconsistent, non-conserving, or mispaired bundle fails closed to all
- * `null` rather than infer anything from the stage's `COMPLETE` label alone. */
-function projectPayoutEvidence(payoutStage, cycleId) {
+ * instead of a transfer).
+ *
+ * This function cannot, on its own, honestly tell real finalized USDG payment evidence apart from a
+ * fabricated or foreign-token bundle: the evidence itself carries no immutable anchor for "which
+ * token is actually USDG" or "which address is actually the Operations sender." Both must come from
+ * `trustedPayoutContext`, supplied by the caller from its own immutable cycle/config binding (e.g.
+ * `config.contracts.usdg`/`config.accounts.evm` at composition time) — never derived from the
+ * evidence. Without a complete `trustedPayoutContext` (`expectedUsdgAssetId` and
+ * `operationsAddress`), every payout amount stays `null` and `holderRewardsStatus` stays
+ * `awaiting-verification`, exactly as if the evidence were entirely missing. Every arithmetic
+ * conservation/pairing invariant `stages/payout.mjs` itself enforces (`isDirectPayoutComplete`'s
+ * `paid + quarantined + dust == distributablePool`, `assertPlan`'s `totalAllocated + dust ==
+ * distributablePool`, and quarantine pairing exactly one-to-one with non-paid recipients) is
+ * re-verified here before trusting any of it — a malformed, asset-inconsistent, non-conserving, or
+ * mispaired bundle fails closed to all `null` rather than infer anything from the stage's `COMPLETE`
+ * label alone.
+ */
+function projectPayoutEvidence(payoutStage, cycleId, trustedPayoutContext) {
   const allNull = Object.freeze({
     plannedHolderRewardsMicroUsdg: null,
     paidHolderRewardsMicroUsdg: null,
@@ -159,11 +191,24 @@ function projectPayoutEvidence(payoutStage, cycleId) {
   ) {
     return allNull;
   }
+
+  const expectedUsdgAssetId = trustedPayoutContext?.expectedUsdgAssetId;
+  const operationsAddress = trustedPayoutContext?.operationsAddress;
+  if (typeof expectedUsdgAssetId !== 'string' || expectedUsdgAssetId.length === 0
+    || typeof operationsAddress !== 'string' || operationsAddress.length === 0) {
+    return allNull;
+  }
+  const expectedAsset = Object.freeze({
+    chainId: EXPECTED_USDG_CHAIN_ID,
+    assetId: expectedUsdgAssetId,
+    decimals: USDG_PAYOUT_DECIMALS,
+  });
+
   const distributablePool = publicAmount(evidence.distributablePool);
   const totalAllocated = publicAmount(evidence.totalAllocated);
   const dust = publicAmount(evidence.dust);
   if (distributablePool === null || totalAllocated === null || dust === null) return allNull;
-  if (!isExpectedUsdg(distributablePool) || !sameAsset(distributablePool, totalAllocated) || !sameAsset(distributablePool, dust)) {
+  if (!sameAsset(distributablePool, expectedAsset) || !sameAsset(totalAllocated, expectedAsset) || !sameAsset(dust, expectedAsset)) {
     return allNull;
   }
   // Plan-level conservation (assertPlan's own invariant): totalAllocated + dust == distributablePool.
@@ -174,7 +219,7 @@ function projectPayoutEvidence(payoutStage, cycleId) {
   const nonPaidRecipients = [];
   for (const recipient of evidence.recipients) {
     if (!recipient || typeof recipient !== 'object') return allNull;
-    const finalized = finalizedRecipientAmount(recipient, distributablePool);
+    const finalized = finalizedRecipientAmount(recipient, expectedAsset, operationsAddress);
     if (finalized !== null) {
       paidAtomic += BigInt(finalized.units);
       recipientCount += 1;
@@ -182,7 +227,7 @@ function projectPayoutEvidence(payoutStage, cycleId) {
     }
     if (!NON_PAID_RECIPIENT_STATES.has(recipient.state)) return allNull;
     const amount = publicAmount(recipient.amount);
-    if (amount === null || !sameAsset(amount, distributablePool)) return allNull;
+    if (amount === null || !sameAsset(amount, expectedAsset)) return allNull;
     nonPaidRecipients.push({ recipient: recipient.recipient, units: amount.units });
   }
 
@@ -241,6 +286,18 @@ function distributionStatus(returnStage, distributionStage, payoutStage) {
  * @param {object} input.cycleRepository - a `CycleRepository`-shaped object (`readStage`/
  *   `describeCycle`); see cycle-repository.mjs.
  * @param {string} input.cycleId
+ * @param {{expectedUsdgAssetId: string, operationsAddress: string}|null} [input.trustedPayoutContext] -
+ *   required for `plannedHolderRewardsMicroUsdg`/`paidHolderRewardsMicroUsdg`/
+ *   `payoutLiabilityMicroUsdg`/`payoutDustMicroUsdg`/`paidHolderRewardsRecipientCount` to ever be
+ *   anything but `null` (and `holderRewardsStatus` anything but `awaiting-verification` once the
+ *   payout stage completes). Both fields must come from the caller's own immutable cycle/config
+ *   binding — `expectedUsdgAssetId` from `config.contracts.usdg`, `operationsAddress` from
+ *   `config.accounts.evm` — never derived from the evidence itself, so a fully-formed but foreign
+ *   chain-4663/six-decimal token can never pass as USDG. Used to call
+ *   `stages/payout.mjs`'s own exported, read-only `assertFinalizedPayoutTransferEvidence` (the exact
+ *   canonical finality-proof validator that gates a live FINALIZED transition) — this projection
+ *   never reimplements that check itself. Omitted entirely, payout amounts stay `null` exactly as if
+ *   the payout stage had no evidence at all.
  * @returns {Promise<object>} the exact schemaVersion-6 `RoundAccounting` shape
  *   `packages/dashboard/src/contracts/public-cycle-status.mjs`'s `readRoundAccounting` requires.
  *   `packSpendMicroUsdg`/`buybackMicroUsdg`/`packGainMicroUsdg`/`packLossMicroUsdg` describe pack
@@ -251,7 +308,7 @@ function distributionStatus(returnStage, distributionStage, payoutStage) {
  *   a cross-asset figure under a `MicroUsdg`-labeled pack-economics field would misrepresent it, so
  *   these four stay `null` until a same-asset USDG pack-economics producer exists.
  */
-export async function projectCycleAccounting({ cycleRepository, cycleId }) {
+export async function projectCycleAccounting({ cycleRepository, cycleId, trustedPayoutContext = null }) {
   if (!cycleRepository || typeof cycleRepository.readStage !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
     throw new Error('projectCycleAccounting requires a cycleRepository exposing readStage/describeCycle');
   }
@@ -293,7 +350,7 @@ export async function projectCycleAccounting({ cycleRepository, cycleId }) {
   const packGainMicroUsdg = null;
   const packLossMicroUsdg = null;
 
-  const payoutEvidence = projectPayoutEvidence(payout, cycleId);
+  const payoutEvidence = projectPayoutEvidence(payout, cycleId, trustedPayoutContext);
 
   return Object.freeze({
     packSpendMicroUsdg,
