@@ -261,3 +261,88 @@ No signature, hash, approval, or economic redesign was fabricated to resolve thi
 new required field is populated with schema-valid, zero-value, `build-only`-shaped test fixtures
 (in `scripts/tests/programmable-package.test.mjs`), never asserted as the real launch's committed
 choice.
+
+## LIH-01 resolved: exact `launchIntentHash` preimage formula, read from the verified CLI source (2026-09-06, H4)
+
+Continuing LIH-01 with a genuine offline CLI invocation, per explicit coordinator authorization to
+install pinned dependencies and run build-only/local commands in an isolated workspace. No network
+write, sign, submit, or status/admission call was made; the only network activity was the same
+credential-free `GET` of the CLI tarball already verified in the prior LIH-01 entries, plus
+`npm ci --ignore-scripts --no-audit --no-fund` against the tarball's own committed
+`npm-shrinkwrap.json` (its single runtime dependency is `viem@2.55.5`) in a `/tmp` workspace outside
+this repository. Nothing was installed or run inside this repository or against the provider API.
+
+**The CLI's `pack` command is fully offline.** `src/cli.mjs`'s `pack` branch calls `packLaunch` from
+`src/pack.mjs`, which imports only local modules (`build.mjs`, `canonical-json.mjs`, `graph.mjs`,
+`io.mjs`, `source-bundle.mjs`, `project-metadata.mjs`, `verification.mjs`, `pack-v4.mjs`) — no
+`api-client.mjs` import. Only `validate --remote`, `submit`, and `status` touch the network.
+
+**The exact preimage, read verbatim from `src/v4-contract.mjs`:**
+
+```js
+export function buildV4LaunchIntentHash(value) {
+  return sha256Digest(Buffer.concat([
+    Buffer.from(V4_LAUNCH_INTENT_HASH_DOMAIN, "utf8"),   // "programmable.custom-launch-intent.v4"
+    Buffer.from([0]),
+    Buffer.from(canonicalizeJson(value), "utf8"),
+  ]));
+}
+```
+
+Called (in `src/pack-v4.mjs`) with exactly this field set, in this order:
+`schemaVersion, chainId, caip2, chainDeploymentId, chainDeploymentDescriptorDigest, profile,
+launchWallet, nonce, permitWindow, sourceDescriptor, sourceBundleManifest, externalContracts,
+graphBundleHash` (a hash, not the full graph bundle), `projectMetadataHash,
+projectMetadataImageArtifact`, optionally `behaviorScenarioInputsHash`, `verificationBundleHash`
+(a hash, not the full bundle), `funding`, optionally `fundingPlan`, `liquidityModel`.
+`agentAttestation.subjectLaunchIntentHash` is then set to exactly this value — confirming the field
+relationship our own `validateRecordedV4RequestTemplate` already enforces
+(`request.agentAttestation.subjectLaunchIntentHash === request.launchIntentHash`, in
+`scripts/programmable/lib/package.mjs`) is correct and matches the real implementation, not a
+guess.
+
+**This is genuine, sourced, computable-without-signature evidence — read from the provider's own
+released and checksum-verified tool, not reverse-engineered or invented.** It resolves the
+"CLI-owned, must-not-be-hand-written" tension recorded earlier: the formula itself is public (it
+ships in an MIT-licensed, publicly released package); what remains CLI-owned is the *canonical
+input values* (`chainDeploymentId`, `chainDeploymentDescriptorDigest`, `graphBundleHash`,
+`verificationBundleHash`, and others), most of which are still null in our committed template
+because their prerequisite facts (graph target addresses, resolved chain deployment) are
+themselves unresolved.
+
+Invoked `buildV4LaunchIntentHash` directly (the CLI's real exported function, not a
+reimplementation) against our own `materializePhaseThreeCreateRequest({ root: '.' })` output,
+substituting `null` for `graphBundleHash`/`verificationBundleHash` (not yet computed anywhere in
+our pipeline) to match the function's expected shape. It ran without error and produced a hash. This
+demonstrates only that **the mechanism is invokable against our request shape**; the resulting
+digest is a preview over an object containing 11 of 19 null fields
+(`chainDeploymentId, chainDeploymentDescriptorDigest, nonce, sourceDescriptor, sourceBundleManifest,
+externalContracts, graphBundleHash, projectMetadataHash, projectMetadataImageArtifact,
+verificationBundleHash, fundingPlan`) and is **not** recorded as a candidate `launchIntentHash` —
+doing so would misrepresent a hash-of-mostly-nulls as meaningful evidence. No hash was hand-written
+into any committed file; `launchIntentHash`/`agentAttestation` remain `null` in the actual template,
+exactly as before this investigation.
+
+## LIH-01: independent verification sharpens the conclusion to definitive incompatibility (2026-09-06)
+
+Independent review (`H-provider-sol-decision.md`, not duplicated in full here) went one step
+further than the H investigation above: it hashed the actual admission-descriptor and
+business-policy documents bound by the live capabilities digests
+(`raw.githubusercontent.com/programmablehq/Launch-Policy/main/policy/custom-launch-admission-v4.1.json`
+and `.../policy/robinhood-custom-launch-economics-v1.json`) and confirmed both hash to the exact
+`admissionDescriptorDigest`/`admissionPolicyDigest` values recorded above — i.e. these are not just
+"an example," they are the server-bound policy text itself. That policy states
+`conformance.requiredForEveryFreshLaunch: true`, `platformFee.waiverAllowed: false`, and
+`firstBuy.requiredForEveryFreshLaunch: true`. It also found the released CLI enforces this
+unconditionally in code — `pack-v4.mjs` calls `assertRobinhoodNativeFeeKernelBuildV1` regardless of
+`fundingPlan.launchMode`, so `build-only` does not bypass the kernel check; the official packer
+rejects `HookemonHook`/our USDG PoolKey before it can emit even a local, unsigned `launch.json`.
+
+This corrects and replaces the H investigation's earlier, more tentative framing ("I did not
+conclude the two are definitely incompatible... I also did not find it explicitly ruled out"): the
+current route is **definitively incompatible at local pack time**, not merely undocumented. Only
+whether Programmable will publish a different, compatible future profile remains open. The three
+options recorded above stand unchanged; option 3 (direct provider clarification) now has an exact
+drafted question, recorded in `H-provider-sol-decision.md`, ready for an authorized support
+channel. No code, contract, or economics changed as a result — this is a sharpened diagnosis, not a
+new decision.
