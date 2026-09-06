@@ -50,6 +50,7 @@ import {
 } from '../../../runner/src/cycle/authorization-provider.mjs';
 import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { assertMoneyConfiguration } from '../../../runner/src/cycle/money-schemas.mjs';
+import { CIRCLE_USD_DECIMALS, CIRCLE_USD_MINT } from '../solana-rpc.mjs';
 
 // Signing dependencies load only when a signer is actually constructed. Read-only configuration,
 // repository status, and direct keychain readiness must not initialize the transaction-policy path.
@@ -88,6 +89,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_RELAY_EVM_DEPOSITORY',
   'HOOKEMON_COLLECTOR_CRYPT_BASE_URL',
   'HOOKEMON_COLLECTOR_CRYPT_API_KEY',
+  'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH',
   'HOOKEMON_VAULT_ADDRESS',
   'HOOKEMON_HOOK_ADDRESS',
   'HOOKEMON_EVM_ACCOUNT',
@@ -150,7 +152,9 @@ const ALLOWED_ENV_VARS = Object.freeze([
   // supplies the real deploy block). HOOKEMON_DISTRIBUTION_DIR is the absolute directory this
   // process shares with the separate `bin/hookemon-verifier.mjs` process (pending/receipts/failed).
   'HOOKEMON_HKMN_ADDRESS',
+  'HOOKEMON_HKMN_DECIMALS',
   'HOOKEMON_HKMN_DEPLOY_BLOCK',
+  'HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH',
   'HOOKEMON_DISTRIBUTION_DIR',
   // WP-39: the production evidence profile's own configuration. HOOKEMON_DISTRIBUTION_PROFILE is
   // 'fixture' (default — the existing Ed25519 local-pairing scheme, unchanged) or 'production' (the
@@ -196,6 +200,8 @@ const DEFAULT_ROBINHOOD_RPC_URL = 'https://rpc.mainnet.chain.robinhood.com';
 const DEFAULT_SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const DEFAULT_RELAY_BASE_URL = 'https://api.relay.link';
 const DEFAULT_COLLECTOR_CRYPT_BASE_URL = 'https://gacha.collectorcrypt.com';
+const COLLECTOR_ONLY_PACK_PRICE_ATOMIC = '25000000';
+const OPERATIONS_SOLANA_PUBLIC_KEY = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 
 const evmAddressPattern = /^0x[0-9a-fA-F]{40}$/;
 const ownerPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
@@ -258,8 +264,49 @@ function requireExplicit(env, names) {
   for (const name of names) readString(env, name, { required: true });
 }
 
+function isCollectorOnlyRehearsalProfile(env, profile) {
+  return profile === 'rehearsal'
+    && readString(env, 'HOOKEMON_REHEARSAL_MODE', { defaultValue: null }) === 'collector-only';
+}
+
 function requireProfileInputs(env, profile) {
   if (profile === 'inspection') return;
+  const providerMode = profile === 'rehearsal'
+    ? readString(env, 'HOOKEMON_PROVIDER_MODE', { required: true })
+    : null;
+  if (isCollectorOnlyRehearsalProfile(env, profile)) {
+    requireExplicit(env, [
+      'HOOKEMON_CHAIN_ID',
+      'HOOKEMON_SOLANA_RPC_URL',
+      'HOOKEMON_SOLANA_ACCOUNT',
+      'HOOKEMON_SIGNER_BACKEND',
+      'HOOKEMON_SIGNER_LIVE_MODE',
+      'HOOKEMON_KEYCHAIN_COMMAND',
+      'HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT',
+      'HOOKEMON_PACK_CODE',
+      'HOOKEMON_MIN_ROBINHOOD_RECEIVE',
+      'HOOKEMON_MIN_SOLANA_RECEIVE',
+      'HOOKEMON_MIN_RETURN_USDG',
+      'HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD',
+      'HOOKEMON_NATIVE_GAS_CAP_SOLANA',
+      'HOOKEMON_EVM_GAS_PRICE_CAP',
+      'HOOKEMON_EVM_NATIVE_RESERVE',
+      'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
+      'HOOKEMON_SOLANA_LAMPORT_RESERVE',
+      'HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG',
+      'HOOKEMON_BUDGET_PACK_PRICE_USDG',
+      'HOOKEMON_BUDGET_OUTBOUND_CAP_USDG',
+      'HOOKEMON_BUDGET_RETURN_CAP_USDG',
+      'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG',
+      'HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS',
+      'HOOKEMON_REHEARSAL_PAYOUT_SPLIT',
+      'HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT',
+    ]);
+    if (providerMode === 'live') {
+      requireExplicit(env, ['HOOKEMON_COLLECTOR_CRYPT_BASE_URL', 'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH']);
+    }
+    return;
+  }
   const moneyFields = [
     'HOOKEMON_CHAIN_ID',
     'HOOKEMON_ROBINHOOD_RPC_URL',
@@ -484,9 +531,9 @@ export function validateMoneyConfiguration(value) {
   }
 }
 
-function buildMoneyConfiguration({ profile, chainId, frozenUsdg, relaySolanaMint, relaySolanaDecimals, minimums, evmGasPriceCap, evmNativeReserve, solanaPriorityFeeCap, solanaLamportReserve }) {
+function buildMoneyConfiguration({ profile, chainId, frozenUsdg, relaySolanaMint, relaySolanaDecimals, collectorOnlyRehearsal, minimums, evmGasPriceCap, evmNativeReserve, solanaPriorityFeeCap, solanaLamportReserve }) {
   if (profile === 'inspection') return null;
-  if (relaySolanaMint === null || relaySolanaDecimals === null) {
+  if (!collectorOnlyRehearsal && (relaySolanaMint === null || relaySolanaDecimals === null)) {
     throw new MoneyConfigurationRejected('configured Solana stablecoin asset metadata is required');
   }
   const usdg = Object.freeze({
@@ -494,11 +541,9 @@ function buildMoneyConfiguration({ profile, chainId, frozenUsdg, relaySolanaMint
     assetId: frozenUsdg.address,
     decimals: frozenUsdg.decimals,
   });
-  const solanaStablecoin = Object.freeze({
-    chainId: '792703809',
-    assetId: relaySolanaMint,
-    decimals: relaySolanaDecimals,
-  });
+  const solanaStablecoin = Object.freeze(collectorOnlyRehearsal
+    ? { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS }
+    : { chainId: '792703809', assetId: relaySolanaMint, decimals: relaySolanaDecimals });
   const evmNative = Object.freeze({ chainId: usdg.chainId, assetId: 'native', decimals: 18 });
   const solanaNative = Object.freeze({ chainId: solanaStablecoin.chainId, assetId: 'native', decimals: 9 });
   const solanaPriorityFee = Object.freeze({
@@ -566,6 +611,42 @@ function readJsonObjectFile(env, name, { required = false } = {}) {
   return Object.freeze(value);
 }
 
+/** Reads a private, regular credential file without following a symlink. The result stays only in
+ * the in-memory adapter configuration and is never returned by a CLI projection or journal. */
+function readPrivateCredentialFile(path, label) {
+  let before;
+  try {
+    before = lstatSync(path);
+  } catch {
+    fail(`${label} file is unreadable`);
+  }
+  if (before.isSymbolicLink() || !before.isFile() || (before.mode & 0o777) !== 0o600) {
+    fail(`${label} file must be a private regular file`);
+  }
+  if (typeof fsConstants.O_NOFOLLOW !== 'number') fail(`${label} file requires no-follow file support`);
+  let fd;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === 'ELOOP') fail(`${label} file must be a private regular file`);
+    fail(`${label} file is unreadable`);
+  }
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || (opened.mode & 0o777) !== 0o600 || opened.dev !== before.dev || opened.ino !== before.ino) {
+      fail(`${label} file changed while opening`);
+    }
+    const value = readFileSync(fd, 'utf8').trim();
+    if (value.length === 0 || /[\r\n\u0000]/.test(value)) fail(`${label} file must contain one nonempty line`);
+    return value;
+  } catch (error) {
+    if (error instanceof EnvironmentConfigurationError) throw error;
+    fail(`${label} file is unreadable`);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /**
  * Dynamically imports an operator-supplied signer module (never a path inside this repository's own
  * tree in any real deployment, though nothing here enforces that beyond documentation — the module
@@ -606,6 +687,12 @@ export async function probeKeychainOperations(config, { exec } = {}) {
   }
   if (typeof exec !== 'function') fail('probeKeychainOperations requires an injected exec(...) function');
   const { command, evmAccount, solanaAccount } = config.signer.keychain;
+  const roles = Array.isArray(config.signer.roles)
+    ? config.signer.roles
+    : [OPERATOR_EVM_ROLE, OPERATOR_SOLANA_ROLE];
+  if (roles.length === 0 || roles.some(role => role !== OPERATOR_EVM_ROLE && role !== OPERATOR_SOLANA_ROLE)) {
+    fail('keychain Operations readiness has invalid configured roles');
+  }
   const probe = async (role, account) => {
     const payload = { kind: 'hookemon-keychain-sign-only-readiness.v1' };
     const input = `${JSON.stringify({
@@ -636,11 +723,24 @@ export async function probeKeychainOperations(config, { exec } = {}) {
     if (!response || typeof response !== 'object' || response.ready !== true) {
       fail(`keychain readiness probe did not confirm readiness for ${role}`);
     }
-    return Object.freeze({ ready: true });
+    const publicKey = typeof response.publicKey === 'string' && response.publicKey.length > 0
+      ? response.publicKey
+      : null;
+    const bindCollectorOnlyIdentity = config.execution?.profile === 'rehearsal'
+      && config.execution?.providerMode === 'live'
+      && config.rehearsal?.mode === 'collector-only';
+    if (role === OPERATOR_SOLANA_ROLE && bindCollectorOnlyIdentity && typeof config.accounts?.solana === 'string') {
+      if (publicKey !== config.accounts.solana) {
+        fail('keychain readiness probe did not confirm the configured Operations Solana public key');
+      }
+    }
+    return Object.freeze(publicKey === null ? { ready: true } : { ready: true, publicKey });
   };
-  const evm = await probe(OPERATOR_EVM_ROLE, evmAccount);
-  const solana = await probe(OPERATOR_SOLANA_ROLE, solanaAccount);
-  return Object.freeze({ [OPERATOR_EVM_ROLE]: evm, [OPERATOR_SOLANA_ROLE]: solana });
+  const result = {};
+  for (const role of roles) {
+    result[role] = await probe(role, role === OPERATOR_EVM_ROLE ? evmAccount : solanaAccount);
+  }
+  return Object.freeze(result);
 }
 
 /**
@@ -679,7 +779,14 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const relaySolanaDecimals = readAssetDecimals(env, 'HOOKEMON_RELAY_SOLANA_DECIMALS');
   const relayEvmDepository = readEvmAddress(env, 'HOOKEMON_RELAY_EVM_DEPOSITORY');
   const collectorCryptBaseUrl = readUrl(env, 'HOOKEMON_COLLECTOR_CRYPT_BASE_URL', { defaultValue: DEFAULT_COLLECTOR_CRYPT_BASE_URL });
-  const collectorCryptApiKey = readString(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY', { defaultValue: null });
+  const collectorCryptApiKeyRaw = readString(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY', { defaultValue: null });
+  const collectorCryptApiKeyPath = readAbsolutePath(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH', { required: false });
+  if (collectorCryptApiKeyRaw !== null && collectorCryptApiKeyPath !== null) {
+    fail('set only one of HOOKEMON_COLLECTOR_CRYPT_API_KEY and HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH');
+  }
+  const collectorCryptApiKey = collectorCryptApiKeyPath === null
+    ? collectorCryptApiKeyRaw
+    : readPrivateCredentialFile(collectorCryptApiKeyPath, 'Collector API key');
 
   const vaultAddress = readEvmAddress(env, 'HOOKEMON_VAULT_ADDRESS');
   const hookAddress = readEvmAddress(env, 'HOOKEMON_HOOK_ADDRESS');
@@ -694,6 +801,12 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const solanaAccount = readString(env, 'HOOKEMON_SOLANA_ACCOUNT', { defaultValue: null });
   if (solanaAccount !== null) readSolanaAddress(solanaAccount, 'HOOKEMON_SOLANA_ACCOUNT');
   const rehearsal = readRehearsal(env, solanaAccount);
+  const providerMode = readString(env, 'HOOKEMON_PROVIDER_MODE', { defaultValue: null });
+  if (providerMode !== null && !PROVIDER_MODES.has(providerMode)) {
+    fail('HOOKEMON_PROVIDER_MODE must be "live" or "fake"');
+  }
+  const collectorOnlyRehearsal = profile === 'rehearsal' && rehearsal?.mode === 'collector-only';
+  const liveCollectorOnly = collectorOnlyRehearsal && providerMode === 'live';
 
   const signerModulePath = readString(env, 'HOOKEMON_SIGNER_MODULE', { defaultValue: null });
   if (signerModulePath !== null && !isAbsolute(signerModulePath)) fail('HOOKEMON_SIGNER_MODULE must be an absolute path');
@@ -705,13 +818,8 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const keychainCommand = readAbsolutePath(env, 'HOOKEMON_KEYCHAIN_COMMAND', { required: signerBackend === 'keychain' });
   const keychainEvmAccount = readString(env, 'HOOKEMON_KEYCHAIN_EVM_ACCOUNT', { defaultValue: null });
   const keychainSolanaAccount = readString(env, 'HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT', { defaultValue: null });
-  if (signerBackend === 'keychain' && (!keychainEvmAccount || !keychainSolanaAccount)) {
+  if (signerBackend === 'keychain' && (!keychainSolanaAccount || (!collectorOnlyRehearsal && !keychainEvmAccount))) {
     fail('HOOKEMON_KEYCHAIN_EVM_ACCOUNT and HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT are both required when HOOKEMON_SIGNER_BACKEND is "keychain"');
-  }
-
-  const providerMode = readString(env, 'HOOKEMON_PROVIDER_MODE', { defaultValue: null });
-  if (providerMode !== null && !PROVIDER_MODES.has(providerMode)) {
-    fail('HOOKEMON_PROVIDER_MODE must be "live" or "fake"');
   }
 
   if (profile === 'production') {
@@ -747,12 +855,28 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
       if (rehearsal?.mode === 'relay-roundtrip') {
         fail('relay-roundtrip rehearsal requires HOOKEMON_PROVIDER_MODE=fake');
       }
-      if (rehearsal !== null) fail('live rehearsal refuses the collector-only rehearsal flags');
-      if (evmAccount === null || solanaAccount === null || relaySolanaMint === null || relayEvmDepository === null) {
-        fail('live rehearsal requires both Operations identities and explicit bridge asset routes');
+      if (rehearsal?.mode !== 'collector-only' || rehearsal.proceedsAccount === undefined) {
+        fail('live rehearsal requires collector-only mode and a dedicated Solana proceeds account');
+      }
+      if (evmAccount !== null || keychainEvmAccount !== null) {
+        fail('live collector-only rehearsal requires the Solana Operations identity only');
+      }
+      if (solanaAccount === null || signerBackend !== 'keychain' || keychainSolanaAccount !== 'operator-solana') {
+        fail('live collector-only rehearsal requires the operator-solana Keychain identity');
+      }
+      if (signerModulePath !== null) {
+        fail('live collector-only rehearsal refuses HOOKEMON_SIGNER_MODULE; use the Operations Keychain child');
+      }
+      if (solanaAccount !== OPERATIONS_SOLANA_PUBLIC_KEY) {
+        fail('live collector-only rehearsal must use the configured Operations Solana public key');
+      }
+      if (collectorCryptApiKeyPath === null || collectorCryptApiKey === null) {
+        fail('live collector-only rehearsal requires HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH');
       }
       if (signerLiveModeRaw !== 'true') fail('live rehearsal requires HOOKEMON_SIGNER_LIVE_MODE=true');
-      fail('live rehearsal is unavailable until the dedicated Solana proceeds projection is integrated');
+      if (relayApiKey !== null || relayEvmDepository !== null || vaultAddress !== null || hookAddress !== null) {
+        fail('live collector-only rehearsal refuses bridge and contract configuration');
+      }
     } else {
       fail('rehearsal profile requires HOOKEMON_PROVIDER_MODE=live or HOOKEMON_PROVIDER_MODE=fake');
     }
@@ -770,7 +894,10 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     fail('HOOKEMON_STANDING_AUTHORITY_PATH, HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH, and HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH must be set together');
   }
   const observability = readJsonObjectFile(env, 'HOOKEMON_OBSERVABILITY_CONFIG_PATH', {
-    required: profile !== 'inspection',
+    required: profile !== 'inspection' && !collectorOnlyRehearsal,
+  });
+  const eligibilitySnapshot = readJsonObjectFile(env, 'HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH', {
+    required: profile === 'production' && !dryRun,
   });
 
   const packCode = readString(env, 'HOOKEMON_PACK_CODE', { defaultValue: null });
@@ -790,6 +917,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     frozenUsdg,
     relaySolanaMint,
     relaySolanaDecimals,
+    collectorOnlyRehearsal,
     minimums,
     evmGasPriceCap: readBudgetAmount(env, 'HOOKEMON_EVM_GAS_PRICE_CAP', { defaultValue: null }),
     evmNativeReserve: readBudgetAmount(env, 'HOOKEMON_EVM_NATIVE_RESERVE', { defaultValue: null }),
@@ -798,6 +926,10 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   });
 
   const hkmnAddress = readEvmAddress(env, 'HOOKEMON_HKMN_ADDRESS');
+  const hkmnDecimals = readAssetDecimals(env, 'HOOKEMON_HKMN_DECIMALS');
+  if (hkmnAddress !== null && hkmnDecimals === null) {
+    fail('HOOKEMON_HKMN_DECIMALS is required when HOOKEMON_HKMN_ADDRESS is configured');
+  }
   const hkmnDeployBlockRaw = readBudgetAmount(env, 'HOOKEMON_HKMN_DEPLOY_BLOCK', { defaultValue: '0' });
   const distributionDir = readAbsolutePath(env, 'HOOKEMON_DISTRIBUTION_DIR', { required: false });
   const distributionProfile = readString(env, 'HOOKEMON_DISTRIBUTION_PROFILE', { defaultValue: 'fixture' });
@@ -818,6 +950,9 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     returnCapUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_RETURN_CAP_USDG', { defaultValue: '0' }),
     operatingMarginUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG', { defaultValue: '0' }),
   });
+  if (liveCollectorOnly && budget.packPriceUsdg !== COLLECTOR_ONLY_PACK_PRICE_ATOMIC) {
+    fail(`live collector-only rehearsal requires HOOKEMON_BUDGET_PACK_PRICE_USDG=${COLLECTOR_ONLY_PACK_PRICE_ATOMIC}`);
+  }
 
   return Object.freeze({
     stateDir,
@@ -827,14 +962,32 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     chainId,
     execution: Object.freeze({ profile, networkProfile: 'mainnet', providerMode: providerMode ?? 'live', dryRun }),
     robinhood: Object.freeze({ rpcUrl: robinhoodRpcUrl, archiveRpcUrl: robinhoodArchiveRpcUrl }),
-    solana: Object.freeze({ rpcUrl: solanaRpcUrl }),
+    solana: Object.freeze({
+      rpcUrl: solanaRpcUrl,
+      ...(collectorOnlyRehearsal ? { chainId: 'solana-mainnet' } : {}),
+    }),
     relay: Object.freeze({
       baseUrl: relayBaseUrl,
       apiKey: relayApiKey,
       solanaMint: relaySolanaMint,
       evmDepository: relayEvmDepository,
     }),
-    collectorCrypt: Object.freeze({ baseUrl: collectorCryptBaseUrl, apiKey: collectorCryptApiKey }),
+    collectorCrypt: Object.freeze({
+      baseUrl: collectorCryptBaseUrl,
+      apiKey: collectorCryptApiKey,
+      ...(collectorOnlyRehearsal ? {
+        executionBundleRequired: true,
+        settlementAsset: Object.freeze({
+          chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS,
+        }),
+        packPrice: Object.freeze({
+          chainId: 'solana-mainnet',
+          assetId: CIRCLE_USD_MINT,
+          decimals: CIRCLE_USD_DECIMALS,
+          amountAtomic: budget.packPriceUsdg,
+        }),
+      } : {}),
+    }),
     contracts: Object.freeze({
       vault: vaultAddress,
       hook: hookAddress,
@@ -849,6 +1002,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     signer: Object.freeze({
       backend: signerBackend,
       liveMode: signerLiveModeRaw === 'true',
+      roles: Object.freeze(collectorOnlyRehearsal ? [OPERATOR_SOLANA_ROLE] : [OPERATOR_EVM_ROLE, OPERATOR_SOLANA_ROLE]),
       keychain: Object.freeze({ command: keychainCommand, evmAccount: keychainEvmAccount, solanaAccount: keychainSolanaAccount }),
     }),
     standingAuthority: Object.freeze({
@@ -863,7 +1017,8 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     minimums,
     nativeGasCaps,
     rehearsal,
-    hkmn: Object.freeze({ address: hkmnAddress, deployBlock: BigInt(hkmnDeployBlockRaw) }),
+    hkmn: Object.freeze({ address: hkmnAddress, deployBlock: BigInt(hkmnDeployBlockRaw), decimals: hkmnDecimals }),
+    eligibilitySnapshot,
     distribution: Object.freeze({
       dir: distributionDir,
       excludedHolderAddresses,
@@ -908,9 +1063,32 @@ export async function loadOperatorSignerClient(config, { exec, preflightAuthorit
     if (typeof exec !== 'function') fail('loadOperatorSignerClient requires an injected exec(...) function for the keychain backend');
     const { command, evmAccount, solanaAccount } = config.signer.keychain;
     const { createKeychainSignerClient } = await import('../signing/keychain-signer.mjs');
+    const roles = Array.isArray(config.signer.roles)
+      ? config.signer.roles
+      : [OPERATOR_EVM_ROLE, OPERATOR_SOLANA_ROLE];
+    if (roles.length === 0 || roles.some(role => role !== OPERATOR_EVM_ROLE && role !== OPERATOR_SOLANA_ROLE)) {
+      fail('keychain Operations signer has invalid configured roles');
+    }
+    const liveCollectorOnly = config.execution?.profile === 'rehearsal'
+      && config.execution?.providerMode === 'live'
+      && config.rehearsal?.mode === 'collector-only';
     return {
-      evm: createKeychainSignerClient({ role: OPERATOR_EVM_ROLE, liveMode: config.signer.liveMode, preflightAuthority, exec, command, account: evmAccount }),
-      solana: createKeychainSignerClient({ role: OPERATOR_SOLANA_ROLE, liveMode: config.signer.liveMode, preflightAuthority, exec, command, account: solanaAccount }),
+      evm: roles.includes(OPERATOR_EVM_ROLE)
+        ? createKeychainSignerClient({ role: OPERATOR_EVM_ROLE, liveMode: config.signer.liveMode, preflightAuthority, exec, command, account: evmAccount })
+        : null,
+      solana: roles.includes(OPERATOR_SOLANA_ROLE)
+        ? createKeychainSignerClient({
+          role: OPERATOR_SOLANA_ROLE,
+          liveMode: config.signer.liveMode,
+          preflightAuthority,
+          exec,
+          command,
+          account: solanaAccount,
+          ...(liveCollectorOnly && config.signer.liveMode === true
+            ? { operationArgs: ['--parent-policy-evaluated'] }
+            : {}),
+        })
+        : null,
       distributionSigner: null,
     };
   }
@@ -1006,8 +1184,16 @@ export function loadStandingAuthority(config) {
   const ownerPublicKey = loadPublicKeyFromPemFile(config.standingAuthority.ownerPublicKeyPath);
   const policyPublicKey = loadPublicKeyFromPemFile(config.standingAuthority.policyPublicKeyPath);
   const provider = createStandingAuthorityProvider({ standingAuthority: document, ownerPublicKey, policyPublicKey });
+  // The owner-signed document and policy key are pinned above for this process lifetime. Only the
+  // private, policy-signed artifact is re-read at each signing boundary, so an external policy
+  // service can publish the exact runtime cycle/request authorization without restarting the
+  // runner. Every reload repeats no-follow, ownership, mode, canonical-JSON, digest, and signature
+  // validation before the already-pinned provider is allowed to consume the selected intent.
   const resolveStepAuthorization = config.execution.profile === 'production'
-    ? loadPersistedStandingAuthorityArtifact(config.stateDir, document.documentDigest)
+    ? Object.freeze(async request => {
+      const resolver = loadPersistedStandingAuthorityArtifact(config.stateDir, document.documentDigest);
+      return resolver(request);
+    })
     : null;
   return Object.freeze({
     ...document,

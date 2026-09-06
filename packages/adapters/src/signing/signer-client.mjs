@@ -25,6 +25,7 @@ import {
   captureSolanaCoSignerSignatures,
   decodeProviderTransaction,
   evaluate as evaluateTransactionPolicy,
+  expectedBroadcastIdentifier,
   revalidateSignedMessage,
 } from './transaction-policy.mjs';
 import {
@@ -68,6 +69,27 @@ export class SignerClientError extends Error {}
 
 function fail(message) {
   throw new SignerClientError(message);
+}
+
+// A fresh, unforgeable token this module mints only inside `wrapTransactionPolicySignerClient`,
+// immediately after it evaluates transaction policy for the exact request or signed bytes about
+// to cross to a backend (Task B independent review: the Solana `--parent-policy-evaluated` marker
+// must never be a caller-supplied construction knob). Neither the issuer nor the WeakSet is
+// exported, so no code outside this module can construct a value that passes
+// `assertPolicyEvaluationProof` — the only way to obtain a genuine proof is to go through this
+// module's own, already-evaluated policy path.
+const policyEvaluationProofs = new WeakSet();
+
+function issuePolicyEvaluationProof() {
+  const proof = Object.freeze(Object.create(null));
+  policyEvaluationProofs.add(proof);
+  return proof;
+}
+
+function assertPolicyEvaluationProof(proof, role) {
+  if (typeof proof !== 'object' || proof === null || !policyEvaluationProofs.has(proof)) {
+    fail(`signer client for role "${role}" requires a genuine parent transaction-policy evaluation proof`);
+  }
 }
 
 function requireSignerMutationAuthority(role, preflightAuthority) {
@@ -176,9 +198,14 @@ export function signRequestDigest(request) {
  *   defense-in-depth, construction-time gate distinct from (and in addition to) any call-site
  *   liveMode gate a caller (e.g. `packages/adapters/src/app/stage-driver.mjs`) already applies —
  *   even if a caller forgets to gate, this client itself never signs or broadcasts.
- * @param {{sign: Function, broadcast?: Function}} input.inner - the real implementation. `sign`
- *   is called as `inner.sign(request, { digest, role })`; `broadcast` (required only for roles
- *   whose `ROLE_CAPABILITIES` says `broadcast: true`) as `inner.broadcast(signed, { role })`.
+ * @param {{sign: Function, broadcast?: Function, signApproved?: Function, broadcastApproved?: Function}} input.inner -
+ *   the real implementation. `sign` is called as `inner.sign(request, { digest, role })`;
+ *   `broadcast` (required only for roles whose `ROLE_CAPABILITIES` says `broadcast: true`, unless
+ *   `broadcastApproved` is supplied instead) as `inner.broadcast(signed, { role })`. `signApproved`/
+ *   `broadcastApproved` are optional, stronger variants an implementation exposes when a caller
+ *   must first prove genuine parent transaction-policy evaluation (see `assertPolicyEvaluationProof`
+ *   below) — this wrapper checks that proof itself, before `inner.signApproved`/
+ *   `inner.broadcastApproved` ever runs, so every implementation gets that guarantee identically.
  * @param {object} [input.preflightAuthority] - exact object returned by
  *   `createTestProfileMutationAuthority()` for local fixture tests only. Production callers omit
  *   this field, causing every sign and broadcast call to re-read the active interface authority.
@@ -189,8 +216,14 @@ export function wrapSignerClient({ role, liveMode, inner, preflightAuthority }) 
   if (!inner || typeof inner !== 'object' || Array.isArray(inner)) fail('signer client implementation must be a plain object');
   if (typeof inner.sign !== 'function') fail(`signer client for role "${role}" must expose sign()`);
   const capabilities = ROLE_CAPABILITIES[role];
-  if (capabilities.broadcast && typeof inner.broadcast !== 'function') {
-    fail(`signer client for role "${role}" must expose broadcast()`);
+  if (capabilities.broadcast && typeof inner.broadcast !== 'function' && typeof inner.broadcastApproved !== 'function') {
+    fail(`signer client for role "${role}" must expose broadcast() or broadcastApproved()`);
+  }
+  if (inner.signApproved !== undefined && typeof inner.signApproved !== 'function') {
+    fail(`signer client for role "${role}" signApproved must be a function`);
+  }
+  if (inner.broadcastApproved !== undefined && typeof inner.broadcastApproved !== 'function') {
+    fail(`signer client for role "${role}" broadcastApproved must be a function`);
   }
 
   const client = {
@@ -204,14 +237,37 @@ export function wrapSignerClient({ role, liveMode, inner, preflightAuthority }) 
       return result;
     },
   };
-  if (capabilities.broadcast) {
-    client.broadcast = async signed => {
-      if (liveMode !== true) fail(`signer client for role "${role}" refuses to broadcast: liveMode is false`);
+  if (typeof inner.signApproved === 'function') {
+    client.signApproved = async (request, proof) => {
+      if (liveMode !== true) fail(`signer client for role "${role}" refuses to sign: liveMode is false`);
+      assertPolicyEvaluationProof(proof, role);
+      const requestDigest = signRequestDigest(request);
       requireSignerMutationAuthority(role, preflightAuthority);
-      const result = await inner.broadcast(signed, { role });
-      assertNoSecretLookingValue(result, `${role} broadcast() result`, { checkRawKeyShape: true });
+      const result = await inner.signApproved(request, proof, { digest: requestDigest, role });
+      assertNoSecretLookingValue(result, `${role} signApproved() result`, { checkRawKeyShape: true });
       return result;
     };
+  }
+  if (capabilities.broadcast) {
+    if (typeof inner.broadcast === 'function') {
+      client.broadcast = async signed => {
+        if (liveMode !== true) fail(`signer client for role "${role}" refuses to broadcast: liveMode is false`);
+        requireSignerMutationAuthority(role, preflightAuthority);
+        const result = await inner.broadcast(signed, { role });
+        assertNoSecretLookingValue(result, `${role} broadcast() result`, { checkRawKeyShape: true });
+        return result;
+      };
+    }
+    if (typeof inner.broadcastApproved === 'function') {
+      client.broadcastApproved = async (signed, proof) => {
+        if (liveMode !== true) fail(`signer client for role "${role}" refuses to broadcast: liveMode is false`);
+        assertPolicyEvaluationProof(proof, role);
+        requireSignerMutationAuthority(role, preflightAuthority);
+        const result = await inner.broadcastApproved(signed, proof, { role });
+        assertNoSecretLookingValue(result, `${role} broadcastApproved() result`, { checkRawKeyShape: true });
+        return result;
+      };
+    }
   }
   return Object.freeze(client);
 }
@@ -286,6 +342,26 @@ function signedEnvelope(signed, family) {
   const field = family === 'solana' ? 'signedTxBase64' : 'signedTx';
   const key = signedApprovalKey(signed, family);
   return Object.freeze({ [field]: key.slice(`${family}:`.length) });
+}
+
+/** Refuses a broadcast result that is not a well-formed, matching identifier for these exact
+ * authorized signed bytes — an EVM transaction hash or a Solana signature, per
+ * `expectedBroadcastIdentifier`'s own contract. Applies identically regardless of which of
+ * `wrapTransactionPolicySignerClient`'s two transport shapes (a caller-supplied `broadcast`
+ * callback or a backend's guarded `broadcastApproved`) produced the result — neither is a
+ * lesser-trusted seam than the other. */
+function assertBroadcastResultMatchesSignedBytes(envelope, family, result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    fail('broadcast result must be an object');
+  }
+  const expectedIdentifier = expectedBroadcastIdentifier(envelope, family);
+  const identifierField = family === 'solana' ? 'signature' : 'transactionHash';
+  const actualIdentifier = typeof result[identifierField] === 'string' && family === 'evm'
+    ? result[identifierField].toLowerCase()
+    : result[identifierField];
+  if (actualIdentifier !== expectedIdentifier) {
+    fail(`broadcast result ${identifierField} does not match the signed ${family} transaction bytes`);
+  }
 }
 
 function decodedSignedMessageBytes(signed, family) {
@@ -409,7 +485,8 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
   const role = assertRole(client.role);
   const family = signerFamily(role);
   const trustedDecodeOptions = trustedTransactionDecodeOptions(family, decodeOptions);
-  if (!ROLE_CAPABILITIES[role].broadcast || typeof client.sign !== 'function' || (broadcast === undefined && typeof client.broadcast !== 'function')) {
+  if (!ROLE_CAPABILITIES[role].broadcast || typeof client.sign !== 'function'
+    || (broadcast === undefined && typeof client.broadcast !== 'function' && typeof client.broadcastApproved !== 'function')) {
     fail(`transaction policy signer for role "${role}" requires sign() and broadcast()`);
   }
   if (broadcast !== undefined && typeof broadcast !== 'function') {
@@ -456,7 +533,15 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
       const coSignerSignatures = family === 'solana'
         ? captureSolanaCoSignerSignatures(input.transaction)
         : undefined;
-      const signed = signedEnvelope(await client.sign(requestSnapshot), family);
+      // `signApproved`, when the backend exposes it, requires the proof below — minted only here,
+      // only after the policy evaluation immediately above succeeded. A backend cannot receive this
+      // proof any other way (see `assertPolicyEvaluationProof`'s own doc comment), so a backend
+      // that gates a trust marker on this proof can never emit that marker for an unevaluated
+      // request, regardless of how a caller constructs or configures that backend.
+      const rawSigned = typeof client.signApproved === 'function'
+        ? await client.signApproved(requestSnapshot, issuePolicyEvaluationProof())
+        : await client.sign(requestSnapshot);
+      const signed = signedEnvelope(rawSigned, family);
       approvals.set(signedApprovalKey(signed, family), Object.freeze({
         approved,
         input,
@@ -487,7 +572,26 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
         ...(family === 'solana' ? { expectedCoSignerSignatures: approval.coSignerSignatures } : {}),
       });
       evaluateTransactionPolicy(canonicalPolicy, redecoded, { rules: policyRules });
-      const result = broadcast === undefined ? await client.broadcast(envelope) : await broadcast(envelope);
+      // All three ways this method can reach a real chain RPC — a directly-supplied `broadcast`
+      // callback, a backend's guarded `broadcastApproved`, and a plain `client.broadcast` (the
+      // live-capable shape `createExternalModuleSignerClient`/`outbound.mjs`/`payout.mjs` construct
+      // this wrapper around with no direct callback) — are the same kind of untrusted transport
+      // boundary. `result` is selected among them first, then validated and the approval consumed
+      // exactly once below, so no branch can be added or reordered without the check applying to it.
+      let result;
+      if (broadcast !== undefined) {
+        result = await broadcast(envelope);
+      } else if (typeof client.broadcastApproved === 'function') {
+        // Mirrors `sign()`'s `signApproved` gate: a real chain RPC transport is reachable only
+        // through this freshly-minted proof, immediately after the revalidation and policy
+        // re-check above — never through a caller holding a bare reference to the backend.
+        result = await client.broadcastApproved(envelope, issuePolicyEvaluationProof());
+      } else {
+        result = await client.broadcast(envelope);
+      }
+      // A mismatched or malformed result is refused and the approval is left in place, so a
+      // caller can retry the same signed bytes exactly like an RPC failure would.
+      assertBroadcastResultMatchesSignedBytes(envelope, family, result);
       approvals.delete(key);
       return result;
     },
@@ -500,4 +604,25 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
   const frozen = Object.freeze(wrapped);
   transactionPolicySigners.add(frozen);
   return frozen;
+}
+
+/**
+ * The frozen production entry point (launch-repair Task B, "production signer and chain RPC
+ * transport"): constructs a policy-guarded signer/broadcaster in one call, matching this module's
+ * one signing route rather than a second one.
+ *
+ *   createPolicySigner({ backend, policy, rules, decodeOptions, broadcast });
+ *   // decodeOptions may contain resolver functions and stays in the parent.
+ *   // backend receives only validated JSON signing data.
+ *   // broadcast sends already-authorized signed bytes through the correct chain RPC.
+ *
+ * `backend` is a `{ role, sign, broadcast? }` implementation — typically what
+ * `createKeychainSignerClient`/`createExternalModuleSignerClient` returns — optionally exposing the
+ * stronger `signApproved`/`broadcastApproved` a backend uses to gate a trust marker (e.g. the
+ * Solana keychain child's `--parent-policy-evaluated` CLI argument) on proof that this exact call
+ * genuinely evaluated policy first. This is a thin, clearly-named alias for
+ * `wrapTransactionPolicySignerClient` — the same function, same guarantees.
+ */
+export function createPolicySigner({ backend, policy, rules, decodeOptions, broadcast }) {
+  return wrapTransactionPolicySignerClient({ client: backend, policy, rules, decodeOptions, broadcast });
 }
