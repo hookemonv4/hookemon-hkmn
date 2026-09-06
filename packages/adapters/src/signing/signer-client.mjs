@@ -572,25 +572,26 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
         ...(family === 'solana' ? { expectedCoSignerSignatures: approval.coSignerSignatures } : {}),
       });
       evaluateTransactionPolicy(canonicalPolicy, redecoded, { rules: policyRules });
-      // Both a directly-supplied `broadcast` callback and a backend's guarded `broadcastApproved`
-      // are a real chain RPC transport in exactly the same sense (`createPolicySigner`'s own
-      // `broadcast` argument is not a lesser-trusted seam than a backend's) — its returned
-      // identifier is checked against these exact authorized bytes before the approval is
-      // consumed either way. A mismatched or malformed result is refused and the approval is left
-      // in place, so a caller can retry the same signed bytes exactly like an RPC failure would.
+      // All three ways this method can reach a real chain RPC — a directly-supplied `broadcast`
+      // callback, a backend's guarded `broadcastApproved`, and a plain `client.broadcast` (the
+      // live-capable shape `createExternalModuleSignerClient`/`outbound.mjs`/`payout.mjs` construct
+      // this wrapper around with no direct callback) — are the same kind of untrusted transport
+      // boundary. `result` is selected among them first, then validated and the approval consumed
+      // exactly once below, so no branch can be added or reordered without the check applying to it.
       let result;
       if (broadcast !== undefined) {
         result = await broadcast(envelope);
-        assertBroadcastResultMatchesSignedBytes(envelope, family, result);
       } else if (typeof client.broadcastApproved === 'function') {
         // Mirrors `sign()`'s `signApproved` gate: a real chain RPC transport is reachable only
         // through this freshly-minted proof, immediately after the revalidation and policy
         // re-check above — never through a caller holding a bare reference to the backend.
         result = await client.broadcastApproved(envelope, issuePolicyEvaluationProof());
-        assertBroadcastResultMatchesSignedBytes(envelope, family, result);
       } else {
         result = await client.broadcast(envelope);
       }
+      // A mismatched or malformed result is refused and the approval is left in place, so a
+      // caller can retry the same signed bytes exactly like an RPC failure would.
+      assertBroadcastResultMatchesSignedBytes(envelope, family, result);
       approvals.delete(key);
       return result;
     },

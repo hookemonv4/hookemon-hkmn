@@ -612,6 +612,97 @@ test('a Solana direct createPolicySigner broadcast callback is validated exactly
   });
 });
 
+// --- plain backend.broadcast() (no proof gate at all): the third live-capable transport branch
+// (Sol B3 verification) -- the shape createExternalModuleSignerClient/outbound.mjs/payout.mjs
+// construct this wrapper around, with no direct callback and no backend broadcastApproved ---
+
+test('an EVM plain backend.broadcast() with no proof gate is validated exactly like the guarded transports', async t => {
+  const keychain = await createTestKeychain(t);
+  const wallet = await generateWallet(keychain, 'operations-evm');
+  const transaction = evmTransaction(wallet.address);
+  const decoded = await decodeProviderTransaction({ family: 'evm', transaction });
+  const policy = policyFor(decoded, TRANSACTION_POLICY_SCHEMA);
+  const policyRules = readTransactionPolicyRules(policy);
+  const { exec, command, env } = realExecOptions(keychain);
+  const rpcResponses = [];
+
+  const rawClient = createKeychainSignerClient({
+    role: OPERATOR_EVM_ROLE, liveMode: true, ...fixtureSignerOptions, exec, command, account: 'operator-evm',
+  });
+  // A plain { role, sign, broadcast } backend with no signApproved/broadcastApproved at all -- the
+  // shape createExternalModuleSignerClient's live client, and outbound.mjs's/payout.mjs's own
+  // client objects, actually are. No proof gate exists on this branch; only the shared post-
+  // transport identifier check protects it.
+  const plainBackend = {
+    role: OPERATOR_EVM_ROLE,
+    sign: request => rawClient.sign(request),
+    broadcast: async () => {
+      if (rpcResponses.length === 0) throw new Error('test fixture RPC has no queued response');
+      return rpcResponses.shift();
+    },
+  };
+  const policySigner = createPolicySigner({ backend: plainBackend, policy, rules: policyRules, decodeOptions: { family: 'evm' } });
+
+  await withKeychainEnv(keychain, env, async () => {
+    const signed = await policySigner.sign({
+      transaction, transactionPolicy: policy, transactionPolicyRules: policyRules, transactionDecodeOptions: { family: 'evm' }, liveMode: true,
+    });
+
+    rpcResponses.push('not-an-object');
+    await assert.rejects(() => policySigner.broadcast(signed), /broadcast result must be an object/);
+
+    rpcResponses.push({ transactionHash: `0x${'0'.repeat(64)}` });
+    await assert.rejects(() => policySigner.broadcast(signed), /broadcast result transactionHash does not match/);
+
+    rpcResponses.push({ transactionHash: expectedBroadcastIdentifier(signed, 'evm') });
+    const accepted = await policySigner.broadcast(signed);
+    assert.equal(accepted.transactionHash, expectedBroadcastIdentifier(signed, 'evm'));
+  });
+});
+
+test('a Solana plain backend.broadcast() with no proof gate is validated exactly like the guarded transports', async t => {
+  const keychain = await createTestKeychain(t);
+  const wallet = await generateWallet(keychain, 'operations-solana');
+  const transactionBase64 = solanaSelfTransferBytes(wallet.publicKey);
+  const decodeOptions = solanaResolvers(SystemProgram.programId.toBase58(), '100');
+  const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction: transactionBase64, lastValidBlockHeight: '100' });
+  const policy = policyFor(decoded, TRANSACTION_POLICY_SCHEMA);
+  const policyRules = readTransactionPolicyRules(policy);
+  const { exec, command, env } = realExecOptions(keychain);
+  const rpcResponses = [];
+
+  const rawClient = createKeychainSignerClient({
+    role: OPERATOR_SOLANA_ROLE, liveMode: true, ...fixtureSignerOptions, exec, command, account: 'operator-solana',
+  });
+  // Signing still goes through the real, genuinely-gated signApproved (a plain sign() can never
+  // carry the live Solana marker -- that is the already-fixed first finding, not reopened here).
+  // Only broadcast is the plain, ungated shape under test: no broadcastApproved, no proof.
+  const plainBackend = {
+    role: OPERATOR_SOLANA_ROLE,
+    sign: request => rawClient.sign(request),
+    signApproved: (request, proof) => rawClient.signApproved(request, proof),
+    broadcast: async () => {
+      if (rpcResponses.length === 0) throw new Error('test fixture RPC has no queued response');
+      return rpcResponses.shift();
+    },
+  };
+  const policySigner = createPolicySigner({ backend: plainBackend, policy, rules: policyRules, decodeOptions });
+
+  await withKeychainEnv(keychain, env, async () => {
+    const signed = await policySigner.sign(transactionBase64);
+
+    rpcResponses.push(null);
+    await assert.rejects(() => policySigner.broadcast(signed), /broadcast result must be an object/);
+
+    rpcResponses.push({ signature: 'not-the-real-signature' });
+    await assert.rejects(() => policySigner.broadcast(signed), /broadcast result signature does not match/);
+
+    rpcResponses.push({ signature: expectedBroadcastIdentifier(signed, 'solana') });
+    const accepted = await policySigner.broadcast(signed);
+    assert.equal(accepted.signature, expectedBroadcastIdentifier(signed, 'solana'));
+  });
+});
+
 test('a changed Solana recipient is refused before it ever reaches the keychain child for signing', async t => {
   const keychain = await createTestKeychain(t);
   const wallet = await generateWallet(keychain, 'operations-solana');
