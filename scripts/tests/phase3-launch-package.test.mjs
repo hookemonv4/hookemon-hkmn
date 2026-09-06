@@ -143,10 +143,25 @@ test('the launch-package verifier retains the request template for explicit Phas
   assert.match(JSON.parse(result.stdout).createRequestSha256, /^sha256:[0-9a-f]{64}$/);
 });
 
-test('the unsigned revision 65 baseline pins its current approval subjects', () => {
-  const baseline = readJson('decisions/owner-approvals/revision-65-baseline.json');
+test('the unsigned revision 66 baseline pins its current approval subjects', () => {
+  const baseline = readJson('decisions/owner-approvals/revision-66-baseline.json');
   assert.equal(baseline.approvalToken, 'DRAFT_UNSIGNED_NOT_YET_APPROVED');
   for (const [path, digest] of Object.entries(baseline.subjectHashes)) {
+    assert.equal(digest, sha256(path), `${path} drifted from the unsigned baseline`);
+  }
+});
+
+test('the unsigned revision 65 baseline remains a preserved historical record', () => {
+  const baseline = readJson('decisions/owner-approvals/revision-65-baseline.json');
+  assert.equal(baseline.approvalToken, 'DRAFT_UNSIGNED_NOT_YET_APPROVED');
+  // specs/requirements.json moved on to revision 66 (pinned separately above); revision 65's own
+  // record of it is frozen allocation history and must stay exactly what revision 65 actually
+  // proposed, not silently track the live file. Every other subject is stable architecture/
+  // decision content shared by both revisions and must still match current content exactly.
+  const { 'specs/requirements.json': historicalRequirementsDigest, ...stableSubjects } = baseline.subjectHashes;
+  assert.equal(historicalRequirementsDigest, '927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff');
+  assert.notEqual(historicalRequirementsDigest, sha256('specs/requirements.json'));
+  for (const [path, digest] of Object.entries(stableSubjects)) {
     assert.equal(digest, sha256(path), `${path} drifted from the unsigned baseline`);
   }
 });
