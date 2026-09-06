@@ -5,10 +5,11 @@ import test from 'node:test';
 import { keccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { createRelayClient, relayQuoteDigest, RelayIntentAuthenticationError } from '../../src/relay-client.mjs';
+import { createRelayClient, relayQuoteDigest, RelayIntentAuthenticationError, RelayQuoteExpiredError } from '../../src/relay-client.mjs';
 import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { digest } from '../../../runner/src/cycle/journal.mjs';
 import {
   OutboundRecoveryRequiredError,
   createOutboundPolicySigner,
@@ -248,6 +249,166 @@ test('prepareOutboundRequest rejects a recorded-shaped Relay transaction whose d
     }),
     /depository/,
   );
+});
+
+/**
+ * `admission()` above omits `unitRelay`/`quoteDigest`-on-`relay` fields no other outbound.mjs check
+ * needs, but ADR-0025 `refresh-after-readmission` evidence binds both admitted quote identities.
+ * This augments it with exactly those fields for the tests below.
+ */
+function refreshableAdmission(cycleId, { quote = admittedQuote() } = {}) {
+  const base = admission(cycleId, quote);
+  return {
+    ...base,
+    relay: { ...base.relay, quoteDigest: quote.quoteDigest },
+    unitRelay: {
+      requestId: `unit-${quote.requestId}`,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds,
+      quoteDigest: `sha256:${'9'.repeat(64)}`,
+    },
+  };
+}
+
+test('prepareOutboundRequest records ADR-0025 outbound quote expiry evidence exactly once before any effect, then rethrows the typed error', async () => {
+  const cycleId = 'cycle-outbound-quote-expired';
+  const deadline = quoteFixture.protocol.v2.orderData.output.deadline;
+  const durable = refreshableAdmission(cycleId);
+  const expiryCalls = [];
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: durable.aggregateFundingQuote.amountAtomic, admission: durable }; },
+    async readOutboundQuoteRefresh() { return null; },
+    async recordOutboundQuoteExpired(id, evidence) { expiryCalls.push({ id, evidence }); },
+  };
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository,
+      context: { cycleId },
+      nowMs: deadline * 1000,
+    }),
+    RelayQuoteExpiredError,
+  );
+  assert.equal(expiryCalls.length, 1);
+  assert.equal(expiryCalls[0].id, cycleId);
+  assert.deepEqual(expiryCalls[0].evidence, {
+    schema: 'hookemon.outbound-quote-expiry-evidence.v1',
+    cycleId,
+    admissionDigest: digest(durable),
+    aggregateQuote: {
+      requestId: durable.relay.requestId,
+      deadlineUnixSeconds: durable.relay.deadlineUnixSeconds,
+      quoteDigest: durable.relay.quoteDigest,
+    },
+    unitQuote: {
+      requestId: durable.unitRelay.requestId,
+      deadlineUnixSeconds: durable.unitRelay.deadlineUnixSeconds,
+      quoteDigest: durable.unitRelay.quoteDigest,
+    },
+    observedAtMs: deadline * 1000,
+  });
+});
+
+test('prepareOutboundRequest does not record a second expiry once REFRESH_REQUIRED is already durable', async () => {
+  const cycleId = 'cycle-outbound-quote-already-expired';
+  const deadline = quoteFixture.protocol.v2.orderData.output.deadline;
+  const durable = refreshableAdmission(cycleId);
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: durable.aggregateFundingQuote.amountAtomic, admission: durable }; },
+    async readOutboundQuoteRefresh() { return { state: 'REFRESH_REQUIRED', expiryDigest: `sha256:${'7'.repeat(64)}` }; },
+    async recordOutboundQuoteExpired() { throw new Error('must not record a second expiry while REFRESH_REQUIRED'); },
+  };
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository,
+      context: { cycleId },
+      nowMs: deadline * 1000,
+    }),
+    RelayQuoteExpiredError,
+  );
+});
+
+test('prepareOutboundRequest signs the ACTIVE selected replacement instead of the expired original admission', async () => {
+  const cycleId = 'cycle-outbound-quote-refreshed';
+  const original = refreshableAdmission(cycleId);
+  const originalDeadline = original.relay.deadlineUnixSeconds;
+
+  const replacementRaw = structuredClone(quoteFixture);
+  replacementRaw.protocol.v2.orderData.output.deadline = originalDeadline + 10_000;
+  const replacement = refreshableAdmission(cycleId, { quote: admittedQuote(replacementRaw) });
+
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: original.aggregateFundingQuote.amountAtomic, admission: original }; },
+    async readOutboundQuoteRefresh() { return { state: 'ACTIVE', replacement }; },
+    async recordOutboundQuoteExpired() { throw new Error('must not record expiry once a replacement is already active'); },
+    async holdCycle() { throw new Error('must not hold while the active replacement is still fresh'); },
+  };
+
+  const request = await prepareOutboundRequest({
+    adapters: { relay: relayClient() },
+    config: {
+      chainId: 4663,
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+      moneyConfiguration: moneyConfiguration(),
+    },
+    cycleRepository,
+    context: { cycleId },
+    // Past the original (immutable, durable) deadline -- the original admission would throw
+    // RelayQuoteExpiredError here if it, rather than the ACTIVE replacement, were used.
+    nowMs: (originalDeadline * 1000) + 1,
+  });
+  assert.equal(request.intent.requestId, replacement.relay.requestId);
+});
+
+test('prepareOutboundRequest holds the cycle for an owner decision when the selected replacement itself expires before preparation', async () => {
+  const cycleId = 'cycle-outbound-replacement-expired';
+  const original = refreshableAdmission(cycleId);
+  const originalDeadline = original.relay.deadlineUnixSeconds;
+  const replacementRaw = structuredClone(quoteFixture);
+  replacementRaw.protocol.v2.orderData.output.deadline = originalDeadline + 1;
+  const replacement = refreshableAdmission(cycleId, { quote: admittedQuote(replacementRaw) });
+  const holdCalls = [];
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: original.aggregateFundingQuote.amountAtomic, admission: original }; },
+    async readOutboundQuoteRefresh() { return { state: 'ACTIVE', replacement }; },
+    async recordOutboundQuoteExpired() { throw new Error('must not record a fresh expiry for an already-active replacement'); },
+    async holdCycle(id, terminalState, evidence) { holdCalls.push({ id, terminalState, evidence }); },
+  };
+
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository,
+      context: { cycleId },
+      // Past both the original and the replacement's deadlines.
+      nowMs: (originalDeadline + 1) * 1000,
+    }),
+    RelayQuoteExpiredError,
+  );
+  assert.equal(holdCalls.length, 1);
+  assert.equal(holdCalls[0].id, cycleId);
+  assert.equal(holdCalls[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(holdCalls[0].evidence.stage, 'outbound');
+  assert.equal(holdCalls[0].evidence.reason, 'OUTBOUND_QUOTE_REFRESH_REPLACEMENT_EXPIRED');
 });
 
 test('createOutboundPolicySigner refuses an unsigned Relay plan until a journal-owned EVM nonce is available', async () => {
