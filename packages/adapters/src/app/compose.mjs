@@ -626,7 +626,7 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
       // this cycle may spend process money, and a wallet balance or configured figure is not a
       // substitute. Live production has no such reader yet, so no live cycle is admitted.
       const liability = assertProcessLiabilityEvidence(
-        typeof processLiabilityReader?.read === 'function' ? await processLiabilityReader.read({ packId }) : null,
+        typeof processLiabilityReader?.read === 'function' ? await processLiabilityReader.read({ cycleId, packId }) : null,
         fundingAsset,
       );
       if (liability === null) return null;

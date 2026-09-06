@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import {
   decodeFunctionData, encodeAbiParameters, encodeEventTopics, keccak256, parseAbi,
-  parseTransaction, recoverTransactionAddress, toHex,
+  parseTransaction, recoverTransactionAddress, toFunctionSelector, toHex,
 } from 'viem';
 
 import { createEmptyOperatorState, mutateOperatorState } from '../../../runner/src/operator/state-file.mjs';
@@ -48,6 +48,41 @@ const RELAY_CHAINS = Object.freeze({
     { id: RELAY_SOLANA_CHAIN_ID, depositEnabled: true, solverCurrencies: [{ address: SOLANA_MINT }] },
   ],
 });
+
+// Selector -> encoded return for each hook getter admission reads. Values are generous enough to
+// cover this fixture's tiny quotes; the point of the fixture is the read path, not the amounts.
+const HOOK_LIABILITY_ATOMIC = 1_000_000n;
+const HOOK_STATE_SELECTORS = new Map([
+  [toFunctionSelector('function processLiability() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
+  [toFunctionSelector('function remainingProcessClaimCapacity() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
+  [toFunctionSelector('function activeProcessClaimLimit() view returns (uint256)'), () => abiUint(4n)],
+  [toFunctionSelector('function totalLiability() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
+  [toFunctionSelector('function hookUsdgBalance() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
+  [toFunctionSelector('function processClaimsPaused() view returns (bool)'), () => abiUint(0n)],
+  [toFunctionSelector('function processClaimCycleUsed(bytes32) view returns (bool)'), () => abiUint(0n)],
+  [toFunctionSelector('function isSolvent() view returns (bool)'), () => abiUint(1n)],
+  [
+    toFunctionSelector('function readRoles(bytes32) view returns ((address,address,address),(bytes32,address,address),(bytes32,address,address),(bytes32,address))'),
+    operations => encodeAbiParameters(
+      [
+        { type: 'tuple', components: [{ type: 'address' }, { type: 'address' }, { type: 'address' }] },
+        { type: 'tuple', components: [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' }] },
+        { type: 'tuple', components: [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' }] },
+        { type: 'tuple', components: [{ type: 'bytes32' }, { type: 'address' }] },
+      ],
+      [
+        [operations, operations, operations],
+        [`0x${'0'.repeat(64)}`, operations, operations],
+        [`0x${'0'.repeat(64)}`, operations, operations],
+        [`0x${'0'.repeat(64)}`, operations],
+      ],
+    ),
+  ],
+]);
+
+function abiUint(value) {
+  return `0x${value.toString(16).padStart(64, '0')}`;
+}
 
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3';
 const RELAY_DEPOSIT_SELECTOR = '0xe8017952';
@@ -206,7 +241,7 @@ function respond(response, value) {
   response.end(JSON.stringify(value));
 }
 
-async function fixtureServer(t, directory) {
+async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.repeat(40)}`) {
   const paths = {
     caKey: join(directory, 'ca-key.pem'), caCert: join(directory, 'ca-cert.pem'),
     key: join(directory, 'tls-key.pem'), request: join(directory, 'tls-request.pem'),
@@ -258,6 +293,15 @@ async function fixtureServer(t, directory) {
         topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', `0x${'0'.repeat(64)}`, `0x${'0'.repeat(24)}${'9'.repeat(40)}`],
         data: `0x${'1'.padStart(64, '0')}`, blockNumber: '0x1', logIndex: '0x0', blockHash: `0x${'1'.repeat(64)}`, removed: false,
         }] : []);
+      }
+      // The hook's process-liability ledger and claim controls, answered from the isolated fixture
+      // state at whatever height was asked for. Admission reads these through the real archive
+      // capability, so the block and hash binding runs against these values rather than around them.
+      if (rpc.method === 'eth_call') {
+        const call = rpc.params?.[0] ?? {};
+        const selector = (call.data ?? '').slice(0, 10).toLowerCase();
+        const hookValue = HOOK_STATE_SELECTORS.get(selector);
+        if (hookValue !== undefined) return reply(hookValue(operationsAccount()));
       }
       // balanceOf is answered with real process funds; every other static call keeps returning zero.
       if (rpc.method === 'eth_call') {
@@ -668,9 +712,14 @@ const GRAPH_WINDOW_MS = Number(process.env.HKMN_GRAPH_WINDOW_MS ?? 15000);
 test('I-01/I-02 literal production loader completes an automatic two-pack cycle', { timeout: GRAPH_WINDOW_MS + 30000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-production-graph-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const fixture = await fixtureServer(t, directory);
+  // The loopback chain must report the hook's Operations role as the account this run actually
+  // signs with, and that account only exists once the isolated keys are generated, so the fixture
+  // reads it late rather than being handed a placeholder.
+  let operationsEvm = `0x${'0'.repeat(40)}`;
+  const fixture = await fixtureServer(t, directory, () => operationsEvm);
   const { root, binPath } = await isolatedSource(directory);
   const signer = await productionChildSigner(t, root, directory);
+  operationsEvm = signer.evmAccount;
   const authority = await testPolicyAuthority(t, directory);
   await activateTwoPackPolicy(directory);
   const observabilityPath = join(directory, 'observability.json');
