@@ -3054,6 +3054,7 @@ test('guards direct provider and RPC mutation methods immediately before they ex
     adapters: {
       collectorCrypt: Object.freeze({
         async generatePack() { calls.push(['generatePack']); return { transaction: 'unsigned' }; },
+        async generateYoloPacks() { calls.push(['generateYoloPacks']); return { transactions: ['unsigned'] }; },
         async submitTransaction() { calls.push(['submitTransaction']); return { signature: 'signature-1' }; },
       }),
       relay: null,
@@ -3075,6 +3076,7 @@ test('guards direct provider and RPC mutation methods immediately before they ex
         async mutate({ adapters }) {
           calls.push(['mutate']);
           await adapters.collectorCrypt.generatePack({ playerAddress: 'PLAYER11111111111111111111111111111111111' });
+          await adapters.collectorCrypt.generateYoloPacks({ playerAddress: 'PLAYER11111111111111111111111111111111111' });
           await adapters.collectorCrypt.submitTransaction({ signedTransaction: 'signed' });
           await adapters.robinhood.client.sendRawTransaction({ serializedTransaction: '0xabc' });
           return { providerReceipt: 'provider-receipt-2' };
@@ -3098,13 +3100,69 @@ test('guards direct provider and RPC mutation methods immediately before they ex
   });
 
   assert.deepEqual(calls.map(call => call[0]), [
-    'guard', 'mutate', 'guard', 'generatePack', 'guard', 'submitTransaction', 'guard', 'sendRawTransaction',
+    'guard', 'mutate', 'guard', 'generatePack', 'guard', 'generateYoloPacks', 'guard', 'submitTransaction', 'guard', 'sendRawTransaction',
   ]);
-  assert.deepEqual(guards.map(guard => guard.boundary), ['mutation', 'mutation', 'broadcast', 'broadcast']);
+  assert.deepEqual(guards.map(guard => guard.boundary), ['mutation', 'mutation', 'mutation', 'broadcast', 'broadcast']);
   for (const guard of guards) {
     assert.equal(guard.stage, 'purchase');
     assert.match(guard.requestDigest, /^sha256:[0-9a-f]{64}$/);
   }
+});
+
+test('refuses a stale-policy generateYoloPacks batch call after initial admission and preserves NOT_SENT', async () => {
+  const cycleRepository = writeAheadRepository();
+  const calls = [];
+  let batchCalls = 0;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: {
+      collectorCrypt: Object.freeze({
+        async generateYoloPacks() { batchCalls += 1; return { transactions: ['unsigned'] }; },
+      }),
+      relay: null,
+      robinhood: { client: null },
+      solana: { client: null },
+    },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+    stageHandlers: {
+      purchase: {
+        async probe() { return null; },
+        async prepareRequest() { return { provider: 'collector-test', playerAddress: 'PLAYER11111111111111111111111111111111111' }; },
+        async mutate({ adapters }) {
+          calls.push(['mutate']);
+          return adapters.collectorCrypt.generateYoloPacks({ playerAddress: 'PLAYER11111111111111111111111111111111111' });
+        },
+        async reconcileLive() { return null; },
+      },
+    },
+  });
+
+  let guardCalls = 0;
+  await assert.rejects(
+    () => driver.execute({
+      cycleId: CYCLE_ID,
+      stage: 'purchase',
+      intent: { journalHead: 'head-batch-guard-refusal' },
+      fencingToken: '12345678-1234-4123-8123-123456789abc',
+      async assertMutationAllowed(input) {
+        guardCalls += 1;
+        calls.push(['guard', input.boundary]);
+        // First call is the stage-level admission before the handler runs; the second is the
+        // per-call guard immediately before generateYoloPacks, where a policy change between
+        // admission and batch generation must be caught.
+        if (guardCalls === 2) throw new Error('policy became ineligible after admission');
+      },
+    }),
+    /policy became ineligible after admission/,
+  );
+
+  assert.equal(guardCalls, 2);
+  assert.equal(batchCalls, 0);
+  assert.deepEqual(calls.map(call => call[0]), ['guard', 'mutate', 'guard']);
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'purchase')).attempt.state, 'NOT_SENT');
 });
 
 test('guards the production Solana RPC transport immediately before sendTransaction', async () => {

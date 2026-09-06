@@ -577,6 +577,7 @@ function guardedSolanaRpcClient(value, guard) {
 function guardedAdapters(adapters, guard) {
   const collectorCrypt = guardedAdapterMethods(adapters.collectorCrypt, {
     generatePack: 'mutation',
+    generateYoloPacks: 'mutation',
     openPack: 'mutation',
     buyback: 'mutation',
     submitTransaction: 'broadcast',
