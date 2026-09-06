@@ -45,15 +45,21 @@ serializes worker dispatch. It owns cadence and cancellation, not money limits o
 ## State transitions
 
 - A start wake-up queues one generation-tagged tick and schedules the next one after its outcome.
-- A manual `triggerTick` queues behind any active work and schedules no timer of its own — it never
-  changes `nextCycleAt`/`nextReconcileAt` or the backoff counter, only `pendingReason` (a fresh,
-  real finding). If a timer is already installed, `getView()` keeps showing that real deadline
-  throughout and after the manual tick, never the manual tick's own outcome.
+- A manual `triggerTick` queues behind any active work. If it finds nothing urgent
+  (`requiresFastRetry === null`), it installs no timer of its own and leaves whatever cadence timer
+  is already running untouched — only `pendingReason` (a fresh, real finding) updates. If it *does*
+  find urgent pending work (a still-open cycle, a partial settlement, or an outage), it preempts the
+  currently installed timer: cancels it, bumps the scheduler generation (so a callback already in
+  flight for the cancelled timer is a guaranteed no-op), and installs the real fast-retry/backoff
+  timer in its place. `getView()` reflects whichever timer is actually installed either way — never
+  an outcome that has no matching real wakeup.
 - State read, worker construction, and worker execution failures are emitted and leave the loop able
-  to run a later tick, retried per the outage backoff above rather than the ordinary interval.
+  to run a later tick, retried per the outage backoff above rather than the ordinary interval — a
+  manual tick that hits one of these preempts the installed timer the same way.
 - `stop()` clears `getView()`'s `nextCycleAt`/`nextReconcileAt` to `null` (no timer is installed);
   `pendingReason` keeps showing the last real tick's finding, since `stop()` itself neither runs a
-  tick nor discovers anything new.
+  tick nor discovers anything new. A manual tick run against a stopped scheduler never installs a
+  timer, regardless of what it finds.
 
 ## Operational commands
 

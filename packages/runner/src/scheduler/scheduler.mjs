@@ -293,15 +293,17 @@ export function createScheduler(options) {
   // nextCycleAt/nextReconcileAt for getView(). The two are mutually exclusive at any moment: either
   // the next wakeup is the ordinary new-cycle cadence, or it is a fast reconciliation/outage retry —
   // never both, since a single timer drives the loop and whichever is more urgent wins.
-  // Only a tick that actually drives the installed timer (scheduleAfter === true, i.e. the automatic
-  // loop) may change nextCycleAtMs/nextReconcileAtMs/the backoff counter: those fields describe the
-  // real, currently-scheduled wakeup, and a manual triggerTick() never touches the timer loop (see
-  // triggerTick's own doc comment) — installing no timer of its own and cancelling none. Updating the
-  // displayed deadline from a manual tick's outcome would show a wakeup that does not exist. A manual
-  // tick's pendingReason is still real, freshly-observed information and is always recorded.
+  // A clean manual tick (nothing urgent found) never touches nextCycleAtMs/nextReconcileAtMs/the
+  // backoff counter: it did not drive the installed timer, so it must not silently reset an
+  // in-progress interval countdown just because someone happened to check. A manual tick that *does*
+  // find urgent pending work is different: the whole point of a fast-retry/outage classification is
+  // that the next real attempt happens soon, not whenever the old cadence next fires, so this always
+  // computes (and the caller always installs) that real deadline regardless of who triggered the tick
+  // that discovered it. A manual tick's pendingReason is, either way, real information and is always
+  // recorded.
   function applyScheduleOutcome(outcome, { scheduleAfter }) {
     lastPendingReason = outcome.pendingReason ?? null;
-    if (!scheduleAfter) return null;
+    if (!scheduleAfter && outcome.requiresFastRetry === null) return null;
     if (outcome.requiresFastRetry === 'outage') {
       outageBackoffMs = outageBackoffMs === null
         ? reconcileRetryMs
@@ -322,6 +324,21 @@ export function createScheduler(options) {
     return outcome.intervalMs;
   }
 
+  // A manual tick that just computed an urgent real deadline preempts whatever cadence timer is
+  // currently installed: cancel it, bump the generation (so a callback already in flight for the
+  // cancelled timer is a guaranteed no-op even if `cancel` itself were ever to race), and install the
+  // new one. A no-op while stopped — `scheduleNext` already refuses to arm a timer in that state, so a
+  // stopped scheduler never gains a timer just because a manual tick was run against it.
+  function preemptInstalledTimer(delayMs) {
+    if (stopped) return;
+    scheduleGeneration += 1;
+    if (timerHandle !== null) {
+      cancel(timerHandle);
+      timerHandle = null;
+    }
+    scheduleNext(delayMs);
+  }
+
   function enqueueTick({ scheduleAfter, scheduledGeneration = null }) {
     const dispatch = () => {
       if (scheduledGeneration !== null && (stopped || scheduledGeneration !== scheduleGeneration)) {
@@ -336,7 +353,11 @@ export function createScheduler(options) {
     tickChain = outcome.then(
       result => {
         const delayMs = applyScheduleOutcome(result, { scheduleAfter });
-        if (scheduleAfter) scheduleNext(delayMs);
+        if (scheduleAfter) {
+          scheduleNext(delayMs);
+        } else if (delayMs !== null) {
+          preemptInstalledTimer(delayMs);
+        }
       },
       () => {
         if (scheduleAfter) scheduleNext(defaultIntervalMs);

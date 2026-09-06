@@ -446,7 +446,7 @@ test('a manual triggerTick() updates getView() without scheduling a follow-up ti
   assert.equal(scheduler.getView().pendingReason, 'INSUFFICIENT_FUNDS');
 });
 
-test('a manual triggerTick() on a running scheduler never moves the displayed deadline away from the actual installed timer', async () => {
+test('a manual triggerTick() that discovers pending work on a running scheduler preempts the installed timer with the real fast-retry deadline', async () => {
   let manualObservedPending = false;
   const worker = fakeWorker({
     runOnce: async () => (manualObservedPending
@@ -472,15 +472,40 @@ test('a manual triggerTick() on a running scheduler never moves the displayed de
   const manual = await scheduler.triggerTick();
 
   assert.equal(manual.result.status, 'ACTIVE_CYCLE_NOT_RECONCILED', 'the manual tick really did observe a pending operation');
-  assert.equal(clock.pendingCount(), 1, 'the manual tick installed no timer of its own');
-  assert.equal(clock.pendingDelayMs(), 20 * 60_000, 'the real installed timer is untouched by the manual tick');
+  assert.equal(clock.pendingCount(), 1, 'the old cadence timer was replaced, not left running alongside a new one');
+  assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS, 'the installed timer is actually replaced with the real fast-retry deadline');
   assert.equal(
-    scheduler.getView().nextCycleAt,
-    new Date(20 * 60_000).toISOString(),
-    'the displayed deadline still matches the real installed timer, not the manual tick\'s five-second outcome',
+    scheduler.getView().nextReconcileAt,
+    new Date(RECONCILE_RETRY_MS).toISOString(),
+    'the displayed deadline matches the newly installed real timer',
   );
-  assert.equal(scheduler.getView().nextReconcileAt, null);
+  assert.equal(scheduler.getView().nextCycleAt, null);
   assert.equal(scheduler.getView().pendingReason, 'RECONCILING_PENDING_TRANSACTION', 'the manual tick\'s finding is still surfaced');
+  scheduler.stop();
+});
+
+test('a manual triggerTick() that finds nothing urgent never disturbs the already-installed cadence timer', async () => {
+  const worker = fakeWorker({ runOnce: async () => ({ status: 'COMPLETE', cycleId: 'c1' }) });
+  const reader = stateReaderFrom(Array.from({ length: 4 }, () => configuration({ paused: false, liveMode: false })));
+  const clock = manualClock();
+  const scheduler = createScheduler({
+    statePath: '/state.json',
+    readState: reader.read,
+    buildWorker: () => worker,
+    schedule: clock.schedule,
+    cancel: clock.cancel,
+    now: () => 0,
+  });
+  scheduler.start();
+  await scheduler.settled();
+  assert.equal(clock.pendingDelayMs(), 20 * 60_000);
+
+  const manual = await scheduler.triggerTick();
+
+  assert.equal(manual.result.status, 'COMPLETE');
+  assert.equal(clock.pendingCount(), 1, 'no second timer was installed');
+  assert.equal(clock.pendingDelayMs(), 20 * 60_000, 'a clean manual tick never resets the running cadence timer');
+  assert.equal(scheduler.getView().nextCycleAt, new Date(20 * 60_000).toISOString());
   scheduler.stop();
 });
 
