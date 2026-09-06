@@ -1,6 +1,6 @@
 # Hookemon web
 
-Public Hookemon website and dashboard in the canonical [hookemon-hkmn repository](https://github.com/hookemonv4/hookemon-hkmn). Holding, reward accounting, and automatic payment do not depend on a website login.
+Public Hookemon website and dashboard in the canonical [hkmn repository](https://github.com/hookemonv4/hkmn). Holding, reward accounting, and automatic payment do not depend on a website login.
 
 ## Local development
 
