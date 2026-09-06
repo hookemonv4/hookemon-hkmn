@@ -50,35 +50,35 @@ function relayClient(quote = quoteFixture) {
   });
 }
 
-function admittedQuote() {
+function admittedQuote(raw = quoteFixture) {
   return {
     direction: 'OUTBOUND',
     tradeType: 'EXACT_OUTPUT',
-    requestId: quoteFixture.requestId,
-    orderId: quoteFixture.protocol.v2.orderId,
-    sender: EVM_ACCOUNT,
-    recipient: SOLANA_ACCOUNT,
-    deadlineUnixSeconds: quoteFixture.protocol.v2.orderData.output.deadline,
+    requestId: raw.requestId,
+    orderId: raw.protocol.v2.orderId,
+    sender: raw.details.sender,
+    recipient: raw.details.recipient,
+    deadlineUnixSeconds: raw.protocol.v2.orderData.output.deadline,
     origin: {
       chainId: 4663,
       address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
       decimals: 6,
-      amount: '25000000',
+      amount: raw.details.currencyIn.amount,
     },
     destination: {
       chainId: 792703809,
       address: SOLANA_MINT,
       decimals: 6,
-      amount: '25000000',
-      minimumAmount: '25000000',
+      amount: raw.details.currencyOut.amount,
+      minimumAmount: raw.details.currencyOut.minimumAmount,
     },
-    raw: quoteFixture,
+    raw,
   };
 }
 
 function admission(cycleId, quote = admittedQuote()) {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '25000000' };
-  const usdc = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '25000000' };
+  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: quote.origin.amount };
+  const usdc = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: quote.destination.amount };
   return {
     schema: 'hookemon.policy-admission.v2',
     cycleId,
@@ -208,7 +208,7 @@ test('prepareOutboundRequest fails closed when the exact configured Solana mint 
       context: { cycleId: 'cycle-outbound-2' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
-    /not fully enabled/,
+    /asset identity/,
   );
 });
 
@@ -224,7 +224,7 @@ test('prepareOutboundRequest rejects a recorded-shaped Relay transaction whose d
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
         moneyConfiguration: moneyConfiguration(),
       },
-      cycleRepository: repository(),
+      cycleRepository: { async describeCycle(cycleId) { return { admission: admission(cycleId, admittedQuote(altered)) }; } },
       context: { cycleId: 'cycle-outbound-depository' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
@@ -304,7 +304,7 @@ test('createOutboundPolicySigner refuses the provisional authority before either
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       moneyConfiguration: moneyConfiguration(),
     },
-    cycleRepository: repository(),
+    cycleRepository: { async describeCycle(cycleId) { return { admission: admission(cycleId, admittedQuote(quote)) }; } },
     context: { cycleId: 'cycle-outbound-authority' },
     nowMs,
   });
@@ -1202,7 +1202,10 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
     adapters: { relay: relayClient(quote) },
     config,
     cycleRepository,
-    context: { cycleId: 'cycle-outbound-durable' },
+    context: {
+      cycleId: 'cycle-outbound-durable',
+      admission: admission('cycle-outbound-durable', admittedQuote(quote)),
+    },
     nowMs: (quote.protocol.v2.orderData.output.deadline * 1000) - 1,
   });
   const context = {
