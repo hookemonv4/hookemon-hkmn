@@ -2096,7 +2096,7 @@ test('keeps a lost lease retryable before a provider effect and retains a NOT_SE
   assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 });
 
-async function assertPolicyRefusalRetryable(t, message) {
+async function assertPolicyRefusalHeldForOwnerDecision(t, message) {
   const { directory, repository, cycleId } = await durableCycle(t);
   let broadcasts = 0;
   const driver = createStageDriver({
@@ -2129,21 +2129,27 @@ async function assertPolicyRefusalRetryable(t, message) {
     }),
     TransactionPolicyError,
   );
-  assert.equal(broadcasts, 0);
+  assert.equal(broadcasts, 0, 'a semantically wrong request must never reach a signature or broadcast');
+  // Durable across reopen: a real repository, not an in-memory fixture, so this proves the hold and
+  // the NOT_SENT attempt both survive a process restart rather than only living in this instance.
   const reopened = await CycleRepository.open(directory);
   const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.terminalState, null);
-  assert.equal(state.terminalEvidence, null);
+  assert.equal(state.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.deepEqual(state.terminalEvidence, { stage: 'purchase', reason: 'TRANSACTION_POLICY_REFUSED', error: message });
   assert.equal(state.operationalAttempts.get('purchase').attempt.state, 'NOT_SENT');
-  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
+  // A held cycle stays "active" (not archived) until an explicit owner decision resolves it; it is
+  // never automatically re-prepared.
+  const active = await reopened.readActiveCycle();
+  assert.equal(active.cycleId, cycleId);
+  assert.equal(active.terminalState, 'HELD_DATA_UNVERIFIED');
 }
 
-test('keeps a wrong-asset transaction policy refusal retryable before signing', async t => {
-  await assertPolicyRefusalRetryable(t, 'transaction policy refused a wrong asset');
+test('holds a wrong-asset transaction policy refusal before signing', async t => {
+  await assertPolicyRefusalHeldForOwnerDecision(t, 'transaction policy refused a wrong asset');
 });
 
-test('keeps a wrong-recipient transaction policy refusal retryable before signing', async t => {
-  await assertPolicyRefusalRetryable(t, 'transaction policy refused a wrong recipient');
+test('holds a wrong-recipient transaction policy refusal before signing', async t => {
+  await assertPolicyRefusalHeldForOwnerDecision(t, 'transaction policy refused a wrong recipient');
 });
 
 test('keeps an expired return blockhash retryable while retaining a broadcast attempt after reopen', async t => {

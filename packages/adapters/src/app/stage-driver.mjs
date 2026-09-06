@@ -2,6 +2,7 @@ import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { isStandingAuthorityProvider } from '../../../runner/src/cycle/authorization-provider.mjs';
 import { assertCollectorPolicyBundleRuntimeReady } from '../signing/collector-policy-loader.mjs';
+import { TransactionPolicyError } from '../signing/transaction-policy.mjs';
 import { walletNonceLeaseWindow } from './wallet-nonce-lease.mjs';
 import {
   createTestProfileMutationAuthority,
@@ -265,10 +266,15 @@ function assertWriteAheadJournal(cycleRepository) {
   }
 }
 
-// The write-ahead attempt state is the recovery authority for signer, quote, lease, and
-// transaction-policy failures. They remain retryable and never convert a recoverable stage error
-// into a whole-cycle terminal hold. Stage handlers reserve whole-cycle holds for conditions that
-// make the cycle itself unattributable, such as a missing predecessor or snapshot evidence.
+// The write-ahead attempt state is the recovery authority for signer, quote, and lease failures.
+// They remain retryable and never convert a recoverable stage error into a whole-cycle terminal
+// hold. A `TransactionPolicyError` is the one exception: it means the prepared request itself is
+// semantically wrong (wrong asset, wrong recipient) before any signature or broadcast, which is not
+// a transient condition an unmodified retry could correct, so it also holds the whole cycle
+// `HELD_DATA_UNVERIFIED` for an owner decision (docs/runbooks/relay-wrong-asset.md,
+// docs/runbooks/transaction-policy-wrong-recipient.md). Stage handlers reserve their own whole-cycle
+// holds for conditions that make the cycle itself unattributable, such as a missing predecessor or
+// snapshot evidence.
 
 function assertChainJournal(cycleRepository) {
   for (const method of CHAIN_JOURNAL_REPOSITORY_METHODS) {
@@ -1382,7 +1388,18 @@ export function createStageDriver({
         });
       } catch (error) {
         if (!chainJournal) {
-          if (reachedProviderCapability) {
+          if (error instanceof TransactionPolicyError) {
+            // A semantically wrong prepared request (wrong asset, wrong recipient) is not a
+            // transient failure a bare retry could fix: it never reached a signature or broadcast,
+            // so the write-ahead attempt stays NOT_SENT, but the whole cycle also holds for an
+            // owner decision rather than being automatically re-prepared.
+            await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
+            await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', {
+              stage: context.stage,
+              reason: 'TRANSACTION_POLICY_REFUSED',
+              error: error.message,
+            });
+          } else if (reachedProviderCapability) {
             await cycleRepository.markStageAttemptSentUnknown(context.cycleId, context.stage);
           } else {
             await cycleRepository.markStageAttemptNotSent(context.cycleId, context.stage);
