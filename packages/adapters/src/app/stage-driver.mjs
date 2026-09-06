@@ -908,7 +908,7 @@ function handlerFor(handlers, context) {
   return handler;
 }
 
-function supplementaryHandlerFor(handlers, settlement) {
+function supplementaryHandlerFor(handlers, settlement, { observationOnly }) {
   if (handlers === null) return null;
   const handler = handlers[settlement.state] ?? null;
   if (handler === null) return null;
@@ -917,7 +917,7 @@ function supplementaryHandlerFor(handlers, settlement) {
     || typeof handler.reconcile !== 'function') {
     throw new Error(`stage-driver: supplementary handler for "${settlement.state}" is invalid`);
   }
-  if (Object.hasOwn(handler, 'mutation') || Object.hasOwn(handler, 'requestDigest')) {
+  if (observationOnly && (Object.hasOwn(handler, 'mutation') || Object.hasOwn(handler, 'requestDigest'))) {
     throw new Error('stage-driver: supplementary handlers are observation-only');
   }
   return handler;
@@ -952,6 +952,9 @@ export function createStageDriver({
   preflightAuthority,
   readOperatorConfiguration = null,
   supplementaryStageHandlers = null,
+  supplementaryAdapters = null,
+  supplementarySignerClient = null,
+  productionSupplementaryStageHandlers = null,
 }) {
   if (typeof liveMode !== 'boolean') throw new Error('stage-driver liveMode must be a boolean');
   if (!adapters || typeof adapters !== 'object') throw new Error('stage-driver adapters must be an object');
@@ -970,17 +973,46 @@ export function createStageDriver({
   if (supplementaryStageHandlers !== null && process.env.NODE_TEST_CONTEXT === undefined) {
     throw new Error('stage-driver supplementaryStageHandlers are available only from the Node test runner');
   }
+  // Distinct from supplementaryStageHandlers above, which stays exactly as it was: a
+  // Node-test-only, observation-only injection seam with no capability access, guarded by
+  // NODE_TEST_CONTEXT. This is the seam a real process uses instead -- explicit, capability-bound,
+  // and never gated by a test-runner environment variable. A caller must supply real
+  // supplementaryAdapters/supplementarySignerClient alongside it (production must choose shipped
+  // handlers deliberately, with its own policy/canary/fencing at the call site that supplies this
+  // constructor argument -- not by relaxing the arbitrary-injection guard above), and its handlers
+  // are not restricted to observation-only, since a real resale/settlement handler must sign and
+  // broadcast. The two seams are mutually exclusive: a driver instance is either a Node-test
+  // instance exercising observation-only fixtures, or a production instance with its own real
+  // handlers -- never both at once.
+  if (productionSupplementaryStageHandlers !== null
+    && (!productionSupplementaryStageHandlers || typeof productionSupplementaryStageHandlers !== 'object' || Array.isArray(productionSupplementaryStageHandlers))) {
+    throw new Error('stage-driver productionSupplementaryStageHandlers must be an object or null');
+  }
+  if (productionSupplementaryStageHandlers !== null && supplementaryStageHandlers !== null) {
+    throw new Error('stage-driver cannot combine productionSupplementaryStageHandlers with the Node-test-only supplementaryStageHandlers seam');
+  }
+  if (productionSupplementaryStageHandlers !== null && (!supplementaryAdapters || !supplementarySignerClient)) {
+    throw new Error('stage-driver productionSupplementaryStageHandlers requires supplementaryAdapters and supplementarySignerClient');
+  }
   assertWriteAheadJournal(cycleRepository);
   const usesBuiltInHandlers = stageHandlers === null;
   const handlers = stageHandlers ?? stageHandlersForConfig(config);
   const handlerConfig = () => stageConfigurationWithOperatorDeadline(config, readOperatorConfiguration);
+  const activeSupplementaryHandlers = productionSupplementaryStageHandlers ?? supplementaryStageHandlers;
+  const activeSupplementaryObservationOnly = productionSupplementaryStageHandlers === null;
+  const activeSupplementaryCapabilities = productionSupplementaryStageHandlers !== null
+    ? Object.freeze({ adapters: supplementaryAdapters, signerClient: supplementarySignerClient })
+    : Object.freeze({ adapters: EMPTY_SUPPLEMENTARY_CAPABILITIES, signerClient: null });
 
   return Object.freeze({
     /**
      * Reconciles one owner-approved held-position settlement outside the normal cycle stage
-     * sequence. These test-only handlers are observation-only: they receive a lease-fenced
-     * repository facade but no provider or signer capability. Production leaves this seam null
-     * until a provider-specific implementation has its own documented mutation boundary.
+     * sequence. With no production seam supplied, injected handlers are observation-only: they
+     * receive a lease-fenced repository facade but no provider or signer capability -- this stays
+     * the Node-test-only default. A caller that supplies productionSupplementaryStageHandlers with
+     * its own supplementaryAdapters/supplementarySignerClient gets a real provider/signer capability
+     * passed to its handlers instead, for a provider-specific implementation with its own documented
+     * mutation boundary.
      */
     async runSupplementarySettlement(input) {
       if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -990,7 +1022,7 @@ export function createStageDriver({
         throw new Error('stage-driver supplementary settlement assertLease is invalid');
       }
       const { position, settlement } = assertSupplementarySettlementDispatch(input.position, input.settlement);
-      const handler = supplementaryHandlerFor(supplementaryStageHandlers, settlement);
+      const handler = supplementaryHandlerFor(activeSupplementaryHandlers, settlement, { observationOnly: activeSupplementaryObservationOnly });
       const pending = Object.freeze({
         status: 'PENDING',
         positionId: position.positionId,
@@ -1013,7 +1045,8 @@ export function createStageDriver({
         ...(input.fencingToken === undefined ? {} : { fencingToken: input.fencingToken }),
       });
       await handler.reconcile(Object.freeze({
-        adapters: EMPTY_SUPPLEMENTARY_CAPABILITIES,
+        adapters: activeSupplementaryCapabilities.adapters,
+        signerClient: activeSupplementaryCapabilities.signerClient,
         config: frozenCanonicalValue(currentHandlerConfig),
         cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
         context: frozenCanonicalValue(context),
