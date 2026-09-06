@@ -712,6 +712,35 @@ test('readActiveCycle is null before any cycle is created', async t => {
   assert.equal(await repository.readActiveCycle(), null);
 });
 
+test('holdCycle persists terminalAtMs from the repository clock', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  assert.equal((await repository.describeCycle(cycleId)).terminalAtMs, 1_700_000_000_000);
+});
+
+test('completeCycle persists terminalAtMs from the repository clock', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  assert.equal((await repository.describeCycle(cycleId)).terminalAtMs, 1_700_000_000_000);
+});
+
+test('a legacy cycle-terminal event stored without terminalAtMs reads back null rather than a fabricated time', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const store = await DurableCycleStore.open(directory);
+  const stored = store.readCycle(cycleId);
+  const entry = new CycleJournal(cycleId, stored.entries).propose('cycle-terminal', { terminalState: 'HELD_UNAVAILABLE', evidence: {} });
+  const transaction = store.begin(cycleId, { expectedVersion: stored.version, expectedJournalHead: stored.journalHead });
+  transaction.stageEvent(entry);
+  await store.commit(transaction);
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  assert.equal((await reopened.describeCycle(cycleId)).terminalAtMs, null);
+});
+
 test('peekActiveCycle skips a completed crash-recovery record without changing it', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
@@ -1668,11 +1697,14 @@ test('a held terminal state stays active and prevents automatic completion', asy
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
   await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'snapshot source disagreed' });
 
-  assert.deepEqual(await repository.readActiveCycle(), {
+  const active = await repository.readActiveCycle();
+  assert.equal(Number.isSafeInteger(active.terminalAtMs), true);
+  assert.deepEqual(active, {
     cycleId,
     releaseAmount: '1',
     mode: 'production',
     terminalState: 'HELD_DATA_UNVERIFIED',
+    terminalAtMs: active.terminalAtMs,
   });
   await assert.rejects(() => repository.completeCycle(cycleId), /terminally held/);
   await assert.rejects(() => repository.completeStage(cycleId, 'outbound', { transactionId: 'must-not-append' }), /terminally held/);
@@ -3234,5 +3266,40 @@ test('recordPackBatchRequest refuses to add packs once the cycle is terminally h
   await assert.rejects(
     () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(1)),
     /cycle is terminal/,
+  );
+});
+
+function packBatchIntent(overrides = {}) {
+  return { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, ...overrides };
+}
+
+test('readPackBatchIntent is null before an intent is recorded', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readPackBatchIntent(cycleId, 'purchase'), null);
+});
+
+test('recordPackBatchIntent persists the requested quantity and pack code before any provider call, and is idempotent on retry', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const intent = packBatchIntent();
+
+  const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', intent);
+  assert.deepEqual(recorded, { recordedAtMs: 1_700_000_000_000, intent });
+  assert.deepEqual(await repository.readPackBatchIntent(cycleId, 'purchase'), { recordedAtMs: 1_700_000_000_000, intent });
+  assert.deepEqual(await repository.recordPackBatchIntent(cycleId, 'purchase', intent), { recordedAtMs: 1_700_000_000_000, intent });
+});
+
+test('recordPackBatchIntent survives a repository reopen and rejects a conflicting retry', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent());
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPackBatchIntent(cycleId, 'purchase'), recorded);
+  await assert.rejects(
+    () => reopened.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent({ quantity: 5 })),
+    /already has a different pack batch intent/,
   );
 });
