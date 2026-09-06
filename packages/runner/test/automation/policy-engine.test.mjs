@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createDefaultOperatorConfiguration } from '../../src/config/state-schema.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE } from '../../src/cycle/money-schemas.mjs';
 import {
   assertCollectorOnlyRehearsalPolicy,
   assertPolicyAdmission,
@@ -809,6 +810,15 @@ test('each independent process liability evidence control refuses the admission'
     Object.assign(tampered.processLiabilityEvidence, override);
     assert.throws(() => assertPolicyAdmission(tampered), pattern, JSON.stringify(override));
   }
+});
+
+test('a policy admission quantity above the shared batch/catalog ceiling is refused before the cycle exists (BOT-PACK-QUANTITY P1)', () => {
+  const cycleId = 'cycle-quantity-over-ceiling';
+  const admission = exactOutputAdmission({ cycleId, quantity: MAXIMUM_PACK_BATCH_SIZE + 1 });
+  assert.throws(
+    () => assertPolicyAdmission(admission),
+    /policy admission quantity must be an integer from 1 through/,
+  );
 });
 
 test('the verified N2 two-pack USDG quote is admitted under an explicit configuration sized exactly to it, and one atomic unit above the same rail is refused', async () => {

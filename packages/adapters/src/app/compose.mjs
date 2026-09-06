@@ -11,6 +11,7 @@ import { AutomatedCycleService } from '../../../runner/src/automation/automated-
 import { assertCollectorOnlyRehearsalPolicy, createPolicyEngine } from '../../../runner/src/automation/policy-engine.mjs';
 import { createRehearsalStageDriver } from '../../../runner/src/cycle/rehearsal-stage-driver.mjs';
 import { collectRehearsalEvidence, ensureRehearsalEvidence } from '../../../runner/src/cycle/rehearsal-evidence.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
 import { inspectCycleRecovery } from '../../../runner/src/operator/cli.mjs';
 import { createScheduler } from '../../../runner/src/scheduler/scheduler.mjs';
@@ -613,6 +614,17 @@ export function buildAdmissionPlanner({ config, adapters, readConfiguration, pro
       if (configuration === null || !configuration.liveMode) return null;
       const quantity = configuration.requestedOrders;
       if (!Number.isInteger(quantity) || quantity < 1) return null;
+      // BOT-PACK-QUANTITY (pack-quantity-review.md P1 / pack-quantity-corrected-report.md OPEN
+      // FACT): requestedOrders is only bounded against the operator's own maxBoostersPerCycle
+      // ceiling (up to 1,000, packages/runner/src/config/state-schema.mjs) at configuration-write
+      // time, which can exceed the shared purchase-stage batch/catalog ceiling. Refuse here, before
+      // any catalog read, Relay quote, hook liability read, or durable cycle-open effect -- the
+      // normalized policy admission (packages/runner/src/automation/policy-engine.mjs's
+      // assertPolicyAdmission) and the purchase stage's own replay check both still enforce the
+      // same ceiling independently; this closes the remaining, earliest construction boundary.
+      if (quantity > MAXIMUM_PACK_BATCH_SIZE) {
+        throw new Error(`admission planner refuses requestedOrders above the shared batch/catalog ceiling of ${MAXIMUM_PACK_BATCH_SIZE}`);
+      }
       if (!configuration.allowedPackIds.includes(packId)) return null;
       if (typeof adapters?.collectorCrypt?.getMachines !== 'function') {
         throw new Error('admission planner requires collector-crypt machine data');

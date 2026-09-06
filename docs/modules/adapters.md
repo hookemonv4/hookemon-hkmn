@@ -150,6 +150,24 @@ infrastructure.
   and broadcast. The reservation is globally durable, contains its fencing token and lease window,
   and cannot be replaced until expiry; no production composition wires the compatibility-only third
   Operations role.
+- `src/app/stages/purchase.mjs`'s `preparePurchaseRequest` sources the number of packs a cycle
+  purchases from the cycle's own durably admitted record (`cycleRepository.describeCycle(cycleId)
+  .admission`, written once at admission by `buildAdmissionPlanner.plan` from the operator's
+  `requestedOrders`), not from a second, independently configured quantity. A caller-supplied
+  `config.pack.quantity` is consulted only to refuse an explicit contradiction against that
+  admission, and, for a genuinely unadmitted context, as a bounded default of 1. In the composed
+  production execution profile (`config.execution.profile === 'production'`) a missing admission --
+  no cycle-scoped repository/context at all, or a real cycle record whose admission is `null` -- is
+  refused before catalog access, policy authorization, signer, or provider mutation, rather than
+  silently constructing an unpriced one-pack request; the bounded default remains available for
+  every other, explicitly non-production context (a standalone probe/dry run, or the Collector-only
+  rehearsal profile). An admitted quantity is independently re-bounded to the shared purchase-stage
+  batch/catalog ceiling (`MAXIMUM_PACK_BATCH_SIZE`, packages/runner/src/cycle/money-schemas.mjs) as
+  defense against a corrupt or replayed record; the same ceiling is independently enforced earlier,
+  before the cycle exists, at both `packages/runner/src/automation/policy-engine.mjs`'s
+  `assertPolicyAdmission` (before `CycleRepository` durably persists the admission) and
+  `buildAdmissionPlanner.plan`'s own construction boundary in `packages/adapters/src/app/compose.mjs`
+  (before any catalog read, Relay quote, or hook liability read).
 - A custody ledger key is `(cycleId, chainId, assetId)`. Its first record fixes `decimals`; later
   records with another decimal value are rejected both while writing and during journal replay.
 - A generic chain transaction is keyed by `(cycleId, stage, requestDigest)`. It persists raw bytes,

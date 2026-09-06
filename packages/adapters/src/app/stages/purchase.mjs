@@ -139,15 +139,27 @@ async function expectedCardCountPerPack({ adapters, packType }) {
 }
 
 /**
- * Catalog/admission-time quantity validation. A configured quantity above the documented
- * provider batch ceiling, or above the shared durable-journal payload bound
- * (`MAXIMUM_PACK_BATCH_SIZE`, packages/runner/src/cycle/money-schemas.mjs), is rejected here —
- * before any spend — rather than discovered only after a purchase attempt.
+ * Purchase-stage quantity validation against the documented provider batch ceiling / shared
+ * durable-journal payload bound (`MAXIMUM_PACK_BATCH_SIZE`, packages/runner/src/cycle/money-schemas.mjs).
+ * Applied both to an explicitly configured quantity and to a durably admitted one
+ * (`resolvePurchaseQuantity` below), so a replayed or corrupt admission record is never trusted
+ * past this ceiling merely because it was durably admitted.
+ *
+ * This is defense-in-depth at the purchase stage, not the cycle's only such refusal, and does not
+ * by itself mean "before any spend": purchase is the fourth operational stage
+ * (`OPERATIONAL_CYCLE_STAGES`, packages/runner/src/cycle/money-schemas.mjs), after claim-process
+ * and outbound, so an over-ceiling quantity that reached this point could already have claimed and
+ * bridged funds. The pre-cycle enforcement point is `normalizePolicyAdmission`
+ * (packages/runner/src/automation/policy-engine.mjs), which now applies this exact ceiling before
+ * `CycleRepository` durably persists an admission at all -- i.e. before the cycle exists and
+ * before claim-process can run. `buildAdmissionPlanner.plan` (packages/adapters/src/app/compose.mjs)
+ * can still quote and admit an over-ceiling request before reaching that normalizer; closing that
+ * remaining planner-side gap is out of this file's write-set (see
+ * pack-quantity-corrected-report.md).
  */
-function assertConfiguredPackQuantity(value) {
-  if (value === undefined) return 1;
+function assertConfiguredPackQuantity(value, label = 'config.pack.quantity') {
   if (!Number.isSafeInteger(value) || value < 1 || value > MAXIMUM_PACK_BATCH_SIZE) {
-    throw new Error(`Collector purchase config.pack.quantity must be an integer from 1 through ${MAXIMUM_PACK_BATCH_SIZE}`);
+    throw new Error(`Collector purchase ${label} must be an integer from 1 through ${MAXIMUM_PACK_BATCH_SIZE}`);
   }
   return value;
 }
@@ -192,33 +204,72 @@ async function assertHeldHeadroom({ cycleRepository, context, config, quantity }
 }
 
 /**
- * The typed per-pack and whole-batch settlement bounds this purchase is authorized for, taken from
- * the cycle's own durable admission. Binding them into the prepared request puts them under the
- * request digest, so the amount each pack may debit is fixed before anything is signed and cannot
- * be renegotiated afterwards. Returns null for an unadmitted cycle, which leaves existing
- * behaviour unchanged.
+ * True only for the composed production execution profile (`config.execution.profile ===
+ * 'production'`, packages/adapters/src/app/compose.mjs). Every other value -- 'rehearsal'
+ * (including the explicitly authorized Collector-only rehearsal mode) and 'inspection', plus a
+ * standalone caller that never built a full composed config (`probePurchase`'s dry-run path, or a
+ * unit-test fixture) -- is treated as non-production here.
  */
-async function admittedPurchaseBounds({ cycleRepository, context, packType, quantity }) {
-  if (typeof cycleRepository?.describeCycle !== 'function' || typeof context?.cycleId !== 'string') return null;
-  const admission = (await cycleRepository.describeCycle(context.cycleId))?.admission ?? null;
-  if (admission === null) return null;
+function isProductionExecutionProfile(config) {
+  return config?.execution?.profile === 'production';
+}
+
+/**
+ * The authoritative per-cycle quantity and its typed per-pack/whole-batch settlement bounds.
+ *
+ * The durably admitted cycle (`cycleRepository.describeCycle(context.cycleId).admission`) is the
+ * one source of truth for how many packs this cycle actually spends for: it is written once, at
+ * admission, from the operator's `requestedOrders` at that moment
+ * (`buildAdmissionPlanner.plan`, packages/adapters/src/app/compose.mjs), and it is immutable after
+ * that. `config.pack.quantity` is not a second, competing source for an admitted cycle: it is
+ * consulted only to refuse an explicit contradiction (protects a caller that pinned a specific
+ * quantity, e.g. a signed or already-prepared request, from silently being redirected to a
+ * different admitted quantity) and, for a genuinely unadmitted, non-production context
+ * (`probePurchase`'s dry-run path, or a test fixture with no admission), as the sole bounded
+ * default (1 when unset).
+ *
+ * A missing admission (no cycle-scoped repository/context at all, or a real cycle record whose
+ * `admission` is null) is refused, not defaulted, whenever the composed config's execution
+ * profile is `'production'` (pack-quantity-review.md P1): the production stage-driver always
+ * supplies a fenced `describeCycle` and a durable cycle id, so an absent admission there is a
+ * production invariant failure -- constructing an unpriced one-pack request instead would let a
+ * legacy or partially composed production cycle spend with no admitted, typed purchase bound at
+ * all. The bounded config/default fallback remains available for every other, explicitly
+ * non-production context.
+ *
+ * Binding the bounds into the prepared request puts them under the request digest, so the amount
+ * each pack may debit is fixed before anything is signed and cannot be renegotiated afterwards.
+ */
+async function resolvePurchaseQuantity({ cycleRepository, context, config, packType }) {
+  const configuredQuantity = config?.pack?.quantity;
+  if (configuredQuantity !== undefined) assertConfiguredPackQuantity(configuredQuantity);
+  const hasCycleScope = typeof cycleRepository?.describeCycle === 'function' && typeof context?.cycleId === 'string';
+  const admission = hasCycleScope ? (await cycleRepository.describeCycle(context.cycleId))?.admission ?? null : null;
+  if (admission === null) {
+    if (isProductionExecutionProfile(config)) {
+      throw new Error('purchase prepareRequest requires a durable cycle admission in the production execution profile');
+    }
+    return { quantity: configuredQuantity === undefined ? 1 : configuredQuantity, bounds: null };
+  }
   if (admission.packId !== packType) throw new Error('purchase prepareRequest pack does not match the admitted pack');
-  if (admission.quantity !== quantity) throw new Error('purchase prepareRequest quantity does not match the admitted quantity');
+  const quantity = assertConfiguredPackQuantity(admission.quantity, 'admitted quantity');
+  if (configuredQuantity !== undefined && configuredQuantity !== quantity) {
+    throw new Error('purchase prepareRequest quantity does not match the admitted quantity');
+  }
   const unit = admission.unitPurchase;
   const aggregate = admission.aggregatePurchase;
   if (BigInt(unit.amountAtomic) * BigInt(quantity) !== BigInt(aggregate.amountAtomic)) {
     throw new Error('purchase prepareRequest admitted aggregate is not the admitted unit times quantity');
   }
-  return Object.freeze({ unitPurchase: unit, aggregatePurchase: aggregate });
+  return { quantity, bounds: Object.freeze({ unitPurchase: unit, aggregatePurchase: aggregate }) };
 }
 
 export async function preparePurchaseRequest({ adapters, config, cycleRepository, context }) {
   const playerAddress = config?.accounts?.solana;
   if (typeof playerAddress !== 'string' || playerAddress.length === 0) throw new Error('purchase prepareRequest requires HOOKEMON_SOLANA_ACCOUNT');
   const packType = config?.pack?.code;
-  const quantity = assertConfiguredPackQuantity(config?.pack?.quantity);
+  const { quantity, bounds } = await resolvePurchaseQuantity({ cycleRepository, context, config, packType });
   await assertHeldHeadroom({ cycleRepository, context, config, quantity });
-  const bounds = await admittedPurchaseBounds({ cycleRepository, context, packType, quantity });
   const request = {
     provider: 'collector-crypt',
     operation: 'purchase',
@@ -238,7 +289,9 @@ export async function probePurchase({ adapters, config }) {
     configured: true,
     machineCount: Array.isArray(catalog?.machines) ? catalog.machines.length : null,
     machineStatus: status.machineStatus,
-    quantity: assertConfiguredPackQuantity(config?.pack?.quantity),
+    // probePurchase has no cycle context to admit against (it is the standalone dry-run/status
+    // read), so config.pack.quantity's bounded default (1 when unset) is the only source here.
+    quantity: assertConfiguredPackQuantity(config?.pack?.quantity ?? 1),
   };
   const packType = config?.pack?.code;
   if (typeof packType !== 'string' || packType.length === 0) return evidence;

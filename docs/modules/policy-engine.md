@@ -49,6 +49,19 @@ canonical micro-USDG integer strings.
   totalLiability`) and rejecting any unrecognized field, and the aggregate funding quote must not
   exceed that ceiling. A one-field mutation to a validated record either fails one of these checks or
   survives into the normalized result the policy digest covers.
+- A `hookemon.policy-admission.v2` admission's `quantity` is a positive integer bounded to the
+  shared purchase-stage batch/catalog ceiling (`MAXIMUM_PACK_BATCH_SIZE`,
+  packages/runner/src/cycle/money-schemas.mjs), refused here -- before `CycleRepository` durably
+  persists the admission, and therefore before the cycle exists or claim-process can run -- rather
+  than only at the later purchase stage's own defense-in-depth check. The operator's own
+  `requestedOrders` ceiling (`maxBoostersPerCycle`, up to 1,000,
+  packages/runner/src/config/state-schema.mjs) can exceed this batch/catalog bound, so an admitted
+  quantity is never trusted past it merely because an operator configured it. The same ceiling is
+  independently enforced earlier still, at admission construction: `buildAdmissionPlanner.plan`
+  (packages/adapters/src/app/compose.mjs) refuses an over-ceiling `requestedOrders` before any
+  catalog read, Relay quote, or hook liability read, so a request this far above the ceiling never
+  reaches a Relay quote, a claim, or a durably admitted cycle at all -- not merely this later
+  normalizer.
 - Purchases require the exact existing cycle digest and reservation. Before signing, policy checks
   typed unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string
   quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share one

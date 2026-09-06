@@ -66,7 +66,7 @@
     {
       "id": "adapters",
       "path": "docs/modules/adapters.md",
-      "sha256": "d8a70df0ce3a522d0f1c0420610526c745660672015a1c2be1904fe41443d2a8"
+      "sha256": "30b3062937f2edbefaea3b11fedbb54e7351342967dcf7c9d68a66c152702821"
     },
     {
       "id": "hook-contract-client",
@@ -111,7 +111,7 @@
     {
       "id": "policy-engine",
       "path": "docs/modules/policy-engine.md",
-      "sha256": "09e8cc1527523c7564fedde60d73cf368e258df3e56538f7df490dd01676c4ab"
+      "sha256": "675f97573c073b8e865846bd13a770ad0bfc9a61ce60e6ea69a76d7d27329dca"
     },
     {
       "id": "eligibility-snapshot",

@@ -10,6 +10,7 @@ import { buildAdmissionPlanner, buildProcessLiabilityReader } from '../../src/ap
 import { mutateClaimProcess, prepareClaimProcessRequest } from '../../src/app/stages/claim-process.mjs';
 import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE } from '../../../runner/src/cycle/money-schemas.mjs';
 
 const HOOK = `0x${'1'.repeat(40)}`;
 const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
@@ -310,6 +311,60 @@ test('the aggregate quote is admitted exactly at the ceiling and refused one ato
     () => belowCeiling.planner.plan({ cycleId: 'cycle-planner-one-under', packId: 'base-pack' }),
     /refuses an aggregate quote above the attributable process liability/,
   );
+});
+
+// BOT-PACK-QUANTITY (pack-quantity-review.md P1 / pack-quantity-planner-report.md): the earlier
+// purchase-stage-only test proved refusal at `preparePurchaseRequest`, after admission, quoting,
+// and claim-process could already have run. This proves the planner's own construction boundary
+// refuses first -- no catalog read, no Relay quote, and no hook liability read at all -- so an
+// over-ceiling `requestedOrders` can never reach a Relay quote, a claim, or a durably admitted
+// cycle in the first place.
+test('requestedOrders above the shared batch/catalog ceiling is refused before any catalog read, Relay quote, or liability read', async () => {
+  let getMachinesCalls = 0;
+  let quoteCalls = 0;
+  let liabilityReadCalls = 0;
+  const usdg = { chainId: '4663', assetId: USDG, decimals: 6 };
+  const settlement = { chainId: '792703809', assetId: SETTLEMENT_MINT, decimals: 6 };
+  const planner = buildAdmissionPlanner({
+    config: {
+      contracts: { hook: HOOK },
+      accounts: { evm: PLANNER_OPERATIONS, solana: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE' },
+      moneyConfiguration: { assets: { usdg, solanaStablecoin: settlement } },
+    },
+    adapters: {
+      collectorCrypt: {
+        async getMachines() {
+          getMachinesCalls += 1;
+          return { machines: [{ code: 'base-pack', price: '1', available: true, enabled: true }] };
+        },
+      },
+      relay: {
+        async quoteOutboundBridge({ amount }) {
+          quoteCalls += 1;
+          return {
+            requestId: 'req-should-never-be-requested', orderId: `0x${'9'.repeat(64)}`,
+            deadlineUnixSeconds: 2_000_000_000, sender: PLANNER_OPERATIONS,
+            recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE',
+            origin: { amount }, destination: { amount, minimumAmount: amount },
+            quoteDigest: `sha256:${'9'.repeat(64)}`,
+          };
+        },
+      },
+    },
+    readConfiguration: async () => ({
+      liveMode: true, requestedOrders: MAXIMUM_PACK_BATCH_SIZE + 1, allowedPackIds: ['base-pack'],
+    }),
+    processLiabilityReader: {
+      async read({ cycleId }) { liabilityReadCalls += 1; return fakeProcessLiabilityEvidence(cycleId); },
+    },
+  });
+  await assert.rejects(
+    () => planner.plan({ cycleId: 'cycle-over-batch-ceiling', packId: 'base-pack' }),
+    /admission planner refuses requestedOrders above the shared batch\/catalog ceiling of 64/,
+  );
+  assert.equal(getMachinesCalls, 0, 'no catalog read before the ceiling refusal');
+  assert.equal(quoteCalls, 0, 'no Relay quote before the ceiling refusal');
+  assert.equal(liabilityReadCalls, 0, 'no hook liability read before the ceiling refusal');
 });
 
 test('each independent hook control refuses admission at the planner boundary, from evidence alone', async () => {

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { assertOperatorConfiguration } from '../config/state-schema.mjs';
 import { canonicalJson, digest } from '../cycle/journal.mjs';
-import { assertStandingAuthorityDecision } from '../cycle/money-schemas.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE, assertStandingAuthorityDecision } from '../cycle/money-schemas.mjs';
 import { OPERATOR_HARD_CAPS } from '../operator/state-file.mjs';
 
 export const POLICY_WINDOW_MS = 86_400_000;
@@ -431,7 +431,17 @@ function normalizePolicyAdmission(value, operationsAccounts) {
   }
   assertCycleId(value.cycleId);
   assertPackId(value.packId);
-  if (!Number.isInteger(value.quantity) || value.quantity < 1) throw new Error('policy admission quantity is invalid');
+  // Pre-cycle ceiling (BOT-PACK-QUANTITY / pack-quantity-review.md P1): this is the durable cycle
+  // repository's own persist-time normalizer (`CycleRepository`'s admission open path calls
+  // `assertPolicyAdmission`, i.e. this function, before claim-process or any spend), so a
+  // quantity above the shared batch/catalog ceiling is refused here before a cycle exists at all.
+  // `buildAdmissionPlanner.plan` (packages/adapters/src/app/compose.mjs) can still quote and admit
+  // a >64 request before reaching this normalizer; that planner-side ceiling remains a separate,
+  // not-yet-fixed gap outside this file's write-set (compose.mjs is owned by another worker) --
+  // see pack-quantity-corrected-report.md.
+  if (!Number.isInteger(value.quantity) || value.quantity < 1 || value.quantity > MAXIMUM_PACK_BATCH_SIZE) {
+    throw new Error(`policy admission quantity must be an integer from 1 through ${MAXIMUM_PACK_BATCH_SIZE}`);
+  }
   if (typeof value.quoteDigest !== 'string' || !digestPattern.test(value.quoteDigest)) throw new Error('policy admission quoteDigest is invalid');
   const unitPurchase = assertPolicyAdmissionAmount(value.unitPurchase, 'policy admission unitPurchase');
   const aggregatePurchase = assertPolicyAdmissionAmount(value.aggregatePurchase, 'policy admission aggregatePurchase');
