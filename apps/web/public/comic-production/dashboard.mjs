@@ -52,15 +52,18 @@ const roundShape = record({
   holderRewardsStatus: text, distributionStatus: text,
 });
 // schemaVersion 6 (status) / 8 (community): packSpend/buyback/packGain/packLoss become nullable
-// (an unknown amount is `null`, never a fabricated '0'), plus two typed Amount|null fields
-// distinguishing the real Collector-Crypt-side (Solana) amounts from the EVM USDG bridge amounts.
+// (an unknown amount is `null`, never a fabricated '0'), plus typed Amount|null fields
+// distinguishing the real Collector-Crypt-side (Solana) amounts and the EVM USDG bridge amounts
+// from each other, and nullable real payout-liability/dust/recipient-count facts.
 const roundShapeTyped = record({
   ...fields('packSpendMicroUsdg buybackMicroUsdg', nullable(money)),
+  outboundBridgeDebit: nullableAmount, inboundBridgeProceeds: nullableAmount,
   collectorPurchaseDebit: nullableAmount, collectorBuybackProceeds: nullableAmount,
   ...fields('packGainMicroUsdg packLossMicroUsdg', nullable(money)),
   quotedCosts: quotedCostsShape,
-  ...fields('protectedCostsMicroUsdg cycleGainMicroUsdg cycleLossMicroUsdg walletBalanceBeforeMicroUsdg walletBalanceAfterMicroUsdg feeReserveBeforeMicroUsdg feeReserveTargetMicroUsdg feeReserveTopUpMicroUsdg feeReserveAfterMicroUsdg plannedHolderRewardsMicroUsdg paidHolderRewardsMicroUsdg', nullable(money)),
+  ...fields('protectedCostsMicroUsdg cycleGainMicroUsdg cycleLossMicroUsdg walletBalanceBeforeMicroUsdg walletBalanceAfterMicroUsdg feeReserveBeforeMicroUsdg feeReserveTargetMicroUsdg feeReserveTopUpMicroUsdg feeReserveAfterMicroUsdg plannedHolderRewardsMicroUsdg paidHolderRewardsMicroUsdg payoutLiabilityMicroUsdg payoutDustMicroUsdg', nullable(money)),
   confirmedCostsMicroUsdg: nullable(signedMoney),
+  paidHolderRewardsRecipientCount: nullable(count),
   networkFees: networkFeesShape,
   holderRewardsStatus: text, distributionStatus: text,
 });
@@ -123,13 +126,16 @@ const transaction = (value) => transactionShape(value) && (value.chain === 'evm'
 const transactions = (value) => list(transaction, 24)(value)
   && new Set(value.map(({ chain, id }) => `${chain}:${chain === 'evm' ? id.toLowerCase() : id}`)).size === value.length;
 const recipientLimit = (value) => count(value) && (value === 50 || (value >= 100 && value <= 1000 && value % 100 === 0));
+// schemaVersion 8: no durable recipient-count/configured-limit producer exists yet, so both
+// become honestly nullable rather than a fabricated count or the old always-200 placeholder.
 const latestCycleShapeFor = (schemaVersion) => {
   const base = {
     cycleId: text, status: text, reason: nullable(text), updatedAt: nullable(timestamp),
-    paidMicroUsdg: nullable(money), payoutRecipientCount: count,
+    paidMicroUsdg: nullable(money), payoutRecipientCount: schemaVersion === 8 ? nullable(count) : count,
     roundAccounting: schemaVersion === 8 ? accountingTyped : accounting, transactions,
   };
-  return schemaVersion >= 5 ? { ...base, rewardRecipientLimit: recipientLimit } : base;
+  if (schemaVersion < 5) return base;
+  return { ...base, rewardRecipientLimit: schemaVersion === 8 ? nullable(recipientLimit) : recipientLimit };
 };
 const latestCycleFor = (schemaVersion) => (value) =>
   value === null || record(latestCycleShapeFor(schemaVersion))(value);
@@ -156,6 +162,16 @@ const metricsShape = record({
   ...fields('totalCycleFundingMicroUsdg totalCollectorSpendMicroUsdg totalBuybacksReturnedMicroUsdg totalBridgedBackMicroUsdg totalRewardsPaidMicroUsdg totalRewardsDeferredMicroUsdg totalQuotedOperatingCostsMicroUsdg latestRetainedReserveMicroUsdg latestCycleReserveTargetMicroUsdg', money),
   ...fields('completedCycles skippedCycles openedPacks', count),
 });
+// schemaVersion 8: no durable lifetime-aggregate producer exists yet, so every money field except
+// completedCycles (a real derived count), plus skippedCycles/openedPacks, is honestly null rather
+// than a fabricated '0'.
+const metricsShapeV8 = record({
+  latestObservedProjectPoolMicroUsdg: nullable(money),
+  ...fields('totalCycleFundingMicroUsdg totalCollectorSpendMicroUsdg totalBuybacksReturnedMicroUsdg totalBridgedBackMicroUsdg totalRewardsPaidMicroUsdg totalRewardsDeferredMicroUsdg totalQuotedOperatingCostsMicroUsdg latestRetainedReserveMicroUsdg latestCycleReserveTargetMicroUsdg', nullable(money)),
+  completedCycles: count,
+  ...fields('skippedCycles openedPacks', nullable(count)),
+});
+const metricsShapeFor = (schemaVersion) => schemaVersion === 8 ? metricsShapeV8 : metricsShape;
 const COMMUNITY_HELD_VERSIONS = new Set([6, 7, 8]);
 function readCommunityShape(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -166,7 +182,7 @@ function readCommunityShape(value) {
   const base = record({
     schemaVersion: oneOf(schemaVersion), profile: oneOf('testnet', 'mainnet'), badge: oneOf('TESTNET', 'MAINNET'), network,
     historyComplete: oneOf(true, false), generatedAt: timestamp, nextCycleAt: nullable(timestamp),
-    delayed: oneOf(true, false), poolObservedAt: nullable(timestamp), metrics: metricsShape,
+    delayed: oneOf(true, false), poolObservedAt: nullable(timestamp), metrics: metricsShapeFor(schemaVersion),
     latestCycle: latestCycleFor(schemaVersion),
     cards: list(cardCheck, 12),
     ...(held ? { heldPositionCount: count, heldPositions: schemaVersion === 6 ? heldPositionsV4 : heldPositionsV5 } : {}),

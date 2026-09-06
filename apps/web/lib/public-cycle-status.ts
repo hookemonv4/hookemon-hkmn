@@ -38,6 +38,8 @@ export type PublicNativeFee = { lamports: string; paidBy: string };
 export type PublicRoundAccounting = {
   packSpendMicroUsdg: string | null;
   buybackMicroUsdg: string | null;
+  outboundBridgeDebit?: Amount | null;
+  inboundBridgeProceeds?: Amount | null;
   collectorPurchaseDebit?: Amount | null;
   collectorBuybackProceeds?: Amount | null;
   packGainMicroUsdg: string | null;
@@ -60,6 +62,9 @@ export type PublicRoundAccounting = {
   feeReserveAfterMicroUsdg: string | null;
   plannedHolderRewardsMicroUsdg: string | null;
   paidHolderRewardsMicroUsdg: string | null;
+  payoutLiabilityMicroUsdg?: string | null;
+  payoutDustMicroUsdg?: string | null;
+  paidHolderRewardsRecipientCount?: number | null;
   holderRewardsStatus: string;
   distributionStatus: string;
 };
@@ -210,8 +215,13 @@ const ROUND_ACCOUNTING_KEYS = new Set([
 // amounts, which are a different chain/asset and never assumed at parity.
 const ROUND_ACCOUNTING_V6_KEYS = new Set([
   ...ROUND_ACCOUNTING_KEYS,
+  "outboundBridgeDebit",
+  "inboundBridgeProceeds",
   "collectorPurchaseDebit",
   "collectorBuybackProceeds",
+  "payoutLiabilityMicroUsdg",
+  "payoutDustMicroUsdg",
+  "paidHolderRewardsRecipientCount",
 ]);
 const QUOTED_COST_KEYS = new Set([
   "outboundBridgeMicroUsdg",
@@ -501,6 +511,8 @@ function readRoundAccountingV6(source: Record<string, unknown>): PublicRoundAcco
   const result: PublicRoundAccounting = {
     packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg),
     buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg),
+    outboundBridgeDebit: nullableAmount(source.outboundBridgeDebit),
+    inboundBridgeProceeds: nullableAmount(source.inboundBridgeProceeds),
     collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit),
     collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds),
     packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg),
@@ -519,12 +531,19 @@ function readRoundAccountingV6(source: Record<string, unknown>): PublicRoundAcco
     feeReserveAfterMicroUsdg: optionalMoney(source.feeReserveAfterMicroUsdg),
     plannedHolderRewardsMicroUsdg: optionalMoney(source.plannedHolderRewardsMicroUsdg),
     paidHolderRewardsMicroUsdg: optionalMoney(source.paidHolderRewardsMicroUsdg),
+    payoutLiabilityMicroUsdg: optionalMoney(source.payoutLiabilityMicroUsdg),
+    payoutDustMicroUsdg: optionalMoney(source.payoutDustMicroUsdg),
+    paidHolderRewardsRecipientCount: nullableNonNegativeInteger(source.paidHolderRewardsRecipientCount),
     holderRewardsStatus: boundedText(source.holderRewardsStatus),
     distributionStatus: boundedText(source.distributionStatus),
   };
   assertNullableExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
   assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
   return result;
+}
+
+function nullableNonNegativeInteger(value: unknown): number | null {
+  return value === null ? null : nonNegativeInteger(value);
 }
 
 function nullableAmount(value: unknown): Amount | null {

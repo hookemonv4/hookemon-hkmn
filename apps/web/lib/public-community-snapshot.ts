@@ -14,18 +14,18 @@ import { type Amount, type PublicCardEvent, normalizeAmount, normalizePublicCard
 
 export type PublicCommunityMetrics = {
   latestObservedProjectPoolMicroUsdg: string | null;
-  totalCycleFundingMicroUsdg: string;
-  totalCollectorSpendMicroUsdg: string;
-  totalBuybacksReturnedMicroUsdg: string;
-  totalBridgedBackMicroUsdg: string;
-  totalRewardsPaidMicroUsdg: string;
-  totalRewardsDeferredMicroUsdg: string;
-  totalQuotedOperatingCostsMicroUsdg: string;
-  latestRetainedReserveMicroUsdg: string;
-  latestCycleReserveTargetMicroUsdg: string;
+  totalCycleFundingMicroUsdg: string | null;
+  totalCollectorSpendMicroUsdg: string | null;
+  totalBuybacksReturnedMicroUsdg: string | null;
+  totalBridgedBackMicroUsdg: string | null;
+  totalRewardsPaidMicroUsdg: string | null;
+  totalRewardsDeferredMicroUsdg: string | null;
+  totalQuotedOperatingCostsMicroUsdg: string | null;
+  latestRetainedReserveMicroUsdg: string | null;
+  latestCycleReserveTargetMicroUsdg: string | null;
   completedCycles: number;
-  skippedCycles: number;
-  openedPacks: number;
+  skippedCycles: number | null;
+  openedPacks: number | null;
 };
 
 export type PublicCommunityCycle = {
@@ -34,10 +34,10 @@ export type PublicCommunityCycle = {
   reason: string | null;
   updatedAt: string | null;
   paidMicroUsdg: string | null;
-  payoutRecipientCount: number;
+  payoutRecipientCount: number | null;
   roundAccounting: PublicCommunityRoundAccounting | null;
   transactions: PublicTransactionReference[];
-  rewardRecipientLimit?: number;
+  rewardRecipientLimit?: number | null;
 };
 
 export type PublicCommunityRoundAccounting = PublicRoundAccounting;
@@ -140,8 +140,13 @@ const ROUND_ACCOUNTING_KEYS = new Set([
 // schemaVersion 8: same nullable/typed evolution as public-cycle-status.ts's schemaVersion 6.
 const ROUND_ACCOUNTING_V8_KEYS = new Set([
   ...ROUND_ACCOUNTING_KEYS,
+  "outboundBridgeDebit",
+  "inboundBridgeProceeds",
   "collectorPurchaseDebit",
   "collectorBuybackProceeds",
+  "payoutLiabilityMicroUsdg",
+  "payoutDustMicroUsdg",
+  "paidHolderRewardsRecipientCount",
 ]);
 const LEGACY_ROUND_ACCOUNTING_KEYS = new Set([
   "packSpendMicroUsdg",
@@ -237,8 +242,18 @@ export function normalizePublicCommunitySnapshot(
       metricsSource.latestObservedProjectPoolMicroUsdg === null
         ? null
         : money(metricsSource.latestObservedProjectPoolMicroUsdg);
-    for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key]);
-    for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key]);
+    // schemaVersion 8: no durable lifetime-aggregate producer exists, so these totals are honestly
+    // null rather than a fabricated '0'; completedCycles stays a required real count. schemaVersion
+    // <8 keeps its original required shape for any still-current caller.
+    if (sourceSchemaVersion === 8) {
+      for (const key of MONEY_KEYS.slice(1)) metrics[key] = nullableMoney(metricsSource[key]);
+      metrics.completedCycles = count(metricsSource.completedCycles);
+      metrics.skippedCycles = nullableCount(metricsSource.skippedCycles);
+      metrics.openedPacks = nullableCount(metricsSource.openedPacks);
+    } else {
+      for (const key of MONEY_KEYS.slice(1)) metrics[key] = money(metricsSource[key]);
+      for (const key of COUNT_KEYS) metrics[key] = count(metricsSource[key]);
+    }
 
     const result: PublicCommunitySnapshot = {
       schemaVersion: sourceSchemaVersion === 8
@@ -332,7 +347,11 @@ function readLatestCycle(value: unknown, schemaVersion: unknown): PublicCommunit
     reason: source.reason === null ? null : boundedText(source.reason),
     updatedAt: optionalTimestamp(source.updatedAt),
     paidMicroUsdg: source.paidMicroUsdg === null ? null : money(source.paidMicroUsdg),
-    payoutRecipientCount: count(source.payoutRecipientCount),
+    // schemaVersion 8: no durable recipient-count producer exists yet, so an unknown count is
+    // null, never a fabricated 0.
+    payoutRecipientCount: schemaVersion === 8
+      ? nullableCount(source.payoutRecipientCount)
+      : count(source.payoutRecipientCount),
     roundAccounting: readRoundAccounting(
       source.roundAccounting,
       schemaVersion,
@@ -340,7 +359,11 @@ function readLatestCycle(value: unknown, schemaVersion: unknown): PublicCommunit
     ),
     transactions,
   };
-  if (currentSchema) result.rewardRecipientLimit = recipientLimit(source.rewardRecipientLimit);
+  if (currentSchema) {
+    result.rewardRecipientLimit = schemaVersion === 8
+      ? nullableRecipientLimit(source.rewardRecipientLimit)
+      : recipientLimit(source.rewardRecipientLimit);
+  }
   return result;
 }
 
@@ -350,6 +373,14 @@ function recipientLimit(value: unknown): number {
     (value !== 50 && ((value as number) < 100 || (value as number) > 1000 || (value as number) % 100 !== 0))
   ) invalid();
   return value as number;
+}
+
+function nullableRecipientLimit(value: unknown): number | null {
+  return value === null ? null : recipientLimit(value);
+}
+
+function nullableCount(value: unknown): number | null {
+  return value === null ? null : count(value);
 }
 
 function readRoundAccounting(
@@ -396,6 +427,8 @@ function readRoundAccountingV8(source: Record<string, unknown>): PublicCommunity
   const result: PublicCommunityRoundAccounting = {
     packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg),
     buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg),
+    outboundBridgeDebit: nullableAmount(source.outboundBridgeDebit),
+    inboundBridgeProceeds: nullableAmount(source.inboundBridgeProceeds),
     collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit),
     collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds),
     packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg),
@@ -414,6 +447,9 @@ function readRoundAccountingV8(source: Record<string, unknown>): PublicCommunity
     feeReserveAfterMicroUsdg: nullableMoney(source.feeReserveAfterMicroUsdg),
     plannedHolderRewardsMicroUsdg: nullableMoney(source.plannedHolderRewardsMicroUsdg),
     paidHolderRewardsMicroUsdg: nullableMoney(source.paidHolderRewardsMicroUsdg),
+    payoutLiabilityMicroUsdg: nullableMoney(source.payoutLiabilityMicroUsdg),
+    payoutDustMicroUsdg: nullableMoney(source.payoutDustMicroUsdg),
+    paidHolderRewardsRecipientCount: nullableCount(source.paidHolderRewardsRecipientCount),
     holderRewardsStatus: boundedText(source.holderRewardsStatus),
     distributionStatus: boundedText(source.distributionStatus),
   };

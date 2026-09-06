@@ -844,7 +844,7 @@ function historyMoney(
 
 function historyCount(
   snapshot: PublicCommunitySnapshot | null,
-  value: number | undefined,
+  value: number | null | undefined,
 ): string {
   if (!snapshot) return "—";
   return snapshot.historyComplete ? formatCount(value) : "History incomplete";
@@ -885,8 +885,8 @@ export function formatMicroUsdg(value: string | null | undefined): string {
   return `${grouped}${fraction ? `.${fraction}` : ""} USDG`;
 }
 
-export function formatCount(value: number | undefined): string {
-  return value === undefined ? "—" : value.toLocaleString("en-US");
+export function formatCount(value: number | null | undefined): string {
+  return value === undefined || value === null ? "—" : value.toLocaleString("en-US");
 }
 
 function formatTimestamp(value: string | null | undefined): string {

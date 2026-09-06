@@ -300,6 +300,8 @@ function schemaVersion6Fixture() {
       roundAccounting: {
         packSpendMicroUsdg: null,
         buybackMicroUsdg: null,
+        outboundBridgeDebit: null,
+        inboundBridgeProceeds: null,
         collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6 },
         collectorBuybackProceeds: null,
         packGainMicroUsdg: null,
@@ -318,6 +320,9 @@ function schemaVersion6Fixture() {
         feeReserveAfterMicroUsdg: null,
         plannedHolderRewardsMicroUsdg: null,
         paidHolderRewardsMicroUsdg: null,
+        payoutLiabilityMicroUsdg: null,
+        payoutDustMicroUsdg: null,
+        paidHolderRewardsRecipientCount: null,
         holderRewardsStatus: "pending",
         distributionStatus: "pending",
       },
@@ -362,6 +367,30 @@ test("schemaVersion 6 rejects a missing scheduler, held positions, or a schedule
   const mismatchedHeldCount = schemaVersion6Fixture();
   mismatchedHeldCount.heldPositionCount = 2;
   assert.throws(() => normalizePublicCycleStatus(mismatchedHeldCount, "testnet"), /PUBLIC_CYCLE_STATUS_INVALID/);
+});
+
+test("schemaVersion 6 carries real bridge amounts and payout-liability facts distinctly from the Collector-side amounts", () => {
+  const fixture = schemaVersion6Fixture();
+  fixture.cycle.roundAccounting.outboundBridgeDebit = {
+    chainId: "eip155:4663", assetId: "USDG", units: "5000000", decimals: 6,
+  };
+  fixture.cycle.roundAccounting.payoutLiabilityMicroUsdg = "1200000";
+  fixture.cycle.roundAccounting.payoutDustMicroUsdg = "0";
+  fixture.cycle.roundAccounting.paidHolderRewardsRecipientCount = 3;
+  const result = normalizePublicCycleStatus(fixture, "testnet");
+  assert.deepEqual(result.cycle.roundAccounting.outboundBridgeDebit, {
+    chainId: "eip155:4663", assetId: "USDG", units: "5000000", decimals: 6,
+  });
+  assert.equal(result.cycle.roundAccounting.inboundBridgeProceeds, null);
+  assert.equal(result.cycle.roundAccounting.payoutLiabilityMicroUsdg, "1200000");
+  assert.equal(result.cycle.roundAccounting.paidHolderRewardsRecipientCount, 3);
+
+  const missingBridgeField = schemaVersion6Fixture();
+  delete missingBridgeField.cycle.roundAccounting.outboundBridgeDebit;
+  assert.throws(
+    () => normalizePublicCycleStatus(missingBridgeField, "testnet"),
+    /PUBLIC_CYCLE_STATUS_INVALID/,
+  );
 });
 
 test("schemaVersion 6 never invents a spend/buyback amount before it is actually settled", () => {

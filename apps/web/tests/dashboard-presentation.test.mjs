@@ -289,6 +289,49 @@ test('browser dashboard accepts the real backend schemaVersion 6/8 pair with sch
   assert.equal(display.detailLine, 'Proceeds: 8 USDC');
 });
 
+test('standalone dashboard.mjs validates real bridge amounts, payout-liability facts, and nullable lifetime metrics at schemaVersion 8', () => {
+  const pair = schemaVersion6And8Fixture();
+  const typedAccounting = {
+    packSpendMicroUsdg: null, buybackMicroUsdg: null,
+    outboundBridgeDebit: { chainId: 'eip155:4663', assetId: 'USDG', units: '5000000', decimals: 6 },
+    inboundBridgeProceeds: null,
+    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'USDC', units: '10000000', decimals: 6 },
+    collectorBuybackProceeds: null,
+    packGainMicroUsdg: null, packLossMicroUsdg: null,
+    quotedCosts: {
+      outboundBridgeMicroUsdg: null, inboundBridgeMicroUsdg: null, collectorApiMicroUsdg: null,
+      evmNetworkMicroUsdg: null, solanaNetworkMicroUsdg: null, slippageMicroUsdg: null,
+    },
+    protectedCostsMicroUsdg: null, confirmedCostsMicroUsdg: null,
+    cycleGainMicroUsdg: null, cycleLossMicroUsdg: null,
+    walletBalanceBeforeMicroUsdg: null, walletBalanceAfterMicroUsdg: null,
+    networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
+    feeReserveBeforeMicroUsdg: null, feeReserveTargetMicroUsdg: null, feeReserveTopUpMicroUsdg: null,
+    feeReserveAfterMicroUsdg: null, plannedHolderRewardsMicroUsdg: null, paidHolderRewardsMicroUsdg: null,
+    payoutLiabilityMicroUsdg: '1200000', payoutDustMicroUsdg: '0', paidHolderRewardsRecipientCount: null,
+    holderRewardsStatus: 'awaiting-verification', distributionStatus: 'pending',
+  };
+  pair.community.metrics.skippedCycles = null;
+  pair.community.metrics.openedPacks = null;
+  pair.community.metrics.totalRewardsPaidMicroUsdg = null;
+  pair.community.latestCycle = {
+    cycleId: 'cycle-1', status: 'complete', reason: null, updatedAt: generatedAt,
+    paidMicroUsdg: null, payoutRecipientCount: null, rewardRecipientLimit: null,
+    roundAccounting: typedAccounting, transactions: [],
+  };
+  const canonical = {
+    status: normalizePublicCycleStatus(pair.status, 'testnet'),
+    community: normalizePublicCommunitySnapshot(pair.community, 'testnet'),
+  };
+  const validated = validateDashboardPair(canonical.status, canonical.community);
+  assert.deepEqual(validated.community.latestCycle.roundAccounting.outboundBridgeDebit, typedAccounting.outboundBridgeDebit);
+  assert.equal(validated.community.latestCycle.roundAccounting.payoutLiabilityMicroUsdg, '1200000');
+  assert.equal(validated.community.latestCycle.payoutRecipientCount, null);
+  assert.equal(validated.community.latestCycle.rewardRecipientLimit, null);
+  assert.equal(validated.community.metrics.skippedCycles, null);
+  assert.equal(validated.community.metrics.totalRewardsPaidMicroUsdg, null);
+});
+
 test('dashboardTiming shows a reconcile wakeup distinctly from a cycle wakeup, and humanizes a pending reason', () => {
   const pair = schemaVersion6And8Fixture();
   pair.status.scheduler = {

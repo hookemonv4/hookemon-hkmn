@@ -311,6 +311,8 @@ function schemaVersion8Fixture() {
       roundAccounting: {
         packSpendMicroUsdg: null,
         buybackMicroUsdg: null,
+        outboundBridgeDebit: null,
+        inboundBridgeProceeds: null,
         collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6 },
         collectorBuybackProceeds: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "8000000", decimals: 6 },
         packGainMicroUsdg: null,
@@ -329,6 +331,9 @@ function schemaVersion8Fixture() {
         feeReserveAfterMicroUsdg: null,
         plannedHolderRewardsMicroUsdg: null,
         paidHolderRewardsMicroUsdg: null,
+        payoutLiabilityMicroUsdg: null,
+        payoutDustMicroUsdg: null,
+        paidHolderRewardsRecipientCount: null,
         holderRewardsStatus: "pending",
         distributionStatus: "pending",
       },
@@ -379,4 +384,31 @@ test("schemaVersion 8 rejects a legacy productId/rarity card, a missing held-pos
     () => normalizePublicCommunitySnapshot(invalidCardState, "testnet"),
     { message: "PUBLIC_COMMUNITY_SNAPSHOT_INVALID" },
   );
+});
+
+test("schemaVersion 8 renders honest unknowns for untracked lifetime metrics, recipient counts, and bridge amounts", () => {
+  const fixture = schemaVersion8Fixture();
+  fixture.metrics.skippedCycles = null;
+  fixture.metrics.openedPacks = null;
+  fixture.metrics.totalRewardsPaidMicroUsdg = null;
+  fixture.latestCycle.payoutRecipientCount = null;
+  fixture.latestCycle.rewardRecipientLimit = null;
+  fixture.latestCycle.roundAccounting.outboundBridgeDebit = {
+    chainId: "eip155:4663", assetId: "USDG", units: "5000000", decimals: 6,
+  };
+  fixture.latestCycle.roundAccounting.payoutLiabilityMicroUsdg = "1200000";
+  fixture.latestCycle.roundAccounting.paidHolderRewardsRecipientCount = null;
+
+  const result = normalizePublicCommunitySnapshot(fixture, "testnet");
+  assert.equal(result.metrics.skippedCycles, null);
+  assert.equal(result.metrics.openedPacks, null);
+  assert.equal(result.metrics.totalRewardsPaidMicroUsdg, null);
+  assert.equal(result.metrics.completedCycles, fixture.metrics.completedCycles);
+  assert.equal(result.latestCycle.payoutRecipientCount, null);
+  assert.equal(result.latestCycle.rewardRecipientLimit, null);
+  assert.deepEqual(result.latestCycle.roundAccounting.outboundBridgeDebit, {
+    chainId: "eip155:4663", assetId: "USDG", units: "5000000", decimals: 6,
+  });
+  assert.equal(result.latestCycle.roundAccounting.payoutLiabilityMicroUsdg, "1200000");
+  assert.equal(result.latestCycle.roundAccounting.paidHolderRewardsRecipientCount, null);
 });
