@@ -196,11 +196,11 @@ test('schemaVersion 8 accepts a finalized card with real typed proceeds', () => 
     state: 'finalized',
     finalizedAt: '2026-01-01T00:05:00.000Z',
     transactionId: 'sig-1',
-    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 },
+    proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '4995000', decimals: 6 },
   })];
   const result = normalizePublicCommunitySnapshot(input, 'mainnet');
   assert.equal(result.cards[0].state, 'finalized');
-  assert.deepEqual(result.cards[0].proceeds, { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 });
+  assert.deepEqual(result.cards[0].proceeds, { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '4995000', decimals: 6 });
 });
 
 function v8RoundAccounting(overrides = {}) {
@@ -235,7 +235,7 @@ test('schemaVersion 8 roundAccounting: packSpend/buyback stay permanently null, 
     payoutRecipientCount: null, rewardRecipientLimit: null, transactions: [],
     roundAccounting: v8RoundAccounting({
       outboundBridgeDebit: { chainId: '4663', assetId: '0xusdg', units: '50', decimals: 6 },
-      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6 },
+      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '49', decimals: 6 },
     }),
   };
   const result = normalizePublicCommunitySnapshot(input, 'mainnet');
@@ -245,7 +245,7 @@ test('schemaVersion 8 roundAccounting: packSpend/buyback stay permanently null, 
     chainId: '4663', assetId: '0xusdg', units: '50', decimals: 6,
   });
   assert.deepEqual(result.latestCycle.roundAccounting.collectorPurchaseDebit, {
-    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6,
+    chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '49', decimals: 6,
   });
 });
 

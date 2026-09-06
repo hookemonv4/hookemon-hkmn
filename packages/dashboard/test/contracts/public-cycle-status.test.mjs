@@ -233,7 +233,7 @@ test('schemaVersion 6 keeps the EVM bridge debit and the real Collector-side (So
     plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
     roundAccounting: v6RoundAccounting({
       outboundBridgeDebit: { chainId: '4663', assetId: '0xusdg', units: '50', decimals: 6 }, // real EVM USDG bridge debit
-      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6 }, // distinct real Solana debit
+      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '49', decimals: 6 }, // distinct real Solana debit
     }),
   };
   const result = normalizePublicCycleStatus(input, 'mainnet');
@@ -245,7 +245,7 @@ test('schemaVersion 6 keeps the EVM bridge debit and the real Collector-side (So
     chainId: '4663', assetId: '0xusdg', units: '50', decimals: 6,
   });
   assert.deepEqual(result.cycle.roundAccounting.collectorPurchaseDebit, {
-    chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '49', decimals: 6,
+    chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '49', decimals: 6,
   });
 });
 
@@ -255,7 +255,7 @@ test('schemaVersion 6 rejects a malformed typed Amount (never silently drops it 
     cycleId: 'cycle-1', status: 'settled', selectedPackId: null, maxBoostersPerCycle: null,
     plannedBoosters: 1, openedBoosters: 0, actions: [], cards: [], returnedMicroUsdg: null, rewardStatus: null,
     roundAccounting: v6RoundAccounting({
-      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '-1', decimals: 6 },
+      collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '-1', decimals: 6 },
     }),
   };
   assert.throws(() => normalizePublicCycleStatus(input, 'mainnet'), /PUBLIC_CYCLE_STATUS_INVALID/);

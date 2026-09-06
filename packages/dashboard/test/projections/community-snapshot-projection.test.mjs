@@ -76,8 +76,8 @@ test('readAccounting, when supplied, is called with the most recent terminal cyc
     packSpendMicroUsdg: null, buybackMicroUsdg: null,
     outboundBridgeDebit: { chainId: '4663', assetId: '0xusdg', units: '5000000', decimals: 6 },
     inboundBridgeProceeds: { chainId: '4663', assetId: '0xusdg', units: '4990000', decimals: 6 },
-    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 },
-    collectorBuybackProceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4990000', decimals: 6 },
+    collectorPurchaseDebit: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '4995000', decimals: 6 },
+    collectorBuybackProceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '4990000', decimals: 6 },
     packGainMicroUsdg: null, packLossMicroUsdg: null,
     quotedCosts: {
       outboundBridgeMicroUsdg: null, inboundBridgeMicroUsdg: null, collectorApiMicroUsdg: null,

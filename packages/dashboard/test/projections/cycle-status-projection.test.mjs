@@ -69,7 +69,7 @@ const FIXTURE_ACCOUNTING = Object.freeze({
   buybackMicroUsdg: null,
   outboundBridgeDebit: Object.freeze({ chainId: '4663', assetId: '0xusdg', units: '5000000', decimals: 6 }),
   inboundBridgeProceeds: null,
-  collectorPurchaseDebit: Object.freeze({ chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', units: '4995000', decimals: 6 }),
+  collectorPurchaseDebit: Object.freeze({ chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', units: '4995000', decimals: 6 }),
   collectorBuybackProceeds: null,
   packGainMicroUsdg: null,
   packLossMicroUsdg: null,
