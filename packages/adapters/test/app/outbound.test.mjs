@@ -5,7 +5,7 @@ import test from 'node:test';
 import { keccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { createRelayClient, RelayIntentAuthenticationError } from '../../src/relay-client.mjs';
+import { createRelayClient, relayQuoteDigest, RelayIntentAuthenticationError } from '../../src/relay-client.mjs';
 import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
@@ -28,6 +28,12 @@ function fixture(name) {
 
 const chains = fixture('chains.json');
 const quoteFixture = fixture('quote-outbound.json');
+// This fixture remains a deterministic recorded EVM envelope, but the admission path below
+// models an EXACT_OUTPUT quote: the requested settlement target and minimum are both 25 atomic units.
+quoteFixture.details.currencyOut.amount = '25000000';
+quoteFixture.details.currencyOut.minimumAmount = '25000000';
+quoteFixture.protocol.v2.orderData.output.payments[0].expectedAmount = '25000000';
+quoteFixture.protocol.v2.orderData.output.payments[0].minimumAmount = '25000000';
 const RELAY_DEPOSITORY = quoteFixture.steps[1].items[0].data.to;
 
 function response(body) {
@@ -44,8 +50,60 @@ function relayClient(quote = quoteFixture) {
   });
 }
 
+function admittedQuote(raw = quoteFixture) {
+  const parsed = {
+    direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
+    requestId: raw.requestId,
+    orderId: raw.protocol.v2.orderId,
+    sender: raw.details.sender,
+    recipient: raw.details.recipient,
+    deadlineUnixSeconds: raw.protocol.v2.orderData.output.deadline,
+    origin: {
+      chainId: 4663,
+      address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+      decimals: 6,
+      amount: raw.details.currencyIn.amount,
+    },
+    destination: {
+      chainId: 792703809,
+      address: SOLANA_MINT,
+      decimals: 6,
+      amount: raw.details.currencyOut.amount,
+      minimumAmount: raw.details.currencyOut.minimumAmount,
+    },
+    raw,
+  };
+  return { ...parsed, quoteDigest: relayQuoteDigest(parsed) };
+}
+
+function admission(cycleId, quote = admittedQuote()) {
+  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: quote.origin.amount };
+  const destinationAsset = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: quote.destination.amount };
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    quoteDigest: quote.quoteDigest,
+    quantity: 1,
+    unitFundingQuote: usdg,
+    aggregateFundingQuote: usdg,
+    aggregatePurchase: destinationAsset,
+    relay: {
+      tradeType: 'EXACT_OUTPUT',
+      requestId: quote.requestId,
+      orderId: quote.orderId,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds,
+      sender: quote.sender,
+      recipient: quote.recipient,
+      destinationAmount: destinationAsset.amountAtomic,
+      destinationMinimumAmount: destinationAsset.amountAtomic,
+    },
+    relayQuote: quote,
+  };
+}
+
 function repository(releaseAmount = '25000000') {
-  return { async describeCycle() { return { releaseAmount }; } };
+  return { async describeCycle(cycleId) { return { releaseAmount, admission: admission(cycleId) }; } };
 }
 
 test('prepareOutboundRequest refuses an absent MoneyConfigurationV1 before requesting a Relay quote', async () => {
@@ -109,6 +167,51 @@ test('prepareOutboundRequest binds the same cycle reserve to the configured Sola
   ]);
 });
 
+test('prepareOutboundRequest consumes the admitted exact-output quote without requoting and refuses a short minimum output', async () => {
+  const shortQuote = admittedQuote();
+  shortQuote.destination.minimumAmount = '49999999';
+  const cycleId = 'cycle-outbound-admission-shortfall';
+  let requoteCalls = 0;
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: {
+        relay: {
+          async quoteOutboundBridge() { requoteCalls += 1; throw new Error('must not requote'); },
+          prepareExecution() { throw new Error('must not prepare a short quote'); },
+        },
+      },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository: { async describeCycle() { return { releaseAmount: '25000000', admission: admission(cycleId, shortQuote) }; } },
+      context: { cycleId },
+      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    }),
+    /differs from the durable policy admission/,
+  );
+  assert.equal(requoteCalls, 0);
+});
+
+test('prepareOutboundRequest refuses a context admission that differs from the repository-owned quote or reserve', async () => {
+  const cycleId = 'cycle-outbound-context-conflict';
+  const durable = admission(cycleId);
+  const conflicting = structuredClone(durable);
+  conflicting.quoteDigest = `sha256:${'d'.repeat(64)}`;
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: { chainId: 4663, accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY }, moneyConfiguration: moneyConfiguration() },
+      cycleRepository: { async describeCycle() { return { releaseAmount: durable.aggregateFundingQuote.amountAtomic, admission: durable }; } },
+      context: { cycleId, admission: conflicting },
+      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    }),
+    /context admission conflicts/,
+  );
+});
+
 test('prepareOutboundRequest fails closed when the exact configured Solana mint does not match the quote', async () => {
   await assert.rejects(
     () => prepareOutboundRequest({
@@ -123,7 +226,7 @@ test('prepareOutboundRequest fails closed when the exact configured Solana mint 
       context: { cycleId: 'cycle-outbound-2' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
-    /not fully enabled/,
+    /asset identity/,
   );
 });
 
@@ -139,7 +242,7 @@ test('prepareOutboundRequest rejects a recorded-shaped Relay transaction whose d
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
         moneyConfiguration: moneyConfiguration(),
       },
-      cycleRepository: repository(),
+      cycleRepository: { async describeCycle(cycleId) { return { releaseAmount: altered.details.currencyIn.amount, admission: admission(cycleId, admittedQuote(altered)) }; } },
       context: { cycleId: 'cycle-outbound-depository' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
@@ -219,7 +322,7 @@ test('createOutboundPolicySigner refuses the provisional authority before either
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       moneyConfiguration: moneyConfiguration(),
     },
-    cycleRepository: repository(),
+    cycleRepository: { async describeCycle(cycleId) { return { releaseAmount: quote.details.currencyIn.amount, admission: admission(cycleId, admittedQuote(quote)) }; } },
     context: { cycleId: 'cycle-outbound-authority' },
     nowMs,
   });
@@ -254,6 +357,8 @@ function outboundIntent() {
     requestId: quoteFixture.requestId,
     orderId: quoteFixture.protocol.v2.orderId,
     direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
+    quoteDigest: admittedQuote().quoteDigest,
     originChainId: 4663,
     destinationChainId: 792703809,
     originAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
@@ -1044,7 +1149,7 @@ function quoteForOperationsAccount(account) {
   return quote;
 }
 
-function outboundChainRepository(releaseAmount = quoteFixture.details.currencyIn.amount) {
+function outboundChainRepository(releaseAmount = quoteFixture.details.currencyIn.amount, durableAdmission = null) {
   const attempts = new Map();
   const recoveryContexts = new Map();
   const reservations = [];
@@ -1054,7 +1159,7 @@ function outboundChainRepository(releaseAmount = quoteFixture.details.currencyIn
     get relayLeg() { return relayLeg; },
     get recoveryContexts() { return [...recoveryContexts.values()].map(context => structuredClone(context)); },
     get reservations() { return structuredClone(reservations); },
-    async describeCycle() { return { releaseAmount, chainAttempts: new Map(attempts) }; },
+    async describeCycle() { return { releaseAmount, ...(durableAdmission === null ? {} : { admission: durableAdmission }), chainAttempts: new Map(attempts) }; },
     async readChainTransactionAttempt(_cycleId, stage, requestDigest) {
       return attempts.get(`${stage}\u0000${requestDigest}`) ?? null;
     },
@@ -1111,12 +1216,16 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
     relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     moneyConfiguration: moneyConfiguration(),
   };
-  const cycleRepository = outboundChainRepository();
+  const durableAdmission = admission('cycle-outbound-durable', admittedQuote(quote));
+  const cycleRepository = outboundChainRepository(quote.details.currencyIn.amount, durableAdmission);
   const request = await prepareOutboundRequest({
     adapters: { relay: relayClient(quote) },
     config,
     cycleRepository,
-    context: { cycleId: 'cycle-outbound-durable' },
+    context: {
+      cycleId: 'cycle-outbound-durable',
+      admission: durableAdmission,
+    },
     nowMs: (quote.protocol.v2.orderData.output.deadline * 1000) - 1,
   });
   const context = {

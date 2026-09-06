@@ -11,10 +11,20 @@ import { LeaseLostError } from '../../../runner/src/automation/exclusive-lease.m
 import { LiveModeIntegrationPendingError, createStageDriver } from '../../src/app/stage-driver.mjs';
 import { ReturnRecoveryRequiredError } from '../../src/app/stages/return.mjs';
 import { preparePurchaseRequest } from '../../src/app/stages/purchase.mjs';
-import { createSolanaRpcClient, submitSignedTransaction } from '../../src/solana-rpc.mjs';
+import {
+  CIRCLE_USD_DECIMALS,
+  CIRCLE_USD_MINT,
+  createSolanaRpcClient,
+  deriveAssociatedTokenAddress,
+  submitSignedTransaction,
+} from '../../src/solana-rpc.mjs';
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
-import { createPreparedChainTransactionAttempt, createRecordedRelayLeg } from '../../../runner/src/cycle/money-schemas.mjs';
+import {
+  createPreparedChainTransactionAttempt,
+  createPreparedProviderMutationAttempt,
+  createRecordedRelayLeg,
+} from '../../../runner/src/cycle/money-schemas.mjs';
 import { createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { RelayQuoteExpiredError } from '../../src/relay-client.mjs';
@@ -163,6 +173,406 @@ test('requires a write-ahead repository even when a caller only intends to const
     }),
     /write-ahead mutation safety/,
   );
+});
+
+test('reads the current operator deadline while reconciling a card mutation', async () => {
+  const attempt = createPreparedProviderMutationAttempt({
+    cycleId: CYCLE_ID,
+    stage: 'purchase',
+    requestDigest: `sha256:${'a'.repeat(64)}`,
+  });
+  const attempts = new Map([['purchase', {
+    attempt: { ...attempt, state: 'SENT_UNKNOWN' },
+    responseEvidence: null,
+    reconciliationEvidence: null,
+  }]]);
+  let deadline = null;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig(),
+    readOperatorConfiguration: async () => ({ unresolvedCardDeadlineMinutes: 37 }),
+    cycleRepository: fakeCycleRepository(new Map(), '0', attempts),
+    stageHandlers: {
+      purchase: {
+        async probe() { return null; },
+        async prepareRequest() { return { request: 'unused' }; },
+        async mutate() { throw new Error('reconciliation must not mutate'); },
+        async reconcileLive({ config }) {
+          deadline = config.unresolvedCardDeadlineMinutes;
+          return { reconciled: true };
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(await driver.reconcile({ cycleId: CYCLE_ID, stage: 'purchase' }), { reconciled: true });
+  assert.equal(deadline, 37);
+});
+
+test('limits held-position persistence to card-stage reconciliation', async () => {
+  const sentUnknown = stage => ({
+    attempt: {
+      ...createPreparedProviderMutationAttempt({
+        cycleId: CYCLE_ID,
+        stage,
+        requestDigest: `sha256:${(stage === 'open' ? 'b' : 'c').repeat(64)}`,
+      }),
+      state: 'SENT_UNKNOWN',
+    },
+    responseEvidence: null,
+    reconciliationEvidence: null,
+  });
+  const attempts = new Map([
+    ['open', sentUnknown('open')],
+    ['return', sentUnknown('return')],
+  ]);
+  const repository = fakeCycleRepository(new Map(), '0', attempts);
+  let heldWrites = 0;
+  let wholeCycleHolds = 0;
+  repository.recordHeldPosition = async (cycleId, input) => {
+    assert.equal(cycleId, CYCLE_ID);
+    assert.equal(input.reason, 'HELD_UNRESOLVED');
+    heldWrites += 1;
+    return { positionId: 'held-test' };
+  };
+  repository.holdCycle = async (cycleId, terminalState, evidence) => {
+    assert.equal(cycleId, CYCLE_ID);
+    assert.equal(terminalState, 'HELD_DATA_UNVERIFIED');
+    assert.equal(evidence.reason, 'missing predecessor evidence');
+    wholeCycleHolds += 1;
+  };
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repository,
+    stageHandlers: {
+      open: {
+        async probe() { return null; },
+        async prepareRequest() { return { request: 'unused' }; },
+        async mutate() { throw new Error('reconciliation must not mutate'); },
+        async reconcileLive({ context, cycleRepository }) {
+          assert.equal(context.nowMs, 1_000);
+          assert.equal(typeof cycleRepository.recordHeldPosition, 'function');
+          assert.equal(typeof cycleRepository.holdCycle, 'function');
+          await cycleRepository.recordHeldPosition(context.cycleId, { reason: 'HELD_UNRESOLVED' });
+          await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'missing predecessor evidence' });
+          return { decision: 'held' };
+        },
+      },
+      return: {
+        async probe() { return null; },
+        async prepareRequest() { return { request: 'unused' }; },
+        async mutate() { throw new Error('reconciliation must not mutate'); },
+        async reconcileLive({ cycleRepository }) {
+          assert.equal(cycleRepository.recordHeldPosition, undefined);
+          assert.equal(cycleRepository.holdCycle, undefined);
+          return { reconciled: true };
+        },
+      },
+    },
+  });
+
+  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'open', nowMs: 1_000 });
+  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'return', nowMs: 1_000 });
+  assert.equal(heldWrites, 1);
+  assert.equal(wholeCycleHolds, 1);
+});
+
+test('dispatches a prepared supplementary settlement through its injected handler', async () => {
+  const position = {
+    positionId: `held:${'a'.repeat(64)}`,
+    cycleId: CYCLE_ID,
+    packId: 'base-pack',
+    memo: 'memo-supplementary',
+    mint: 'mint-supplementary',
+    cardRef: 'mint-supplementary',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'b'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  let settlement = {
+    positionId: position.positionId,
+    cycleId: CYCLE_ID,
+    manifestId: `${CYCLE_ID}:supplementary:1`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  const repository = fakeCycleRepository();
+  repository.readSupplementarySettlement = async positionId => {
+    assert.equal(positionId, position.positionId);
+    return structuredClone(settlement);
+  };
+  repository.readSupplementarySettlementEvidence = async positionId => {
+    assert.equal(positionId, position.positionId);
+    return null;
+  };
+  repository.advanceSupplementarySettlement = async (positionId, input) => {
+    assert.equal(positionId, position.positionId);
+    assert.equal(input.expectedState, 'PREPARED');
+    assert.equal(input.nextState, 'BUYBACK_SENT_UNKNOWN');
+    settlement = { ...settlement, state: input.nextState };
+    return structuredClone(settlement);
+  };
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repository,
+    supplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        async reconcile({ context, cycleRepository, position: receivedPosition, settlement: receivedSettlement }) {
+          assert.equal(context.stage, 'supplementary-buyback');
+          assert.deepEqual(receivedPosition, position);
+          assert.deepEqual(receivedSettlement, {
+            positionId: position.positionId,
+            cycleId: CYCLE_ID,
+            manifestId: `${CYCLE_ID}:supplementary:1`,
+            state: 'PREPARED',
+            positionEvidenceDigest: position.evidenceDigest,
+          });
+          assert.equal(await cycleRepository.readSupplementarySettlementEvidence(position.positionId), null);
+          return cycleRepository.advanceSupplementarySettlement(position.positionId, {
+            expectedState: receivedSettlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'c'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+
+  const result = await driver.runSupplementarySettlement({
+    position,
+    settlement,
+    nowMs: 1_001,
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {},
+  });
+
+  assert.deepEqual(result, {
+    status: 'ADVANCED',
+    positionId: position.positionId,
+    cycleId: CYCLE_ID,
+    manifestId: `${CYCLE_ID}:supplementary:1`,
+    stage: 'supplementary-buyback',
+    state: 'BUYBACK_SENT_UNKNOWN',
+  });
+});
+
+test('keeps supplementary test handlers from receiving provider capabilities', async () => {
+  const position = {
+    positionId: `held:${'d'.repeat(64)}`,
+    cycleId: CYCLE_ID,
+    packId: 'base-pack',
+    memo: 'memo-supplementary-guard',
+    mint: 'mint-supplementary-guard',
+    cardRef: 'mint-supplementary-guard',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'e'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  const settlement = {
+    positionId: position.positionId,
+    cycleId: CYCLE_ID,
+    manifestId: `${CYCLE_ID}:supplementary:2`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  const repository = fakeCycleRepository();
+  repository.readSupplementarySettlement = async () => structuredClone(settlement);
+  let handlerRan = false;
+  let providerCalls = 0;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: {
+      collectorCrypt: {
+        async buyback() { providerCalls += 1; },
+      },
+      relay: null,
+      robinhood: { client: null },
+      solana: { client: null },
+    },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repository,
+    supplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        async reconcile({ adapters }) {
+          handlerRan = true;
+          assert.deepEqual(adapters, {});
+          assert.equal(adapters.collectorCrypt, undefined);
+        },
+      },
+    },
+  });
+
+  const result = await driver.runSupplementarySettlement({
+    position,
+    settlement,
+    nowMs: 1_001,
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {},
+  });
+  assert.equal(result.status, 'PENDING');
+  assert.equal(handlerRan, true);
+  assert.equal(providerCalls, 0);
+});
+
+test('rejects supplementary handler injection outside the Node test runner', () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    assert.throws(
+      () => createStageDriver({
+        liveMode: true,
+        adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+        signerClient: null,
+        config: baseConfig(),
+        cycleRepository: fakeCycleRepository(),
+        supplementaryStageHandlers: {},
+      }),
+      /available only from the Node test runner/,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
+});
+
+test('productionSupplementaryStageHandlers requires its own real adapters and signer client', () => {
+  assert.throws(
+    () => createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: fakeCycleRepository(),
+      productionSupplementaryStageHandlers: { PREPARED: { stage: 'supplementary-buyback', async reconcile() {} } },
+    }),
+    /requires supplementaryAdapters and supplementarySignerClient/,
+  );
+});
+
+test('productionSupplementaryStageHandlers cannot be combined with the Node-test-only seam', () => {
+  assert.throws(
+    () => createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: fakeCycleRepository(),
+      supplementaryStageHandlers: {},
+      supplementaryAdapters: {},
+      supplementarySignerClient: {},
+      productionSupplementaryStageHandlers: { PREPARED: { stage: 'supplementary-buyback', async reconcile() {} } },
+    }),
+    /cannot combine productionSupplementaryStageHandlers with the Node-test-only supplementaryStageHandlers seam/,
+  );
+});
+
+test('productionSupplementaryStageHandlers dispatches outside the Node test runner with real capabilities, unrestricted to observation-only', async () => {
+  const previous = process.env.NODE_TEST_CONTEXT;
+  try {
+    delete process.env.NODE_TEST_CONTEXT;
+    const position = {
+      positionId: `held:${'f'.repeat(64)}`,
+      cycleId: CYCLE_ID,
+      packId: 'base-pack',
+      memo: 'memo-supplementary-production',
+      mint: 'mint-supplementary-production',
+      cardRef: 'mint-supplementary-production',
+      costMicroUsdg: '25',
+      insuredValue: null,
+      reason: 'EPIC_THRESHOLD',
+      terminalState: 'HELD_OWNER_DECISION',
+      evidenceDigest: `sha256:${'1'.repeat(64)}`,
+      openedAtMs: 1_000,
+      ownerDecision: { choice: 'sell' },
+      resolution: null,
+    };
+    let settlement = {
+      positionId: position.positionId,
+      cycleId: CYCLE_ID,
+      manifestId: `${CYCLE_ID}:supplementary:3`,
+      state: 'PREPARED',
+      positionEvidenceDigest: position.evidenceDigest,
+    };
+    const repository = fakeCycleRepository();
+    repository.readSupplementarySettlement = async () => structuredClone(settlement);
+    repository.advanceSupplementarySettlement = async (positionId, input) => {
+      settlement = { ...settlement, state: input.nextState };
+      return structuredClone(settlement);
+    };
+    let buybackCalls = 0;
+    let signingCalls = 0;
+    let leaseChecks = 0;
+    const productionAdapters = Object.freeze({ collectorCrypt: { async buyback() { buybackCalls += 1; return { signature: 'sig' }; } } });
+    const productionSignerClient = Object.freeze({ solana: { async sign() { signingCalls += 1; return 'signed'; } } });
+    let receivedAdapters = null;
+    let receivedSignerClient = null;
+    const driver = createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null,
+      config: baseConfig(),
+      cycleRepository: repository,
+      supplementaryAdapters: productionAdapters,
+      supplementarySignerClient: productionSignerClient,
+      productionSupplementaryStageHandlers: {
+        PREPARED: {
+          stage: 'supplementary-buyback',
+          mutation: 'buyback',
+          async reconcile({ adapters, signerClient, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
+            receivedAdapters = adapters;
+            receivedSignerClient = signerClient;
+            await adapters.collectorCrypt.buyback();
+            await signerClient.solana.sign();
+            return injectedRepository.advanceSupplementarySettlement(position.positionId, {
+              expectedState: receivedSettlement.state,
+              nextState: 'BUYBACK_SENT_UNKNOWN',
+              evidence: { requestDigest: `sha256:${'2'.repeat(64)}` },
+            });
+          },
+        },
+      },
+    });
+
+    const result = await driver.runSupplementarySettlement({
+      position,
+      settlement,
+      nowMs: 1_001,
+      fencingToken: '11111111-1111-4111-8111-111111111111',
+      assertLease() { leaseChecks += 1; },
+    });
+
+    assert.notEqual(receivedAdapters, productionAdapters, 'production capabilities are lease-fenced facades');
+    assert.notEqual(receivedSignerClient, productionSignerClient, 'production signer is a lease-fenced facade');
+    assert.equal(buybackCalls, 1);
+    assert.equal(signingCalls, 1);
+    assert.ok(leaseChecks >= 4, 'the driver checks the lease before dispatch and each capability use');
+    assert.equal(result.status, 'ADVANCED');
+    assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = previous;
+  }
 });
 
 test('liveMode false: execute() never reaches signerClient.sign or any collector-crypt/relay mutation, for every stage', async () => {
@@ -527,6 +937,7 @@ test('purchase request omits packType when no pack code is configured', async ()
     provider: 'collector-crypt',
     operation: 'purchase',
     playerAddress: 'PLAYER11111111111111111111111111111111111',
+    quantity: 1,
   });
 });
 
@@ -569,6 +980,119 @@ test('the remaining frozen built-in mutation stages refuse live mutations before
     const attempt = await cycleRepository.readOperationalStageAttempt(CYCLE_ID, stage);
     assert.equal(attempt.attempt.state, 'PREPARED');
   }
+});
+
+test('a live collector-only rehearsal journals and invokes the real open handler instead of the frozen integration refusal', async () => {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const attempts = new Map();
+  const stages = new Map([['purchase', {
+    status: 'COMPLETE',
+    evidence: { quantity: 1, packs: [{ packIndex: 0, memo: 'collector-memo', status: 'purchased', expectedCardCount: 1 }] },
+  }]]);
+  const cycleRepository = fakeCycleRepository(stages, '0', attempts);
+  let openCalls = 0;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: {
+      collectorCrypt: {
+        async openPack({ memo }) {
+          openCalls += 1;
+          assert.equal(memo, 'collector-memo');
+          return { nft_address: 'Card111111111111111111111111111111111111111' };
+        },
+      },
+      relay: null,
+      robinhood: { client: null },
+      solana: { client: null },
+    },
+    signerClient: null,
+    config: baseConfig({
+      accounts: { evm: null, solana: operator },
+      execution: { profile: 'rehearsal', providerMode: 'live' },
+      signer: {
+        backend: 'keychain',
+        liveMode: true,
+        roles: ['operator-solana'],
+        keychain: { solanaAccount: 'operator-solana' },
+      },
+      solana: { chainId: 'solana-mainnet' },
+      pack: { code: 'collector-25' },
+      collectorCrypt: {
+        settlementAsset: asset,
+        packPrice: { ...asset, amountAtomic: '25000000' },
+      },
+      moneyConfiguration: {
+        assets: { solanaStablecoin: asset },
+        solana: { lamportReserve: { chainId: 'solana-mainnet', assetId: 'native', decimals: 9, amountAtomic: '5000000' } },
+      },
+      rehearsal: {
+        mode: 'collector-only',
+        proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+        payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+        split: 'equal',
+      },
+    }),
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+  });
+
+  await driver.execute({
+    cycleId: CYCLE_ID,
+    stage: 'open',
+    intent: { journalHead: 'collector-open' },
+    assertMutationAllowed: async () => {},
+  });
+
+  assert.equal(openCalls, 1);
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'open')).attempt.state, 'RESPONSE_RECORDED');
+});
+
+test('a live collector-only rehearsal records no-effect eligibility and claim stages without an EVM adapter', async () => {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const cycleRepository = writeAheadRepository();
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig({
+      accounts: { evm: null, solana: operator },
+      execution: { profile: 'rehearsal', providerMode: 'live' },
+      signer: {
+        backend: 'keychain',
+        liveMode: true,
+        roles: ['operator-solana'],
+        keychain: { solanaAccount: 'operator-solana' },
+      },
+      solana: { chainId: 'solana-mainnet' },
+      pack: { code: 'collector-25' },
+      collectorCrypt: { settlementAsset: asset, packPrice: { ...asset, amountAtomic: '25000000' } },
+      moneyConfiguration: {
+        assets: { solanaStablecoin: asset },
+        solana: { lamportReserve: { chainId: 'solana-mainnet', assetId: 'native', decimals: 9, amountAtomic: '5000000' } },
+      },
+      rehearsal: {
+        mode: 'collector-only',
+        proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+        payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+        split: 'equal',
+      },
+    }),
+    cycleRepository,
+  });
+
+  const eligibility = await driver.reconcile({ cycleId: CYCLE_ID, stage: 'eligibility-snapshot' });
+  assert.equal(eligibility.skipped, true);
+  await driver.execute({
+    cycleId: CYCLE_ID,
+    stage: 'claim-process',
+    intent: { journalHead: 'collector-no-claim' },
+    assertMutationAllowed: async () => {},
+  });
+  const claim = await driver.reconcile({ cycleId: CYCLE_ID, stage: 'claim-process' });
+  assert.equal(claim.skipped, true);
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'claim-process')).attempt.state, 'RECONCILED');
 });
 
 test('the built-in eligibility snapshot completes only through read-only reconciliation', async () => {
@@ -1349,7 +1873,7 @@ test('persists NOT_SENT before an injected capability and retries the same reque
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'purchase')).attempt.state, 'RESPONSE_RECORDED');
 });
 
-test('holds a keychain interaction denial with redacted OS text before any broadcast', async t => {
+test('keeps a keychain interaction denial retryable with redacted OS text before any broadcast', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   const secret = `0x${'a'.repeat(64)}`;
   let keychainCalls = 0;
@@ -1394,21 +1918,24 @@ test('holds a keychain interaction denial with redacted OS text before any broad
       intent: { journalHead: 'keychain-interaction-denied' },
       assertMutationAllowed: async () => {},
     }),
-    /User interaction is not allowed/,
+    error => {
+      assert.match(error.message, /User interaction is not allowed/);
+      assert.doesNotMatch(error.message, new RegExp(secret.slice(2, 16)));
+      return true;
+    },
   );
   assert.equal(keychainCalls, 1);
   assert.equal(broadcasts, 0);
 
   const reopened = await CycleRepository.open(directory);
   const cycle = await reopened.describeCycle(cycleId);
-  assert.equal(cycle.terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(cycle.terminalState, null);
+  assert.equal(cycle.terminalEvidence, null);
   assert.equal(cycle.operationalAttempts.get('purchase').attempt.state, 'NOT_SENT');
-  assert.match(cycle.terminalEvidence.error, /User interaction is not allowed/);
-  assert.doesNotMatch(cycle.terminalEvidence.error, new RegExp(secret.slice(2, 16)));
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'purchase'), /terminal as HELD_UNAVAILABLE/);
+  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 });
 
-test('holds an expired Relay quote before any request or broadcast', async t => {
+test('keeps an expired Relay quote retryable before any request or broadcast', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   let requests = 0;
   let broadcasts = 0;
@@ -1449,12 +1976,12 @@ test('holds an expired Relay quote before any request or broadcast', async t => 
   assert.equal(broadcasts, 0);
 
   const reopened = await CycleRepository.open(directory);
-  assert.equal((await reopened.describeCycle(cycleId)).terminalState, 'HELD_UNAVAILABLE');
+  assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
   assert.equal(await reopened.readOperationalStageAttempt(cycleId, 'outbound'), null);
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'outbound'), /terminal as HELD_UNAVAILABLE/);
+  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 });
 
-test('holds a lost lease before a provider effect and retains a NOT_SENT retry record', async t => {
+test('keeps a lost lease retryable before a provider effect and retains a NOT_SENT record', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   let effects = 0;
   const driver = createStageDriver({
@@ -1489,13 +2016,13 @@ test('holds a lost lease before a provider effect and retains a NOT_SENT retry r
 
   const reopened = await CycleRepository.open(directory);
   const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.terminalState, 'HELD_UNAVAILABLE');
+  assert.equal(state.terminalState, null);
+  assert.equal(state.terminalEvidence, null);
   assert.equal(state.operationalAttempts.get('purchase').attempt.state, 'NOT_SENT');
-  assert.deepEqual(state.terminalEvidence.lease, { owner: 'cycle-runner', version: 4 });
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'purchase'), /terminal as HELD_UNAVAILABLE/);
+  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 });
 
-async function assertPolicyRefusalHeld(t, message) {
+async function assertPolicyRefusalRetryable(t, message) {
   const { directory, repository, cycleId } = await durableCycle(t);
   let broadcasts = 0;
   const driver = createStageDriver({
@@ -1531,20 +2058,21 @@ async function assertPolicyRefusalHeld(t, message) {
   assert.equal(broadcasts, 0);
   const reopened = await CycleRepository.open(directory);
   const state = await reopened.describeCycle(cycleId);
-  assert.equal(state.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(state.terminalState, null);
+  assert.equal(state.terminalEvidence, null);
   assert.equal(state.operationalAttempts.get('purchase').attempt.state, 'NOT_SENT');
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'purchase'), /terminal as HELD_DATA_UNVERIFIED/);
+  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 }
 
-test('holds a wrong-asset transaction policy refusal before signing', async t => {
-  await assertPolicyRefusalHeld(t, 'transaction policy refused a wrong asset');
+test('keeps a wrong-asset transaction policy refusal retryable before signing', async t => {
+  await assertPolicyRefusalRetryable(t, 'transaction policy refused a wrong asset');
 });
 
-test('holds a wrong-recipient transaction policy refusal before signing', async t => {
-  await assertPolicyRefusalHeld(t, 'transaction policy refused a wrong recipient');
+test('keeps a wrong-recipient transaction policy refusal retryable before signing', async t => {
+  await assertPolicyRefusalRetryable(t, 'transaction policy refused a wrong recipient');
 });
 
-test('holds an expired return blockhash while retaining a broadcast attempt after reopen', async t => {
+test('keeps an expired return blockhash retryable while retaining a broadcast attempt after reopen', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   const requestDigest = `sha256:${'d'.repeat(64)}`;
   await repository.prepareChainTransactionAttempt(cycleId, 'return', createPreparedChainTransactionAttempt({
@@ -1588,9 +2116,9 @@ test('holds an expired return blockhash while retaining a broadcast attempt afte
   );
   assert.equal(effects, 0);
   const reopened = await CycleRepository.open(directory);
-  assert.equal((await reopened.describeCycle(cycleId)).terminalState, 'HELD_UNAVAILABLE');
+  assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
   assert.equal((await reopened.readChainTransactionAttempt(cycleId, 'return', requestDigest)).attempt.state, 'BROADCAST');
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'return'), /terminal as HELD_UNAVAILABLE/);
+  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 });
 
 test('records NOT_SENT when a signer refuses before any provider send', async () => {
@@ -1954,16 +2482,16 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     ...writeAheadRepository(),
     async holdCycle() { throw new Error('reconciliation must not receive a repository writer'); },
   };
-  await cycleRepository.prepareStageAttempt(CYCLE_ID, 'purchase', {
+  await cycleRepository.prepareStageAttempt(CYCLE_ID, 'return', {
     schema: 'hookemon.provider-mutation-attempt.v1',
     cycleId: CYCLE_ID,
-    stage: 'purchase',
+    stage: 'return',
     state: 'PREPARED',
     requestDigest: `sha256:${'a'.repeat(64)}`,
     responseDigest: null,
     reconciliationDigest: null,
   });
-  await cycleRepository.recordStageAttemptResponse(CYCLE_ID, 'purchase', { providerReceipt: 'provider-receipt-1' });
+  await cycleRepository.recordStageAttemptResponse(CYCLE_ID, 'return', { providerReceipt: 'provider-receipt-1' });
   let readCalls = 0;
   let leaseCurrent = true;
   const driver = createStageDriver({
@@ -1988,7 +2516,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     config: baseConfig(),
     cycleRepository,
     stageHandlers: {
-      purchase: {
+      return: {
         async probe() { return null; },
         async mutate() { throw new Error('mutation must not run during reconciliation'); },
         async reconcileLive({ adapters, cycleRepository }) {
@@ -2004,7 +2532,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
   await assert.rejects(
     () => driver.reconcile({
       cycleId: CYCLE_ID,
-      stage: 'purchase',
+      stage: 'return',
       intent: { journalHead: 'head-read-fence' },
       assertLease() {
         if (!leaseCurrent) throw new Error('lease expired before reconciliation read');
@@ -2013,7 +2541,7 @@ test('reconciliation receives only lease-fenced read capabilities', async () => 
     /lease expired before reconciliation read/,
   );
   assert.equal(readCalls, 0);
-  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'purchase')).attempt.state, 'RESPONSE_RECORDED');
+  assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'return')).attempt.state, 'RESPONSE_RECORDED');
 });
 
 test('does not repeat a provider mutation after a post-send error leaves an attempt unknown', async () => {
@@ -2533,7 +3061,7 @@ test('pending provider stages refuse live mutations while the eligibility snapsh
   assert.equal(await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'eligibility-snapshot'), null);
 });
 
-test('built-in payout holds a lost lease before payout preparation or signing', async t => {
+test('built-in payout keeps a lost lease retryable before payout preparation or signing', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   const lost = new LeaseLostError('payout lease expired', { owner: 'cycle-runner', version: 9 });
   let broadcasts = 0;
@@ -2563,9 +3091,9 @@ test('built-in payout holds a lost lease before payout preparation or signing', 
   );
   assert.equal(broadcasts, 0);
   const reopened = await CycleRepository.open(directory);
-  assert.equal((await reopened.describeCycle(cycleId)).terminalState, 'HELD_UNAVAILABLE');
+  assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
   assert.equal(await reopened.readOperationalStageAttempt(cycleId, 'payout'), null);
-  await assert.rejects(() => reopened.prepareStage(cycleId, 'payout'), /terminal as HELD_UNAVAILABLE/);
+  assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
 });
 
 test('the built-in driver derives direct payout policy around a guarded raw signer', async () => {

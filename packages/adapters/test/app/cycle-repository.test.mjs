@@ -16,7 +16,7 @@ import { ERC20_TRANSFER_TOPIC, readFinalizedErc20TransferProof } from '../../src
 import { createSolanaRpcClient, readFinalizedRelayDestinationObservation } from '../../src/solana-rpc.mjs';
 import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
 import { CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
-import { OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 
 const SETTLEMENT_SOURCE_ASSET = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
@@ -49,6 +49,7 @@ function custodyLedger(cycleId, overrides = {}) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -631,6 +632,73 @@ async function completeOperationalStages(repository, cycleId) {
   }
 }
 
+const SUPPLEMENTARY_USDG = '0x0000000000000000000000000000000000000001';
+const SUPPLEMENTARY_OPERATIONS = '0x0000000000000000000000000000000000000002';
+
+function supplementaryReturnBoundary(position, settlement, {
+  amountAtomic = '9',
+  finalityEvidence = { transactionHash: `0x${'a'.repeat(64)}`, finalized: true },
+} = {}) {
+  return {
+    schema: 'hookemon.supplementary-return-boundary.v1',
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturnEvidence: {
+      schema: 'hookemon.supplementary-finalized-return.v1',
+      positionId: position.positionId,
+      cycleId: position.cycleId,
+      manifestId: settlement.manifestId,
+      operations: SUPPLEMENTARY_OPERATIONS,
+      usdgAddress: SUPPLEMENTARY_USDG,
+      amountAtomic,
+      finalityEvidence,
+    },
+  };
+}
+
+function supplementaryPayoutSource(position, settlement, returnBoundary, {
+  previousDust = {
+    chainId: 4663,
+    assetId: SUPPLEMENTARY_USDG,
+    decimals: 6,
+    amountAtomic: '0',
+  },
+  previousDustSource = null,
+} = {}) {
+  const finalizedReturnEvidence = returnBoundary.finalizedReturnEvidence;
+  return {
+    schema: 'hookemon.supplementary-payout-source.v1',
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturn: {
+      chainId: 4663,
+      assetId: SUPPLEMENTARY_USDG,
+      decimals: 6,
+      amountAtomic: finalizedReturnEvidence.amountAtomic,
+    },
+    previousDust: {
+      chainId: 4663,
+      assetId: previousDust.assetId.toLowerCase(),
+      decimals: previousDust.decimals,
+      amountAtomic: previousDust.amountAtomic,
+    },
+    previousDustSource,
+    returnBinding: {
+      operations: SUPPLEMENTARY_OPERATIONS,
+      usdgAddress: SUPPLEMENTARY_USDG,
+      evidenceDigest: digest({
+        schema: 'hookemon.supplementary-finalized-return-binding.v1',
+        positionId: position.positionId,
+        cycleId: position.cycleId,
+        manifestId: settlement.manifestId,
+        finalizedReturnEvidence,
+      }),
+    },
+  };
+}
+
 async function completePredecessors(repository, cycleId, stage) {
   const stageIndex = OPERATIONAL_CYCLE_STAGES.indexOf(stage);
   for (const predecessor of OPERATIONAL_CYCLE_STAGES.slice(0, stageIndex)) {
@@ -644,7 +712,36 @@ test('readActiveCycle is null before any cycle is created', async t => {
   assert.equal(await repository.readActiveCycle(), null);
 });
 
-test('peekActiveCycle leaves a completed crash-recovery record byte-for-byte unchanged', async t => {
+test('holdCycle persists terminalAtMs from the repository clock', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  assert.equal((await repository.describeCycle(cycleId)).terminalAtMs, 1_700_000_000_000);
+});
+
+test('completeCycle persists terminalAtMs from the repository clock', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  assert.equal((await repository.describeCycle(cycleId)).terminalAtMs, 1_700_000_000_000);
+});
+
+test('a legacy cycle-terminal event stored without terminalAtMs reads back null rather than a fabricated time', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const store = await DurableCycleStore.open(directory);
+  const stored = store.readCycle(cycleId);
+  const entry = new CycleJournal(cycleId, stored.entries).propose('cycle-terminal', { terminalState: 'HELD_UNAVAILABLE', evidence: {} });
+  const transaction = store.begin(cycleId, { expectedVersion: stored.version, expectedJournalHead: stored.journalHead });
+  transaction.stageEvent(entry);
+  await store.commit(transaction);
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  assert.equal((await reopened.describeCycle(cycleId)).terminalAtMs, null);
+});
+
+test('peekActiveCycle skips a completed crash-recovery record without changing it', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
@@ -659,11 +756,7 @@ test('peekActiveCycle leaves a completed crash-recovery record byte-for-byte unc
   const before = store.readCycle(cycleId);
 
   const reopened = await CycleRepository.open(directory);
-  assert.deepEqual(await reopened.peekActiveCycle(), {
-    cycleId,
-    releaseAmount: '1',
-    terminalState: 'COMPLETED',
-  });
+  assert.equal(await reopened.peekActiveCycle(), null);
   assert.deepEqual(store.readCycle(cycleId), before);
   assert.deepEqual(store.activeCycleIds, [cycleId]);
 });
@@ -887,6 +980,87 @@ test('completeStage is idempotent when retried with identical evidence, and reje
   );
 });
 
+function oversizedEligibilitySnapshotEvidence(overrides = {}) {
+  return {
+    entries: Array.from({ length: 200 }, (_, index) => ({ holder: `holder-${index}`, amount: `${index}` })),
+    ...overrides,
+  };
+}
+
+test('completeStage pages oversized evidence to durable storage and readStage transparently resolves it', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  const evidence = oversizedEligibilitySnapshotEvidence();
+
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence);
+  assert.deepEqual(await repository.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence });
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence }, 'survives a repository restart');
+});
+
+test('completeStage retried with identical oversized evidence is idempotent and reuses the durable blob', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  const evidence = oversizedEligibilitySnapshotEvidence();
+
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence);
+  await repository.completeStage(cycleId, 'eligibility-snapshot', evidence); // no throw
+  assert.deepEqual(await repository.readStage(cycleId, 'eligibility-snapshot'), { status: 'COMPLETE', evidence });
+});
+
+test('completeStage rejects a retry with different oversized evidence for the same stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+  await assert.rejects(
+    () => repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence({ note: 'different' })),
+    /already completed with different evidence/,
+  );
+});
+
+test('readStage hard-fails when paged evidence is referenced but missing from durable storage', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+
+  await rm(join(directory, 'stage-evidence'), { recursive: true, force: true });
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => reopened.readStage(cycleId, 'eligibility-snapshot'),
+    /durable cycle store stage evidence is missing/,
+  );
+});
+
+test('readStage hard-fails when a paged evidence blob no longer matches its durable reference digest', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', oversizedEligibilitySnapshotEvidence());
+
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent('eligibility-snapshot'));
+  const manifest = JSON.parse(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'));
+  const generationDirectory = join(stageDirectory, manifest.generation);
+  const firstPageFile = join(generationDirectory, '0000.json');
+  const page = JSON.parse(await readFile(firstPageFile, 'utf8'));
+  page.entries = page.entries.slice().reverse();
+  await writeFile(firstPageFile, `${JSON.stringify(page)}\n`);
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => reopened.readStage(cycleId, 'eligibility-snapshot'),
+    /page digest does not match its manifest|does not match its durable reference digest/,
+  );
+});
+
 test('readStage/completeStage reject an unknown stage name', async t => {
   const repository = await CycleRepository.open(await tempDirectory(t));
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
@@ -903,6 +1077,775 @@ test('completeCycle archives the cycle so readActiveCycle reports null and a new
   assert.equal(await repository.readActiveCycle(), null);
   const second = await repository.createCycle({ releaseAmount: '2', mode: 'production' });
   assert.notEqual(second.cycleId, cycleId);
+});
+
+test('records a held position without terminally holding its cycle', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+
+  const recorded = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-1',
+    mint: 'mint-1',
+    cardRef: 'mint-1',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: {
+      chainId: '792703809',
+      assetId: SETTLEMENT_SOLANA_MINT,
+      decimals: 6,
+      amountAtomic: '50000000',
+    },
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+
+  assert.match(recorded.positionId, /^held:[0-9a-f]{64}$/);
+  assert.equal(recorded.cycleId, cycleId);
+  assert.equal(recorded.openedAtMs, 1_700_000_000_000);
+  const current = await repository.describeCycle(cycleId);
+  assert.equal(current.terminalState, null);
+  assert.deepEqual([...current.heldPositions.values()], [recorded]);
+  assert.equal(current.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '25000000');
+  assert.deepEqual(await repository.readHeldPosition(recorded.positionId), recorded);
+  assert.deepEqual(await repository.listHeldPositions(), [recorded]);
+
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  assert.equal((await repository.describeCycle(cycleId)).terminalState, 'COMPLETED');
+  assert.deepEqual(await repository.listHeldPositions(), [recorded]);
+});
+
+test('reuses a held position after restart timing changes without doubling its custody bucket', async t => {
+  let nowMs = 1_700_000_000_000;
+  const repository = await CycleRepository.open(await tempDirectory(t), () => nowMs);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const input = {
+    packId: 'pack-1',
+    memo: 'memo-1',
+    mint: 'mint-1',
+    cardRef: 'mint-1',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'BUYBACK_UNAVAILABLE',
+    terminalState: 'HELD_UNAVAILABLE',
+    evidence: { stage: 'buyback', reason: 'unavailable' },
+  };
+  const first = await repository.recordHeldPosition(cycleId, input);
+  nowMs += 60_000;
+  const retry = await repository.recordHeldPosition(cycleId, input);
+
+  assert.deepEqual(retry, first);
+  const state = await repository.describeCycle(cycleId);
+  assert.equal(state.heldPositions.size, 1);
+  assert.equal(state.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '25000000');
+});
+
+test('all held cards complete a cycle with zero main settlement', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '25000000', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-1',
+    mint: 'mint-1',
+    cardRef: 'mint-1',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+
+  const completed = await repository.describeCycle(cycleId);
+  assert.equal(completed.terminalState, 'COMPLETED');
+  assert.deepEqual([...completed.heldPositions.values()], [position]);
+  const ledger = completed.custodyLedgers.get('4663\u0000asset-usdg');
+  assert.equal(ledger.heldPositions, '25000000');
+  assert.equal(ledger.buybackProceeds, '0');
+  assert.equal(ledger.returnReceived, '0');
+});
+
+test('records a position-bound held owner decision without terminally holding the cycle', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-1',
+    mint: 'mint-1',
+    cardRef: 'mint-1',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  const decision = {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-decision-1',
+    expectedRevision: 0,
+    choice: 'keep-holding',
+  };
+
+  const recorded = await repository.recordHeldOwnerDecision(position.positionId, decision);
+  assert.deepEqual(recorded, { positionId: position.positionId, ...decision });
+  const updated = await repository.readHeldPosition(position.positionId);
+  assert.equal(updated.positionRevision, 1);
+  assert.deepEqual(updated.ownerDecision, recorded);
+  assert.equal((await repository.describeCycle(cycleId)).terminalState, null);
+  assert.deepEqual(await repository.recordHeldOwnerDecision(position.positionId, decision), recorded);
+  await assert.rejects(
+    () => repository.recordHeldOwnerDecision(position.positionId, { ...decision, choice: 'sell' }),
+    /requestId conflict/,
+  );
+});
+
+test('starts a supplementary settlement for a held position after its main cycle completes', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary',
+    mint: 'mint-supplementary',
+    cardRef: 'mint-supplementary',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+
+  const decision = await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+
+  assert.equal(decision.choice, 'sell');
+  const settlement = await repository.readSupplementarySettlement(position.positionId);
+  assert.deepEqual(settlement, {
+    positionId: position.positionId,
+    cycleId,
+    manifestId: `${cycleId}:supplementary:1`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+    eligibilitySnapshotEvidenceDigest: digest({ stage: 'eligibility-snapshot', finalized: true }),
+    payoutSourceDigest: null,
+  });
+  assert.equal((await repository.describeCycle(cycleId)).terminalState, 'COMPLETED');
+  const next = await repository.createCycle({ releaseAmount: '2', mode: 'production' });
+  assert.notEqual(next.cycleId, cycleId);
+});
+
+async function preparedSupplementarySettlement(repository, cycleId) {
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary',
+    mint: 'mint-supplementary',
+    cardRef: 'mint-supplementary',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  return position.positionId;
+}
+
+function supplementaryChainAttempt(positionId, overrides = {}) {
+  return {
+    schema: 'hookemon.supplementary-chain-attempt.v1',
+    positionId,
+    requestDigest: `sha256:${'7'.repeat(64)}`,
+    state: 'PREPARED',
+    rawBytes: null,
+    nonce: null,
+    blockhash: null,
+    hash: null,
+    ...overrides,
+  };
+}
+
+test('prepares, signs, and broadcasts a position-scoped supplementary chain attempt without colliding with the main cycle stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+
+  const prepared = await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  assert.deepEqual(prepared, { attempt: supplementaryChainAttempt(positionId), broadcastEvidence: null });
+  // Idempotent retry with identical evidence.
+  assert.deepEqual(await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId)), prepared);
+
+  const signed = await repository.recordSupplementarySignedTransaction(positionId, requestDigest, {
+    rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}`,
+  });
+  assert.equal(signed.attempt.state, 'SIGNED');
+  assert.deepEqual(
+    await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}` }),
+    signed,
+  );
+
+  const broadcast = await repository.recordSupplementaryBroadcast(positionId, requestDigest, { schema: 'hookemon.chain-observation.v1', observed: true });
+  assert.equal(broadcast.attempt.state, 'BROADCAST');
+  assert.deepEqual(broadcast.broadcastEvidence, { schema: 'hookemon.chain-observation.v1', observed: true });
+
+  assert.deepEqual(await repository.readSupplementaryChainTransactionAttempt(positionId, requestDigest), broadcast);
+  // Ordinary per-cycle chain attempts remain untouched: nothing was ever written under the
+  // 'buyback'/'return' stage keyspace for this cycleId.
+  assert.equal(await repository.readChainTransactionAttempt(cycleId, 'buyback', requestDigest), null);
+});
+
+test('recordSupplementarySignedTransaction refuses to re-sign an already-broadcast attempt', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: `hash:${'a'.repeat(64)}` });
+  await repository.recordSupplementaryBroadcast(positionId, requestDigest, { schema: 'hookemon.chain-observation.v1', observed: true });
+  await assert.rejects(
+    () => repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW2', nonce: '2', blockhash: null, hash: `hash:${'b'.repeat(64)}` }),
+    /already broadcast and cannot be re-signed/,
+  );
+});
+
+test('supplementary chain attempt recovery context binds to the exact signed-bytes hash and rejects a conflicting retry', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+  await repository.recordSupplementarySignedTransaction(positionId, requestDigest, { rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash });
+
+  await assert.rejects(
+    () => repository.persistSupplementaryChainAttemptRecoveryContext(positionId, {
+      positionId, requestDigest, rawSignedBytesHash: `hash:${'f'.repeat(64)}`, context: { approvalRef: 'x' },
+    }),
+    /does not bind signed bytes/,
+  );
+
+  const persisted = await repository.persistSupplementaryChainAttemptRecoveryContext(positionId, {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' },
+  });
+  assert.deepEqual(persisted, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' } });
+  assert.deepEqual(await repository.readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest), persisted);
+  // Idempotent identical retry.
+  assert.deepEqual(
+    await repository.persistSupplementaryChainAttemptRecoveryContext(positionId, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'x' } }),
+    persisted,
+  );
+  await assert.rejects(
+    () => repository.persistSupplementaryChainAttemptRecoveryContext(positionId, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'different' } }),
+    /conflicts with prior context/,
+  );
+});
+
+test('atomically persists supplementary signed bytes and recovery context across restart', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const positionId = await preparedSupplementarySettlement(repository, cycleId);
+  const requestDigest = `sha256:${'7'.repeat(64)}`;
+  const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
+  await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
+
+  await repository.recordSupplementarySignedTransactionWithRecoveryContext(positionId, requestDigest, {
+    rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash,
+  }, {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'durable' },
+  });
+
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
+  assert.equal((await reopened.readSupplementaryChainTransactionAttempt(positionId, requestDigest)).attempt.state, 'SIGNED');
+  assert.deepEqual(await reopened.readSupplementaryChainAttemptRecoveryContext(positionId, requestDigest), {
+    positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'durable' },
+  });
+  await assert.rejects(
+    () => reopened.recordSupplementarySignedTransactionWithRecoveryContext(positionId, requestDigest, {
+      rawBytes: 'RAW', nonce: '1', blockhash: null, hash: rawSignedBytesHash,
+    }, { positionId, requestDigest, rawSignedBytesHash, context: { approvalRef: 'different' } }),
+    /different signing material or recovery context/,
+  );
+});
+
+test('persists the completed eligibility evidence and zero-dust return source for a sell settlement across restart', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const snapshotEvidence = {
+    schema: 'fixture.eligibility-snapshot.v1',
+    cycleId,
+    snapshot: 'original',
+  };
+  await repository.prepareStage(cycleId, 'eligibility-snapshot');
+  await repository.completeStage(cycleId, 'eligibility-snapshot', snapshotEvidence);
+  for (const stage of OPERATIONAL_CYCLE_STAGES.slice(1)) {
+    await repository.prepareStage(cycleId, stage);
+    await repository.completeStage(cycleId, stage, { stage, finalized: true });
+  }
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary-source',
+    mint: 'mint-supplementary-source',
+    cardRef: 'mint-supplementary-source',
+    costMicroUsdg: '25',
+    valueMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await repository.recordPayoutDust(cycleId, {
+    amount: {
+      chainId: '4663',
+      assetId: SUPPLEMENTARY_USDG,
+      decimals: 6,
+      amountAtomic: '1',
+    },
+    planDigest: digest({ schema: 'fixture.normal-payout-plan.v1', cycleId }),
+  });
+  await repository.completeCycle(cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-source',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  const prepared = await repository.readSupplementarySettlement(position.positionId);
+  assert.equal(prepared.eligibilitySnapshotEvidenceDigest, digest(snapshotEvidence));
+  assert.equal(prepared.payoutSourceDigest, null);
+
+  const returnBoundary = supplementaryReturnBoundary(position, prepared);
+  const expectedPayoutSource = supplementaryPayoutSource(position, prepared, returnBoundary);
+  await repository.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'PREPARED',
+    nextState: 'BUYBACK_SENT_UNKNOWN',
+    evidence: { requestDigest: `sha256:${'b'.repeat(64)}` },
+  });
+  await assert.rejects(
+    () => repository.advanceSupplementarySettlement(position.positionId, {
+      expectedState: 'BUYBACK_SENT_UNKNOWN',
+      nextState: 'RETURN_BROADCAST',
+      evidence: returnBoundary,
+      payoutSource: expectedPayoutSource,
+    }),
+    /exact schema/i,
+  );
+  await repository.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'BUYBACK_SENT_UNKNOWN',
+    nextState: 'RETURN_BROADCAST',
+    evidence: returnBoundary,
+  });
+
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
+  const recovered = await reopened.readSupplementarySettlement(position.positionId);
+  assert.equal(recovered.eligibilitySnapshotEvidenceDigest, digest(snapshotEvidence));
+  assert.equal(recovered.payoutSourceDigest, digest(expectedPayoutSource));
+  const recoveredBoundary = await reopened.readSupplementarySettlementEvidence(position.positionId);
+  assert.deepEqual(recoveredBoundary.payoutSource, expectedPayoutSource);
+  assert.equal(recoveredBoundary.payoutSource.previousDust.amountAtomic, '0');
+  assert.equal(recoveredBoundary.payoutSource.previousDustSource, null);
+  assert.deepEqual(recoveredBoundary.evidence, returnBoundary);
+  await assert.doesNotReject(() => reopened.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'BUYBACK_SENT_UNKNOWN',
+    nextState: 'RETURN_BROADCAST',
+    evidence: returnBoundary,
+  }));
+  await assert.rejects(
+    () => reopened.advanceSupplementarySettlement(position.positionId, {
+      expectedState: 'BUYBACK_SENT_UNKNOWN',
+      nextState: 'RETURN_BROADCAST',
+      evidence: supplementaryReturnBoundary(position, prepared, { amountAtomic: '8' }),
+    }),
+    /boundary evidence conflicts/i,
+  );
+});
+
+test('does not reuse normal dust after a newer cycle consumes it', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary-consumed-dust',
+    mint: 'mint-supplementary-consumed-dust',
+    cardRef: 'mint-supplementary-consumed-dust',
+    costMicroUsdg: '25',
+    valueMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  const normalDust = await repository.recordPayoutDust(cycleId, {
+    amount: {
+      chainId: '4663',
+      assetId: SUPPLEMENTARY_USDG,
+      decimals: 6,
+      amountAtomic: '1',
+    },
+    planDigest: digest({ schema: 'fixture.normal-payout-plan.v1', cycleId }),
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+
+  const newer = await repository.createCycle({ releaseAmount: '2', mode: 'production' });
+  await repository.consumePayoutDust(newer.cycleId, {
+    source: normalDust.source,
+    amount: normalDust.amount,
+    planDigest: digest({ schema: 'fixture.newer-main-payout-plan.v1', cycleId: newer.cycleId }),
+  });
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-consumed-dust',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  const settlement = await repository.readSupplementarySettlement(position.positionId);
+  await repository.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'PREPARED',
+    nextState: 'BUYBACK_SENT_UNKNOWN',
+    evidence: { requestDigest: `sha256:${'c'.repeat(64)}` },
+  });
+  await repository.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'BUYBACK_SENT_UNKNOWN',
+    nextState: 'RETURN_BROADCAST',
+    evidence: supplementaryReturnBoundary(position, settlement),
+  });
+
+  const returnBoundary = await repository.readSupplementarySettlementEvidence(position.positionId);
+  assert.equal(returnBoundary.payoutSource.previousDust.amountAtomic, '0');
+  assert.equal(returnBoundary.payoutSource.previousDustSource, null);
+});
+
+test('peekActiveCycle skips a resolved completed cycle while a newer cycle is active', async t => {
+  let nowMs = 1_700_000_000_000;
+  const repository = await CycleRepository.open(await tempDirectory(t), () => nowMs);
+  const older = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(older.cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-resolved-peek',
+    mint: 'mint-resolved-peek',
+    cardRef: 'mint-resolved-peek',
+    costMicroUsdg: '25',
+    valueMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'SENT_UNKNOWN_DEADLINE',
+    terminalState: 'HELD_UNRESOLVED',
+    evidence: { stage: 'buyback', status: 'sent-unknown' },
+  });
+  await completeOperationalStages(repository, older.cycleId);
+  await repository.completeCycle(older.cycleId);
+  nowMs += 1;
+  const newer = await repository.createCycle({ releaseAmount: '2', mode: 'production' });
+  await repository.resolveHeldPosition(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    expectedRevision: 0,
+    terminalState: 'NEVER_SENT',
+    evidence: { source: 'collector-status', status: 'not-found' },
+  });
+
+  assert.deepEqual(await repository.peekActiveCycle(), {
+    cycleId: newer.cycleId,
+    releaseAmount: '2',
+  });
+});
+
+test('persists every supplementary settlement boundary across a restart without replacing the manifest', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-supplementary-restart',
+    mint: 'mint-supplementary-restart',
+    cardRef: 'mint-supplementary-restart',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'position-supplementary-restart',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  const prepared = await repository.readSupplementarySettlement(position.positionId);
+  const returnBoundaryInput = supplementaryReturnBoundary(position, prepared, {
+    finalityEvidence: { transactionHash: 'return-broadcast-1', finalizedBuyback: true },
+  });
+
+  await repository.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'PREPARED',
+    nextState: 'BUYBACK_SENT_UNKNOWN',
+    evidence: { requestDigest: `sha256:${'1'.repeat(64)}`, attempt: 'persisted-before-provider' },
+  });
+  await repository.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'BUYBACK_SENT_UNKNOWN',
+    nextState: 'RETURN_BROADCAST',
+    evidence: returnBoundaryInput,
+  });
+
+  const returnBoundary = await repository.readSupplementarySettlementEvidence(position.positionId);
+  assert.equal(returnBoundary.state, 'RETURN_BROADCAST');
+  assert.match(returnBoundary.evidenceDigest, /^sha256:[0-9a-f]{64}$/);
+  assert.deepEqual(returnBoundary.evidence, returnBoundaryInput);
+  assert.equal(returnBoundary.payoutSource.previousDust.amountAtomic, '0');
+  assert.equal(returnBoundary.payoutSource.previousDustSource, null);
+
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
+  const broadcast = await reopened.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'RETURN_BROADCAST',
+    nextState: 'PAYOUT_BROADCAST',
+    evidence: { manifestId: `${cycleId}:supplementary:1`, transactionHash: 'payout-broadcast-1' },
+  });
+  assert.equal(broadcast.manifestId, `${cycleId}:supplementary:1`);
+  assert.deepEqual(
+    (await reopened.readSupplementarySettlementEvidence(position.positionId)).returnBoundary,
+    returnBoundary,
+  );
+  const complete = await reopened.advanceSupplementarySettlement(position.positionId, {
+    expectedState: 'PAYOUT_BROADCAST',
+    nextState: 'COMPLETE',
+    evidence: { manifestId: `${cycleId}:supplementary:1`, finalizedRecipients: 2 },
+  });
+  assert.equal(complete.state, 'COMPLETE');
+  assert.deepEqual(await reopened.readSupplementarySettlement(position.positionId), complete);
+});
+
+test('closes a resolved held position after a completed cycle without retaining its limit value', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-resolve',
+    mint: 'mint-resolve',
+    cardRef: 'mint-resolve',
+    costMicroUsdg: '17',
+    valueMicroUsdg: '17',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason: 'SENT_UNKNOWN_DEADLINE',
+    terminalState: 'HELD_UNRESOLVED',
+    evidence: { stage: 'buyback', status: 'sent-unknown' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+
+  const resolved = await repository.resolveHeldPosition(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    expectedRevision: 0,
+    terminalState: 'NEVER_SENT',
+    evidence: { source: 'collector-status', status: 'not-found' },
+  });
+
+  assert.equal(resolved.resolution.terminalState, 'NEVER_SENT');
+  assert.deepEqual(await repository.listHeldPositions(), []);
+  assert.deepEqual(await repository.readClaimPreconditions(), {
+    heldAssets: false,
+    unattributed: false,
+    unresolvedObligations: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+  });
+  const state = await repository.describeCycle(cycleId);
+  assert.equal(state.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '0');
+  assert.deepEqual(await repository.listHeldPositions({ includeResolved: true }), [resolved]);
+});
+
+test('resolves a deadline-held position as sold, refunded, or never sent only on its attributable path', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const createPosition = async (suffix, reason = 'SENT_UNKNOWN_DEADLINE') => repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: `memo-resolution-${suffix}`,
+    mint: `mint-resolution-${suffix}`,
+    cardRef: `mint-resolution-${suffix}`,
+    costMicroUsdg: '17',
+    valueMicroUsdg: '17',
+    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    insuredValue: null,
+    reason,
+    terminalState: 'HELD_UNRESOLVED',
+    evidence: { stage: 'buyback', status: 'sent-unknown', suffix },
+  });
+  const sold = await createPosition('sold');
+  const refunded = await createPosition('refunded');
+  const neverSent = await createPosition('never-sent');
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+  await repository.recordHeldOwnerDecision(sold.positionId, {
+    heldEvidenceDigest: sold.evidenceDigest,
+    requestId: 'position-resolution-sold',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  const soldSettlement = await repository.readSupplementarySettlement(sold.positionId);
+  await assert.rejects(
+    () => repository.resolveHeldPosition(sold.positionId, {
+      heldEvidenceDigest: sold.evidenceDigest,
+      expectedRevision: 1,
+      terminalState: 'SOLD',
+      evidence: { source: 'collector-status', status: 'sold' },
+    }),
+    /supplementary settlement.*complete/i,
+  );
+  for (const [expectedState, nextState] of [
+    ['PREPARED', 'BUYBACK_SENT_UNKNOWN'],
+    ['BUYBACK_SENT_UNKNOWN', 'RETURN_BROADCAST'],
+    ['RETURN_BROADCAST', 'PAYOUT_BROADCAST'],
+    ['PAYOUT_BROADCAST', 'COMPLETE'],
+  ]) {
+    await repository.advanceSupplementarySettlement(sold.positionId, {
+      expectedState,
+      nextState,
+      evidence: nextState === 'RETURN_BROADCAST'
+        ? supplementaryReturnBoundary(sold, soldSettlement, {
+          finalityEvidence: { expectedState, nextState },
+        })
+        : { expectedState, nextState },
+    });
+  }
+
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
+  const outcomes = [];
+  outcomes.push(await reopened.resolveHeldPosition(sold.positionId, {
+      heldEvidenceDigest: sold.evidenceDigest,
+      expectedRevision: 1,
+      terminalState: 'SOLD',
+      evidence: { source: 'collector-status', status: 'sold' },
+    }));
+  outcomes.push(await reopened.resolveHeldPosition(refunded.positionId, {
+      heldEvidenceDigest: refunded.evidenceDigest,
+      expectedRevision: 0,
+      terminalState: 'REFUNDED',
+      evidence: { source: 'collector-status', status: 'refunded' },
+    }));
+  outcomes.push(await reopened.resolveHeldPosition(neverSent.positionId, {
+      heldEvidenceDigest: neverSent.evidenceDigest,
+      expectedRevision: 0,
+      terminalState: 'NEVER_SENT',
+      evidence: { source: 'collector-status', status: 'not-found' },
+    }));
+  assert.deepEqual(outcomes.map(position => position.resolution.terminalState).sort(), ['NEVER_SENT', 'REFUNDED', 'SOLD']);
+  assert.deepEqual(await reopened.listHeldPositions(), []);
+});
+
+test('projects open held positions from completed cycles as bounded claim exposure', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const position = await repository.recordHeldPosition(cycleId, {
+    packId: 'pack-1',
+    memo: 'memo-1',
+    mint: 'mint-1',
+    cardRef: 'mint-1',
+    costMicroUsdg: '25000000',
+    valueMicroUsdg: '25000000',
+    insuredValue: null,
+    reason: 'BUYBACK_UNAVAILABLE',
+    terminalState: 'HELD_UNAVAILABLE',
+    evidence: { stage: 'buyback', reason: 'unavailable' },
+  });
+  await completeOperationalStages(repository, cycleId);
+  await repository.completeCycle(cycleId);
+
+  assert.deepEqual(await repository.readClaimPreconditions(), {
+    heldAssets: false,
+    unattributed: false,
+    unresolvedObligations: false,
+    heldPositions: {
+      count: 1,
+      valueMicroUsdg: '25000000',
+      positions: [position],
+    },
+  });
+});
+
+test('keeps interleaved held positions and attributed proceeds in their original cycles', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+
+  const first = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const firstPosition = await repository.recordHeldPosition(first.cycleId, {
+    packId: 'pack-first',
+    memo: 'memo-first',
+    mint: 'mint-first',
+    cardRef: 'mint-first',
+    costMicroUsdg: '11',
+    valueMicroUsdg: '11',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await repository.recordCustodyLedger(first.cycleId, custodyLedger(first.cycleId, {
+    buybackProceeds: '17',
+    heldPositions: '11',
+  }));
+  await completeOperationalStages(repository, first.cycleId);
+  await repository.completeCycle(first.cycleId);
+
+  const second = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const secondPosition = await repository.recordHeldPosition(second.cycleId, {
+    packId: 'pack-second',
+    memo: 'memo-second',
+    mint: 'mint-second',
+    cardRef: 'mint-second',
+    costMicroUsdg: '19',
+    valueMicroUsdg: '19',
+    insuredValue: null,
+    reason: 'BUYBACK_UNAVAILABLE',
+    terminalState: 'HELD_UNAVAILABLE',
+    evidence: { stage: 'buyback', reason: 'unavailable' },
+  });
+  await repository.recordCustodyLedger(second.cycleId, custodyLedger(second.cycleId, {
+    buybackProceeds: '29',
+    heldPositions: '19',
+  }));
+  await completeOperationalStages(repository, second.cycleId);
+  await repository.completeCycle(second.cycleId);
+
+  const firstState = await repository.describeCycle(first.cycleId);
+  const secondState = await repository.describeCycle(second.cycleId);
+  const ledgerKey = `eip155:4663\u0000eip155:4663/erc20:stablecoin`;
+  assert.deepEqual([...firstState.heldPositions.values()], [firstPosition]);
+  assert.deepEqual([...secondState.heldPositions.values()], [secondPosition]);
+  assert.equal(firstState.custodyLedgers.get(ledgerKey).buybackProceeds, '17');
+  assert.equal(secondState.custodyLedgers.get(ledgerKey).buybackProceeds, '29');
+  assert.equal(firstState.custodyLedgers.get(ledgerKey).heldPositions, '11');
+  assert.equal(secondState.custodyLedgers.get(ledgerKey).heldPositions, '19');
+  assert.deepEqual(await repository.listHeldPositions({ cycleId: first.cycleId }), [firstPosition]);
+  assert.deepEqual(await repository.listHeldPositions({ cycleId: second.cycleId }), [secondPosition]);
 });
 
 test('completeCycle rejects unfinalized chain attempts and unclosed custody before archiving', async t => {
@@ -978,49 +1921,31 @@ test('a held terminal state stays active and prevents automatic completion', asy
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
   await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'snapshot source disagreed' });
 
-  assert.deepEqual(await repository.readActiveCycle(), {
+  const active = await repository.readActiveCycle();
+  assert.equal(Number.isSafeInteger(active.terminalAtMs), true);
+  assert.deepEqual(active, {
     cycleId,
     releaseAmount: '1',
     mode: 'production',
     terminalState: 'HELD_DATA_UNVERIFIED',
+    terminalAtMs: active.terminalAtMs,
   });
   await assert.rejects(() => repository.completeCycle(cycleId), /terminally held/);
   await assert.rejects(() => repository.completeStage(cycleId, 'outbound', { transactionId: 'must-not-append' }), /terminally held/);
   assert.equal((await repository.describeCycle(cycleId)).terminalState, 'HELD_DATA_UNVERIFIED');
 });
 
-test('records a held owner decision idempotently and retains it across restart', async t => {
+test('retains a legacy whole-cycle owner hold across restart', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
   const heldEvidence = { stage: 'epic-gate', memo: 'memo-1', mint: 'mint-1', decision: 'hold' };
   await repository.holdCycle(cycleId, 'HELD_OWNER_DECISION', heldEvidence);
-  const held = await repository.describeCycle(cycleId);
-  const decision = {
-    heldEvidenceDigest: digest({
-      schema: 'hookemon.cycle-held-owner-decision.v1',
-      cycleId,
-      terminalState: 'HELD_OWNER_DECISION',
-      evidence: heldEvidence,
-    }),
-    requestId: 'owner-decision-1',
-    expectedRevision: held.version,
-    choice: 'keep-holding',
-  };
-
-  const recorded = await repository.recordHeldOwnerDecision(cycleId, decision);
-  assert.deepEqual(recorded, { cycleId, ...decision });
-  assert.equal((await repository.describeCycle(cycleId)).heldEvidenceDigest, decision.heldEvidenceDigest);
-  assert.deepEqual((await repository.describeCycle(cycleId)).ownerDecision, recorded);
-
-  assert.deepEqual(await repository.recordHeldOwnerDecision(cycleId, decision), recorded);
-  await assert.rejects(
-    () => repository.recordHeldOwnerDecision(cycleId, { ...decision, choice: 'sell' }),
-    /held owner decision conflict/,
-  );
 
   const reopened = await CycleRepository.open(directory);
-  assert.deepEqual((await reopened.describeCycle(cycleId)).ownerDecision, recorded);
+  const state = await reopened.describeCycle(cycleId);
+  assert.equal(state.terminalState, 'HELD_OWNER_DECISION');
+  assert.deepEqual(state.terminalEvidence, heldEvidence);
 });
 
 test('an operator hold preserves its reason and rejects a conflicting retry', async t => {
@@ -1084,6 +2009,7 @@ test('a hold fences new effects but retains append-only observation and custody 
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -2452,6 +3378,7 @@ test('marks a thrown post-send mutation unknown and retains custody obligations 
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '1',
     dust: '0',
     unattributed: '0',
@@ -2460,5 +3387,143 @@ test('marks a thrown post-send mutation unknown and retains custody obligations 
     heldAssets: false,
     unattributed: false,
     unresolvedObligations: true,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
   });
+});
+
+test('timestamps a sent-unknown provider attempt for deadline reconciliation', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_300_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.prepareStageAttempt(cycleId, 'buyback', {
+    schema: 'hookemon.provider-mutation-attempt.v1',
+    cycleId,
+    stage: 'buyback',
+    state: 'PREPARED',
+    requestDigest: `sha256:${'c'.repeat(64)}`,
+    responseDigest: null,
+    reconciliationDigest: null,
+  });
+
+  await repository.markStageAttemptSentUnknown(cycleId, 'buyback');
+  assert.equal((await repository.readOperationalStageAttempt(cycleId, 'buyback')).sentAtMs, 1_700_000_300_000);
+});
+
+function packBatch(count, overrides = {}) {
+  return Array.from({ length: count }, (_, packIndex) => ({
+    packIndex,
+    memo: `memo-${packIndex}`,
+    expectedCardCount: 1,
+    packType: 'pokemon_25',
+    ...overrides,
+  }));
+}
+
+test('readPackBatchRequest is null before a batch is recorded', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readPackBatchRequest(cycleId, 'purchase'), null);
+});
+
+test('recordPackBatchRequest persists every pack before signing and is idempotent for a retried identical batch', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const packs = packBatch(3);
+
+  const recorded = await repository.recordPackBatchRequest(cycleId, 'purchase', packs);
+  assert.deepEqual(recorded, { requestedAtMs: 1_700_000_000_000, packs });
+  assert.deepEqual(await repository.readPackBatchRequest(cycleId, 'purchase'), { requestedAtMs: 1_700_000_000_000, packs });
+
+  // A retried "generate the batch" call after a lost response replays the exact same durable
+  // packs (and the original requestedAtMs) rather than raising a conflict.
+  assert.deepEqual(await repository.recordPackBatchRequest(cycleId, 'purchase', packs), { requestedAtMs: 1_700_000_000_000, packs });
+});
+
+test('recordPackBatchRequest survives a repository reopen', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const packs = packBatch(2);
+  const recorded = await repository.recordPackBatchRequest(cycleId, 'purchase', packs);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPackBatchRequest(cycleId, 'purchase'), recorded);
+});
+
+test('recordPackBatchRequest rejects a conflicting batch for the same stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(2));
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(3)),
+    /already has a different pack batch/,
+  );
+});
+
+test('recordPackBatchRequest keeps purchase and open batches independent and rejects a non-pack stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(2));
+  await repository.recordPackBatchRequest(cycleId, 'open', packBatch(1));
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'purchase')).packs.length, 2);
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'open')).packs.length, 1);
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'return', packBatch(1)),
+    /not a pack-operation stage/,
+  );
+});
+
+test('recordPackBatchRequest refuses more packs than the shared journal payload bound', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(MAXIMUM_PACK_BATCH_SIZE + 1)),
+    /at most/,
+  );
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(MAXIMUM_PACK_BATCH_SIZE));
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'purchase')).packs.length, MAXIMUM_PACK_BATCH_SIZE);
+});
+
+test('recordPackBatchRequest refuses to add packs once the cycle is terminally held', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(1)),
+    /cycle is terminal/,
+  );
+});
+
+function packBatchIntent(overrides = {}) {
+  return { quantity: 2, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: SETTLEMENT_SOLANA_OWNER, ...overrides };
+}
+
+test('readPackBatchIntent is null before an intent is recorded', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readPackBatchIntent(cycleId, 'purchase'), null);
+});
+
+test('recordPackBatchIntent persists the requested quantity and pack code before any provider call, and is idempotent on retry', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const intent = packBatchIntent();
+
+  const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', intent);
+  assert.deepEqual(recorded, { recordedAtMs: 1_700_000_000_000, intent });
+  assert.deepEqual(await repository.readPackBatchIntent(cycleId, 'purchase'), { recordedAtMs: 1_700_000_000_000, intent });
+  assert.deepEqual(await repository.recordPackBatchIntent(cycleId, 'purchase', intent), { recordedAtMs: 1_700_000_000_000, intent });
+});
+
+test('recordPackBatchIntent survives a repository reopen and rejects a conflicting retry', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const recorded = await repository.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent());
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPackBatchIntent(cycleId, 'purchase'), recorded);
+  await assert.rejects(
+    () => reopened.recordPackBatchIntent(cycleId, 'purchase', packBatchIntent({ quantity: 5 })),
+    /already has a different pack batch intent/,
+  );
 });

@@ -15,7 +15,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 
 import { runOperatorCli } from '../../../runner/src/operator/cli.mjs';
-import { createEmptyOperatorState, mutateOperatorState } from '../../../runner/src/operator/state-file.mjs';
+import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
 import { canonicalJson } from '../../../runner/src/cycle/journal.mjs';
@@ -23,10 +23,14 @@ import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authori
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
 import {
+  assertLiveCollectorOnlyRunOptions,
+  assertRehearsalProfile,
   buildManualApprovalHandoff,
   compositionInput,
+  initializeCollectorOnlyPolicy,
   parseArgv,
   runCli,
+  runRehearsal,
   runRehearsalSupervisor,
 } from '../../bin/hookemon-runner.mjs';
 import { readRehearsalSession } from '../../../runner/src/cycle/rehearsal-session.mjs';
@@ -247,6 +251,87 @@ test('dry-run accepts an explicit production profile and composes its fake-provi
   assert.equal(shutdowns, 1);
 });
 
+test('preflight dispatches the read-only Collector-only plan without composing a signer or scheduler', async () => {
+  assert.deepEqual(parseArgv(['preflight']), {
+    command: 'preflight', statePathOverride: null, noDashboard: false, cycleId: null, operatorArgv: null,
+  });
+  const emitted = [];
+  const calls = [];
+  await runCli(['preflight'], {
+    async runCollectorOnlyPreflightFn(input) {
+      calls.push(input);
+      return { schema: 'hookemon.collector-only-preflight.v1', mode: 'collector-only' };
+    },
+    emitJson(value) { emitted.push(value); },
+  });
+  assert.deepEqual(calls, [{ statePathOverride: null }]);
+  assert.deepEqual(emitted, [{ schema: 'hookemon.collector-only-preflight.v1', mode: 'collector-only' }]);
+});
+
+test('operator initializer creates one exact Collector-only policy only in an absent state file', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const environment = { HOOKEMON_STATE_DIR: stateDir };
+  const env = {
+    stateDir,
+    execution: { providerMode: 'live' },
+    rehearsal: { mode: 'collector-only' },
+    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+    pack: { code: 'collector-25' },
+  };
+
+  const initialized = await initializeCollectorOnlyPolicy({
+    statePathOverride: statePath,
+    environment,
+    readEnvironmentFn: () => env,
+  });
+
+  assert.equal(initialized.action, 'initialize-collector-only-policy');
+  assert.equal(initialized.revision, 0);
+  assert.deepEqual(initialized.configuration.allowedPackIds, ['collector-25']);
+  assert.equal(initialized.configuration.requestedOrders, 1);
+  assert.equal(initialized.configuration.maxBoostersPerCycle, 1);
+  assert.equal(initialized.configuration.maxUnitPriceMicroUsdg, '25000000');
+  assert.equal(initialized.configuration.maxCycleBudgetMicroUsdg, '25000000');
+  assert.equal(initialized.configuration.max24HourBudgetMicroUsdg, '25000000');
+  assert.equal(initialized.configuration.maxCyclesPerDay, 1);
+  assert.equal(initialized.configuration.manualApprovalCycles, 1);
+  assert.equal(initialized.configuration.liveMode, true);
+  assert.deepEqual(await readOperatorState(statePath), {
+    schema: 'hookemon.operator-state.v2', revision: 0, configuration: initialized.configuration,
+  });
+
+  await assert.rejects(
+    () => initializeCollectorOnlyPolicy({
+      statePathOverride: statePath,
+      environment,
+      readEnvironmentFn: () => env,
+    }),
+    /stale operator state revision/,
+  );
+});
+
+test('operator initializer is routed without composing a scheduler', async () => {
+  const emitted = [];
+  const calls = [];
+  await runCli(['operator', 'initialize-collector-only-policy'], {
+    environment: { HOOKEMON_STATE_DIR: '/tmp/hookemon-initializer' },
+    async initializeCollectorOnlyPolicyFn(input) {
+      calls.push(input);
+      return { action: 'initialize-collector-only-policy', revision: 0 };
+    },
+    async buildComposition() {
+      throw new Error('initializer must not compose a scheduler');
+    },
+    emitJson(value) { emitted.push(value); },
+  });
+  assert.deepEqual(calls, [{
+    statePathOverride: null,
+    environment: { HOOKEMON_STATE_DIR: '/tmp/hookemon-initializer' },
+  }]);
+  assert.deepEqual(emitted, [{ action: 'initialize-collector-only-policy', revision: 0 }]);
+});
+
 async function fakeRehearsalEnv(t, stateDir) {
   const observabilityPath = join(stateDir, 'observability.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
@@ -389,7 +474,158 @@ test('a manual-approval refusal has a digest-bound handoff without creating an e
   });
   assert.deepEqual(handoff.status, 'AWAITING_MANUAL_APPROVAL');
   assert.equal(handoff.cycleId, 'cycle-manual-approval');
-  assert.match(handoff.policyDigest, /^sha256:[0-9a-f]{64}$/);
+  assert.match(handoff.cycleDigest, /^sha256:[0-9a-f]{64}$/);
+});
+
+test('a live collector-only manual-approval handoff binds the live policy digest', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const configuration = applyOperatorConfiguration(null, {
+    intervalMinutes: 5,
+    allowedPackIds: ['collector-25'],
+    requestedOrders: 1,
+    maxBoostersPerCycle: 1,
+    maxUnitPriceMicroUsdg: '25000000',
+    maxCycleBudgetMicroUsdg: '25000000',
+    max24HourBudgetMicroUsdg: '25000000',
+    maxCyclesPerDay: 1,
+    lossCapMicroUsdg: '25000000',
+    maxOutstandingCustodyMicroUsdg: '25000000',
+    manualApprovalCycles: 1,
+    paused: false,
+    liveMode: true,
+  });
+  await mutateOperatorState(statePath, null, state => ({ ...(state ?? createEmptyOperatorState()), configuration }));
+  const active = {
+    cycleId: 'cycle-live-manual-approval', releaseAmount: '25000000', mode: 'rehearsal', providerMode: 'live',
+  };
+  const handoff = await buildManualApprovalHandoff({
+    composition: { cycleRepository: { readActiveCycle: async () => active } },
+    env: {
+      execution: { providerMode: 'live' },
+      rehearsal: { mode: 'collector-only' },
+      pack: { code: 'collector-25' },
+    },
+    statePath,
+  });
+
+  assert.deepEqual(handoff, {
+    status: 'AWAITING_MANUAL_APPROVAL',
+    cycleId: active.cycleId,
+    cycleDigest: deriveCyclePolicyDigest({
+      configuration,
+      cycleId: active.cycleId,
+      releaseAmountMicroUsdg: active.releaseAmount,
+      packId: 'collector-25',
+      liveMode: true,
+      mode: 'rehearsal',
+    }),
+  });
+});
+
+test('live collector-only rehearsal accepts only one exact-price cycle without restart injection', () => {
+  const env = {
+    execution: { providerMode: 'live' },
+    rehearsal: { mode: 'collector-only' },
+    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+  };
+  assert.doesNotThrow(() => assertRehearsalProfile({ env, collectorOnly: true, relayRoundtrip: false }));
+  assert.doesNotThrow(() => assertLiveCollectorOnlyRunOptions({
+    env, cycles: 1, capUsdg: '25000000', restartInject: false,
+  }));
+  assert.throws(
+    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 2, capUsdg: '25000000', restartInject: false }),
+    /exactly one cycle/i,
+  );
+  assert.throws(
+    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 1, capUsdg: '1', restartInject: false }),
+    /exact configured pack price/i,
+  );
+  assert.throws(
+    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 1, capUsdg: '25000000', restartInject: true }),
+    /restart injection/i,
+  );
+});
+
+test('live collector-only rehearsal completes preflight before starting its cycle', async t => {
+  const stateDir = await tempStateDir(t);
+  const environment = { HOOKEMON_STATE_DIR: stateDir };
+  const calls = [];
+  const liveCollectorOnly = {
+    stateDir,
+    execution: { providerMode: 'live' },
+    rehearsal: { mode: 'collector-only' },
+    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+  };
+
+  await assert.rejects(
+    () => runRehearsal({
+      statePathOverride: null,
+      cycles: 1,
+      capUsdg: '25000000',
+      collectorOnly: true,
+      relayRoundtrip: false,
+      restartInject: false,
+    }, {
+      environment,
+      readEnvironmentFn: () => liveCollectorOnly,
+      async runCollectorOnlyPreflightFn(input) {
+        calls.push(['preflight', input]);
+      },
+      async buildCompositionFn() {
+        return {
+          service: {
+            async runOnce() {
+              calls.push(['cycle-start']);
+              throw new Error('stop after cycle start');
+            },
+          },
+          async shutdown() {},
+        };
+      },
+    }),
+    /stop after cycle start/,
+  );
+
+  assert.deepEqual(calls, [
+    ['preflight', { statePathOverride: null, environment }],
+    ['cycle-start'],
+  ]);
+});
+
+test('live collector-only rehearsal refuses before composing or starting a cycle when preflight fails', async t => {
+  const stateDir = await tempStateDir(t);
+  const calls = [];
+  const liveCollectorOnly = {
+    stateDir,
+    execution: { providerMode: 'live' },
+    rehearsal: { mode: 'collector-only' },
+    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+  };
+
+  await assert.rejects(
+    () => runRehearsal({
+      statePathOverride: null,
+      cycles: 1,
+      capUsdg: '25000000',
+      collectorOnly: true,
+      relayRoundtrip: false,
+      restartInject: false,
+    }, {
+      readEnvironmentFn: () => liveCollectorOnly,
+      async runCollectorOnlyPreflightFn() {
+        calls.push('preflight');
+        throw new Error('collector-only preflight refused: recipient token account is missing');
+      },
+      async buildCompositionFn() {
+        calls.push('compose');
+        throw new Error('composition must not be reached');
+      },
+    }),
+    /recipient token account is missing/,
+  );
+
+  assert.deepEqual(calls, ['preflight']);
 });
 
 test('hookemon-runner status reads the repository without loading a signer or provider', async t => {
@@ -992,6 +1228,7 @@ async function seedProductionReturnCycle(stateDir) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',

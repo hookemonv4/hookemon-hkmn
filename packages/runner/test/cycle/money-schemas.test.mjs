@@ -5,14 +5,21 @@ import {
   CHAIN_TRANSACTION_ATTEMPT_STATES,
   CUSTODY_LEDGER_BUCKETS,
   CYCLE_TERMINAL_STATES,
+  MAXIMUM_PACK_BATCH_SIZE,
   OPERATIONAL_CYCLE_STAGES,
   PROVIDER_MUTATION_ATTEMPT_STATES,
   assertChainTransactionAttempt,
   assertCustodyLedger,
+  assertOperationIdentity,
+  assertPackBatchRequest,
+  assertPublicAmount,
+  assertPublicCardEvent,
+  toPublicAmount,
   assertTransactionPolicy,
   assertTypedAmount,
   assertProviderMutationAttempt,
   createPreparedChainTransactionAttempt,
+  packOperationId,
   transitionChainTransactionAttempt,
   transitionProviderMutationAttempt,
   RELAY_LEG_STATES,
@@ -58,6 +65,7 @@ function custodyLedger(overrides = {}) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -93,7 +101,7 @@ test('validates atomic amounts and a per-cycle custody ledger with every require
   assert.deepEqual(assertCustodyLedger(ledger), ledger);
   assert.deepEqual(CUSTODY_LEDGER_BUCKETS, [
     'claimed', 'bridgeOut', 'bridgeIn', 'packCost', 'buybackProceeds', 'returnInput',
-    'returnReceived', 'refunds', 'residual', 'heldAssets', 'payoutLiability', 'dust', 'unattributed',
+    'returnReceived', 'refunds', 'residual', 'heldAssets', 'heldPositions', 'payoutLiability', 'dust', 'unattributed',
   ]);
   assert.throws(() => assertCustodyLedger({ ...ledger, unexpected: '0' }), /exact schema/);
   assert.throws(() => assertCustodyLedger({ ...ledger, dust: '-1' }), /dust/);
@@ -406,4 +414,64 @@ test('money configuration is explicit typed amounts; a literal 1 or a missing ca
     () => assertMoneyConfiguration(moneyConfiguration({ evm: { ...configuration.evm, nativeReserve: { ...configuration.evm.nativeReserve, chainId: '1' } } })),
     /nativeReserve/,
   );
+});
+
+function packBatchEntry(overrides = {}) {
+  return { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: 'pokemon_25', ...overrides };
+}
+
+test('pack batch requests are bounded, index-ordered, and memo-unique', () => {
+  const batch = [packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-1' })];
+  assert.deepEqual(assertPackBatchRequest(batch), batch);
+  assert.throws(() => assertPackBatchRequest([]), /non-empty/);
+  assert.throws(
+    () => assertPackBatchRequest(Array.from({ length: MAXIMUM_PACK_BATCH_SIZE + 1 }, (_, index) => packBatchEntry({ packIndex: index, memo: `memo-${index}` }))),
+    /at most/,
+  );
+  assert.throws(() => assertPackBatchRequest([packBatchEntry({ packIndex: 1 })]), /packIndex must equal/);
+  assert.throws(
+    () => assertPackBatchRequest([packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-0' })]),
+    /unique/,
+  );
+});
+
+test('operation identity and public card events bind a stable per-pack identity', () => {
+  const operationId = packOperationId('cycle-1', 2);
+  assert.equal(operationId, 'pack:cycle-1:2');
+  const identity = { cycleId: 'cycle-1', operationId, packIndex: 2, memo: 'memo-2', mint: null };
+  assert.deepEqual(assertOperationIdentity(identity), identity);
+  const event = {
+    ...identity,
+    eventId: 'sha256:'.padEnd(71, '0'),
+    sequence: '1',
+    state: 'PURCHASED',
+    name: null,
+    imageUrl: null,
+    observedAt: '2026-09-06T00:00:00.000Z',
+    finalizedAt: null,
+    transactionId: null,
+    proceeds: null,
+  };
+  assert.deepEqual(assertPublicCardEvent(event), event);
+  assert.throws(() => assertPublicCardEvent({ ...event, state: 'UNKNOWN' }), /state is invalid/);
+  assert.equal(packOperationId('cycle-1', 2), operationId);
+});
+
+test('the public Amount contract uses units, never amountAtomic, and toPublicAmount preserves full precision', () => {
+  const internal = { chainId: 'solana-mainnet', assetId: 'mint', decimals: 6, amountAtomic: '900719925474099312345678' };
+  const publicAmount = toPublicAmount(internal);
+  assert.deepEqual(publicAmount, { chainId: 'solana-mainnet', assetId: 'mint', decimals: 6, units: '900719925474099312345678' });
+  assert.equal(Object.hasOwn(publicAmount, 'amountAtomic'), false);
+  assert.deepEqual(assertPublicAmount(publicAmount), publicAmount);
+  assert.throws(() => assertPublicAmount(internal), /public amount.*is invalid|must use the exact schema/);
+  assert.equal(toPublicAmount(null), null);
+
+  const event = {
+    cycleId: 'cycle-1', operationId: 'pack:cycle-1:0', packIndex: 0, memo: 'memo-0', mint: 'mint',
+    eventId: `sha256:${'0'.repeat(64)}`, sequence: '1', state: 'SOLD', name: null, imageUrl: null,
+    observedAt: '2026-09-06T00:00:00.000Z', finalizedAt: '2026-09-06T00:00:01.000Z', transactionId: 'sig',
+    proceeds: publicAmount,
+  };
+  assert.deepEqual(assertPublicCardEvent(event), event);
+  assert.throws(() => assertPublicCardEvent({ ...event, proceeds: internal }), /must use the exact schema/);
 });

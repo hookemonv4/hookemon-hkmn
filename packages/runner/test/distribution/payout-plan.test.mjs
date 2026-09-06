@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson } from '../../src/cycle/journal.mjs';
-import {
-  compileDirectPayoutPlan as compilePayoutPlan,
+import * as payoutPlan from '../../src/distribution/payout-plan.mjs';
+
+const {
+  compileSupplementaryDirectPayoutPlan,
+  compileDirectPayoutPlan: compilePayoutPlan,
   createUsdgPayoutAmount,
   directPayoutPlanDigest,
-} from '../../src/distribution/payout-plan.mjs';
+  DIRECT_PAYOUT_RECIPIENT_LIMIT,
+  supplementaryPayoutPlanDigest,
+} = payoutPlan;
 
 const TOKEN = `0x${'a'.repeat(40)}`;
 const RETURN_BINDING = Object.freeze({
@@ -221,20 +226,77 @@ test('supports 1,025 recipients when the frozen feasibility envelope permits the
   assert.equal(plan.planDigest.startsWith('sha256:'), true);
 });
 
-test('rejects a feasible holder set beyond direct-payout capacity before allocation', () => {
+test('accepts 1,026 recipients: recipient count alone never truncates a feasible holder set', () => {
   const entries = Array.from({ length: 1026 }, (_, index) => holder(index, 1));
   const manifest = eligibilityManifest(entries, { cycleId: 'cycle-direct-capacity' });
 
   assert.equal(manifest.feasibility.feasible, true);
-  assert.throws(
-    () => compileDirectPayoutPlan({
-      cycleId: 'cycle-direct-capacity',
-      eligibilityManifest: manifest,
-      finalizedReturn: usdg('1026'),
-      previousDust: usdg('0'),
-    }),
-    /supports at most 1025 recipients/,
-  );
+  const plan = compileDirectPayoutPlan({
+    cycleId: 'cycle-direct-capacity',
+    eligibilityManifest: manifest,
+    finalizedReturn: usdg('1026'),
+    previousDust: usdg('0'),
+  });
+
+  assert.equal(plan.allocations.length, 1026);
+  assert.equal(plan.payableRecipientCount, 1026);
+  assert.equal(plan.totalAllocated.amountAtomic, '1026');
+  assert.equal(plan.outcome, 'ALLOCATED');
+});
+
+test('accepts DIRECT_PAYOUT_RECIPIENT_LIMIT recipients and conserves every atomic unit (correctness/load boundary)', () => {
+  const count = DIRECT_PAYOUT_RECIPIENT_LIMIT;
+  const entries = Array.from({ length: count }, (_, index) => holder(index, 1 + (index % 7)));
+  const manifest = eligibilityManifest(entries, { cycleId: 'cycle-recipient-limit' });
+  const plan = compileDirectPayoutPlan({
+    cycleId: 'cycle-recipient-limit',
+    eligibilityManifest: manifest,
+    finalizedReturn: usdg('123456789'),
+    previousDust: usdg('0'),
+  });
+
+  assert.equal(plan.allocations.length, count);
+  const recipients = new Set(plan.allocations.map(allocation => allocation.recipient));
+  assert.equal(recipients.size, count);
+  const paid = plan.allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount.amountAtomic), 0n);
+  assert.equal(paid + BigInt(plan.dust.amountAtomic), 123456789n);
+});
+
+test('retains the full pool as durable dust when there are no eligible holders, instead of throwing', () => {
+  const manifest = eligibilityManifest([], { cycleId: 'cycle-zero-eligible', supply: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '1' } });
+  const plan = compileDirectPayoutPlan({
+    cycleId: 'cycle-zero-eligible',
+    eligibilityManifest: manifest,
+    finalizedReturn: usdg('17'),
+    previousDust: usdg('0'),
+  });
+
+  assert.equal(plan.outcome, 'NON_SPENDING_NO_ELIGIBLE_HOLDERS');
+  assert.deepEqual(plan.allocations, []);
+  assert.equal(plan.payableRecipientCount, 0);
+  assert.equal(plan.totalAllocated.amountAtomic, '0');
+  assert.equal(plan.dust.amountAtomic, '17');
+  assert.equal(BigInt(plan.totalAllocated.amountAtomic) + BigInt(plan.dust.amountAtomic), 17n);
+});
+
+test('matches the independent oracle for equal and skewed integer-weight allocation', () => {
+  const equal = compileDirectPayoutPlan({
+    cycleId: 'cycle-oracle-equal',
+    eligibilityManifest: eligibilityManifest([holder(0, 1), holder(1, 1), holder(2, 1)], { cycleId: 'cycle-oracle-equal' }),
+    finalizedReturn: usdg('10'),
+    previousDust: usdg('0'),
+  });
+  assert.deepEqual(equal.allocations.map(allocation => allocation.amount.amountAtomic), ['3', '3', '3']);
+  assert.equal(equal.dust.amountAtomic, '1');
+
+  const skewed = compileDirectPayoutPlan({
+    cycleId: 'cycle-oracle-skew',
+    eligibilityManifest: eligibilityManifest([holder(0, 1), holder(1, 2), holder(2, 7)], { cycleId: 'cycle-oracle-skew' }),
+    finalizedReturn: usdg('101'),
+    previousDust: usdg('0'),
+  });
+  assert.deepEqual(skewed.allocations.map(allocation => allocation.amount.amountAtomic), ['10', '20', '70']);
+  assert.equal(skewed.dust.amountAtomic, '1');
 });
 
 test('rejects a holder count beyond the frozen payout envelope', () => {
@@ -399,6 +461,55 @@ test('keeps the plan digest stable after a canonical persistence reload', () => 
   const reloadedPlan = JSON.parse(canonicalJson(plan));
 
   assert.equal(directPayoutPlanDigest(reloadedPlan), plan.planDigest);
+});
+
+test('compiles a deterministic supplementary payout plan from the original frozen eligibility snapshot', () => {
+  const cycleId = 'cycle-supplementary';
+  const manifest = eligibilityManifest([holder(0, 2), holder(1, 1)], { cycleId });
+  const input = {
+    cycleId,
+    supplementaryIndex: 2,
+    eligibilityManifest: manifest,
+    finalizedReturn: usdg('7'),
+    previousDust: usdg('0'),
+    returnBinding: RETURN_BINDING,
+  };
+
+  const first = compileSupplementaryDirectPayoutPlan(input);
+  const second = compileSupplementaryDirectPayoutPlan({ ...input, eligibilityManifest: JSON.parse(canonicalJson(manifest)) });
+  manifest.entries[0].hkmnBalance.amountAtomic = '999';
+
+  assert.equal(first.schema, 'hookemon.supplementary-direct-payout-plan.v1');
+  assert.equal(first.cycleId, cycleId);
+  assert.equal(first.manifestId, 'cycle-supplementary:supplementary:2');
+  assert.equal(first.supplementaryIndex, 2);
+  assert.equal(first.payoutPlan.cycleId, cycleId);
+  assert.equal(first.payoutPlan.eligibility.holderSnapshotDigest, `sha256:${'d'.repeat(64)}`);
+  assert.deepEqual(first.payoutPlan.allocations.map(({ recipient, amount }) => [recipient, amount.amountAtomic]), [
+    [address(0), '4'],
+    [address(1), '2'],
+  ]);
+  assert.equal(first.supplementaryPlanDigest, second.supplementaryPlanDigest);
+  assert.equal(supplementaryPayoutPlanDigest(JSON.parse(canonicalJson(first))), first.supplementaryPlanDigest);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.payoutPlan), true);
+});
+
+test('refuses an invalid supplementary manifest ordinal', () => {
+  const input = {
+    cycleId: 'cycle-supplementary-ordinal',
+    eligibilityManifest: eligibilityManifest([holder(0, 1)], { cycleId: 'cycle-supplementary-ordinal' }),
+    finalizedReturn: usdg('1'),
+    previousDust: usdg('0'),
+    returnBinding: RETURN_BINDING,
+  };
+
+  for (const supplementaryIndex of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => compileSupplementaryDirectPayoutPlan({ ...input, supplementaryIndex }),
+      /supplementary.*index/i,
+    );
+  }
 });
 
 test('refuses a frozen feasibility envelope that cannot support the payout', () => {

@@ -22,10 +22,12 @@ import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { wrapSignerClient, wrapTransactionPolicySignerClient } from '../../src/signing/signer-client.mjs';
 import {
   advanceDirectPayout,
+  assertFinalizedPayoutTransferEvidence,
   assertPayoutManifestUnchanged,
   buildDirectPayoutTransaction,
   createCycleRepositoryPayoutStore,
   createDirectPayoutState,
+  DirectPayoutError,
   DirectPayoutNonceInterferenceError,
   initializeDirectPayout,
   isDirectPayoutComplete,
@@ -164,6 +166,7 @@ function custodyLedger(cycleId, returnReceived) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -226,6 +229,9 @@ function rpc({ frozen = new Set(), nonce = 0n, balance = 1_000_000n, receiptForH
     },
     async getTransactionCount() { return observedNonce; },
     async getBalance() { return balance; },
+    async readCycleAttributableFinalizedAvailable() {
+      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '999999999999999999999999' };
+    },
     async sendRawTransaction({ serializedTransaction }) {
       broadcasts.push(serializedTransaction);
       return { transactionHash: `0x${'0'.repeat(64)}` };
@@ -911,6 +917,249 @@ test('prepares a plan bound to the finalized cycle return evidence', async () =>
       returnEvidence,
     }),
   });
+});
+
+test('binds held card exclusions to the prepared main payout without changing settled proceeds', async () => {
+  const snapshot = payoutManifest();
+  const returnEvidence = {
+    finalized: true,
+    destinationAccount: OPERATIONS,
+    destinationAsset: TOKEN,
+    destinationCreditAmount: '9',
+  };
+  const heldPosition = {
+    positionId: `held:${'a'.repeat(64)}`,
+    evidenceDigest: `sha256:${'b'.repeat(64)}`,
+    reason: 'HELD_UNAVAILABLE',
+    terminalState: 'HELD_UNAVAILABLE',
+    resolution: null,
+  };
+  const positions = [{
+    positionId: heldPosition.positionId,
+    evidenceDigest: heldPosition.evidenceDigest,
+    reason: heldPosition.reason,
+    terminalState: heldPosition.terminalState,
+  }];
+  const cycleRepository = {
+    async readStage(_cycleId, stage) {
+      if (stage === 'eligibility-snapshot') return { status: 'COMPLETE', evidence: snapshot };
+      if (stage === 'return') return { status: 'COMPLETE', evidence: returnEvidence };
+      throw new Error(`unexpected stage ${stage}`);
+    },
+    async readPayoutDust() { return usdg('0'); },
+    async describeCycle() {
+      return { heldPositions: new Map([[heldPosition.positionId, heldPosition]]) };
+    },
+  };
+
+  const request = await preparePayoutRequest({
+    config: config(),
+    cycleRepository,
+    context: { cycleId: snapshot.cycleId },
+  });
+
+  assert.equal(request.plan.distributablePool.amountAtomic, '9');
+  assert.deepEqual(request.heldPositionExclusions, {
+    schema: 'hookemon.direct-payout-held-position-exclusions.v1',
+    cycleId: snapshot.cycleId,
+    count: 1,
+    positions,
+    evidenceDigest: canonicalDigest({
+      schema: 'hookemon.direct-payout-held-position-exclusions.v1',
+      cycleId: snapshot.cycleId,
+      count: 1,
+      positions,
+    }),
+  });
+});
+
+test('lists bound held card exclusions in terminal zero-proceeds payout evidence', async () => {
+  const snapshot = payoutManifest();
+  const returnEvidence = {
+    finalized: true,
+    destinationAccount: OPERATIONS,
+    destinationAsset: TOKEN,
+    destinationCreditAmount: '0',
+  };
+  const heldPosition = {
+    positionId: `held:${'c'.repeat(64)}`,
+    evidenceDigest: `sha256:${'d'.repeat(64)}`,
+    reason: 'DATA_UNVERIFIED',
+    terminalState: 'HELD_DATA_UNVERIFIED',
+    resolution: null,
+  };
+  const positions = [{
+    positionId: heldPosition.positionId,
+    evidenceDigest: heldPosition.evidenceDigest,
+    reason: heldPosition.reason,
+    terminalState: heldPosition.terminalState,
+  }];
+  let pagedState = null;
+  const cycleRepository = {
+    async reserveWalletNonce() { throw new Error('zero-proceeds payout must not reserve a nonce'); },
+    async assertWalletNonce() { throw new Error('zero-proceeds payout must not assert a nonce'); },
+    async releaseWalletNonce() { throw new Error('zero-proceeds payout must not release a nonce'); },
+    async readStage(_cycleId, stage) {
+      if (stage === 'eligibility-snapshot') return { status: 'COMPLETE', evidence: snapshot };
+      if (stage === 'return') return { status: 'COMPLETE', evidence: returnEvidence };
+      throw new Error(`unexpected stage ${stage}`);
+    },
+    async readPayoutDust() { return usdg('0'); },
+    async readPagedPayoutState() { return pagedState; },
+    async persistPagedPayoutState(_cycleId, _stage, value) { pagedState = structuredClone(value); },
+    async consumePayoutDustAndPersistPagedPayoutState(_cycleId, { evidence }) { pagedState = structuredClone(evidence); },
+    async describeCycle() {
+      return {
+        custodyLedgers: new Map(),
+        heldPositions: new Map([[heldPosition.positionId, heldPosition]]),
+      };
+    },
+    async recordCustodyLedger() {},
+  };
+  const request = await preparePayoutRequest({
+    config: config(),
+    cycleRepository,
+    context: { cycleId: snapshot.cycleId },
+  });
+
+  const evidence = await mutatePayout({
+    liveMode: true,
+    config: config(),
+    cycleRepository,
+    context: {
+      cycleId: snapshot.cycleId,
+      requestDigest: `sha256:${'e'.repeat(64)}`,
+      fencingToken: '22222222-2222-4222-8222-222222222222',
+    },
+    request,
+    adapters: { robinhood: { client: new Proxy({}, { get() { throw new Error('zero-proceeds payout must not read the RPC'); } }) } },
+    signerClient: { evm: { async sign() { throw new Error('zero-proceeds payout must not sign'); } } },
+  });
+
+  assert.equal(evidence.distributablePool.amountAtomic, '0');
+  assert.deepEqual(evidence.heldPositionExclusions, {
+    schema: 'hookemon.direct-payout-held-position-exclusions.v1',
+    cycleId: snapshot.cycleId,
+    count: 1,
+    positions,
+    evidenceDigest: canonicalDigest({
+      schema: 'hookemon.direct-payout-held-position-exclusions.v1',
+      cycleId: snapshot.cycleId,
+      count: 1,
+      positions,
+    }),
+  });
+});
+
+test('keeps the prepared main payout exclusions after a held position resolves', async () => {
+  const snapshot = payoutManifest();
+  const returnEvidence = {
+    finalized: true,
+    destinationAccount: OPERATIONS,
+    destinationAsset: TOKEN,
+    destinationCreditAmount: '0',
+  };
+  const heldPosition = {
+    positionId: `held:${'e'.repeat(64)}`,
+    evidenceDigest: `sha256:${'f'.repeat(64)}`,
+    reason: 'SENT_UNKNOWN_DEADLINE',
+    terminalState: 'HELD_UNRESOLVED',
+    resolution: null,
+  };
+  let resolved = false;
+  let pagedState = null;
+  const cycleRepository = {
+    async reserveWalletNonce() { throw new Error('zero-proceeds payout must not reserve a nonce'); },
+    async assertWalletNonce() { throw new Error('zero-proceeds payout must not assert a nonce'); },
+    async releaseWalletNonce() { throw new Error('zero-proceeds payout must not release a nonce'); },
+    async readStage(_cycleId, stage) {
+      if (stage === 'eligibility-snapshot') return { status: 'COMPLETE', evidence: snapshot };
+      if (stage === 'return') return { status: 'COMPLETE', evidence: returnEvidence };
+      throw new Error(`unexpected stage ${stage}`);
+    },
+    async readPayoutDust() { return usdg('0'); },
+    async readPagedPayoutState() { return pagedState; },
+    async persistPagedPayoutState(_cycleId, _stage, value) { pagedState = structuredClone(value); },
+    async consumePayoutDustAndPersistPagedPayoutState(_cycleId, { evidence }) { pagedState = structuredClone(evidence); },
+    async describeCycle() {
+      return {
+        custodyLedgers: new Map(),
+        heldPositions: new Map([[heldPosition.positionId, {
+          ...heldPosition,
+          resolution: resolved ? { terminalState: 'NEVER_SENT' } : null,
+        }]]),
+      };
+    },
+    async recordCustodyLedger() {},
+  };
+  const context = {
+    cycleId: snapshot.cycleId,
+    requestDigest: `sha256:${'1'.repeat(64)}`,
+    fencingToken: '22222222-2222-4222-8222-222222222222',
+  };
+  const request = await preparePayoutRequest({
+    config: config(),
+    cycleRepository,
+    context,
+  });
+  const exclusions = structuredClone(request.heldPositionExclusions);
+  resolved = true;
+
+  const evidence = await mutatePayout({
+    liveMode: true,
+    config: config(),
+    cycleRepository,
+    context,
+    request,
+    adapters: { robinhood: { client: new Proxy({}, { get() { throw new Error('zero-proceeds payout must not read the RPC'); } }) } },
+    signerClient: { evm: { async sign() { throw new Error('zero-proceeds payout must not sign'); } } },
+  });
+  const recoveredRequest = await preparePayoutRequest({
+    config: config(),
+    cycleRepository,
+    context,
+  });
+  const recovered = await reconcileLivePayout({ config: config(), cycleRepository, context });
+
+  assert.deepEqual(evidence.heldPositionExclusions, exclusions);
+  assert.deepEqual(recoveredRequest.heldPositionExclusions, exclusions);
+  assert.deepEqual(recovered.heldPositionExclusions, exclusions);
+});
+
+test('a zero-proceeds payout persists a zero manifest without reserving a nonce or reaching a signer', async () => {
+  const plan = payoutPlan(undefined, '0');
+  let pagedState = null;
+  let custodyWrites = 0;
+  const cycleRepository = {
+    async reserveWalletNonce() { throw new Error('zero-proceeds payout must not reserve a nonce'); },
+    async assertWalletNonce() { throw new Error('zero-proceeds payout must not assert a nonce'); },
+    async releaseWalletNonce() { throw new Error('zero-proceeds payout must not release a nonce'); },
+    async readPagedPayoutState() { return pagedState; },
+    async persistPagedPayoutState(_cycleId, _stage, value) { pagedState = structuredClone(value); },
+    async consumePayoutDustAndPersistPagedPayoutState(_cycleId, { evidence }) { pagedState = structuredClone(evidence); },
+    async describeCycle() { return { custodyLedgers: new Map() }; },
+    async recordCustodyLedger() { custodyWrites += 1; },
+  };
+
+  const evidence = await mutatePayout({
+    liveMode: true,
+    config: config(),
+    cycleRepository,
+    context: {
+      cycleId: plan.cycleId,
+      requestDigest: `sha256:${'1'.repeat(64)}`,
+      fencingToken: '22222222-2222-4222-8222-222222222222',
+    },
+    request: { plan },
+    adapters: { robinhood: { client: new Proxy({}, { get() { throw new Error('zero-proceeds payout must not read the RPC'); } }) } },
+    signerClient: { evm: { async sign() { throw new Error('zero-proceeds payout must not sign'); } } },
+  });
+
+  assert.equal(custodyWrites, 1);
+  assert.equal(evidence.distributablePool.amountAtomic, '0');
+  assert.equal(evidence.totalAllocated.amountAtomic, '0');
+  assert.equal(evidence.dust.amountAtomic, '0');
+  assert.deepEqual(evidence.recipients, []);
 });
 
 test('reconstructs an interrupted dust-consumption plan before initializing payout state', async () => {
@@ -2405,4 +2654,70 @@ test('rejects a changed plan after the first broadcast and requires an exact fin
     config: config(),
   });
   assert.equal((await store.load()).recipients.find(entry => entry.recipient === RECIPIENT_A).state, 'BROADCAST');
+});
+
+function validFinalizedTransfer({ operations = OPERATIONS, recipient = RECIPIENT_A, amountAtomic = '100' } = {}) {
+  return {
+    from: operations,
+    to: recipient,
+    amount: usdg(amountAtomic),
+    finalizedBlockNumber: '100',
+    finalizedBlockHash: `0x${'1'.repeat(64)}`,
+    receiptBlockNumber: '100',
+    receiptBlockHash: `0x${'1'.repeat(64)}`,
+    previousBlockNumber: '99',
+    previousBlockHash: `0x${'2'.repeat(64)}`,
+    sourceBalanceBeforeAtomic: '1000',
+    sourceBalanceAfterAtomic: String(1000 - Number(amountAtomic)),
+    sourceBalanceDeltaAtomic: amountAtomic,
+    recipientBalanceBeforeAtomic: '0',
+    recipientBalanceAfterAtomic: amountAtomic,
+    recipientBalanceDeltaAtomic: amountAtomic,
+    logIndexes: ['0'],
+  };
+}
+
+test('assertFinalizedPayoutTransferEvidence accepts a full producer-shaped valid finality proof', () => {
+  const finalizedTransfer = validFinalizedTransfer();
+  const normalized = assertFinalizedPayoutTransferEvidence({
+    transactionHash: `0x${'3'.repeat(64)}`,
+    finalizedTransfer,
+    operations: OPERATIONS,
+    recipient: RECIPIENT_A,
+    amount: usdg('100'),
+  });
+  assert.equal(normalized.to, RECIPIENT_A);
+  assert.equal(normalized.amount.amountAtomic, '100');
+  assert.equal(normalized.logIndexes.length, 1);
+});
+
+test('assertFinalizedPayoutTransferEvidence rejects a malformed transactionHash even when the amount matches', () => {
+  assert.throws(
+    () => assertFinalizedPayoutTransferEvidence({
+      transactionHash: 'not-a-transaction-hash',
+      finalizedTransfer: validFinalizedTransfer(),
+      operations: OPERATIONS,
+      recipient: RECIPIENT_A,
+      amount: usdg('100'),
+    }),
+    error => error instanceof DirectPayoutError && /transactionHash is invalid/.test(error.message),
+  );
+});
+
+test('assertFinalizedPayoutTransferEvidence rejects a fully-shaped foreign same-chain six-decimal token', () => {
+  const foreignToken = `0x${'f'.repeat(40)}`;
+  const finalizedTransfer = {
+    ...validFinalizedTransfer(),
+    amount: { chainId: '4663', assetId: foreignToken, decimals: 6, amountAtomic: '100' },
+  };
+  assert.throws(
+    () => assertFinalizedPayoutTransferEvidence({
+      transactionHash: `0x${'3'.repeat(64)}`,
+      finalizedTransfer,
+      operations: OPERATIONS,
+      recipient: RECIPIENT_A,
+      amount: usdg('100'),
+    }),
+    error => error instanceof DirectPayoutError && /wrong transfer amount/.test(error.message),
+  );
 });

@@ -148,6 +148,33 @@ test('quoteOutboundBridge returns a typed QuoteResult for USDG(4663) -> Solana C
   assert.equal(quote.destination.minimumAmount, quoteOutboundFixture.details.currencyOut.minimumAmount);
 });
 
+test('EXACT_OUTPUT binds the requested Solana destination amount and preserves the required USDG origin amount', async () => {
+  const exactOutput = structuredClone(quoteOutboundFixture);
+  exactOutput.details.currencyOut.amount = '50000000';
+  exactOutput.details.currencyOut.minimumAmount = '50000000';
+  exactOutput.protocol.v2.orderData.output.payments[0].expectedAmount = '50000000';
+  exactOutput.protocol.v2.orderData.output.payments[0].minimumAmount = '50000000';
+  const fetchImpl = createScriptedFetch({
+    'GET /chains': jsonResponse(200, chainsFixture),
+    'POST /quote/v2': (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.tradeType, 'EXACT_OUTPUT');
+      assert.equal(body.amount, '50000000');
+      return jsonResponse(200, exactOutput);
+    },
+  });
+  const client = createRelayClient({ fetchImpl });
+  const quote = await client.quoteOutboundBridge({
+    ...OUTBOUND_QUOTE_INPUT,
+    amount: '50000000',
+    tradeType: 'EXACT_OUTPUT',
+  });
+  assert.equal(quote.tradeType, 'EXACT_OUTPUT');
+  assert.equal(quote.destination.amount, '50000000');
+  assert.equal(quote.origin.amount, quoteOutboundFixture.details.currencyIn.amount);
+  assert.equal(client.prepareExecution({ quote, liveMode: true }).intent.tradeType, 'EXACT_OUTPUT');
+});
+
 test('quoteReturnBridge returns a typed QuoteResult for Solana Circle USD -> USDG(4663)', async () => {
   const fetchImpl = createScriptedFetch({
     'GET /chains': jsonResponse(200, chainsFixture),

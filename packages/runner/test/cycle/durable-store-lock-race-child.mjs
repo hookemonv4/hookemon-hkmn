@@ -2,7 +2,15 @@ import { lstat, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-const { DURABLE_LOCK_RACE_DIRECTORY: directory, DURABLE_LOCK_RACE_ROLE: role } = process.env;
+import { DurableCycleStore } from '../../src/cycle/durable-store.mjs';
+import { CycleJournal } from '../../src/cycle/journal.mjs';
+
+const {
+  DURABLE_LOCK_RACE_DIRECTORY: directory,
+  DURABLE_LOCK_RACE_ROLE: role,
+  DURABLE_LOCK_RACE_HAMMER_PREFIX: hammerPrefix,
+  DURABLE_LOCK_RACE_HAMMER_ITERATIONS: hammerIterationsRaw,
+} = process.env;
 if (typeof directory !== 'string' || typeof role !== 'string') {
   throw new Error('durable lock race child configuration is incomplete');
 }
@@ -50,6 +58,43 @@ try {
     await waitForResume();
     await unlink(lockPath);
     announce('result', { outcome: 'released' });
+  } else if (role === 'commit-hammer') {
+    // A genuinely independent OS process, not a same-process instance sharing anything but the
+    // filesystem, repeatedly opening and committing against the same directory as fast as possible —
+    // the actual "concurrent writers" shape that reproduces the store.lock release-order race: a
+    // benign "durable cycle store lock contention" from real contention is expected and ignored; a
+    // raw ENOENT or a "legacy migration fence is missing" surfacing all the way to this catch is the
+    // defect under test and is reported back to the parent as a failure.
+    const iterations = Number(hammerIterationsRaw);
+    if (!Number.isInteger(iterations) || iterations <= 0) throw new Error('durable lock race hammer iterations is invalid');
+    const anomalies = [];
+    let contentions = 0;
+    let store = null;
+    while (store === null) {
+      try {
+        store = await DurableCycleStore.open(directory);
+      } catch (error) {
+        if (error?.message !== 'durable cycle store lock contention') throw error;
+        contentions += 1;
+      }
+    }
+    for (let index = 0; index < iterations; index += 1) {
+      try {
+        const cycleId = `${hammerPrefix}-${index}`;
+        const journal = new CycleJournal(cycleId);
+        const tx = store.begin(cycleId, { expectedVersion: 0, expectedJournalHead: null });
+        tx.stageEvent(journal.append('fixture-event', { index }));
+        await store.commit(tx);
+      } catch (error) {
+        const message = error?.message ?? String(error);
+        if (message === 'durable cycle store lock contention' || /active cycle count limit exceeded/.test(message)) {
+          contentions += 1;
+          continue;
+        }
+        anomalies.push(message);
+      }
+    }
+    announce('result', { outcome: 'done', contentions, anomalies });
   } else if (role === 'sqlite-holder') {
     const database = new DatabaseSync(lockDatabasePath);
     try {

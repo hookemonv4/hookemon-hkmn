@@ -88,7 +88,7 @@ test('the full operational sequence completes through one repository and one lea
   assert.deepEqual(repository.completed, [result.cycleId]);
 });
 
-test('a custody hold prevents a resumed cycle from entering claim-process', async () => {
+test('a held-position custody marker lets a resumed cycle enter claim-process', async () => {
   const repository = new MemoryCycleRepository();
   repository.active = { cycleId: 'integration-held', releaseAmount: '55000000', mode: 'rehearsal' };
   repository.stages.set(repository.active.cycleId, new Map([[
@@ -97,12 +97,18 @@ test('a custody hold prevents a resumed cycle from entering claim-process', asyn
   ]]));
   repository.custody = { heldAssets: true, unattributed: false, unresolvedObligations: false };
   const executed = [];
+  const evidence = new Map();
   const service = createService(repository, {
-    async reconcile() { return null; },
-    async execute({ stage }) { executed.push(stage); },
+    async reconcile({ cycleId, stage }) { return evidence.get(`${cycleId}:${stage}`) ?? null; },
+    async execute({ cycleId, stage }) {
+      executed.push(stage);
+      evidence.set(`${cycleId}:${stage}`, { stage, source: 'integration-driver' });
+    },
     async commit() {},
   });
 
-  await assert.rejects(() => service.recoverActiveCycle(), /claim-process blocked by custody preconditions: held assets/);
-  assert.deepEqual(executed, []);
+  const result = await service.recoverActiveCycle();
+
+  assert.equal(result.status, 'COMPLETE');
+  assert.deepEqual(executed, AUTOMATED_CYCLE_STAGES.slice(1));
 });
