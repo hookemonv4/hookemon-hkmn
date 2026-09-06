@@ -106,13 +106,13 @@
       "schemaVersion": "programmable.custom-launch-profile-ref.v4",
       "structuralProfileId": "programmable.custom-launch.robinhood-mainnet.v1",
       "businessProfileId": "robinhood-production-launch",
-      "admissionDescriptorDigest": "sha256:99b4ccabdaaf143bad28a8f6af441a1b93e1f113d0179236328b7fa594d1f948",
-      "admissionPolicyDigest": "sha256:31e6b286ca839b31cb1edfe30c05d9f334892f3d84377961dc10b93959c7e216",
-      "admissionBindingDigest": "sha256:f31643e6e9ff6d5409d59a2fc3ac7fb5ac9cfcb3af08e95c9478bc95ddfa66a2",
-      "admissionSchemaDigest": "sha256:a28a6de6208d6ba7b65b4b706174509570955ba9ce9714624bcb2046ab7beae7",
-      "profileRevision": 1,
-      "profileVersion": "4.0.0",
-      "profileDigest": "sha256:484b1dc6e9091804fabc230f2b3a7504940fa00264f8e66e82a66a951e71f1a0"
+      "admissionDescriptorDigest": "sha256:b09611360e284641873fdb2914b4282e0545e32ea587b278fcd11f4db9a4e7f5",
+      "admissionPolicyDigest": "sha256:47801f57e2365f89eb7397a2df10d697bd1f756ec01536b9b34755e89809da04",
+      "admissionBindingDigest": "sha256:5b2486f35fcd44bd476cafd5bfb5a12decf05a756ba237ca191928f5414c721e",
+      "admissionSchemaDigest": "sha256:6a8194a3b5d8b6432a95ec04da3cd86091ad64c93c0531125caf00ecb919c8cf",
+      "profileRevision": 2,
+      "profileVersion": "4.1.0",
+      "profileDigest": "sha256:b0fca91264a49d358ed1a9eec2a679b59a48d716b71475bef583c2545e1ee502"
     },
     "readiness": {
       "status": "ready",
@@ -125,7 +125,7 @@
       "requiredGraphDescription": "One acyclic executable graph with exactly one token and one hook."
     },
     "funding": {
-      "modes": ["none", "wallet-transaction-value"]
+      "modes": ["wallet-transaction-value"]
     },
     "toolchains": [
       {
@@ -171,9 +171,73 @@
       "verificationBundle",
       "funding",
       "liquidityModel",
+      "fundingPlan",
       "launchIntentHash",
       "agentAttestation"
     ],
+    "nonce": {
+      "format": "lowercase-bytes32",
+      "nonzero": true,
+      "learnedFromPreflightErrors": true,
+      "probeIds": [
+        "001"
+      ]
+    },
+    "sourceDescriptor": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "kind",
+        "controllerWallet",
+        "sourceLineageNonce",
+        "sourceBundleDigest",
+        "bundleContentSha256",
+        "publicOriginCommitment"
+      ],
+      "schemaVersion": "2.0.0",
+      "kind": "deterministic-source-bundle",
+      "controllerWallet": "0x address",
+      "sourceLineageNonce": "integer string",
+      "sourceBundleDigest": "lowercase bytes32",
+      "bundleContentSha256": "sha256 digest",
+      "publicOriginCommitment": "lowercase bytes32",
+      "learnedFromPreflightErrors": true,
+      "probeIds": [
+        "002",
+        "004"
+      ]
+    },
+    "sourceBundleManifest": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "entries"
+      ],
+      "schemaVersion": "2.0.0",
+      "entries": {
+        "minimumLength": 1,
+        "entryRequired": [
+          "path",
+          "kind",
+          "mode",
+          "byteLength",
+          "contentSha256",
+          "symlinkTarget"
+        ],
+        "acceptedKind": "file",
+        "acceptedMode": "100644",
+        "byteLength": "integer string",
+        "contentSha256": "sha256 digest",
+        "symlinkTarget": null
+      },
+      "learnedFromPreflightErrors": true,
+      "probeIds": [
+        "005",
+        "006",
+        "008",
+        "010"
+      ]
+    },
     "funding": {
       "schemaVersion": "programmable.custom-launch-funding-intent.v2",
       "mode": ["none", "wallet-transaction-value"],
@@ -194,6 +258,17 @@
         "liquidity-provided-by-launch",
         "custom-settlement"
       ]
+    },
+    "fundingPlan": {
+      "schemaVersion": "programmable.robinhood-funding-plan.v1",
+      "capitalSource": ["buyer-funded", "creator-funded", "hybrid", "custom"],
+      "pricingModel": ["concentrated-liquidity", "custom-curve", "auction", "custom"],
+      "launchMode": ["fund-and-launch", "build-only"],
+      "nativeAllocations": ["initialLiquidityWei", "initialBuyWei", "reserveWei", "otherLaunchValueWei"],
+      "buildOnlyRejectedOnCreate": true,
+      "fundAndLaunchRequiresNonzeroInitialBuy": true,
+      "addedInProfileVersion": "4.1.0",
+      "addedInProfileRevision": 2
     },
     "externalContract": {
       "required": [
@@ -230,6 +305,28 @@
     },
     "platformFeeConfigurationField": "absent"
   },
+  "preflightProbeResolutions": [
+    {
+      "id": "PREFLIGHT-SOURCE-BUNDLE-DIGEST",
+      "status": "SETTLED",
+      "statementPath": "release/phase3/admission/provider-statement-2026-09-05.json",
+      "previousProbeIds": [
+        "008",
+        "009",
+        "010"
+      ],
+      "resolution": "The provider supplied the V4 source-bundle digest recipe: Keccak256 of the UTF-8 domain string, one zero byte, and UTF-8 RFC 8785 JCS bytes of the 2.0.0 manifest."
+    },
+    {
+      "id": "PREFLIGHT-NONCE-DERIVATION",
+      "status": "SETTLED",
+      "statementPath": "release/phase3/admission/provider-statement-2026-09-05.json",
+      "previousProbeIds": [
+        "001"
+      ],
+      "resolution": "The provider requires one cryptographically random, nonzero 32-byte lowercase-hex nonce per launch attempt and byte-identical reuse on retries."
+    }
+  ],
   "admissionAuthority": {
     "admissionEvidenceAuthority": "private-custom-launch-api",
     "backendAuthoritative": true,

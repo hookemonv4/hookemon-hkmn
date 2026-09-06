@@ -71,13 +71,17 @@
     "factorySelector": "0x196d9f22",
     "targetCount": 3,
     "initializerCount": 3,
-    "targetOrder": ["token", "custody", "hook"],
+    "targetOrder": [
+      "token",
+      "custody",
+      "hook"
+    ],
     "initializers": [
       "allocate(hook)",
       "configureBindingHook(hook)",
       "initializeGraphLaunch(custody,sqrtPriceX96)"
     ],
-    "graphDeploymentHash": "0xe1b2b55129c74cc24d49d5da4f80d7573bb61b4e43bf1ed653950409d3dda0ef",
+    "graphDeploymentHash": "0x9873003251d48d8e6e570777f6fdfdde966fa2f24ddd36f987c63050c7858fdc",
     "deployments": {
       "token": {
         "address": "0x9EDD7Dc4c4b719623a28d7AEa72DCbc9C954B8C2",
@@ -89,7 +93,7 @@
       },
       "hook": {
         "address": "0xA32a6758Dcf40D17F66B8eE08C04910c23A0a0Cc",
-        "runtimeCodeHash": "0x2ca1fa1c1a23730bc06cb37a8bd38e1cc61e62880c84fa6022d7b23d94e79051"
+        "runtimeCodeHash": "0x0508dec733b31a935dab99ba982d6eb46aef56184529309065076b7dc2a86313"
       }
     }
   },

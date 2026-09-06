@@ -1762,6 +1762,7 @@
         "release/phase3/admission/preflight-probe.json",
         "release/phase3/admission/provider-documents.json",
         "release/phase3/admission/route-log.json",
+        "release/phase3/admission/provider-statement-2026-09-05.json",
         "release/phase3/fork-pin.json",
         "release/phase3/genesis-evidence.json",
         "release/phase3/graph-gas-evidence.json",
@@ -1771,6 +1772,7 @@
         "release/phase3/artifacts/custody.json",
         "release/phase3/artifacts/hook.json",
         "release/phase3/build-info/launch.json",
+        "release/phase3/package/create-request.json",
         "release/phase3/package/graph-draft.json",
         "release/phase3/package/package-manifest.json",
         "release/phase3/deployment-manifest.json",
@@ -1806,6 +1808,7 @@
       "packages/contracts/src/accounting/FeeAccounting.sol",
       "packages/contracts/src/market/CanonicalMarket.sol",
       "packages/contracts/src/access/MoneyRoles.sol",
+      "packages/contracts/src/launch/HKMNToken.sol",
       "packages/contracts/src/launch/HookemonIssuance.sol",
       "packages/contracts/src/bindings/RobinhoodBindings.sol",
       "packages/contracts/script/release/PhaseThreeReleasePlan.sol"

@@ -132,6 +132,28 @@ The reference promotion code ties `publicAuthorization`, `publicWrites`, and `re
 
 OPEN FACT A-06: The provider has not published a date, release artifact, or owner-visible transition criterion for these four blockers. Resolve through the public discovery document after a promoted release or a provider release record binding all four artifacts. Until then, no public submission path is available.
 
+## Resolved LIH-01: `launchIntentHash`/`agentAttestation` schema re-checked against the current live OpenAPI (2026-09-06)
+
+H2 re-fetched `https://programmable.market/openapi/custom-launch-v4.json` directly (not from cache or memory) at `2026-09-06`, rather than relying on this file's prior (2026-09-05) snapshot alone, per the instruction that an old findings file is evidence of a prior gap, not proof no current answer exists.
+
+Result: the live schema is unchanged in the relevant respect. `CustomLaunchCreateRequestV4.properties.launchIntentHash` is still only `{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}` — a format constraint, not a preimage formula. `agentAttestation`'s object shape matches exactly what `scripts/programmable/lib/package.mjs` already implements (`schemaVersion: "programmable.agent-launch-attestation.v2"`, `subjectLaunchIntentHash`, `agentId`, `checkedAt`, `checks[].{checkId,evidenceSha256}`, all `sha256:`-prefixed) — no schema drift found; the existing implementation's shape is current. The full route list (`GET capabilities`, `POST/GET custom-launches`, `GET custom-launches/{id}`, `GET finalized-custom-launches`) has no self-serve "compute intent hash" or "compute attestation" endpoint. `CustomLaunchPreflightV2`'s response does carry `requestHash` and `rawRequestSha256` (both `sha256:` pattern) — these are new facts not previously recorded here, but they describe a hash *of the submitted request*, returned *after* submission; they are not documented as the `launchIntentHash` preimage and must not be treated as one without an explicit provider statement.
+
+New, concrete, sourced fact: `https://programmable.market/policies/custom-launch-agent-remediation-v1.json` (fetched 2026-09-06, credential-free) states explicitly, under `packConfig`:
+
+```
+"derivedValuesAreCliOwned": true,
+"derivedValuesMustNotBeCopiedOrHandWritten": [
+  "source descriptor", "manifest digest", "address locators", "CREATE2 addresses",
+  "runtime hashes", "graph hash", "project metadata hash", "metadata-bound graph hash",
+  "launch profile hash", "launch intent hash", "funding intent hash", "funding nonce",
+  "verification bundle hash", "request bytes"
+]
+```
+
+This is a direct, current, provider-published statement that `launchIntentHash` (and the request-bytes/graph/verification-bundle hashes around it) is a value the provider's own CLI computes, and that hand-deriving or copying it is against the provider's own policy — it is not merely undocumented, it is explicitly declared not-ours-to-derive. This is consistent with, and gives concrete cause for, the four open public-discovery activation blockers already recorded above in this file, one of which is literally `public-cli-release`: the CLI that owns this derivation is not yet publicly released. `agentAttestation.subjectLaunchIntentHash` is bound to that same CLI-owned value, so it inherits the same block.
+
+**Updated resolution step (replaces the prior open-ended "obtain the preimage" framing):** this is not a research gap this task can close by reading more docs or reverse-engineering a hash function — it is blocked on the provider publicly releasing its own CLI (tracked as blocker `public-cli-release` in the public discovery document). No signature, hash, or attestation may be invented in its place. Re-check `activationStage`/`public-cli-release` on `https://programmable.market/.well-known/programmable.json` before the next funded attempt.
+
 ## Unverified boundaries
 
 - The preflight probe was intentionally incomplete, so it is not an admission test for a real graph.
@@ -139,3 +161,188 @@ OPEN FACT A-06: The provider has not published a date, release artifact, or owne
 - The owner-recorded 10-basis-point acceptance is not a claim that a hook fee, the published
   20-basis-point default, or any fee path is payable, inclusive, additive, or enforceable onchain.
 - No claim is made that USDG liquidity can be funded, approved, transferred, initialized, or minted through the current API.
+
+## LIH-01 follow-up: v4.1 CLI verified released; native-fee-kernel/funding-plan architecture conflict identified (2026-09-06, H2)
+
+Continuing LIH-01 per explicit coordinator direction that full v4.1 compatibility investigation is
+in scope. All facts below are fresh reads (`curl`, `python3`/`node` JSON parsing, `tar -tzf`/`-xzOf`
+listing — no execution of downloaded code) taken 2026-09-06, cross-checked against at least two
+independent provider sources each.
+
+### CLI release: verified, not blocked
+
+`https://programmable.market/.well-known/programmable.json` → `customLaunchApi.versions.v4` now
+reports `activationBlockers: []` (previously named `public-cli-release` among others — see the
+"Activation gate" section above). `cli.release` names GitHub release `programmable-launch-v4.1.0`
+in `programmablehq/PROGRAMMABLE`, tarball `programmable-launch-4.1.0.tgz`,
+sha256 `9d7d26a74b0b4aaa3b3d8acddc80f821cbd79511ee1ada6acc7b935aeb21cac5`. Downloaded that exact
+tarball and its published `.sha256` file directly from GitHub Releases: both the file's own hash
+and the separately-published checksum file match the discovery document's inline digest exactly
+(three independent sources agreeing). This is genuine evidence the CLI is released and installable,
+not merely a marketing claim; the `public-cli-release` blocker is stale and should be dropped from
+any future reference to it. No package was installed or executed — only listed (`tar -tzf`) and
+individual JSON/Solidity files were read (`tar -xzOf`).
+
+### Profile digests updated from 4.0.0 to 4.1.0
+
+Live `GET https://api.programmable.market/v4/chains/4663/capabilities` and the fetched
+`https://programmable.market/openapi/custom-launch-v4.1.json` (`CustomLaunchPreflightV2.properties.profile`)
+report identical, current values: `profileRevision: 2`, `profileVersion: "4.1.0"`, and four new
+`admission*Digest` consts plus a new `profileDigest`. `release/phase3/admission/provider-documents.json`
+(`capabilities.profile`, `capabilities.funding.modes`) and the regenerated
+`release/phase3/package/create-request.json`/`package-manifest.json` now carry these values.
+`capabilities.funding.modes` on the live endpoint is now `["wallet-transaction-value"]` only —
+`"none"` is no longer advertised as a supported funding mode for new launches, though it remains a
+syntactically valid schema enum value (`CustomLaunchCreateRequestV4.properties.funding.properties.mode.enum`
+still lists both). This distinction — schema-valid vs. currently-advertised-supported — is recorded
+precisely rather than collapsed into one claim.
+
+### `fundingPlan`: new required field, schema captured, template left null
+
+`CustomLaunchCreateRequestV4` in the v4.1 OpenAPI adds a required `fundingPlan` object
+(`programmable.robinhood-funding-plan.v1`, fetched from
+`https://programmable.market/schemas/custom-launch/v4.1/funding-plan.json`): `capitalSource` enum
+(`buyer-funded`/`creator-funded`/`hybrid`/`custom`), `pricingModel` enum
+(`concentrated-liquidity`/`custom-curve`/`auction`/`custom`), `nativeAllocations` (four wei-string
+fields), `maxLaunchValueWei`, `maxGasCostWei`, and `launchMode`
+(`fund-and-launch`/`build-only`). The schema's own `description` states: "Build-only permits local
+pack/preflight only; fresh create must reject before persistence or signing," and a conditional
+(`allOf`/`if`/`then`) requires `nativeAllocations.initialBuyWei` to be nonzero when
+`launchMode: "fund-and-launch"`. `scripts/programmable/lib/create-request-materializer.mjs` now
+validates this exact shape (schema version, enum membership against `provider-documents.json`,
+the nonzero-initial-buy conditional) and `provider-documents.json`'s `v4RequestContract` records
+the same enums as a new `fundingPlan` descriptor, mirroring the existing `funding`/`liquidityModel`
+pattern. The materialized Phase 3 template itself sets `fundingPlan: null` — like `nonce` or
+`sourceDescriptor`, this is a genuinely unresolved fact, not an oversight: which `launchMode`
+applies is exactly the open decision below.
+
+### Genuinely unresolved decision: native-ETH platform fee kernel vs. our USDG-quoted pool
+
+The discovery document's `platformFeePolicy` (`required: true`,
+`status: "required-exact-native-fee-kernel"`, `appliesTo: "new-robinhood-v4.1-api-custom-launches-only"`)
+is not marketing text — it is backed by a concrete reference contract shipped inside the verified
+CLI tarball itself: `package/examples/robinhood-v4-native20/project/src/robinhood-fee-v1/RobinhoodNativeFeeHookV1.sol`.
+Reading that source directly: its `_requirePool` check requires
+`Currency.unwrap(key.currency0) == address(0)` (Solidity's native-ETH sentinel) — i.e. the pool this
+reference kernel enforces **must** have native ETH as currency0. The same example's `README.md`
+states plainly: "This example builds a real ETH/token Uniswap v4 market... zero ETH supplied as
+starting liquidity... The launch wallet funds the first real ETH buy in the same atomic launch
+transaction." The mandatory `initialBuy` object in the discovery document
+(`minimumUsd: "1"`, `execution: "atomic-full-native-input-and-minimum-token-output"`,
+`assessmentBase: "gross-native-initial-buy-at-admission"`) matches this exactly.
+
+Our current, owner-accepted design is a **USDG/HKMN pool** (`packages/contracts/src/market/CanonicalMarket.sol`,
+`FeeAccounting.sol`'s 300 bps split — 10 bps Programmable, 40 bps treasury, 250 bps process — all
+USDG-denominated) with `funding.mode: "none"` and no atomic native-ETH initial buy. No currency in
+our pool is native ETH. I found no written provider statement that a non-ETH-quoted pool can satisfy
+the "exact native fee kernel" requirement via an alternative mechanism (e.g. a wrapped/bridged
+equivalent, or an `externalContracts[]`-bound adapter); the only concrete reference implementation
+shipped is ETH-quoted. I did **not** conclude the two are definitely incompatible — I could not find
+that written anywhere either — but I also did not find a supported path to reconcile them, and I am
+not inventing one.
+
+**This is the exact genuinely unresolved financial/architecture decision requiring an owner/coordinator
+call, not a scoped code fix:**
+
+1. Adopt the provider's native-ETH-quoted pool + `RobinhoodNativeFeeHookV1`-style kernel pattern for
+   a real (`fund-and-launch`) v4.1 launch — this would mean redesigning `CanonicalMarket.sol`/
+   `FeeAccounting.sol`'s USDG-denominated economics to an ETH-quoted pool, a materially different
+   contract change outside H's authority to make unilaterally (no reproduced defect, this is a new
+   design); or
+2. Confirm directly with the provider (support channel, not inferred from schema) whether a
+   USDG-quoted pool can satisfy `platformFeePolicy`/`fundingPlan` through some other accepted
+   mechanism this task did not find documented; or
+3. Use `fundingMode: "build-only"` indefinitely for local pack/preflight validation only, and
+   accept that a real (`fund-and-launch`) v4.1 Robinhood self-serve launch is not currently reachable
+   with the existing USDG-quoted architecture.
+
+No signature, hash, approval, or economic redesign was fabricated to resolve this. HKMN's existing
+300 bps USDG-denominated economics are preserved unchanged in source; only the request template's
+new required field is populated with schema-valid, zero-value, `build-only`-shaped test fixtures
+(in `scripts/tests/programmable-package.test.mjs`), never asserted as the real launch's committed
+choice.
+
+## LIH-01 resolved: exact `launchIntentHash` preimage formula, read from the verified CLI source (2026-09-06, H4)
+
+Continuing LIH-01 with a genuine offline CLI invocation, per explicit coordinator authorization to
+install pinned dependencies and run build-only/local commands in an isolated workspace. No network
+write, sign, submit, or status/admission call was made; the only network activity was the same
+credential-free `GET` of the CLI tarball already verified in the prior LIH-01 entries, plus
+`npm ci --ignore-scripts --no-audit --no-fund` against the tarball's own committed
+`npm-shrinkwrap.json` (its single runtime dependency is `viem@2.55.5`) in a `/tmp` workspace outside
+this repository. Nothing was installed or run inside this repository or against the provider API.
+
+**The CLI's `pack` command is fully offline.** `src/cli.mjs`'s `pack` branch calls `packLaunch` from
+`src/pack.mjs`, which imports only local modules (`build.mjs`, `canonical-json.mjs`, `graph.mjs`,
+`io.mjs`, `source-bundle.mjs`, `project-metadata.mjs`, `verification.mjs`, `pack-v4.mjs`) — no
+`api-client.mjs` import. Only `validate --remote`, `submit`, and `status` touch the network.
+
+**The exact preimage, read verbatim from `src/v4-contract.mjs`:**
+
+```js
+export function buildV4LaunchIntentHash(value) {
+  return sha256Digest(Buffer.concat([
+    Buffer.from(V4_LAUNCH_INTENT_HASH_DOMAIN, "utf8"),   // "programmable.custom-launch-intent.v4"
+    Buffer.from([0]),
+    Buffer.from(canonicalizeJson(value), "utf8"),
+  ]));
+}
+```
+
+Called (in `src/pack-v4.mjs`) with exactly this field set, in this order:
+`schemaVersion, chainId, caip2, chainDeploymentId, chainDeploymentDescriptorDigest, profile,
+launchWallet, nonce, permitWindow, sourceDescriptor, sourceBundleManifest, externalContracts,
+graphBundleHash` (a hash, not the full graph bundle), `projectMetadataHash,
+projectMetadataImageArtifact`, optionally `behaviorScenarioInputsHash`, `verificationBundleHash`
+(a hash, not the full bundle), `funding`, optionally `fundingPlan`, `liquidityModel`.
+`agentAttestation.subjectLaunchIntentHash` is then set to exactly this value — confirming the field
+relationship our own `validateRecordedV4RequestTemplate` already enforces
+(`request.agentAttestation.subjectLaunchIntentHash === request.launchIntentHash`, in
+`scripts/programmable/lib/package.mjs`) is correct and matches the real implementation, not a
+guess.
+
+**This is genuine, sourced, computable-without-signature evidence — read from the provider's own
+released and checksum-verified tool, not reverse-engineered or invented.** It resolves the
+"CLI-owned, must-not-be-hand-written" tension recorded earlier: the formula itself is public (it
+ships in an MIT-licensed, publicly released package); what remains CLI-owned is the *canonical
+input values* (`chainDeploymentId`, `chainDeploymentDescriptorDigest`, `graphBundleHash`,
+`verificationBundleHash`, and others), most of which are still null in our committed template
+because their prerequisite facts (graph target addresses, resolved chain deployment) are
+themselves unresolved.
+
+Invoked `buildV4LaunchIntentHash` directly (the CLI's real exported function, not a
+reimplementation) against our own `materializePhaseThreeCreateRequest({ root: '.' })` output,
+substituting `null` for `graphBundleHash`/`verificationBundleHash` (not yet computed anywhere in
+our pipeline) to match the function's expected shape. It ran without error and produced a hash. This
+demonstrates only that **the mechanism is invokable against our request shape**; the resulting
+digest is a preview over an object containing 11 of 19 null fields
+(`chainDeploymentId, chainDeploymentDescriptorDigest, nonce, sourceDescriptor, sourceBundleManifest,
+externalContracts, graphBundleHash, projectMetadataHash, projectMetadataImageArtifact,
+verificationBundleHash, fundingPlan`) and is **not** recorded as a candidate `launchIntentHash` —
+doing so would misrepresent a hash-of-mostly-nulls as meaningful evidence. No hash was hand-written
+into any committed file; `launchIntentHash`/`agentAttestation` remain `null` in the actual template,
+exactly as before this investigation.
+
+## LIH-01: independent verification sharpens the conclusion to definitive incompatibility (2026-09-06)
+
+Independent review (`H-provider-sol-decision.md`, not duplicated in full here) went one step
+further than the H investigation above: it hashed the actual admission-descriptor and
+business-policy documents bound by the live capabilities digests
+(`raw.githubusercontent.com/programmablehq/Launch-Policy/main/policy/custom-launch-admission-v4.1.json`
+and `.../policy/robinhood-custom-launch-economics-v1.json`) and confirmed both hash to the exact
+`admissionDescriptorDigest`/`admissionPolicyDigest` values recorded above — i.e. these are not just
+"an example," they are the server-bound policy text itself. That policy states
+`conformance.requiredForEveryFreshLaunch: true`, `platformFee.waiverAllowed: false`, and
+`firstBuy.requiredForEveryFreshLaunch: true`. It also found the released CLI enforces this
+unconditionally in code — `pack-v4.mjs` calls `assertRobinhoodNativeFeeKernelBuildV1` regardless of
+`fundingPlan.launchMode`, so `build-only` does not bypass the kernel check; the official packer
+rejects `HookemonHook`/our USDG PoolKey before it can emit even a local, unsigned `launch.json`.
+
+This corrects and replaces the H investigation's earlier, more tentative framing ("I did not
+conclude the two are definitely incompatible... I also did not find it explicitly ruled out"): the
+current route is **definitively incompatible at local pack time**, not merely undocumented. Only
+whether Programmable will publish a different, compatible future profile remains open. The three
+options recorded above stand unchanged; option 3 (direct provider clarification) now has an exact
+drafted question, recorded in `H-provider-sol-decision.md`, ready for an authorized support
+channel. No code, contract, or economics changed as a result — this is a sharpened diagnosis, not a
+new decision.
