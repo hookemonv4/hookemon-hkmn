@@ -535,9 +535,9 @@ test('claim admission rejects configuration values above the fixed operator ceil
 });
 
 // H's verified exact-output bridge quote (H-funding-observations.md, 2026-09-05): acquiring
-// 50,000,000 atomic USDC (two `pokemon_25` packs) required exactly this many atomic USDG in. USDC
-// and USDG are different assets; this is the one number in this file that is a measured quote, not a
-// derived multiple or a round USD guess.
+// 50,000,000 atomic units of Solana mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v (two
+// `pokemon_25` packs) required exactly this many atomic USDG in. The assets differ; this is the one
+// number in this file that is a measured quote, not a derived multiple or a round USD guess.
 const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
 
 function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds }) {
