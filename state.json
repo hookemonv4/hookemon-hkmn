@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-04T04:10:01.961Z",
+  "generatedAt": "2026-09-06T19:23:32.272Z",
   "currentPhase": "init",
   "phases": [
     {
@@ -9,8 +9,8 @@
     },
     {
       "phase": "spec",
-      "result": "STALE",
-      "receipt": "r-00625"
+      "result": "FAILED",
+      "receipt": "r-00644"
     },
     {
       "phase": "architecture",
