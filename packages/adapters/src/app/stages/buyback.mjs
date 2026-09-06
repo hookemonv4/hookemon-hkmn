@@ -572,7 +572,7 @@ async function recordTotalProceedsLedger(cycleRepository, cycleId, asset, soldPa
   let ledger = emptyLedger(cycleId, asset, total.toString());
   if (typeof cycleRepository.describeCycle === 'function') {
     const state = await cycleRepository.describeCycle(cycleId);
-    const existing = state?.custodyLedgers?.get?.(`${asset.chainId} ${asset.assetId}`);
+    const existing = state?.custodyLedgers?.get?.(`${asset.chainId} ${asset.assetId}`);
     if (existing) ledger = { ...existing, buybackProceeds: total.toString() };
   }
   await cycleRepository.recordCustodyLedger(cycleId, ledger);
