@@ -85,7 +85,6 @@ jobs:
         run: node scripts/verify-control-dependencies.mjs
       - name: Verify the test manifest covers every test file
         run: node scripts/test-manifest.mjs check
-      - run: node scripts/v4.mjs trace check
       - run: node scripts/check-cleanroom.mjs .
       - name: Install pinned Gitleaks
         shell: bash
@@ -228,6 +227,7 @@ jobs:
         run: node scripts/programmable/verify-launch-package.mjs --allow-unverified
       - name: Verify release package closure
         run: node scripts/verify-release-package-closure.mjs
+      - run: node scripts/v4.mjs trace check
       - name: Verify deterministic state projection
         run: |
           node scripts/v4.mjs status --check

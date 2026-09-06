@@ -22,7 +22,7 @@
     },
     "workflow": {
       "path": ".github/workflows/v4-gates.yml",
-      "sha256": "1e899ca2394d95e3a8bb4b58b86c87ab1f6164f0f013d1896cd1d1a4bfeeece6"
+      "sha256": "1db099363c61964ddddba8c87c6f2b8d5ae70fd49370aa91d58f3843c1195b0a"
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
@@ -71,11 +71,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "7d188030fb2cebfa94780fc37e2336d88f0d2a6fc3a40f0baa9cd54321356d46",
+      "sha256": "8d23b73122dd2da9dca6ed0d76035d8ab8e0a9e6a545328ac4ad6d8385d352f3",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "7d188030fb2cebfa94780fc37e2336d88f0d2a6fc3a40f0baa9cd54321356d46"
+          "sha256": "8d23b73122dd2da9dca6ed0d76035d8ab8e0a9e6a545328ac4ad6d8385d352f3"
         },
         {
           "path": "scripts/lib/util.mjs",

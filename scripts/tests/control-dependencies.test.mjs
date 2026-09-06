@@ -1053,8 +1053,8 @@ assertWorkflowTamperIsRejected('rejects removing a required workflow step', work
 ));
 
 assertWorkflowTamperIsRejected('rejects reordering required workflow steps', workflow => workflow.replace(
-  '      - run: node scripts/v4.mjs trace check\n      - run: node scripts/check-cleanroom.mjs .',
-  '      - run: node scripts/check-cleanroom.mjs .\n      - run: node scripts/v4.mjs trace check',
+  '      - run: node scripts/v4.mjs trace check\n      - name: Verify deterministic state projection\n        run: |\n          node scripts/v4.mjs status --check\n          git diff --exit-code -- STATE.md state.json\n',
+  '      - name: Verify deterministic state projection\n        run: |\n          node scripts/v4.mjs status --check\n          git diff --exit-code -- STATE.md state.json\n      - run: node scripts/v4.mjs trace check\n',
 ));
 
 assertWorkflowTamperIsRejected('rejects replacing a required workflow step', workflow => workflow.replace(
