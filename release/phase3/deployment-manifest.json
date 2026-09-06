@@ -94,7 +94,6 @@
           "expectedDecimals:uint8",
           "bindingDigest:bytes32",
           "runtimeDigest:bytes32",
-          "seedIntentDigest:bytes32",
           "processClaimLimit6h:uint256",
           "processClaimLimitMax:uint256",
           "processClaimMaxCount:uint256",
@@ -126,5 +125,5 @@
     "CanonicalMerkleSum",
     "HolderSettlement"
   ],
-  "deploymentManifestDigest": "sha256:12a904c8db32ea0909b519b9b712bfd95cad806fa8850085526f3cf0c9b22507"
+  "deploymentManifestDigest": "sha256:8154743b6e7b678e1e941ea580dd012e1f75d6767f1ecfff79df860138cea7cc"
 }

@@ -56,7 +56,7 @@
     {
       "id": "launch-orchestration",
       "path": "docs/modules/launch-orchestration.md",
-      "sha256": "e2e17fbf9709d28a08f1213ff235694f64309bbe506dad2992bff3dcd6edac25"
+      "sha256": "78cef3fb18213ddd820b8f310eeb8f56fe0fc1c187de004d073fe18b9ffc01d3"
     },
     {
       "id": "legacy-custody-family",
@@ -156,7 +156,7 @@
     {
       "id": "release-evidence",
       "path": "docs/modules/release-evidence.md",
-      "sha256": "012a2bc2158e4066a52340c9120dfc93f8cacc4bb4fe35ee87657cd4a774b603"
+      "sha256": "55015dba91dfc265feca8353e26b8c10bc7792bbd9cff21840c31c5117530a9d"
     },
     {
       "id": "website",
