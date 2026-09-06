@@ -2,7 +2,7 @@
 
 ## Informational pages
 
-The canonical repository is `hookemonv4/hookemon-hkmn`. The website assets, configuration and provenance records live in this repository alongside the project; the previous website repository is not a deployment input.
+The website assets, configuration and provenance records live with the project; no separate repository is a deployment input.
 
 `/packs`, `/cycles`, `/holders` and `/transparency` serve the corresponding fixed HTML assets in `public/comic-production/`. GET and HEAD are supported; a trailing slash redirects to the canonical route with the query intact. Other methods return 405. Unknown paths remain with the application router. `worker/public-page-routes.ts` owns this allowlist and never constructs an asset filename from request input.
 
@@ -14,7 +14,7 @@ The cycle page explains recorded stages and public observations; the holder page
 
 OPEN FACT: The repository control-dependency policy does not yet permit the two website workflows or their pinned `actions/setup-node` action. Integrating them requires a reviewed control-policy revision with explicit workflow and dependency pins. The verified alternative is the green website-only CI and local preview; do not merge or deploy while the required repository gate fails.
 
-The legacy operator regression dependencies are isolated in `tests/fixtures/legacy-control` and never imported by the Worker. The retired Durable Object implementation is not part of the website runtime; operator authority remains in the canonical backend.
+The browser sends authenticated operator requests through `worker/operator-proxy.ts`; operator authority remains in the control service.
 
 The hero coin uses `coin-spin.mjs` for a full rotation with two circular gold faces carrying the approved H symbol. A closed cylindrical rim uses tangent gold surfaces; its radius and thickness track the responsive face size. Horizontal mouse or touch drags set its angle and release with decaying momentum. Vertical gestures remain native scrolling. Clicking pauses or resumes automatic rotation; arrow keys rotate in discrete steps. Reduced motion disables automatic rotation and inertia. Offscreen coins and hidden tabs stop animation frames.
 
@@ -34,6 +34,6 @@ Run `npm test` and `npm run lint` from `apps/web`. `npm run dev` is the standard
 
 Shared public links expose server-rendered Open Graph and large-image Twitter card metadata using the original 1500×500 `hookemon-banner.jpeg`. The social description is concise; the full product description remains in page content. Image and page URLs are absolute production URLs. Metadata follows https://ogp.me/.
 
-Public copy distinguishes the legacy USDC dashboard feed from the current USDG payout policy. It describes finalized returned proceeds as the payout basis without implying an additional discretionary reserve deduction. The FAQ discloses the verified 40% buyback hold threshold and paused new cycles pending an owner decision, as specified by REQ-epic-gate-1.
+Public copy keeps Collector-side observations distinct from the EVM payout policy. It describes finalized returned proceeds as the payout basis without implying an additional discretionary reserve deduction. The FAQ discloses the verified 40% buyback hold threshold and paused new cycles pending an owner decision, as specified by REQ-epic-gate-1.
 
 Held-card copy describes community consultation followed by an individual owner decision between Collector Crypt buyback and another marketplace. Automatic payout resumption after verified settlement is a planned extension; the website does not claim an external-marketplace settlement adapter exists. The original cycle snapshot remains fixed.

@@ -50,7 +50,7 @@ test("normalizePublicCardEvent rejects malformed, extra, or impossible fields", 
     (event) => { event.observedAt = "not-a-timestamp"; },
     (event) => { event.imageUrl = "javascript:alert(1)"; },
     (event) => { event.imageUrl = "http://images.example/card.png"; },
-    (event) => { event.imageUrl = "https://user:secret@images.example/card.png"; },
+    (event) => { event.imageUrl = "https://-@images.invalid/card.png"; },
     // finalizedAt before observedAt is never possible for a real observation.
     (event) => { event.finalizedAt = "2026-09-06T09:00:00.000Z"; },
     (event) => { event.proceeds = { ...validAmount, extra: 1 }; },

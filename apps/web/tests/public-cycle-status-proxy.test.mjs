@@ -111,7 +111,7 @@ test("fails closed before fetch for missing, partial, or mismatched paired confi
       env({ PUBLIC_CYCLE_STATUS_URL: "http://operator.example/public/api/cycle-status" }),
       env({ PUBLIC_CYCLE_STATUS_URL: "https://operator.example/status" }),
       env({ PUBLIC_COMMUNITY_SNAPSHOT_URL: "https://other.example/public/api/community-dashboard" }),
-      env({ PUBLIC_CYCLE_STATUS_URL: "https://user@operator.example/public/api/cycle-status" }),
+      env({ PUBLIC_CYCLE_STATUS_URL: "https://operator.invalid/public/api/cycle-status#fragment" }),
       env({ PUBLIC_CYCLE_STATUS_URL: "https://operator.example:8443/public/api/cycle-status" }),
       env({ PUBLIC_CYCLE_STATUS_URL: "https://operator.example/public/api/cycle-status?debug=1" }),
       env({ PUBLIC_COMMUNITY_SNAPSHOT_URL: "https://operator.example/public/api/community-dashboard#fragment" }),

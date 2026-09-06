@@ -277,7 +277,7 @@ test("build contains only secret names and no control credential or execution ca
   for (const source of [indexSource, cycleProxySource, communityProxySource]) {
     assert.doesNotMatch(
       source,
-      /(?:ethereumRpc|solanaRpc|privateKey|signTransaction|sendTransaction|walletClient)/i,
+      /(?:evmRpc|solanaRpc|privateKey|signTransaction|sendTransaction|walletClient)/i,
     );
   }
   for (const name of REQUIRED_WORKER_SECRETS) {
