@@ -64,6 +64,10 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
 - A signer wrapper cannot reach its backend while the active authority is provisional or digestless.
   It checks at each sign and broadcast call, after request preparation and immediately before the
   external effect.
+- Claim-process's last pre-sign veto (`assertClaimStillCoveredByHookLiability`) re-reads the public
+  finalized block by number immediately after its archive-bound hook-liability read and before any
+  control check, estimate, or signer call. A hash mismatch there -- a reorg the archive read's own
+  height/hash binding cannot see -- refuses the claim before the signer is ever reached.
 
 ## State transitions
 

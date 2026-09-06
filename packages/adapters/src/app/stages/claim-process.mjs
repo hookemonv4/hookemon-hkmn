@@ -30,7 +30,7 @@ import {
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
 import { deriveOnchainCycleId, readUsdgAddress } from './action-builder.mjs';
-import { readFinalizedBlock } from '../../robinhood-rpc.mjs';
+import { readBlockByNumber, readFinalizedBlock } from '../../robinhood-rpc.mjs';
 import { StageMutationRevertedError } from './errors.mjs';
 import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
 
@@ -575,6 +575,14 @@ async function assertClaimStillCoveredByHookLiability({ adapters, configured, co
     blockNumber: finalized.number,
     blockHash: finalized.hash,
   });
+  // The archive read binds its values to `finalized.hash`, but the archive itself could sit behind a
+  // reorg the public chain has already abandoned. Re-reading the same height from the public client
+  // now -- after the archive read, before any control check, estimate, or signer call -- catches that
+  // window instead of signing off a hash the canonical chain no longer reports.
+  const recheck = await readBlockByNumber(publicClient, finalized.number);
+  if (recheck.hash?.toLowerCase() !== state.blockHash) {
+    throw new Error('claim-process refuses to sign: the public finalized block hash changed after the archive read');
+  }
   if (state.processClaimsPaused) throw new Error('claim-process refuses to sign while hook process claims are paused');
   if (state.processClaimCycleUsed) throw new Error('claim-process refuses to sign a cycle the hook already claimed');
   if (!state.isSolvent) throw new Error('claim-process refuses to sign while the hook is not solvent');
