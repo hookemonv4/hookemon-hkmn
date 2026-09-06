@@ -26,7 +26,7 @@ import {
   createRecordedRelayLeg,
 } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
-import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
+import { createHistoricalErc20EvidenceClient, ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { RelayQuoteExpiredError } from '../../src/relay-client.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import { createKeychainSignerClient } from '../../src/signing/keychain-signer.mjs';
@@ -144,6 +144,42 @@ function claimMoneyConfiguration() {
       priorityFeeCap: { chainId: '792703809', assetId: 'microlamports-per-compute-unit', decimals: 0, amountAtomic: '2' },
       lamportReserve: { chainId: '792703809', assetId: 'native', decimals: 9, amountAtomic: '2' },
     },
+  };
+}
+
+const CLAIM_HOOK_BLOCK_HASH = `0x${'9'.repeat(64)}`;
+
+/**
+ * A real hook process-liability archive read, bound to the exact production code path
+ * (`createHistoricalErc20EvidenceClient`, `readFinalizedBlock`, `readBlockByNumber`) the pre-sign
+ * veto in `assertClaimStillCoveredByHookLiability` requires -- the same real getter/block-binding
+ * machinery `process-liability-admission.test.mjs`'s reader-level tests exercise, not an invented
+ * shortcut. Every getter reports ample, self-consistent, always-solvent liability: these two tests
+ * are about the chain-attempt/signing lifecycle, not the liability boundary itself, which has its
+ * own focused coverage.
+ */
+function claimHookLiabilityArchive({ operations }) {
+  const covers = 10n ** 12n;
+  const values = {
+    processLiability: covers, remainingProcessClaimCapacity: covers, processClaimsPaused: false,
+    processClaimCycleUsed: false, activeProcessClaimLimit: covers, totalLiability: covers,
+    hookUsdgBalance: covers, isSolvent: true,
+  };
+  const readContractClient = {
+    async readContract({ functionName }) {
+      if (functionName === 'readRoles') {
+        return [{ programmableBeneficiary: operations, treasury: operations, operations }, {}, {}, {}];
+      }
+      if (!(functionName in values)) throw new Error(`unexpected getter ${functionName}`);
+      return values[functionName];
+    },
+    async getBlock({ blockNumber } = {}) {
+      return { number: blockNumber ?? 10n, hash: CLAIM_HOOK_BLOCK_HASH, timestamp: 1n };
+    },
+  };
+  return {
+    getBlock: readContractClient.getBlock,
+    historicalEvidenceClient: createHistoricalErc20EvidenceClient({ client: readContractClient }),
   };
 }
 
@@ -1163,6 +1199,7 @@ test('claim-process writes a chain attempt before signing and broadcasts only it
     nativeGasCaps: { robinhood: '100', solana: '1' },
     moneyConfiguration: claimMoneyConfiguration(),
   });
+  const { getBlock, historicalEvidenceClient } = claimHookLiabilityArchive({ operations: account.address });
   const driver = createStageDriver({
     liveMode: true,
     adapters: {
@@ -1179,7 +1216,9 @@ test('claim-process writes a chain attempt before signing and broadcasts only it
             broadcasted.push(serializedTransaction);
             return keccak256(serializedTransaction);
           },
+          getBlock,
         },
+        historicalEvidenceClient,
       },
       solana: { client: null },
     },
@@ -1257,6 +1296,7 @@ test('claim-process reconciliation records a visible signed transaction after it
   cycleRepository.readStage = async (_cycleId, stage) => stage === 'eligibility-snapshot'
     ? { status: 'COMPLETE', evidence: { finalized: true } }
     : { status: 'PENDING' };
+  const { getBlock, historicalEvidenceClient } = claimHookLiabilityArchive({ operations: account.address });
   const client = {
     async getChainId() { return 4663; },
     async getTransactionCount() { return 0n; },
@@ -1264,6 +1304,7 @@ test('claim-process reconciliation records a visible signed transaction after it
     async estimateFeesPerGas() { return { maxFeePerGas: 1n, maxPriorityFeePerGas: 1n }; },
     async getBalance() { return 1_000_000n; },
     async sendRawTransaction() { throw new Error('broadcast response lost after acceptance'); },
+    getBlock,
   };
   const config = baseConfig({
     contracts: {
@@ -1277,7 +1318,7 @@ test('claim-process reconciliation records a visible signed transaction after it
   });
   const driver = createStageDriver({
     liveMode: true,
-    adapters: { collectorCrypt: null, relay: null, robinhood: { client }, solana: { client: null } },
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client, historicalEvidenceClient }, solana: { client: null } },
     signerClient: {
       evm: {
         async sign({ transaction }) {
@@ -3255,6 +3296,12 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
     async getBlock({ blockNumber } = {}) {
       if (blockNumber === 99n) return { number: 99n, hash: `0x${'e'.repeat(64)}`, timestamp: 99n };
       return { number: 100n, hash: `0x${'f'.repeat(64)}`, parentHash: `0x${'e'.repeat(64)}`, timestamp: 100n };
+    },
+    // The same real shape stages-payout.test.mjs's rpc() fixture already proves against
+    // `readCycleAttributableFinalizedAvailableUsdg`: a typed asset amount bound to the configured
+    // USDG identity, ample enough to never itself constrain this test's tiny payout.
+    async readCycleAttributableFinalizedAvailable() {
+      return { chainId: '4663', assetId: token, decimals: 6, amountAtomic: '999999999999999999999999' };
     },
   };
   const historicalEvidenceClient = {
