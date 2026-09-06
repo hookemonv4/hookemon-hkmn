@@ -60,7 +60,7 @@ stays append-only. The remedy is forward-only via the fast-forward path above.
 
 Escalate an archive pin mismatch, archive-suite failure, unavailable endpoint,
 or a fork-proof run from a non-main ref. Re-run the local checkpoint commands
-after fixing configuration.
+after fixing configuration or pin material.
 
 ## Evidence
 
