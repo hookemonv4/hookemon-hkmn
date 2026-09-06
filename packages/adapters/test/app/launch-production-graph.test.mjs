@@ -10,6 +10,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
+import {
+  decodeFunctionData, encodeAbiParameters, encodeEventTopics, keccak256, parseAbi,
+  parseTransaction, recoverTransactionAddress, toHex,
+} from 'viem';
 
 import { createEmptyOperatorState, mutateOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
@@ -25,6 +29,45 @@ const BIN_PATH = fileURLToPath(new URL('../../bin/hookemon-runner.mjs', import.m
 const SOURCE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+
+// The loopback chain's execution semantics: it derives every emitted event from the calldata it was
+// actually given, exactly as the deployed hook would. Nothing here is keyed on the runner's intent,
+// so a transaction carrying a different cycle, amount, or destination emits a correspondingly
+// different event and the stage's own receipt verification refuses it.
+const HOOK_ABI = parseAbi([
+  'function claimProcess(bytes32 cycleId, uint256 amountAtomicUsdg, address destination)',
+  'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountAtomicUsdg, address indexed destination, uint256 timestamp, uint256 cap, uint256 usedAfter)',
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+]);
+
+function executionLogs(parsed) {
+  let call;
+  try {
+    call = decodeFunctionData({ abi: HOOK_ABI, data: parsed.data ?? '0x' });
+  } catch {
+    return [];
+  }
+  if (call.functionName !== 'claimProcess') return [];
+  const [cycleId, amountAtomicUsdg, destination] = call.args;
+  const amount = encodeAbiParameters([{ type: 'uint256' }], [amountAtomicUsdg]);
+  return [
+    {
+      address: parsed.to,
+      topics: encodeEventTopics({ abi: HOOK_ABI, eventName: 'ProcessClaimed', args: { cycleId, destination } }),
+      data: encodeAbiParameters(
+        [{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
+        [amountAtomicUsdg, 1n, amountAtomicUsdg, amountAtomicUsdg],
+      ),
+    },
+    // The USDG credit the claim actually moves. The stage verifies this transfer independently of
+    // the hook's own event, so both have to agree on sender, recipient, and amount.
+    {
+      address: USDG,
+      topics: encodeEventTopics({ abi: HOOK_ABI, eventName: 'Transfer', args: { from: parsed.to, to: destination } }),
+      data: amount,
+    },
+  ];
+}
 
 async function body(request) {
   const chunks = [];
@@ -49,6 +92,7 @@ async function fixtureServer(t, directory) {
   await execFileAsync('/usr/bin/openssl', ['x509', '-req', '-in', paths.request, '-CA', paths.caCert, '-CAkey', paths.caKey, '-CAcreateserial', '-out', paths.cert, '-days', '1', '-extfile', paths.extensions]);
   const [key, cert] = await Promise.all([readFile(paths.key), readFile(paths.cert)]);
   const calls = { evm: 0, solana: 0, methods: [] };
+  const broadcasts = new Map();
   const server = createServer({ key, cert }, async (request, response) => {
     if (request.url === '/alert') { response.writeHead(204); response.end(); return; }
     if (request.url === '/chains') { respond(response, { chains: [] }); return; }
@@ -78,6 +122,48 @@ async function fixtureServer(t, directory) {
         }] : []);
       }
       if (rpc.method === 'eth_call') return reply(`0x${'0'.repeat(64)}`);
+      // The loopback chain accepts raw bytes and reports them back; it never invents a transaction.
+      // A receipt exists only for bytes this endpoint was actually handed, under the hash those
+      // exact bytes keccak to, so nothing here can manufacture finality for an unsigned or
+      // unsubmitted transaction. Inclusion is at block 2 while latest/finalized stay at 10, which
+      // keeps the configured finality depth satisfied deterministically.
+      if (rpc.method === 'eth_sendRawTransaction') {
+        const raw = rpc.params?.[0];
+        if (typeof raw !== 'string' || !raw.startsWith('0x')) {
+          return respond(response, { jsonrpc: '2.0', id: rpc.id, error: { code: -32602, message: 'raw transaction is invalid' } });
+        }
+        const hash = keccak256(raw);
+        const parsed = parseTransaction(raw);
+        const sender = await recoverTransactionAddress({ serializedTransaction: raw });
+        broadcasts.set(hash, { hash, raw, parsed, from: sender.toLowerCase(), logs: executionLogs(parsed) });
+        return reply(hash);
+      }
+      if (rpc.method === 'eth_getTransactionReceipt' || rpc.method === 'eth_getTransactionByHash') {
+        const sent = broadcasts.get(rpc.params?.[0]);
+        if (!sent) return reply(null);
+        const { parsed: tx } = sent;
+        const common = {
+          transactionHash: sent.hash, blockNumber: '0x2', blockHash: `0x${'1'.repeat(64)}`,
+          transactionIndex: '0x0', from: sent.from, to: tx.to ?? null, type: '0x2',
+        };
+        // Echoed from the decoded raw bytes, never from the runner's own intent: an equivalence
+        // check against this endpoint is therefore a real check of what was actually submitted.
+        return reply(rpc.method === 'eth_getTransactionByHash'
+          ? {
+            ...common, hash: sent.hash, input: tx.data ?? '0x', nonce: toHex(tx.nonce ?? 0),
+            value: toHex(tx.value ?? 0n), gas: toHex(tx.gas ?? 0n), chainId: toHex(tx.chainId ?? 0),
+            maxFeePerGas: toHex(tx.maxFeePerGas ?? 0n), maxPriorityFeePerGas: toHex(tx.maxPriorityFeePerGas ?? 0n),
+            accessList: tx.accessList ?? [], r: tx.r, s: tx.s, v: toHex(tx.v ?? 0n), yParity: toHex(tx.yParity ?? 0),
+          }
+          : {
+            ...common, status: '0x1', gasUsed: '0x5208', cumulativeGasUsed: '0x5208', effectiveGasPrice: '0x2',
+            logs: sent.logs.map((log, index) => ({
+              ...log, blockNumber: '0x2', blockHash: `0x${'1'.repeat(64)}`, transactionHash: sent.hash,
+              transactionIndex: '0x0', logIndex: toHex(index), removed: false,
+            })),
+            logsBloom: `0x${'0'.repeat(512)}`, contractAddress: null,
+          });
+      }
       return respond(response, { jsonrpc: '2.0', id: rpc.id, error: { code: -32601, message: `unhandled EVM ${rpc.method}` } });
     }
     calls.solana += 1;
@@ -420,12 +506,12 @@ test('I-01/I-02 literal production loader completes an automatic two-pack cycle'
   const env = {
     ...process.env,
     HOOKEMON_STATE_DIR: directory, HOOKEMON_DEFAULT_INTERVAL_MS: '100', HOOKEMON_CHAIN_ID: '4663', HOOKEMON_PROVIDER_MODE: 'live',
-    // Short so a wallet-nonce reservation from a tick whose sign attempt failed before reaching the
-    // chain (still PREPARED, see cli.mjs's inspectCycleRecovery) is legitimately expired -- and
-    // therefore takeable under a fresh lease's fencing token -- well before the scheduler's own
-    // ~5s failed-tick retry backoff fires the next attempt. The default 90s production TTL would
-    // otherwise make every retry within this fixture's 15s window collide with its own prior attempt.
-    HOOKEMON_LEASE_TTL_MS: '1000',
+    // Long enough to outlive a whole tick. A TTL below the tick duration expires the lease while the
+    // stage still holds a wallet-nonce reservation taken under it, and the release then fails closed
+    // with a stale fencing token on every subsequent tick -- a permanent stall rather than the
+    // recovery it looks like. Reservations from a genuinely abandoned attempt are reclaimed by the
+    // recovery path, not by racing the lease against the stage that owns it.
+    HOOKEMON_LEASE_TTL_MS: '30000',
     HOOKEMON_ROBINHOOD_RPC_URL: `${fixture.baseUrl}/rpc`, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: `${fixture.baseUrl}/archive`, HOOKEMON_SOLANA_RPC_URL: `${fixture.baseUrl}/solana`,
     HOOKEMON_RELAY_BASE_URL: fixture.baseUrl, HOOKEMON_RELAY_API_KEY: 'fixture-relay-key', HOOKEMON_RELAY_SOLANA_MINT: SOLANA_MINT, HOOKEMON_RELAY_SOLANA_DECIMALS: '6', HOOKEMON_RELAY_EVM_DEPOSITORY: `0x${'a'.repeat(40)}`,
     HOOKEMON_COLLECTOR_CRYPT_BASE_URL: `${fixture.baseUrl}/collector`, HOOKEMON_COLLECTOR_CRYPT_API_KEY: 'fixture-collector-key',
