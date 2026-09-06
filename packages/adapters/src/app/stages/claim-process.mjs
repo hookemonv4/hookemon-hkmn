@@ -6,7 +6,7 @@ import {
   recoverTransactionAddress,
 } from 'viem';
 
-import { buildClaimProcessCall } from '../../hook-contract-client.mjs';
+import { buildClaimProcessCall, HOOK_ABI } from '../../hook-contract-client.mjs';
 import {
   RobinhoodMalformedResponseError,
   readFinalizedErc20TransferCredit,
@@ -30,6 +30,7 @@ import {
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
 import { deriveOnchainCycleId, readUsdgAddress } from './action-builder.mjs';
+import { readFinalizedBlock } from '../../robinhood-rpc.mjs';
 import { StageMutationRevertedError } from './errors.mjs';
 import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
 
@@ -490,6 +491,8 @@ export async function mutateClaimProcess({
     });
     await assertClaimWalletNonce({ cycleRepository, context, reservation: walletReservation });
     requireClaimMutationAuthority(preflightAuthority);
+    // After the authority check, which needs no network, and still before any signer call.
+    await assertClaimStillCoveredByHookLiability({ adapters, configured, context, request });
     const signed = await signerClient.evm.sign({
       transaction: approved.transaction,
       transactionPolicy: approved.policy,
@@ -544,6 +547,55 @@ export async function mutateClaimProcess({
  * must inspect capacity or liability evidence and prepare a new owner-authorized cycle, never
  * retry the same claimed cycle identifier.
  */
+/**
+ * Last veto before a signature: re-read the hook's liability and claim controls, and let the
+ * canonical claim call itself be estimated.
+ *
+ * This may only refuse. It never raises the admitted amount, reprices, or mints a new quote or cycle
+ * identity -- the persisted admission stays immutable, and a snapshot that has dropped below it means
+ * the cycle stops rather than adapts. The estimate is what catches state a getter cannot express,
+ * notably a full active-entry ring (`ProcessClaimEntryLimitReached`), and it runs before any signer
+ * call so a refusal costs no signature.
+ *
+ * Absent capability is not silent success: if neither the archive state read nor the estimate is
+ * available, the claim refuses.
+ */
+async function assertClaimStillCoveredByHookLiability({ adapters, configured, context, request }) {
+  const publicClient = adapters?.robinhood?.client ?? null;
+  const archive = adapters?.robinhood?.historicalEvidenceClient ?? null;
+  if (publicClient === null || typeof archive?.readHookProcessStateAtBlock !== 'function') {
+    throw new Error('claim-process requires finalized hook process-liability evidence before signing');
+  }
+  const amount = BigInt(request.amount.amountAtomic);
+  const onchainCycleId = deriveOnchainCycleId(context.cycleId);
+  const finalized = await readFinalizedBlock(publicClient);
+  const state = await archive.readHookProcessStateAtBlock({
+    hook: configured.hook,
+    onchainCycleId,
+    blockNumber: finalized.number,
+    blockHash: finalized.hash,
+  });
+  if (state.processClaimsPaused) throw new Error('claim-process refuses to sign while hook process claims are paused');
+  if (state.processClaimCycleUsed) throw new Error('claim-process refuses to sign a cycle the hook already claimed');
+  if (!state.isSolvent) throw new Error('claim-process refuses to sign while the hook is not solvent');
+  if (state.operations !== configured.operations.toLowerCase()) {
+    throw new Error('claim-process refuses to sign against a changed hook Operations role');
+  }
+  if (amount > state.processLiability || amount > state.remainingProcessClaimCapacity) {
+    throw new Error('claim-process refuses to sign: the admitted amount is no longer covered by hook liability and capacity');
+  }
+  // The canonical call, estimated as Operations would send it. A revert here is a refusal.
+  if (typeof publicClient.estimateContractGas === 'function') {
+    await publicClient.estimateContractGas({
+      address: configured.hook,
+      abi: HOOK_ABI,
+      functionName: 'claimProcess',
+      args: [onchainCycleId, amount, configured.operations],
+      account: configured.operations,
+    });
+  }
+}
+
 function claimChainAttempts(cycle) {
   const entries = cycle?.chainAttempts instanceof Map ? [...cycle.chainAttempts.values()] : [];
   return entries.filter(record => record?.attempt?.stage === 'claim-process');

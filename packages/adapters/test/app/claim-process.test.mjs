@@ -41,7 +41,41 @@ function claimMoneyConfiguration({ gasPriceCap = '2', nativeReserve = '100' } = 
   };
 }
 
+// Isolated hook process-liability evidence: the pre-sign veto re-reads the hook's own ledger at a
+// canonical finalized block, so a fixture that omits it is refused rather than silently signed.
+function hookProcessStateFixture({ amount = 10n ** 12n, operations, ...overrides } = {}) {
+  const blockHash = `0x${'1'.repeat(64)}`;
+  return {
+    finalizedBlock: { number: 10n, hash: blockHash, timestamp: 1n },
+    evidenceClient: {
+      async readHookProcessStateAtBlock() {
+        return {
+          processLiability: amount,
+          remainingProcessClaimCapacity: amount,
+          processClaimsPaused: false,
+          processClaimCycleUsed: false,
+          activeProcessClaimLimit: 4n,
+          totalLiability: amount,
+          hookUsdgBalance: amount,
+          isSolvent: true,
+          operations: String(operations).toLowerCase(),
+          blockNumber: 10n,
+          blockHash,
+          ...overrides,
+        };
+      },
+    },
+  };
+}
+
+// The veto compares the hook's Operations role against the configured account, which differs per
+// test (several derive one from a signing key). Recording the account each config was built with
+// lets the isolated evidence fixture answer for that same account without weakening the check.
+let lastConfiguredOperations = OPERATIONS;
+const OPERATIONS_FOR_VETO = () => lastConfiguredOperations;
+
 function claimConfig(account, overrides = {}) {
+  lastConfiguredOperations = account;
   return {
     chainId: 4663,
     contracts: { hook: HOOK, usdg: '0x5fc5360d0400a0fd4f2af552add042d716f1d168' },
@@ -150,7 +184,9 @@ test('mutateClaimProcess persists signed raw bytes and replays those exact bytes
       liveMode: true,
       adapters: {
         robinhood: {
+          historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
           client: {
+            async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
             async getChainId() { return 4663; },
             async getTransactionCount() {
               assert.equal(reservationEstablished, true);
@@ -213,7 +249,9 @@ test('mutateClaimProcess persists signed raw bytes and replays those exact bytes
       liveMode: true,
       adapters: {
         robinhood: {
+          historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
           client: {
+            async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
             async sendRawTransaction() {
               invalidBroadcastCalls += 1;
               throw new Error('broadcast must not be reached');
@@ -237,7 +275,9 @@ test('mutateClaimProcess persists signed raw bytes and replays those exact bytes
     liveMode: true,
     adapters: {
       robinhood: {
+        historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
         client: {
+          async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
           async getChainId() { throw new Error('a signed claim must not refresh the nonce or fees'); },
           async sendRawTransaction({ serializedTransaction }) {
             broadcastCalls += 1;
@@ -272,7 +312,9 @@ test('mutateClaimProcess refuses a quoted EVM gas price above MoneyConfiguration
       liveMode: true,
       adapters: {
         robinhood: {
+          historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
           client: {
+            async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
             async getChainId() { return 4663; },
             async getTransactionCount() { return 7n; },
             async estimateGas() { return 100n; },
@@ -306,7 +348,9 @@ test('mutateClaimProcess preserves the configured native reserve after the maxim
       liveMode: true,
       adapters: {
         robinhood: {
+          historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
           client: {
+            async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
             async getChainId() { return 4663; },
             async getTransactionCount() { return 7n; },
             async estimateGas() { return 100n; },
@@ -339,7 +383,9 @@ test('mutateClaimProcess refuses an invalid mutation authority before signing', 
       liveMode: true,
       adapters: {
         robinhood: {
+          historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
           client: {
+            async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
             async getChainId() { return 4663; },
             async getTransactionCount() { return 7n; },
             async estimateGas() { return 120000n; },
@@ -397,7 +443,9 @@ test('mutateClaimProcess refuses an unresolved claim attempt with a different re
       liveMode: true,
       adapters: {
         robinhood: {
+          historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
           client: {
+            async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
             async getChainId() { return 4663; },
             async getTransactionCount() { return 7n; },
             async estimateGas() { return 120000n; },
@@ -456,7 +504,9 @@ test('reconcileLiveClaimProcess leaves a prepared claim attempt retryable after 
     liveMode: true,
     adapters: {
       robinhood: {
+        historicalEvidenceClient: hookProcessStateFixture({ operations: OPERATIONS_FOR_VETO() }).evidenceClient,
         client: {
+          async getBlock() { return { number: 10n, hash: `0x${'1'.repeat(64)}`, timestamp: 1n }; },
           async getChainId() { return 4663; },
           async getTransactionCount() { return 7n; },
           async estimateGas() { return 120000n; },

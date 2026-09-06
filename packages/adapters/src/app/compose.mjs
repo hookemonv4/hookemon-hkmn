@@ -21,11 +21,12 @@ import { executeAuditedCommand, readAllAuditEntries, verifyAuditChain } from '..
 import { createAccessJwtVerifier } from '../../../dashboard/src/auth/access-jwt.mjs';
 import { assertProxyCredentialConfigured } from '../../../dashboard/src/auth/proxy-credential.mjs';
 import { readDashboardProfile } from '../../../dashboard/src/contracts/dashboard-profile.mjs';
+import { deriveOnchainCycleId } from './stages/action-builder.mjs';
 import { createCollectorCryptClient } from '../collector-crypt.mjs';
 import { createRelayClient } from '../relay-client.mjs';
 import {
-  confirmReadFinalized, createHistoricalErc20EvidenceClient, createRobinhoodClient, readChainId,
-  readTokenBalanceAtLatest,
+  createHistoricalErc20EvidenceClient, createRobinhoodClient, readBlockByNumber, readChainId,
+  readFinalizedBlock,
 } from '../robinhood-rpc.mjs';
 import { createSolanaRpcClient, readSolBalance, readUsableLatestBlockhash } from '../solana-rpc.mjs';
 import { attachCollectorPolicyBundle, loadCollectorPolicyBundle } from '../signing/collector-policy-loader.mjs';
@@ -691,6 +692,66 @@ function buildAdmissionPlanner({ config, adapters, readConfiguration, processLia
  * and inventing one is not available to this composition -- so live admission fails closed here
  * rather than substituting a weaker proof.
  */
+/**
+ * The production process-liability reader: the deployed hook's own accrued ledger, read at one
+ * canonical finalized block.
+ *
+ * The public RPC selects the finalized block; every getter is then issued against the archive client
+ * at that explicit height, and the archive re-reads the block so the values are bound to the hash
+ * they were taken at. The evidenced ceiling is min(processLiability, remainingProcessClaimCapacity),
+ * because remaining capacity alone ignores liability just as liability alone ignores the claim
+ * limit. Paused claims, a cycle id already used, an Operations role that is not the frozen identity,
+ * and an insolvent hook each refuse outright.
+ *
+ * There is no latest read, no configured literal, and no wallet balance anywhere on this path: an
+ * Operations USDG balance is post-claim custody and can include unrelated deposits, so it cannot
+ * authorize a new claim.
+ */
+function buildProcessLiabilityReader({ config, adapters }) {
+  const publicClient = adapters?.robinhood?.client ?? null;
+  const archive = adapters?.robinhood?.historicalEvidenceClient ?? null;
+  const hook = config.contracts?.hook ?? null;
+  const fundingAsset = config.moneyConfiguration?.assets?.usdg ?? null;
+  return {
+    async read({ cycleId }) {
+      if (publicClient === null || hook === null || fundingAsset === null
+        || typeof archive?.readHookProcessStateAtBlock !== 'function') {
+        return null;
+      }
+      const finalized = await readFinalizedBlock(publicClient);
+      const state = await archive.readHookProcessStateAtBlock({
+        hook,
+        onchainCycleId: deriveOnchainCycleId(cycleId),
+        blockNumber: finalized.number,
+        blockHash: finalized.hash,
+      });
+      // The public chain must still report the same hash at that height after the archive reads.
+      const recheck = await readBlockByNumber(publicClient, finalized.number);
+      if (recheck.hash?.toLowerCase() !== state.blockHash) {
+        throw new Error('process liability evidence block hash changed between the archive read and its recheck');
+      }
+      if (state.processClaimsPaused) throw new Error('process liability evidence refuses while hook process claims are paused');
+      if (state.processClaimCycleUsed) throw new Error('process liability evidence refuses a cycle id the hook already used');
+      if (!state.isSolvent) throw new Error('process liability evidence refuses while the hook is not solvent');
+      if (state.operations !== config.accounts.evm.toLowerCase()) {
+        throw new Error('process liability evidence Operations role does not match the configured Operations account');
+      }
+      const ceiling = state.processLiability < state.remainingProcessClaimCapacity
+        ? state.processLiability
+        : state.remainingProcessClaimCapacity;
+      return {
+        amountAtomic: ceiling.toString(),
+        chainId: fundingAsset.chainId,
+        assetId: fundingAsset.assetId,
+        decimals: fundingAsset.decimals,
+        blockNumber: state.blockNumber.toString(),
+        blockHash: state.blockHash,
+        finalized: true,
+      };
+    },
+  };
+}
+
 function assertProcessLiabilityEvidence(value, fundingAsset) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -1305,10 +1366,9 @@ export async function compose(config) {
             config: resolved,
             adapters,
             readConfiguration,
-            // Production supplies nothing here: no deployed view reports attributable claimable
-            // process liability yet, so live admission fails closed rather than accepting a wallet
-            // balance or a configured figure as proof. A test supplies an isolated evidence source.
-            processLiabilityReader: config.processLiabilityReader ?? null,
+            // The hook's own accrued liability ledger at a canonical finalized block. A test may
+            // substitute an isolated reader; nothing substitutes a wallet balance or a config value.
+            processLiabilityReader: config.processLiabilityReader ?? buildProcessLiabilityReader({ config: resolved, adapters }),
           }),
         }
         : {}),
