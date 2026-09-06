@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { PublicKey, Transaction } from '@solana/web3.js';
+
 import { acquireLease } from '../../../runner/src/automation/exclusive-lease.mjs';
 import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
@@ -33,12 +35,15 @@ import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
   SolanaAdapterError,
+  TOKEN_PROGRAM_ID,
+  buildTransferCheckedInstruction,
   createSolanaRpcClient,
   deriveAssociatedTokenAddress,
 } from '../../src/solana-rpc.mjs';
 import { MoneyConfigurationRejected } from '../../src/app/environment.mjs';
 import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
 import {
@@ -481,31 +486,243 @@ test('the trusted Solana blockhashContextResolver refuses when the RPC latest bl
   await assert.rejects(() => resolver(latestBlockhash), SolanaAdapterError);
 });
 
-test('compose installs the trusted resolver from its own configured Solana client, not an arbitrary same-shaped one', async t => {
-  const latestBlockhash = 'SysvarC1ock11111111111111111111111111111111';
-  const { client: solanaClient, calls } = configurableSolanaRpcClient({ blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+/** A syntactically real, structurally valid legacy Solana transaction (deserializable by
+ * `VersionedTransaction.deserialize`, exactly what `decodeProviderTransaction` requires to ever
+ * reach `blockhashContextResolver`): a single-instruction SPL transfer-checked from the configured
+ * operator to itself, signed by nobody (`decodeProviderTransaction` never verifies signatures, only
+ * shape) so no private key is needed. `recentBlockhash` is the one field this test controls per
+ * case. */
+function realUnsignedPurchaseTransaction({ operator, recentBlockhash }) {
+  const operatorKey = new PublicKey(operator);
+  const source = deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT);
+  const transaction = new Transaction({ feePayer: operatorKey, recentBlockhash }).add(
+    buildTransferCheckedInstruction({
+      source: source.toBase58(),
+      destination: source.toBase58(),
+      owner: operator,
+      mint: CIRCLE_USD_MINT,
+      amount: 1n,
+      decimals: CIRCLE_USD_DECIMALS,
+    }),
+  );
+  return Buffer.from(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })).toString('base64');
+}
+
+/** The configured-RPC double a real composed purchase mutation actually reaches: `getLatestBlockhash`
+ * / `isBlockhashValid` (consumed twice on the exact-match path -- once by `requireLiveCollectorOnlyCanary`'s
+ * own startup canary, once again inside the resolver itself during decode), `getBlockHeight` (the
+ * decode options' independent `currentBlockHeightResolver`), and `getAccountInfo` (the operator's
+ * settlement associated-token-account existence read gating admission before any provider call).
+ * `invalidFromCall` lets a test keep the startup canary healthy while making only the resolver's own
+ * later `isBlockhashValid` read report the latest blockhash as already unusable. */
+function collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidFromCall = null }) {
+  let isBlockhashValidCalls = 0;
+  return createSolanaRpcClient({
+    rpcUrl: 'https://solana.example.test',
+    fetchImpl: async (_url, request) => {
+      const { id, method } = JSON.parse(request.body);
+      let result;
+      if (method === 'getLatestBlockhash') result = { value: { blockhash: latestBlockhash, lastValidBlockHeight: 4242 } };
+      else if (method === 'isBlockhashValid') {
+        isBlockhashValidCalls += 1;
+        result = { value: invalidFromCall === null || isBlockhashValidCalls < invalidFromCall };
+      } else if (method === 'getBlockHeight') result = 100;
+      else if (method === 'getBalance') result = { value: 10_000_000 };
+      else if (method === 'getAccountInfo') {
+        result = {
+          value: {
+            owner: TOKEN_PROGRAM_ID,
+            data: {
+              program: 'spl-token',
+              parsed: {
+                type: 'account',
+                info: {
+                  mint: CIRCLE_USD_MINT,
+                  owner: operator,
+                  tokenAmount: { amount: '1000000', decimals: CIRCLE_USD_DECIMALS },
+                },
+              },
+            },
+          },
+        };
+      } else result = null;
+      return { ok: true, async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); } };
+    },
+  });
+}
+
+async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transactionBlockhash, invalidFromCall = null }) {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
   const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  // The loss/outstanding-custody caps are raised to the same 25000000 atomic units as the release
+  // amount below -- `collectorOnlyLivePolicyPatch`'s base `livePolicyPatch` caps them at a token '20'.
+  await writeOperatorState(statePath, {
+    ...collectorOnlyLivePolicyPatch(),
+    lossCapMicroUsdg: '25000000',
+    maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const cycle = await seedCycle(stateDir, {
+    releaseAmount: '25000000',
+    mode: 'rehearsal',
+    providerMode: 'live',
+    completedStages: [
+      { stage: 'eligibility-snapshot' },
+      { stage: 'claim-process' },
+      { stage: 'outbound' },
+    ],
+  });
+
+  const calls = { generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
   const composition = await compose({
     stateDir,
-    statePath: join(stateDir, 'operator-state.json'),
+    statePath,
     workerOwner: 'test-worker',
     leaseTtlMs: 30_000,
     robinhood: { rpcUrl: 'https://example.invalid' },
-    solana: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid', chainId: 'solana-mainnet' },
     relay: { baseUrl: 'https://example.invalid' },
-    collectorCrypt: { baseUrl: 'https://example.invalid' },
-    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: solanaClient } },
+    collectorCrypt: {
+      baseUrl: 'https://example.invalid',
+      settlementAsset: asset,
+      packPrice: { ...asset, amountAtomic: '25000000' },
+    },
+    // A collector-only rehearsal has no EVM leg, but the policy engine's custody projection still
+    // needs a typed EVM USDG valuation asset to report a valued (not `UNVALUED_CUSTODY`-refused)
+    // custody state -- the same placeholder pin `productionMoneyConfiguration` uses elsewhere here.
+    contracts: { vault: null, hook: null, usdg: '0x0000000000000000000000000000000000000001', usdgDecimals: 6 },
+    accounts: { evm: null, solana: operator },
+    pack: { code: 'collector-25' },
+    signer: {
+      backend: 'keychain',
+      liveMode: true,
+      roles: ['operator-solana'],
+      keychain: { solanaAccount: 'operator-solana' },
+    },
+    moneyConfiguration: collectorOnlyMoneyConfiguration(),
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+      payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+      split: 'equal',
+    },
+    execution: { profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    preflightAuthority: createTestProfileMutationAuthority(),
+    adapters: {
+      collectorCrypt: {
+        async getMachines() { return { machines: [{ code: 'collector-25', price: '0.025', contains: 1 }] }; },
+        async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
+        async generateYoloPacks({ playerAddress }) {
+          calls.generateYoloPacks += 1;
+          assert.equal(playerAddress, operator);
+          return {
+            packs: [{
+              memo: 'memo-composed-purchase',
+              transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
+            }],
+          };
+        },
+        submitTransaction: () => { throw new Error('submitTransaction must never be reached before a pinned policy exists'); },
+      },
+      relay: {
+        quoteOutboundBridge: () => { throw new Error('unused: outbound is already seeded complete'); },
+        quoteReturnBridge: () => { throw new Error('unused'); },
+        simulateExecution: () => { throw new Error('unused'); },
+        prepareExecution: () => { throw new Error('unused'); },
+      },
+      robinhood: { client: { async readContract() { return { requirementsRevision: 0n, chainId: 4663n }; } } },
+      solana: { client: collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidFromCall }) },
+    },
+    signerClient: {
+      solana: {
+        probe: async () => ({ ready: true }),
+        async sign() { calls.sign += 1; throw new Error('signer must never be reached before a pinned policy exists'); },
+      },
+    },
+    now: () => 1_000,
   });
   t.after(() => composition.shutdown());
 
-  // `compose` never re-exports the resolved `config.solana.blockhashContextResolver` it builds and
-  // hands to the stage driver (see stage-driver.test.mjs for that capability-threading proof); what
-  // is public here is the exact same configured client instance the resolver factory closes over,
-  // identity-checked so a future refactor cannot silently point it at a different, untrusted client.
-  assert.equal(composition.adapters.solana.client, solanaClient);
-  const resolver = createTrustedSolanaBlockhashContextResolver(composition.adapters.solana.client);
-  assert.deepEqual(await resolver(latestBlockhash), { blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
-  assert.equal(calls.getLatestBlockhash, 1);
+  // `collectorOnlyLivePolicyPatch`'s manualApprovalCycles: 1 requires this cycle's own policy digest
+  // to be pre-approved -- collector-only rehearsal policy refuses a manualApprovalCycles of 0
+  // outright, so the approval is recorded rather than the requirement disabled.
+  const approvedConfiguration = (await readOperatorState(statePath)).configuration;
+  const cycleDigest = deriveCyclePolicyDigest({
+    configuration: approvedConfiguration,
+    cycleId: cycle.cycleId,
+    releaseAmountMicroUsdg: cycle.releaseAmount,
+    packId: 'collector-25',
+    liveMode: true,
+    mode: 'rehearsal',
+  });
+  await composition.policyEngine.recordManualApproval({ cycleDigest, cycleId: cycle.cycleId, approvedAtMs: 999 });
+
+  // The predecessor stages above are seeded directly into the repository (this test isolates
+  // purchase), but the policy engine's own claim-process ledger entry is not a byproduct of that --
+  // it is what lets the purchase boundary find `existingCycle(...)` instead of refusing
+  // CYCLE_POLICY_MISSING before purchase's own handler ever runs.
+  const admission = await composition.policyEngine.admit({
+    boundary: 'claim-process',
+    cycleId: cycle.cycleId,
+    releaseAmountMicroUsdg: cycle.releaseAmount,
+    packId: 'collector-25',
+    liveMode: true,
+    mode: 'rehearsal',
+  });
+  assert.equal(admission.allowed, true);
+
+  const error = await composition.service.recoverActiveCycle({ liveMode: true, mode: 'rehearsal' }).then(
+    () => null,
+    caught => caught,
+  );
+  return { error, calls, composition, cycle };
+}
+
+test('a composed live collector-only purchase refuses at the trusted resolver before any signer or submit call, on a stale provider blockhash', async t => {
+  const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+    latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+    transactionBlockhash: 'SysvarRecentB1ockHashes11111111111111111111',
+  });
+
+  assert.match(
+    error?.message ?? '',
+    /Solana blockhashContextResolver failed: compose Solana blockhashContextResolver refuses a blockhash that is not the current latest/,
+  );
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
+
+test('a composed live collector-only purchase refuses at the trusted resolver before any signer or submit call, when the RPC latest blockhash is already unusable', async t => {
+  const blockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+    latestBlockhash: blockhash,
+    transactionBlockhash: blockhash,
+    // Call 1 is the startup canary (must stay healthy so the run actually reaches purchase); call 2
+    // is the resolver's own internal `readUsableLatestBlockhash` during decode -- that is the one
+    // this test makes report the latest blockhash as no longer usable.
+    invalidFromCall: 2,
+  });
+
+  assert.match(
+    error?.message ?? '',
+    /Solana blockhashContextResolver failed: latest Solana blockhash is no longer valid before signing/,
+  );
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
+
+test('a composed live collector-only purchase advances past the trusted resolver on an exact blockhash match, refusing only at the genuine next pinned-policy boundary', async t => {
+  const blockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+    latestBlockhash: blockhash,
+    transactionBlockhash: blockhash,
+  });
+
+  assert.equal(calls.generateYoloPacks, 1, 'the resolver match must let the batch call and decode actually happen');
+  assert.match(error?.message ?? '', /Collector purchase requires a pinned transaction policy/);
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
 });
 
 test('compose refuses a production profile without MoneyConfigurationV1 before opening durable state', async t => {
