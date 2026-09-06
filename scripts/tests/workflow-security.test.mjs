@@ -378,8 +378,8 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   ];
 
   assert.equal((gitleaksConfig.match(/^\[\[rules\]\]$/gm) ?? []).length, 1);
-  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 9);
-  assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 7);
+  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 12);
+  assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 8);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/collector-crypt\/pack-status\\\.json/);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/robinhood-rpc\\\.test\\\.mjs/);
   assert.match(gitleaksConfig, /docs\/modules\/collector-crypt-adapter\\\.md/);
@@ -401,6 +401,13 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   assert.match(gitleaksConfig, /\^5Z6Ay5NEcbg3xhopc522sBCRXQujkTiuDRnHGfQdcnSf\$/);
   assert.match(gitleaksConfig, /\^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse\$/);
   assert.match(gitleaksConfig, /\^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168\$/);
+  assert.match(gitleaksConfig, /packages\/dashboard\/src\/contracts\/public-cycle-status\\\.mjs/);
+  assert.match(gitleaksConfig, /packages\/dashboard\/src\/contracts\/public-community-snapshot\\\.mjs/);
+  assert.match(gitleaksConfig, /HELD_POSITION_V5_KEYS : HELD_POSITION_V4_KEYS/);
+  assert.match(gitleaksConfig, /HELD_POSITION_V7_KEYS : HELD_POSITION_V6_KEYS/);
+  assert.match(gitleaksConfig, /packages\/adapters\/rehearsal\/collector-policy\/specimens\/purchase\\\.json/);
+  assert.match(gitleaksConfig, /packages\/adapters\/rehearsal\/collector-policy\/specimens\/buyback\\\.json/);
+  assert.match(gitleaksConfig, /\^EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\$/);
   assert.doesNotMatch(gitleaksConfig, /^\[\[allowlists\]\]$/m);
 });
 

@@ -145,6 +145,32 @@ paths = [
 ]
 regexTarget = "secret"
 regexes = ['''^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168$''']
+
+[[rules.allowlists]]
+description = "Held-position key-set selector ternary in the public cycle-status contract misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/dashboard/src/contracts/public-cycle-status\.mjs$''']
+regexTarget = "line"
+regexes = ['''^\s*const keys = \(schemaVersion === 5 \|\| schemaVersion === 6\) \? HELD_POSITION_V5_KEY`
+  + String.raw`S : HELD_POSITION_V4_KEYS;\s*$''']
+
+[[rules.allowlists]]
+description = "Held-position key-set selector ternary in the public community-snapshot contract misclassified as a generic API key"
+condition = "AND"
+paths = ['''(?:^|/)packages/dashboard/src/contracts/public-community-snapshot\.mjs$''']
+regexTarget = "line"
+regexes = ['''^\s*const keys = \(schemaVersion === 7 \|\| schemaVersion === 8\) \? HELD_POSITION_V7_KEY`
+  + String.raw`S : HELD_POSITION_V6_KEYS;\s*$''']
+
+[[rules.allowlists]]
+description = "Public Solana stablecoin mint repeated across the collector-policy rehearsal specimen fixtures misclassified as a generic API key"
+condition = "AND"
+paths = [
+  '''(?:^|/)packages/adapters/rehearsal/collector-policy/specimens/purchase\.json$''',
+  '''(?:^|/)packages/adapters/rehearsal/collector-policy/specimens/buyback\.json$''',
+]
+regexTarget = "secret"
+regexes = ['''^EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v$''']
 `;
 const GITLEAKS_CONFIG_SHA256 = sha256(GITLEAKS_CONFIG);
 const CANONICAL_WORKFLOW = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'v4-gates.yml'), 'utf8');
