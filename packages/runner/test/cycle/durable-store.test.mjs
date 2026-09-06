@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -508,24 +508,18 @@ test('rejects a replacement state directory even when its original identity mark
   const directory = join(parent, 'cycles');
   await DurableCycleStore.open(directory);
   const marker = await readFile(join(directory, '.store-identity.json'), 'utf8');
-  const originalWitness = await stat(directory);
-  // Deleting and recreating a directory can let the filesystem hand the new
-  // directory the same inode the original just freed (observed on Linux
-  // ext4/tmpfs), which would make this replacement indistinguishable from a
-  // reopen by coincidence rather than by the guard under test. Renaming the
-  // original aside keeps its inode allocated so the replacement is
-  // necessarily distinct, on every POSIX filesystem.
-  await rename(directory, join(parent, 'cycles.original'));
+  // Delete the whole tree (including the in-tree marker) and recreate it at
+  // the same path, then copy the original marker bytes back in. On Linux the
+  // directory's own inode can be immediately reused for the replacement, so
+  // this exercises the sibling hard-link witness rather than directory
+  // (dev, inode) reuse timing: the copied marker file is necessarily a
+  // distinct inode from the surviving witness link, regardless of whether
+  // the root directory's inode happens to be reused.
+  await rm(directory, { recursive: true, force: true });
   for (const child of ['active', 'archive', 'payout']) {
     await mkdir(join(directory, child), { recursive: true, mode: 0o700 });
   }
   await writeFile(join(directory, '.store-identity.json'), marker, { mode: 0o600 });
-  const replacementWitness = await stat(directory);
-  assert.notEqual(
-    `${replacementWitness.dev}:${replacementWitness.ino}`,
-    `${originalWitness.dev}:${originalWitness.ino}`,
-    'fixture precondition: the replacement directory must not reuse the original inode',
-  );
 
   const recovery = await readStateDirectoryRecovery(directory);
   assert.equal(recovery.detected, true);
@@ -536,6 +530,28 @@ test('rejects a replacement state directory even when its original identity mark
       && error.code === 'STATE_DIRECTORY_LOSS'
       && error.recovery.reason === 'identity-directory-mismatch',
   );
+});
+
+test('rejects a replacement state directory whose root directory inode happens to match the original', async t => {
+  const parent = await temporaryDirectory(t);
+  const directory = join(parent, 'cycles');
+  await DurableCycleStore.open(directory);
+  const marker = await readFile(join(directory, '.store-identity.json'), 'utf8');
+  const originalWitness = await stat(directory);
+  await rm(directory, { recursive: true, force: true });
+  for (const child of ['active', 'archive', 'payout']) {
+    await mkdir(join(directory, child), { recursive: true, mode: 0o700 });
+  }
+  await writeFile(join(directory, '.store-identity.json'), marker, { mode: 0o600 });
+  const replacementWitness = await stat(directory);
+  if (replacementWitness.dev !== originalWitness.dev || replacementWitness.ino !== originalWitness.ino) {
+    t.skip('this filesystem did not reuse the deleted directory inode; covered by the sibling case above');
+    return;
+  }
+
+  const recovery = await readStateDirectoryRecovery(directory);
+  assert.equal(recovery.detected, true);
+  assert.equal(recovery.reason, 'identity-directory-mismatch');
 });
 
 test('refuses to mint a replacement identity over a nonempty existing cycle store', async t => {
@@ -555,6 +571,46 @@ test('refuses to mint a replacement identity over a nonempty existing cycle stor
     error => error instanceof StateDirectoryLossError && error.recovery.reason === 'missing-identity',
   );
   assert.equal((await readdir(parent)).includes('cycles.identity.json'), false);
+});
+
+test('backfills the sibling identity witness link for a store bootstrapped before it existed, and normal reopen keeps working', async t => {
+  const parent = await temporaryDirectory(t);
+  const directory = join(parent, 'cycles');
+  await DurableCycleStore.open(directory);
+  const witnessPath = join(parent, 'cycles.identity-witness.json');
+  const markerStatBefore = await stat(join(directory, '.store-identity.json'));
+  assert.equal((await stat(witnessPath)).ino, markerStatBefore.ino);
+  await unlink(witnessPath);
+
+  await DurableCycleStore.open(directory);
+  const witnessStatAfter = await stat(witnessPath);
+  const markerStatAfter = await stat(join(directory, '.store-identity.json'));
+  assert.equal(witnessStatAfter.dev, markerStatAfter.dev);
+  assert.equal(witnessStatAfter.ino, markerStatAfter.ino);
+
+  const recovery = await readStateDirectoryRecovery(directory);
+  assert.equal(recovery.detected, false);
+  await DurableCycleStore.open(directory);
+});
+
+test('rejects a store whose sibling identity witness link points away from the current marker', async t => {
+  const parent = await temporaryDirectory(t);
+  const directory = join(parent, 'cycles');
+  await DurableCycleStore.open(directory);
+  const witnessPath = join(parent, 'cycles.identity-witness.json');
+  const forgedWitnessContents = await readFile(witnessPath, 'utf8');
+  await unlink(witnessPath);
+  await writeFile(witnessPath, forgedWitnessContents, { mode: 0o600 });
+
+  const recovery = await readStateDirectoryRecovery(directory);
+  assert.equal(recovery.detected, true);
+  assert.equal(recovery.reason, 'identity-directory-mismatch');
+  await assert.rejects(
+    DurableCycleStore.open(directory),
+    error => error instanceof StateDirectoryLossError
+      && error.code === 'STATE_DIRECTORY_LOSS'
+      && error.recovery.reason === 'identity-directory-mismatch',
+  );
 });
 
 // WP-31: CycleRunner's own public API is fully synchronous, so a disk-backed production store must be

@@ -20,6 +20,7 @@
 // a later cycle even after its original cycle has been archived.
 import {
   chmod,
+  link,
   lstat,
   mkdir,
   open,
@@ -128,6 +129,58 @@ function stateDirectoryIdentityPath(directory) {
   return join(directory, '.store-identity.json');
 }
 
+// A directory's own (device, inode) can be reused by the filesystem
+// immediately after deletion (observed on Linux ext4/tmpfs), so it alone
+// cannot distinguish a genuine reopen from a deleted-and-replaced directory
+// that had its identity marker bytes copied back in. A sibling hard link
+// living outside the state directory closes that gap: as long as the link
+// survives, its target inode can never be handed to an unrelated new file,
+// so a byte-identical copy written into a replacement directory is
+// necessarily a different inode and is detected deterministically.
+function stateDirectoryWitnessLinkPath(directory) {
+  return join(dirname(directory), `${basename(directory)}.identity-witness.json`);
+}
+
+async function stateDirectoryWitnessLinkStatus(markerPath, witnessPath) {
+  let witnessStat;
+  try {
+    witnessStat = await lstat(witnessPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing';
+    throw error;
+  }
+  if (witnessStat.isSymbolicLink() || !witnessStat.isFile()) return 'mismatch';
+  const markerStat = await lstat(markerPath, { bigint: true });
+  if (markerStat.dev !== witnessStat.dev || markerStat.ino !== witnessStat.ino) return 'mismatch';
+  return 'linked';
+}
+
+async function linkStateDirectoryWitness(markerPath, witnessPath) {
+  try {
+    await link(markerPath, witnessPath);
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      const [markerStat, witnessStat] = await Promise.all([
+        lstat(markerPath, { bigint: true }),
+        lstat(witnessPath, { bigint: true }),
+      ]);
+      if (markerStat.dev === witnessStat.dev && markerStat.ino === witnessStat.ino) return;
+      await unlink(witnessPath);
+      await link(markerPath, witnessPath);
+    } else if (error?.code === 'EXDEV') {
+      throw new Error('durable cycle store state directory and its parent must share one filesystem for the identity witness link');
+    } else {
+      throw error;
+    }
+  }
+  const parentHandle = await open(dirname(witnessPath), 'r');
+  try {
+    await parentHandle.sync();
+  } finally {
+    await parentHandle.close();
+  }
+}
+
 function lockDirectoryPath(directory) {
   return join(directory, lockDirectoryName);
 }
@@ -219,7 +272,8 @@ async function stateDirectoryAvailability(directory, expectedIdentity) {
       const childInfo = await lstat(join(directory, child));
       if (childInfo.isSymbolicLink() || !childInfo.isDirectory()) return 'unavailable';
     }
-    const stateIdentity = await readStateDirectoryIdentity(stateDirectoryIdentityPath(directory));
+    const markerPath = stateDirectoryIdentityPath(directory);
+    const stateIdentity = await readStateDirectoryIdentity(markerPath);
     if (stateIdentity === null) return 'identity-marker-missing';
     if (stateIdentity.storeId !== expectedIdentity.storeId) return 'identity-marker-mismatch';
     if (!await hasOnlyExpectedLockDatabaseArtifacts(lockDirectoryPath(directory))) return 'unavailable';
@@ -227,6 +281,13 @@ async function stateDirectoryAvailability(directory, expectedIdentity) {
     if (stateIdentity.directoryDevice !== witness.directoryDevice || stateIdentity.directoryInode !== witness.directoryInode) {
       return 'identity-directory-mismatch';
     }
+    // A missing witness link means this store was bootstrapped before this
+    // guard existed; DurableCycleStore.open backfills it once the checks
+    // above already establish continuity. A present-but-different-inode
+    // witness is definitive replacement evidence independent of directory
+    // inode reuse and fails closed the same as any other identity mismatch.
+    const linkStatus = await stateDirectoryWitnessLinkStatus(markerPath, stateDirectoryWitnessLinkPath(directory));
+    if (linkStatus === 'mismatch') return 'identity-directory-mismatch';
     await readdir(directory);
     return 'available';
   } catch (error) {
@@ -1515,20 +1576,28 @@ export class DurableCycleStore {
         if (stateDirectory.isSymbolicLink() || !stateDirectory.isDirectory()) {
           throw new Error('durable cycle store state directory is unavailable during bootstrap');
         }
+        const markerPath = stateDirectoryIdentityPath(directory);
         await atomicWriteFile(
           directory,
-          stateDirectoryIdentityPath(directory),
+          markerPath,
           serializeStateDirectoryIdentity({
             schema: stateDirectoryIdentitySchema,
             storeId: identity.storeId,
             ...stateDirectoryWitness(stateDirectory),
           }),
         );
+        await linkStateDirectoryWitness(markerPath, stateDirectoryWitnessLinkPath(directory));
         await atomicWriteFile(
           dirname(lockedRecovery.identityPath),
           lockedRecovery.identityPath,
           serializeStoreIdentity(identity),
         );
+      } else {
+        const markerPath = stateDirectoryIdentityPath(directory);
+        const witnessPath = stateDirectoryWitnessLinkPath(directory);
+        if (await stateDirectoryWitnessLinkStatus(markerPath, witnessPath) === 'missing') {
+          await linkStateDirectoryWitness(markerPath, witnessPath);
+        }
       }
       store.#index = await store.#loadIndex();
       const cycles = await store.#loadActiveCycles();

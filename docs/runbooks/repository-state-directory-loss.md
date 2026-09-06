@@ -11,9 +11,15 @@ Do not recreate a cycle, claim funds, or infer prior state from a wallet balance
 ## Runner behavior
 
 The repository compares a private sibling identity with an in-directory witness
-bound to that directory's device and inode. A missing, copied, or mismatched witness
-creates a private sibling recovery hold and refuses cycle creation and stage
-preparation until the preserved journal and custody evidence can be restored and reviewed.
+bound to that directory's device and inode, and with a sibling identity-witness hard link kept
+outside the state directory. The in-directory device-and-inode pair alone cannot prove continuity
+across a delete-and-recreate, because a filesystem may reuse the deleted directory's inode for the
+replacement (observed on Linux); the sibling hard link is immune to that reuse, since its target
+inode cannot be handed to an unrelated new file while the link survives. A missing, copied, or
+mismatched witness (in-directory or sibling link) creates a private sibling recovery hold and
+refuses cycle creation and stage preparation until the preserved journal and custody evidence can be
+restored and reviewed. A store predating the sibling link gets it backfilled automatically on its
+next successful open once every other check already confirms continuity.
 
 `.store-lock/lease.sqlite` is not a replacement state directory and is normally retained after a
 clean store release. A store owner first acquires SQLite's exclusive lease, then creates `store.lock`
