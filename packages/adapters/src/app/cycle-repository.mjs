@@ -3342,7 +3342,7 @@ export class CycleRepository {
     return entry;
   }
 
-  /** @returns {Promise<{cycleId: string, releaseAmount: string, mode: 'production'|'rehearsal'|null, providerMode?: 'live'|'fake', terminalState?: string}|null>} */
+  /** @returns {Promise<{cycleId: string, releaseAmount: string, mode: 'production'|'rehearsal'|null, providerMode?: 'live'|'fake', admission?: object, terminalState?: string}|null>} */
   async readActiveCycle() {
     for (const cycleId of this.#store.activeCycleIds) {
       const state = await this.#replay(cycleId);
@@ -3360,9 +3360,13 @@ export class CycleRepository {
         ...(state.dryRun ? { dryRun: true } : {}),
         ...(state.rehearsalSessionId === null ? {} : { rehearsalSessionId: state.rehearsalSessionId }),
       };
+      // The admission travels with the active cycle, not only with describeCycle: a resumed cycle
+      // must re-present the same authorization to the policy engine, or its digest changes and the
+      // spend reservation it already made stops matching.
+      const admitted = state.admission === null ? {} : { admission: state.admission };
       return state.terminalState
-        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, terminalState: state.terminalState, terminalAtMs: state.terminalAtMs }
-        : { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile };
+        ? { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, ...admitted, terminalState: state.terminalState, terminalAtMs: state.terminalAtMs }
+        : { cycleId, releaseAmount: state.releaseAmount, mode: state.mode, ...profile, ...admitted };
     }
     return null;
   }

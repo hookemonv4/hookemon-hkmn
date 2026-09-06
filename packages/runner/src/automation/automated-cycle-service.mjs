@@ -53,7 +53,6 @@ async function assertJoinPreconditions(cycleRepository, cycleId, stage) {
     const custody = await cycleRepository.readClaimPreconditions(cycleId);
     if (!custody || typeof custody !== 'object') throw new Error('claim-process custody preconditions are invalid');
     const reasons = [
-      custody.heldAssets === true ? 'held assets' : null,
       custody.unattributed === true ? 'unattributed assets' : null,
       custody.unresolvedObligations === true ? 'unresolved obligations' : null,
     ].filter(Boolean);
@@ -63,6 +62,7 @@ async function assertJoinPreconditions(cycleRepository, cycleId, stage) {
 
 export class AutomatedCycleService {
   #budgetReader;
+  #admissionPlanner;
   #beforeComplete;
   #beforeMutation;
   #cycleRepository;
@@ -178,6 +178,10 @@ export class AutomatedCycleService {
     this.#now = config.now;
     this.#leaseStore = config.leaseStore;
     this.#budgetReader = config.budgetReader;
+    this.#admissionPlanner = config.admissionPlanner ?? null;
+    if (this.#admissionPlanner !== null && typeof this.#admissionPlanner.plan !== 'function') {
+      throw new Error('admissionPlanner must expose plan()');
+    }
     this.#cycleRepository = config.cycleRepository;
     this.#runnerFactory = config.runnerFactory;
     this.#stageDriver = config.stageDriver;
@@ -190,6 +194,48 @@ export class AutomatedCycleService {
 
   async recoverActiveCycle({ signal } = {}) {
     return this.#run({ signal, requireActive: true });
+  }
+
+  async #runOneSupplementarySettlement({ signal, lease, assertLease }) {
+    if (typeof this.#stageDriver.runSupplementarySettlement !== 'function'
+      || typeof this.#cycleRepository.listHeldPositions !== 'function'
+      || typeof this.#cycleRepository.readSupplementarySettlement !== 'function') {
+      return null;
+    }
+    const positions = await this.#cycleRepository.listHeldPositions();
+    if (!Array.isArray(positions)) throw new Error('supplementary settlement held-position list is invalid');
+    for (const position of positions) {
+      assertNotAborted(signal);
+      if (!position || typeof position !== 'object' || position.ownerDecision?.choice !== 'sell' || position.resolution !== null) {
+        continue;
+      }
+      const settlement = await this.#cycleRepository.readSupplementarySettlement(position.positionId);
+      if (settlement === null || settlement?.state === 'COMPLETE') continue;
+      assertLease();
+      const result = await this.#stageDriver.runSupplementarySettlement({
+        position,
+        settlement,
+        nowMs: this.#now(),
+        fencingToken: lease.fencingToken,
+        assertLease,
+      });
+      assertLease();
+      if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        throw new Error('supplementary settlement stage driver result is invalid');
+      }
+      if (result.status === 'PENDING') continue;
+      if (result.status !== 'ADVANCED') {
+        throw new Error('supplementary settlement stage driver result status is invalid');
+      }
+      return {
+        cycleId: settlement.cycleId,
+        positionId: position.positionId,
+        manifestId: settlement.manifestId,
+        stage: result.stage ?? null,
+        settlementState: result.state ?? settlement.state,
+      };
+    }
+    return null;
   }
 
   async #run({ signal, requireActive }) {
@@ -213,10 +259,39 @@ export class AutomatedCycleService {
 
     try {
       assertNotAborted(signal);
+      const assertLease = () => {
+        if (heartbeatError) throw heartbeatError;
+        assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
+      };
+      const scheduleHeartbeat = () => {
+        heartbeatTimer = setTimeout(() => {
+          if (heartbeatError) return;
+          try {
+            lease = renewLease({
+              store: this.#leaseStore,
+              lease,
+              now: this.#now(),
+              ttlMs: this.#leaseTtlMs,
+            });
+            if (activeContext) Object.assign(activeContext.lease, lease);
+            scheduleHeartbeat();
+          } catch (error) {
+            heartbeatError = error;
+          }
+        }, Math.max(1, Math.floor(this.#leaseTtlMs / 2)));
+        heartbeatTimer.unref?.();
+      };
+      scheduleHeartbeat();
+      const supplementary = await this.#runOneSupplementarySettlement({ signal, lease, assertLease });
       let cycle = await this.#cycleRepository.readActiveCycle();
       let createdCycle = false;
       if (cycle === null) {
-        if (requireActive) return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
+        if (requireActive) {
+          if (supplementary !== null) {
+            return { status: 'SUPPLEMENTARY_SETTLEMENT', ...supplementary };
+          }
+          return { status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null };
+        }
         const budget = await this.#budgetReader.read();
         if (budget?.packPriceUsdg === '0') {
           return {
@@ -226,7 +301,25 @@ export class AutomatedCycleService {
             requiredProcessUsdg: '0',
           };
         }
-        const decision = decideCycleBudget(budget);
+        // The admission is planned before the cycle exists, because its quotes are what decide the
+        // principal the cycle may be opened for and the policy digest binds its cycleId. The
+        // identifier is reserved rather than invented so one identity spans plan, evaluation and
+        // creation; an unused reservation journals nothing.
+        const reservedCycleId = this.#admissionPlanner === null ? null : this.#cycleRepository.nextCycleId();
+        const admission = this.#admissionPlanner === null
+          ? null
+          : await this.#admissionPlanner.plan({
+            cycleId: reservedCycleId,
+            packId: this.#packId,
+            nowMs: this.#now(),
+          });
+        if (this.#admissionPlanner !== null && admission === null) {
+          return { status: 'WAITING_FOR_ADMISSION', cycleId: null, stage: null, requiredProcessUsdg: '0' };
+        }
+        assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
+        const decision = decideCycleBudget(budget, {
+          admittedAggregateFundingUsdg: admission === null ? null : admission.aggregateFundingQuote.amountAtomic,
+        });
         if (!decision.ready) {
           return {
             status: decision.reason === 'ACTIVE_CYCLE' ? 'ACTIVE_CYCLE_NOT_RECONCILED' : 'WAITING_FOR_PROCESS_BUDGET',
@@ -242,6 +335,7 @@ export class AutomatedCycleService {
             liveMode: this.#liveMode,
             mode: this.#mode,
             capUsdg: this.#policyCapUsdg ?? undefined,
+            ...(admission === null ? {} : { admission, cycleId: reservedCycleId, packId: this.#packId }),
           });
           if (!policyDecision?.allowed) {
             return {
@@ -256,6 +350,7 @@ export class AutomatedCycleService {
         cycle = await this.#cycleRepository.createCycle({
           releaseAmount: decision.releaseAmount,
           mode: this.#mode,
+          ...(admission === null ? {} : { cycleId: reservedCycleId, admission }),
           ...(this.#providerMode === null ? {} : { providerMode: this.#providerMode }),
           ...(this.#dryRun ? { dryRun: true } : {}),
           ...(this.#rehearsalSessionId === null ? {} : { rehearsalSessionId: this.#rehearsalSessionId }),
@@ -306,10 +401,6 @@ export class AutomatedCycleService {
         }
       }
       const runner = this.#runnerFactory(cycle.cycleId);
-      const assertLease = () => {
-        if (heartbeatError) throw heartbeatError;
-        assertLeaseCurrent({ store: this.#leaseStore, lease, now: this.#now() });
-      };
       const assertMutationAllowed = async ({
         boundary = 'mutation',
         cycleId = cycle.cycleId,
@@ -346,25 +437,6 @@ export class AutomatedCycleService {
         assertLease();
         return lease.fencingToken;
       };
-      const scheduleHeartbeat = () => {
-        heartbeatTimer = setTimeout(() => {
-          if (heartbeatError) return;
-          try {
-            lease = renewLease({
-              store: this.#leaseStore,
-              lease,
-              now: this.#now(),
-              ttlMs: this.#leaseTtlMs,
-            });
-            if (activeContext) Object.assign(activeContext.lease, lease);
-            scheduleHeartbeat();
-          } catch (error) {
-            heartbeatError = error;
-          }
-        }, Math.max(1, Math.floor(this.#leaseTtlMs / 2)));
-        heartbeatTimer.unref?.();
-      };
-      scheduleHeartbeat();
 
       for (const stage of AUTOMATED_CYCLE_STAGES) {
         assertNotAborted(signal);
@@ -380,6 +452,7 @@ export class AutomatedCycleService {
           fencingToken: lease.fencingToken,
           releaseAmountMicroUsdg: cycle.releaseAmount,
           packId: this.#packId,
+          nowMs: this.#now(),
           assertLease,
           assertMutationAllowed,
         };
@@ -399,6 +472,7 @@ export class AutomatedCycleService {
               liveMode: this.#liveMode,
               mode: this.#mode,
               capUsdg: this.#policyCapUsdg ?? undefined,
+              ...(cycle.admission ? { admission: cycle.admission } : {}),
             });
             assertPolicyDecision(policyDecision);
           }
@@ -411,6 +485,7 @@ export class AutomatedCycleService {
               liveMode: this.#liveMode,
               mode: this.#mode,
               capUsdg: this.#policyCapUsdg ?? undefined,
+              ...(cycle.admission ? { admission: cycle.admission } : {}),
             });
             assertPolicyDecision(policyDecision);
           }
