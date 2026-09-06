@@ -520,8 +520,11 @@ test('productionSupplementaryStageHandlers dispatches outside the Node test runn
       settlement = { ...settlement, state: input.nextState };
       return structuredClone(settlement);
     };
-    const productionAdapters = Object.freeze({ collectorCrypt: { async buyback() { return { signature: 'sig' }; } } });
-    const productionSignerClient = Object.freeze({ solana: { async sign() { return 'signed'; } } });
+    let buybackCalls = 0;
+    let signingCalls = 0;
+    let leaseChecks = 0;
+    const productionAdapters = Object.freeze({ collectorCrypt: { async buyback() { buybackCalls += 1; return { signature: 'sig' }; } } });
+    const productionSignerClient = Object.freeze({ solana: { async sign() { signingCalls += 1; return 'signed'; } } });
     let receivedAdapters = null;
     let receivedSignerClient = null;
     const driver = createStageDriver({
@@ -539,6 +542,8 @@ test('productionSupplementaryStageHandlers dispatches outside the Node test runn
           async reconcile({ adapters, signerClient, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
             receivedAdapters = adapters;
             receivedSignerClient = signerClient;
+            await adapters.collectorCrypt.buyback();
+            await signerClient.solana.sign();
             return injectedRepository.advanceSupplementarySettlement(position.positionId, {
               expectedState: receivedSettlement.state,
               nextState: 'BUYBACK_SENT_UNKNOWN',
@@ -554,11 +559,14 @@ test('productionSupplementaryStageHandlers dispatches outside the Node test runn
       settlement,
       nowMs: 1_001,
       fencingToken: '11111111-1111-4111-8111-111111111111',
-      assertLease() {},
+      assertLease() { leaseChecks += 1; },
     });
 
-    assert.equal(receivedAdapters, productionAdapters);
-    assert.equal(receivedSignerClient, productionSignerClient);
+    assert.notEqual(receivedAdapters, productionAdapters, 'production capabilities are lease-fenced facades');
+    assert.notEqual(receivedSignerClient, productionSignerClient, 'production signer is a lease-fenced facade');
+    assert.equal(buybackCalls, 1);
+    assert.equal(signingCalls, 1);
+    assert.ok(leaseChecks >= 4, 'the driver checks the lease before dispatch and each capability use');
     assert.equal(result.status, 'ADVANCED');
     assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
   } finally {

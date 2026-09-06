@@ -561,7 +561,11 @@ function createProductionSupplementaryStageHandlers({ assertCanary }) {
   const guarded = handler => Object.freeze({
     stage: handler.stage,
     async reconcile(input) {
-      await assertCanary();
+      await assertCanary({
+        cycleId: input.context.cycleId,
+        stage: input.context.stage,
+        assertLease: input.assertLease,
+      });
       return handler.reconcile(input);
     },
   });

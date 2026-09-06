@@ -1058,6 +1058,7 @@ export function createStageDriver({
         config: frozenCanonicalValue(currentHandlerConfig),
         cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
         context: frozenCanonicalValue(context),
+        assertLease: input.assertLease,
         position,
         settlement,
       }));
