@@ -151,9 +151,25 @@ const HOOK_ABI = parseAbi([
 ]);
 
 function executionLogs(parsed) {
+  // The Relay depository deposit moves USDG from Operations to the depository. Outbound proves its
+  // source leg from exactly that finalized transfer, so the chain has to emit it for the same bytes
+  // it accepted -- decoded from the deposit calldata, never from what the runner intended.
+  const data = parsed.data ?? '0x';
+  if (data.toLowerCase().startsWith(RELAY_DEPOSIT_SELECTOR)) {
+    const [, sender, , amount] = [0, 1, 2, 3].map(i => data.slice(10 + (i * 64), 10 + ((i + 1) * 64)));
+    return [{
+      address: USDG,
+      topics: encodeEventTopics({
+        abi: HOOK_ABI,
+        eventName: 'Transfer',
+        args: { from: `0x${sender.slice(-40)}`, to: parsed.to },
+      }),
+      data: `0x${amount}`,
+    }];
+  }
   let call;
   try {
-    call = decodeFunctionData({ abi: HOOK_ABI, data: parsed.data ?? '0x' });
+    call = decodeFunctionData({ abi: HOOK_ABI, data });
   } catch {
     return [];
   }
