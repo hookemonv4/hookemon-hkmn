@@ -699,7 +699,7 @@ test('reconcileLivePurchase refuses before any provider or RPC read when the adm
       config: baseConfig(),
       cycleRepository,
       context: { cycleId: CYCLE_ID },
-    }));
+    }), /purchase reconciliation admitted unitPurchase/);
     assert.equal(cycleRepository.held.length, 0);
   }
 });
