@@ -145,11 +145,15 @@ This guarantee does **not** extend to an opaque or external-module signer.
 that its imported module is operator-written code and that whatever it does
 to produce a signature happens entirely inside that module, outside this
 repository's control or knowledge; a universal claim that signing cannot
-mutate a provider is unsupported for it. Absent that signer's own verified durable
-read-by-operation authority, or an equivalently proven sign-only/idempotent
-contract, its timeout keeps the existing no-automatic-retry, terminal
-whole-cycle class: canonical chain observation cannot recover or rule out an
-unbroadcast signature for a signer whose internals are not provably sign-only.
+mutate a provider is unsupported for it. Its timeout keeps the existing
+no-automatic-retry, terminal whole-cycle class: canonical chain observation
+cannot recover or rule out an unbroadcast signature for a signer whose
+internals are not provably sign-only. This revision does not extend
+automatic sign-only retry to any other signer; a future signer with durable
+read-by-operation authority or a separately proven sign-only, idempotent
+contract can receive it only through a later owner-approved spec revision
+bound to that exact signer contract, never by an implementation-time claim
+of equivalence.
 
 Neither the Solana nor the EVM signing path in this repository currently
 promises deterministic or idempotent repeated signing, and Collector purchase
@@ -211,9 +215,11 @@ authority.
 Rejected: the proof that `sign()` cannot itself submit a transaction holds
 only for the checked-in Keychain broker's specific implementation. An
 opaque or external-module signer may embed code that submits during
-`sign()`, so a blanket retry could double-submit. The guarantee is scoped to
-the verified broker contract, or to a signer that separately proves the same
-property.
+`sign()`, so a blanket retry could double-submit. This revision scopes the
+guarantee to that one verified broker contract only; extending it to any
+other signer, even one that appears to have an equivalent contract, requires
+a later owner-approved spec revision naming that exact contract, not an
+inference drawn from this ADR or from implementation evidence alone.
 
 ## Consequences
 
