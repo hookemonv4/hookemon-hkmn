@@ -21,14 +21,34 @@ the cross-process write lock; it holds no domain knowledge of cycles, packs, or 
   exceed the journal's bounded payload. `state.cycleId` must equal `cycleId`, `state.recipients` must
   be an array of unique-`recipient`-keyed objects; `readPagedPayoutState` returns `null` when nothing
   has been persisted yet for that `(cycleId, stage)` pair.
-- `persistPagedStageEvidence(cycleId, stage, evidence)` / `readPagedStageEvidence(cycleId, stage)` are
-  the generic counterpart for any other large stage evidence (e.g. an eligibility-snapshot manifest's
-  `entries` beyond ~64 items) that does not fit the journal's bounded payload. `evidence` needs only a
-  matching `cycleId` field — no `recipients` shape or other payout-specific requirement. Shares its
-  page format, ceilings, and locking with the payout methods above but writes under its own directory
-  root and schema strings; it never shares a manifest, generation, or page file with payout state, even
-  for the identical `(cycleId, stage)` pair. `readPagedStageEvidence` returns `null` when nothing has
-  been persisted yet.
+- `persistPagedStageEvidence(cycleId, stage, evidence)` / `readPagedStageEvidence(cycleId, stage,
+  expected)` are the generic counterpart for any other large stage evidence (e.g. an
+  eligibility-snapshot manifest's `entries` beyond ~64 items) that does not fit the journal's bounded
+  payload. `evidence` needs only a matching `cycleId` field — no `recipients` shape or other
+  payout-specific requirement. Shares its page format, ceilings, and locking with the payout methods
+  above but writes under its own directory root and schema strings; it never shares a manifest,
+  generation, or page file with payout state, even for the identical `(cycleId, stage)` pair.
+- `persistPagedStageEvidence` is idempotent by content, not by request identity: it returns a compact,
+  immutable `{schema, cycleId, stage, generation, evidenceDigest}` handle a caller durably records
+  (e.g. as the compact marker C's journal event stores in place of the full evidence). `evidenceDigest`
+  is a pure content address of the evidence value — independent of the random `generation` any one
+  persist call happens to pick for its on-disk layout — computed via `evidenceContentDigest`, which
+  chunks any array longer than one page before hashing so it never hits `digest()`'s fixed default
+  bound (unlike this module's own paged ceilings, that bound cannot be overridden per call). A retry
+  with byte-identical evidence recomputes the identical `evidenceDigest`, matches the existing
+  manifest, and returns the existing handle without writing a new generation or any new page files. A
+  retry with different evidence for the same `(cycleId, stage)` throws
+  `'durable cycle store stage evidence is already persisted with different evidence'` rather than
+  silently replacing the existing reference.
+- `readPagedStageEvidence`'s third argument, `expected`, distinguishes "nothing has been persisted"
+  from "something should exist but its blob is missing or does not match": with `expected` omitted (or
+  `null`), a caller has no durable reference yet, so a missing stage-evidence directory or manifest
+  returns `null` (an ordinary absent read). With `expected` supplied (the handle a caller previously
+  recorded, e.g. from its own journal), the same absence — or a manifest whose `generation`/
+  `evidenceDigest` do not match `expected` — is a hard failure (thrown error), never `null`: a journal
+  that already committed a reference to this evidence describes a fact that must still be true, and a
+  missing or altered blob under that fact is corruption to raise or hold on, not a value to silently
+  treat as "never happened."
 
 ## Invariants
 

@@ -741,10 +741,15 @@ test('durably round-trips paged stage evidence with an entries array well beyond
   };
 
   const store = await DurableCycleStore.open(directory);
-  await store.persistPagedStageEvidence(cycleId, stage, evidence);
+  const handle = await store.persistPagedStageEvidence(cycleId, stage, evidence);
+  assert.equal(handle.schema, 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1');
+  assert.equal(handle.cycleId, cycleId);
+  assert.equal(handle.stage, stage);
+  assert.match(handle.evidenceDigest, /^sha256:[0-9a-f]{64}$/);
 
   const reopened = await DurableCycleStore.open(directory);
   assert.deepEqual(await reopened.readPagedStageEvidence(cycleId, stage), evidence);
+  assert.deepEqual(await reopened.readPagedStageEvidence(cycleId, stage, handle), evidence);
 
   // Stage evidence and payout state never share a directory, a manifest, or a page, even for the
   // exact same cycleId/stage pair.
@@ -767,6 +772,137 @@ test('paged stage evidence with no persisted generation reads back as null, and 
       entries: [],
     }),
     /cycle identifier does not match its storage key/,
+  );
+});
+
+test('a same-payload retry of persistPagedStageEvidence reuses the existing generation and digest', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-retry-same-payload';
+  const stage = 'eligibility-snapshot';
+  const evidence = {
+    schema: 'hookemon.eligibility-snapshot.v1',
+    cycleId,
+    manifestDigest: `sha256:${'b'.repeat(64)}`,
+    entries: [{ cardId: 'card-1' }, { cardId: 'card-2' }],
+  };
+
+  const first = await store.persistPagedStageEvidence(cycleId, stage, evidence);
+  const stageDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent(stage));
+  const generationDirectory = join(stageDirectory, first.generation);
+  const manifestBefore = await readFile(join(stageDirectory, 'manifest.json'), 'utf8');
+  const generationEntriesBefore = (await readdir(generationDirectory)).sort();
+
+  const second = await store.persistPagedStageEvidence(cycleId, stage, structuredClone(evidence));
+  assert.deepEqual(second, first);
+
+  // A same-payload retry is a true no-op: it must not touch the existing manifest bytes, add a
+  // second generation directory, or write any new page file under the original one.
+  assert.equal((await stat(generationDirectory)).isDirectory(), true);
+  assert.equal(await readFile(join(stageDirectory, 'manifest.json'), 'utf8'), manifestBefore);
+  assert.deepEqual((await readdir(generationDirectory)).sort(), generationEntriesBefore);
+  assert.deepEqual((await readdir(stageDirectory)).sort(), ['manifest.json', first.generation].sort());
+});
+
+test('a tampered stage evidence page fails closed on read instead of returning altered content', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-tampered-page';
+  const stage = 'eligibility-snapshot';
+  const entries = Array.from({ length: 200 }, (_, index) => ({ cardId: `card-${index}` }));
+  const handle = await store.persistPagedStageEvidence(cycleId, stage, {
+    schema: 'hookemon.eligibility-snapshot.v1',
+    cycleId,
+    entries,
+  });
+
+  const generationDirectory = join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent(stage), handle.generation);
+  const pageFiles = (await readdir(generationDirectory)).sort();
+  assert.ok(pageFiles.length > 0);
+  const pagePath = join(generationDirectory, pageFiles[0]);
+  const page = JSON.parse(await readFile(pagePath, 'utf8'));
+  page.entries[0].cardId = 'tampered';
+  await writeFile(pagePath, `${canonicalJson(page)}\n`);
+
+  await assert.rejects(
+    store.readPagedStageEvidence(cycleId, stage),
+    /page digest does not match its manifest/,
+  );
+});
+
+test('durably round-trips a 10,000-record fully-FINALIZED-shaped stage evidence array through the generic primitive', async t => {
+  const directory = await temporaryDirectory(t);
+  const cycleId = 'cycle-stage-evidence-finalized-10k';
+  const stage = 'eligibility-snapshot';
+  const records = Array.from({ length: 10_000 }, (_, index) => finalizedRecipient(index));
+  const evidence = {
+    schema: 'hookemon.eligibility-snapshot.v1',
+    cycleId,
+    manifestDigest: `sha256:${'a'.repeat(64)}`,
+    records,
+  };
+
+  const store = await DurableCycleStore.open(directory);
+  const handle = await store.persistPagedStageEvidence(cycleId, stage, evidence);
+
+  const reopened = await DurableCycleStore.open(directory);
+  assert.deepEqual(await reopened.readPagedStageEvidence(cycleId, stage, handle), evidence);
+});
+
+test('a conflicting-payload retry of persistPagedStageEvidence rejects without altering the existing reference', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-retry-conflict';
+  const stage = 'eligibility-snapshot';
+  const first = await store.persistPagedStageEvidence(cycleId, stage, {
+    schema: 'hookemon.eligibility-snapshot.v1',
+    cycleId,
+    entries: [{ cardId: 'card-1' }],
+  });
+
+  await assert.rejects(
+    store.persistPagedStageEvidence(cycleId, stage, {
+      schema: 'hookemon.eligibility-snapshot.v1',
+      cycleId,
+      entries: [{ cardId: 'card-2' }],
+    }),
+    /already persisted with different evidence/,
+  );
+
+  assert.deepEqual(
+    await store.readPagedStageEvidence(cycleId, stage, first),
+    { schema: 'hookemon.eligibility-snapshot.v1', cycleId, entries: [{ cardId: 'card-1' }] },
+  );
+});
+
+test('readPagedStageEvidence treats a missing blob as a hard failure once a caller supplies an expected reference', async t => {
+  const directory = await temporaryDirectory(t);
+  const store = await DurableCycleStore.open(directory);
+  const cycleId = 'cycle-expected-missing';
+  const stage = 'eligibility-snapshot';
+  const handle = await store.persistPagedStageEvidence(cycleId, stage, {
+    schema: 'hookemon.eligibility-snapshot.v1',
+    cycleId,
+    entries: [{ cardId: 'card-1' }],
+  });
+
+  await rm(join(directory, 'stage-evidence', encodeURIComponent(cycleId), encodeURIComponent(stage), 'manifest.json'));
+
+  assert.equal(await store.readPagedStageEvidence(cycleId, stage), null);
+  await assert.rejects(
+    store.readPagedStageEvidence(cycleId, stage, handle),
+    /durable cycle store stage evidence manifest is missing/,
+  );
+
+  await assert.rejects(
+    store.readPagedStageEvidence('cycle-never-persisted-either', stage, {
+      schema: 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1',
+      cycleId: 'cycle-never-persisted-either',
+      stage,
+      generation: handle.generation,
+      evidenceDigest: handle.evidenceDigest,
+    }),
+    /durable cycle store stage evidence is missing/,
   );
 });
 

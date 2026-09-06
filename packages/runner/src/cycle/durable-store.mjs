@@ -104,6 +104,12 @@ const pagedStageEvidenceManifestSchema = 'hookemon.durable-cycle-store.paged-sta
 const pagedStageEvidencePageSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-page.v1';
 const pagedStageEvidenceReferenceSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-reference.v1';
 const pagedStageEvidenceSchemas = { manifest: pagedStageEvidenceManifestSchema, page: pagedStageEvidencePageSchema, reference: pagedStageEvidenceReferenceSchema };
+// The compact, content-addressed handle persistPagedStageEvidence returns and a caller (e.g. a
+// journal event) durably records to later prove readPagedStageEvidence(cycleId, stage, expected)
+// reconstructed exactly the evidence that was originally persisted -- distinct from
+// pagedStageEvidenceReferenceSchema above, which is the internal page-array reference embedded
+// inside a manifest, never handed to a caller directly.
+const pagedStageEvidenceHandleSchema = 'hookemon.durable-cycle-store.paged-stage-evidence-handle.v1';
 const privateDirectoryMode = 0o700;
 const lockDirectoryName = '.store-lock';
 const lockDatabaseFileName = 'lease.sqlite';
@@ -116,6 +122,7 @@ const globalKeyPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,255}$/;
 const internalPagedSchemas = new Set([
   pagedPayoutManifestSchema, pagedPayoutPageSchema, pagedPayoutReferenceSchema,
   pagedStageEvidenceManifestSchema, pagedStageEvidencePageSchema, pagedStageEvidenceReferenceSchema,
+  pagedStageEvidenceHandleSchema,
 ]);
 const forbiddenCanonicalKeys = new Set(['__proto__', 'prototype', 'constructor']);
 const openGuard = Symbol('durable-cycle-store-open-guard');
@@ -1306,6 +1313,35 @@ function encodePagedValue(value, context) {
   return encoded;
 }
 
+/**
+ * A pure content address for stage evidence, independent of the random `generation` a real persist
+ * call picks for its on-disk layout: `digest()` cannot hash a large evidence value directly (it is
+ * bound-checked against journal.mjs's fixed default limits, e.g. 512 items per array, regardless of
+ * the wider paged ceilings this module validates against), so this mirrors encodePagedValue's chunking
+ * of any array longer than one page into `pagedPayoutPageItems`-sized slices, hashing each slice down
+ * to one string before it is ever handed to `digest()`. The result depends only on the evidence's own
+ * content -- never on a generation, schema wrapper, or page identifier -- so two persist calls for the
+ * identical payload always produce the identical evidenceDigest even though each picks its own
+ * generation for storage.
+ */
+function evidenceContentDigest(value) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (Array.isArray(value)) {
+    const mapped = value.map(entry => evidenceContentDigest(entry));
+    if (mapped.length <= pagedPayoutPageItems) return mapped;
+    const chunks = [];
+    for (let start = 0; start < mapped.length; start += pagedPayoutPageItems) {
+      chunks.push(digest(mapped.slice(start, start + pagedPayoutPageItems)));
+    }
+    return chunks;
+  }
+  const encoded = {};
+  for (const [key, entry] of Object.entries(value)) {
+    Object.defineProperty(encoded, key, { enumerable: true, value: evidenceContentDigest(entry) });
+  }
+  return encoded;
+}
+
 function serializePagedManifest(schemas, { cycleId, stage, generation, pages, state }) {
   const manifest = {
     schema: schemas.manifest,
@@ -1333,6 +1369,67 @@ function parsePagedManifest(schemas, text, label) {
   assertGeneration(value.generation);
   if (!Number.isInteger(value.pageCount) || value.pageCount < 0 || value.pageCount > maximumPagedPages) {
     throw new Error(`${label} page count is invalid`);
+  }
+  return value;
+}
+
+/**
+ * Stage evidence keeps its own manifest shape (an extra durable `evidenceDigest` field) rather than
+ * reusing parsePagedManifest/serializePagedManifest: payout's manifest schema and exact field list
+ * are load-bearing for every already-written payout manifest and must stay byte-for-byte unchanged
+ * (see docs/modules/durable-store.md), so a field only stage evidence needs cannot be added to the
+ * shared function without breaking that.
+ */
+function serializePagedStageEvidenceManifest({ cycleId, stage, generation, pages, state, evidenceDigest }) {
+  const manifest = {
+    schema: pagedStageEvidenceManifestSchema,
+    cycleId,
+    stage,
+    generation,
+    pageCount: pages.length,
+    evidenceDigest,
+    state,
+  };
+  return `${canonicalJson(manifest)}\n`;
+}
+
+function parsePagedStageEvidenceManifest(text, label) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error(`${label} contains corrupt JSON`);
+  }
+  if (`${canonicalJson(value)}\n` !== text) throw new Error(`${label} bytes are not canonical JSON plus one newline`);
+  exactObject(value, ['schema', 'cycleId', 'stage', 'generation', 'pageCount', 'evidenceDigest', 'state'], label);
+  if (value.schema !== pagedStageEvidenceManifestSchema) throw new Error(`${label} schema is invalid`);
+  assertCycleId(value.cycleId);
+  assertStageIdentifier(value.stage);
+  assertGeneration(value.generation);
+  if (!Number.isInteger(value.pageCount) || value.pageCount < 0 || value.pageCount > maximumPagedPages) {
+    throw new Error(`${label} page count is invalid`);
+  }
+  if (typeof value.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.evidenceDigest)) {
+    throw new Error(`${label} evidence digest is invalid`);
+  }
+  return value;
+}
+
+/**
+ * Validates the compact, content-addressed handle `persistPagedStageEvidence` returns and a caller
+ * durably records (e.g. in a journal event) to later pass back into `readPagedStageEvidence` as
+ * `expected`, so a durable reference whose blob later turns out missing or altered is a hard failure
+ * rather than indistinguishable from "nothing was ever persisted."
+ */
+function assertPagedStageEvidenceHandle(value, cycleId, stage) {
+  exactObject(value, ['schema', 'cycleId', 'stage', 'generation', 'evidenceDigest'], 'paged stage evidence handle');
+  if (value.schema !== pagedStageEvidenceHandleSchema) throw new Error('paged stage evidence handle schema is invalid');
+  if (value.cycleId !== cycleId || value.stage !== stage) {
+    throw new Error('paged stage evidence handle identity does not match the requested cycle or stage');
+  }
+  assertGeneration(value.generation);
+  if (typeof value.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.evidenceDigest)) {
+    throw new Error('paged stage evidence handle digest is invalid');
   }
   return value;
 }
@@ -1927,12 +2024,32 @@ export class DurableCycleStore {
     assertCycleId(cycleId);
     assertStageIdentifier(stage);
     const validatedEvidence = assertPagedStageEvidence(cycleId, evidence);
+    const evidenceDigest = digest(evidenceContentDigest(validatedEvidence));
     return this.#withLock(async () => {
       await ensurePrivateDirectory(this.#stageEvidenceDirectory, 'durable cycle store stage evidence directory');
       const cycleDirectory = this.#stageEvidenceCycleDirectory(cycleId);
       const stageDirectory = this.#stageEvidenceStageDirectory(cycleId, stage);
       await ensurePrivateDirectory(cycleDirectory, 'durable cycle store stage evidence cycle directory');
       await ensurePrivateDirectory(stageDirectory, 'durable cycle store stage evidence stage directory');
+
+      const manifestPath = join(stageDirectory, 'manifest.json');
+      const existingText = await readStableFile(manifestPath, maximumPagedStageEvidencePageBytes, 'durable cycle store stage evidence manifest');
+      if (existingText !== null) {
+        const existingManifest = parsePagedStageEvidenceManifest(existingText, 'durable cycle store stage evidence manifest');
+        if (existingManifest.cycleId !== cycleId || existingManifest.stage !== stage) {
+          throw new Error('durable cycle store stage evidence manifest identity mismatch');
+        }
+        if (existingManifest.evidenceDigest === evidenceDigest) {
+          return Object.freeze({
+            schema: pagedStageEvidenceHandleSchema,
+            cycleId,
+            stage,
+            generation: existingManifest.generation,
+            evidenceDigest,
+          });
+        }
+        throw new Error('durable cycle store stage evidence is already persisted with different evidence');
+      }
 
       const generation = randomToken();
       const generationDirectory = join(stageDirectory, generation);
@@ -1948,27 +2065,37 @@ export class DurableCycleStore {
       }
       await atomicWriteFile(
         stageDirectory,
-        join(stageDirectory, 'manifest.json'),
-        serializePagedManifest(pagedStageEvidenceSchemas, { cycleId, stage, generation, pages: context.pages, state: encodedEvidence }),
+        manifestPath,
+        serializePagedStageEvidenceManifest({ cycleId, stage, generation, pages: context.pages, state: encodedEvidence, evidenceDigest }),
       );
+      return Object.freeze({ schema: pagedStageEvidenceHandleSchema, cycleId, stage, generation, evidenceDigest });
     });
   }
 
-  async readPagedStageEvidence(cycleId, stage) {
+  async readPagedStageEvidence(cycleId, stage, expected = null) {
     assertCycleId(cycleId);
     assertStageIdentifier(stage);
+    if (expected !== null) assertPagedStageEvidenceHandle(expected, cycleId, stage);
     const cycleDirectory = this.#stageEvidenceCycleDirectory(cycleId);
     const stageDirectory = this.#stageEvidenceStageDirectory(cycleId, stage);
-    if (!(await privateDirectoryExists(this.#stageEvidenceDirectory, 'durable cycle store stage evidence directory'))
-      || !(await privateDirectoryExists(cycleDirectory, 'durable cycle store stage evidence cycle directory'))
-      || !(await privateDirectoryExists(stageDirectory, 'durable cycle store stage evidence stage directory'))) {
+    const stageDirectoryExists = (await privateDirectoryExists(this.#stageEvidenceDirectory, 'durable cycle store stage evidence directory'))
+      && (await privateDirectoryExists(cycleDirectory, 'durable cycle store stage evidence cycle directory'))
+      && (await privateDirectoryExists(stageDirectory, 'durable cycle store stage evidence stage directory'));
+    if (!stageDirectoryExists) {
+      if (expected !== null) throw new Error('durable cycle store stage evidence is missing');
       return null;
     }
     const manifestPath = join(stageDirectory, 'manifest.json');
     const manifestText = await readStableFile(manifestPath, maximumPagedStageEvidencePageBytes, 'durable cycle store stage evidence manifest');
-    if (manifestText === null) return null;
-    const manifest = parsePagedManifest(pagedStageEvidenceSchemas, manifestText, 'durable cycle store stage evidence manifest');
+    if (manifestText === null) {
+      if (expected !== null) throw new Error('durable cycle store stage evidence manifest is missing');
+      return null;
+    }
+    const manifest = parsePagedStageEvidenceManifest(manifestText, 'durable cycle store stage evidence manifest');
     if (manifest.cycleId !== cycleId || manifest.stage !== stage) throw new Error('durable cycle store stage evidence manifest identity mismatch');
+    if (expected !== null && (manifest.generation !== expected.generation || manifest.evidenceDigest !== expected.evidenceDigest)) {
+      throw new Error('durable cycle store stage evidence does not match its expected reference');
+    }
     const generationDirectory = join(stageDirectory, manifest.generation);
     await assertPrivateDirectory(generationDirectory, 'durable cycle store stage evidence generation directory');
     const context = {
@@ -1987,12 +2114,12 @@ export class DurableCycleStore {
         return page;
       },
     };
-    const evidence = await decodePagedValue(manifest.state, context);
+    const evidenceValue = await decodePagedValue(manifest.state, context);
     if (context.pageIds.size !== manifest.pageCount) throw new Error('durable cycle store stage evidence manifest page count does not match its state');
     for (let pageId = 0; pageId < manifest.pageCount; pageId += 1) {
       if (!context.pageIds.has(pageId)) throw new Error('durable cycle store stage evidence manifest omits a page');
     }
-    return assertPagedStageEvidence(cycleId, evidence);
+    return assertPagedStageEvidence(cycleId, evidenceValue);
   }
 
   readCycle(cycleId) {
