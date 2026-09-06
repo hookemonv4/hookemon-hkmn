@@ -5,14 +5,19 @@ import {
   CHAIN_TRANSACTION_ATTEMPT_STATES,
   CUSTODY_LEDGER_BUCKETS,
   CYCLE_TERMINAL_STATES,
+  MAXIMUM_PACK_BATCH_SIZE,
   OPERATIONAL_CYCLE_STAGES,
   PROVIDER_MUTATION_ATTEMPT_STATES,
   assertChainTransactionAttempt,
   assertCustodyLedger,
+  assertOperationIdentity,
+  assertPackBatchRequest,
+  assertPublicCardEvent,
   assertTransactionPolicy,
   assertTypedAmount,
   assertProviderMutationAttempt,
   createPreparedChainTransactionAttempt,
+  packOperationId,
   transitionChainTransactionAttempt,
   transitionProviderMutationAttempt,
   RELAY_LEG_STATES,
@@ -407,4 +412,45 @@ test('money configuration is explicit typed amounts; a literal 1 or a missing ca
     () => assertMoneyConfiguration(moneyConfiguration({ evm: { ...configuration.evm, nativeReserve: { ...configuration.evm.nativeReserve, chainId: '1' } } })),
     /nativeReserve/,
   );
+});
+
+function packBatchEntry(overrides = {}) {
+  return { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: 'pokemon_25', ...overrides };
+}
+
+test('pack batch requests are bounded, index-ordered, and memo-unique', () => {
+  const batch = [packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-1' })];
+  assert.deepEqual(assertPackBatchRequest(batch), batch);
+  assert.throws(() => assertPackBatchRequest([]), /non-empty/);
+  assert.throws(
+    () => assertPackBatchRequest(Array.from({ length: MAXIMUM_PACK_BATCH_SIZE + 1 }, (_, index) => packBatchEntry({ packIndex: index, memo: `memo-${index}` }))),
+    /at most/,
+  );
+  assert.throws(() => assertPackBatchRequest([packBatchEntry({ packIndex: 1 })]), /packIndex must equal/);
+  assert.throws(
+    () => assertPackBatchRequest([packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-0' })]),
+    /unique/,
+  );
+});
+
+test('operation identity and public card events bind a stable per-pack identity', () => {
+  const operationId = packOperationId('cycle-1', 2);
+  assert.equal(operationId, 'pack:cycle-1:2');
+  const identity = { cycleId: 'cycle-1', operationId, packIndex: 2, memo: 'memo-2', mint: null };
+  assert.deepEqual(assertOperationIdentity(identity), identity);
+  const event = {
+    ...identity,
+    eventId: 'sha256:'.padEnd(71, '0'),
+    sequence: '1',
+    state: 'PURCHASED',
+    name: null,
+    imageUrl: null,
+    observedAt: '2026-09-06T00:00:00.000Z',
+    finalizedAt: null,
+    transactionId: null,
+    proceeds: null,
+  };
+  assert.deepEqual(assertPublicCardEvent(event), event);
+  assert.throws(() => assertPublicCardEvent({ ...event, state: 'UNKNOWN' }), /state is invalid/);
+  assert.equal(packOperationId('cycle-1', 2), operationId);
 });
