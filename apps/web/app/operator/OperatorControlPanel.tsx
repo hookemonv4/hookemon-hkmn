@@ -177,6 +177,7 @@ type Command =
   | { type: "pause" }
   | { type: "skip-next-cycle" }
   | { type: "run-cycle-now" }
+  | { type: "reconcile" }
   | {
       type: "update-configuration";
       configuration: {
@@ -405,6 +406,13 @@ export default function OperatorControlPanel() {
 
   function skipNextCycle() {
     void submitCommand({ type: "skip-next-cycle" }, "Nächster planmäßiger Zyklus wird übersprungen.");
+  }
+
+  function reconcile() {
+    // The reconcile command re-reads and re-evaluates current repository state; it does not
+    // itself trigger a fix or a new transaction (that happens automatically inside the scheduler
+    // when needed). Say exactly that, not a fabricated "problem resolved" outcome.
+    void submitCommand({ type: "reconcile" }, "Zustand wurde neu gelesen und protokolliert.");
   }
 
   function setPackQuantity(pack: Pack, rawValue: string) {
@@ -855,6 +863,15 @@ export default function OperatorControlPanel() {
                 onClick={skipNextCycle}
               >
                 Nächsten planmäßigen Zyklus überspringen
+              </button>
+              <button
+                className={styles.secondaryButton}
+                type="button"
+                disabled={controlsDisabled}
+                onClick={reconcile}
+                title="Liest den aktuellen Zustand neu ein; löst selbst keine neue Transaktion aus."
+              >
+                Zustand neu abgleichen
               </button>
             </div>
           </section>
