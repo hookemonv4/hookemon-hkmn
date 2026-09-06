@@ -461,6 +461,109 @@ test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-C
   assert.equal(accounting.packSpendMicroUsdg, null);
 });
 
+const SOLANA_USDC = { chainId: 'solana:mainnet-beta', assetId: 'spl:usdc-mint', decimals: 6 };
+function solAmount(amountAtomic) { return { ...SOLANA_USDC, amountAtomic }; }
+
+test('collectorPurchaseDebit sums an N-pack purchase batch: verified purchased packs plus genuinely zero-cost not_purchased packs', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 3,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+            { packIndex: 1, memo: 'memo-1', status: 'not_purchased' },
+            { packIndex: 2, memo: 'memo-2', status: 'purchased', packCost: solAmount('20') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.collectorPurchaseDebit, { ...SOLANA_USDC, units: '50' });
+});
+
+test('collectorBuybackProceeds sums only sold packs; held (never-sold) packs are a real verified zero, not unknown', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          soldCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+            { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'held', terminalState: 'HELD_OWNER_DECISION', reason: 'insured value exceeds cap' },
+            { packIndex: 2, memo: 'memo-2', mint: 'mint-2', decision: 'sold', signature: 'sig-2', proceeds: solAmount('35') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.collectorBuybackProceeds, { ...SOLANA_USDC, units: '75' });
+});
+
+test('collectorPurchaseDebit fails closed to null when a purchased pack is missing its own packCost (never a fabricated zero or a silently dropped pack)', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased' }, // packCost missing
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('collectorBuybackProceeds fails closed to null on a mixed-denomination pack batch instead of silently double-mixing assets', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          soldCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+            { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'sold', signature: 'sig-1', proceeds: { chainId: 1, assetId: '0xforeign', decimals: 18, amountAtomic: '35' } },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('collectorPurchaseDebit fails closed to null on a duplicate packIndex instead of double-counting it', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+            { packIndex: 0, memo: 'memo-0-dup', status: 'purchased', packCost: solAmount('30') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
 // The configured USDG token address, standing in for `config.contracts.usdg` at composition time.
 // Every "real" fixture in this file uses this exact assetId; a "foreign token" fixture deliberately
 // uses a different one to prove the asset anchor is a trusted, external identity, never derived from
