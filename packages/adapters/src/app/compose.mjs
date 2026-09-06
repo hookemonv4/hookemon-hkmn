@@ -705,6 +705,60 @@ export function buildAdmissionPlanner({ config, adapters, readConfiguration, pro
 }
 
 /**
+ * Plans the replacement admission ADR-0025 `refresh-after-readmission` selects once, after the
+ * originally admitted quote expired before any outbound request existed.
+ *
+ * Deliberately narrower than `buildAdmissionPlanner`: pack, quantity, both destination purchase
+ * targets, and the finalized `processLiabilityEvidence` all come from the immutable original
+ * admission unchanged, never re-derived -- the funding this replacement quotes was already claimed
+ * and its finalized custody already proved by the caller's `readFinalizedClaimCustodyEvidence`
+ * evidence, so nothing here re-reads the pre-claim hook liability (which the hook itself would now
+ * refuse as an already-used cycle id) or infers a new catalog price. Only two fresh Relay quotes,
+ * for exactly the same destination amounts the original admission targeted, are obtained.
+ */
+export function buildQuoteRefreshPlanner({ config, adapters }) {
+  return {
+    async plan({ cycleId, packId, admission, custody }) {
+      if (!admission || !custody || custody.cycleId !== cycleId) return null;
+      if (typeof adapters?.relay?.quoteOutboundBridge !== 'function') {
+        throw new Error('quote refresh planner requires a Relay client');
+      }
+      const settlementAsset = config.moneyConfiguration.assets.solanaStablecoin;
+      const fundingAsset = config.moneyConfiguration.assets.usdg;
+      const route = {
+        user: config.accounts.evm,
+        recipient: config.accounts.solana,
+        destinationCurrency: settlementAsset.assetId,
+        tradeType: 'EXACT_OUTPUT',
+      };
+      // Sequential for the same reason as the original admission planner: one deterministic
+      // ordering of two separate priced facts, never issued together.
+      const unitQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: admission.unitPurchase.amountAtomic });
+      const aggregateQuote = await adapters.relay.quoteOutboundBridge({ ...route, amount: admission.aggregatePurchase.amountAtomic });
+      if (admission.quantity > 1 && unitQuote.requestId === aggregateQuote.requestId) {
+        throw new Error('quote refresh planner received one Relay quote for both the unit and aggregate targets');
+      }
+      return Object.freeze({
+        schema: 'hookemon.policy-admission.v2',
+        cycleId,
+        packId,
+        quantity: admission.quantity,
+        quoteDigest: aggregateQuote.quoteDigest,
+        unitPurchase: admission.unitPurchase,
+        aggregatePurchase: admission.aggregatePurchase,
+        unitFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(unitQuote.origin.amount)),
+        aggregateFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(aggregateQuote.origin.amount)),
+        relay: admittedRelayIdentity(aggregateQuote),
+        unitRelay: admittedRelayIdentity(unitQuote),
+        unitRelayQuote: unitQuote,
+        relayQuote: aggregateQuote,
+        processLiabilityEvidence: admission.processLiabilityEvidence,
+      });
+    },
+  };
+}
+
+/**
  * Attributable finalized process liability, bound to the exact block it was observed at.
  *
  * A bare `balanceOf` on the Operations wallet is not this. The cycle's first money mutation is the
@@ -1527,6 +1581,7 @@ export async function compose(config) {
             // substitute an isolated reader; nothing substitutes a wallet balance or a config value.
             processLiabilityReader: config.processLiabilityReader ?? buildProcessLiabilityReader({ config: resolved, adapters }),
           }),
+          quoteRefreshPlanner: buildQuoteRefreshPlanner({ config: resolved, adapters }),
         }
         : {}),
       cycleRepository,
