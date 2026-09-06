@@ -725,6 +725,83 @@ test('pause and kill persist execution guards before the policy engine observes 
   );
 });
 
+test('retrying pause after an unrelated configuration change advanced the revision is a real conflict, never a false success', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  // An unrelated command advances the revision while pause's own retry still targets revision 0 —
+  // the exact independent-repro shape: pause never durably applied, but a generic revision CAS
+  // failure alone must not be read as proof that it did.
+  await control.execute({
+    expectedRevision: 0,
+    command: { type: 'update-configuration', configuration: { intervalMinutes: 10 } },
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'pause' } }),
+    /stale operator state revision/,
+  );
+  const status = await control.status();
+  assert.equal(status.configuration.paused, false, 'pause was never durably applied by the failed retry');
+});
+
+test('retrying pause against a revision it already durably applied recognizes the authoritative postcondition instead of failing', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  const first = await control.execute({ expectedRevision: 0, command: { type: 'pause' } });
+  assert.equal(first.revision, 1);
+  assert.equal(first.configuration.paused, true);
+
+  // A retry with the same original (now stale) expectedRevision — the exact shape a crashed effect's
+  // safe re-execution produces — must recognize the postcondition it already reached, not throw.
+  const retried = await control.execute({ expectedRevision: 0, command: { type: 'pause' } });
+  assert.equal(retried.action, 'pause');
+  assert.equal(retried.revision, 1);
+  assert.equal(retried.configuration.paused, true);
+});
+
+test('retrying update-configuration against a revision it already durably applied recognizes the authoritative postcondition', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+  const patch = { intervalMinutes: 15 };
+
+  const first = await control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: patch } });
+  assert.equal(first.configuration.intervalMinutes, 15);
+
+  const retried = await control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: patch } });
+  assert.equal(retried.revision, first.revision);
+  assert.equal(retried.configuration.intervalMinutes, 15);
+
+  // A retry whose patch would produce a functionally different result than what is durably current
+  // remains a real, reported conflict.
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: { intervalMinutes: 20 } } }),
+    /stale operator state revision/,
+  );
+});
+
 test('manual approval delegates one exact digest-bound request to the policy engine', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
@@ -789,7 +866,7 @@ test('held owner decisions carry the audited request and position revision to th
   assert.deepEqual(result, { action: 'held-owner-decision', revision: 0, decision });
 });
 
-test('reconcile reads repository state without invoking an effect callback', async t => {
+test('reconcile without a wired reconciliation authority reads repository state and invokes nothing', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
   let ticks = 0;
@@ -810,6 +887,50 @@ test('reconcile reads repository state without invoking an effect callback', asy
   assert.equal(ticks, 0);
   assert.equal(resumes, 0);
   assert.equal(approvals, 0);
+});
+
+test('reconcile with a wired reconciliation authority triggers serialized recovery and never opens a new cycle', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  let ticks = 0;
+  let reconciles = 0;
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository(),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    triggerTick: async () => { ticks += 1; return { tick: 'started' }; },
+    reconcileActiveCycle: async () => { reconciles += 1; return { status: 'IN_PROGRESS', cycleId: 'cycle-one' }; },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  const result = await control.execute({ expectedRevision: 0, command: { type: 'reconcile' } });
+
+  assert.deepEqual(result, {
+    action: 'reconcile',
+    resultCode: 'RECOVERY_IN_PROGRESS',
+    result: { status: 'IN_PROGRESS', cycleId: 'cycle-one' },
+    revision: 0,
+  });
+  assert.equal(reconciles, 1);
+  assert.equal(ticks, 0, 'reconcile never opens a new cycle, wired or not');
+});
+
+test('a wired reconcile refuses without safety telemetry, same as resume-cycle', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository(),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    reconcileActiveCycle: async () => { throw new Error('must not be called without safety telemetry'); },
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'reconcile' } }),
+    /safety telemetry is unavailable/,
+  );
 });
 
 test('resume-cycle and run-cycle-now each call their injected authority once', async t => {
@@ -891,12 +1012,12 @@ test('configuration updates reject monetary values above the fixed operator ceil
     command: {
       type: 'update-configuration',
       configuration: {
-        maxUnitPriceMicroUsdg: '250000000',
-        maxCycleBudgetMicroUsdg: '250000000',
-        max24HourBudgetMicroUsdg: '250000000',
-        perCycleCapMicroUsdg: '250000000',
-        lossCapMicroUsdg: '250000000',
-        maxOutstandingCustodyMicroUsdg: '250000000',
+        maxUnitPriceMicroUsdg: '50000000',
+        maxCycleBudgetMicroUsdg: '150000000',
+        max24HourBudgetMicroUsdg: '450000000',
+        perCycleCapMicroUsdg: '150000000',
+        lossCapMicroUsdg: '450000000',
+        maxOutstandingCustodyMicroUsdg: '450000000',
       },
     },
   });
@@ -908,10 +1029,10 @@ test('configuration updates reject monetary values above the fixed operator ceil
       command: {
         type: 'update-configuration',
         configuration: {
-          maxUnitPriceMicroUsdg: '250000001',
-          maxCycleBudgetMicroUsdg: '250000001',
-          perCycleCapMicroUsdg: '250000001',
-          max24HourBudgetMicroUsdg: '250000001',
+          maxUnitPriceMicroUsdg: '50000001',
+          maxCycleBudgetMicroUsdg: '150000001',
+          perCycleCapMicroUsdg: '150000001',
+          max24HourBudgetMicroUsdg: '450000001',
         },
       },
     }),

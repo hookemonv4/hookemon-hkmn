@@ -515,10 +515,10 @@ test('the first production cycle needs an approval bound to its exact policy dig
 test('claim admission rejects configuration values above the fixed operator ceilings', async () => {
   const { engine } = policyFixture({
     configuration: configuredPolicy({
-      maxUnitPriceMicroUsdg: '250000001',
-      maxCycleBudgetMicroUsdg: '250000001',
-      max24HourBudgetMicroUsdg: '250000001',
-      perCycleCapMicroUsdg: '250000001',
+      maxUnitPriceMicroUsdg: '50000001',
+      maxCycleBudgetMicroUsdg: '150000001',
+      max24HourBudgetMicroUsdg: '450000001',
+      perCycleCapMicroUsdg: '150000001',
     }),
   });
 

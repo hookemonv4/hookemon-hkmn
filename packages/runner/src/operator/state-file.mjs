@@ -21,19 +21,29 @@ const maximumLockBytes = 512;
 const lockOwnerFields = ['pid', 'token'];
 const lockTokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-// The owner's total funding ceiling ($250, see the launch-repair brief) is the only verified upper
-// bound on real spend; it replaces the prior 25,000,000 / 50,000,000 micro-USDG pair, which was sized
-// to the single Collector-only rehearsal pack price and blocked a production catalog with a different
-// unit price or a multi-pack cycle even though the operator's own configurable
-// perCycleCapMicroUsdg/max24HourBudgetMicroUsdg/lossCapMicroUsdg limits already bound real exposure
-// tighter than this fixed rail.
-const OWNER_FUNDING_CEILING_MICRO_USDG = '250000000';
+// These are pack-spend rails, not the owner's funding ceiling. The owner's $250 total is cumulative
+// external top-up capital (plan.md); a process can also recycle finalized returns without another
+// owner dollar, so the top-up ceiling neither authorizes nor bounds per-unit/per-cycle/rolling-24h
+// spend by itself, and conflating the two (as a prior revision of this file did, assigning 250,000,000
+// to all three fields) can either block legitimate catalog spend or silently license a single
+// cycle/day to consume the owner's entire lifetime top-up. These hard caps are instead anchored to
+// H's verified public Collector catalog snapshot (H-funding-observations.md, 2026-09-05): the highest
+// observed single-pack price is `pokemon_50` at 50 USDC. maxUnitPriceMicroUsdg stays at that verified
+// ceiling; maxCycleBudgetMicroUsdg and max24HourBudgetMicroUsdg are small, clearly-labeled multiples
+// of it, giving headroom for the documented multi-pack ("N=2") acceptance session plus bridge/gas
+// variance (H observed ~50.31 USDG in for a two-`pokemon_25`-pack quote) without reaching for the
+// unrelated owner top-up figure. The operator's own configured perCycleCapMicroUsdg,
+// max24HourBudgetMicroUsdg, and lossCapMicroUsdg remain the real, tighter day-to-day operating limits;
+// these are only the immutable outer rail no configuration edit can exceed.
+const VERIFIED_CATALOG_MAX_UNIT_PRICE_MICRO_USDG = 50_000_000n; // pokemon_50, H-funding-observations.md
+const CYCLE_BUDGET_MULTIPLE = 3n; // headroom for a modest multi-pack cycle, e.g. up to 3 packs
+const DAILY_BUDGET_MULTIPLE = 3n; // headroom for a modest number of cycles per day
 
 export const OPERATOR_HARD_CAPS = Object.freeze({
   maxBoostersPerCycle: '1000',
-  maxUnitPriceMicroUsdg: OWNER_FUNDING_CEILING_MICRO_USDG,
-  maxCycleBudgetMicroUsdg: OWNER_FUNDING_CEILING_MICRO_USDG,
-  max24HourBudgetMicroUsdg: OWNER_FUNDING_CEILING_MICRO_USDG,
+  maxUnitPriceMicroUsdg: VERIFIED_CATALOG_MAX_UNIT_PRICE_MICRO_USDG.toString(),
+  maxCycleBudgetMicroUsdg: (VERIFIED_CATALOG_MAX_UNIT_PRICE_MICRO_USDG * CYCLE_BUDGET_MULTIPLE).toString(),
+  max24HourBudgetMicroUsdg: (VERIFIED_CATALOG_MAX_UNIT_PRICE_MICRO_USDG * CYCLE_BUDGET_MULTIPLE * DAILY_BUDGET_MULTIPLE).toString(),
   maxHeldPositions: '1000',
 });
 

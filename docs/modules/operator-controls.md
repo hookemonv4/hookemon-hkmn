@@ -9,8 +9,11 @@ creates a local cycle store, signer, or provider effect.
 ## Public interface
 
 - `createOperatorControl({ statePath, cycleRepository, policyEngine, now, triggerTick,
-  resumeActiveCycle, readCustody, recordHeldOwnerDecision })` returns frozen `{ status, execute }`
-  functions.
+  resumeActiveCycle, reconcileActiveCycle, readCustody, recordHeldOwnerDecision })` returns frozen
+  `{ status, execute }` functions. `reconcileActiveCycle` is the injection point for the composed
+  runner graph's serialized, lease-protected recovery call (e.g. the scheduler's
+  `recoverActiveCycle` path); this module never imports a stage driver or cycle-domain module to
+  reach it itself.
 - `status()` returns the configuration revision, active and known repository cycles, canonical
   lifecycle stages, provider requests, typed chain transaction evidence, custody buckets, cap
   usage, open held positions, telemetry-source availability, alerts, and payout state.
@@ -45,8 +48,21 @@ creates a local cycle store, signer, or provider effect.
   produces null loss and outstanding-cap projections, `alertSources.safetyTelemetry: false`, and a
   critical authority alert.
 - `resume`, `manual-approval`, `resume-cycle`, `run-cycle-now`, and exposure-increasing
-  configuration changes refuse to act while safety telemetry is unavailable. `pause`, `kill`, and
-  read-only `reconcile` remain available for safe-stop and inspection.
+  configuration changes refuse to act while safety telemetry is unavailable. `pause` and `kill`
+  remain available for safe-stop regardless. `reconcile` without a wired `reconcileActiveCycle`
+  stays read-only and available for inspection; wired, it requires safety telemetry the same as
+  `resume-cycle`, since it can invoke the same money-moving recovery.
+- A generic shared-state compare-and-swap failure (`'stale operator state revision'`) carries no
+  command-specific identity or postcondition — it only means some write happened after the caller's
+  expected revision, not that this exact patch was the one applied. `pause`, `resume`, `kill`, and
+  `update-configuration` recover from that failure by checking a real postcondition instead of
+  guessing: applying the same patch again to whatever is durably current now, and comparing every
+  field except `configurationRevision` against that current state. A match means this patch's
+  intended effect is already durably present regardless of who wrote it, and the call returns that
+  current state as success; a mismatch is a genuine conflict and the stale-revision error is
+  rethrown unchanged. This makes those four commands safe to retry (including a crash-recovered
+  retry through the audited command executor) without ever inferring "applied" from the error
+  message alone.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
 - A held-owner decision binds position ID, held-evidence digest, request ID, expected position
@@ -67,8 +83,10 @@ creates a local cycle store, signer, or provider effect.
   supplementary settlement. `resume-cycle` can recover that durable settlement after its main
   cycle is `COMPLETED`, while tick commands and normal recovery leave the main stage sequence
   closed. Recovery and tick commands return the result of their one injected authority call.
-- Reconcile reads repository state only. It never invokes a tick, recovery callback, signer, or
-  provider mutation.
+- Reconcile without a wired `reconcileActiveCycle` reads repository state only; it never invokes a
+  tick, recovery callback, signer, or provider mutation. Wired, it calls `reconcileActiveCycle()`
+  exactly once and returns its durable outcome (`RECOVERY_<status>`), same as `resume-cycle`; it
+  never calls `triggerTick` and so can never open a new cycle.
 
 ## Operational commands
 

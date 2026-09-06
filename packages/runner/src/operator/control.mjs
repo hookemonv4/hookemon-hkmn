@@ -8,12 +8,15 @@ import {
   assertProviderMutationAttempt,
   assertTypedAmount,
 } from '../cycle/money-schemas.mjs';
+import { canonicalJson } from '../cycle/journal.mjs';
 import { POLICY_WINDOW_MS } from '../automation/policy-engine.mjs';
 import {
   createEmptyOperatorState,
   mutateOperatorState,
   readOperatorState,
 } from './state-file.mjs';
+
+const staleRevisionMessage = 'stale operator state revision';
 
 const missingStateFileMessage = 'operator state file does not exist';
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
@@ -489,6 +492,7 @@ export function createOperatorControl({
   now = () => Date.now(),
   triggerTick = undefined,
   resumeActiveCycle = undefined,
+  reconcileActiveCycle = undefined,
   readCustody = undefined,
   recordHeldOwnerDecision = undefined,
 } = {}) {
@@ -498,6 +502,9 @@ export function createOperatorControl({
   if (typeof now !== 'function') throw new Error('operator control now is required');
   if (triggerTick !== undefined && typeof triggerTick !== 'function') throw new Error('operator control triggerTick must be a function');
   if (resumeActiveCycle !== undefined && typeof resumeActiveCycle !== 'function') throw new Error('operator control resumeActiveCycle must be a function');
+  if (reconcileActiveCycle !== undefined && typeof reconcileActiveCycle !== 'function') {
+    throw new Error('operator control reconcileActiveCycle must be a function');
+  }
   if (readCustody !== undefined && typeof readCustody !== 'function') throw new Error('operator control readCustody must be a function');
   if (recordHeldOwnerDecision !== undefined && typeof recordHeldOwnerDecision !== 'function') {
     throw new Error('operator control recordHeldOwnerDecision must be a function');
@@ -539,11 +546,41 @@ export function createOperatorControl({
     });
   }
 
+  // A generic 'stale operator state revision' CAS failure carries no command-specific identity: it
+  // only means some write happened after `expectedRevision`, not that this exact patch was the one
+  // durably applied (see docs/modules/dashboard-audit-log.md and the P0 review it was written for).
+  // The one authoritative postcondition this control layer can check without guessing is functional
+  // equality: applying the same patch again to whatever is durably current now, and comparing every
+  // field except configurationRevision (which a fresh application always bumps) against that current
+  // state. If they already match, this patch's intended effect is durably present regardless of who
+  // wrote it or why the revision moved — a real postcondition, not an inferred one. If they don't
+  // match, this is a genuine conflict and the stale-revision error is rethrown unchanged.
+  function configurationFunctionallyEquals(a, b) {
+    const { configurationRevision: revisionA, ...restA } = a;
+    const { configurationRevision: revisionB, ...restB } = b;
+    void revisionA;
+    void revisionB;
+    return canonicalJson(restA) === canonicalJson(restB);
+  }
+
+  async function recoverIdempotentConfigurationMutation(patch, error) {
+    const actual = await readStateOrNull(statePath);
+    if (actual === null || actual.configuration === null) throw error;
+    const intended = applyOperatorConfiguration(actual.configuration, patch);
+    if (!configurationFunctionallyEquals(actual.configuration, intended)) throw error;
+    return actual;
+  }
+
   async function mutateConfiguration(expectedRevision, patch) {
-    return mutateOperatorState(statePath, expectedRevision, current => {
-      const base = current ?? createEmptyOperatorState();
-      return { ...base, configuration: applyOperatorConfiguration(base.configuration, patch) };
-    });
+    try {
+      return await mutateOperatorState(statePath, expectedRevision, current => {
+        const base = current ?? createEmptyOperatorState();
+        return { ...base, configuration: applyOperatorConfiguration(base.configuration, patch) };
+      });
+    } catch (error) {
+      if (error?.message !== staleRevisionMessage) throw error;
+      return recoverIdempotentConfigurationMutation(patch, error);
+    }
   }
 
   async function execute({ expectedRevision, requestId = undefined, command } = {}) {
@@ -565,7 +602,16 @@ export function createOperatorControl({
         return deepFreeze({ action: 'kill', revision: state.revision, configuration: structuredClone(state.configuration) });
       }
       case 'update-configuration': {
-        const current = await requireExpectedRevision(statePath, revision);
+        let current;
+        try {
+          current = await requireExpectedRevision(statePath, revision);
+        } catch (error) {
+          if (error?.message !== staleRevisionMessage) throw error;
+          const recovered = await recoverIdempotentConfigurationMutation(normalized.configuration, error);
+          return deepFreeze({
+            action: 'update-configuration', revision: recovered.revision, configuration: structuredClone(recovered.configuration),
+          });
+        }
         const base = current ?? createEmptyOperatorState();
         const next = applyOperatorConfiguration(base.configuration, normalized.configuration);
         if (configurationIncreasesExposure(base.configuration ?? createDefaultOperatorConfiguration(), next)) {
@@ -607,8 +653,19 @@ export function createOperatorControl({
         });
       }
       case 'reconcile': {
-        await requireExpectedRevision(statePath, revision);
-        return deepFreeze({ action: 'reconcile', inspection: await status() });
+        const state = await requireExpectedRevision(statePath, revision);
+        if (reconcileActiveCycle === undefined) {
+          return deepFreeze({ action: 'reconcile', revision: state?.revision ?? null, inspection: await status() });
+        }
+        const safetyTelemetry = await readSafetyTelemetry(readCustody);
+        if (!safetyTelemetry.available) throw new Error('operator control safety telemetry is unavailable');
+        const result = await reconcileActiveCycle();
+        return deepFreeze({
+          action: 'reconcile',
+          resultCode: recoveryResultCode(result),
+          result: structuredClone(result),
+          revision: state?.revision ?? null,
+        });
       }
       case 'resume-cycle': {
         const state = await requireExpectedRevision(statePath, revision);

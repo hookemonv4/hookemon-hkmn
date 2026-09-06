@@ -59,9 +59,10 @@ class MemoryCycleRepository {
   }
 }
 
+// packPriceUsdg mirrors the verified public catalog's pokemon_25 pack (H-funding-observations.md).
 const readyBudget = () => ({
-  availableProcessUsdg: '55000000',
-  packPriceUsdg: '50000000',
+  availableProcessUsdg: '30000000',
+  packPriceUsdg: '25000000',
   outboundCapUsdg: '1000000',
   returnCapUsdg: '1000000',
   operatingMarginUsdg: '3000000',
@@ -88,12 +89,12 @@ function launchConfiguration(overrides = {}) {
     allowedPackIds: ['base-pack'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '55000000',
-    maxCycleBudgetMicroUsdg: '55000000',
-    max24HourBudgetMicroUsdg: '200000000',
-    perCycleCapMicroUsdg: '55000000',
-    lossCapMicroUsdg: '550000000',
-    maxOutstandingCustodyMicroUsdg: '550000000',
+    maxUnitPriceMicroUsdg: '30000000',
+    maxCycleBudgetMicroUsdg: '30000000',
+    max24HourBudgetMicroUsdg: '100000000',
+    perCycleCapMicroUsdg: '30000000',
+    lossCapMicroUsdg: '100000000',
+    maxOutstandingCustodyMicroUsdg: '100000000',
     maxCyclesPerDay: 10,
     manualApprovalCycles: 1,
     intervalMinutes: 20,
@@ -192,7 +193,7 @@ test('a one-time launch-readiness approval unlocks standing automation: only the
   const cycleDigest = deriveCyclePolicyDigest({
     configuration: launchConfiguration({ manualApprovalCycles: 1 }),
     cycleId: 'cycle-1',
-    releaseAmountMicroUsdg: '55000000',
+    releaseAmountMicroUsdg: '30000000',
     packId: 'base-pack',
     liveMode: true,
   });
