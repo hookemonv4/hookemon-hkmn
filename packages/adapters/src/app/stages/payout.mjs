@@ -62,9 +62,15 @@ const PLAN_FIELDS = [
   'totalAllocated',
   'dust',
   'feasibility',
+  'outcome',
   'payableRecipientCount',
   'planDigest',
 ];
+const HELD_POSITION_EXCLUSIONS_SCHEMA = 'hookemon.direct-payout-held-position-exclusions.v1';
+const HELD_POSITION_EXCLUSIONS_FIELDS = ['schema', 'cycleId', 'count', 'positions', 'evidenceDigest'];
+const HELD_POSITION_EXCLUSION_FIELDS = ['positionId', 'evidenceDigest', 'reason', 'terminalState'];
+const HELD_POSITION_ID = /^held:[0-9a-f]{64}$/;
+const HELD_POSITION_REASON = /^[A-Z][A-Z0-9_]{2,63}$/;
 const ERC20_TRANSFER_ABI = [{
   type: 'function',
   name: 'transfer',
@@ -85,6 +91,14 @@ const FROZEN_ABI = [{
 
 export class DirectPayoutError extends Error {}
 
+export class DirectPayoutFrozenAssetError extends DirectPayoutError {
+  constructor({ operations }) {
+    super(`direct payout USDG is frozen for the Operations sender ${operations}: nothing was admitted or spent`);
+    this.name = 'DirectPayoutFrozenAssetError';
+    this.operations = operations;
+  }
+}
+
 export class DirectPayoutNonceInterferenceError extends DirectPayoutError {
   constructor({ recipient, expectedNonce, observedNonce }) {
     super(`direct payout nonce interference for ${recipient}: expected ${expectedNonce}, observed ${observedNonce}`);
@@ -92,6 +106,29 @@ export class DirectPayoutNonceInterferenceError extends DirectPayoutError {
     this.recipient = recipient;
     this.expectedNonce = expectedNonce;
     this.observedNonce = observedNonce;
+  }
+}
+
+export class DirectPayoutBridgeShortfallError extends DirectPayoutError {
+  constructor({ deficit }) {
+    super(`direct payout finalized available USDG is short of the attributable distributable pool by ${deficit}: nothing was admitted or spent`);
+    this.name = 'DirectPayoutBridgeShortfallError';
+    this.deficit = deficit;
+  }
+}
+
+export class DirectPayoutBridgeAvailabilityUnknownError extends DirectPayoutError {
+  constructor() {
+    super('direct payout requires an authoritative cycle-attributable finalized-available USDG reader before admission: nothing was admitted or spent');
+    this.name = 'DirectPayoutBridgeAvailabilityUnknownError';
+  }
+}
+
+export class DirectPayoutNativeGasShortfallError extends DirectPayoutError {
+  constructor({ deficit }) {
+    super(`direct payout native gas balance is below the required feasibility envelope by ${deficit} wei: nothing was admitted or spent`);
+    this.name = 'DirectPayoutNativeGasShortfallError';
+    this.deficit = deficit;
   }
 }
 
@@ -374,6 +411,99 @@ function assertPlan(value) {
   };
 }
 
+function heldPositionExclusionsDigest({ cycleId, count, positions }) {
+  return canonicalDigest({
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count,
+    positions,
+  });
+}
+
+function emptyHeldPositionExclusions(cycleId) {
+  return {
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count: 0,
+    positions: [],
+    evidenceDigest: heldPositionExclusionsDigest({ cycleId, count: 0, positions: [] }),
+  };
+}
+
+function normalizeHeldPositionExclusions(value, cycleId) {
+  if (value === undefined || value === null) return emptyHeldPositionExclusions(cycleId);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail('direct payout held position exclusions are invalid');
+  }
+  if (Object.keys(value).length !== HELD_POSITION_EXCLUSIONS_FIELDS.length
+    || !HELD_POSITION_EXCLUSIONS_FIELDS.every(field => Object.hasOwn(value, field))) {
+    fail('direct payout held position exclusions must use the exact schema');
+  }
+  if (value.schema !== HELD_POSITION_EXCLUSIONS_SCHEMA || value.cycleId !== cycleId) {
+    fail('direct payout held position exclusions do not bind the payout cycle');
+  }
+  if (!Number.isSafeInteger(value.count) || value.count < 0 || !Array.isArray(value.positions)
+    || value.count !== value.positions.length) {
+    fail('direct payout held position exclusion count is invalid');
+  }
+  const positions = value.positions.map((position, index) => {
+    if (!position || typeof position !== 'object' || Array.isArray(position)
+      || Object.keys(position).length !== HELD_POSITION_EXCLUSION_FIELDS.length
+      || !HELD_POSITION_EXCLUSION_FIELDS.every(field => Object.hasOwn(position, field))) {
+      fail(`direct payout held position exclusion ${index} must use the exact schema`);
+    }
+    if (!HELD_POSITION_ID.test(position.positionId)
+      || !HELD_POSITION_REASON.test(position.reason)
+      || !HELD_POSITION_REASON.test(position.terminalState)) {
+      fail(`direct payout held position exclusion ${index} identity is invalid`);
+    }
+    return {
+      positionId: position.positionId,
+      evidenceDigest: assertDigest(position.evidenceDigest, `direct payout held position exclusion ${index} evidence digest`),
+      reason: position.reason,
+      terminalState: position.terminalState,
+    };
+  });
+  for (let index = 1; index < positions.length; index += 1) {
+    if (positions[index - 1].positionId >= positions[index].positionId) {
+      fail('direct payout held position exclusions must be unique and sorted by positionId');
+    }
+  }
+  const evidenceDigest = heldPositionExclusionsDigest({ cycleId, count: value.count, positions });
+  if (value.evidenceDigest !== evidenceDigest) {
+    fail('direct payout held position exclusions digest is invalid');
+  }
+  return {
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count: value.count,
+    positions,
+    evidenceDigest,
+  };
+}
+
+function heldPositionExclusionsForCycle(cycleId, cycle) {
+  const heldPositions = cycle?.heldPositions;
+  if (heldPositions === undefined || heldPositions === null) return emptyHeldPositionExclusions(cycleId);
+  if (!(heldPositions instanceof Map)) fail('direct payout cycle held positions are invalid');
+  const positions = [...heldPositions.values()]
+    .filter(position => position?.resolution === null)
+    .map(position => ({
+      positionId: position.positionId,
+      evidenceDigest: position.evidenceDigest,
+      reason: position.reason,
+      terminalState: position.terminalState,
+    }))
+    .sort((left, right) => left.positionId.localeCompare(right.positionId));
+  return normalizeHeldPositionExclusions({
+    schema: HELD_POSITION_EXCLUSIONS_SCHEMA,
+    cycleId,
+    count: positions.length,
+    positions,
+    evidenceDigest: heldPositionExclusionsDigest({ cycleId, count: positions.length, positions }),
+  }, cycleId);
+}
+
 function directTransferCalldata(recipient, amountAtomic) {
   return encodeFunctionData({
     abi: ERC20_TRANSFER_ABI,
@@ -419,6 +549,7 @@ function normalizedState(stateValue) {
   if (typeof state.manifestFrozen !== 'boolean' || typeof state.feasibilityChecked !== 'boolean') {
     fail('direct payout state flags are invalid');
   }
+  state.heldPositionExclusions = normalizeHeldPositionExclusions(state.heldPositionExclusions, state.cycleId);
   state.distributablePool = assertUsdAmount(state.distributablePool, 'direct payout state distributable pool');
   state.dust = assertUsdAmount(state.dust, 'direct payout state dust');
   if (state.distributablePool.amountAtomic !== planInfo.distributablePool.amountAtomic
@@ -432,6 +563,10 @@ function normalizedState(stateValue) {
     fail('direct payout state gasPriceWei exceeds its frozen gas-price cap');
   }
   if (BigInt(state.nextNonce) < BigInt(state.firstNonce)) fail('direct payout state nextNonce is invalid');
+  if (state.inFlightWindow === undefined) state.inFlightWindow = 1;
+  if (!Number.isSafeInteger(state.inFlightWindow) || state.inFlightWindow < 1) {
+    fail('direct payout state inFlightWindow is invalid');
+  }
   if (!Array.isArray(state.recipients) || !Array.isArray(state.quarantine)) fail('direct payout state journals are invalid');
   const recipients = new Set();
   state.recipients = state.recipients.map((attempt, index) => normalizeAttempt(
@@ -514,6 +649,36 @@ function normalizeFinalizedTransfer(value, index, attempt, operations) {
     recipientBalanceDeltaAtomic: value.recipientBalanceDeltaAtomic,
     logIndexes: [...value.logIndexes],
   };
+}
+
+/**
+ * Read-only seam for external projections (e.g. public accounting) that need to verify a
+ * FINALIZED recipient's persisted evidence without re-implementing or weakening the producer's
+ * canonical finality-proof validator. Reuses the exact same 16-field schema/endpoint/amount/
+ * block/balance-delta/log-index checks that gate a live FINALIZED transition in
+ * `normalizeAttempt` -- never a duplicated, amount-only check -- plus a transaction-hash format
+ * check the raw evidence alone does not carry. Throws `DirectPayoutError` on any malformed,
+ * incomplete, or mismatched evidence.
+ *
+ * Callers MUST supply `operations`, `recipient`, and `amount` from their own trusted context
+ * (the frozen plan, configured USDG asset, and configured Operations address) -- never derived
+ * from the evidence under verification. This is what binds the asset to the actually-configured
+ * USDG contract instead of any syntactically valid same-chain, same-decimals token the evidence
+ * happens to assert.
+ */
+export function assertFinalizedPayoutTransferEvidence({ transactionHash, finalizedTransfer, operations, recipient, amount }) {
+  if (typeof transactionHash !== 'string' || !TRANSACTION_HASH.test(transactionHash)) {
+    fail('finalized payout transfer evidence transactionHash is invalid');
+  }
+  const expectedOperations = assertAddress(operations, 'finalized payout transfer evidence operations');
+  const expectedRecipient = assertAddress(recipient, 'finalized payout transfer evidence recipient');
+  const expectedAmount = assertUsdAmount(amount, 'finalized payout transfer evidence amount');
+  return normalizeFinalizedTransfer(
+    finalizedTransfer,
+    'external verification',
+    { recipient: expectedRecipient, amount: expectedAmount },
+    expectedOperations,
+  );
 }
 
 function normalizeReplacementHistory(value, index, attempt, { maxGasPriceWei }) {
@@ -997,7 +1162,18 @@ export async function createDirectPayoutPolicySigner({ signerClient, state, reci
  * its recipient records as one durable stage value, so recovery never reconstructs a nonce or
  * signed payload from transient process state.
  */
-export function createDirectPayoutState({ plan, operations, usdgAddress, firstNonce, gasPriceWei }) {
+export function createDirectPayoutState({
+  plan,
+  operations,
+  usdgAddress,
+  firstNonce,
+  gasPriceWei,
+  heldPositionExclusions = undefined,
+  inFlightWindow = 1,
+}) {
+  if (!Number.isSafeInteger(inFlightWindow) || inFlightWindow < 1) {
+    fail('direct payout inFlightWindow must be a positive safe integer');
+  }
   const { plan: sourcePlan, distributablePool, dust, allocations } = assertPlan(plan);
   const operationAddress = assertAddress(operations, 'Operations address');
   const tokenAddress = assertAddress(usdgAddress, 'USDG address');
@@ -1013,6 +1189,7 @@ export function createDirectPayoutState({ plan, operations, usdgAddress, firstNo
   if (BigInt(selectedGasPrice) > BigInt(sourcePlan.feasibility.maxGasPriceWei)) {
     fail('initial payout gasPriceWei exceeds the frozen gas-price cap');
   }
+  const exclusions = normalizeHeldPositionExclusions(heldPositionExclusions, sourcePlan.cycleId);
   const recipients = [];
   for (const allocation of allocations) {
     if (allocation.amount.amountAtomic === '0') continue;
@@ -1046,25 +1223,45 @@ export function createDirectPayoutState({ plan, operations, usdgAddress, firstNo
     usdgAddress: tokenAddress,
     manifestFrozen: false,
     feasibilityChecked: false,
+    heldPositionExclusions: exclusions,
     distributablePool,
     dust,
     firstNonce: initialNonce,
     nextNonce: initialNonce,
     gasPriceWei: selectedGasPrice,
+    inFlightWindow,
     recipients,
     quarantine: [],
   };
 }
 
-export async function initializeDirectPayout({ payoutStore, plan, operations, usdgAddress, firstNonce, gasPriceWei }) {
-  const state = createDirectPayoutState({ plan, operations, usdgAddress, firstNonce, gasPriceWei });
+export async function initializeDirectPayout({
+  payoutStore,
+  plan,
+  operations,
+  usdgAddress,
+  firstNonce,
+  gasPriceWei,
+  heldPositionExclusions = undefined,
+  inFlightWindow = 1,
+}) {
+  const state = createDirectPayoutState({
+    plan,
+    operations,
+    usdgAddress,
+    firstNonce,
+    gasPriceWei,
+    heldPositionExclusions,
+    inFlightWindow,
+  });
   if (!payoutStore || typeof payoutStore.load !== 'function') fail('direct payout requires a durable payoutStore.load()');
   const existing = await payoutStore.load();
   if (existing !== null && existing !== undefined) {
     const recovered = normalizedState(existing);
     if (recovered.planDigest !== state.planDigest
       || recovered.operations !== state.operations
-      || recovered.usdgAddress !== state.usdgAddress) {
+      || recovered.usdgAddress !== state.usdgAddress
+      || recovered.heldPositionExclusions.evidenceDigest !== state.heldPositionExclusions.evidenceDigest) {
       fail('direct payout refuses to replace an existing immutable payout state');
     }
     return recovered;
@@ -1081,14 +1278,51 @@ export function buildDirectPayoutTransaction({ state, recipient }) {
   return buildTransaction(normalized, attempt);
 }
 
-function nextUnresolvedRecipient(state) {
-  return state.recipients.find(attempt => !['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'].includes(attempt.state)) ?? null;
+const RESOLVED_RECIPIENT_STATES = ['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'];
+const IN_FLIGHT_RECIPIENT_STATES = ['SIGNED', 'BROADCAST'];
+
+/**
+ * A recipient only occupies an on-chain nonce slot once it reaches SIGNED (nonce reserved *and*
+ * the transaction built) or BROADCAST. A recipient still in PREPARED -- even after reserving its
+ * nonce number locally -- has not yet been sent to the network, so the wallet's real pending-nonce
+ * count cannot yet corroborate a *later* recipient's reservation. A PREPARED recipient therefore
+ * always blocks every later recipient, exactly as the original fully-serial dispatch did; the
+ * window only lets up to `state.inFlightWindow` *already-broadcast-or-signed* recipients await
+ * finality concurrently, so one slow confirmation cannot stall the recipients behind it.
+ */
+function inFlightWindowRecipients(state) {
+  const window = [];
+  let inFlight = 0;
+  for (const attempt of state.recipients) {
+    if (RESOLVED_RECIPIENT_STATES.includes(attempt.state)) continue;
+    if (attempt.state === 'PREPARED') {
+      if (inFlight < state.inFlightWindow) window.push(attempt);
+      break;
+    }
+    window.push(attempt);
+    inFlight += 1;
+  }
+  return window;
 }
 
-function assertRecipientIsNext(state, attempt) {
-  const next = nextUnresolvedRecipient(state);
-  if (next && next.recipient !== attempt.recipient) {
-    fail(`direct payout must reconcile ${next.recipient} before advancing ${attempt.recipient}`);
+/**
+ * Mirrors `inFlightWindowRecipients`'s eligibility rule for a single recipient, so
+ * `advanceDirectPayout` refuses out-of-window or out-of-order requests the same way the driver's
+ * own selection would. Continuing an already SIGNED/BROADCAST recipient's lifecycle is always
+ * allowed regardless of the window: finishing in-flight work drains the window rather than being
+ * blocked by it. `inFlightWindow` of 1 reproduces the original fully-serial dispatch exactly.
+ */
+function assertRecipientAdvanceable(state, attempt) {
+  const index = state.recipients.indexOf(attempt);
+  const unresolvedBefore = state.recipients.slice(0, index).filter(entry => !RESOLVED_RECIPIENT_STATES.includes(entry.state));
+  const blockedByEarlierRecipient = unresolvedBefore.find(entry => entry.state === 'PREPARED');
+  if (blockedByEarlierRecipient) {
+    fail(`direct payout must reconcile ${blockedByEarlierRecipient.recipient} before advancing ${attempt.recipient}`);
+  }
+  if (attempt.state !== 'PREPARED') return;
+  const inFlightAhead = unresolvedBefore.filter(entry => IN_FLIGHT_RECIPIENT_STATES.includes(entry.state)).length;
+  if (inFlightAhead >= state.inFlightWindow) {
+    fail(`direct payout in-flight window (${state.inFlightWindow}) is full before advancing ${attempt.recipient}`);
   }
 }
 
@@ -1548,7 +1782,7 @@ export async function advanceDirectPayout({
       observedNonce: attempt.nonceInterference?.observedNonce ?? attempt.nonce,
     });
   }
-  assertRecipientIsNext(state, attempt);
+  assertRecipientAdvanceable(state, attempt);
 
   if (attempt.state === 'PREPARED') {
     if (await isRecipientFrozen(client, state.usdgAddress, attempt.recipient)) {
@@ -1721,7 +1955,7 @@ export async function replaceDirectPayout({
   assertRuntimeConfiguration(state, config);
   const { index, attempt } = stateRecipient(state, recipient);
   if (!['SIGNED', 'BROADCAST'].includes(attempt.state)) fail('direct payout replacement requires a signed or broadcast unresolved recipient attempt');
-  assertRecipientIsNext(state, attempt);
+  assertRecipientAdvanceable(state, attempt);
   const prior = await assertSignedTransaction({ rawSignedBytes: attempt.rawSignedBytes, state, attempt });
   const nextGasPriceWei = assertAtomic(replacementGasPriceWei, 'direct payout replacement gasPriceWei', { positive: true });
   if (BigInt(nextGasPriceWei) > BigInt(state.plan.feasibility.maxGasPriceWei)) {
@@ -1871,7 +2105,7 @@ function returnBinding(returnEvidence, config, cycleId) {
   };
 }
 
-function payoutRequestForPlan(planValue) {
+function payoutRequestForPlan(planValue, heldPositionExclusions = undefined) {
   const plan = assertPlan(planValue).plan;
   return Object.freeze({
     schema: 'hookemon.direct-payout-request.v1',
@@ -1879,6 +2113,7 @@ function payoutRequestForPlan(planValue) {
     planDigest: plan.planDigest,
     recipientCount: plan.payableRecipientCount,
     distributablePool: plan.distributablePool,
+    heldPositionExclusions: normalizeHeldPositionExclusions(heldPositionExclusions, plan.cycleId),
     plan,
   });
 }
@@ -1919,9 +2154,12 @@ function priorDustFromConsumption(value) {
 /** Builds a frozen direct-payout request for the coordinator-owned stage-driver integration. */
 export async function preparePayoutRequest({ config, cycleRepository, context, payoutStore = null }) {
   if (config?.payout?.legacyVault === true) fail('legacy payout mode is explicitly disabled for Operations EOA payouts');
-  const [snapshot, returned] = await Promise.all([
+  const [snapshot, returned, cycle] = await Promise.all([
     cycleRepository.readStage(context.cycleId, 'eligibility-snapshot'),
     cycleRepository.readStage(context.cycleId, 'return'),
+    typeof cycleRepository.describeCycle === 'function'
+      ? cycleRepository.describeCycle(context.cycleId)
+      : Promise.resolve(null),
   ]);
   if (snapshot?.status !== 'COMPLETE' || !snapshot.evidence) fail('payout requires a completed frozen eligibility snapshot');
   if (returned?.status !== 'COMPLETE' || !returned.evidence) fail('payout requires a completed finalized return');
@@ -1935,9 +2173,12 @@ export async function preparePayoutRequest({ config, cycleRepository, context, p
       // Once a plan has consumed predecessor dust, retries must use the durable plan rather than
       // querying dust again. Its digest remains the mutation-policy request identity until payout
       // reaches terminal conservation.
-      return payoutRequestForPlan(state.plan);
+      return payoutRequestForPlan(state.plan, state.heldPositionExclusions);
     }
   }
+  // Held-card exclusions are audit evidence frozen with this payout request. A later reconciliation
+  // may close a position, but it cannot alter the already-attributed main-cycle payout.
+  const heldPositionExclusions = heldPositionExclusionsForCycle(context.cycleId, cycle);
   if (typeof cycleRepository.readPayoutDust !== 'function') {
     fail('payout requires a durable prior-dust repository reader');
   }
@@ -1969,7 +2210,7 @@ export async function preparePayoutRequest({ config, cycleRepository, context, p
   if (consumed !== null && plan.planDigest !== priorDust.planDigest) {
     fail('payout consumed-dust recovery record does not match the reconstructed immutable plan');
   }
-  return payoutRequestForPlan(plan);
+  return payoutRequestForPlan(plan, heldPositionExclusions);
 }
 
 function usesLegacyVaultPayout(config) {
@@ -2240,6 +2481,7 @@ function payoutTerminalEvidence(stateValue) {
       refusalEvidence: attempt.refusalEvidence,
     })),
     quarantine: state.quarantine,
+    heldPositionExclusions: state.heldPositionExclusions,
   };
 }
 
@@ -2255,6 +2497,7 @@ function payoutCustodyLedger(cycleId, amount) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -2320,11 +2563,123 @@ async function recoverPagedPayoutInitialization({ cycleRepository, cycleId, plan
   }
 }
 
+function frozenHeldPositionExclusions({ cycleId, requested }) {
+  return normalizeHeldPositionExclusions(requested, cycleId);
+}
+
+export const DIRECT_PAYOUT_ADMISSION_OUTCOME = Object.freeze({
+  OK: 'OK',
+  NON_SPENDING_BRIDGE_SHORTFALL: 'NON_SPENDING_BRIDGE_SHORTFALL',
+  NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN: 'NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN',
+  NON_SPENDING_FROZEN_ASSET: 'NON_SPENDING_FROZEN_ASSET',
+  NON_SPENDING_NATIVE_GAS_SHORTFALL: 'NON_SPENDING_NATIVE_GAS_SHORTFALL',
+});
+
+/**
+ * Pure pre-admission check: an attributable distributable amount can never exceed the actually
+ * finalized, available proceeds backing it (e.g. an under-delivered bridge relay). Never signs or
+ * spends anything itself; it only reports the exact deficit so a refusal is auditable before any
+ * irreversible admission, matching the accounting rule that pack purchases and holder payouts
+ * never share treasury, other-cycle, or owner-gas balances as an alternate funding source.
+ */
+export function evaluateDirectPayoutBridgeAdmission({ attributableDistributableAmount, finalizedAvailableAmount }) {
+  const attributable = BigInt(attributableDistributableAmount);
+  const available = BigInt(finalizedAvailableAmount);
+  if (available >= attributable) {
+    return Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.OK, deficit: '0' });
+  }
+  return Object.freeze({
+    outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_BRIDGE_SHORTFALL,
+    deficit: (attributable - available).toString(),
+  });
+}
+
+/**
+ * Pure pre-admission check: when the payout asset itself is frozen for the Operations sender, the
+ * whole distributable pool becomes non-spending unsent liability rather than being partially
+ * dispatched -- distinct from the existing per-recipient USDG_FROZEN quarantine, which only ever
+ * refuses one already-admitted recipient after admission has begun.
+ */
+export function evaluateDirectPayoutFrozenAssetAdmission({ frozen, attributableDistributableAmount, dust }) {
+  if (!frozen) return Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.OK });
+  return Object.freeze({
+    outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_FROZEN_ASSET,
+    finalized: '0',
+    pending: '0',
+    unsentLiability: (BigInt(attributableDistributableAmount) - BigInt(dust)).toString(),
+    remainingDust: String(dust),
+  });
+}
+
+/**
+ * Pure pre-admission check: the plan's frozen feasibility envelope can go stale between the
+ * eligibility snapshot and durable payout admission (native balance can drop in the meantime).
+ * Reports the exact deficit so a refusal is auditable before dust/state are committed, matching
+ * eligibility-snapshot's deficit-reporting contract instead of a generic failure discovered only
+ * at the first signature after irreversible accounting admission has already happened.
+ */
+export function evaluateDirectPayoutNativeGasAdmission({ requiredNativeAmount, observedNativeBalance }) {
+  const required = BigInt(requiredNativeAmount);
+  const observed = BigInt(observedNativeBalance);
+  if (observed >= required) {
+    return Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.OK, deficit: '0' });
+  }
+  return Object.freeze({
+    outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_NATIVE_GAS_SHORTFALL,
+    deficit: (required - observed).toString(),
+  });
+}
+
+/**
+ * Explicit I-owned admission input: the authoritative, cycle-attributable finalized-available
+ * USDG amount actually backing this cycle's payout right now -- never a wallet-wide balance, since
+ * the same Operations wallet can hold unrelated cycles' funds that must never fund this cycle's
+ * shortfall. Composition injects adapters.robinhood.client.readCycleAttributableFinalizedAvailable();
+ * its absence, or a reader that cannot yet produce a value, fails closed (returns null here) rather
+ * than skipping the bridge-shortfall check or trusting the plan's own accounting.
+ */
+async function readCycleAttributableFinalizedAvailableUsdg({ client, config, cycleId }) {
+  if (!client || typeof client.readCycleAttributableFinalizedAvailable !== 'function') return null;
+  const result = await client.readCycleAttributableFinalizedAvailable({
+    cycleId,
+    operations: config.accounts.evm,
+    usdgAddress: config.contracts.usdg,
+  });
+  if (result === null || result === undefined) return null;
+  return assertUsdAmount(
+    result,
+    'direct payout cycle-attributable finalized available USDG',
+    config.contracts.usdg,
+  ).amountAtomic;
+}
+
+/**
+ * Reads the configured bounded nonce-aware in-flight window for direct-payout dispatch. Defaults
+ * to 1 (fully serial, byte-identical to the pre-existing behavior) unless the deployment
+ * explicitly opts into wider concurrency for large recipient counts.
+ */
+function directPayoutInFlightWindow(config) {
+  const configured = config?.payout?.inFlightWindow;
+  if (configured === undefined) return 1;
+  if (!Number.isSafeInteger(configured) || configured < 1) {
+    fail('config.payout.inFlightWindow must be a positive safe integer');
+  }
+  return configured;
+}
+
 async function ensureDirectPayoutState({ cycleRepository, context, request, adapters, config, evmNonceFence = null }) {
   const payoutStore = createCycleRepositoryPayoutStore({ cycleRepository, cycleId: context.cycleId });
+  const preparedPlan = assertPlan(request.plan);
+  const heldPositionExclusions = frozenHeldPositionExclusions({
+    cycleId: context.cycleId,
+    requested: request.heldPositionExclusions,
+  });
   const existing = await payoutStore.load();
   if (existing !== null && existing !== undefined) {
     assertPayoutManifestUnchanged(existing, request.plan);
+    if (normalizedState(existing).heldPositionExclusions.evidenceDigest !== heldPositionExclusions.evidenceDigest) {
+      fail('direct payout state held position exclusions do not match the prepared request');
+    }
     await recoverPagedPayoutInitialization({
       cycleRepository,
       cycleId: context.cycleId,
@@ -2344,20 +2699,104 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
   if (!pagedInitialization && !legacyTestInitialization) {
     fail('direct payout production execution requires atomic prior-dust consumption and payout-state storage');
   }
-  const client = adapters?.robinhood?.client;
-  if (!client || typeof client.getTransactionCount !== 'function') {
-    fail('direct payout requires getTransactionCount before initializing recipient state');
+  if (preparedPlan.plan.payableRecipientCount > 0) {
+    const freezeCheckClient = adapters?.robinhood?.client;
+    if (freezeCheckClient && typeof freezeCheckClient.readContract === 'function') {
+      const frozen = await isRecipientFrozen(freezeCheckClient, config.contracts.usdg, config.accounts.evm);
+      if (frozen) {
+        const admission = evaluateDirectPayoutFrozenAssetAdmission({
+          frozen: true,
+          attributableDistributableAmount: request.plan.distributablePool.amountAtomic,
+          dust: request.plan.dust.amountAtomic,
+        });
+        if (typeof cycleRepository.holdCycle === 'function') {
+          await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+            stage: STAGE,
+            category: 'frozen-asset',
+            reason: 'PAYOUT_FROZEN_ASSET',
+            admission,
+            planDigest: request.plan.planDigest,
+          });
+        }
+        throw new DirectPayoutFrozenAssetError({ operations: config.accounts.evm });
+      }
+    }
+    const finalizedAvailableAmount = await readCycleAttributableFinalizedAvailableUsdg({
+      client: freezeCheckClient,
+      config,
+      cycleId: context.cycleId,
+    });
+    if (finalizedAvailableAmount === null) {
+      const admission = Object.freeze({ outcome: DIRECT_PAYOUT_ADMISSION_OUTCOME.NON_SPENDING_BRIDGE_AVAILABILITY_UNKNOWN });
+      if (typeof cycleRepository.holdCycle === 'function') {
+        await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+          stage: STAGE,
+          category: 'bridge-availability-unknown',
+          reason: 'PAYOUT_BRIDGE_AVAILABILITY_UNKNOWN',
+          admission,
+          planDigest: request.plan.planDigest,
+        });
+      }
+      throw new DirectPayoutBridgeAvailabilityUnknownError();
+    }
+    const bridgeAdmission = evaluateDirectPayoutBridgeAdmission({
+      attributableDistributableAmount: request.plan.distributablePool.amountAtomic,
+      finalizedAvailableAmount,
+    });
+    if (bridgeAdmission.outcome !== DIRECT_PAYOUT_ADMISSION_OUTCOME.OK) {
+      if (typeof cycleRepository.holdCycle === 'function') {
+        await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+          stage: STAGE,
+          category: 'bridge-shortfall',
+          reason: 'PAYOUT_BRIDGE_SHORTFALL',
+          admission: bridgeAdmission,
+          planDigest: request.plan.planDigest,
+        });
+      }
+      throw new DirectPayoutBridgeShortfallError({ deficit: bridgeAdmission.deficit });
+    }
+    if (!freezeCheckClient || typeof freezeCheckClient.getBalance !== 'function') {
+      fail('direct payout requires getBalance before durable admission');
+    }
+    const observedNativeRaw = await freezeCheckClient.getBalance({ address: config.accounts.evm });
+    const observedNative = typeof observedNativeRaw === 'bigint' ? observedNativeRaw : BigInt(observedNativeRaw);
+    const gasAdmission = evaluateDirectPayoutNativeGasAdmission({
+      requiredNativeAmount: requiredNativeAmount(preparedPlan.plan).toString(),
+      observedNativeBalance: observedNative.toString(),
+    });
+    if (gasAdmission.outcome !== DIRECT_PAYOUT_ADMISSION_OUTCOME.OK) {
+      if (typeof cycleRepository.holdCycle === 'function') {
+        await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
+          stage: STAGE,
+          category: 'native-gas-shortfall',
+          reason: 'PAYOUT_NATIVE_GAS_SHORTFALL',
+          admission: gasAdmission,
+          planDigest: request.plan.planDigest,
+        });
+      }
+      throw new DirectPayoutNativeGasShortfallError({ deficit: gasAdmission.deficit });
+    }
   }
-  await evmNonceFence?.();
-  const firstNonce = normalizeNonce(
-    await client.getTransactionCount({ address: config.accounts.evm, blockTag: 'pending' }),
-    'initial direct payout nonce',
-  );
+  const firstNonce = preparedPlan.plan.payableRecipientCount === 0
+    ? '0'
+    : await (async () => {
+      const client = adapters?.robinhood?.client;
+      if (!client || typeof client.getTransactionCount !== 'function') {
+        fail('direct payout requires getTransactionCount before initializing recipient state');
+      }
+      await evmNonceFence?.();
+      return normalizeNonce(
+        await client.getTransactionCount({ address: config.accounts.evm, blockTag: 'pending' }),
+        'initial direct payout nonce',
+      );
+    })();
   const initialState = createDirectPayoutState({
     plan: request.plan,
     operations: config.accounts.evm,
     usdgAddress: config.contracts.usdg,
     firstNonce,
+    heldPositionExclusions,
+    inFlightWindow: directPayoutInFlightWindow(config),
   });
   const initialization = {
     source: request.plan.previousDustSource,
@@ -2402,24 +2841,31 @@ async function advanceDirectPayoutUntilPending({
   for (let boundary = 0; boundary < maximumBoundaries; boundary += 1) {
     const state = await load(payoutStore);
     if (isDirectPayoutComplete(state)) return state;
-    const next = nextUnresolvedRecipient(state);
-    if (!next) fail('direct payout has no unresolved recipient before terminal conservation');
-    const before = canonicalDigest(state);
-    const advanced = await advanceDirectPayout({
-      payoutStore,
-      recipient: next.recipient,
-      adapters,
-      signerClient,
-      policySignerClient,
-      policySignerFactory,
-      config,
-      cycleRepository,
-      requestDigest,
-      fencingToken,
-      evmNonceFence,
-      nonceLeaseContext,
-    });
-    if (canonicalDigest(advanced) === before) return null;
+    // Drive every recipient currently inside the bounded in-flight window one step forward per
+    // pass, so up to `inFlightWindow` recipients advance concurrently instead of waiting for the
+    // whole cycle-length serial queue ahead of them to finalize first.
+    const window = inFlightWindowRecipients(state);
+    if (window.length === 0) fail('direct payout has no unresolved recipient before terminal conservation');
+    let progressed = false;
+    for (const target of window) {
+      const before = canonicalDigest(await load(payoutStore));
+      const advanced = await advanceDirectPayout({
+        payoutStore,
+        recipient: target.recipient,
+        adapters,
+        signerClient,
+        policySignerClient,
+        policySignerFactory,
+        config,
+        cycleRepository,
+        requestDigest,
+        fencingToken,
+        evmNonceFence,
+        nonceLeaseContext,
+      });
+      if (canonicalDigest(advanced) !== before) progressed = true;
+    }
+    if (!progressed) return null;
   }
   fail('direct payout exceeded its durable recipient-boundary budget');
 }
@@ -2561,6 +3007,7 @@ export async function mutatePayout(args) {
     || typeof context.fencingToken !== 'string' || context.fencingToken.length === 0) {
     fail('direct payout production execution requires a request digest and persisted fencing token');
   }
+  const noPayableRecipients = assertPlan(request.plan).plan.payableRecipientCount === 0;
   // Bind every direct-payout signature to a policy decoded from its durable recipient attempt.
   // The factory receives the stage driver's guarded facade, never an unguarded keychain or
   // external-module client, so it cannot bypass standing-authority or lease checks.
@@ -2573,6 +3020,19 @@ export async function mutatePayout(args) {
     });
     return composed.policySigner;
   };
+  if (noPayableRecipients) {
+    const { state } = await ensureDirectPayoutState({
+      cycleRepository,
+      context,
+      request,
+      adapters,
+      config,
+    });
+    if (!isDirectPayoutComplete(state)) {
+      fail('direct payout without payable recipients is not terminal');
+    }
+    return finalizeDirectPayoutResult({ cycleRepository, state });
+  }
   await reserveDirectPayoutWalletNonce({ cycleRepository, context, config });
   const walletNonceFence = async () => {
     await assertDirectPayoutWalletNonce({ cycleRepository, context, config });
@@ -2620,11 +3080,13 @@ export async function reconcileLivePayout(args = {}) {
     if (!isDirectPayoutComplete(state)) return null;
     // A crash after the final recipient boundary but before mutatePayout() returns must still
     // write successor dust before the stage can be reconciled and completed.
-    await recoverDirectPayoutWalletNonce({
-      cycleRepository: args.cycleRepository,
-      context: args.context,
-      config: args.config,
-    });
+    if (state.recipients.length > 0) {
+      await recoverDirectPayoutWalletNonce({
+        cycleRepository: args.cycleRepository,
+        context: args.context,
+        config: args.config,
+      });
+    }
     const evidence = await finalizeDirectPayoutResult({ cycleRepository: args.cycleRepository, state });
     return evidence;
   } catch (error) {
