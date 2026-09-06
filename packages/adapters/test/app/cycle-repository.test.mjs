@@ -16,7 +16,7 @@ import { ERC20_TRANSFER_TOPIC, readFinalizedErc20TransferProof } from '../../src
 import { createSolanaRpcClient, readFinalizedRelayDestinationObservation } from '../../src/solana-rpc.mjs';
 import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
 import { CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
-import { OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 
 const SETTLEMENT_SOURCE_ASSET = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
@@ -3150,4 +3150,89 @@ test('timestamps a sent-unknown provider attempt for deadline reconciliation', a
 
   await repository.markStageAttemptSentUnknown(cycleId, 'buyback');
   assert.equal((await repository.readOperationalStageAttempt(cycleId, 'buyback')).sentAtMs, 1_700_000_300_000);
+});
+
+function packBatch(count, overrides = {}) {
+  return Array.from({ length: count }, (_, packIndex) => ({
+    packIndex,
+    memo: `memo-${packIndex}`,
+    expectedCardCount: 1,
+    packType: 'pokemon_25',
+    ...overrides,
+  }));
+}
+
+test('readPackBatchRequest is null before a batch is recorded', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readPackBatchRequest(cycleId, 'purchase'), null);
+});
+
+test('recordPackBatchRequest persists every pack before signing and is idempotent for a retried identical batch', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const packs = packBatch(3);
+
+  const recorded = await repository.recordPackBatchRequest(cycleId, 'purchase', packs);
+  assert.deepEqual(recorded, { requestedAtMs: 1_700_000_000_000, packs });
+  assert.deepEqual(await repository.readPackBatchRequest(cycleId, 'purchase'), { requestedAtMs: 1_700_000_000_000, packs });
+
+  // A retried "generate the batch" call after a lost response replays the exact same durable
+  // packs (and the original requestedAtMs) rather than raising a conflict.
+  assert.deepEqual(await repository.recordPackBatchRequest(cycleId, 'purchase', packs), { requestedAtMs: 1_700_000_000_000, packs });
+});
+
+test('recordPackBatchRequest survives a repository reopen', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const packs = packBatch(2);
+  const recorded = await repository.recordPackBatchRequest(cycleId, 'purchase', packs);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPackBatchRequest(cycleId, 'purchase'), recorded);
+});
+
+test('recordPackBatchRequest rejects a conflicting batch for the same stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(2));
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(3)),
+    /already has a different pack batch/,
+  );
+});
+
+test('recordPackBatchRequest keeps purchase and open batches independent and rejects a non-pack stage', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(2));
+  await repository.recordPackBatchRequest(cycleId, 'open', packBatch(1));
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'purchase')).packs.length, 2);
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'open')).packs.length, 1);
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'return', packBatch(1)),
+    /not a pack-operation stage/,
+  );
+});
+
+test('recordPackBatchRequest refuses more packs than the shared journal payload bound', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(MAXIMUM_PACK_BATCH_SIZE + 1)),
+    /at most/,
+  );
+  await repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(MAXIMUM_PACK_BATCH_SIZE));
+  assert.equal((await repository.readPackBatchRequest(cycleId, 'purchase')).packs.length, MAXIMUM_PACK_BATCH_SIZE);
+});
+
+test('recordPackBatchRequest refuses to add packs once the cycle is terminally held', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.holdCycle(cycleId, 'HELD_DATA_UNVERIFIED', { reason: 'test' });
+  await assert.rejects(
+    () => repository.recordPackBatchRequest(cycleId, 'purchase', packBatch(1)),
+    /cycle is terminal/,
+  );
 });

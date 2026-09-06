@@ -19,6 +19,7 @@ import {
   attributeRelayLegSource,
   assertChainTransactionAttempt,
   assertCustodyLedger,
+  assertPackBatchRequest,
   CUSTODY_LEDGER_BUCKETS,
   assertCycleTerminalState,
   assertProviderMutationAttempt,
@@ -26,6 +27,7 @@ import {
   assertTypedAmount,
   assertReturnLegDestinationProof,
   OPERATIONAL_CYCLE_STAGES,
+  PACK_OPERATION_STAGES,
   RELAY_LEG_TERMINAL_STATES,
   transitionChainTransactionAttempt,
   transitionRelayLeg,
@@ -131,6 +133,8 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'completeStage',
   'completeCycle',
   'holdCycle',
+  'recordPackBatchRequest',
+  'readPackBatchRequest',
   'recordHeldPosition',
   'recordHeldOwnerDecision',
   'resolveHeldPosition',
@@ -463,6 +467,12 @@ function assertStageName(stage, { allowLegacyRead = false } = {}) {
   if (allowLegacyRead && LEGACY_ACCOUNTING_STAGE_SET.has(stage)) return;
   if (LEGACY_ACCOUNTING_STAGE_SET.has(stage)) throw new Error(`cycle-repository: retired stage "${stage}" is read-only`);
   throw new Error(`cycle-repository: unknown stage "${stage}"`);
+}
+
+const PACK_OPERATION_STAGE_SET = new Set(PACK_OPERATION_STAGES);
+
+function assertPackOperationStageName(stage) {
+  if (!PACK_OPERATION_STAGE_SET.has(stage)) throw new Error(`cycle-repository: "${stage}" is not a pack-operation stage`);
 }
 
 function assertPagedPayoutStage(stage) {
@@ -2337,6 +2347,7 @@ export class CycleRepository {
     const payoutDustConsumptions = new Map();
     const payoutQuarantines = new Map();
     const evmNonceLocks = new Map();
+    const packBatchRequests = new Map();
     const replayState = {
       stages,
       preparedStages,
@@ -2355,6 +2366,7 @@ export class CycleRepository {
       payoutDustConsumptions,
       payoutQuarantines,
       evmNonceLocks,
+      packBatchRequests,
     };
     let completed = false;
     let terminalState = null;
@@ -2420,6 +2432,18 @@ export class CycleRepository {
           throw new Error(`stored stage "${entry.payload.stage}" has conflicting completion evidence`);
         }
         stages.set(entry.payload.stage, { status: 'COMPLETE', evidence: entry.payload.evidence });
+      } else if (entry.kind === 'pack-batch-request-recorded') {
+        assertPackOperationStageName(entry.payload.stage);
+        const packs = assertPackBatchRequest(entry.payload.packs, 'stored pack batch request');
+        if (!Number.isSafeInteger(entry.payload.requestedAtMs) || entry.payload.requestedAtMs < 0) {
+          throw new Error('stored pack batch request requestedAtMs is invalid');
+        }
+        const record = { requestedAtMs: entry.payload.requestedAtMs, packs };
+        const previous = packBatchRequests.get(entry.payload.stage);
+        if (previous && canonicalJson(previous.packs) !== canonicalJson(packs)) {
+          throw new Error(`stored pack batch request for "${entry.payload.stage}" has conflicting packs`);
+        }
+        if (!previous) packBatchRequests.set(entry.payload.stage, record);
       } else if (entry.kind === 'stage-attempted') {
         const attemptIndex = attemptCounts.get(entry.payload.stage) ?? 0;
         attempts.set(entry.payload.stage, { evidence: entry.payload.evidence, attemptIndex, failed: false });
@@ -2919,6 +2943,7 @@ export class CycleRepository {
       payoutDustConsumptions,
       payoutQuarantines,
       evmNonceLocks,
+      packBatchRequests,
       completed,
       terminalState,
       heldEvidenceDigest,
@@ -3166,6 +3191,47 @@ export class CycleRepository {
       },
       assertLease,
     });
+  }
+
+  /**
+   * Durably persists every pack a single batch provider call generated (memo, expected card
+   * count, pack type) before any transaction is signed. Idempotent for the exact same batch:
+   * this is the sole guard against re-issuing a batch purchase whose response was lost after the
+   * provider already committed it. A stage may record at most one batch (bounded to
+   * `MAXIMUM_PACK_BATCH_SIZE` packs by the shared journal payload limit).
+   */
+  async recordPackBatchRequest(cycleId, stage, packsValue) {
+    assertPackOperationStageName(stage);
+    const packs = assertPackBatchRequest(packsValue, `${stage} pack batch request`);
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordPackBatchRequest: cycle is terminal as ${state.terminalState}`);
+    }
+    const existing = state.packBatchRequests.get(stage);
+    if (existing) {
+      if (canonicalJson(existing.packs) === canonicalJson(packs)) return structuredClone(existing);
+      throw new Error(`cycle-repository recordPackBatchRequest: stage "${stage}" already has a different pack batch`);
+    }
+    const requestedAtMs = currentRepositoryTime(this.#now);
+    await this.#append(cycleId, 'pack-batch-request-recorded', { stage, packs, requestedAtMs }, {
+      operation: 'recordPackBatchRequest',
+      assertState: currentState => {
+        const latest = currentState.packBatchRequests.get(stage);
+        if (latest && canonicalJson(latest.packs) !== canonicalJson(packs)) {
+          throw new Error(`cycle-repository recordPackBatchRequest: stage "${stage}" changed while recording the pack batch`);
+        }
+      },
+    });
+    const latest = await this.#replay(cycleId);
+    return structuredClone(latest.packBatchRequests.get(stage));
+  }
+
+  /** @returns {Promise<{requestedAtMs: number, packs: Array<{packIndex: number, memo: string, expectedCardCount: number, packType: string|null}>}|null>} */
+  async readPackBatchRequest(cycleId, stage) {
+    assertPackOperationStageName(stage);
+    const state = await this.#replay(cycleId);
+    const record = state.packBatchRequests.get(stage);
+    return record ? structuredClone(record) : null;
   }
 
   /**
