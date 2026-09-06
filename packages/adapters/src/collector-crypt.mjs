@@ -71,7 +71,7 @@ const DEFAULT_MUTATION_RETRYABLE_STATUSES = Object.freeze([]);
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 const solanaAddressPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const packTypePattern = /^[a-z][a-z0-9_]{0,63}$/;
+const packTypePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const memoPattern = /^[\x21-\x7e]{1,255}$/; // printable ASCII, no whitespace/control chars
 const base64Pattern = /^[A-Za-z0-9+/]+={0,2}$/;
 const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
