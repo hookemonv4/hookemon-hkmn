@@ -14,7 +14,7 @@ const validAmount = { chainId: "evm:4663", assetId: "USDG", units: "1500000", de
 
 const validEvent = {
   cycleId: "cycle-1", operationId: "op-1", packIndex: 0, memo: "memo-1", mint: null,
-  eventId: "evt-1", sequence: "1", state: "opened", name: "Pikachu", imageUrl: "https://images.example/card.png",
+  eventId: "evt-1", sequence: "1", state: "observed", name: "Pikachu", imageUrl: "https://images.example/card.png",
   observedAt: "2026-09-06T10:00:00.000Z", finalizedAt: null, transactionId: null, proceeds: null,
 };
 
@@ -35,7 +35,7 @@ test("normalizePublicCardEvent accepts the exact frozen shape", () => {
 
 test("normalizePublicCardEvent accepts a finalized event with proceeds", () => {
   const finalized = {
-    ...validEvent, state: "sold", finalizedAt: "2026-09-06T10:05:00.000Z",
+    ...validEvent, state: "finalized", finalizedAt: "2026-09-06T10:05:00.000Z",
     transactionId: "5xJ8vN2q3", proceeds: validAmount,
   };
   assert.deepEqual(normalizePublicCardEvent(finalized), finalized);
@@ -65,7 +65,7 @@ test("normalizePublicCardEvent rejects malformed, extra, or impossible fields", 
 test("mergeCardEvents keeps one card per identity, preferring the latest sequence", () => {
   const first = normalizePublicCardEvent(validEvent);
   const secondObservation = normalizePublicCardEvent({
-    ...validEvent, sequence: "2", state: "sold",
+    ...validEvent, sequence: "2", state: "finalized",
     finalizedAt: "2026-09-06T10:05:00.000Z", proceeds: validAmount,
   });
   const otherCard = normalizePublicCardEvent({
@@ -74,13 +74,13 @@ test("mergeCardEvents keeps one card per identity, preferring the latest sequenc
   const merged = mergeCardEvents([first, secondObservation, otherCard]);
   assert.equal(merged.length, 2);
   const merged1 = merged.find((event) => event.operationId === "op-1");
-  assert.equal(merged1.state, "sold");
+  assert.equal(merged1.state, "finalized");
   assert.equal(merged1.sequence, "2");
 });
 
 test("operationIdentityKey is stable across repeated observations of the same operation", () => {
   const key1 = operationIdentityKey(validEvent);
-  const key2 = operationIdentityKey({ ...validEvent, sequence: "9", state: "sold" });
+  const key2 = operationIdentityKey({ ...validEvent, sequence: "9", state: "finalized" });
   assert.equal(key1, key2);
 });
 
@@ -94,16 +94,16 @@ test("presentCardEvent never invents a name/image and treats null proceeds as no
   assert.equal(pending.proceedsText, "Not yet sold");
 
   const sold = presentCardEvent(normalizePublicCardEvent({
-    ...validEvent, state: "sold", finalizedAt: "2026-09-06T10:05:00.000Z", proceeds: validAmount,
+    ...validEvent, state: "finalized", finalizedAt: "2026-09-06T10:05:00.000Z", proceeds: validAmount,
   }));
   assert.equal(sold.isFinalized, true);
   assert.equal(sold.proceedsText, "1.5 USDG");
-  assert.equal(sold.stateLabel, "Sold");
+  assert.equal(sold.stateLabel, "Finalized");
 });
 
 test("presentCardEvent never presents provider-observed-only state as finalized money", () => {
-  // state says "sold" but neither finalizedAt nor proceeds confirm it -- must not claim finalized.
-  const provisional = presentCardEvent(normalizePublicCardEvent({ ...validEvent, state: "sold" }));
+  // state says "finalized" but neither finalizedAt nor proceeds confirm it -- must not claim finalized.
+  const provisional = presentCardEvent(normalizePublicCardEvent({ ...validEvent, state: "finalized" }));
   assert.equal(provisional.isFinalized, false);
   assert.equal(provisional.proceedsText, "Not yet sold");
 });

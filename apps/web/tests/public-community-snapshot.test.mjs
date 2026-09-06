@@ -300,3 +300,83 @@ test("rejects mixed-case duplicate EVM transaction references", () => {
     { message: "PUBLIC_COMMUNITY_SNAPSHOT_INVALID" },
   );
 });
+
+function schemaVersion8Fixture() {
+  return {
+    ...structuredClone(validCommunitySnapshot),
+    schemaVersion: 8,
+    latestCycle: {
+      ...structuredClone(validCommunitySnapshot.latestCycle),
+      rewardRecipientLimit: 100,
+      roundAccounting: {
+        packSpendMicroUsdg: null,
+        buybackMicroUsdg: null,
+        collectorPurchaseDebit: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "10000000", decimals: 6 },
+        collectorBuybackProceeds: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "8000000", decimals: 6 },
+        packGainMicroUsdg: null,
+        packLossMicroUsdg: null,
+        quotedCosts: validCommunitySnapshot.latestCycle.roundAccounting.quotedCosts,
+        protectedCostsMicroUsdg: null,
+        confirmedCostsMicroUsdg: null,
+        cycleGainMicroUsdg: null,
+        cycleLossMicroUsdg: null,
+        walletBalanceBeforeMicroUsdg: null,
+        walletBalanceAfterMicroUsdg: null,
+        networkFees: { walletLamportsCharged: null, purchase: null, buyback: null },
+        feeReserveBeforeMicroUsdg: null,
+        feeReserveTargetMicroUsdg: null,
+        feeReserveTopUpMicroUsdg: null,
+        feeReserveAfterMicroUsdg: null,
+        plannedHolderRewardsMicroUsdg: null,
+        paidHolderRewardsMicroUsdg: null,
+        holderRewardsStatus: "pending",
+        distributionStatus: "pending",
+      },
+    },
+    cards: [{
+      cycleId: "cycle-3", operationId: "op-1", packIndex: 0, memo: "memo-1", mint: null,
+      eventId: "evt-1", sequence: "1", state: "finalized", name: "Pikachu",
+      imageUrl: "https://images.example/pikachu.png",
+      observedAt: "2026-08-19T10:58:00.000Z", finalizedAt: "2026-08-19T11:00:00.000Z",
+      transactionId: null,
+      proceeds: { chainId: "solana:mainnet-beta", assetId: "USDC", units: "8000000", decimals: 6 },
+    }],
+    heldPositionCount: 1,
+    heldPositions: [{ reason: "AWAITING_BUYBACK_WINDOW", ageSeconds: 15, cycleState: "opened" }],
+  };
+}
+
+test("accepts schemaVersion 8 with the frozen PublicCardEvent card feed and typed nullable accounting", () => {
+  const fixture = schemaVersion8Fixture();
+  const result = normalizePublicCommunitySnapshot(fixture, "testnet");
+  assert.deepEqual(result, fixture);
+  assert.equal(result.cards[0].state, "finalized");
+  assert.equal(result.latestCycle.roundAccounting.packSpendMicroUsdg, null);
+  assert.deepEqual(result.latestCycle.roundAccounting.collectorBuybackProceeds, {
+    chainId: "solana:mainnet-beta", assetId: "USDC", units: "8000000", decimals: 6,
+  });
+});
+
+test("schemaVersion 8 rejects a legacy productId/rarity card, a missing held-position count, and an invalid card event", () => {
+  const legacyCardShape = schemaVersion8Fixture();
+  legacyCardShape.cards = [validCommunitySnapshot.cards[0]];
+  assert.throws(
+    () => normalizePublicCommunitySnapshot(legacyCardShape, "testnet"),
+    { message: "PUBLIC_COMMUNITY_SNAPSHOT_INVALID" },
+  );
+
+  const missingHeldPositions = schemaVersion8Fixture();
+  delete missingHeldPositions.heldPositionCount;
+  delete missingHeldPositions.heldPositions;
+  assert.throws(
+    () => normalizePublicCommunitySnapshot(missingHeldPositions, "testnet"),
+    { message: "PUBLIC_COMMUNITY_SNAPSHOT_INVALID" },
+  );
+
+  const invalidCardState = schemaVersion8Fixture();
+  invalidCardState.cards[0].state = "sold";
+  assert.throws(
+    () => normalizePublicCommunitySnapshot(invalidCardState, "testnet"),
+    { message: "PUBLIC_COMMUNITY_SNAPSHOT_INVALID" },
+  );
+});

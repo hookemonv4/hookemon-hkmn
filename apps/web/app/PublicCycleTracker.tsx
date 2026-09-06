@@ -14,21 +14,23 @@ import {
   normalizePublicCycleStatus,
   type PublicCycle,
   type PublicCycleAction,
-  type PublicCycleCard,
   type PublicCycleStatus,
 } from "../lib/public-cycle-status";
 import {
   normalizePublicCommunitySnapshot,
   type PublicCommunitySnapshot,
 } from "../lib/public-community-snapshot";
+import { isPublicCardEvent, presentCardEvent } from "../lib/public-card-event";
 import { dashboardExplorerHref } from "../lib/public-dashboard-profile";
 import {
   buildPublicCycleProcess,
   hasLatestPayoutFacts,
   latestDashboardCards,
+  presentDisplayCard,
   resolveDashboardPresentation,
   type DashboardEnvironment,
   type DashboardFeedState,
+  type DisplayCard,
   type PublicProcessStepId,
 } from "../lib/public-dashboard-view";
 import styles from "./PublicCycleTracker.module.css";
@@ -234,29 +236,32 @@ export function PublicCycleCardRail() {
         </div>
         {cards.length ? (
           <ul className={styles.pullRailCards}>
-            {cards.map((card, index) => (
-              <li className={styles.pullRailCard} key={`${card.nftAddress ?? card.productId}-${index}`}>
-                <span className={styles.pullRailArt}>
-                  {card.imageUrl ? (
-                    // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={card.imageUrl}
-                      alt={cardAltText(card)}
-                      loading="lazy"
-                      decoding="async"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span aria-hidden="true">H</span>
-                  )}
-                </span>
-                <span className={styles.pullRailCopy}>
-                  <span>{card.rarity}</span>
-                  <strong>{card.cardName ?? "Name pending"}</strong>
-                </span>
-              </li>
-            ))}
+            {cards.map((card, index) => {
+              const display = presentDisplayCard(card);
+              return (
+                <li className={styles.pullRailCard} key={`${display.key}-${index}`}>
+                  <span className={styles.pullRailArt}>
+                    {display.imageUrl ? (
+                      // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={display.imageUrl}
+                        alt={display.altText}
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <span aria-hidden="true">H</span>
+                    )}
+                  </span>
+                  <span className={styles.pullRailCopy}>
+                    <span>{display.secondaryLabel}</span>
+                    <strong>{display.primaryLabel}</strong>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className={styles.pullRailEmpty}>
@@ -624,7 +629,7 @@ export default function PublicCycleTracker() {
                     : "Awaiting booster results"}
                 </strong>
               </div>
-              <span>{cycle?.selectedPackId ?? cards[0]?.productId ?? "UNAVAILABLE"}</span>
+              <span>{cycle?.selectedPackId ?? firstCardProductId(cards[0]) ?? "UNAVAILABLE"}</span>
             </div>
             {cycle && cycle.openedBoosters > cards.length ? (
               <p className={styles.windowNotice}>
@@ -634,7 +639,7 @@ export default function PublicCycleTracker() {
             {visibleCards.length ? (
               <div className={styles.cardGrid}>
                 {visibleCards.map((card, index) => (
-                  <CycleCard card={card} key={`${card.nftAddress ?? card.productId}-${index}`} />
+                  <CycleCard card={card} key={`${presentDisplayCard(card).key}-${index}`} />
                 ))}
               </div>
             ) : (
@@ -724,16 +729,17 @@ function ActionRow({ action, index }: { action: PublicCycleAction; index: number
   );
 }
 
-function CycleCard({ card }: { card: PublicCycleCard }) {
+function CycleCard({ card }: { card: DisplayCard }) {
+  const display = presentDisplayCard(card);
   return (
     <div className={styles.card}>
       <div className={styles.cardArt}>
-        {card.imageUrl ? (
+        {display.imageUrl ? (
           // Dynamic card images are already restricted to credential-free HTTPS URLs by the parser.
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={card.imageUrl}
-            alt={cardAltText(card)}
+            src={display.imageUrl}
+            alt={display.altText}
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
@@ -743,13 +749,19 @@ function CycleCard({ card }: { card: PublicCycleCard }) {
         )}
       </div>
       <div className={styles.cardCopy}>
-        <span>{card.rarity}</span>
-        <strong>{card.cardName ?? "Name pending"}</strong>
-        <small>Set: {card.setName ?? "pending"}</small>
-        <small>Card number: {card.cardNumber ?? "pending"}</small>
-        <small>NFT: {card.nftAddress ?? "pending"}</small>
-        <small>Pack price: {pendingMoney(card.packPriceMicroUsdg, "pending")}</small>
-        <small>Buyback: {pendingMoney(card.buybackMicroUsdg, "pending")}</small>
+        <span>{display.secondaryLabel}</span>
+        <strong>{display.primaryLabel}</strong>
+        {isPublicCardEvent(card) ? (
+          <small>Proceeds: {presentCardEvent(card).proceedsText}</small>
+        ) : (
+          <>
+            <small>Set: {card.setName ?? "pending"}</small>
+            <small>Card number: {card.cardNumber ?? "pending"}</small>
+            <small>NFT: {card.nftAddress ?? "pending"}</small>
+            <small>Pack price: {pendingMoney(card.packPriceMicroUsdg, "pending")}</small>
+            <small>Buyback: {pendingMoney(card.buybackMicroUsdg, "pending")}</small>
+          </>
+        )}
       </div>
     </div>
   );
@@ -812,8 +824,10 @@ function resolveEmptyPullsMessage(
   return "No cards revealed in this cycle yet";
 }
 
-export function cardAltText(card: PublicCycleCard): string {
-  return card.cardName ? `${card.cardName} card` : `Revealed ${card.rarity} card`;
+function firstCardProductId(card: DisplayCard | undefined): string | null {
+  // The frozen PublicCardEvent feed carries no pack/product SKU (a genuinely different concept
+  // from its operationId), so this identifier is only available for the legacy card shape.
+  return card !== undefined && !isPublicCardEvent(card) ? card.productId : null;
 }
 
 function pendingMoney(value: string | null, pending: string): string {

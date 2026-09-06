@@ -3,6 +3,8 @@ import {
   type DashboardNetwork,
   type DashboardProfileId,
 } from "./public-dashboard-profile.ts";
+import { type Amount, normalizeAmount } from "./public-card-event.ts";
+import { normalizeSchedulerView, type SchedulerView } from "./scheduler-view.ts";
 
 export type PublicCycleAction = {
   type: string;
@@ -34,10 +36,12 @@ export type PublicQuotedCosts = {
 export type PublicNativeFee = { lamports: string; paidBy: string };
 
 export type PublicRoundAccounting = {
-  packSpendMicroUsdg: string;
-  buybackMicroUsdg: string;
-  packGainMicroUsdg: string;
-  packLossMicroUsdg: string;
+  packSpendMicroUsdg: string | null;
+  buybackMicroUsdg: string | null;
+  collectorPurchaseDebit?: Amount | null;
+  collectorBuybackProceeds?: Amount | null;
+  packGainMicroUsdg: string | null;
+  packLossMicroUsdg: string | null;
   quotedCosts: PublicQuotedCosts;
   protectedCostsMicroUsdg: string | null;
   confirmedCostsMicroUsdg: string | null;
@@ -79,8 +83,16 @@ export type PublicCycle = {
   paidMicroUsdg?: string | null;
 };
 
+export type PublicHeldPosition = {
+  positionId?: string;
+  cycleId?: string;
+  reason: string;
+  ageSeconds: number;
+  cycleState: string;
+};
+
 export type PublicCycleStatus = {
-  schemaVersion: 3;
+  schemaVersion: 3 | 4 | 5 | 6;
   profile: DashboardProfileId;
   network: DashboardNetwork;
   executionState: "active" | "paused" | "unknown";
@@ -89,6 +101,9 @@ export type PublicCycleStatus = {
   nextCycleAt: string;
   countdownSeconds: number;
   cycle: PublicCycle | null;
+  heldPositionCount?: number;
+  heldPositions?: PublicHeldPosition[];
+  scheduler?: SchedulerView;
 };
 
 const STATUS_KEYS = new Set([
@@ -102,6 +117,8 @@ const STATUS_KEYS = new Set([
   "countdownSeconds",
   "cycle",
 ]);
+const STATUS_V4_KEYS = new Set([...STATUS_KEYS, "heldPositionCount", "heldPositions"]);
+const STATUS_V6_KEYS = new Set([...STATUS_V4_KEYS, "scheduler"]);
 const LEGACY_IDLE_STATUS_KEYS = new Set([
   "schemaVersion",
   "generatedAt",
@@ -187,6 +204,15 @@ const ROUND_ACCOUNTING_KEYS = new Set([
   "holderRewardsStatus",
   "distributionStatus",
 ]);
+// schemaVersion 6: packSpend/buyback/packGain/packLoss become nullable (an unknown amount is
+// `null`, never an invented '0'), and two typed Amount|null fields distinguish the real
+// Collector-Crypt-side (Solana) purchase debit/buyback proceeds from the EVM-side USDG bridge
+// amounts, which are a different chain/asset and never assumed at parity.
+const ROUND_ACCOUNTING_V6_KEYS = new Set([
+  ...ROUND_ACCOUNTING_KEYS,
+  "collectorPurchaseDebit",
+  "collectorBuybackProceeds",
+]);
 const QUOTED_COST_KEYS = new Set([
   "outboundBridgeMicroUsdg",
   "inboundBridgeMicroUsdg",
@@ -197,6 +223,9 @@ const QUOTED_COST_KEYS = new Set([
 ]);
 const NETWORK_FEE_KEYS = new Set(["walletLamportsCharged", "purchase", "buyback"]);
 const NATIVE_FEE_KEYS = new Set(["lamports", "paidBy"]);
+const HELD_POSITION_V4_KEYS = new Set(["positionId", "cycleId", "reason", "ageSeconds", "cycleState"]);
+const HELD_POSITION_V5_KEYS = new Set(["reason", "ageSeconds", "cycleState"]);
+const SCHEDULER_KEYS = new Set(["nextCycleAt", "nextReconcileAt", "automationEnabled", "paused", "pendingReason"]);
 const ACTION_STATUSES = new Set(["pending", "complete", "failed"]);
 const EXECUTION_STATES = new Set(["active", "paused", "unknown"]);
 const MAX_PUBLIC_CARDS = 60;
@@ -221,9 +250,15 @@ function readPublicCycleStatus(
   if (source.schemaVersion === 1) {
     return readLegacyIdleStatus(source, expectedProfile);
   }
-  exactKeys(source, STATUS_KEYS);
-  requiredKeys(source, STATUS_KEYS);
-  if (!(source.schemaVersion === 2 || source.schemaVersion === 3)) invalid();
+  const statusKeys = source.schemaVersion === 6
+    ? STATUS_V6_KEYS
+    : (source.schemaVersion === 5 || source.schemaVersion === 4 ? STATUS_V4_KEYS : STATUS_KEYS);
+  exactKeys(source, statusKeys);
+  requiredKeys(source, statusKeys);
+  if (
+    !(source.schemaVersion === 2 || source.schemaVersion === 3 || source.schemaVersion === 4 ||
+      source.schemaVersion === 5 || source.schemaVersion === 6)
+  ) invalid();
   const schemaVersion = source.schemaVersion;
   const selected = readDashboardProfile(source.profile);
   if (expectedProfile !== undefined && readDashboardProfile(expectedProfile).id !== selected.id) {
@@ -241,8 +276,8 @@ function readPublicCycleStatus(
   );
   if (source.countdownSeconds !== expectedCountdown) invalid();
 
-  return {
-    schemaVersion: 3,
+  const result: PublicCycleStatus = {
+    schemaVersion: schemaVersion === 6 ? 6 : (schemaVersion === 5 ? 5 : (schemaVersion === 4 ? 4 : 3)),
     profile: selected.id,
     network: readNetwork(source.network, selected.network),
     executionState: source.executionState as PublicCycleStatus["executionState"],
@@ -252,6 +287,25 @@ function readPublicCycleStatus(
     countdownSeconds: nonNegativeInteger(source.countdownSeconds),
     cycle: source.cycle === null ? null : readCycle(source.cycle, schemaVersion),
   };
+  if (schemaVersion === 4 || schemaVersion === 5 || schemaVersion === 6) {
+    result.heldPositionCount = nonNegativeInteger(source.heldPositionCount);
+    result.heldPositions = readHeldPositions(source.heldPositions, result.heldPositionCount, schemaVersion);
+  }
+  if (schemaVersion === 6) {
+    result.scheduler = readScheduler(source.scheduler);
+  }
+  return result;
+}
+
+function readScheduler(value: unknown): SchedulerView {
+  const source = requiredRecord(value);
+  exactKeys(source, SCHEDULER_KEYS);
+  requiredKeys(source, SCHEDULER_KEYS);
+  try {
+    return normalizeSchedulerView(source);
+  } catch {
+    invalid();
+  }
 }
 
 function readLegacyIdleStatus(
@@ -305,8 +359,9 @@ function readNetwork(value: unknown, expected: DashboardNetwork): DashboardNetwo
 
 function readCycle(value: unknown, schemaVersion: unknown): PublicCycle {
   const source = requiredRecord(value);
-  exactKeys(source, schemaVersion === 3 ? CYCLE_KEYS : LEGACY_CYCLE_KEYS);
-  requiredKeys(source, schemaVersion === 3 ? CYCLE_REQUIRED_KEYS : LEGACY_CYCLE_REQUIRED_KEYS);
+  const currentSchema = schemaVersion === 3 || schemaVersion === 4 || schemaVersion === 5 || schemaVersion === 6;
+  exactKeys(source, currentSchema ? CYCLE_KEYS : LEGACY_CYCLE_KEYS);
+  requiredKeys(source, currentSchema ? CYCLE_REQUIRED_KEYS : LEGACY_CYCLE_REQUIRED_KEYS);
 
   const maxBoostersPerCycle = source.maxBoostersPerCycle === null
     ? null
@@ -330,7 +385,7 @@ function readCycle(value: unknown, schemaVersion: unknown): PublicCycle {
     cards,
     returnedMicroUsdg: optionalMoney(source.returnedMicroUsdg),
     rewardStatus: optionalText(source.rewardStatus),
-    roundAccounting: schemaVersion === 3 ? readRoundAccounting(source.roundAccounting) : null,
+    roundAccounting: currentSchema ? readRoundAccounting(source.roundAccounting, schemaVersion) : null,
   };
   if (source.startedAt !== undefined) cycle.startedAt = isoTimestamp(source.startedAt);
   if (source.updatedAt !== undefined) cycle.updatedAt = isoTimestamp(source.updatedAt);
@@ -338,6 +393,32 @@ function readCycle(value: unknown, schemaVersion: unknown): PublicCycle {
   if (source.paidMicroUsdg !== undefined) cycle.paidMicroUsdg = optionalMoney(source.paidMicroUsdg);
   if (source.reason !== undefined) cycle.reason = stableReason(source.reason);
   return cycle;
+}
+
+function readHeldPositions(
+  value: unknown,
+  heldPositionCount: number,
+  schemaVersion: unknown,
+): PublicHeldPosition[] {
+  const positions = boundedArray(value, 1_000).map((position) => {
+    const source = requiredRecord(position);
+    const keys = schemaVersion === 5 || schemaVersion === 6 ? HELD_POSITION_V5_KEYS : HELD_POSITION_V4_KEYS;
+    exactKeys(source, keys);
+    requiredKeys(source, keys);
+    if (typeof source.reason !== "string" || !/^[A-Z][A-Z0-9_]{2,63}$/.test(source.reason)) invalid();
+    const result: PublicHeldPosition = {
+      reason: source.reason,
+      ageSeconds: nonNegativeInteger(source.ageSeconds),
+      cycleState: boundedText(source.cycleState),
+    };
+    if (schemaVersion === 4) {
+      result.positionId = boundedText(source.positionId);
+      result.cycleId = boundedText(source.cycleId);
+    }
+    return result;
+  });
+  if (heldPositionCount !== positions.length) invalid();
+  return positions;
 }
 
 function stableReason(value: unknown): string {
@@ -359,8 +440,9 @@ function readAction(value: unknown): PublicCycleAction {
 
 function readCard(value: unknown, schemaVersion: unknown): PublicCycleCard {
   const source = requiredRecord(value);
-  exactKeys(source, schemaVersion === 3 ? CARD_KEYS : LEGACY_CARD_KEYS);
-  requiredKeys(source, schemaVersion === 3 ? CARD_KEYS : new Set(["productId", "rarity"]));
+  const currentSchema = schemaVersion === 3 || schemaVersion === 4 || schemaVersion === 5 || schemaVersion === 6;
+  exactKeys(source, currentSchema ? CARD_KEYS : LEGACY_CARD_KEYS);
+  requiredKeys(source, currentSchema ? CARD_KEYS : new Set(["productId", "rarity"]));
   const card: PublicCycleCard = {
     productId: boundedText(source.productId),
     rarity: boundedText(source.rarity),
@@ -380,9 +462,10 @@ function readCard(value: unknown, schemaVersion: unknown): PublicCycleCard {
   return card;
 }
 
-function readRoundAccounting(value: unknown): PublicRoundAccounting | null {
+function readRoundAccounting(value: unknown, schemaVersion: unknown): PublicRoundAccounting | null {
   if (value === null) return null;
   const source = requiredRecord(value);
+  if (schemaVersion === 6) return readRoundAccountingV6(source);
   exactKeys(source, ROUND_ACCOUNTING_KEYS);
   requiredKeys(source, ROUND_ACCOUNTING_KEYS);
   const result: PublicRoundAccounting = {
@@ -407,9 +490,50 @@ function readRoundAccounting(value: unknown): PublicRoundAccounting | null {
     holderRewardsStatus: boundedText(source.holderRewardsStatus),
     distributionStatus: boundedText(source.distributionStatus),
   };
-  assertExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertExclusive(result.packGainMicroUsdg as string, result.packLossMicroUsdg as string);
   assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
   return result;
+}
+
+function readRoundAccountingV6(source: Record<string, unknown>): PublicRoundAccounting {
+  exactKeys(source, ROUND_ACCOUNTING_V6_KEYS);
+  requiredKeys(source, ROUND_ACCOUNTING_V6_KEYS);
+  const result: PublicRoundAccounting = {
+    packSpendMicroUsdg: nullableMoney(source.packSpendMicroUsdg),
+    buybackMicroUsdg: nullableMoney(source.buybackMicroUsdg),
+    collectorPurchaseDebit: nullableAmount(source.collectorPurchaseDebit),
+    collectorBuybackProceeds: nullableAmount(source.collectorBuybackProceeds),
+    packGainMicroUsdg: nullableMoney(source.packGainMicroUsdg),
+    packLossMicroUsdg: nullableMoney(source.packLossMicroUsdg),
+    quotedCosts: readQuotedCosts(source.quotedCosts),
+    protectedCostsMicroUsdg: optionalMoney(source.protectedCostsMicroUsdg),
+    confirmedCostsMicroUsdg: optionalSignedMoney(source.confirmedCostsMicroUsdg),
+    cycleGainMicroUsdg: optionalMoney(source.cycleGainMicroUsdg),
+    cycleLossMicroUsdg: optionalMoney(source.cycleLossMicroUsdg),
+    walletBalanceBeforeMicroUsdg: optionalMoney(source.walletBalanceBeforeMicroUsdg),
+    walletBalanceAfterMicroUsdg: optionalMoney(source.walletBalanceAfterMicroUsdg),
+    networkFees: readNetworkFees(source.networkFees),
+    feeReserveBeforeMicroUsdg: optionalMoney(source.feeReserveBeforeMicroUsdg),
+    feeReserveTargetMicroUsdg: optionalMoney(source.feeReserveTargetMicroUsdg),
+    feeReserveTopUpMicroUsdg: optionalMoney(source.feeReserveTopUpMicroUsdg),
+    feeReserveAfterMicroUsdg: optionalMoney(source.feeReserveAfterMicroUsdg),
+    plannedHolderRewardsMicroUsdg: optionalMoney(source.plannedHolderRewardsMicroUsdg),
+    paidHolderRewardsMicroUsdg: optionalMoney(source.paidHolderRewardsMicroUsdg),
+    holderRewardsStatus: boundedText(source.holderRewardsStatus),
+    distributionStatus: boundedText(source.distributionStatus),
+  };
+  assertNullableExclusive(result.packGainMicroUsdg, result.packLossMicroUsdg);
+  assertNullableExclusive(result.cycleGainMicroUsdg, result.cycleLossMicroUsdg);
+  return result;
+}
+
+function nullableAmount(value: unknown): Amount | null {
+  if (value === null) return null;
+  try {
+    return normalizeAmount(value);
+  } catch {
+    invalid();
+  }
 }
 
 function readQuotedCosts(value: unknown): PublicQuotedCosts {
@@ -481,7 +605,7 @@ function boundedArray(value: unknown, maximumLength: number): unknown[] {
   return value;
 }
 
-function exactKeys(value: Record<string, unknown>, allowed: Set<string>) {
+function exactKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>) {
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) invalid();
   }
@@ -511,6 +635,10 @@ function optionalMoney(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || !/^(0|[1-9]\d{0,77})$/.test(value)) invalid();
   return value;
+}
+
+function nullableMoney(value: unknown): string | null {
+  return value === undefined || value === null ? null : optionalMoney(value);
 }
 
 function optionalSignedMoney(value: unknown): string | null {

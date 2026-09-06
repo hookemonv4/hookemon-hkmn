@@ -579,10 +579,10 @@ export default function OperatorControlPanel() {
         {dashboard?.latestCycle?.roundAccounting ? (
           <div className={styles.accountingGroups} aria-label="Letzte Holder-Rewards-Runde">
             <OperatorAccountingGroup title="Pack-Ergebnis">
-              <RoundMetric label="Packausgaben" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.packSpendMicroUsdg)} />
-              <RoundMetric label="Buyback" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.buybackMicroUsdg)} />
-              <RoundMetric label="Packgewinn" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.packGainMicroUsdg)} />
-              <RoundMetric label="Packverlust" value={formatMicroUsdg(dashboard.latestCycle.roundAccounting.packLossMicroUsdg)} />
+              <RoundMetric label="Packausgaben" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.packSpendMicroUsdg, "Noch nicht bestätigt")} />
+              <RoundMetric label="Buyback" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.buybackMicroUsdg, "Noch nicht bestätigt")} />
+              <RoundMetric label="Packgewinn" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.packGainMicroUsdg, "Noch nicht bestätigt")} />
+              <RoundMetric label="Packverlust" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.packLossMicroUsdg, "Noch nicht bestätigt")} />
               <RoundMetric label="Wallet vorher" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.walletBalanceBeforeMicroUsdg, "Guthaben nicht bestätigt")} />
               <RoundMetric label="Wallet nachher" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.walletBalanceAfterMicroUsdg, "Guthaben nicht bestätigt")} />
             </OperatorAccountingGroup>
@@ -1567,7 +1567,7 @@ function decodeRoundAccounting(
     holderRewardsStatus: dashboardText(raw.holderRewardsStatus),
     distributionStatus: dashboardText(raw.distributionStatus),
   };
-  assertDashboardExclusive(accounting.packGainMicroUsdg, accounting.packLossMicroUsdg);
+  assertDashboardNullableExclusive(accounting.packGainMicroUsdg, accounting.packLossMicroUsdg);
   assertDashboardNullableExclusive(accounting.cycleGainMicroUsdg, accounting.cycleLossMicroUsdg);
   return accounting;
 }
