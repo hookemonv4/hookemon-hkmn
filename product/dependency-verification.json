@@ -63,13 +63,13 @@
   },
   "workflowIntegrity": {
     "path": ".github/workflows/v4-gates.yml",
-    "expectedSha256": "9eb984c4314d8d4cdb6d0f707646b70da90a39aa27a427a3c7e3696bd7a2d079",
-    "actualSha256": "9eb984c4314d8d4cdb6d0f707646b70da90a39aa27a427a3c7e3696bd7a2d079"
+    "expectedSha256": "f73c7c08ff45405d78e2e6e4659a103246c8ffd191da2236063411e21bdbdff3",
+    "actualSha256": "f73c7c08ff45405d78e2e6e4659a103246c8ffd191da2236063411e21bdbdff3"
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "09cb482c0eaf071c57a03ab007d3baab62ed1907d74633881a133f46c9caee49",
-    "actualSha256": "09cb482c0eaf071c57a03ab007d3baab62ed1907d74633881a133f46c9caee49"
+    "expectedSha256": "3b2ef4a745828acf808adba0f81ceb9d5499f7015b19b4df4a7010a631e5b313",
+    "actualSha256": "3b2ef4a745828acf808adba0f81ceb9d5499f7015b19b4df4a7010a631e5b313"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
@@ -127,13 +127,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720",
-      "actualSha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720",
+      "expectedSha256": "95a2d363569f77a25d9d453a7afbd67e52fd3b7d5030c8f3b4ccac08436e4d40",
+      "actualSha256": "95a2d363569f77a25d9d453a7afbd67e52fd3b7d5030c8f3b4ccac08436e4d40",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720",
-          "actualSha256": "07cfde63eff240582bb7334acaee11b809b4b6fda80501661454ad2b56876720"
+          "sha256": "95a2d363569f77a25d9d453a7afbd67e52fd3b7d5030c8f3b4ccac08436e4d40",
+          "actualSha256": "95a2d363569f77a25d9d453a7afbd67e52fd3b7d5030c8f3b4ccac08436e4d40"
         },
         {
           "path": "scripts/lib/util.mjs",

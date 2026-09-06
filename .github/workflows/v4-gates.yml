@@ -202,6 +202,8 @@ jobs:
           git -C packages/contracts/lib/v4-periphery submodule update --init lib/permit2
       - name: Initialize pinned launch dependencies
         run: git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory
+      - name: Initialize pinned launch dependency closure
+        run: git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts
       - name: Verify Phase 1 contracts
         run: |
           FOUNDRY_LIBS='["lib/v4-core"]' forge fmt --check --root packages/contracts

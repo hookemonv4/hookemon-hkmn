@@ -73,6 +73,7 @@ test('CI installs the pinned Foundry release and runs the Phase 1 contract proof
   assert.match(workflow, /git -C packages\/contracts\/lib\/v4-core submodule update --init --recursive/);
   assert.match(workflow, /git -C packages\/contracts\/lib\/v4-periphery submodule update --init lib\/permit2/);
   assert.match(workflow, /git submodule update --init packages\/contracts\/lib\/liquidity-launcher packages\/contracts\/lib\/uerc20-factory/);
+  assert.match(workflow, /git -C packages\/contracts\/lib\/uerc20-factory submodule update --init lib\/solady lib\/openzeppelin-contracts/);
   assert.match(workflow, /FOUNDRY_LIBS='\["lib\/v4-core"\]' forge fmt --check --root packages\/contracts/);
   assert.match(workflow, /FOUNDRY_LIBS='\["lib\/v4-core","lib\/v4-periphery"\]' forge test --root packages\/contracts --match-path 'test\/bindings\/\*\.t\.sol' -vvv/);
   assert.match(workflow, /FOUNDRY_LIBS='\["lib\/v4-core"\]' forge test --root packages\/contracts --match-path 'test\/market\/\*\.t\.sol' -vvv/);
@@ -91,6 +92,16 @@ test('CI installs the pinned Foundry release and runs the Phase 1 contract proof
     workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory')
       < workflow.indexOf('forge fmt --check --root packages/contracts'),
     'launch dependencies must be initialized before compiling the contracts',
+  );
+  assert.ok(
+    workflow.indexOf('git submodule update --init packages/contracts/lib/liquidity-launcher packages/contracts/lib/uerc20-factory')
+      < workflow.indexOf('git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts'),
+    'uerc20-factory must be initialized before its nested compile dependencies',
+  );
+  assert.ok(
+    workflow.indexOf('git -C packages/contracts/lib/uerc20-factory submodule update --init lib/solady lib/openzeppelin-contracts')
+      < workflow.indexOf('forge fmt --check --root packages/contracts'),
+    'nested launch compile dependencies must be initialized before compiling the contracts',
   );
 });
 
