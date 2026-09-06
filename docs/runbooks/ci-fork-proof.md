@@ -56,6 +56,17 @@ The CI launch-package command allows draft inputs; the no-override form of
 `verify-launch-package.mjs` remains the release gate after owner preflight inputs
 exist.
 
+## Required-status migration and fast-forward
+
+When the owner moves `main` from a temporary migration set of required contexts back to the ordinary set (`control-gate`, `identity-gate`, `gates`, `fork-proof`), follow this order:
+
+1. Run an ordinary pull request against the newly protected base and let all four ordinary required contexts pass with no override.
+2. Only after all four pass, restore the ordinary required-status configuration on `main` (drop the temporary contexts).
+3. Only after that restoration, land the tested head with an ordinary non-force fast-forward — never a GitHub UI or API merge, which fabricates a merge commit whose platform author and committer do not satisfy the identity check. A fast-forward keeps the reviewed commit's author and committer exactly as tested.
+4. Confirm the post-push `main` checks (including `fork-proof`) pass on the new head.
+
+A GitHub-generated merge commit that already exists in history is not rewritten to fix this; history stays append-only. The remedy is forward-only: the next integration uses the fast-forward path above.
+
 ## Escalation
 
 Escalate an archive pin mismatch, archive-suite failure, unavailable endpoint,

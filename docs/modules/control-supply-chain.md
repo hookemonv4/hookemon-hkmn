@@ -36,6 +36,7 @@ The control supply chain content-addresses selected Node and Gitleaks executable
 - `v4-gates.yml` retains a transitional base identity check until the owner registers `identity-gate` and `control-gate` as required statuses on `main`.
 - Pull requests require `control-gate`, `identity-gate`, and `gates`.
 - Main requires `control-gate`, `identity-gate`, `gates`, and `fork-proof`.
+- A required-status change on the protected base only takes effect for a head built against the new base. During an owner-authorized migration, temporary contexts may stand in for `control-gate` and `identity-gate` on `main`. They are dropped only after an ordinary pull request against the newly protected base has passed `control-gate`, `identity-gate`, `gates`, and `fork-proof` with no override, proving the ordinary required set is satisfiable before it becomes exclusive again.
 - The `fork-proof` workflow triggers on pushes to `main` and manual dispatch. It rejects any ref other than `refs/heads/main`, uses GitHub Environment `fork-proof` restricted to **Selected branches and tags** `main`, requires `ROBINHOOD_FORK_RPC_URL`, sets `ROBINHOOD_FORK_PINNED=true`, validates the pin, and runs the archive suite without FFI. Missing endpoint configuration fails the status.
 - The general Forge suite excludes the archive proof because the separate protected `fork-proof` status owns it. `test/integration/LaunchLegFork.t.sol`, `test/integration/RobinhoodV4Fork.t.sol`, and `test/integration/RobinhoodV4ForkSmoke.t.sol` remain opt-in focused suites that may skip when their optional endpoint inputs are absent; none is mandatory release proof.
 - The scheduled and manually dispatched canary is guarded to `refs/heads/main`, checks that ref again in shell, and fails when its endpoint is unavailable or the archived head drifts.
@@ -60,6 +61,7 @@ The control supply chain content-addresses selected Node and Gitleaks executable
 5. A main push or manual main dispatch starts `fork-proof`; it verifies its closure, then either proves the archived fork or fails nonzero.
 6. Release readiness verifies the owner-attested current and predecessor review bundles, the R1–R5 receipt chain, and owner-artifact filesystem safety before deciding whether the manifest dispositions can remain non-blocking.
 7. Any mismatch, unavailable mandatory endpoint, unsupported executable dependency, secret finding, identity error, receipt mutation, package failure, or test failure stops its gate.
+8. A tested pull-request head reaches `main` only by an ordinary non-force fast-forward to that exact commit, never a GitHub-generated merge commit: a platform-authored merge carries platform author and committer metadata that the identity check does not recognize, while a fast-forward leaves the reviewed commit's author, committer, and content unchanged. Fast-forwarding grants no exemption; the head still had to satisfy every required status before it reached `main`.
 
 ## Operational commands
 
@@ -81,6 +83,6 @@ node --test scripts/tests/*.test.mjs
 - Configure the main-only environment as described in [the fork-proof runbook](../runbooks/ci-fork-proof.md); never place the endpoint in tracked files.
 - Update a dependency only from official release evidence, then change the manifest, workflow constants, tests, verification artifact, and receipt chain together.
 - Never add a secret allowlist to make a gate pass. Remove and rotate the secret.
-- A non-fast-forward main update is rejected; restore a forward-only history through a reviewed branch.
+- A non-fast-forward main update is rejected; restore a forward-only history through a reviewed branch. Land a reviewed pull request onto `main` with an ordinary non-force fast-forward of the exact tested head, never a GitHub-generated merge commit. Restore the ordinary required contexts (`control-gate`, `identity-gate`, `gates`, `fork-proof`) only after an ordinary pull request against the new protected base has passed all four; never fast-forward `main` while a temporary migration context still stands in for one of the ordinary ones.
 - Append replacement evidence when control inputs change, then regenerate the phase gate and state projections.
 - For a release-readiness refusal, repair the current review bundle or receipt chain instead of editing `state.json`; projections do not authorize release.
