@@ -779,10 +779,22 @@ const UNSIGNED_DECIMAL = /^(0|[1-9][0-9]*)$/;
  * chain read cannot hand the planner evidence a real one would have refused; that is what lets a
  * planner-level test exercise each independent control refusal without touching a provider.
  */
+const PROCESS_LIABILITY_EVIDENCE_FIELDS = Object.freeze([
+  'schema', 'chainId', 'assetId', 'decimals', 'hook', 'cycleId', 'onchainCycleId', 'blockNumber',
+  'blockHash', 'finalized', 'processLiability', 'remainingProcessClaimCapacity',
+  'processClaimsPaused', 'processClaimCycleUsed', 'activeProcessClaimLimit', 'totalLiability',
+  'hookUsdgBalance', 'isSolvent', 'operations', 'ceilingAtomic',
+]);
+
 function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, operations }) {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('process liability evidence must be a plain object');
+  }
+  for (const key of Object.keys(value)) {
+    if (!PROCESS_LIABILITY_EVIDENCE_FIELDS.includes(key)) {
+      throw new Error(`process liability evidence has an unrecognized field "${key}"`);
+    }
   }
   if (value.schema !== 'hookemon.process-liability-evidence.v1') {
     throw new Error('process liability evidence must use hookemon.process-liability-evidence.v1');
@@ -811,6 +823,22 @@ function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, op
       throw new Error(`process liability evidence ${field} is invalid`);
     }
   }
+  if (typeof value.processClaimsPaused !== 'boolean' || typeof value.processClaimCycleUsed !== 'boolean'
+    || typeof value.isSolvent !== 'boolean') {
+    throw new Error('process liability evidence has a non-boolean control flag');
+  }
+  // These three relationships hold for any real hook read (FeeAccounting.sol/HookemonHook.sol); a
+  // combination outside them cannot have come from the contract, so a fake reader cannot use one to
+  // pass the shape check the real reader would fail.
+  if (BigInt(value.remainingProcessClaimCapacity) > BigInt(value.activeProcessClaimLimit)) {
+    throw new Error('process liability evidence remainingProcessClaimCapacity exceeds activeProcessClaimLimit');
+  }
+  if (BigInt(value.processLiability) > BigInt(value.totalLiability)) {
+    throw new Error('process liability evidence processLiability exceeds totalLiability');
+  }
+  if (value.isSolvent !== (BigInt(value.hookUsdgBalance) >= BigInt(value.totalLiability))) {
+    throw new Error('process liability evidence isSolvent does not match hookUsdgBalance and totalLiability');
+  }
   if (value.processClaimsPaused !== false) throw new Error('process liability evidence refuses while hook process claims are paused');
   if (value.processClaimCycleUsed !== false) throw new Error('process liability evidence refuses a cycle id the hook already used');
   if (value.isSolvent !== true) throw new Error('process liability evidence refuses while the hook is not solvent');
@@ -823,7 +851,28 @@ function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, op
   if (ceiling.toString() !== value.ceilingAtomic) {
     throw new Error('process liability evidence ceilingAtomic does not equal min(processLiability, remainingProcessClaimCapacity)');
   }
-  return Object.freeze({ ...value });
+  return Object.freeze({
+    schema: value.schema,
+    chainId: value.chainId,
+    assetId: value.assetId,
+    decimals: value.decimals,
+    hook: value.hook,
+    cycleId: value.cycleId,
+    onchainCycleId: value.onchainCycleId,
+    blockNumber: value.blockNumber,
+    blockHash: value.blockHash,
+    finalized: value.finalized,
+    processLiability: value.processLiability,
+    remainingProcessClaimCapacity: value.remainingProcessClaimCapacity,
+    processClaimsPaused: value.processClaimsPaused,
+    processClaimCycleUsed: value.processClaimCycleUsed,
+    activeProcessClaimLimit: value.activeProcessClaimLimit,
+    totalLiability: value.totalLiability,
+    hookUsdgBalance: value.hookUsdgBalance,
+    isSolvent: value.isSolvent,
+    operations: value.operations,
+    ceilingAtomic: value.ceilingAtomic,
+  });
 }
 
 function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMode }) {

@@ -293,20 +293,43 @@ function deriveOnchainCycleIdForEvidence(cycleId) {
 const UNSIGNED_DECIMAL_STRING = /^(0|[1-9][0-9]*)$/;
 
 /**
- * Normalizes the optional finalized hook process-liability evidence an admission may carry.
+ * The exact and only fields a normalized `processLiabilityEvidence` record may carry. Rejecting any
+ * other key means "normalized exact shape" cannot smuggle an unvalidated field through to the
+ * digest -- the returned object below is built field by field from this list, never by spreading
+ * the input.
+ */
+const PROCESS_LIABILITY_EVIDENCE_FIELDS = Object.freeze([
+  'schema', 'chainId', 'assetId', 'decimals', 'hook', 'cycleId', 'onchainCycleId', 'blockNumber',
+  'blockHash', 'finalized', 'processLiability', 'remainingProcessClaimCapacity',
+  'processClaimsPaused', 'processClaimCycleUsed', 'activeProcessClaimLimit', 'totalLiability',
+  'hookUsdgBalance', 'isSolvent', 'operations', 'ceilingAtomic',
+]);
+
+/**
+ * Normalizes the finalized hook process-liability evidence a quote-bound admission must carry.
  *
- * Absent evidence normalizes to `null` unchanged: not every admission this engine has ever accepted
- * is quote-bound to a live hook read (rehearsal and pre-evidence fixtures are not), so this does not
- * retroactively demand one. When evidence is present, every getter and control flag is re-validated
- * against the resolved deployment identity's funding route -- independent of however the caller
- * produced it -- and the aggregate funding quote it accompanies must not exceed its ceiling. A
- * one-field mutation to a validated record either fails one of these checks or survives into the
- * returned object, which durable replay persists and the cycle policy digest covers.
+ * Every quote-bound `hookemon.policy-admission.v2` admission binds a live hook read -- there is no
+ * evidence-free equivalent for one. A rehearsal or other cycle that has no such read uses the
+ * existing no-admission path (an absent `admission` altogether) rather than this schema; accepting
+ * this schema without evidence would let an old or hand-built admission resume as though it still
+ * proved a hook observation. Every getter and control flag is re-validated against the resolved
+ * deployment identity's funding route -- independent of however the caller produced it -- including
+ * the three relationships the hook's own accounting guarantees
+ * (`remainingProcessClaimCapacity <= activeProcessClaimLimit`, `processLiability <= totalLiability`,
+ * and `isSolvent` exactly tracking `hookUsdgBalance >= totalLiability`), so a fake reader cannot
+ * hand the planner or a replayed record a combination the real hook could never produce. The
+ * aggregate funding quote it accompanies must not exceed its ceiling. A one-field mutation to a
+ * validated record either fails one of these checks or survives into the returned object, which
+ * durable replay persists and the cycle policy digest covers.
  */
 function normalizeProcessLiabilityEvidence(value, { cycleId, fundingRoute, operations }) {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('policy admission processLiabilityEvidence must be a plain object');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('policy admission processLiabilityEvidence is required and must be a plain object');
+  }
+  for (const key of Object.keys(value)) {
+    if (!PROCESS_LIABILITY_EVIDENCE_FIELDS.includes(key)) {
+      throw new Error(`policy admission processLiabilityEvidence has an unrecognized field "${key}"`);
+    }
   }
   if (value.schema !== 'hookemon.process-liability-evidence.v1') {
     throw new Error('policy admission processLiabilityEvidence must use hookemon.process-liability-evidence.v1');
@@ -335,6 +358,21 @@ function normalizeProcessLiabilityEvidence(value, { cycleId, fundingRoute, opera
       throw new Error(`policy admission processLiabilityEvidence ${field} is invalid`);
     }
   }
+  if (typeof value.processClaimsPaused !== 'boolean' || typeof value.processClaimCycleUsed !== 'boolean'
+    || typeof value.isSolvent !== 'boolean') {
+    throw new Error('policy admission processLiabilityEvidence has a non-boolean control flag');
+  }
+  // These three relationships hold for any real hook read (FeeAccounting.sol/HookemonHook.sol);
+  // a value combination outside them cannot have come from the contract, real reader or not.
+  if (BigInt(value.remainingProcessClaimCapacity) > BigInt(value.activeProcessClaimLimit)) {
+    throw new Error('policy admission processLiabilityEvidence remainingProcessClaimCapacity exceeds activeProcessClaimLimit');
+  }
+  if (BigInt(value.processLiability) > BigInt(value.totalLiability)) {
+    throw new Error('policy admission processLiabilityEvidence processLiability exceeds totalLiability');
+  }
+  if (value.isSolvent !== (BigInt(value.hookUsdgBalance) >= BigInt(value.totalLiability))) {
+    throw new Error('policy admission processLiabilityEvidence isSolvent does not match hookUsdgBalance and totalLiability');
+  }
   if (value.processClaimsPaused !== false) {
     throw new Error('policy admission processLiabilityEvidence refuses while hook process claims are paused');
   }
@@ -351,7 +389,28 @@ function normalizeProcessLiabilityEvidence(value, { cycleId, fundingRoute, opera
   if (ceiling.toString() !== value.ceilingAtomic) {
     throw new Error('policy admission processLiabilityEvidence ceilingAtomic does not equal min(processLiability, remainingProcessClaimCapacity)');
   }
-  return Object.freeze({ ...value });
+  return Object.freeze({
+    schema: value.schema,
+    chainId: value.chainId,
+    assetId: value.assetId,
+    decimals: value.decimals,
+    hook: value.hook,
+    cycleId: value.cycleId,
+    onchainCycleId: value.onchainCycleId,
+    blockNumber: value.blockNumber,
+    blockHash: value.blockHash,
+    finalized: value.finalized,
+    processLiability: value.processLiability,
+    remainingProcessClaimCapacity: value.remainingProcessClaimCapacity,
+    processClaimsPaused: value.processClaimsPaused,
+    processClaimCycleUsed: value.processClaimCycleUsed,
+    activeProcessClaimLimit: value.activeProcessClaimLimit,
+    totalLiability: value.totalLiability,
+    hookUsdgBalance: value.hookUsdgBalance,
+    isSolvent: value.isSolvent,
+    operations: value.operations,
+    ceilingAtomic: value.ceilingAtomic,
+  });
 }
 
 /**
@@ -394,7 +453,7 @@ function normalizePolicyAdmission(value, operationsAccounts) {
   const processLiabilityEvidence = normalizeProcessLiabilityEvidence(value.processLiabilityEvidence, {
     cycleId: value.cycleId, fundingRoute: operations.fundingRoute, operations,
   });
-  if (processLiabilityEvidence !== null && BigInt(aggregateFundingQuote.amountAtomic) > BigInt(processLiabilityEvidence.ceilingAtomic)) {
+  if (BigInt(aggregateFundingQuote.amountAtomic) > BigInt(processLiabilityEvidence.ceilingAtomic)) {
     throw new Error('policy admission aggregateFundingQuote exceeds the persisted process liability ceiling');
   }
   const relay = value.relay;
@@ -450,7 +509,7 @@ function normalizePolicyAdmission(value, operationsAccounts) {
     unitRelay: Object.freeze({ ...unitRelay }),
     unitRelayQuote,
     relayQuote,
-    ...(processLiabilityEvidence === null ? {} : { processLiabilityEvidence }),
+    processLiabilityEvidence,
   });
 }
 

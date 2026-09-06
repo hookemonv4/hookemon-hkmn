@@ -745,12 +745,11 @@ test('N1 rejects a parsed Relay quote whose canonical digest or raw origin amoun
   );
 });
 
-test('an admission without process liability evidence normalizes exactly as before (legacy and rehearsal callers)', () => {
+test('a quote-bound admission without process liability evidence is refused, not silently accepted as equivalent', () => {
   const cycleId = 'cycle-evidence-absent';
   const admission = exactOutputAdmission({ cycleId, quantity: 1 });
   delete admission.processLiabilityEvidence;
-  const normalized = assertPolicyAdmission(admission);
-  assert.equal(Object.hasOwn(normalized, 'processLiabilityEvidence'), false);
+  assert.throws(() => assertPolicyAdmission(admission), /processLiabilityEvidence is required/);
 });
 
 test('a valid process liability evidence record survives normalization unchanged and binds the cycle policy digest', () => {
@@ -765,7 +764,9 @@ test('a valid process liability evidence record survives normalization unchanged
     packId: 'base-pack', liveMode: true, admission,
   });
   const mutated = structuredClone(admission);
-  mutated.processLiabilityEvidence.totalLiability = (BigInt(mutated.processLiabilityEvidence.totalLiability) + 1n).toString();
+  // activeProcessClaimLimit only has a `remainingProcessClaimCapacity <= activeProcessClaimLimit`
+  // upper-bound relationship, so raising it keeps every other invariant intact.
+  mutated.processLiabilityEvidence.activeProcessClaimLimit = (BigInt(mutated.processLiabilityEvidence.activeProcessClaimLimit) + 1n).toString();
   const mutatedDigest = deriveCyclePolicyDigest({
     configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
     packId: 'base-pack', liveMode: true, admission: mutated,
@@ -789,13 +790,19 @@ test('each independent process liability evidence control refuses the admission'
   const cases = [
     [{ processClaimsPaused: true }, /refuses while hook process claims are paused/],
     [{ processClaimCycleUsed: true }, /refuses a cycle id the hook already used/],
-    [{ isSolvent: false }, /refuses while the hook is not solvent/],
+    [{ isSolvent: false, hookUsdgBalance: '0' }, /refuses while the hook is not solvent/],
     [{ operations: `0x${'9'.repeat(40)}` }, /Operations role does not match the approved deployment identity/],
     [{ cycleId: 'a-different-cycle' }, /cycleId does not match the admitted cycle/],
     [{ onchainCycleId: `0x${'9'.repeat(64)}` }, /onchainCycleId does not match its cycleId/],
     [{ ceilingAtomic: (BigInt(admission.processLiabilityEvidence.ceilingAtomic) + 1n).toString() }, /ceilingAtomic does not equal min/],
     [{ chainId: '1' }, /not denominated in the configured funding asset/],
     [{ schema: 'hookemon.process-liability-evidence.v0' }, /must use hookemon\.process-liability-evidence\.v1/],
+    [{ notARecognizedField: '1' }, /unrecognized field/],
+    // The hook's own accounting guarantees these three relationships; a value combination outside
+    // them cannot have come from the contract regardless of who supplied it.
+    [{ activeProcessClaimLimit: '0' }, /remainingProcessClaimCapacity exceeds activeProcessClaimLimit/],
+    [{ totalLiability: '0' }, /processLiability exceeds totalLiability/],
+    [{ isSolvent: true, hookUsdgBalance: '0' }, /isSolvent does not match hookUsdgBalance and totalLiability/],
   ];
   for (const [override, pattern] of cases) {
     const tampered = structuredClone(admission);

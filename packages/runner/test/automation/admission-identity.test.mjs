@@ -2,6 +2,7 @@
 // identity, an aggregate executable quote that is only shallowly checked, and evidence that is
 // missing or unbound. Every case here asserts a refusal; none of them exercise a live provider.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { assertPolicyAdmission, createTestOnlyAdmissionIdentity } from '../../src/automation/policy-engine.mjs';
@@ -13,9 +14,47 @@ const CIRCLE_USD_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const FUNDING = Object.freeze({ chainId: '4663', assetId: USDG, decimals: 6 });
 const SETTLEMENT = Object.freeze({ chainId: '792703809', assetId: CIRCLE_USD_MINT, decimals: 6 });
 const DEADLINE = 2_000_000_000;
+const HOOK_ADDRESS = `0x${'7'.repeat(40)}`;
+const EVIDENCE_CEILING_ATOMIC = '1000000';
 
 function typed(asset, amountAtomic) {
   return { ...asset, amountAtomic };
+}
+
+function onchainCycleIdFor(cycleId) {
+  return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
+}
+
+/**
+ * Every quote-bound admission in this file is now required to carry finalized process liability
+ * evidence: `assertPolicyAdmission` refuses one without it. `operationsEvm` tracks whichever
+ * deployment identity's `.evm` the admission is being checked against (production by default, or a
+ * `createTestOnlyAdmissionIdentity` object), since the evidence's `operations` field is checked
+ * against that same resolved identity.
+ */
+function processLiabilityEvidenceFor(cycleId, operationsEvm = OPERATIONS_EVM.toLowerCase()) {
+  return {
+    schema: 'hookemon.process-liability-evidence.v1',
+    chainId: FUNDING.chainId,
+    assetId: FUNDING.assetId,
+    decimals: FUNDING.decimals,
+    hook: HOOK_ADDRESS,
+    cycleId,
+    onchainCycleId: onchainCycleIdFor(cycleId),
+    blockNumber: '999',
+    blockHash: `0x${'4'.repeat(64)}`,
+    finalized: true,
+    processLiability: EVIDENCE_CEILING_ATOMIC,
+    remainingProcessClaimCapacity: EVIDENCE_CEILING_ATOMIC,
+    processClaimsPaused: false,
+    processClaimCycleUsed: false,
+    activeProcessClaimLimit: EVIDENCE_CEILING_ATOMIC,
+    totalLiability: EVIDENCE_CEILING_ATOMIC,
+    hookUsdgBalance: EVIDENCE_CEILING_ATOMIC,
+    isSolvent: true,
+    operations: operationsEvm,
+    ceilingAtomic: EVIDENCE_CEILING_ATOMIC,
+  };
 }
 
 function rawQuote({ requestId, orderId, originAmount, destinationAmount, sender, recipient }) {
@@ -92,8 +131,19 @@ function relayIdentity(quote, destinationAmount) {
   };
 }
 
-/** A complete, self-consistent admission whose two quote digests are the engine's own. */
-function admissionFor({ sender = OPERATIONS_EVM, recipient = OPERATIONS_SOLANA, identity } = {}) {
+/**
+ * A complete, self-consistent admission whose two quote digests are the engine's own.
+ *
+ * `identity` only affects how `probeDigest` resolves its own internal recomputation probe (which
+ * must reach the digest-mismatch check under whatever identity the caller intends to validate the
+ * finished admission against). The returned admission's own `processLiabilityEvidence.operations`
+ * defaults to the production identity, since every caller below except the one exercising the
+ * test-only identity end to end validates the finished admission with no explicit identity
+ * (production by default); that one caller passes `evidenceOperations` explicitly.
+ */
+function admissionFor({
+  sender = OPERATIONS_EVM, recipient = OPERATIONS_SOLANA, identity, evidenceOperations = OPERATIONS_EVM.toLowerCase(),
+} = {}) {
   const unit = parsedQuote({ requestId: 'req-unit', orderId: `0x${'1'.repeat(64)}`, originAmount: '17', destinationAmount: '8', sender, recipient });
   const aggregate = parsedQuote({ requestId: 'req-aggregate', orderId: `0x${'2'.repeat(64)}`, originAmount: '33', destinationAmount: '16', sender, recipient });
   // Digests are discovered by letting the engine recompute them once from the same evidence.
@@ -119,6 +169,7 @@ function admissionFor({ sender = OPERATIONS_EVM, recipient = OPERATIONS_SOLANA, 
     unitRelay: relayIdentity(unit, '8'),
     unitRelayQuote: unit,
     relayQuote: aggregate,
+    processLiabilityEvidence: processLiabilityEvidenceFor('cycle-admission-identity-1', evidenceOperations),
   };
 }
 
@@ -143,6 +194,7 @@ function probeDigest(quote, identity) {
     unitRelay: relayIdentity(probe, probe.destination.amount),
     unitRelayQuote: probe,
     relayQuote: probe,
+    processLiabilityEvidence: processLiabilityEvidenceFor('cycle-admission-identity-1', identity?.evm),
   };
   try {
     assertPolicyAdmission(candidate, identity);
@@ -204,6 +256,7 @@ test('the test-only identity is honoured only for the exact object the factory m
     sender: `0x${'c'.repeat(40)}`,
     recipient: 'HWPRgtDGpBm8mByTGS57BWCsijMo53qPPSbskWDukfTc',
     identity,
+    evidenceOperations: identity.evm,
   });
   assert.equal(assertPolicyAdmission(admission, identity).cycleId, 'cycle-admission-identity-1');
   // A structurally identical copy is a different object, so it carries no approval.

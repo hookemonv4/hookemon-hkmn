@@ -99,10 +99,12 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 
 - `createCycle`'s optional `admission` is validated by the policy engine's own
   `assertPolicyAdmission` (`assertDurableCycleAdmission`), so the stored record is exactly the
-  normalized result that engine will later digest, including its `processLiabilityEvidence` when
-  present. The admission rides in `cycle-opened` itself and is immutable for the cycle's life; replay
-  re-validates the stored record on every read, so a resumed cycle's evidence and policy digest
-  reproduce unchanged.
+  normalized result that engine will later digest, including its required `processLiabilityEvidence`.
+  A quote-bound admission missing that evidence is refused at `createCycle` and, for a record written
+  before this requirement existed, at replay -- neither path accepts an evidence-free admission as
+  equivalent to a covered one. The admission rides in `cycle-opened` itself and is immutable for the
+  cycle's life; replay re-validates the stored record on every read, so a resumed cycle's evidence and
+  policy digest reproduce unchanged.
 - Provider attempts progress through `PREPARED -> NOT_SENT -> PREPARED` for a pre-call failure,
   `PREPARED -> SENT_UNKNOWN -> RESPONSE_RECORDED -> RECONCILED` for post-send ambiguity, or
   `PREPARED -> RESPONSE_RECORDED -> RECONCILED` for a recorded response. `SENT_UNKNOWN` is

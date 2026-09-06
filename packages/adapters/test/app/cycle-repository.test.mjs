@@ -949,6 +949,48 @@ test('createCycle persists finalized process liability evidence and replay repro
   assert.equal((await after.describeCycle(cycleId)).admission.processLiabilityEvidence.ceilingAtomic, admission.processLiabilityEvidence.ceilingAtomic);
 });
 
+test('createCycle refuses a quote-bound production admission missing process liability evidence', async t => {
+  const directory = await tempDirectory(t);
+  const cycleId = 'cycle-missing-evidence-create';
+  const admission = admissionWithEvidence(cycleId);
+  delete admission.processLiabilityEvidence;
+  const repository = await CycleRepository.open(directory);
+  await assert.rejects(
+    () => repository.createCycle({
+      releaseAmount: admission.aggregateFundingQuote.amountAtomic, mode: 'production', cycleId, admission,
+    }),
+    /processLiabilityEvidence is required/,
+  );
+});
+
+test('reopening a stored production cycle-opened record without process liability evidence refuses replay', async t => {
+  const directory = await tempDirectory(t);
+  const cycleId = 'cycle-legacy-evidence-free';
+  // Bootstrap the store's directory structure and identity exactly as CycleRepository.open() would
+  // for a fresh state directory, then write the active-cycle file directly: this simulates a record
+  // written before evidence was required (a legitimate createCycle() call can no longer produce one).
+  await CycleRepository.open(directory);
+
+  const admission = admissionWithEvidence(cycleId);
+  delete admission.processLiabilityEvidence;
+  const payload = {
+    releaseAmount: admission.aggregateFundingQuote.amountAtomic,
+    mode: 'production',
+    providerMode: 'live',
+    admission,
+    openedAtMs: 1_000,
+  };
+  const unsigned = { cycleId, index: 0, kind: 'cycle-opened', payload, previousDigest: null };
+  const entry = { ...unsigned, digest: digest(unsigned) };
+  const cycle = { cycleId, version: 1, journalHead: entry.digest, entries: [entry] };
+  const fileValue = { schema: 'hookemon.durable-cycle-store.active-cycle.v1', cycle };
+  const filePath = join(directory, 'active', `${encodeURIComponent(cycleId)}.json`);
+  await writeFile(filePath, `${canonicalJson(fileValue)}\n`, { encoding: 'utf8', mode: 0o600 });
+
+  const reopened = await CycleRepository.open(directory);
+  await assert.rejects(() => reopened.readActiveCycle(), /processLiabilityEvidence is required/);
+});
+
 test('createCycle persists an explicit fake-provider production dry run across a repository reopen', async t => {
   const directory = await tempDirectory(t);
   const before = await CycleRepository.open(directory);

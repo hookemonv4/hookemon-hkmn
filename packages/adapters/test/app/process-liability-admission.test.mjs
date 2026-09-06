@@ -316,8 +316,12 @@ test('each independent hook control refuses admission at the planner boundary, f
   for (const [override, pattern] of [
     [{ processClaimsPaused: true }, /refuses while hook process claims are paused/],
     [{ processClaimCycleUsed: true }, /refuses a cycle id the hook already used/],
-    [{ isSolvent: false }, /refuses while the hook is not solvent/],
+    [{ isSolvent: false, hookUsdgBalance: '0' }, /refuses while the hook is not solvent/],
     [{ operations: `0x${'9'.repeat(40)}` }, /Operations role does not match the configured Operations account/],
+    [{ activeProcessClaimLimit: '0' }, /remainingProcessClaimCapacity exceeds activeProcessClaimLimit/],
+    [{ totalLiability: '0' }, /processLiability exceeds totalLiability/],
+    [{ isSolvent: true, hookUsdgBalance: '0' }, /isSolvent does not match hookUsdgBalance and totalLiability/],
+    [{ notARecognizedField: '1' }, /unrecognized field/],
   ]) {
     const { planner } = plannerFixture({ processLiabilityReader: fakeProcessLiabilityReader(override) });
     await assert.rejects(
