@@ -132,14 +132,11 @@ function memoBoundSend(packStatus) {
   };
 }
 
-async function deriveCardAssetFromOpenTransaction({ adapters, config, signature }) {
+async function deriveCardAssetFromOpenTransaction({ adapters, playerAddress, signature }) {
   if (!adapters.solana?.client) throw new Error('open reconciliation requires a configured Solana RPC client');
-  if (typeof config.accounts?.solana !== 'string' || config.accounts.solana.length === 0) {
-    throw new Error('open reconciliation requires HOOKEMON_SOLANA_ACCOUNT');
-  }
   const balanceChanges = await getTransactionTokenBalanceChanges(adapters.solana.client, signature, { commitment: 'finalized' });
   const candidates = balanceChanges.filter(
-    entry => entry.owner === config.accounts.solana && entry.preAmount === '0' && entry.postAmount === '1',
+    entry => entry.owner === playerAddress && entry.preAmount === '0' && entry.postAmount === '1',
   );
   if (candidates.length === 1) return { mint: candidates[0].mint, assetKind: 'spl' };
   if (candidates.length > 1) {
@@ -149,7 +146,7 @@ async function deriveCardAssetFromOpenTransaction({ adapters, config, signature 
   const coreCandidates = [];
   for (const asset of [...new Set(transferred)]) {
     const owner = await readMplCoreAssetOwner(adapters.solana.client, asset, { commitment: 'finalized' });
-    if (owner === config.accounts.solana) coreCandidates.push(asset);
+    if (owner === playerAddress) coreCandidates.push(asset);
   }
   if (coreCandidates.length !== 1) throw new AmbiguousCardMintError('open', signature, coreCandidates);
   return { mint: coreCandidates[0], assetKind: 'mpl-core' };
@@ -159,7 +156,7 @@ async function deriveCardAssetFromOpenTransaction({ adapters, config, signature 
  * Reconciles one purchased pack against the provider's memo-bound status. Returns either an
  * opened-card evidence entry or a held-position evidence entry; never blocks another pack.
  */
-async function reconcilePack({ adapters, config, cycleRepository, context, pack, immediateHoldOnMissingSend, missingSendReason, missingSendTerminal }) {
+async function reconcilePack({ adapters, config, cycleRepository, context, pack, playerAddress, immediateHoldOnMissingSend, missingSendReason, missingSendTerminal }) {
   let packStatus;
   try {
     packStatus = await adapters.collectorCrypt.getPackStatus({ memo: pack.memo });
@@ -181,7 +178,7 @@ async function reconcilePack({ adapters, config, cycleRepository, context, pack,
       reason: missingSendReason,
     }, missingSendTerminal);
   }
-  if (send.destination !== config.accounts?.solana) {
+  if (send.destination !== playerAddress) {
     return holdPack(cycleRepository, config, context, { stage: 'open', packIndex: pack.packIndex, memo: pack.memo, send: packStatus.send, reason: 'memo-bound send destination does not match the operator wallet' });
   }
   const signature = send.signature;
@@ -197,7 +194,7 @@ async function reconcilePack({ adapters, config, cycleRepository, context, pack,
   }
   let asset;
   try {
-    asset = await deriveCardAssetFromOpenTransaction({ adapters, config, signature });
+    asset = await deriveCardAssetFromOpenTransaction({ adapters, playerAddress, signature });
   } catch (error) {
     if (error instanceof AmbiguousCardMintError) {
       return holdPack(cycleRepository, config, context, { stage: 'open', packIndex: pack.packIndex, memo: pack.memo, signature, candidateMints: error.candidateMints });
@@ -252,6 +249,12 @@ export async function reconcileLiveOpen({ adapters, config, cycleRepository, con
   const purchase = await cycleRepository.readStage(context.cycleId, 'purchase');
   const packs = purchasedPacks(purchase);
   if (packs.length === 0) return { packs: [] };
+  // The wallet that actually received these cards is bound durably at purchase's pre-call intent,
+  // not re-derived from the live operator config -- see purchase.mjs's identical fix. A
+  // purchase-completed cycle with packs to open always has this record.
+  const intentRecord = await cycleRepository.readPackBatchIntent(context.cycleId, 'purchase');
+  if (intentRecord === null) throw new Error('open reconciliation requires the purchase stage pre-call intent that must exist alongside any completed purchase');
+  const playerAddress = intentRecord.intent.playerAddress;
 
   const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'open');
   const sentUnknown = record?.attempt?.state === 'SENT_UNKNOWN';
@@ -266,7 +269,7 @@ export async function reconcileLiveOpen({ adapters, config, cycleRepository, con
   for (const pack of packs) {
     const confirmed = confirmedMemos.has(pack.memo);
     const outcome = await reconcilePack({
-      adapters, config, cycleRepository, context, pack,
+      adapters, config, cycleRepository, context, pack, playerAddress,
       immediateHoldOnMissingSend: confirmed || sentUnknown,
       missingSendReason: confirmed
         ? 'response-recorded open is missing memo-bound mint evidence'

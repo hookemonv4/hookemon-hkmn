@@ -265,7 +265,10 @@ test('mixed batch: one purchased pack that never opens is held, the other pack s
     purchasedCount: 2,
   };
   const cardAsset = 'GmaDrppBC7P5ARKV8g3djiwP89vz1jLK23V2GBjuAEGB';
-  const cycleRepository = repository({ stages: { purchase: { status: 'COMPLETE', evidence: purchaseEvidence } } });
+  const cycleRepository = repository({
+    stages: { purchase: { status: 'COMPLETE', evidence: purchaseEvidence } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 2, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
+  });
   const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, cardAsset).toBase58();
   const collectorCrypt = {
     async getPackStatus({ memo }) {

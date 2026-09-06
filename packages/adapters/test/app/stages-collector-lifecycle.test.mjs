@@ -558,6 +558,7 @@ test('mutateOpen refuses the provisional authority before opening any purchased 
 test('reconcileLiveOpen resolves an opened pack from memo-bound status and finalized mint derivation', async () => {
   const cycleRepository = repository({
     stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
   });
   const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
   const collectorCrypt = {
@@ -591,6 +592,7 @@ test('reconcileLiveOpen carves an unverified pack into a held position while ano
         reconciliationEvidence: null,
       },
     },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 2, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
   });
   const cardTokenAccount = deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58();
   const collectorCrypt = {
@@ -614,6 +616,7 @@ test('reconcileLiveOpen holds a SENT_UNKNOWN pack past its deadline as HELD_UNRE
   const cycleRepository = repository({
     stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 1, packs: [{ packIndex: 0, memo: MEMO, status: 'purchased', expectedCardCount: 1 }] } } },
     attempts: { open: { attempt: { state: 'SENT_UNKNOWN' }, sentAtMs: 0, responseEvidence: null, reconciliationEvidence: null } },
+    intents: { purchase: { recordedAtMs: 0, intent: { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR } } },
   });
   let openCalls = 0;
   const collectorCrypt = {
@@ -827,6 +830,7 @@ test('open response missing its memo-bound mint holds durably without a retry', 
     await repo.prepareStage(cycleId, stage);
     await repo.completeStage(cycleId, stage, evidence);
   }
+  await repo.recordPackBatchIntent(cycleId, 'purchase', { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR });
 
   const request = { provider: 'collector-crypt', operation: 'open', packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1 }] };
   await repo.prepareStageAttempt(cycleId, 'open', createPreparedProviderMutationAttempt({
@@ -869,6 +873,7 @@ test('open SENT_UNKNOWN retry missing mint holds durably after reopen', async t 
     await repo.prepareStage(cycleId, stage);
     await repo.completeStage(cycleId, stage, evidence);
   }
+  await repo.recordPackBatchIntent(cycleId, 'purchase', { quantity: 1, packType: null, expectedCardCountPerPack: 1, playerAddress: OPERATOR });
   const request = { provider: 'collector-crypt', operation: 'open', packs: [{ packIndex: 0, memo: MEMO, expectedCardCount: 1 }] };
   await repo.prepareStageAttempt(cycleId, 'open', createPreparedProviderMutationAttempt({
     cycleId, stage: 'open',
