@@ -369,13 +369,25 @@ async function finalizedReturnFixture(t, {
   };
 }
 
-function expectationLedgerFor(leg, cycleId) {
+/** ADR-0026: the canonical CAIP identity a caller (`return.mjs`, in production) resolves for the
+ * EVM USDG row -- deliberately never equal to a Relay leg's own raw `(numeric chain id string,
+ * lowercase address)` destination pair, so tests exercise the same raw/canonical distinction the
+ * repository itself must never conflate. */
+function canonicalEvmUsdgIdentity(leg) {
+  return {
+    chainId: `eip155:${leg.destinationChainId}`,
+    assetId: `eip155:${leg.destinationChainId}/erc20:${leg.destinationAssetId.toLowerCase()}`,
+    decimals: leg.destinationDecimals,
+  };
+}
+
+function expectationLedgerFor(leg, cycleId, identity = canonicalEvmUsdgIdentity(leg)) {
   return {
     schema: 'hookemon.custody-ledger.v2',
     cycleId,
-    chainId: leg.destinationChainId,
-    assetId: leg.destinationAssetId,
-    decimals: leg.destinationDecimals,
+    chainId: identity.chainId,
+    assetId: identity.assetId,
+    decimals: identity.decimals,
     claimed: '0',
     bridgeOut: '0',
     bridgeIn: '0',
@@ -392,12 +404,18 @@ function expectationLedgerFor(leg, cycleId) {
     unattributed: '0',
     verifiedCurrentBalance: null,
     expectedCycleAsset: {
-      chainId: leg.destinationChainId,
-      assetId: leg.destinationAssetId,
-      decimals: leg.destinationDecimals,
+      chainId: identity.chainId,
+      assetId: identity.assetId,
+      decimals: identity.decimals,
       amountAtomic: leg.destinationAmountAtomic,
     },
   };
+}
+
+function canonicalReturnLedgerRow(state, leg) {
+  const identity = canonicalEvmUsdgIdentity(leg);
+  return [...state.custodyLedgers.values()]
+    .find(candidate => candidate.chainId === identity.chainId && candidate.assetId === identity.assetId);
 }
 
 /** Same shape as `finalizedReturnFixture`, but the return leg is recorded through the ADR-0026
@@ -2331,6 +2349,75 @@ test('recordCustodyLedger refuses erasing a previously recorded verifiedCurrentB
   );
 });
 
+test('recordCustodyLedger refuses a null verifiedCurrentBalance for a v2 write when the key already exists as v1', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, { claimed: '1' }));
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, { claimed: '1' })),
+    /first-ever write/,
+  );
+});
+
+test('recordCustodyLedger refuses repeating a null verifiedCurrentBalance once a key already carries a v2 row', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  await repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, { claimed: '1' }));
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, { claimed: '2' })),
+    /first-ever write/,
+  );
+});
+
+test('recordCustodyLedger cannot populate expectedCycleAsset without going through the dedicated return-leg expectation writer', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const leg = returnRelayLeg(cycleId);
+  const ledger = expectationLedgerFor(leg, cycleId);
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, ledger),
+    /expectedCycleAsset can only be populated or cleared/,
+  );
+});
+
+test('recordCustodyLedger cannot change or erase an expectedCycleAsset once the dedicated return-leg expectation writer has populated it', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const leg = returnRelayLeg(cycleId);
+  const ledger = expectationLedgerFor(leg, cycleId);
+  await repository.recordReturnRelayLegExpectation(cycleId, leg, ledger);
+  // A key already exists after the expectation write above, so every further generic write must
+  // also carry a non-null verifiedCurrentBalance -- isolate the expectedCycleAsset check below from
+  // that separate, already-covered invariant.
+  const observation = custodyBalanceObservation(ledger);
+
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, { ...ledger, verifiedCurrentBalance: observation, expectedCycleAsset: null }),
+    /expectedCycleAsset can only be populated or cleared/,
+  );
+  await assert.rejects(
+    () => repository.recordCustodyLedger(cycleId, {
+      ...ledger,
+      verifiedCurrentBalance: observation,
+      expectedCycleAsset: { ...ledger.expectedCycleAsset, amountAtomic: '1' },
+    }),
+    /expectedCycleAsset can only be populated or cleared/,
+  );
+
+  // Buckets (and a fresh observation) may still be updated as long as expectedCycleAsset is
+  // carried forward unchanged.
+  await repository.recordCustodyLedger(cycleId, { ...ledger, verifiedCurrentBalance: observation, claimed: '5' });
+  const state = await repository.describeCycle(cycleId);
+  const row = canonicalReturnLedgerRow(state, leg);
+  assert.equal(row.claimed, '5');
+  assert.deepEqual(row.expectedCycleAsset, ledger.expectedCycleAsset);
+  assert.deepEqual(row.verifiedCurrentBalance, observation);
+});
+
 test('recordCustodyLedger enforces monotonic, non-rewriting finality for verifiedCurrentBalance', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
@@ -3200,7 +3287,7 @@ test('recordReturnRelayLegExpectation appends the RECORDED leg and its ledger ro
   const reopened = await CycleRepository.open(directory);
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.relayLegs.get(leg.relayRequestId).state, 'RECORDED');
-  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === leg.destinationChainId && candidate.assetId === leg.destinationAssetId);
+  const row = canonicalReturnLedgerRow(state, leg);
   assert.deepEqual(row.expectedCycleAsset, ledger.expectedCycleAsset);
 
   // Replaying the identical call is idempotent.
@@ -3225,7 +3312,7 @@ test('recordReturnRelayLegExpectation refuses a second unresolved return leg for
 
   const state = await repository.describeCycle(cycleId);
   assert.equal(state.relayLegs.get(secondLeg.relayRequestId), undefined);
-  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === firstLeg.destinationChainId && candidate.assetId === firstLeg.destinationAssetId);
+  const row = canonicalReturnLedgerRow(state, firstLeg);
   assert.deepEqual(row.expectedCycleAsset, firstLedger.expectedCycleAsset);
 });
 
@@ -3251,7 +3338,7 @@ test('settleRelayLeg clears a v2 expectedCycleAsset in the same atomic append th
 
   const reopened = await CycleRepository.open(fixture.directory);
   const state = await reopened.describeCycle(fixture.cycleId);
-  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === fixture.leg.destinationChainId && candidate.assetId === fixture.leg.destinationAssetId);
+  const row = canonicalReturnLedgerRow(state, fixture.leg);
   assert.equal(row.schema, 'hookemon.custody-ledger.v2');
   assert.equal(row.expectedCycleAsset, null);
   assert.equal(row.returnReceived, fixture.leg.destinationAmountAtomic);
@@ -3264,10 +3351,64 @@ test('settleRelayLeg clears a v2 expectedCycleAsset via its own atomic write whe
 
   const reopened = await CycleRepository.open(fixture.directory);
   const state = await reopened.describeCycle(fixture.cycleId);
-  const row = [...state.custodyLedgers.values()].find(candidate => candidate.chainId === fixture.leg.destinationChainId && candidate.assetId === fixture.leg.destinationAssetId);
+  const row = canonicalReturnLedgerRow(state, fixture.leg);
   assert.equal(row.schema, 'hookemon.custody-ledger.v2');
   assert.equal(row.expectedCycleAsset, null);
   assert.equal(row.returnReceived, '0');
+});
+
+test('settleRelayLeg locates its ledger row via the durable association, never a stray row written under the leg\'s raw destination identity', async t => {
+  const fixture = await finalizedReturnExpectationFixture(t);
+  const strayRow = custodyLedger(fixture.cycleId, {
+    chainId: fixture.leg.destinationChainId,
+    assetId: fixture.leg.destinationAssetId,
+    claimed: '999',
+  });
+  await fixture.repository.recordCustodyLedger(fixture.cycleId, strayRow);
+
+  const settled = await fixture.repository.settleRelayLeg(fixture.cycleId, fixture.leg.relayRequestId, fixture.submission);
+  assert.equal(settled.state, 'SETTLED');
+
+  const reopened = await CycleRepository.open(fixture.directory);
+  const state = await reopened.describeCycle(fixture.cycleId);
+  const canonicalRow = canonicalReturnLedgerRow(state, fixture.leg);
+  assert.equal(canonicalRow.returnReceived, fixture.leg.destinationAmountAtomic);
+  assert.equal(canonicalRow.expectedCycleAsset, null);
+
+  const rawRow = [...state.custodyLedgers.values()]
+    .find(candidate => candidate.chainId === fixture.leg.destinationChainId && candidate.assetId === fixture.leg.destinationAssetId);
+  assert.equal(rawRow.claimed, '999');
+  assert.equal(rawRow.returnReceived, '0');
+  assert.equal(state.custodyLedgers.size, 2);
+});
+
+test('distinct canonical return ledger rows with identical expectedCycleAsset amounts never splice on settlement', async t => {
+  const fixture = await finalizedReturnExpectationFixture(t);
+  const otherDestinationAssetId = '0x00000000000000000000000000000000000abc';
+  const otherLegBase = returnRelayLeg(`${fixture.cycleId}-other`);
+  const otherLeg = {
+    ...otherLegBase,
+    cycleId: fixture.cycleId,
+    destinationAssetId: otherDestinationAssetId,
+    returnAttribution: {
+      ...otherLegBase.returnAttribution,
+      intent: { ...otherLegBase.returnAttribution.intent, destinationAssetId: otherDestinationAssetId },
+    },
+  };
+  const otherLedger = expectationLedgerFor(otherLeg, fixture.cycleId);
+  await fixture.repository.recordReturnRelayLegExpectation(fixture.cycleId, otherLeg, otherLedger);
+
+  const settled = await fixture.repository.settleRelayLeg(fixture.cycleId, fixture.leg.relayRequestId, fixture.submission);
+  assert.equal(settled.state, 'SETTLED');
+
+  const state = await fixture.repository.describeCycle(fixture.cycleId);
+  const settledRow = canonicalReturnLedgerRow(state, fixture.leg);
+  assert.equal(settledRow.expectedCycleAsset, null);
+  assert.equal(settledRow.returnReceived, fixture.leg.destinationAmountAtomic);
+
+  const otherRow = canonicalReturnLedgerRow(state, otherLeg);
+  assert.deepEqual(otherRow.expectedCycleAsset, otherLedger.expectedCycleAsset);
+  assert.equal(otherRow.returnReceived, '0');
 });
 
 test('settleRelayLeg rejects a destination hash already attributed to another return leg after reopen', async t => {
