@@ -188,6 +188,9 @@ const READ_ONLY_LIVE_RECONCILIATION_STAGES = new Set(['eligibility-snapshot']);
 // individual packs genuinely unattributable (lost response with no durable memo at all); it needs
 // the same cycle-level hold authority as the card-bearing stages for that irreducible case.
 const CARD_HELD_POSITION_RECONCILIATION_STAGES = new Set(['purchase', 'open', 'epic-gate', 'buyback']);
+// Only buyback's reconcileLive sums realized proceeds into the durable custody ledger
+// (recordTotalProceedsLedger in stages/buyback.mjs); no other card-stage handler writes it.
+const CUSTODY_LEDGER_RECONCILIATION_STAGES = new Set(['buyback']);
 const CHAIN_JOURNAL_REPOSITORY_METHODS = Object.freeze([
   'readChainTransactionAttempt',
   'prepareChainTransactionAttempt',
@@ -932,6 +935,10 @@ function cardReconciliationRepository(cycleRepository, context) {
     if (recordHeldPosition) repository.recordHeldPosition = recordHeldPosition;
     const holdCycle = leaseFencedReadMethod(cycleRepository, 'holdCycle', context.assertLease);
     if (holdCycle) repository.holdCycle = holdCycle;
+  }
+  if (CUSTODY_LEDGER_RECONCILIATION_STAGES.has(context.stage)) {
+    const recordCustodyLedger = leaseFencedReadMethod(cycleRepository, 'recordCustodyLedger', context.assertLease);
+    if (recordCustodyLedger) repository.recordCustodyLedger = recordCustodyLedger;
   }
   return Object.freeze(repository);
 }

@@ -322,6 +322,97 @@ test('limits held-position persistence to card-stage reconciliation', async () =
   assert.equal(wholeCycleHolds, 1);
 });
 
+test('limits the custody-ledger writer to buyback reconciliation', async () => {
+  const repository = fakeCycleRepository();
+  let ledgerWrites = 0;
+  repository.recordCustodyLedger = async (cycleId, ledger) => {
+    assert.equal(cycleId, CYCLE_ID);
+    assert.deepEqual(ledger, { schema: 'test-ledger' });
+    ledgerWrites += 1;
+  };
+  let leaseChecks = 0;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repository,
+    stageHandlers: {
+      buyback: {
+        async probe() { return null; },
+        async prepareRequest() { return { request: 'unused' }; },
+        async mutate() { throw new Error('reconciliation must not mutate'); },
+        async reconcileLive({ cycleRepository }) {
+          assert.equal(typeof cycleRepository.recordCustodyLedger, 'function');
+          await cycleRepository.recordCustodyLedger(CYCLE_ID, { schema: 'test-ledger' });
+          return { reconciled: true };
+        },
+      },
+      open: {
+        async probe() { return null; },
+        async prepareRequest() { return { request: 'unused' }; },
+        async mutate() { throw new Error('reconciliation must not mutate'); },
+        async reconcileLive({ cycleRepository }) {
+          assert.equal(cycleRepository.recordCustodyLedger, undefined);
+          return { reconciled: true };
+        },
+      },
+    },
+  });
+
+  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'buyback', assertLease() { leaseChecks += 1; } });
+  await driver.reconcile({ cycleId: CYCLE_ID, stage: 'open' });
+  assert.equal(ledgerWrites, 1);
+  assert.equal(leaseChecks, 1);
+});
+
+test('a lease lost before the buyback custody-ledger write blocks the effect', async () => {
+  const attempt = createPreparedProviderMutationAttempt({
+    cycleId: CYCLE_ID,
+    stage: 'buyback',
+    requestDigest: `sha256:${'a'.repeat(64)}`,
+  });
+  const attempts = new Map([['buyback', {
+    attempt: { ...attempt, state: 'SENT_UNKNOWN' },
+    responseEvidence: null,
+    reconciliationEvidence: null,
+  }]]);
+  const repository = fakeCycleRepository(new Map(), '0', attempts);
+  let ledgerWrites = 0;
+  repository.recordCustodyLedger = async () => { ledgerWrites += 1; };
+  const lost = new LeaseLostError('expired', { owner: 'cycle-runner', version: 4 });
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repository,
+    stageHandlers: {
+      buyback: {
+        async probe() { return null; },
+        async prepareRequest() { return { request: 'unused' }; },
+        async mutate() { throw new Error('reconciliation must not mutate'); },
+        async reconcileLive({ cycleRepository }) {
+          // The lease check inside the fenced wrapper runs synchronously before it ever calls
+          // through to the repository, so a lost lease throws here directly rather than
+          // rejecting a promise.
+          assert.throws(
+            () => cycleRepository.recordCustodyLedger(CYCLE_ID, { schema: 'test-ledger' }),
+            LeaseLostError,
+          );
+          return { reconciled: true };
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    await driver.reconcile({ cycleId: CYCLE_ID, stage: 'buyback', assertLease() { throw lost; } }),
+    { reconciled: true },
+  );
+  assert.equal(ledgerWrites, 0);
+});
+
 test('dispatches a prepared supplementary settlement through its injected handler', async () => {
   const position = {
     positionId: `held:${'a'.repeat(64)}`,

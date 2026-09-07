@@ -58,9 +58,12 @@ infrastructure.
   configuration, and a lease-fenced repository facade containing only read methods. The chain-journal
   facade for claim, outbound, and return additionally exposes lease-fenced broadcast, finality,
   custody, Relay settlement, recovery-context, and wallet-nonce release methods after canonical
-  chain observation. Direct payout reads its recipient journal and may idempotently record successor
-  dust and release its wallet nonce fence during terminal recovery. Reconciliation receives no
-  signer, runner, or provider-mutation capability.
+  chain observation. The card-stage facade for purchase, open, epic-gate, and buyback additionally
+  exposes lease-fenced held-position and whole-cycle hold methods for an unattributable card;
+  buyback's own facade also exposes a lease-fenced custody-ledger writer, since only buyback sums
+  realized proceeds into the durable custody ledger. Direct payout reads its recipient journal and
+  may idempotently record successor dust and release its wallet nonce fence during terminal
+  recovery. Reconciliation receives no signer, runner, or provider-mutation capability.
 - `src/app/stages/eligibility-snapshot.mjs`, `claim-process.mjs`, and `epic-gate.mjs` provide
   read-only probes. Eligibility snapshot completes through direct read-only reconciliation. Claim
   processing persists `PREPARED → SIGNED → BROADCAST → FINALIZED` in the chain journal and records
@@ -170,6 +173,11 @@ infrastructure.
   (before any catalog read, Relay quote, or hook liability read).
 - A custody ledger key is `(cycleId, chainId, assetId)`. Its first record fixes `decimals`; later
   records with another decimal value are rejected both while writing and during journal replay.
+  Buyback reconciliation reads the cycle's existing row for its settlement asset before it writes
+  its realized-proceeds total, so every other bucket that row already carried (claimed, bridge,
+  pack cost, and the rest) survives unchanged; only `buybackProceeds` is replaced. A consumer that
+  looks this row up must reconstruct the repository's own key exactly, never a different separator
+  or format, or it silently finds nothing and overwrites the whole row with a fresh, empty one.
 - A generic chain transaction is keyed by `(cycleId, stage, requestDigest)`. It persists raw bytes,
   one nonce or blockhash, a signing hash, and later broadcast and finality observations. The current
   schema does not retain policy digest, approved-semantics recovery material, fencing, or a terminal

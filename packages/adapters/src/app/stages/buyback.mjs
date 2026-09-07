@@ -574,7 +574,9 @@ async function recordTotalProceedsLedger(cycleRepository, cycleId, asset, soldPa
   let ledger = emptyLedger(cycleId, asset, total.toString());
   if (typeof cycleRepository.describeCycle === 'function') {
     const state = await cycleRepository.describeCycle(cycleId);
-    const existing = state?.custodyLedgers?.get?.(`${asset.chainId} ${asset.assetId}`);
+    // Must match cycle-repository.mjs's own custodyLedgerKey exactly (NUL-joined, not a
+    // space): this looks up that repository's real Map key, not a freshly invented format.
+    const existing = state?.custodyLedgers?.get?.(`${asset.chainId}\u0000${asset.assetId}`);
     if (existing) ledger = { ...existing, buybackProceeds: total.toString() };
   }
   await cycleRepository.recordCustodyLedger(cycleId, ledger);

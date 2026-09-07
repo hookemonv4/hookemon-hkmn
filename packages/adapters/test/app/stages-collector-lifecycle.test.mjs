@@ -44,8 +44,10 @@ import {
 } from '../../src/app/stages/buyback.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { LeaseLostError } from '../../../runner/src/automation/exclusive-lease.mjs';
 import { MAXIMUM_PACK_BATCH_SIZE, createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
+import { createStageDriver } from '../../src/app/stage-driver.mjs';
 
 const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 
@@ -1091,6 +1093,134 @@ test('reconcileLiveBuyback confirms proceeds for a submitted sale and records th
   assert.deepEqual(reconciled.packs[0].proceeds, { ...settlementAsset(), amountAtomic: '85' });
   assert.equal(cycleRepository.ledgers.length, 1);
   assert.equal(cycleRepository.ledgers[0].ledger.buybackProceeds, '85');
+});
+
+function seededCustodyLedger(cycleId) {
+  return {
+    schema: 'hookemon.custody-ledger.v1',
+    cycleId,
+    chainId: CHAIN_ID,
+    assetId: SETTLEMENT_ASSET,
+    decimals: CIRCLE_USD_DECIMALS,
+    claimed: '500',
+    bridgeOut: '12',
+    bridgeIn: '0',
+    packCost: '40',
+    buybackProceeds: '0',
+    returnInput: '0',
+    returnReceived: '0',
+    refunds: '0',
+    residual: '3',
+    heldAssets: '0',
+    heldPositions: '0',
+    payoutLiability: '0',
+    dust: '0',
+    unattributed: '0',
+  };
+}
+
+async function seedRealSubmittedBuyback(repo, cycleId, submitted) {
+  const attempt = createPreparedProviderMutationAttempt({
+    cycleId,
+    stage: 'buyback',
+    requestDigest: `sha256:${'a'.repeat(64)}`,
+  });
+  await repo.prepareStageAttempt(cycleId, 'buyback', attempt);
+  await repo.recordStageAttemptResponse(cycleId, 'buyback', { packs: [submitted] });
+}
+
+test('the real built-in buyback stage sums proceeds into an existing custody ledger row through the real stage-driver facade and repository, without erasing its other buckets', async t => {
+  const { repository: repo, cycleId } = await durableCycle(t);
+  await repo.recordCustodyLedger(cycleId, seededCustodyLedger(cycleId));
+
+  const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET, signature: BUYBACK_SIGNATURE, quote: { ...settlementAsset(), amountAtomic: '85' }, refundAmount: { ...settlementAsset(), amountAtomic: '85' } };
+  await seedRealSubmittedBuyback(repo, cycleId, submitted);
+
+  const proceedsTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const collectorCrypt = {
+    async getBuybackCheck() {
+      return { exists: true, status: 'complete', buybackAmount: 85, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE, createdAt: '2026-01-01T00:00:00.000Z' };
+    },
+  };
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
+  });
+
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    reconciliationAdapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repo,
+  });
+
+  const reconciled = await driver.reconcile({ cycleId, stage: 'buyback' });
+  assert.equal(reconciled.soldCount, 1);
+  assert.equal(reconciled.packs[0].decision, 'sold');
+
+  const state = await repo.describeCycle(cycleId);
+  const [ledger] = [...state.custodyLedgers.values()];
+  assert.equal(ledger.chainId, CHAIN_ID);
+  assert.equal(ledger.assetId, SETTLEMENT_ASSET);
+  // The proceeds bucket increments from its seeded value...
+  assert.equal(ledger.buybackProceeds, '85');
+  // ...while every other bucket this cycle already carried survives untouched.
+  assert.equal(ledger.claimed, '500');
+  assert.equal(ledger.bridgeOut, '12');
+  assert.equal(ledger.packCost, '40');
+  assert.equal(ledger.residual, '3');
+  assert.equal((await repo.readOperationalStageAttempt(cycleId, 'buyback')).attempt.state, 'RECONCILED');
+});
+
+test('a lease lost immediately before the buyback custody-ledger write leaves the seeded ledger and attempt untouched', async t => {
+  const { repository: repo, cycleId } = await durableCycle(t);
+  await repo.recordCustodyLedger(cycleId, seededCustodyLedger(cycleId));
+
+  const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET, signature: BUYBACK_SIGNATURE, quote: { ...settlementAsset(), amountAtomic: '85' }, refundAmount: { ...settlementAsset(), amountAtomic: '85' } };
+  await seedRealSubmittedBuyback(repo, cycleId, submitted);
+
+  const proceedsTokenAccount = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const collectorCrypt = {
+    async getBuybackCheck() {
+      return { exists: true, status: 'complete', buybackAmount: 85, playerWallet: OPERATOR, nft: CARD_ASSET, transactionSignature: BUYBACK_SIGNATURE, createdAt: '2026-01-01T00:00:00.000Z' };
+    },
+  };
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsTokenAccount, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
+  });
+
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    reconciliationAdapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: null,
+    config: baseConfig(),
+    cycleRepository: repo,
+  });
+
+  const lost = new LeaseLostError('expired', { owner: 'cycle-runner', version: 1 });
+  await assert.rejects(
+    () => driver.reconcile({ cycleId, stage: 'buyback', assertLease() { throw lost; } }),
+    LeaseLostError,
+  );
+
+  const state = await repo.describeCycle(cycleId);
+  const [ledger] = [...state.custodyLedgers.values()];
+  assert.equal(ledger.chainId, CHAIN_ID);
+  assert.equal(ledger.assetId, SETTLEMENT_ASSET);
+  assert.equal(ledger.buybackProceeds, '0');
+  assert.equal(ledger.claimed, '500');
+  assert.equal(ledger.bridgeOut, '12');
+  assert.equal(ledger.packCost, '40');
+  assert.equal(ledger.residual, '3');
+  assert.equal((await repo.readOperationalStageAttempt(cycleId, 'buyback')).attempt.state, 'RESPONSE_RECORDED');
 });
 
 test('reconcileLiveBuyback resolves an "unknown" (ambiguous-mutation) pack to sold once Collector confirms it, and waits while Collector shows nothing yet', async () => {
