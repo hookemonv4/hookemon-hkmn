@@ -1,0 +1,21 @@
+Compiling 81 files with Solc 0.8.26
+Solc 0.8.26 finished in 1.85s
+Compiler run successful!
+
+Ran 1 test for /Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/bot-process-funding-feasibility/packages/contracts/test/feasibility/OwnerCapital.t.sol:OwnerCapitalFeasibilityTest
+[PASS] test_onePackFundedByActualFeesWith150UsdgInitialCapital() (gas: 72051510)
+Logs:
+  initialOwnerUsdgAtomic: 150000000
+  seedUsdgAtomic: 100000000
+  remainingTraderUsdgAtomic: 18865368
+  remainingPoolUsdgAtomic: 100000016
+  minimumRoundEndTraderAtomic: 18865368
+  processLiabilityAtomic: 25945514
+  totalFeeAtomic: 31134616
+  grossExecutedUsdgAtomic: 1037820588
+  swapCount: 32
+  swapGasMeasuredPlusIntrinsic: 5700508
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 29.39ms (25.80ms CPU time)
+
+Ran 1 test suite in 35.00ms (29.39ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)
