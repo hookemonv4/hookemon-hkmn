@@ -46,6 +46,17 @@
           <a href="#machine">Dashboard</a><a href="#journey">The loop</a
           ><a href="#cards">Cards</a><a href="/packs">Packs</a><a href="#faq">FAQ</a>
         </div>
+        <details class="mobile-menu">
+          <summary aria-label="Open navigation"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary>
+          <nav class="mobile-menu-panel" aria-label="Mobile navigation">
+            <span>Explore Hookemon</span>
+            <a href="#machine">Dashboard</a>
+            <a href="#journey">The loop</a>
+            <a href="#cards">Cards</a>
+            <a href="/packs">Browse packs <span aria-hidden="true">↗</span></a>
+            <a href="#faq">FAQ</a>
+          </nav>
+        </details>
         <div class="nav-actions">
           <a
             class="social-link"
@@ -539,7 +550,14 @@
               <span class="card-corner">✦</span
               ><span class="collector-star" aria-hidden="true">✦</span
               ><span class="chase-ribbon">Chase card <span aria-hidden="true">✦</span></span>
+              <div class="collector-constellation" aria-hidden="true">
+                <span class="collector-star">✦</span><span class="collector-star">✦</span>
+                <span class="collector-star">✦</span><span class="collector-star">✦</span>
+                <span class="collector-star">✦</span><span class="collector-star">✦</span>
+              </div>
               <div class="chase-sparkles" aria-hidden="true">
+                <span>✦</span><span>✦</span><span>✦</span><span>✦</span>
+                <span>✦</span><span>✦</span><span>✦</span><span>✦</span>
                 <span>✦</span><span>✦</span><span>✦</span><span>✦</span>
                 <span>✦</span><span>✦</span><span>✦</span><span>✦</span>
               </div>
@@ -856,5 +874,6 @@
     </footer>
     <script type="module" src="/comic-production/dashboard.mjs"></script>
     <script type="module" src="/comic-production/motion.mjs"></script>
+    <script type="module" src="/comic-production/navigation.mjs"></script>
   </body>
 </html>

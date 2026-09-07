@@ -61,6 +61,11 @@ contracts below, or an honest "nothing observed yet" placeholder — never an in
 
 - The illustrated homepage uses 30 px header social icons, decorative Lugia sparkles that stop
   under reduced motion, and one large footer wordmark without a duplicate logo in the bottom row.
+- Mobile navigation exposes the pack catalog in a dismissible side panel. The cycle transcript
+  has a prominent summary and readable body text. Portrait phone scenes follow scroll progress,
+  including shorter Safari viewports; reduced motion retains manual chapter selection.
+- Coin dragging survives implicit touch capture moving from a child face to the coin button;
+  vertical scrolling remains native. See [Pointer Events implicit capture](https://www.w3.org/TR/pointerevents3/#implicit-pointer-capture).
 
 - The site never holds a signer, private key, RPC credential, or Collector Crypt/Relay/Solana
   provider secret; `apps/web/worker/index.ts`'s `WorkerEnv` only ever carries public read

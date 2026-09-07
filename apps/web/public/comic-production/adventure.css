@@ -3373,7 +3373,7 @@ summary:focus-visible {
   }
 }
 /* A pinned scene must fit below the header; short windows use chapter buttons. */
-@media (max-height: 700px) {
+@media (max-height: 700px) and (min-width: 601px), (max-height: 599px) {
   .journey {
     height: auto;
   }
@@ -3450,13 +3450,20 @@ summary:focus-visible {
   color: var(--muted);
 }
 .story-transcript {
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  margin-block: 24px;
+  border: 2px solid var(--navy);
+  border-radius: 14px;
+  background: #fff3bd;
+  box-shadow: 0 5px 0 #15345f18;
+  font-size: 16px;
+  overflow: hidden;
 }
 .story-transcript summary {
   list-style: none;
   cursor: pointer;
-  min-height: 62px;
+  min-height: 82px;
+  padding: 20px 24px;
+  font-size: 24px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -3467,7 +3474,7 @@ summary:focus-visible {
   display: none;
 }
 .story-transcript summary > span {
-  font-size: 19px;
+  font-size: 30px;
   transition: transform 0.2s;
 }
 .story-transcript[open] summary > span {
@@ -3475,7 +3482,7 @@ summary:focus-visible {
 }
 .story-transcript ol {
   max-width: 790px;
-  padding: 0 0 22px 21px;
+  padding: 8px 24px 24px 48px;
   margin: 0;
   line-height: 1.75;
   color: #54667d;
@@ -3496,3 +3503,101 @@ summary:focus-visible {
 }
 
 .dashboard-data-note{font-size:13px;line-height:1.6;color:var(--muted);margin:12px 0 20px;max-width:70ch}
+
+/* Keep mobile navigation available without crowding the primary links. */
+.mobile-menu { display: none; }
+.mobile-menu summary { list-style: none; cursor: pointer; }
+.mobile-menu summary::-webkit-details-marker { display: none; }
+.mobile-menu-panel {
+  position: fixed;
+  top: var(--nav-height);
+  bottom: auto;
+  right: 0;
+  height: calc(100vh - var(--nav-height));
+  height: calc(100dvh - var(--nav-height));
+  width: min(320px, 100vw);
+  padding: 28px 24px;
+  overflow-y: auto;
+  background: var(--navy);
+  color: var(--cream);
+  box-shadow: -12px 0 32px #15345f30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+.mobile-menu-panel > span { color: var(--yellow); font-weight: 800; margin-bottom: 16px; }
+.mobile-menu-panel a { min-height: 48px; padding: 12px; font-size: 18px; border-radius: 8px; }
+.mobile-menu-panel a[href="/packs"] { background: var(--yellow); color: var(--navy); font-weight: 800; }
+@media (max-width: 1050px) {
+  .mobile-menu { display: block; }
+  .mobile-menu summary { display: grid; place-items: center; width: 44px; height: 44px; }
+}
+@media (max-width: 600px) {
+  :root { --nav-height: 112px; }
+  .site-header .nav { display: grid; grid-template-columns: 1fr 44px; gap: 8px; padding-block: 8px; }
+  .site-header .brand { grid-column: 1; grid-row: 1; padding: 0; }
+  .mobile-menu { grid-column: 2; grid-row: 1; }
+  .site-header .nav-actions { grid-column: 1 / -1; width: 100%; flex-wrap: nowrap; gap: 8px; }
+  .nav-actions .social-link { flex: 0 0 44px; width: 44px; height: 44px; }
+  .nav-actions .nav-cycle { flex: 1; min-height: 44px; border-top: 0; border-left: 1px solid var(--line); padding: 0 0 0 12px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; }
+  .nav-cycle-label { font-size: 11px; }
+  .nav-cycle-value { font-size: 16px; }
+  .nav-actions svg, .nav-actions img { width: 30px; height: 30px; }
+  .story-stage { min-height: 320px; }
+  .story-payout > .floating-label { bottom: 0; }
+  .replay-button { min-width: 44px; width: 44px; }
+  .story-transcript summary { font-size: 21px; min-height: 80px; padding: 18px; }
+  .story-transcript ol { padding: 0 20px 20px 38px; }
+}
+/* Safari's browser chrome can leave a portrait phone less than 700 px tall. */
+@media (max-width: 600px) and (min-height: 600px) and (max-height: 740px) {
+  .scene-sticky { min-height: 0; }
+  .scene-layout { padding-block: 42px 68px; }
+  .story-panel h2 { font-size: 28px; min-height: 58px; }
+  .story-panel > p { font-size: 12px; line-height: 1.5; min-height: 0; margin-top: 6px; }
+  .story-stage { min-height: 280px; max-height: 280px; margin-top: 8px; }
+  .payout-coin { width: 100px; top: 0; }
+  .payout-lines { top: 77px; height: 67px; --coin-arrow-inset: 26px; }
+  .holder-row { top: 154px; }
+  .holder-row > div { padding-block: 8px; }
+  .holder-row img { width: 30px; height: 30px; margin-bottom: 5px; }
+  .scene-bottom { bottom: 12px; }
+}
+.chase-sparkles { z-index: 4; }
+.chase-sparkles span { color: #fffefa; text-shadow: 0 0 4px #fff, 0 0 12px #fff3a0, 0 0 24px #ffc400; }
+.chase-sparkles span:nth-child(9) { left: 36%; top: 24%; font-size: 13px; animation-delay: -1.7s; }
+.chase-sparkles span:nth-child(10) { left: 56%; top: 37%; font-size: 19px; animation-delay: -0.2s; }
+.chase-sparkles span:nth-child(11) { left: 43%; top: 56%; font-size: 12px; animation-delay: -2.4s; }
+.chase-sparkles span:nth-child(12) { left: 61%; top: 73%; font-size: 22px; animation-delay: -1.2s; }
+.chase-sparkles span:nth-child(13) { left: 29%; top: 68%; font-size: 17px; animation-delay: -0.6s; }
+.chase-sparkles span:nth-child(14) { left: 73%; top: 54%; font-size: 25px; animation-delay: -2.8s; }
+.chase-sparkles span:nth-child(15) { left: 39%; top: 89%; font-size: 16px; animation-delay: -1.9s; }
+.chase-sparkles span:nth-child(16) { left: 68%; top: 9%; font-size: 20px; animation-delay: -0.9s; }
+.card-lugia .foil { opacity: 0.75; animation: chase-foil 5s ease-in-out infinite; }
+@keyframes chase-foil {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-sticky { min-height: 0; }
+  .scene-layout { height: auto; }
+  .story-stage { flex: none; height: 320px; }
+}
+@media (min-width: 601px) and (max-width: 1050px) {
+  .story-stage { height: 410px; min-height: 410px; }
+}
+
+.collector-constellation { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.card-lugia .collector-star { animation: collector-twinkle 3.8s ease-in-out infinite; }
+.collector-constellation .collector-star { right: auto; font-size: 34px; }
+.collector-constellation .collector-star:nth-child(1) { left: 10%; top: 17%; animation-delay: -0.6s; }
+.collector-constellation .collector-star:nth-child(2) { left: 8%; top: 49%; font-size: 42px; animation-delay: -2.1s; }
+.collector-constellation .collector-star:nth-child(3) { left: 17%; top: 79%; font-size: 30px; animation-delay: -1.3s; }
+.collector-constellation .collector-star:nth-child(4) { left: 83%; top: 37%; font-size: 38px; animation-delay: -2.9s; }
+.collector-constellation .collector-star:nth-child(5) { left: 81%; top: 70%; animation-delay: -1.8s; }
+.collector-constellation .collector-star:nth-child(6) { left: 64%; top: 87%; font-size: 28px; animation-delay: -3.4s; }
+@keyframes collector-twinkle {
+  0%, 100% { opacity: 0.25; transform: rotate(-10deg) scale(0.65); }
+  50% { opacity: 1; transform: rotate(18deg) scale(1.15); }
+}
