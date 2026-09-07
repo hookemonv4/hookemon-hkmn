@@ -11,6 +11,8 @@ site holds no signer, wallet, RPC, or transaction-submission capability of any k
 figure it displays is either observed by `packages/dashboard` and served through the two public
 contracts below, or an honest "nothing observed yet" placeholder — never an invented number.
 
+The hero uses a two-line shared-cycle heading and the supplied transparent Robinhood Chain SVG. The description retains its star marker, and the adventure slogan introduces the loop. In short landscape viewports, the coin scales to the available height.
+
 ## Public interface
 
 - Repository: a standalone git repository at `hookemon-web` (owner-hosted; see Recovery pointers for
