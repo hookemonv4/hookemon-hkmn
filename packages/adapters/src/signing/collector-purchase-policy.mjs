@@ -27,6 +27,13 @@ const EXPECTED_INSTRUCTION_KINDS = Object.freeze([
   'spl-transfer-checked',
   'unknown',
 ]);
+const GENERATE_PACK_KINDS = Object.freeze([
+  'compute-budget-set-unit-limit', 'unknown', 'spl-transfer-checked', 'compute-budget-set-unit-price',
+]);
+function isGeneratePackProfile(binding) {
+  return Array.isArray(binding.instructions) && binding.instructions.length === GENERATE_PACK_KINDS.length
+    && binding.instructions.every((instruction, index) => instruction?.kind === GENERATE_PACK_KINDS[index]);
+}
 const SPL_TRANSFER_CHECKED_ROLES = Object.freeze(['source-ata', 'settlement-mint', 'settlement-destination', 'operator-fee-payer']);
 const CYCLE_FACT_FIELDS = Object.freeze(['operatorFeePayer', 'sourceAta', 'amountAtomic', 'memoValue', 'requestDigest']);
 const BLOCKHASH_CONTEXT_FIELDS = Object.freeze(['blockhash', 'lastValidBlockHeight', 'currentBlockHeight']);
@@ -143,10 +150,11 @@ function parseBindingInput(bindingInput) {
   return bindingInput;
 }
 
-function assertInstructionTemplate(template, index, label) {
+function assertInstructionTemplate(template, index, label, generatePack) {
+  const kinds = generatePack ? GENERATE_PACK_KINDS : EXPECTED_INSTRUCTION_KINDS;
   exactKeys(template, INSTRUCTION_TEMPLATE_FIELDS, label);
-  if (template.kind !== EXPECTED_INSTRUCTION_KINDS[index]) {
-    fail(`${label}.kind must be ${EXPECTED_INSTRUCTION_KINDS[index]} at this fixed instruction position`);
+  if (template.kind !== kinds[index]) {
+    fail(`${label}.kind must be ${kinds[index]} at this fixed instruction position`);
   }
   assertSolanaPublicKey(template.programId, `${label}.programId`);
   if (!Array.isArray(template.accounts)) fail(`${label}.accounts must be an array`);
@@ -180,14 +188,19 @@ function assertInstructionTemplate(template, index, label) {
 
   if (template.kind === 'spl-transfer-checked') {
     if (!TOKEN_PROGRAM_IDS.has(template.programId)) fail(`${label}.programId must be a supported SPL token program`);
-    if (template.accounts.length !== SPL_TRANSFER_CHECKED_ROLES.length) {
+    const roles = generatePack ? [...SPL_TRANSFER_CHECKED_ROLES, 'operator-fee-payer'] : SPL_TRANSFER_CHECKED_ROLES;
+    if (template.accounts.length !== roles.length) {
       fail(`${label}.accounts must declare exactly the fixed transfer-checked role sequence`);
     }
     template.accounts.forEach((account, accountIndex) => {
-      if (account.role !== SPL_TRANSFER_CHECKED_ROLES[accountIndex]) {
-        fail(`${label}.accounts[${accountIndex}].role must be ${SPL_TRANSFER_CHECKED_ROLES[accountIndex]}`);
+      if (account.role !== roles[accountIndex]) {
+        fail(`${label}.accounts[${accountIndex}].role must be ${roles[accountIndex]}`);
       }
     });
+    if (generatePack && template.accounts.some((account, index) =>
+      account.isSigner !== (index >= 3) || account.isWritable !== (index !== 1))) {
+      fail(`${label}.accounts flags must match the fixed generatePack transfer profile`);
+    }
     if (template.computeUnitLimit !== null || template.priorityFeeCapAtomic !== null || template.memoPrefix !== null) {
       fail(`${label} must not declare compute-budget or memo fields`);
     }
@@ -198,6 +211,11 @@ function assertInstructionTemplate(template, index, label) {
   if (template.programId !== MEMO_PROGRAM_ID) fail(`${label}.programId must be the Solana memo program`);
   if (typeof template.memoPrefix !== 'string' || !MEMO_PREFIX_PATTERN.test(template.memoPrefix)) {
     fail(`${label}.memoPrefix must be a bounded plain-text prefix`);
+  }
+  if (generatePack && (template.memoPrefix !== '' || template.accounts.length !== 1
+    || template.accounts[0].role !== 'provider-co-signer'
+    || !template.accounts[0].isSigner || template.accounts[0].isWritable)) {
+    fail(`${label} must use the fixed generatePack provider memo and empty prefix`);
   }
   if (template.computeUnitLimit !== null || template.priorityFeeCapAtomic !== null) {
     fail(`${label} must not declare compute-budget fields`);
@@ -235,7 +253,7 @@ export function assertCollectorPurchaseBindingV1(bindingInput, expectedDigest) {
     fail('Collector purchase binding must declare exactly the fixed purchase instruction sequence');
   }
   parsed.instructions.forEach((template, index) => {
-    assertInstructionTemplate(template, index, `Collector purchase binding instructions[${index}]`);
+    assertInstructionTemplate(template, index, `Collector purchase binding instructions[${index}]`, isGeneratePackProfile(parsed));
   });
 
   return deepFreeze(structuredClone(parsed));
@@ -337,7 +355,7 @@ function resolveInstruction(template, binding, facts) {
     });
   }
 
-  const memoBytes = Buffer.from(`${template.memoPrefix}${facts.memoValue}`, 'utf8');
+  const memoBytes = Buffer.from(`${template.memoPrefix}${facts.memoValue}${isGeneratePackProfile(binding) ? ':open' : ''}`, 'utf8');
   return Object.freeze({
     ...base,
     instructionId: memoInstructionId(memoBytes),

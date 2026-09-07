@@ -19,7 +19,7 @@ import {
   assertCollectorPurchaseBindingV1,
   createCollectorPurchasePolicy,
 } from '../../src/signing/collector-purchase-policy.mjs';
-import { TransactionPolicyError, decodeProviderTransaction, evaluate } from '../../src/signing/transaction-policy.mjs';
+import { TransactionPolicyError, captureSolanaCoSignerSignatures, decodeProviderTransaction, evaluate } from '../../src/signing/transaction-policy.mjs';
 
 const COMPUTE_BUDGET_PROGRAM_ID = 'ComputeBudget111111111111111111111111111111';
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -144,6 +144,7 @@ function buildCandidateTransaction(overrides = {}) {
     blockhash = BLOCKHASH_CONTEXT.blockhash,
     instructionOrder = ['limit', 'price', 'transfer', 'memo'],
     extraInstruction = false,
+    duplicateAuthority = null,
   } = overrides;
 
   const instructionsByKind = {
@@ -156,6 +157,7 @@ function buildCandidateTransaction(overrides = {}) {
         { pubkey: mintKey, isSigner: false, isWritable: false },
         { pubkey: destinationKey, isSigner: false, isWritable: destinationWritable },
         { pubkey: feePayer.publicKey, isSigner: true, isWritable: false },
+        ...(duplicateAuthority === null ? [] : [{ pubkey: duplicateAuthority, isSigner: true, isWritable: false }]),
       ],
       data: transferCheckedData(amountAtomic, decimals),
     }),
@@ -396,3 +398,66 @@ test('refuses a v0 candidate transaction because the binding only ever authorize
   const decoded = await decodeCandidate(transactionBase64);
   assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
 });
+
+const liveBinding = structuredClone(RAW_BINDING);
+liveBinding.instructions = [liveBinding.instructions[0], liveBinding.instructions[3], liveBinding.instructions[2], liveBinding.instructions[1]];
+liveBinding.instructions[0].computeUnitLimit = 80000;
+liveBinding.instructions[1].memoPrefix = '';
+liveBinding.instructions[2].accounts.push({ role: 'operator-fee-payer', isSigner: true, isWritable: true });
+liveBinding.instructions[3].priorityFeeCapAtomic = '10000';
+const liveFacts = { ...CYCLE_FACTS, amountAtomic: '25000000' };
+function livePolicy() {
+  return createCollectorPurchasePolicy(factoryInput({ binding: liveBinding, expectedDigest: digest(liveBinding), cycleFacts: liveFacts }));
+}
+function liveCandidate(overrides = {}) {
+  return buildCandidateTransaction({ instructionOrder: ['limit', 'memo', 'transfer', 'price'],
+    computeUnitLimit: 80000, priorityFeeMicroLamports: 10000, amountAtomic: liveFacts.amountAtomic,
+    memoText: `${liveFacts.memoValue}:open`, duplicateAuthority: overrides.feePayer?.publicKey ?? operator.publicKey, ...overrides });
+}
+test('accepts the exact generatePack profile with duplicate operator and durable memo suffix', async () => {
+  assert.equal(evaluate(livePolicy(), await decodeCandidate(liveCandidate())).allowed, true);
+});
+for (const [label, overrides] of [
+  ['amount', { amountAtomic: '25000001' }],
+  ['recipient', { destinationKey: Keypair.generate().publicKey }],
+  ['memo', { memoText: 'other:open' }],
+  ['missing suffix', { memoText: liveFacts.memoValue }],
+  ['signer', { feePayer: Keypair.generate() }],
+  ['duplicate authority', { duplicateAuthority: coSigner.publicKey }],
+  ['order', { instructionOrder: ['limit', 'price', 'transfer', 'memo'] }],
+  ['extra instruction', { extraInstruction: true }],
+]) {
+  test(`generatePack profile rejects changed ${label}`, async () => {
+    const policy = livePolicy();
+    const decoded = await decodeCandidate(liveCandidate(overrides));
+    assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
+  });
+}
+for (const [label, mutate] of [
+  ['memo prefix', binding => { binding.instructions[1].memoPrefix = 'prefix'; }],
+  ['memo signer', binding => { binding.instructions[1].accounts[0].role = 'operator-fee-payer'; }],
+  ['transfer flags', binding => { binding.instructions[2].accounts[4].isWritable = false; }],
+  ['transfer role', binding => { binding.instructions[2].accounts[4].role = 'provider-co-signer'; }],
+]) {
+  test(`generatePack binding rejects changed ${label} even with a matching digest`, () => {
+    const binding = structuredClone(liveBinding); mutate(binding);
+    assert.throws(() => assertCollectorPurchaseBindingV1(binding, digest(binding)), CollectorPurchasePolicyError);
+  });
+}
+
+test('generatePack pre-sign boundary accepts a verified provider signature with an unsigned operator', () => {
+  const tx = Transaction.from(Buffer.from(liveCandidate(), 'base64'));
+  tx.signatures.find(item => item.publicKey.equals(operator.publicKey)).signature = null;
+  assert.equal(captureSolanaCoSignerSignatures(tx.serialize({ requireAllSignatures: false }).toString('base64')).length, 1);
+});
+
+for (const mode of ['missing', 'corrupt', 'foreign']) {
+  test(`generatePack pre-sign boundary rejects a ${mode} provider signature`, () => {
+    const tx = Transaction.from(Buffer.from(liveCandidate(), 'base64'));
+    const slot = tx.signatures.find(item => item.publicKey.equals(coSigner.publicKey));
+    if (mode === 'missing') slot.signature = null;
+    if (mode === 'corrupt') slot.signature[0] ^= 0xff;
+    if (mode === 'foreign') slot.signature = tx.signatures.find(item => item.publicKey.equals(operator.publicKey)).signature;
+    assert.throws(() => captureSolanaCoSignerSignatures(tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64')), TransactionPolicyError);
+  });
+}
