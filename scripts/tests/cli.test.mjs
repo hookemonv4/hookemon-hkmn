@@ -97,6 +97,57 @@ test('task rebind-completion appends a descendant completion and regenerates tas
   assert.equal(projected.commitSha, integrated);
 });
 
+test('task rebind-completion accepts a rewritten completion with an equal canonical raw patch', () => {
+  const root = proj();
+  v4(root, 'task', 'add', 'T1', '--title', 'demo', '--req', 'REQ-core-1');
+  const { token } = v4(root, 'task', 'claim', 'T1', '--owner', 'worker');
+  const fixture = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(root, 'rewrite-demo.txt'), 'same content\n');
+  execFileSync('git', ['-C', root, 'add', 'rewrite-demo.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original change']);
+  const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  v4(root, 'task', 'complete', 'T1', '--owner', 'worker', '--token', String(token), '--commit', original);
+
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', fixture]);
+  writeFileSync(join(root, 'rewrite-demo.txt'), 'same content\n');
+  execFileSync('git', ['-C', root, 'add', 'rewrite-demo.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'rewritten change']);
+  const rewritten = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  assert.deepEqual(v4(
+    root, 'task', 'rebind-completion', 'T1', '--from', original, '--commit', rewritten,
+  ), { ok: true, id: 'T1', commitSha: rewritten });
+
+  const projected = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8'))
+    .tasks.find(task => task.id === 'T1');
+  assert.equal(projected.status, 'done');
+  assert.equal(projected.commitSha, rewritten);
+});
+
+test('task rebind-completion rejects a rewrite whose canonical raw patch differs', () => {
+  const root = proj();
+  v4(root, 'task', 'add', 'T1', '--title', 'demo', '--req', 'REQ-core-1');
+  const { token } = v4(root, 'task', 'claim', 'T1', '--owner', 'worker');
+  const fixture = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(root, 'rewrite-demo.txt'), 'const s = "hello  world";\n');
+  execFileSync('git', ['-C', root, 'add', 'rewrite-demo.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original change']);
+  const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  v4(root, 'task', 'complete', 'T1', '--owner', 'worker', '--token', String(token), '--commit', original);
+
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', fixture]);
+  writeFileSync(join(root, 'rewrite-demo.txt'), 'const s = "hello world";\n');
+  execFileSync('git', ['-C', root, 'add', 'rewrite-demo.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'semantically different change']);
+  const rewritten = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  const result = v4Result(
+    root, 'task', 'rebind-completion', 'T1', '--from', original, '--commit', rewritten,
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /canonical patch does not match/);
+});
+
 test('status --check rejects recorded failed, stale, and exhausted gates', () => {
   for (const result of ['FAILED', 'EXHAUSTED_WITH_OPEN_FINDINGS']) {
     const root = proj();

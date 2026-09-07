@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -150,6 +150,9 @@ test('rebindCompletionCommit appends completion history and projects the descend
   assert.equal(attemptsAfter.at(-1).task_id, 'T1');
   assert.equal(attemptsAfter.at(-1).outcome, 'done');
   assert.equal(attemptsAfter.at(-1).commit_sha, integrated);
+  assert.deepEqual(JSON.parse(attemptsAfter.at(-1).provenance), {
+    route: 'descendant', from: head, target: integrated,
+  });
   const task = listTasks(db).find(candidate => candidate.id === 'T1');
   assert.equal(task.status, 'done');
   assert.equal(task.lease_owner, null);
@@ -157,6 +160,234 @@ test('rebindCompletionCommit appends completion history and projects the descend
   assert.equal(task.lease_expires, null);
   const projected = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8')).tasks[0];
   assert.equal(projected.commitSha, integrated);
+});
+
+test('rebindCompletionCommit accepts a rewritten completion whose canonical raw patch matches and records stable-patch-id provenance', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'rewrite', phase: 'build' });
+  const { token } = claimTask(db, 'T1', 'worker');
+  writeFileSync(join(root, 'file.txt'), 'same content\n');
+  execFileSync('git', ['-C', root, 'add', 'file.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original change']);
+  const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  completeTask(db, 'T1', 'worker', token, original);
+
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+  writeFileSync(join(root, 'file.txt'), 'same content\n');
+  execFileSync('git', ['-C', root, 'add', 'file.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'rewritten change']);
+  const rewritten = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  rebindCompletionCommit(db, 'T1', original, rewritten);
+  projectTasks(db, root);
+
+  const attempt = db.prepare('SELECT * FROM attempts ORDER BY seq').all().at(-1);
+  assert.equal(attempt.commit_sha, rewritten);
+  const provenance = JSON.parse(attempt.provenance);
+  assert.equal(provenance.route, 'stable-patch-id');
+  assert.equal(provenance.from, original);
+  assert.equal(provenance.target, rewritten);
+  assert.match(provenance.patchId, /^[0-9a-f]{40}$/);
+  assert.match(provenance.rawPatchSha256, /^[0-9a-f]{64}$/);
+  const projected = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8')).tasks[0];
+  assert.equal(projected.commitSha, rewritten);
+});
+
+test('rebindCompletionCommit refuses a whitespace-only rewrite even though its stable patch id matches', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'rewrite', phase: 'build' });
+  const { token } = claimTask(db, 'T1', 'worker');
+  writeFileSync(join(root, 'file.txt'), 'const s = "hello  world";\n');
+  execFileSync('git', ['-C', root, 'add', 'file.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original change']);
+  const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  completeTask(db, 'T1', 'worker', token, original);
+
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+  writeFileSync(join(root, 'file.txt'), 'const s = "hello world";\n');
+  execFileSync('git', ['-C', root, 'add', 'file.txt']);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'semantically different change']);
+  const rewritten = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  assert.throws(
+    () => rebindCompletionCommit(db, 'T1', original, rewritten),
+    /canonical patch does not match/,
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+});
+
+test('rebindCompletionCommit rejects merge commits, empty patches, and mismatched patch ids on the rewritten-source route without mutation', () => {
+  const assertRejectedWithoutMutation = ({ db, root, attempt, error }) => {
+    const before = {
+      tasks: db.prepare('SELECT * FROM tasks ORDER BY id').all(),
+      attempts: db.prepare('SELECT * FROM attempts ORDER BY seq').all(),
+    };
+    assert.throws(attempt, error);
+    assert.deepEqual({
+      tasks: db.prepare('SELECT * FROM tasks ORDER BY id').all(),
+      attempts: db.prepare('SELECT * FROM attempts ORDER BY seq').all(),
+    }, before);
+  };
+
+  {
+    const { root, head, branch } = repo();
+    const db = openLedger(root);
+    addTask(db, { id: 'T1', title: 'x' });
+    const { token } = claimTask(db, 'T1', 'worker');
+    writeFileSync(join(root, 'file.txt'), 'value\n');
+    execFileSync('git', ['-C', root, 'add', 'file.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original']);
+    const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    completeTask(db, 'T1', 'worker', token, original);
+
+    execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+    execFileSync('git', ['-C', root, 'checkout', '--quiet', '-b', 'side']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'side']);
+    execFileSync('git', ['-C', root, 'checkout', '--quiet', branch]);
+    execFileSync('git', ['-C', root, 'merge', '--quiet', '--no-ff', 'side', '-m', 'merge']);
+    const merged = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    assertRejectedWithoutMutation({
+      db, root,
+      attempt: () => rebindCompletionCommit(db, 'T1', original, merged),
+      error: /is a merge commit/,
+    });
+  }
+
+  {
+    const { root, head, branch } = repo();
+    const db = openLedger(root);
+    addTask(db, { id: 'T1', title: 'x' });
+    const { token } = claimTask(db, 'T1', 'worker');
+    execFileSync('git', ['-C', root, 'checkout', '--quiet', '-b', 'side']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'side']);
+    execFileSync('git', ['-C', root, 'checkout', '--quiet', branch]);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'main-tip']);
+    execFileSync('git', ['-C', root, 'merge', '--quiet', '--no-ff', 'side', '-m', 'merge']);
+    const merged = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    completeTask(db, 'T1', 'worker', token, merged);
+
+    execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+    writeFileSync(join(root, 'file.txt'), 'value\n');
+    execFileSync('git', ['-C', root, 'add', 'file.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'rewritten']);
+    const rewritten = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    assertRejectedWithoutMutation({
+      db, root,
+      attempt: () => rebindCompletionCommit(db, 'T1', merged, rewritten),
+      error: /is a merge commit/,
+    });
+  }
+
+  {
+    const { root, head } = repo();
+    const db = openLedger(root);
+    addTask(db, { id: 'T1', title: 'x' });
+    const { token } = claimTask(db, 'T1', 'worker');
+    writeFileSync(join(root, 'file.txt'), 'value\n');
+    execFileSync('git', ['-C', root, 'add', 'file.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original']);
+    const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    completeTask(db, 'T1', 'worker', token, original);
+
+    execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'noop']);
+    const empty = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    assertRejectedWithoutMutation({
+      db, root,
+      attempt: () => rebindCompletionCommit(db, 'T1', original, empty),
+      error: /produced an empty patch/,
+    });
+  }
+
+  {
+    const { root, head } = repo();
+    const db = openLedger(root);
+    addTask(db, { id: 'T1', title: 'x' });
+    const { token } = claimTask(db, 'T1', 'worker');
+    writeFileSync(join(root, 'file.txt'), 'value\n');
+    execFileSync('git', ['-C', root, 'add', 'file.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'original']);
+    const original = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    completeTask(db, 'T1', 'worker', token, original);
+
+    execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+    writeFileSync(join(root, 'other.txt'), 'unrelated\n');
+    execFileSync('git', ['-C', root, 'add', 'other.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', 'unrelated change']);
+    const unrelated = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    assertRejectedWithoutMutation({
+      db, root,
+      attempt: () => rebindCompletionCommit(db, 'T1', original, unrelated),
+      error: /stable patch id does not match/,
+    });
+  }
+});
+
+test('rebindCompletionCommit refuses a rewrite whose non-UTF-8 payload bytes differ, even though naive UTF-8 decoding would collapse them', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'x' });
+  const { token } = claimTask(db, 'T1', 'worker');
+
+  const build = byte => {
+    writeFileSync(join(root, 'shared.txt'), 'same content\n');
+    execFileSync('git', ['-C', root, 'add', 'shared.txt']);
+    writeFileSync(join(root, 'legacy.txt'), Buffer.from([0x61, byte, 0x0a]));
+    execFileSync('git', ['-C', root, 'add', 'legacy.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', `change ${byte}`]);
+    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+
+  const original = build(0x80);
+  completeTask(db, 'T1', 'worker', token, original);
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+  const rewritten = build(0x81);
+
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  assert.throws(
+    () => rebindCompletionCommit(db, 'T1', original, rewritten),
+    /stable patch id does not match/,
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+});
+
+test('rebindCompletionCommit refuses a rewrite that only differs in a gitlink target hidden by an inherited diff.ignoreSubmodules config', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'x' });
+  const { token } = claimTask(db, 'T1', 'worker');
+
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'other-target']);
+  const otherTarget = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+
+  const build = gitlinkSha => {
+    writeFileSync(join(root, 'shared.txt'), 'same content\n');
+    execFileSync('git', ['-C', root, 'add', 'shared.txt']);
+    execFileSync('git', ['-C', root, 'update-index', '--add', '--cacheinfo', `160000,${gitlinkSha},module`]);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', `link ${gitlinkSha}`]);
+    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+
+  const original = build(head);
+  completeTask(db, 'T1', 'worker', token, original);
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+  const rewritten = build(otherTarget);
+  execFileSync('git', ['-C', root, 'config', 'diff.ignoreSubmodules', 'all']);
+
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  assert.throws(
+    () => rebindCompletionCommit(db, 'T1', original, rewritten),
+    /stable patch id does not match/,
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
 });
 
 test('rebindCompletionCommit rejects invalid state or ancestry without mutation', () => {

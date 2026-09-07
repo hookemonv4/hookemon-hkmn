@@ -25,7 +25,8 @@ export function openLedger(root) {
     );
     CREATE TABLE IF NOT EXISTS attempts(
       seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, token INTEGER NOT NULL,
-      owner TEXT NOT NULL, started TEXT NOT NULL, ended TEXT, outcome TEXT, commit_sha TEXT
+      owner TEXT NOT NULL, started TEXT NOT NULL, ended TEXT, outcome TEXT, commit_sha TEXT,
+      provenance TEXT
     );
     CREATE TABLE IF NOT EXISTS merge_queue(
       seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
@@ -41,6 +42,8 @@ export function openLedger(root) {
   ]) {
     if (!taskColumns.has(name)) db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`);
   }
+  const attemptColumns = new Set(db.prepare('PRAGMA table_info(attempts)').all().map(column => column.name));
+  if (!attemptColumns.has('provenance')) db.exec('ALTER TABLE attempts ADD COLUMN provenance TEXT');
   LEDGER_ROOTS.set(db, root);
   return db;
 }
@@ -233,6 +236,115 @@ export function validateCompletionCommit(root, commitSha) {
   return commitSha;
 }
 
+function assertFullCommitFormat(commitSha) {
+  if (typeof commitSha !== 'string' || !FULL_COMMIT.test(commitSha)) {
+    throw new Error('completion commit must be a full lowercase 40-hex SHA');
+  }
+}
+
+function commitObjectExists(root, commitSha) {
+  return gitResult(root, ['cat-file', '-e', `${commitSha}^{commit}`]).status === 0;
+}
+
+function isReachableFromHead(root, commitSha) {
+  return gitResult(root, ['merge-base', '--is-ancestor', commitSha, 'HEAD']).status === 0;
+}
+
+function isMergeCommit(root, commitSha) {
+  const parents = gitResult(root, ['show', '-s', '--format=%P', commitSha]);
+  if (parents.status !== 0) throw new Error(`completion commit ${commitSha} is not an existing commit object`);
+  return parents.stdout.trim().split(/\s+/).filter(Boolean).length > 1;
+}
+
+// Byte-for-byte view of a patch as a canonicalized Buffer. Committed file content is not
+// guaranteed to be valid UTF-8 (legacy encodings are legal patch payload), so the raw patch is
+// captured as a Buffer and never decoded as UTF-8. Normalization uses a lossless latin1
+// string view (a 1:1 byte<->code-point mapping, unlike UTF-8) so the header regexes below can
+// run without ever collapsing distinct non-UTF-8 payload bytes into the same replacement
+// character; only the two known-ASCII git-generated header line shapes are rewritten, never
+// payload lines (those always start with '+'/'-'/' ' and so can never match '^index '/'^@@ ').
+function canonicalizePatchBytes(rawPatch) {
+  const text = rawPatch.toString('latin1');
+  const canonicalText = text
+    .replace(/^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/gm, 'index <object>..<object>$1')
+    .replace(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@(.*)$/gm, '@@ <coords> @@$1');
+  return Buffer.from(canonicalText, 'latin1');
+}
+
+// A canonical raw patch preserves whitespace, binary payloads, paths, modes, and all changed
+// content byte-for-byte; only commit-dependent blob object IDs and hunk line-number coordinates
+// are normalized, since those vary with history rewrites even for a truly identical change.
+// Rendering is pinned against inherited repository configuration that could otherwise hide or
+// alter content: no external diff driver, no path-relativization, and gitlink (submodule)
+// changes always shown in full regardless of a local `diff.ignoreSubmodules` setting.
+function rewrittenCommitPatch(root, commitSha) {
+  const diff = spawnSync('git', [
+    '-C', root, 'show',
+    '--no-color', '--no-textconv', '--no-renames', '--no-ext-diff', '--no-relative',
+    '--ignore-submodules=none', '--submodule=short', '--src-prefix=a/', '--dst-prefix=b/',
+    '--full-index', '--binary', '--format=', commitSha,
+  ], { maxBuffer: 1024 * 1024 * 256 });
+  if (diff.status !== 0) throw new Error(`unable to render patch for completion commit ${commitSha}`);
+  const rawPatch = diff.stdout;
+  const patchId = spawnSync('git', ['-C', root, 'patch-id', '--stable'], {
+    input: rawPatch, encoding: 'utf8',
+  });
+  if (patchId.status !== 0) {
+    throw new Error(`unable to compute stable patch id for completion commit ${commitSha}`);
+  }
+  const id = patchId.stdout.trim().split(/\s+/)[0] ?? '';
+  const canonical = canonicalizePatchBytes(rawPatch);
+  return { id, canonical };
+}
+
+function deriveRebindProvenance(root, fromCommitSha, commitSha) {
+  assertFullCommitFormat(fromCommitSha);
+  assertFullCommitFormat(commitSha);
+  if (!commitObjectExists(root, commitSha)) {
+    throw new Error(`completion commit ${commitSha} is not an existing commit object`);
+  }
+  if (!isReachableFromHead(root, commitSha)) {
+    throw new Error(`completion commit ${commitSha} is not reachable from current HEAD`);
+  }
+  if (!commitObjectExists(root, fromCommitSha)) {
+    throw new Error(`completion commit ${fromCommitSha} is not an existing commit object`);
+  }
+  if (isReachableFromHead(root, fromCommitSha)) {
+    const descended = gitResult(root, ['merge-base', '--is-ancestor', fromCommitSha, commitSha]);
+    if (descended.status !== 0) {
+      throw new Error(`completion commit ${commitSha} is not descended from ${fromCommitSha}`);
+    }
+    return { route: 'descendant', from: fromCommitSha, target: commitSha };
+  }
+  if (isMergeCommit(root, fromCommitSha)) {
+    throw new Error(`completion commit ${fromCommitSha} is a merge commit`);
+  }
+  if (isMergeCommit(root, commitSha)) {
+    throw new Error(`completion commit ${commitSha} is a merge commit`);
+  }
+  const from = rewrittenCommitPatch(root, fromCommitSha);
+  const target = rewrittenCommitPatch(root, commitSha);
+  if (!from.id || !from.canonical.toString('latin1').trim()) {
+    throw new Error(`completion commit ${fromCommitSha} produced an empty patch`);
+  }
+  if (!target.id || !target.canonical.toString('latin1').trim()) {
+    throw new Error(`completion commit ${commitSha} produced an empty patch`);
+  }
+  if (from.id !== target.id) {
+    throw new Error(`completion commit ${commitSha} stable patch id does not match ${fromCommitSha}`);
+  }
+  if (!from.canonical.equals(target.canonical)) {
+    throw new Error(`completion commit ${commitSha} canonical patch does not match ${fromCommitSha}`);
+  }
+  return {
+    route: 'stable-patch-id',
+    from: fromCommitSha,
+    target: commitSha,
+    patchId: from.id,
+    rawPatchSha256: sha256(from.canonical),
+  };
+}
+
 export function completeTask(db, taskId, owner, token, commitSha = null) {
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -262,17 +374,12 @@ export function rebindCompletionCommit(db, taskId, fromCommitSha, commitSha) {
     }
     const root = LEDGER_ROOTS.get(db);
     if (!root) throw new Error('ledger has no repository root');
-    validateCompletionCommit(root, fromCommitSha);
-    validateCompletionCommit(root, commitSha);
-    const descended = gitResult(root, ['merge-base', '--is-ancestor', fromCommitSha, commitSha]);
-    if (descended.status !== 0) {
-      throw new Error(`completion commit ${commitSha} is not descended from ${fromCommitSha}`);
-    }
+    const provenance = deriveRebindProvenance(root, fromCommitSha, commitSha);
     const at = nowIso();
     db.prepare(`
-      INSERT INTO attempts(task_id,token,owner,started,ended,outcome,commit_sha)
-      VALUES(?,?,?,?,?,'done',?)
-    `).run(taskId, task.lease_token, 'completion-rebind', at, at, commitSha);
+      INSERT INTO attempts(task_id,token,owner,started,ended,outcome,commit_sha,provenance)
+      VALUES(?,?,?,?,?,'done',?,?)
+    `).run(taskId, task.lease_token, 'completion-rebind', at, at, commitSha, JSON.stringify(provenance));
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
