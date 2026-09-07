@@ -308,6 +308,8 @@ test(
       })),
     });
 
+    if (getCaptured() === null) t.diagnostic(JSON.stringify({ calls: fixture.calls, run }));
+
     // The same barrier, the same real authority publish/verify step -- released healthy this time.
     assert.ok(
       fixture.calls.usdgFrozenObservations.every(observed => observed === false),

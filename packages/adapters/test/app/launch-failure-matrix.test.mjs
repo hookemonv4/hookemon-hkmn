@@ -137,7 +137,7 @@ test(
 
     assert.ok(
       fixture.calls.usdgFrozenObservations.length >= 2,
-      `the real USDG freeze reader must be observed at least twice (healthy, then frozen); observations=${JSON.stringify(fixture.calls.usdgFrozenObservations)}`,
+      `the real USDG freeze reader must be observed at least twice (healthy, then frozen); observations=${JSON.stringify(fixture.calls.usdgFrozenObservations)}; run=${JSON.stringify(run)}`,
     );
     assert.equal(
       fixture.calls.usdgFrozenObservations[0], false,
