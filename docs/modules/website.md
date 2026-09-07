@@ -143,3 +143,9 @@ contracts below, or an honest "nothing observed yet" placeholder — never an in
   contract change, that is the intended signal to re-port the changed file into `hookemon-web`
   (State transitions) — never edit the site's fixture to make it pass without also updating its
   validator to match.
+
+### Iconic card gallery
+
+The landing gallery presents one graded individual card for each of Mew, Mewtwo, Charizard, Blastoise, Venusaur and Pikachu. `config/collector-showcase.json` records the provider snapshot, full catalog coverage and selection rules. Selection uses the highest provider insured value per species across the listed packs, excluding sealed products; insured value is not a sale price. Each upright card has the same framed presentation, its certificate and provider record, and an estimated buyback tied to the named pack rate. Rarity colors are pack-relative: Epic is purple and Uncommon is green. Other verified pack memberships appear in card details. Refresh the snapshot and gallery together after repeating the catalog scan; never infer pack membership from value alone.
+
+Lugia remains the full-width chase card above the six iconic species. Buyback cash-out estimates use Collector Crypt pack rates; different verified rates appear as a cash range, not a guaranteed offer.

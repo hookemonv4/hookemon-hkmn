@@ -127,11 +127,8 @@ test("labels illustrative card art separately from actual card history", () => {
   assert.doesNotMatch(journey, /you (?:won|earned)|guaranteed reward/i);
 });
 
-test("keeps the selected Lugia visible as the gallery chase card and holder arrows above cards", async () => {
+test("keeps holder arrows above cards", async () => {
   const css = await readFile(new URL("comic-production/adventure.css", publicRoot), "utf8");
-  assert.match(html, /class="chase-ribbon">Chase card/);
-  assert.match(html, /class="card-collection"><figure class="collectible-card js-tilt card-lugia"/);
-  assert.match(css, /\.collectible-card\.card-lugia\s*\{[^}]*grid-column:\s*1 \/ -1/s);
   assert.match(css, /\.payout-lines\s*\{[^}]*z-index:\s*4/s);
   assert.match(css, /\.holder-row\s*\{[^}]*z-index:\s*3/s);
   assert.match(css, /\.payout-lines i::after\s*\{[^}]*padding:\s*6px/s);
@@ -301,12 +298,21 @@ test("does not install motion when the page has no journey scene", () => {
 });
 
 
-test("shows seven sourced insurance valuations without presenting them as sales", async () => {
+test("keeps Lugia above six iconic cards with estimated cash-out values", async () => {
   const snapshot = JSON.parse(await readFile(new URL("../../../config/collector-showcase.json", import.meta.url), "utf8"));
   const gallery = html.slice(html.indexOf('id="cards"'), html.indexOf('id="economics"'));
   assert.equal(snapshot.cards.length, 7);
   assert.equal((gallery.match(/class="card-valuation"/g) ?? []).length, 7);
+  assert.deepEqual(snapshot.cards.map((card) => card.species), ["Lugia", "Mew", "Mewtwo", "Charizard", "Blastoise", "Venusaur", "Pikachu"]);
+  assert.doesNotMatch(gallery, /js-tilt|data-tilt-surface/);
+  assert.ok(gallery.indexOf("card-lugia") < gallery.indexOf("iconic-gallery"));
+  assert.match(gallery, /Estimated buyback cash-out: ≈ \$232,500/);
+  assert.match(gallery, /Estimated buyback cash-out: ≈ \$6,615–\$6,835.50/);
   for (const card of snapshot.cards) {
+    assert.ok(gallery.includes(card.gradingID));
+    assert.ok(gallery.includes('href="/packs"'));
+    assert.ok(gallery.includes(`data-rarity="${card.rarity}"`));
+    assert.equal(card.estimatedBuybackUsd, Math.round(Number(card.insuredValue) * card.pack.instantBuybackPercent) / 100);
     assert.ok(gallery.includes(card.image));
     assert.ok(gallery.includes(`https://collectorcrypt.com/assets/solana/${card.nftAddress}`));
     assert.ok(gallery.includes(`$${Number(card.insuredValue).toLocaleString("en-US")}`));
