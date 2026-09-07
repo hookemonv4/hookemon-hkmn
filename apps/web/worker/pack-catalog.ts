@@ -6,6 +6,7 @@ const rarities = ["common", "uncommon", "rare", "epic"] as const;
 const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const text = (value: unknown, max = 250): string => typeof value === "string" ? value.slice(0, max) : "";
 const number = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+const buybackPercent = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100 ? value : null;
 const validCode = (value: string) => /^[a-z][a-z0-9_]{1,63}$/.test(value);
 
 /** Carries a fixed, safe diagnostic code (numeric status or enum tag). Never carries upstream body/stack/secret. */
@@ -76,6 +77,7 @@ export function normalizePacks(value: unknown, statusValue: unknown) {
       return {
         code, name: text(pack.name), category: "Pokémon", price, currency: provider.currency, contains,
         availability: state.machineStatus === "running" && status?.isOpen === true ? "open" : status?.isOpen === false || state.machineStatus === "stopped" ? "closed" : "unknown",
+        instantBuybackPercent: buybackPercent(object(pack.instantBuyback).percentageOfValue),
         sourceUrl: provider.source,
         image: imageUrl(pack.imageNobgUrl) ?? imageUrl(pack.image) ?? imageUrl(pack.thumbnailUrl),
         tiers: rarities.map(rarity => {
@@ -86,7 +88,8 @@ export function normalizePacks(value: unknown, statusValue: unknown) {
     }).sort((a, b) => a.price - b.price);
 }
 
-export function normalizeInventory(value: unknown, page: number, rarity: string | null) {
+export function normalizeInventory(value: unknown, page: number, rarity: string | null, instantBuybackPercent: number | null = null) {
+  const percentage = buybackPercent(instantBuybackPercent);
   const payload = object(value);
   if (!Array.isArray(payload.nfts) || typeof payload.hasMore !== "boolean" || payload.page !== page || payload.limit !== provider.pageSize || payload.nfts.length > provider.pageSize) throw new SchemaError("Invalid inventory");
   const cards = payload.nfts.map(item => {
@@ -101,6 +104,7 @@ export function normalizeInventory(value: unknown, page: number, rarity: string 
     const back = Array.isArray(files) ? object(files[1]) : {};
     return {
       id, name: text(card.description || card.name, 400), rarity: tier, insuredValue: value, currency: provider.currency,
+      estimatedBuybackUsd: percentage === null ? null : Math.round(value * (percentage / 100) * 100) / 100,
       image: imageUrl(card.image), backImage: imageUrl(back.cc_cdn || back.uri),
       grade: attribute("The Grade") || null, gradingCompany: attribute("Grading Company") || null,
       certification: attribute("Grading ID") || null, year: attribute("Year") || null,
@@ -137,8 +141,8 @@ export async function handlePackCatalog(request: Request, fetcher: typeof fetch 
     if (!pack) return reply({ error: "Pack not publicly listed" }, 404);
     const query = new URLSearchParams({ code, page: String(page), limit: String(provider.pageSize) });
     if (rarity) query.set("rarity", rarity);
-    const cards = normalizeInventory(await read(`/api/getNfts?${query}`, fetcher), page, rarity);
-    return reply({ ...metadata, fetchedAt: new Date().toISOString(), code, rarity, availability: pack.availability, ...cards });
+    const cards = normalizeInventory(await read(`/api/getNfts?${query}`, fetcher), page, rarity, pack.instantBuybackPercent);
+    return reply({ ...metadata, fetchedAt: new Date().toISOString(), code, rarity, availability: pack.availability, instantBuybackPercent: pack.instantBuybackPercent, buybackNotice: "Estimate based on the provider insured value and this pack’s current buyback percentage. Not a guaranteed offer; the actual offer may vary.", ...cards });
   } catch (error) {
     const diagnostic = error instanceof ProviderError ? error.diagnostic : error instanceof SchemaError ? "invalid_schema" : "unknown";
     return reply({ error: "Provider inventory is temporarily unavailable. Please try again or view Collector Crypt.", provider: provider.name, sourceUrl: provider.source, fetchedAt: null }, 503, diagnostic);
