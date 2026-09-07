@@ -870,6 +870,45 @@ export function runProductionWindow(binPath, env, durationMs) {
   });
 }
 
+/** Wait for a durable proof boundary after a CLI tick, including an expected first-tick
+ * missing-authority refusal. The deadline includes startup and the scheduler's five-second
+ * retry; only the observed boundary establishes success, never elapsed time. */
+export async function runProductionUntil(binPath, env, { deadlineMs, observe }) {
+  const child = spawn(process.execPath, [binPath, 'run', '--mode', 'production', '--no-dashboard'], {
+    env, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  let stdout = '';
+  let finish;
+  const boundary = new Promise(resolve => { finish = resolve; });
+  let inspection = Promise.resolve();
+  const inspect = () => {
+    inspection = inspection.then(async () => {
+      if (await observe({ stderr, stdout })) finish({ reason: 'boundary' });
+    }).catch(error => finish({ reason: 'observation-error', error: String(error) }));
+  };
+  child.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); inspect(); });
+  child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); inspect(); });
+  const closed = new Promise(resolve => {
+    child.once('error', error => finish({ reason: 'child-error', error: String(error) }));
+    child.once('close', (exitCode, signal) => resolve({ reason: 'child-exit', exitCode, signal }));
+  });
+  let timer;
+  const outcome = await Promise.race([
+    boundary, closed, new Promise(resolve => { timer = setTimeout(() => resolve({ reason: 'deadline' }), deadlineMs); }),
+  ]);
+  clearTimeout(timer);
+  child.kill('SIGTERM');
+  const killTimer = setTimeout(() => child.kill('SIGKILL'), 1000);
+  const result = await closed;
+  clearTimeout(killTimer);
+  await inspection;
+  const diagnostics = JSON.stringify({ outcome, ...result, stderr, stdout });
+  assert.equal(outcome.reason, 'boundary', `production proof boundary was not reached: ${diagnostics}`);
+  assert.equal(result.exitCode, 0, `production child did not shut down cleanly: ${diagnostics}`);
+  return { stderr, stdout, exitCode: result.exitCode, signal: result.signal };
+}
+
 /** The full literal-production env, matching the pinned graph fixture's own env one field at a
  * time. Callers pass the fixture/signer/authority objects this module already builds. */
 export function buildProductionEnv({ directory, fixture, signer, authority, observabilityPath, eligibilitySnapshotPath, leaseTtlMs = '30000', intervalMs = '100' }) {
