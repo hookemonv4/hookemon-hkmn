@@ -346,3 +346,5 @@ logical purchases or payments; durable manifests, attempts, recipients and provi
 stable. Every process must complete without a failed tick, and copied runtime bytes may differ
 only at the two fixture identity pins and fixed synthetic interface metadata. This test does not
 establish live provider acceptance or authorize live signing, spending or deployment.
+
+The wallet nonce boundary resolves a renewed automation context against the durable reservation before asserting or releasing it. Only the same cycle, chain, wallet, stage, fencing token and acquisition timestamp may retain that reservation's original expiry. A later context expiry does not extend a held nonce lease; signing still refuses after its original deadline. Released handles retain their original window only for idempotent release. A new reservation after release uses the current active lease window. Reopening the repository or rebuilding a context does not change the binding, and a stale release cannot remove a successor's global reservation.

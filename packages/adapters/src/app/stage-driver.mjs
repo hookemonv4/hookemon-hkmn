@@ -4,7 +4,7 @@ import { isStandingAuthorityProvider } from '../../../runner/src/cycle/authoriza
 import { assertCollectorPolicyBundleRuntimeReady } from '../signing/collector-policy-loader.mjs';
 import { forwardOwnedKeychainSignOnlyIdentity } from '../signing/keychain-signer.mjs';
 import { TransactionPolicyError } from '../signing/transaction-policy.mjs';
-import { walletNonceLeaseWindow } from './wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from './wallet-nonce-lease.mjs';
 import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
@@ -541,13 +541,13 @@ function createEvmNonceFence({ cycleRepository, context, config }) {
       const roleName = role?.role === 'operations-trigger' ? 'operations-trigger' : 'operator EVM';
       throw new Error(`stage-driver ${roleName} signing requires its configured wallet for the nonce fence`);
     }
-    const genericInput = Object.freeze({
+    const genericInput = await resolveWalletNonceReservation(cycleRepository, context.cycleId, Object.freeze({
       chainId: String(config.chainId ?? 4663),
       wallet,
       stage: context.stage,
       fencingToken,
       ...walletNonceLeaseWindow(context, 'stage-driver wallet nonce reservation'),
-    });
+    }));
     if (typeof cycleRepository.reserveWalletNonce === 'function' && typeof cycleRepository.assertWalletNonce === 'function') {
       await cycleRepository.reserveWalletNonce(context.cycleId, genericInput);
       await cycleRepository.assertWalletNonce(context.cycleId, genericInput);

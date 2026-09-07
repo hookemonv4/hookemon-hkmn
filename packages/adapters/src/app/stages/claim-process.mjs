@@ -33,7 +33,7 @@ import {
 import { deriveOnchainCycleId, readUsdgAddress } from './action-builder.mjs';
 import { readBlockByNumber, readFinalizedBlock } from '../../robinhood-rpc.mjs';
 import { StageMutationRevertedError } from './errors.mjs';
-import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
 const USDG_DECIMALS = 6;
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
@@ -102,7 +102,7 @@ async function reserveClaimWalletNonce({ cycleRepository, context, configured })
     if (process.env.NODE_TEST_CONTEXT !== undefined) return null;
     throw new Error('claim-process requires a global wallet nonce reservation repository');
   }
-  const reservation = claimWalletNonceReservation({ configured, context });
+  const reservation = await resolveWalletNonceReservation(cycleRepository, context.cycleId, claimWalletNonceReservation({ configured, context }));
   await cycleRepository.reserveWalletNonce(context.cycleId, reservation);
   await cycleRepository.assertWalletNonce(context.cycleId, reservation);
   return reservation;
@@ -120,7 +120,7 @@ async function releaseClaimWalletNonce({ cycleRepository, context, configured })
   }
   await cycleRepository.releaseWalletNonce(
     context.cycleId,
-    claimWalletNonceReservation({ configured, context }),
+    await resolveWalletNonceReservation(cycleRepository, context.cycleId, claimWalletNonceReservation({ configured, context }), { release: true }),
   );
 }
 
