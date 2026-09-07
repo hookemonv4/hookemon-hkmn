@@ -95,7 +95,7 @@ test("provides five native stage controls and a complete textual fallback", () =
   assert.deepEqual(controls.map((match) => match[1]), ["0", "1", "2", "3", "4"]);
   assert.ok(controls.every(([tag]) => tag.includes('type="button"') && tag.includes("aria-pressed=")));
   assert.match(html, /class="[^"]*story-transcript/);
-  assert.match(html, /data-replay/);
+  assert.doesNotMatch(html, /data-replay/);
   for (const id of ["journey-scene", "journey-progress", "story-title", "story-index", "story-coin", "story-pack", "story-cards", "story-payout"]) {
     assert.ok(html.includes(`id="${id}"`), `${id} must be present`);
   }
@@ -321,7 +321,7 @@ test("keeps Lugia above six iconic cards with estimated cash-out values", async 
     assert.ok(gallery.includes(`https://collectorcrypt.com/assets/solana/${card.nftAddress}`));
     assert.ok(gallery.includes(`$${Number(card.insuredValue).toLocaleString("en-US")}`));
   }
-  assert.match(gallery, /insurance valuations in USD.*not sale prices/);
+  assert.match(gallery, /Collector Crypt insured value/);
   assert.match(gallery, /Charizard/);
   assert.doesNotMatch(html, /Explore the dashboard/);
 });

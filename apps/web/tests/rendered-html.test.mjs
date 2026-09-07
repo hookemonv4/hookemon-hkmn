@@ -214,7 +214,7 @@ test("keeps public claims tied to variable proceeds and verified data", async ()
   assert.match(html, /proportional to the eligible HKMN you hold[\s\S]*?multiply that share by the finalized returned proceeds available to distribute/);
   assert.match(html, /A cycle may have no distributable proceeds/);
   assert.match(html, /when a verified schedule is available/);
-  assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);
+  assert.doesNotMatch(html, /class="collection-disclosure"/);
   assert.doesNotMatch(html, /guaranteed (?:profit|income|returns)|risk.free|passive income|every 20 minutes|Top 200/i);
   assert.doesNotMatch(html, /Prototype · Simulator/i);
 });
@@ -234,7 +234,7 @@ test("explains holder payouts without displaying an invented payout receipt", as
   assert.match(scene, /Proceeds → eligible holders/);
   assert.match(scene, /HKMN holder/);
   assert.doesNotMatch(scene, /(?:\d+\.\d{2})\s*USDG|Paid successfully|confirmed transaction/i);
-  assert.match(html, /Illustrative cycle · example cards/);
+  assert.doesNotMatch(html, /Illustrative cycle · example cards/);
 });
 
 test("keeps the product accessible with native navigation and informational controls", async () => {
@@ -571,12 +571,12 @@ test("defines the four-tone monochrome responsive retro shell", async () => {
   assert.match(css, /body\s*\{[^}]*min-width:\s*0/s);
 });
 
-test("renders native chapter navigation and a replay control", async () => {
+test("renders native chapter navigation without a replay control", async () => {
   const html = await (await render()).text();
   const controls = [...html.matchAll(/<button\b[^>]*data-scene-stage="\d"[^>]*>/g)];
   assert.equal(controls.length, 5);
   assert.ok(controls.every(([tag]) => tag.includes('type="button"') && tag.includes("aria-pressed=")));
-  assert.match(html, /<button[^>]*type="button"[^>]*data-replay[^>]*aria-label="Replay the illustrated cycle"/);
+  assert.doesNotMatch(html, /<button[^>]*type="button"[^>]*data-replay[^>]*aria-label="Replay the illustrated cycle"/);
 });
 
 test("keeps the rounded Nintendo-style dialogue beside Pikachu", async () => {
@@ -916,10 +916,10 @@ test("falls back when Collector Crypt inventory is malformed or empty", async ()
   }
 });
 
-test("server-renders clearly labelled examples from Collector Crypt inventory", async () => {
+test("server-renders Collector Crypt cards without exposing credentials", async () => {
   const html = await (await render("/", { COLLECTOR_API_KEY: "collector-secret-marker" })).text();
-  assert.match(html, /Example cards from Collector Crypt inventory/);
-  assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);
+  assert.doesNotMatch(html, /Example cards from Collector Crypt inventory/);
+  assert.doesNotMatch(html, /class="collection-disclosure"/);
   assert.doesNotMatch(html, /collector-secret-marker|COLLECTOR_API_KEY/);
   assert.ok(showcaseImages.filter((imageUrl) => html.includes(imageUrl)).length >= 3);
 });
@@ -934,7 +934,7 @@ test("keeps the hero focused on the coin while showing inventory cards later", a
   assert.match(html.slice(cardsStart), /Mario Pikachu/);
 });
 
-test("keeps the scroll scene and selected collection explicitly illustrative", async () => {
+test("keeps the scene and collection free of redundant captions", async () => {
   const html = await (await render()).text();
   const journeyStart = html.indexOf('id="journey"');
   const cardsStart = html.indexOf('id="cards"');
@@ -942,10 +942,10 @@ test("keeps the scroll scene and selected collection explicitly illustrative", a
   assert.ok(journeyStart > -1 && cardsStart > journeyStart && collectionEnd > cardsStart);
   const journey = html.slice(journeyStart, cardsStart);
   const collection = html.slice(cardsStart, collectionEnd);
-  assert.match(journey, /Illustrative cycle · example cards/);
-  assert.match(collection, /Example cards from Collector Crypt inventory/);
+  assert.doesNotMatch(journey, /Illustrative cycle · example cards/);
+  assert.doesNotMatch(collection, /Example cards from Collector Crypt inventory/);
   assert.equal(showcaseImages.filter((image) => journey.includes(image)).length, 3);
-  assert.match(collection, /highest insured-value individual card for each Pokémon across all 9 listed packs/);
+  assert.doesNotMatch(collection, /highest insured-value individual card for each Pokémon across all 9 listed packs/);
 });
 
 test("keeps the Collector Crypt partner secret out of every client asset", async () => {
@@ -1064,7 +1064,7 @@ test("renders progress and chapter text inside the sticky scene", async () => {
   const scene = html.slice(html.indexOf('id="journey-scene"'), html.indexOf('class="collection'));
   for (const id of ["journey-progress", "story-title", "story-index"]) assert.ok(scene.includes('id="' + id + '"'));
   assert.equal((scene.match(/data-scene-stage=/g) ?? []).length, 5);
-  assert.match(scene, /data-replay/);
+  assert.doesNotMatch(scene, /data-replay/);
 });
 
 test("defines collision-free journey safety zones and route stations", async () => {
@@ -1132,7 +1132,7 @@ test("renders Lugia and six upright iconic cards with their names and grades", a
   assert.equal((html.match(/<figure class="collectible-card /g) ?? []).length, 7);
   for (const card of ["Mew", "Mewtwo", "Charizard", "Blastoise", "Venusaur", "Pikachu"]) assert.ok(html.includes(card));
   for (const grade of ["PSA 10"]) assert.ok(html.includes(grade));
-  assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);
+  assert.doesNotMatch(html, /class="collection-disclosure"/);
 });
 
 test("summarizes recent cards and the latest cycle payout separately", async () => {
