@@ -7,6 +7,8 @@
 // environment, and packages/adapters/README.md for the injected-transport pattern tests use instead.
 import { join } from 'node:path';
 
+import { http } from 'viem';
+
 import { AutomatedCycleService } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { assertCollectorOnlyRehearsalPolicy, createPolicyEngine } from '../../../runner/src/automation/policy-engine.mjs';
 import { createRehearsalStageDriver } from '../../../runner/src/cycle/rehearsal-stage-driver.mjs';
@@ -31,6 +33,11 @@ import {
 } from '../robinhood-rpc.mjs';
 import { createSolanaRpcClient, readSolBalance, readUsableLatestBlockhash } from '../solana-rpc.mjs';
 import { attachCollectorPolicyBundle, loadCollectorPolicyBundle } from '../signing/collector-policy-loader.mjs';
+import {
+  COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+  createLoopbackConfinedFetch,
+  loadCollectorProductionBindingRegistry,
+} from '../signing/collector-production-binding.mjs';
 import { buildDurableCardFeed } from '../collector/durable-card-feed.mjs';
 import { createRecentWinnersCollector } from '../collector/recent-winners.mjs';
 import {
@@ -337,7 +344,7 @@ function resolveOperatorAuditLogPath(stateDir, dashboardConfig, override) {
  * Tests override any of these by passing pre-built fake-transport clients directly as
  * `config.adapters.*` instead (see packages/adapters/README.md's injected-transport pattern; every
  * existing adapter test uses `fetchImpl`/`transport` injection the same way). */
-function archiveEvidenceClientFromConfig(config) {
+function archiveEvidenceClientFromConfig(config, { transport } = {}) {
   const archiveRpcUrl = config?.robinhood?.archiveRpcUrl;
   if (archiveRpcUrl === null || archiveRpcUrl === undefined) return null;
   if (typeof archiveRpcUrl !== 'string' || archiveRpcUrl.length === 0) {
@@ -347,7 +354,7 @@ function archiveEvidenceClientFromConfig(config) {
     throw new Error('compose robinhood.archiveRpcUrl must be distinct from robinhood.rpcUrl');
   }
   return createHistoricalErc20EvidenceClient({
-    client: createRobinhoodClient({ rpcUrl: archiveRpcUrl }),
+    client: createRobinhoodClient({ rpcUrl: archiveRpcUrl, transport }),
   });
 }
 
@@ -380,23 +387,48 @@ function buildAdapters(config) {
     },
   });
 
+  // Redirect confinement for exactly the synthetic-offline evidence boundary: an already-loopback
+  // `baseUrl`/`rpcUrl` does not by itself stop a misbehaving local mock from handing a client a
+  // 3xx response pointing outward. Collector, Relay, and Solana RPC all accept an injectable
+  // `fetchImpl`; the three Robinhood/EVM construction sites (primary client, secondaryLogClient,
+  // archiveEvidenceClientFromConfig) get the same confined fetch through viem's own `http(url,
+  // {fetchFn})` transport, so every actually-constructed external transport is covered.
+  const offlineTransportFetch = config.collectorCrypt?.productionBindingAuthority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE
+    ? createLoopbackConfinedFetch()
+    : null;
+  const offlineHttpTransport = rpcUrl => (offlineTransportFetch === null ? undefined : http(rpcUrl, { fetchFn: offlineTransportFetch }));
   const collectorCrypt = config.execution?.providerMode === 'fake'
     ? fakeProvider('collector')
     : config.collectorCrypt.apiKey
-    ? createCollectorCryptClient({ apiKey: config.collectorCrypt.apiKey, baseUrl: config.collectorCrypt.baseUrl })
+    ? createCollectorCryptClient({
+      apiKey: config.collectorCrypt.apiKey,
+      baseUrl: config.collectorCrypt.baseUrl,
+      ...(offlineTransportFetch === null ? {} : { fetchImpl: offlineTransportFetch }),
+    })
     : null;
   const liveCollectorOnly = isLiveCollectorOnlyRehearsal(config);
   const relay = config.execution?.providerMode === 'fake'
     ? fakeProvider('relay')
     : liveCollectorOnly
       ? null
-      : createRelayClient({ baseUrl: config.relay.baseUrl, apiKey: config.relay.apiKey ?? undefined });
-  const robinhoodClient = liveCollectorOnly ? null : createRobinhoodClient({ rpcUrl: config.robinhood.rpcUrl });
+      : createRelayClient({
+        baseUrl: config.relay.baseUrl,
+        apiKey: config.relay.apiKey ?? undefined,
+        ...(offlineTransportFetch === null ? {} : { fetchImpl: offlineTransportFetch }),
+      });
+  const robinhoodClient = liveCollectorOnly ? null : createRobinhoodClient({
+    rpcUrl: config.robinhood.rpcUrl,
+    transport: offlineHttpTransport(config.robinhood.rpcUrl),
+  });
   const secondaryLogClient = liveCollectorOnly || config.robinhood.archiveRpcUrl === null || config.robinhood.archiveRpcUrl === undefined
     ? null
-    : createRobinhoodClient({ rpcUrl: config.robinhood.archiveRpcUrl });
-  const solanaClient = createSolanaRpcClient({ rpcUrl: config.solana.rpcUrl });
-  const historicalEvidenceClient = injectedEvidenceClient ?? archiveEvidenceClientFromConfig(config);
+    : createRobinhoodClient({ rpcUrl: config.robinhood.archiveRpcUrl, transport: offlineHttpTransport(config.robinhood.archiveRpcUrl) });
+  const solanaClient = createSolanaRpcClient({
+    rpcUrl: config.solana.rpcUrl,
+    ...(offlineTransportFetch === null ? {} : { fetchImpl: offlineTransportFetch }),
+  });
+  const historicalEvidenceClient = injectedEvidenceClient
+    ?? archiveEvidenceClientFromConfig(config, { transport: offlineHttpTransport(config.robinhood.archiveRpcUrl) });
 
   return {
     collectorCrypt,
@@ -1268,6 +1300,23 @@ export async function compose(config) {
   let adapters = buildAdapters(resolved);
   if (isLiveCollectorOnlyRehearsal(resolved) && resolved.collectorCrypt?.executionBundleRequired === true) {
     resolved = attachCollectorPolicyBundle(resolved, await loadCollectorPolicyBundle());
+  }
+  // Narrow typed attachment of the Collector production binding registry: never read from a
+  // file path or an environment variable (environment.mjs only ever selects the authority
+  // identity), only from a raw registry object/JSON text directly injected on `config` the same
+  // way `config.adapters`/`config.historicalEvidenceClient` already are. Fully schema/digest
+  // validated here, before any stage ever sees it; `resolved.collectorCrypt.productionBindingAuthority`
+  // is set only for the production profile (environment.mjs's own guard), so this never runs
+  // outside it.
+  if (resolved.collectorCrypt?.productionBindingAuthority !== undefined
+    && resolved.collectorCrypt?.productionBindingAuthority !== null) {
+    resolved = {
+      ...resolved,
+      collectorCrypt: {
+        ...resolved.collectorCrypt,
+        productionBindingRegistry: loadCollectorProductionBindingRegistry(resolved.collectorProductionBindingRegistry),
+      },
+    };
   }
   if (adapters.solana?.client) {
     resolved = {

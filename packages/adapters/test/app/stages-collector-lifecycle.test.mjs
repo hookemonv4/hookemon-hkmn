@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { after, before } from 'node:test';
 
-import { Keypair, Transaction } from '@solana/web3.js';
+import { ComputeBudgetProgram, Keypair, PublicKey, Transaction, TransactionInstruction } from '@solana/web3.js';
 
 import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
+  MPL_CORE_PROGRAM_ID,
   SOLANA_RELAY_CHAIN_ID,
   SYSTEM_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -42,6 +43,14 @@ import {
   prepareBuybackRequest,
   reconcileLiveBuyback,
 } from '../../src/app/stages/buyback.mjs';
+import { COLLECTOR_BUYBACK_BINDING_SCHEMA } from '../../src/signing/collector-buyback-policy.mjs';
+import {
+  COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+  COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA,
+  COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA,
+  createIsolatedKeychainChildSetup,
+  loadCollectorProductionBindingRegistry,
+} from '../../src/signing/collector-production-binding.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { LeaseLostError } from '../../../runner/src/automation/exclusive-lease.mjs';
@@ -81,6 +90,15 @@ function tokenAccountResponse({ owner = OPERATOR, mint = SETTLEMENT_ASSET, amoun
   };
 }
 
+/** A minimal, correctly shaped Metaplex Core AssetV1 account (`readMplCoreAssetOwner`'s own
+ * parsing: owner === MPL_CORE_PROGRAM_ID, first data byte the AssetV1 discriminator, next 32 bytes
+ * the current owner's public key) so buyback's finalized-ownership check resolves against the
+ * configured operator by default. */
+function mplCoreAssetResponse({ owner = OPERATOR } = {}) {
+  const bytes = Buffer.concat([Buffer.from([1]), Buffer.from(new PublicKey(owner).toBytes())]);
+  return { value: { owner: MPL_CORE_PROGRAM_ID, data: [bytes.toString('base64'), 'base64'] } };
+}
+
 function transactionResponse(entries) {
   const accountKeys = entries.map(entry => ({ pubkey: entry.tokenAccount, signer: false, writable: true }));
   const preTokenBalances = entries.map((entry, accountIndex) => ({
@@ -101,14 +119,39 @@ function transactionResponse(entries) {
   };
 }
 
-function rpcClient({ tokenAccount = tokenAccountResponse(), entries = [], finalized = true, balance = 1_000_000 } = {}) {
+function rpcClient({
+  tokenAccount = tokenAccountResponse(), entries = [], finalized = true, balance = 1_000_000,
+  cardOwner = OPERATOR, cardAssetId = CARD_ASSET,
+} = {}) {
+  const cardAta = deriveAssociatedTokenAddress(OPERATOR, cardAssetId).toBase58();
+  // `cardOwner` may be a plain value (the same owner every read) or a function (called fresh on
+  // every ownership read, so a test can simulate the card's owner actually changing between the
+  // pre-provider-call read and the beforeSign refresh).
+  const currentCardOwner = () => (typeof cardOwner === 'function' ? cardOwner() : cardOwner);
   return createSolanaRpcClient({
     fetchImpl: async (_url, init) => {
       const body = JSON.parse(init.body);
-      if (body.method === 'getAccountInfo') return jsonRpc(tokenAccount, body.id);
+      if (body.method === 'getAccountInfo') {
+        const [address] = body.params;
+        // Buyback's finalized-ownership check reads the opened card's own account (mpl-core) or
+        // the operator's associated token account for it (spl) -- distinct addresses from the
+        // settlement asset's own ATA that `tokenAccount` below already covers.
+        if (address === cardAssetId) return jsonRpc(mplCoreAssetResponse({ owner: currentCardOwner() }), body.id);
+        if (address === cardAta) {
+          const owner = currentCardOwner();
+          return jsonRpc(tokenAccountResponse({ owner: OPERATOR, mint: cardAssetId, amount: owner === OPERATOR ? '1' : '0', decimals: 0 }), body.id);
+        }
+        return jsonRpc(tokenAccount, body.id);
+      }
       if (body.method === 'getBalance') return jsonRpc({ value: balance }, body.id);
       if (body.method === 'isBlockhashValid') return jsonRpc({ value: true }, body.id);
       if (body.method === 'getBlockHeight') return jsonRpc(99, body.id);
+      // Only the production-binding buyback path reads a fresh blockhash (for the policy's own
+      // deadline fact, independent of the candidate transaction's own already-decoded blockhash);
+      // fixed to the same SYSTEM_PROGRAM_ID placeholder every candidate transaction in this file
+      // already embeds as its own recentBlockhash, and the same lastValidBlockHeight ('100') every
+      // config's own `blockhashContextResolver` above already fixes the decoded deadline bound to.
+      if (body.method === 'getLatestBlockhash') return jsonRpc({ value: { blockhash: SYSTEM_PROGRAM_ID, lastValidBlockHeight: 100 } }, body.id);
       if (body.method === 'getSignatureStatuses') {
         return jsonRpc({ value: [{ err: null, confirmationStatus: finalized ? 'finalized' : 'confirmed' }] }, body.id);
       }
@@ -172,6 +215,239 @@ function collectorMoneyConfiguration() {
       lamportReserve: { chainId: CHAIN_ID, assetId: 'native', decimals: 9, amountAtomic: '2' },
     },
   };
+}
+
+// A real isolated Keychain child setup, built once for the one test below that must satisfy the
+// full offline execution boundary (`resolveCollectorProductionBinding` refuses to resolve any
+// registry entry without it) -- never a hand-built lookalike object.
+let productionBindingSyntheticRoot;
+let productionBindingIsolatedSetup;
+before(async () => {
+  productionBindingSyntheticRoot = await mkdtemp(join(tmpdir(), 'hookemon-buyback-binding-'));
+  productionBindingIsolatedSetup = await createIsolatedKeychainChildSetup({ directory: productionBindingSyntheticRoot });
+});
+after(async () => {
+  await rm(productionBindingSyntheticRoot, { recursive: true, force: true });
+});
+
+/** A buyback registry binding whose declared proceeds mint/decimals deliberately disagree with
+ * `settlementAsset()`, for the one regression that proves this mismatch refuses before any
+ * provider mutation. */
+function mismatchedProceedsBuybackBinding() {
+  return {
+    schema: COLLECTOR_BUYBACK_BINDING_SCHEMA,
+    version: 1,
+    provider: 'collector-crypt',
+    chainId: CHAIN_ID,
+    format: 'legacy',
+    addressLookupTables: [],
+    proceeds: { source: Keypair.generate().publicKey.toBase58(), mint: Keypair.generate().publicKey.toBase58(), decimals: 9 },
+    collectorAuthority: Keypair.generate().publicKey.toBase58(),
+    collectorRecipient: COLLECTOR_RECIPIENT,
+    instructions: [
+      { kind: 'compute-budget-set-unit-limit', programId: 'ComputeBudget111111111111111111111111111111', accounts: [], computeUnitLimit: 40000, priorityFeeCapAtomic: null, discriminatorHex: null },
+      { kind: 'compute-budget-set-unit-price', programId: 'ComputeBudget111111111111111111111111111111', accounts: [], computeUnitLimit: null, priorityFeeCapAtomic: '5000', discriminatorHex: null },
+      {
+        kind: 'unknown',
+        programId: Keypair.generate().publicKey.toBase58(),
+        accounts: [
+          { role: 'operator-fee-payer', isSigner: true, isWritable: true },
+          { role: 'collector-authority', isSigner: true, isWritable: false },
+          { role: 'opened-asset-mint', isSigner: false, isWritable: true },
+          { role: 'collector-recipient', isSigner: false, isWritable: true },
+        ],
+        computeUnitLimit: null,
+        priorityFeeCapAtomic: null,
+        discriminatorHex: 'a1b2c3d4e5f60718',
+      },
+      {
+        kind: 'spl-transfer-checked',
+        programId: TOKEN_PROGRAM_ID,
+        accounts: [
+          { role: 'proceeds-source', isSigner: false, isWritable: true },
+          { role: 'proceeds-mint', isSigner: false, isWritable: false },
+          { role: 'proceeds-destination', isSigner: false, isWritable: true },
+          { role: 'collector-authority', isSigner: true, isWritable: false },
+        ],
+        computeUnitLimit: null,
+        priorityFeeCapAtomic: null,
+        discriminatorHex: null,
+      },
+    ],
+  };
+}
+
+function mismatchedProceedsRegistry() {
+  const binding = mismatchedProceedsBuybackBinding();
+  return {
+    schema: COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA,
+    version: 1,
+    entries: [{
+      schema: COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA,
+      version: 1,
+      authority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+      stage: 'buyback',
+      chainId: CHAIN_ID,
+      provider: 'collector-crypt',
+      binding,
+      expectedDigest: digest(binding),
+    }],
+  };
+}
+
+/** A full, real offline-execution-boundary config: every endpoint pinned to loopback, the real
+ * isolated Keychain child setup above, and the mismatched-proceeds registry -- exactly what
+ * `assertCollectorOfflineExecutionBoundary` (called from inside `resolveCollectorProductionBinding`)
+ * requires before it will even look up the registry entry this test's assertion depends on. */
+/** `assertSolanaSignerMoneyConfiguration` requires `moneyConfiguration.assets.solanaStablecoin` to
+ * carry Relay's own Solana chain id (never `solana-mainnet`) whenever `execution.profile ===
+ * 'production'` -- see `reconcileLivePurchase normalizes a production Relay-namespaced admitted
+ * unitPurchase...` above for the same override against the same underlying rule. */
+function productionMoneyConfiguration() {
+  const money = collectorMoneyConfiguration();
+  money.assets.solanaStablecoin = { chainId: String(SOLANA_RELAY_CHAIN_ID), assetId: SETTLEMENT_ASSET, decimals: CIRCLE_USD_DECIMALS };
+  money.minimums.solanaReceive = { ...money.assets.solanaStablecoin, amountAtomic: '0' };
+  // Large enough to cover this file's own real production-binding candidate transactions' compute
+  // price (4000 microlamports/unit), unlike the tiny '2' baseline `collectorMoneyConfiguration()`
+  // uses for its other, much smaller fixtures.
+  money.solana.priorityFeeCap = { ...money.solana.priorityFeeCap, chainId: String(SOLANA_RELAY_CHAIN_ID), amountAtomic: '1000000' };
+  money.solana.lamportReserve = { ...money.solana.lamportReserve, chainId: String(SOLANA_RELAY_CHAIN_ID) };
+  return money;
+}
+
+function offlineBoundaryConfig(registry = mismatchedProceedsRegistry()) {
+  return {
+    accounts: { solana: OPERATOR },
+    pack: { code: 'pokemon_50' },
+    execution: { profile: 'production' },
+    solana: {
+      chainId: CHAIN_ID,
+      blockhashContextResolver: async blockhash => ({ blockhash, lastValidBlockHeight: '100' }),
+      rpcUrl: 'https://127.0.0.1:4103',
+    },
+    collectorCrypt: {
+      settlementAsset: settlementAsset(),
+      baseUrl: 'https://127.0.0.1:4105',
+      productionBindingAuthority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+      productionBindingRegistry: loadCollectorProductionBindingRegistry(registry),
+    },
+    robinhood: { rpcUrl: 'https://127.0.0.1:4101', archiveRpcUrl: 'https://127.0.0.1:4102' },
+    relay: { baseUrl: 'https://127.0.0.1:4104' },
+    signer: {
+      backend: 'keychain',
+      liveMode: true,
+      keychain: { command: productionBindingIsolatedSetup.command, isolatedChildSetup: productionBindingIsolatedSetup },
+    },
+    moneyConfiguration: productionMoneyConfiguration(),
+  };
+}
+
+/** A buyback registry binding whose proceeds mint/decimals genuinely match `settlementAsset()`,
+ * and whose declared program/recipient/opened-asset-mint accounts match a real candidate
+ * transaction this file builds against it -- for the two ownership-refresh regressions that must
+ * actually reach `sellPack`'s production-binding sign path, not merely resolve the registry entry. */
+function matchingBuybackBinding({ collectorProgramId, collectorRecipient, collectorAuthority, proceedsSource }) {
+  return {
+    schema: COLLECTOR_BUYBACK_BINDING_SCHEMA,
+    version: 1,
+    provider: 'collector-crypt',
+    chainId: CHAIN_ID,
+    format: 'legacy',
+    addressLookupTables: [],
+    proceeds: { source: proceedsSource, mint: SETTLEMENT_ASSET, decimals: CIRCLE_USD_DECIMALS },
+    collectorAuthority,
+    collectorRecipient,
+    instructions: [
+      { kind: 'compute-budget-set-unit-limit', programId: 'ComputeBudget111111111111111111111111111111', accounts: [], computeUnitLimit: 40000, priorityFeeCapAtomic: null, discriminatorHex: null },
+      { kind: 'compute-budget-set-unit-price', programId: 'ComputeBudget111111111111111111111111111111', accounts: [], computeUnitLimit: null, priorityFeeCapAtomic: '5000', discriminatorHex: null },
+      {
+        kind: 'unknown',
+        programId: collectorProgramId,
+        accounts: [
+          { role: 'operator-fee-payer', isSigner: true, isWritable: true },
+          { role: 'collector-authority', isSigner: true, isWritable: false },
+          { role: 'opened-asset-mint', isSigner: false, isWritable: true },
+          { role: 'collector-recipient', isSigner: false, isWritable: true },
+        ],
+        computeUnitLimit: null,
+        priorityFeeCapAtomic: null,
+        discriminatorHex: 'a1b2c3d4e5f60718',
+      },
+      {
+        kind: 'spl-transfer-checked',
+        programId: TOKEN_PROGRAM_ID,
+        accounts: [
+          { role: 'proceeds-source', isSigner: false, isWritable: true },
+          { role: 'proceeds-mint', isSigner: false, isWritable: false },
+          { role: 'proceeds-destination', isSigner: false, isWritable: true },
+          { role: 'collector-authority', isSigner: true, isWritable: false },
+        ],
+        computeUnitLimit: null,
+        priorityFeeCapAtomic: null,
+        discriminatorHex: null,
+      },
+    ],
+  };
+}
+
+function matchingBuybackRegistry(binding) {
+  return {
+    schema: COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA,
+    version: 1,
+    entries: [{
+      schema: COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA,
+      version: 1,
+      authority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+      stage: 'buyback',
+      chainId: CHAIN_ID,
+      provider: 'collector-crypt',
+      binding,
+      expectedDigest: digest(binding),
+    }],
+  };
+}
+
+/** Builds a real candidate buyback transaction that satisfies `matchingBuybackBinding`'s own
+ * template exactly -- the same account roles, instruction order, and settle/transfer data layout
+ * `collector-buyback-policy.mjs`'s factory resolves from the binding, mirroring
+ * `collector-buyback-policy.test.mjs`'s own `buildCandidateTransaction` helper but against this
+ * file's own pack/settlement-asset identities. */
+function buildMatchingBuybackTransaction({ collectorProgramId, collectorAuthority, collectorRecipient, proceedsSource, amountAtomic }) {
+  const settleData = Buffer.alloc(24);
+  Buffer.from('a1b2c3d4e5f60718', 'hex').copy(settleData, 0);
+  settleData.writeBigUInt64LE(BigInt(amountAtomic), 8);
+  settleData.writeBigUInt64LE(BigInt(amountAtomic), 16);
+  const transferData = Buffer.alloc(10);
+  transferData.writeUInt8(12, 0);
+  transferData.writeBigUInt64LE(BigInt(amountAtomic), 1);
+  transferData.writeUInt8(CIRCLE_USD_DECIMALS, 9);
+
+  const proceedsDestination = new PublicKey(deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58());
+  const transaction = new Transaction({ feePayer: OPERATOR_KEYPAIR.publicKey, recentBlockhash: SYSTEM_PROGRAM_ID });
+  transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 40000 }));
+  transaction.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 4000 }));
+  transaction.add(new TransactionInstruction({
+    programId: new PublicKey(collectorProgramId),
+    keys: [
+      { pubkey: OPERATOR_KEYPAIR.publicKey, isSigner: true, isWritable: true },
+      { pubkey: collectorAuthority.publicKey, isSigner: true, isWritable: false },
+      { pubkey: new PublicKey(CARD_ASSET), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(collectorRecipient), isSigner: false, isWritable: true },
+    ],
+    data: settleData,
+  }));
+  transaction.add(new TransactionInstruction({
+    programId: new PublicKey(TOKEN_PROGRAM_ID),
+    keys: [
+      { pubkey: new PublicKey(proceedsSource), isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(SETTLEMENT_ASSET), isSigner: false, isWritable: false },
+      { pubkey: proceedsDestination, isSigner: false, isWritable: true },
+      { pubkey: collectorAuthority.publicKey, isSigner: true, isWritable: false },
+    ],
+    data: transferData,
+  }));
+  transaction.partialSign(OPERATOR_KEYPAIR, collectorAuthority);
+  return Buffer.from(transaction.serialize()).toString('base64');
 }
 
 function baseConfig(overrides = {}) {
@@ -961,7 +1237,10 @@ test('mutateBuyback passes a held epic-gate pack through without touching the pr
 });
 
 test('mutateBuyback holds a pack as unavailable before it can request or sign a provider transaction', async () => {
-  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
   const collectorCrypt = { async getBuybackAvailable() { return { available: false }; } };
   const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
   const evidence = await mutateBuyback({ liveMode: true, adapters: { collectorCrypt, solana: { client: rpc } }, signerClient: {}, config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID } });
@@ -975,7 +1254,10 @@ test('mutateBuyback marks a pack unknown (not held) when the provisional authori
   // guard that also protects a real post-send failure; treating it as "unknown" (never "held")
   // keeps the two indistinguishable paths from ever double-holding a pack the provider may have
   // actually processed.
-  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
   const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
   let buybackCalls = 0;
   const collectorCrypt = {
@@ -990,7 +1272,10 @@ test('mutateBuyback marks a pack unknown (not held) when the provisional authori
 });
 
 test('mutateBuyback admits the exact Node-test-profile capability to reach the provider buyback call', async () => {
-  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
   const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
   let buybackCalls = 0;
   const collectorCrypt = {
@@ -1015,7 +1300,10 @@ test('mutateBuyback admits the exact Node-test-profile capability to reach the p
 
 test('mutateBuyback refuses a structural clone, an arbitrary object, and a serialized capability before any provider call', async () => {
   for (const badCapability of [{ ...TEST_PROFILE_MUTATION_AUTHORITY }, { anything: true }, 'test-profile']) {
-    const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+    const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
     const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
     let buybackCalls = 0;
     const collectorCrypt = {
@@ -1040,7 +1328,10 @@ test('mutateBuyback refuses the exact capability outside the Node test runner', 
   const previous = process.env.NODE_TEST_CONTEXT;
   try {
     delete process.env.NODE_TEST_CONTEXT;
-    const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+    const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
     const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
     let buybackCalls = 0;
     const collectorCrypt = {
@@ -1062,6 +1353,265 @@ test('mutateBuyback refuses the exact capability outside the Node test runner', 
     if (previous === undefined) delete process.env.NODE_TEST_CONTEXT;
     else process.env.NODE_TEST_CONTEXT = previous;
   }
+});
+
+test('mutateBuyback holds a pack whose finalized owner is not the configured operator, with zero provider or signer effects', async () => {
+  const outsider = Keypair.generate().publicKey.toBase58();
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack({ assetKind: 'mpl-core' })] } },
+  } });
+  let buybackCalls = 0;
+  let availableCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { availableCalls += 1; return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }), cardOwner: outsider });
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.heldPositions.length, 1);
+  assert.equal(availableCalls, 0, 'the provider availability read must never be reached for an unowned card');
+  assert.equal(buybackCalls, 0, 'the provider mutation must never be reached for an unowned card');
+});
+
+test('mutateBuyback holds a pack with no completed open-stage record, with zero provider or signer effects', async () => {
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+  } });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { throw new Error('must not be called'); },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.heldPositions.length, 1);
+  assert.equal(buybackCalls, 0, 'the provider mutation must never be reached without a completed open-stage record');
+});
+
+test('mutateBuyback holds a pack whose open-stage record exists but is not COMPLETE, with zero provider or signer effects', async () => {
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    // A PREPARED record carrying a plausible-looking pack ledger is not a completed one: it must
+    // still refuse, exactly like a genuinely absent open-stage record.
+    open: { status: 'PREPARED', evidence: { packs: [openedPack()] } },
+  } });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { throw new Error('must not be called'); },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(buybackCalls, 0, 'the provider mutation must never be reached for a non-COMPLETE open stage');
+});
+
+test('mutateBuyback holds a pack whose open-stage record names a different mint, with zero provider or signer effects', async () => {
+  const wrongMint = Keypair.generate().publicKey.toBase58();
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack({ mint: wrongMint })] } },
+  } });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { throw new Error('must not be called'); },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }), cardAssetId: wrongMint });
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(buybackCalls, 0, 'the provider mutation must never be reached when the open-stage mint does not match the pack being sold');
+});
+
+test('mutateBuyback holds a pack whose open-stage record names a different memo, with zero provider or signer effects', async () => {
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack({ memo: 'a-different-memo' })] } },
+  } });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { throw new Error('must not be called'); },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: baseConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(buybackCalls, 0, 'the provider mutation must never be reached when the open-stage memo does not match the pack being sold');
+});
+
+// `baseConfig()` alone never resolves a production binding (no `productionBindingRegistry`), so
+// `resolvedBinding` stays `null` and the owner-refresh check inside `beforeSign` -- gated on
+// `resolvedBinding !== null` -- is skipped entirely. A prior version of this regression used
+// `baseConfig()` with a signer mock that unconditionally threw, so it only ever proved that any
+// thrown sign/policy error resolves to "unknown" (already covered by the provisional-authority
+// denial tests above), never that the refresh itself ran or observed the change. Both tests below
+// instead resolve a real matching production binding (real isolated child setup, real candidate
+// transaction built to that binding's own template) so the refresh path in `buyback.mjs` actually
+// executes, and assert the exact reads/calls/non-calls it should produce.
+test('mutateBuyback refuses to sign once the finalized owner refresh (bound to a real resolved production binding) observes a changed owner, with zero sign and zero submission calls', async () => {
+  const outsider = Keypair.generate().publicKey.toBase58();
+  const collectorProgramId = Keypair.generate().publicKey.toBase58();
+  const collectorAuthority = Keypair.generate();
+  const collectorRecipient = Keypair.generate().publicKey.toBase58();
+  const proceedsSource = Keypair.generate().publicKey.toBase58();
+  const binding = matchingBuybackBinding({ collectorProgramId, collectorRecipient, collectorAuthority: collectorAuthority.publicKey.toBase58(), proceedsSource });
+  const registry = matchingBuybackRegistry(binding);
+  const candidateTransactionBase64 = buildMatchingBuybackTransaction({
+    collectorProgramId, collectorAuthority, collectorRecipient, proceedsSource, amountAtomic: '85',
+  });
+
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack({ assetKind: 'mpl-core' })] } },
+  } });
+  // The first ownership read (before the provider call, inside `verifyFinalizedOwnership`) sees
+  // the operator; every read after that -- the refresh inside `beforeSign`, which only runs once a
+  // production binding actually resolved -- sees a changed owner, simulating the card moving away
+  // during the provider/quote awaits.
+  let ownershipReads = 0;
+  const rpc = rpcClient({
+    tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }),
+    cardOwner: () => { ownershipReads += 1; return ownershipReads === 1 ? OPERATOR : outsider; },
+  });
+  const quote = { ...settlementAsset(), amountAtomic: '85' };
+  let availableCalls = 0;
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { availableCalls += 1; return { available: true, amount: quote }; },
+    async buyback() { buybackCalls += 1; return { memo: MEMO, refundAmount: quote, serializedTransaction: candidateTransactionBase64 }; },
+    async submitTransaction() { throw new Error('must not submit once ownership changed'); },
+  };
+  let signCalls = 0;
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { signCalls += 1; throw new Error('must not sign once ownership changed'); } } },
+    config: offlineBoundaryConfig(registry),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, assertLease: async () => {} },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'unknown', 'an ownership change discovered only inside beforeSign is provider-ambiguous, not a definite hold');
+  assert.equal(cycleRepository.heldPositions.length, 0);
+  assert.equal(ownershipReads, 2, 'both the initial and the refreshed finalized-owner reads must actually happen');
+  assert.equal(availableCalls, 2, 'the initial availability read and beforeSign\'s own quote refresh must both still happen before the owner refresh is reached');
+  assert.equal(buybackCalls, 1, 'the provider buyback() mutation must still happen before the refresh can even be reached');
+  assert.equal(signCalls, 0, 'signing must never be reached once the refreshed owner disagrees with the initial observation');
+});
+
+test('mutateBuyback reaches signing for the identical resolved production binding and candidate transaction when the finalized owner never changes', async () => {
+  const collectorProgramId = Keypair.generate().publicKey.toBase58();
+  const collectorAuthority = Keypair.generate();
+  const collectorRecipient = Keypair.generate().publicKey.toBase58();
+  const proceedsSource = Keypair.generate().publicKey.toBase58();
+  const binding = matchingBuybackBinding({ collectorProgramId, collectorRecipient, collectorAuthority: collectorAuthority.publicKey.toBase58(), proceedsSource });
+  const registry = matchingBuybackRegistry(binding);
+  const candidateTransactionBase64 = buildMatchingBuybackTransaction({
+    collectorProgramId, collectorAuthority, collectorRecipient, proceedsSource, amountAtomic: '85',
+  });
+
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack({ assetKind: 'mpl-core' })] } },
+  } });
+  // Positive control for the regression above: the identical binding/setup/candidate transaction,
+  // with the finalized owner reading the operator on every read (never changing), must actually
+  // reach the signer -- proving the prior test's refusal comes from the ownership change, not from
+  // some other mismatch in the binding/candidate/config this test reuses unchanged.
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }), cardOwner: OPERATOR });
+  const quote = { ...settlementAsset(), amountAtomic: '85' };
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { return { available: true, amount: quote }; },
+    async buyback() { buybackCalls += 1; return { memo: MEMO, refundAmount: quote, serializedTransaction: candidateTransactionBase64 }; },
+  };
+  let signCalls = 0;
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { signCalls += 1; throw new Error('reached signing'); } } },
+    config: offlineBoundaryConfig(registry),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID, assertLease: async () => {} },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(buybackCalls, 1);
+  assert.equal(signCalls, 1, 'an unchanged finalized owner must let the identical candidate reach the signer');
+  assert.equal(evidence.packs[0].decision, 'unknown', 'the deliberately thrown sign error still resolves as provider-ambiguous, not held');
+});
+
+test('mutateBuyback holds a pack whose resolved production binding proceeds asset does not match the configured settlement asset, with zero provider calls', async () => {
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
+  const rpc = rpcClient({ tokenAccount: tokenAccountResponse({ mint: SETTLEMENT_ASSET }) });
+  let buybackCalls = 0;
+  const collectorCrypt = {
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { buybackCalls += 1; throw new Error('must not be called'); },
+  };
+  const evidence = await mutateBuyback({
+    liveMode: true,
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+    config: offlineBoundaryConfig(),
+    cycleRepository,
+    context: { cycleId: CYCLE_ID },
+    preflightAuthority: TEST_PROFILE_MUTATION_AUTHORITY,
+  });
+  assert.equal(evidence.packs[0].decision, 'held');
+  assert.equal(evidence.packs[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(cycleRepository.heldPositions.length, 1);
+  assert.equal(buybackCalls, 0, 'the provider mutation must never be reached when the resolved binding proceeds asset disagrees with the configured settlement asset');
 });
 
 test('reconcileLiveBuyback confirms proceeds for a submitted sale and records the summed custody ledger', async () => {

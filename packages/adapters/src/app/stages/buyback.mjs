@@ -7,13 +7,20 @@ import {
   readBlockhashValidity,
   readFinalizedSignatureStatus,
   readMplCoreAssetOwner,
+  readUsableLatestBlockhash,
 } from '../../solana-rpc.mjs';
+import { digest } from '../../../../runner/src/cycle/journal.mjs';
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
 import {
   decodeProviderTransaction,
   evaluate as evaluateTransactionPolicy,
 } from '../../signing/transaction-policy.mjs';
 import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
+import {
+  COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX,
+  createCollectorBuybackPolicy,
+} from '../../signing/collector-buyback-policy.mjs';
+import { resolveCollectorProductionBinding } from '../../signing/collector-production-binding.mjs';
 import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../signing/signer-client.mjs';
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
@@ -254,12 +261,20 @@ function decodedBindsBuyback({ decoded, owner, mint, buyback, proceedsAccount = 
   if (!hasProceedsAccount) throw new Error('buyback provider transaction does not bind the dedicated proceeds account');
 }
 
-async function decodeAndSign({ transaction, mint, adapters, config, money, signerClient, beforeSign = null, preflightAuthority }) {
+async function decodeAndSign({ transaction, mint, adapters, config, money, signerClient, beforeSign = null, preflightAuthority, productionBindingInput = null }) {
   if (!adapters?.solana?.client || !signerClient?.solana || typeof signerClient.solana.sign !== 'function') {
     throw new Error('buyback requires a Solana RPC client and signerClient.solana.sign');
   }
   if (typeof config?.solana?.chainId !== 'string' || config.solana.chainId.length === 0) throw new Error('buyback requires config.solana.chainId');
-  const buyback = configuredBuyback(config);
+  // Two seams, never both at once: the production binding registry `compose.mjs` attaches only
+  // for the production execution profile, and the legacy raw canonical policy every other profile
+  // still uses. Neither seam's account/program identity is ever borrowed from the other.
+  const productionBinding = productionBindingInput === null ? null : createCollectorBuybackPolicy(productionBindingInput);
+  const buyback = productionBinding === null ? configuredBuyback(config) : {
+    policy: productionBinding,
+    collectorProgramId: productionBindingInput.binding.instructions[COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX].programId,
+    collectorRecipient: productionBindingInput.binding.collectorRecipient,
+  };
   const decodeOptions = trustedSolanaDecodeOptions({ adapters, config });
   const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction });
   if (!decoded.blockhash || !(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
@@ -378,12 +393,79 @@ async function prepareSale({ adapters, config, pack }) {
   if (!sameAmount(quote, pack.offer)) {
     return { unavailable: false, quoteMismatch: quote };
   }
-  return { unavailable: false, quoteMismatch: null, asset, money, proceedsAccount, quote };
+  return { unavailable: false, quoteMismatch: null, asset, money, proceedsAccount, quote, settlementAccount: account.address };
+}
+
+/**
+ * Binds the pack under sale to the completed open-stage record for the same index -- exact
+ * production provenance, not the looser contract legacy reconciliation code (`assetKindOf`, used
+ * only by post-broadcast reconciliation, unaffected by this function) already tolerates. Requires
+ * the open stage to actually be `COMPLETE` (a `PREPARED` or other in-flight record carrying packs
+ * is not a completed one, however plausible its contents look), and requires this exact pack's
+ * `mint`, `memo`, and `assetKind` to all be present and to agree with the pack being sold. A
+ * missing or mismatched field refuses rather than defaulting -- in particular, an absent
+ * `assetKind` is never silently treated as `spl`.
+ */
+function boundOpenEvidence(openEvidencePacks, pack) {
+  if (openEvidencePacks === null) {
+    throw new Error('buyback requires the open stage to be COMPLETE with a durable pack ledger');
+  }
+  const openPack = openEvidencePacks.find(entry => entry.packIndex === pack.packIndex);
+  if (!plainObject(openPack)
+    || typeof openPack.mint !== 'string' || openPack.mint.length === 0
+    || typeof openPack.memo !== 'string' || openPack.memo.length === 0
+    || typeof openPack.assetKind !== 'string' || openPack.assetKind.length === 0) {
+    throw new Error('buyback requires a completed open-stage record with an explicit mint, memo, and asset kind for this pack');
+  }
+  if (openPack.mint !== pack.mint) throw new Error('buyback pack mint does not match the completed open-stage record');
+  if (openPack.memo !== pack.memo) throw new Error('buyback pack memo does not match the completed open-stage record');
+  return { assetKind: openPack.assetKind };
+}
+
+/**
+ * Reads the card's actual current finalized owner and requires it to be the configured operator,
+ * before any provider generation or signing call. `currentOwner` in the buyback policy factory's
+ * cycle facts must be this independently observed value, never a blind copy of configuration --
+ * copying configuration would make the factory's own `currentOwner === operatorFeePayer` check
+ * tautological instead of a genuine ownership proof. Uses the existing reader for each of this
+ * codebase's two documented card representations: `readMplCoreAssetOwner` for `mpl-core`, and the
+ * operator's own associated-token-account balance (`readAssociatedTokenAccount`) for `spl`. Any
+ * other asset kind refuses rather than guessing.
+ *
+ * `readAssociatedTokenAccount` reads at `adapters.solana.client`'s own configured commitment, not
+ * an explicit override -- unlike `readMplCoreAssetOwner`, which is passed `finalized` directly --
+ * so the `spl` branch enforces finalized commitment locally rather than assuming the configured
+ * client already uses it.
+ */
+async function verifyFinalizedOwnership({ adapters, config, pack, openEvidencePacks }) {
+  const { assetKind } = boundOpenEvidence(openEvidencePacks, pack);
+  if (assetKind === 'mpl-core') {
+    const owner = await readMplCoreAssetOwner(adapters.solana.client, pack.mint, { commitment: 'finalized' });
+    if (owner !== config.accounts.solana) throw new Error('buyback finalized ownership does not match the configured operator');
+    return owner;
+  }
+  if (assetKind === 'spl') {
+    if (adapters.solana.client.commitment !== 'finalized') {
+      throw new Error('buyback requires a finalized-commitment Solana client to verify SPL card ownership');
+    }
+    const account = await readAssociatedTokenAccount(adapters.solana.client, config.accounts.solana, pack.mint);
+    if (!account.exists || account.amount <= 0n) throw new Error('buyback finalized ownership does not match the configured operator');
+    return config.accounts.solana;
+  }
+  throw new Error(`buyback cannot independently verify current ownership for asset kind "${assetKind}"`);
 }
 
 /** Requests, signs, and broadcasts one pack's buyback. Any failure carves it out as held. */
-async function sellPack({ adapters, config, signerClient, cycleRepository, context, pack, preflightAuthority }) {
+async function sellPack({ adapters, config, signerClient, cycleRepository, context, pack, openEvidencePacks, preflightAuthority }) {
   if (pack.decision === 'held') return pack;
+  let observedOwner;
+  try {
+    observedOwner = await verifyFinalizedOwnership({ adapters, config, pack, openEvidencePacks });
+  } catch (error) {
+    return holdPack(cycleRepository, config, context, pack.packIndex, pack.memo, pack.mint, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', memo: pack.memo, mint: pack.mint, reason: error.message,
+    });
+  }
   let prepared;
   try {
     prepared = await prepareSale({ adapters, config, pack });
@@ -403,6 +485,28 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
     });
   }
   const { asset, money, proceedsAccount, quote } = prepared;
+  // Resolved and digest-validated before the provider call below is ever awaited, exactly like
+  // purchase.mjs's own fixture-binding capture: a provider callback executing during that await
+  // cannot influence which binding this pack trusts. `resolveCollectorProductionBinding` returns
+  // an already deep-frozen binding, so this reference stays immutable across every await after it.
+  const productionBindingRegistry = config?.collectorCrypt?.productionBindingRegistry;
+  const resolvedBinding = productionBindingRegistry === undefined || productionBindingRegistry === null
+    ? null
+    : resolveCollectorProductionBinding({
+      registry: productionBindingRegistry,
+      authority: config.collectorCrypt.productionBindingAuthority,
+      stage: 'buyback',
+      config,
+    });
+  // The resolved binding's own proceeds asset identity must already agree with the configured
+  // settlement asset before any provider mutation: a mismatched trusted registry entry refuses
+  // here rather than generating a candidate and relying on a later transfer/receipt failure.
+  if (resolvedBinding !== null
+    && (resolvedBinding.binding.proceeds.mint !== asset.assetId || resolvedBinding.binding.proceeds.decimals !== asset.decimals)) {
+    return holdPack(cycleRepository, config, context, pack.packIndex, pack.memo, pack.mint, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', memo: pack.memo, mint: pack.mint, reason: 'resolved buyback binding proceeds asset does not match the configured settlement asset',
+    });
+  }
   // From here on, a thrown error is provider-ambiguous: the mutation may or may not have landed
   // server-side. This pack is marked "unknown", not held — reconciliation resolves it from
   // durable provider state using its own already-known memo, holding only past its deadline.
@@ -415,6 +519,36 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
         stage: 'buyback', memo: pack.memo, mint: pack.mint, quote, built, insuredValue: pack.insuredValue, reason: 'provider buyback response did not bind the quote and memo',
       });
     }
+    // Every fact below is durable and already independently established above -- the completed
+    // epic-gate stage's own opened mint (`pack.mint`), the operator's own verified settlement ATA
+    // (`prepared.settlementAccount`), and the quote/refund this function already cross-checked
+    // against the completed epic decision and the provider's own response, both before this
+    // point, never derived from the candidate transaction decoded below. Only the blockhash
+    // context is read fresh here, per pack, like purchase.mjs's own per-pack blockhash read.
+    let productionBindingInput = null;
+    if (resolvedBinding !== null) {
+      const latest = await readUsableLatestBlockhash(adapters.solana.client);
+      const currentHeight = await readBlockHeight(adapters.solana.client);
+      productionBindingInput = {
+        binding: resolvedBinding.binding,
+        expectedDigest: resolvedBinding.expectedDigest,
+        cycleFacts: {
+          operatorFeePayer: config.accounts.solana,
+          proceedsDestination: prepared.settlementAccount,
+          openedAssetMint: pack.mint,
+          currentOwner: observedOwner,
+          quoteAtomic: quote.amountAtomic,
+          minimumAtomic: quote.amountAtomic,
+          refundAtomic: refundAmount.amountAtomic,
+          requestDigest: digest({ schema: 'hookemon.collector-buyback-request.v1', cycleId: context.cycleId, memo: pack.memo }),
+        },
+        blockhashContext: Object.freeze({
+          blockhash: latest.blockhash,
+          lastValidBlockHeight: String(latest.lastValidBlockHeight),
+          currentBlockHeight: currentHeight.toString(),
+        }),
+      };
+    }
     const { signer, signed } = await decodeAndSign({
       transaction: built.serializedTransaction,
       mint: pack.mint,
@@ -423,11 +557,20 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
       money,
       signerClient,
       preflightAuthority,
+      productionBindingInput,
       beforeSign: async () => {
         await context.assertLease?.();
         const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: pack.mint, wallet: config.accounts.solana });
         const refreshedQuote = typedBuybackAmount(refreshed.amount, 'buyback quote');
         if (!sameAmount(refreshedQuote, quote)) throw new Error('buyback quote changed before signing');
+        // The production binding factory's cycleFacts.currentOwner is only trustworthy as of when
+        // it was observed; the provider awaits above (availability, then the buyback() mutation
+        // itself) are exactly where ownership could have changed since. Re-verify immediately
+        // before signing rather than trusting the earlier read indefinitely.
+        if (resolvedBinding !== null) {
+          const refreshedOwner = await verifyFinalizedOwnership({ adapters, config, pack, openEvidencePacks });
+          if (refreshedOwner !== observedOwner) throw new Error('buyback ownership changed before signing');
+        }
       },
     });
     const submitted = await signer.broadcast(signed);
@@ -453,12 +596,26 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
   }
 }
 
+/** `null` unless the open stage is actually `COMPLETE` with a durable pack ledger -- a `PREPARED`
+ * or other in-flight record carrying packs is not a completed one, and `boundOpenEvidence` treats
+ * `null` as refusing every pack rather than finding no match for any of them. */
+async function openEvidencePacksFor(cycleRepository, context) {
+  const open = await cycleRepository.readStage(context.cycleId, 'open');
+  if (open?.status !== 'COMPLETE' || !plainObject(open.evidence) || !Array.isArray(open.evidence.packs)) {
+    return null;
+  }
+  return open.evidence.packs;
+}
+
 export async function mutateBuyback({ liveMode, adapters, config, signerClient, cycleRepository, context, request, preflightAuthority }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateBuyback reached without liveMode');
   if (!adapters?.collectorCrypt) throw new Error('buyback requires a configured collector-crypt client');
   const prepared = request ?? context?.request ?? await prepareBuybackRequest({ cycleRepository, context });
+  const openEvidencePacks = await openEvidencePacksFor(cycleRepository, context);
   const outcomes = [];
-  for (const pack of prepared.packs) outcomes.push(await sellPack({ adapters, config, signerClient, cycleRepository, context, pack, preflightAuthority }));
+  for (const pack of prepared.packs) {
+    outcomes.push(await sellPack({ adapters, config, signerClient, cycleRepository, context, pack, openEvidencePacks, preflightAuthority }));
+  }
   return { packs: outcomes };
 }
 

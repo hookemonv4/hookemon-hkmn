@@ -10,7 +10,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { CIRCLE_USD_DECIMALS, CIRCLE_USD_MINT, TOKEN_PROGRAM_ID, createSolanaRpcClient } from '../../src/solana-rpc.mjs';
+import { PublicKey } from '@solana/web3.js';
+
+import {
+  CIRCLE_USD_DECIMALS, CIRCLE_USD_MINT, MPL_CORE_PROGRAM_ID, TOKEN_PROGRAM_ID,
+  createSolanaRpcClient, deriveAssociatedTokenAddress,
+} from '../../src/solana-rpc.mjs';
 import { reconcileLiveOpen } from '../../src/app/stages/open.mjs';
 import { mutateEpicGate, reconcileLiveEpicGate } from '../../src/app/stages/epic-gate.mjs';
 import { mutateBuyback } from '../../src/app/stages/buyback.mjs';
@@ -41,11 +46,27 @@ function tokenAccountResponse({ owner = OPERATOR, mint = SETTLEMENT_ASSET, amoun
   };
 }
 
-function rpcClient({ tokenAccount = tokenAccountResponse() } = {}) {
+/** A minimal, correctly shaped Metaplex Core AssetV1 account (`readMplCoreAssetOwner`'s own
+ * parsing) so buyback's finalized-ownership check resolves against the configured operator by
+ * default -- mirrors stages-collector-lifecycle.test.mjs's own fixture. */
+function mplCoreAssetResponse({ owner = OPERATOR } = {}) {
+  const bytes = Buffer.concat([Buffer.from([1]), Buffer.from(new PublicKey(owner).toBytes())]);
+  return { value: { owner: MPL_CORE_PROGRAM_ID, data: [bytes.toString('base64'), 'base64'] } };
+}
+
+function rpcClient({ tokenAccount = tokenAccountResponse(), cardOwner = OPERATOR, cardAssetId = CARD_ASSET } = {}) {
+  const cardAta = deriveAssociatedTokenAddress(OPERATOR, cardAssetId).toBase58();
   return createSolanaRpcClient({
     fetchImpl: async (_url, init) => {
       const body = JSON.parse(init.body);
-      if (body.method === 'getAccountInfo') return jsonRpc(tokenAccount, body.id);
+      if (body.method === 'getAccountInfo') {
+        const [address] = body.params;
+        if (address === cardAssetId) return jsonRpc(mplCoreAssetResponse({ owner: cardOwner }), body.id);
+        if (address === cardAta) {
+          return jsonRpc(tokenAccountResponse({ owner: OPERATOR, mint: cardAssetId, amount: cardOwner === OPERATOR ? '1' : '0', decimals: 0 }), body.id);
+        }
+        return jsonRpc(tokenAccount, body.id);
+      }
       if (body.method === 'getBalance') return jsonRpc({ value: 1_000_000 }, body.id);
       if (body.method === 'isBlockhashValid') return jsonRpc({ value: true }, body.id);
       if (body.method === 'getBlockHeight') return jsonRpc(99, body.id);
@@ -245,7 +266,10 @@ test('mutateEpicGate passing a held open pack through never derives a custody id
 // --- buyback ---------------------------------------------------------------------------------
 
 test('mutateBuyback attributes a HELD_UNAVAILABLE position to the canonical eip155:4663 USDG custody identity', async () => {
-  const cycleRepository = repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const cycleRepository = repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
   const collectorCrypt = { async getBuybackAvailable() { return { available: false }; } };
   const evidence = await mutateBuyback({
     liveMode: true,
@@ -262,7 +286,10 @@ test('mutateBuyback attributes a HELD_UNAVAILABLE position to the canonical eip1
 });
 
 test('buyback refuses to hold a card when the configured USDG asset is not the recognized canonical chain, token, or decimals', async () => {
-  const fixture = () => repository({ stages: { 'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } } } });
+  const fixture = () => repository({ stages: {
+    'epic-gate': { status: 'COMPLETE', evidence: { packs: [sellDecisionPack()] } },
+    open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } },
+  } });
   const collectorCrypt = { async getBuybackAvailable() { return { available: false }; } };
   const context = { cycleId: CYCLE_ID };
 

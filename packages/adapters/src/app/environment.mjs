@@ -52,6 +52,11 @@ import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { assertMoneyConfiguration } from '../../../runner/src/cycle/money-schemas.mjs';
 import { CIRCLE_USD_DECIMALS, CIRCLE_USD_MINT } from '../solana-rpc.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../collector-crypt.mjs';
+import {
+  COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+  COLLECTOR_SYNTHETIC_API_KEY,
+  RELAY_SYNTHETIC_API_KEY,
+} from '../signing/collector-production-binding.mjs';
 
 // Signing dependencies load only when a signer is actually constructed. Read-only configuration,
 // repository status, and direct keychain readiness must not initialize the transaction-policy path.
@@ -116,6 +121,17 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_KEYCHAIN_COMMAND',
   'HOOKEMON_KEYCHAIN_EVM_ACCOUNT',
   'HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT',
+  // ../signing/collector-production-binding.mjs's registry boundary. The authority selects which
+  // registry entry identity may resolve ("synthetic-offline" only; "live" is refused here and at
+  // every later validation layer). The registry path names a JSON file this module reads and
+  // hands, unvalidated, to compose.mjs -- exactly like every other JSON config path this module
+  // already reads -- which still runs the full schema/digest check before anything can use it.
+  'HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY',
+  'HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH',
+  // The isolated root directory `bin/hookemon-runner.mjs` passes to
+  // `../signing/collector-production-binding.mjs`'s `createIsolatedKeychainChildSetup` -- required
+  // only alongside the synthetic-offline authority above. This module never reads its contents.
+  'HOOKEMON_COLLECTOR_SYNTHETIC_ROOT',
   // The owner-signed standing-authority document and public keys this process verifies before a
   // production signing boundary. All three are optional together; no private key is read here.
   'HOOKEMON_STANDING_AUTHORITY_PATH',
@@ -758,6 +774,24 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   if (dryRun && profile !== 'production') fail('dryRun requires the production profile');
   requireProfileInputs(env, profile);
 
+  // Detected before any credential-file selector is ever read (below), not just before it is
+  // trusted: `HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH` (and any other real secret-file selector) must
+  // never be touched at all -- not even to have it rejected after the filesystem access already
+  // happened -- once a synthetic-offline launch is declared. "live" is refused here too (defense in
+  // depth alongside `../signing/collector-production-binding.mjs`'s own loader/resolver refusals):
+  // no independently pinned live authority exists in this codebase.
+  const productionBindingAuthority = readString(env, 'HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY', { defaultValue: null });
+  if (productionBindingAuthority !== null && productionBindingAuthority !== COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE) {
+    fail('HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY must be "synthetic-offline" when set; no live authority is ever accepted here');
+  }
+  if (productionBindingAuthority !== null && profile !== 'production') {
+    fail('HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY requires the production execution profile');
+  }
+  const syntheticOffline = productionBindingAuthority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE;
+  if (syntheticOffline && Object.hasOwn(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH')) {
+    fail('synthetic-offline authority refuses a real Collector API credential file selector');
+  }
+
   const stateDir = readAbsolutePath(env, 'HOOKEMON_STATE_DIR', { required: true });
   const workerOwner = readString(env, 'HOOKEMON_WORKER_OWNER', { defaultValue: 'hookemon-runner' });
   if (!ownerPattern.test(workerOwner)) fail('HOOKEMON_WORKER_OWNER must be a short alphanumeric identifier');
@@ -775,6 +809,9 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const solanaRpcUrl = readUrl(env, 'HOOKEMON_SOLANA_RPC_URL', { defaultValue: DEFAULT_SOLANA_RPC_URL });
   const relayBaseUrl = readUrl(env, 'HOOKEMON_RELAY_BASE_URL', { defaultValue: DEFAULT_RELAY_BASE_URL });
   const relayApiKey = readString(env, 'HOOKEMON_RELAY_API_KEY', { defaultValue: null });
+  if (syntheticOffline && relayApiKey !== RELAY_SYNTHETIC_API_KEY) {
+    fail('synthetic-offline authority requires the fixed synthetic Relay API credential value');
+  }
   const relaySolanaMintRaw = readString(env, 'HOOKEMON_RELAY_SOLANA_MINT', { defaultValue: null });
   const relaySolanaMint = relaySolanaMintRaw === null ? null : readSolanaAddress(relaySolanaMintRaw, 'HOOKEMON_RELAY_SOLANA_MINT');
   const relaySolanaDecimals = readAssetDecimals(env, 'HOOKEMON_RELAY_SOLANA_DECIMALS');
@@ -788,6 +825,9 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const collectorCryptApiKey = collectorCryptApiKeyPath === null
     ? collectorCryptApiKeyRaw
     : readPrivateCredentialFile(collectorCryptApiKeyPath, 'Collector API key');
+  if (syntheticOffline && collectorCryptApiKey !== COLLECTOR_SYNTHETIC_API_KEY) {
+    fail('synthetic-offline authority requires the fixed synthetic Collector API credential value');
+  }
 
   const vaultAddress = readEvmAddress(env, 'HOOKEMON_VAULT_ADDRESS');
   const hookAddress = readEvmAddress(env, 'HOOKEMON_HOOK_ADDRESS');
@@ -816,12 +856,33 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   if (!['external-module', 'keychain'].includes(signerBackend)) fail('HOOKEMON_SIGNER_BACKEND must be "external-module" or "keychain"');
   const signerLiveModeRaw = readString(env, 'HOOKEMON_SIGNER_LIVE_MODE', { defaultValue: 'false' });
   if (!['true', 'false'].includes(signerLiveModeRaw)) fail('HOOKEMON_SIGNER_LIVE_MODE must be "true" or "false"');
-  const keychainCommand = readAbsolutePath(env, 'HOOKEMON_KEYCHAIN_COMMAND', { required: signerBackend === 'keychain' });
+  // A synthetic-offline launch never reads this value: the runner constructs its own isolated
+  // child wrapper and overrides `signer.keychain.command` with it before composing, so requiring an
+  // operator-supplied Keychain command here as well would be redundant configuration for a path
+  // that is never actually used.
+  const keychainCommand = readAbsolutePath(env, 'HOOKEMON_KEYCHAIN_COMMAND', { required: signerBackend === 'keychain' && !syntheticOffline });
   const keychainEvmAccount = readString(env, 'HOOKEMON_KEYCHAIN_EVM_ACCOUNT', { defaultValue: null });
   const keychainSolanaAccount = readString(env, 'HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT', { defaultValue: null });
   if (signerBackend === 'keychain' && (!keychainSolanaAccount || (!collectorOnlyRehearsal && !keychainEvmAccount))) {
     fail('HOOKEMON_KEYCHAIN_EVM_ACCOUNT and HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT are both required when HOOKEMON_SIGNER_BACKEND is "keychain"');
   }
+
+  // Narrow typed selection for `../signing/collector-production-binding.mjs`'s registry boundary.
+  // `productionBindingAuthority`/`syntheticOffline` were already read and validated at the very top
+  // of this function, before any credential-file selector, so only the registry path and the
+  // isolated root directory remain to read here. The registry file is read like every other JSON
+  // config file this module already reads (`readJsonObjectFile`) -- the path grants no authority by
+  // itself: every entry in it still goes through `loadCollectorProductionBindingRegistry`'s full
+  // schema/digest validation in `compose.mjs` before anything can resolve from it, exactly as a
+  // caller-injected `config.collectorProductionBindingRegistry` object already would (the seam
+  // integration/CLI tests use instead of a file, mirroring `config.adapters`). `collectorSyntheticRoot`
+  // is the one directory `bin/hookemon-runner.mjs` passes to `createIsolatedKeychainChildSetup` to
+  // construct its own branded isolated child setup before composing -- never read or interpreted by
+  // this module itself.
+  const collectorProductionBindingRegistry = readJsonObjectFile(env, 'HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH', {
+    required: syntheticOffline,
+  });
+  const collectorSyntheticRoot = readAbsolutePath(env, 'HOOKEMON_COLLECTOR_SYNTHETIC_ROOT', { required: syntheticOffline });
 
   if (profile === 'production') {
     if (rehearsal !== null) fail('production profile refuses HOOKEMON_REHEARSAL_MODE');
@@ -999,7 +1060,10 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
         }),
       } : {}),
       ...(profile === 'production' ? { settlementAsset: COLLECTOR_CRYPT_SETTLEMENT_ASSET } : {}),
+      ...(productionBindingAuthority === null ? {} : { productionBindingAuthority }),
+      ...(collectorSyntheticRoot === null ? {} : { syntheticRoot: collectorSyntheticRoot }),
     }),
+    ...(collectorProductionBindingRegistry === null ? {} : { collectorProductionBindingRegistry }),
     contracts: Object.freeze({
       vault: vaultAddress,
       hook: hookAddress,
@@ -1015,7 +1079,11 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
       backend: signerBackend,
       liveMode: signerLiveModeRaw === 'true',
       roles: Object.freeze(collectorOnlyRehearsal ? [OPERATOR_SOLANA_ROLE] : [OPERATOR_EVM_ROLE, OPERATOR_SOLANA_ROLE]),
-      keychain: Object.freeze({ command: keychainCommand, evmAccount: keychainEvmAccount, solanaAccount: keychainSolanaAccount }),
+      keychain: Object.freeze({
+        command: keychainCommand,
+        evmAccount: keychainEvmAccount,
+        solanaAccount: keychainSolanaAccount,
+      }),
     }),
     standingAuthority: Object.freeze({
       documentPath: standingAuthorityPath,

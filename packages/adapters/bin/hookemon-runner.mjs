@@ -62,12 +62,18 @@ import {
   attachCollectorPolicyBundle,
   loadCollectorPolicyBundle,
 } from '../src/signing/collector-policy-loader.mjs';
+import { http } from 'viem';
+import {
+  COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
+  createIsolatedKeychainChildSetup,
+  createLoopbackConfinedFetch,
+} from '../src/signing/collector-production-binding.mjs';
 import { createCollectorCryptClient } from '../src/collector-crypt.mjs';
 import { createSolanaRpcClient, submitSignedTransaction } from '../src/solana-rpc.mjs';
 import { createRobinhoodClient, sendRawTransaction } from '../src/robinhood-rpc.mjs';
 import { runCollectorOnlyPreflight as runCollectorOnlyPreflightPlan } from '../rehearsal/collector-only-preflight.mjs';
 
-export { compositionInput, createProcessExec, parseArgv };
+export { applySyntheticIsolatedChildSetup, chainBroadcastTransports, compositionInput, createProcessExec, parseArgv };
 
 const USAGE = `Usage: hookemon-runner run --mode rehearsal --cycles <positive-integer> --cap-usdg <atomic-amount> (--collector-only|--relay-roundtrip) [--restart-inject]
    or: hookemon-runner preflight [--state <absolute-path-to-operator-state.json>]
@@ -324,6 +330,13 @@ function compositionInput({
     solana: env.solana,
     relay: env.relay,
     collectorCrypt: env.collectorCrypt,
+    ...(env.collectorProductionBindingRegistry === undefined ? {} : { collectorProductionBindingRegistry: env.collectorProductionBindingRegistry }),
+    // Forwarded so `../signing/collector-production-binding.mjs`'s offline execution boundary
+    // (`config.signer.keychain.command`/`.isolatedChildSetup`/`.backend`/`.liveMode`, read by
+    // `purchase.mjs`/`buyback.mjs` at stage-mutation time) actually reaches the composed stage
+    // config in an ordinary CLI launch -- previously this function only forwarded the already
+    // constructed `signerClient` object, never the raw `env.signer` configuration itself.
+    signer: env.signer,
     contracts: env.contracts,
     accounts: env.accounts,
     budget: env.budget,
@@ -362,24 +375,68 @@ function compositionInput({
  * signs and can never send. Supplying them also narrows the signer: the bare broadcast() is replaced
  * by a path reachable only through a genuine transaction-policy evaluation proof, so holding a
  * reference to the client is not enough to send arbitrary bytes.
+ *
+ * Under the `synthetic-offline` authority these are the same actual signed-byte send clients
+ * `compose.mjs`'s own `buildAdapters` confines -- an already-loopback `rpcUrl` alone does not stop
+ * a misbehaving local mock from handing either client an outward-pointing 3xx, so both get the same
+ * `createLoopbackConfinedFetch` wrapper, via viem's `http(url, {fetchFn})` transport for the EVM
+ * client and `fetchImpl` directly for the Solana client. Non-synthetic env is unaffected: no
+ * confinement is threaded in unless the authority is explicitly synthetic-offline.
  */
 function chainBroadcastTransports(env) {
+  const offlineTransportFetch = env.collectorCrypt?.productionBindingAuthority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE
+    ? createLoopbackConfinedFetch()
+    : null;
   const transports = {};
   if (env.robinhood?.rpcUrl) {
-    const client = createRobinhoodClient({ rpcUrl: env.robinhood.rpcUrl });
+    const client = createRobinhoodClient({
+      rpcUrl: env.robinhood.rpcUrl,
+      ...(offlineTransportFetch === null ? {} : { transport: http(env.robinhood.rpcUrl, { fetchFn: offlineTransportFetch }) }),
+    });
     transports.evm = async signed => {
       const serialized = typeof signed === 'string' ? signed : signed?.signedTx;
       return { transactionHash: await sendRawTransaction(client, serialized) };
     };
   }
   if (env.solana?.rpcUrl) {
-    const client = createSolanaRpcClient({ rpcUrl: env.solana.rpcUrl });
+    const client = createSolanaRpcClient({
+      rpcUrl: env.solana.rpcUrl,
+      ...(offlineTransportFetch === null ? {} : { fetchImpl: offlineTransportFetch }),
+    });
     transports.solana = async signed => {
       const serialized = typeof signed === 'string' ? signed : signed?.signedTxBase64 ?? signed?.signedTx;
       return { signature: await submitSignedTransaction(client, serialized) };
     };
   }
   return transports;
+}
+
+/**
+ * The ordinary runner entrypoint's own construction of its process-local branded isolated child
+ * setup, applied before this same `env` is ever composed -- not a test overlay. Reused, unmodified,
+ * as the one call site `buildComposition` (the real production/dry-run/rehearsal-adjacent path) and
+ * this function's own focused tests both drive.
+ *
+ * When `env.collectorCrypt.productionBindingAuthority` is not the synthetic-offline authority, `env`
+ * is returned unchanged. Otherwise `createIsolatedKeychainChildSetup({ directory:
+ * env.collectorCrypt.syntheticRoot })` is called -- reusing the same isolated root across a
+ * stopped/restarted process reopens the ephemeral identities and wrapper already provisioned there
+ * rather than minting a replacement pair on every launch (see that function's own header) -- and its
+ * result overrides `signer.keychain.command`/`.isolatedChildSetup`. `HOOKEMON_KEYCHAIN_COMMAND` is
+ * never trusted for this authority: the constructed wrapper's own path always wins.
+ */
+async function applySyntheticIsolatedChildSetup(env) {
+  if (env.collectorCrypt?.productionBindingAuthority !== COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE) {
+    return env;
+  }
+  const isolatedChildSetup = await createIsolatedKeychainChildSetup({ directory: env.collectorCrypt.syntheticRoot });
+  return {
+    ...env,
+    signer: {
+      ...env.signer,
+      keychain: { ...env.signer.keychain, command: isolatedChildSetup.command, isolatedChildSetup },
+    },
+  };
 }
 
 async function buildComposition({
@@ -396,7 +453,7 @@ async function buildComposition({
 } = {}) {
   if (typeof dryRun !== 'boolean') throw new Error('buildComposition dryRun must be a boolean');
   if (dryRun && profile !== 'production') throw new Error('buildComposition dryRun requires the production profile');
-  const env = readEnvironment(process.env, { profile, dryRun });
+  const env = await applySyntheticIsolatedChildSetup(readEnvironment(process.env, { profile, dryRun }));
   const statePath = resolveStatePath(env, statePathOverride);
   const dashboard = withDashboard ? await readDashboardConfig() : null;
   const { compose } = await import('../src/app/compose.mjs');

@@ -16,6 +16,7 @@ import {
   assertCollectorPurchaseBindingV1,
   createCollectorPurchasePolicy,
 } from '../../signing/collector-purchase-policy.mjs';
+import { resolveCollectorProductionBinding } from '../../signing/collector-production-binding.mjs';
 import { OPERATOR_SOLANA_ROLE, wrapTransactionPolicySignerClient } from '../../signing/signer-client.mjs';
 import { requireCollectorOnlyMutationAuthority } from '../../../rehearsal/collector-only-authorization.mjs';
 import { parseCollectorMachineContains } from '../../collector-crypt.mjs';
@@ -435,15 +436,28 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
     }
     admittedUnitAmountAtomic = normalizedUnitPurchase.amountAtomic;
 
-    // The one seam this task wires: validate a Node-test-only fixture binding (schema, digest,
-    // and native chain/settlement identity) before ever calling generateYoloPacks, so a bad or
-    // missing binding -- like a missing legacy evidence/static policy -- refuses before the
-    // durable intent write or any provider generation, sign, or submit call.
+    // Validate a trusted binding (schema, digest, and native chain/settlement identity) before
+    // ever calling generateYoloPacks, so a bad or missing binding -- like a missing legacy
+    // evidence/static policy -- refuses before the durable intent write or any provider
+    // generation, sign, or submit call. Two seams, checked in this fixed order and never both at
+    // once in production: the Node-test-only fixture below, and the production binding registry
+    // `compose.mjs` attaches only for the production execution profile. Neither ever mutates the
+    // other's inputs; only one binding is ever trusted per invocation.
     const fixture = purchaseBindingFixture(config);
+    const productionBindingRegistry = config?.collectorCrypt?.productionBindingRegistry;
     if (fixture !== null) {
       const validatedBinding = assertCollectorPurchaseBindingV1(fixture.binding, fixture.expectedDigest);
       assertFixtureBindingMatchesSettlementAsset(validatedBinding, asset);
       trustedBinding = Object.freeze({ binding: validatedBinding, expectedDigest: String(fixture.expectedDigest) });
+    } else if (productionBindingRegistry !== undefined && productionBindingRegistry !== null) {
+      const resolvedBinding = resolveCollectorProductionBinding({
+        registry: productionBindingRegistry,
+        authority: config.collectorCrypt.productionBindingAuthority,
+        stage: 'purchase',
+        config,
+      });
+      assertFixtureBindingMatchesSettlementAsset(resolvedBinding.binding, asset);
+      trustedBinding = Object.freeze({ binding: resolvedBinding.binding, expectedDigest: resolvedBinding.expectedDigest });
     } else {
       legacyPolicy = requirePolicy(config, 'purchase');
     }
