@@ -208,7 +208,7 @@ function repository({ stages = {}, attempts = {}, batches = {}, intents = {}, ad
         releaseAmount: '40',
         admission,
         heldPositions: new Map(heldPositions.map(position => [position.positionId, position])),
-        custodyLedgers: new Map(ledgers.map(({ ledger }) => [`${ledger.chainId} ${ledger.assetId}`, ledger])),
+        custodyLedgers: new Map(ledgers.map(({ ledger }) => [`${ledger.chainId}\u0000${ledger.assetId}`, ledger])),
       };
     },
     async holdCycle(cycleId, terminalState, evidence) { held.push({ cycleId, terminalState, evidence }); },
