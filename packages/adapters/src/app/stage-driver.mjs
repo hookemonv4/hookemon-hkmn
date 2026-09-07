@@ -1210,6 +1210,7 @@ export function createStageDriver({
       await handler.reconcile(Object.freeze({
         adapters: supplementaryCapabilities.adapters,
         signerClient: supplementaryCapabilities.signerClient,
+        preflightAuthority,
         config: frozenSupplementaryReconcileConfig(currentHandlerConfig),
         cycleRepository: supplementarySettlementRepository(cycleRepository, input.assertLease),
         context: frozenCanonicalValue(context),

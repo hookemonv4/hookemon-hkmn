@@ -304,3 +304,7 @@ node --test packages/runner/test/cycle/money-schemas.test.mjs packages/runner/te
 - Keep production signing closed unless all three standing-authority verification paths and a
   policy-signed step-intent source are present. Do not replace a missing intent with a fixture,
   inferred payload, or a fresh signature.
+
+Supplementary handlers receive the driver's existing opaque `preflightAuthority` unchanged.
+Production callers without that capability retain the frozen-interface authorization check;
+the branded fixture authority remains restricted to the Node test runner.

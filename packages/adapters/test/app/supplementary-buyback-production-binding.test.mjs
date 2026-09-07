@@ -25,6 +25,7 @@ import {
   deriveAssociatedTokenAddress,
   signedSolanaTransactionSignature,
 } from '../../src/solana-rpc.mjs';
+import { createStageDriver } from '../../src/app/stage-driver.mjs';
 import { createSupplementaryBuybackHandler } from '../../src/app/stages/supplementary-buyback.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
@@ -703,4 +704,41 @@ test('reconcile refuses to rebroadcast durably-signed bytes when the production 
   assert.equal(signCalls, 1); // unchanged: no re-sign, and no broadcast
   assert.equal(cycleRepository.advances.length, 0);
   assert.equal(cycleRepository.attempts.get(key).attempt.state, 'SIGNED'); // still SIGNED, never advanced
+});
+
+
+test('stage driver forwards supplied authority to the real supplementary handler without creating authority', async () => {
+  for (const authority of [TEST_AUTHORITY, undefined, Object.freeze({})]) {
+    const repository = fakeChainAttemptRepository();
+    for (const method of ['readOperationalStageAttempt', 'prepareStageAttempt', 'markStageAttemptNotSent', 'markStageAttemptSentUnknown', 'recordStageAttemptResponse', 'reconcileStageAttempt']) {
+      repository[method] = async () => { throw new Error('ordinary stage capability must not run'); };
+    }
+    const settlement = settlementFixture();
+    repository.readSupplementarySettlement = async () => settlement;
+    let providerCalls = 0;
+    let leaseValid = true;
+    const config = productionConfig();
+    // Exercise the authority gate independently of the production-binding factory.
+    delete config.collectorCrypt.productionBindingRegistry;
+    delete config.collectorCrypt.productionBindingAuthority;
+    const adapters = { solana: { client: rpcClient().client }, collectorCrypt: {
+      async getBuybackCheck() { return { exists: false }; },
+      async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: OFFER_ATOMIC } }; },
+      async buyback() { providerCalls += 1; throw new Error('provider boundary reached'); },
+    } };
+    const driver = createStageDriver({
+      liveMode: true, adapters, config, cycleRepository: repository, preflightAuthority: authority,
+      supplementaryAdapters: adapters, supplementarySignerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+      productionSupplementaryStageHandlers: { PREPARED: createSupplementaryBuybackHandler() },
+    });
+    const input = { position: heldPosition(), settlement, fencingToken: FENCING_TOKEN,
+      assertLease() { if (!leaseValid) throw new Error('lease expired'); } };
+    await driver.runSupplementarySettlement(input);
+    assert.equal(providerCalls, authority === TEST_AUTHORITY ? 1 : 0);
+    assert.equal(repository.advances.length, 0);
+    await driver.runSupplementarySettlement(input);
+    assert.equal(providerCalls, authority === TEST_AUTHORITY ? 1 : 0, 'durable prepared attempt is not resent');
+    leaseValid = false;
+    await assert.rejects(driver.runSupplementarySettlement(input), /lease expired/);
+  }
 });
