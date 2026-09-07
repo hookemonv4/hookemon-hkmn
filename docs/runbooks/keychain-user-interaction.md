@@ -1,54 +1,24 @@
 # Keychain user interaction unavailable
 
-## Detection
-
-- Alert reason: the external signer returns `User interaction is not allowed`, another retained OS error, or a timeout during sign-only readiness or signing.
-- Journal state: the prepared transaction remains unsigned and the cycle records `HELD_UNAVAILABLE`.
-
-## Safe stop
-
-- Mark the path unavailable and do not invoke a live runner before another signing boundary. An execution-pause control is planned (WP10b).
-- Do not export a key, switch to an unapproved signer, or broadcast bytes without a verified signature.
-
 ## Runner behavior
 
-- The signer retains bounded, redacted OS error text, enforces its timeout, and stops before
-  broadcast. The stage records `NOT_SENT` and holds the cycle `HELD_UNAVAILABLE`.
-- The runner refuses a replacement signature while the prepared request remains unresolved.
+A provable signing denial before any broadcast leaves the cycle nonterminal with NOT_SENT evidence and bounded redacted OS error text. Preserve the signer identity and request; never export keys or substitute an unapproved signer.
 
-## Operator recovery
+## Recovery constraints
 
-- Restore an interactive macOS Keychain session or its access control, then run
-  `node packages/adapters/bin/hookemon-wallet.mjs probe --identity operations-evm` or the matching
-  `operations-solana` identity.
-- Reconciliation control is planned (WP10b) after readiness is clear. A resume control for this recovery path is planned (WP12); no signing bypass is allowed.
+Restore readiness of the same approved signer before retrying the identical request. This denial cell does not establish that a timeout produced no signature. Sign-only timeout recovery is separately restricted to the verified owned Keychain broker and requires durable unsigned bytes, signer identity, request/policy digests and validity context before invocation, exact reuse and signature deduplication. It grants no broadcast authority. Opaque signer timeouts retain their terminal no-automatic-retry contract.
 
-## Escalation
-
-Escalate the retained error class, signer role, cycle identifier, and journal digest to the macOS keychain administrator and signing owner. Do not include credentials or raw requests.
-
-## Evidence
-
-- Failure-matrix cell: `External signer:keychain-interaction` expects `HELD_UNAVAILABLE` and is owned by WP08a.
-- Traceability: L3-M17 and L4-M5.
+Requirements revision 68 retains the owner-approved bounded-transient classification from revision 66. Its exact approval is recorded in `decisions/owner-approvals/revision-68-spec-s5-approved.json`. The canonical matrix binds the implemented stage boundary below; broader recovery claims require their own executable evidence. Semantic-invalid wrong-asset, wrong-recipient and conflicting-evidence holds remain unchanged.
 
 ## Recovery contract
 
 Failure-matrix cells: External signer:keychain-interaction
 Owning work package: WP08a
-Expected outcome: terminal=HELD_UNAVAILABLE; attempt=NOT_SENT; next=owner-decision
-Test: packages/adapters/test/app/stage-driver.test.mjs — holds a keychain interaction denial with redacted OS text before any broadcast
+Expected outcome: terminal=none; attempt=NOT_SENT; next=retry
+Test: packages/adapters/test/app/stage-driver.test.mjs — keeps a keychain interaction denial retryable with redacted OS text before any broadcast
 Alarm reason/code: OPEN FACT (WP08a): no dedicated alert code is emitted for a signing error.
-Resume command: none supported; restore signer readiness before a new signature is prepared.
+Resume command: use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
 
-## Proposed revision 66
+## Escalation
 
-`decisions/ADR-0025-bounded-transient-recovery-classification.md` splits this single canonical cell into two proposed cases that must not share one tuple, because a timeout cannot prove a signature was not returned the way a synchronous denial can. **Provable denial before any signature could exist** (proven-pre-effect-transient): no broadcast occurred; proposed `terminal=null`, `attempt=NOT_SENT`, `next=retry-after-signer-readiness` — persist a bounded, redacted signer-unavailable reason and next retry time, probe the same approved signer identity after bounded backoff, then retry the identical request once readiness returns; never export a key, substitute a signer, or create a new request.
-
-**Timeout, or any outcome that cannot prove no signature was returned** (new proposed cell `External signer:keychain-interaction-timeout`): proposed `terminal=null`, `attempt=NOT_SENT`, `next=retry-sign-only-with-durable-binding`, scoped **only** to the verified owned Keychain sign-only broker — the checked-in source proves its `sign` operation only deserializes/signs/re-serializes bytes (`packages/adapters/src/signing/keychain-signer.mjs:171-243`, `operations-wallet-keychain-child.mjs:138-206`, `keychain-child-evm.mjs:133-197`) and that a `broadcast` operation sent to the same broker is explicitly refused (`packages/adapters/bin/hookemon-keychain-signer.mjs:203-215`), with every real broadcast wired as a separate later step the broker's `sign()` never reaches (`signer-client.mjs:565-595`, `stages/purchase.mjs:99-117,329-338`). Given that proof, a timeout may retry the identical signing attempt only once the exact unsigned wire bytes, signer role/account identity, request digest, policy/authorization digest, and validity context were durably persisted **before** the sign-only call, reusing those exact values unchanged — never regenerating the provider transaction, blockhash, nonce, memo, or policy — and never asserting the prior attempt produced no signature; a signature from either attempt is deduplicated exactly once by the existing signed-bytes recovery record. This is a bounded-retry guarantee made safe by construction, not a claim that reconciliation can discover an unbroadcast signature — no signer idempotency key or read-by-key API exists anywhere in this repository. It grants no broadcast authority; a subsequent broadcast/provider-send outcome that cannot be distinguished stays its own observation-only `SENT_UNKNOWN` or chain-attempt state. An opaque or external-module signer does **not** inherit this guarantee and keeps the current no-automatic-retry, terminal whole-cycle class, because canonical chain observation cannot recover or rule out an unbroadcast signature for it.
-
-The "Recovery contract" above is the frozen revision-65 contract and the currently deployed fallback: it is binding today and stays binding regardless of whether this proposal is later owner-approved, until an implementation and promoted matrix cells supersede it. Its cited test itself proves only that the low-level `createStageDriver` primitive leaves `terminalState=null`, `NOT_SENT`, and the cycle active/retryable for a synchronous helper denial — not that the frozen whole-cycle hold above is exercised end-to-end, and it does not cover a timeout at all; the provable-denial-before-any-signature row above is not implemented.
-
-The sign-only-timeout row's durable pre-invocation binding and durable invocation ledger are now implemented and passing for exactly the two stages whose live signer facade calls `wrapTransactionPolicySignerClient` with a `recovery` option bound to a `chainAttempts` `PREPARED` record: `outbound` (EVM, `createOutboundPolicySigner`) and `return` (Solana, `createReturnPolicySigner`). `packages/adapters/src/signing/keychain-signer.mjs` classifies a `sign`/`signApproved` timeout as `KeychainSignOnlyTimeoutError` and mints an unforgeable owned-broker capability only its own client carries; `packages/adapters/src/app/cycle-repository.mjs`'s `persistSignOnlyPreSignBinding`/`readSignOnlyPreSignBinding` durably bind the exact unsigned bytes, role, account, and digests before the first call; the same module's `reserveSignOnlyInvocation`/`recordSignOnlyInvocationTimeout`/`readSignOnlyInvocationLedger` durably reserve each of the two possible invocation ordinals one at a time -- re-checking the chain attempt is still `PREPARED` atomically at each reservation -- so the retry budget survives a restart or a concurrent second wrapper instead of resetting to "one more retry" every time the in-process facade is called fresh; `packages/adapters/src/signing/signer-client.mjs`'s `wrapTransactionPolicySignerClient` re-decodes and re-evaluates the exact persisted bytes against the pinned validity digest immediately before each actual invocation and retries exactly once on that classified timeout, only for the owned broker, only through a durably reserved ordinal, reusing only the durably bound material. Test: `packages/adapters/test/signing/signer-client-sign-only-recovery.test.mjs`, `packages/adapters/test/app/cycle-repository.test.mjs`, and `packages/adapters/test/signing/keychain-signer.test.mjs` — one classified timeout retries exactly once for an EVM and a Solana fixture broker, an external-module or structurally cloned signer never retries even when it throws the same classified error, a non-`PREPARED` or conflicting binding refuses before Keychain is invoked, a restart after the first timeout gets exactly the one remaining invocation and never two, two concurrent retries allocate only one ordinal 2, a chain-attempt transition or a revoked authority/lease guard between the timeout and the retry reaches zero second broker calls, and broadcast never enters this path. `claim-process`, `purchase`, `buyback`, and the direct-payout signer do not yet reach this exact boundary with a `chainAttempts` `PREPARED` record behind it (see `docs/modules/signing.md`), so they keep the frozen "Recovery contract" above unchanged.
-
-This section is authoritative only once a `decisions/owner-approvals/*` receipt approves the exact current `specs/requirements.json` hash under `gates/spec.json`'s `S5` item AND each case has an implemented, passing, non-`OPEN FACT` citation promoted into the canonical matrix; check both directly rather than inferring either from this document's wording. The sign-only-timeout row above now has that citation for `outbound`/`return`; promotion into `docs/audit/2026-09-04/failure-matrix.json` itself is a separate, serial closure step this change does not perform.
+Preserve the cycle and stage identifiers, request digest and redacted failure evidence. Escalate conflicting canonical evidence or an attempted identity, amount or signed-byte change before allowing another effect.

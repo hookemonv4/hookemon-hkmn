@@ -85,20 +85,20 @@
     {
       "system": "Relay quote",
       "failureClass": "expired-quote",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": null,
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "retry",
       "owningWp": "WP07",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired Relay quote before any request or broadcast"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — keeps an expired Relay quote retryable before any request or broadcast"
     },
     {
       "system": "Chain transaction",
       "failureClass": "expired-blockhash",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": "BROADCAST",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "reconcile-or-rebroadcast",
       "owningWp": "WP08a",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds an expired return blockhash while retaining a broadcast attempt after reopen"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — keeps an expired return blockhash retryable while retaining a broadcast attempt after reopen"
     },
     {
       "system": "EVM transaction",
@@ -121,11 +121,11 @@
     {
       "system": "Wallet lease",
       "failureClass": "lost-lease",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": "NOT_SENT",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "retry",
       "owningWp": "WP07",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease before a provider effect and retains a NOT_SENT retry record"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — keeps a lost lease retryable before a provider effect and retains a NOT_SENT record"
     },
     {
       "system": "Repository recovery",
@@ -238,11 +238,11 @@
     {
       "system": "External signer",
       "failureClass": "keychain-interaction",
-      "expectedTerminalState": "HELD_UNAVAILABLE",
+      "expectedTerminalState": null,
       "expectedAttemptState": "NOT_SENT",
-      "expectedNextStage": "owner-decision",
+      "expectedNextStage": "retry",
       "owningWp": "WP08a",
-      "test": "packages/adapters/test/app/stage-driver.test.mjs — holds a keychain interaction denial with redacted OS text before any broadcast"
+      "test": "packages/adapters/test/app/stage-driver.test.mjs — keeps a keychain interaction denial retryable with redacted OS text before any broadcast"
     },
     {
       "system": "Standing authority",
