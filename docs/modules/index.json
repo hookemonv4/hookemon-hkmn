@@ -21,7 +21,7 @@
     {
       "id": "provider-binding",
       "path": "docs/modules/provider-binding.md",
-      "sha256": "1655fbab28e629840af7864dccba9e9829ccef0ad8ab78da56035bc071e0ce83"
+      "sha256": "686a469b60753cc802ca7efaa09193cf6b44058abe04e1517037c21e13f4f7f4"
     },
     {
       "id": "deployment-manifest",
@@ -126,7 +126,7 @@
     {
       "id": "direct-payout",
       "path": "docs/modules/direct-payout.md",
-      "sha256": "600d85a9f8c92489bad1ea0f887f895876cb83760328d9029dffc0ba08c68a34"
+      "sha256": "eb12a494eb5b0a0d616e1387a95eac4c4cb38892eeeb32807bd9b6591f03aca2"
     },
     {
       "id": "automation",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "34f2c94233683a6a3e09a419697c760e7c9090e16edd2f8a53f6f83e5c548dcb"
+      "sha256": "fc0bd1e533c86f20f18f405f3c3b33fc8f26fb2a9fc12e063ff350cd4fa3abec"
     },
     {
       "id": "dashboard",

@@ -12,7 +12,7 @@ balance as evidence. Preserve the memo, provider status, and Solana evidence.
 
 ## Runner behavior
 
-The open reconciliation holds the cycle `HELD_DATA_UNVERIFIED` while retaining
+The open reconciliation records a card-scoped `HELD_DATA_UNVERIFIED` position while retaining
 the `SENT_UNKNOWN` attempt. It makes no further provider mutation after the
 missing-mint result.
 
@@ -33,7 +33,7 @@ The durable unknown attempt and its memo identify the only reconciliation path.
 
 Failure-matrix cells: Open result:missing-mint-sent-unknown-retry
 Owning work package: WP08b
-Expected outcome: terminal=HELD_DATA_UNVERIFIED; attempt=SENT_UNKNOWN; next=owner-decision
+Expected outcome: terminal=none; attempt=SENT_UNKNOWN; next=held-position-owner-decision
 Test: packages/adapters/test/app/stages-collector-lifecycle.test.mjs — open SENT_UNKNOWN retry missing mint holds durably after reopen
 Alarm reason/code: OPEN FACT (WP08b): no dedicated alarm reason/code is emitted for this hold.
 Resume command: none supported; reconcile the original memo and finalized evidence first.
