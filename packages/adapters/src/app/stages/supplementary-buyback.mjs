@@ -33,6 +33,7 @@ import {
   readBlockhashValidity,
   readFinalizedSignatureStatus,
   readMplCoreAssetOwner,
+  readUsableLatestBlockhash,
   signedSolanaTransactionSignature,
 } from '../../solana-rpc.mjs';
 import { assertTypedAmount } from '../../../../runner/src/cycle/money-schemas.mjs';
@@ -48,6 +49,11 @@ import {
   readTransactionPolicyApprovalContext,
   recoverTransactionPolicyBroadcast,
 } from '../../signing/signer-client.mjs';
+import { resolveCollectorProductionBinding } from '../../signing/collector-production-binding.mjs';
+import {
+  COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX,
+  createCollectorBuybackPolicy,
+} from '../../signing/collector-buyback-policy.mjs';
 import {
   isLiveCollectorOnlyRehearsal,
   requireCollectorOnlyMutationAuthority,
@@ -188,9 +194,20 @@ function assertFencingToken(value) {
   return value;
 }
 
-function requireSupplementaryMutationAuthority(config) {
-  if (isLiveCollectorOnlyRehearsal(config)) return requireCollectorOnlyMutationAuthority(config);
-  return requireLiveMutationAuthority();
+/**
+ * `requireCollectorOnlyMutationAuthority` already admits exactly one non-rehearsal bypass: the
+ * frozen `createTestProfileMutationAuthority()` singleton, forwarded unchanged, and only while
+ * `NODE_TEST_CONTEXT` is present (see `collector-only-authorization.mjs`) -- the same mechanism
+ * `stage-driver.mjs`/`buyback.mjs` already rely on to exercise a production-profile mutation path
+ * under test without a frozen `architecture/interfaces.json`. Delegating unconditionally here
+ * (rather than only in the rehearsal branch) preserves every existing caller's behavior exactly --
+ * a rehearsal config still resolves through `assertCollectorOnlyConfiguration`, and an `undefined`
+ * `preflightAuthority` still falls through to the unchanged `requireLiveMutationAuthority()` gate --
+ * while letting the production-binding path (which can never itself be a rehearsal config, since
+ * `assertCollectorOfflineExecutionBoundary` refuses one) reach that same bounded test seam.
+ */
+function requireSupplementaryMutationAuthority(config, preflightAuthority) {
+  return requireCollectorOnlyMutationAuthority(config, preflightAuthority);
 }
 
 /** Fails closed rather than degrading to a weaker (memo-lookup-only) guarantee. */
@@ -216,6 +233,121 @@ async function assetKindForPosition(cycleRepository, position) {
   const open = await cycleRepository.readStage(position.cycleId, 'open').catch(() => null);
   const packs = plainObject(open?.evidence) && Array.isArray(open.evidence.packs) ? open.evidence.packs : [];
   return packs.find(entry => entry.memo === position.memo)?.assetKind ?? 'spl';
+}
+
+/**
+ * The production-binding path never trusts the held position record alone for the identity it
+ * signs into a real transaction: it requires the same memo/mint pair to also appear in the
+ * original cycle's own finalized `open` stage evidence -- a mutated or forged position record
+ * cannot substitute a different mint here. Unlike `assetKindForPosition` above (a best-effort,
+ * default-to-'spl' read used only for post-hoc reconciliation), a missing or mismatched entry
+ * refuses outright; this is a pre-provider-mutation gate, not a lookup with a safe fallback.
+ */
+async function heldPositionOpenEvidence(cycleRepository, position) {
+  const open = await cycleRepository.readStage(position.cycleId, 'open');
+  if (open?.status !== 'COMPLETE' || !plainObject(open.evidence) || !Array.isArray(open.evidence.packs)) {
+    throw new Error('supplementary buyback production binding requires a finalized original open stage');
+  }
+  const pack = open.evidence.packs.find(entry => entry.memo === position.memo);
+  if (!pack || pack.mint !== position.mint) {
+    throw new Error('supplementary buyback production binding requires the held position to match finalized original open evidence');
+  }
+  return pack;
+}
+
+/**
+ * Independently confirms the operator's real, finalized on-chain MPL Core custody of the held
+ * asset -- never assumed from the position record or the configured operator address alone.
+ * Called once before the provider is ever asked to generate a resale transaction, and again after
+ * that provider call returns (see `signAndRecordBuyback`), so a transfer landing during the
+ * ambiguous provider round-trip is caught before signing rather than trusted from a stale read.
+ */
+async function verifiedHeldAssetOwner({ adapters, config, mint }) {
+  const owner = await readMplCoreAssetOwner(adapters.solana.client, mint, { commitment: 'finalized' });
+  if (owner !== config.accounts.solana) {
+    throw new Error('supplementary buyback production binding requires the operator to currently hold the finalized on-chain asset');
+  }
+  return owner;
+}
+
+/**
+ * Reads a durable recovery context's `productionBinding` field for replay, distinguishing three
+ * cases: the key is entirely absent (a genuinely historical record, persisted before this field
+ * existed) -- routes through the unchanged legacy policy, exactly like an explicit `null`; the key
+ * is explicitly `null` (this attempt was signed under the legacy policy) -- same outcome; the key is
+ * present and must then be a well-formed `{expectedDigest, cycleFacts, blockhashContext}` object --
+ * anything else is treated as corrupted production metadata and refuses, never silently downgraded
+ * to the legacy policy.
+ */
+function recoveredProductionBinding(recoveryContext) {
+  if (!Object.hasOwn(recoveryContext, 'productionBinding') || recoveryContext.productionBinding === null) {
+    return null;
+  }
+  const value = recoveryContext.productionBinding;
+  if (!plainObject(value) || typeof value.expectedDigest !== 'string' || value.expectedDigest.length === 0
+    || !plainObject(value.cycleFacts) || !plainObject(value.blockhashContext)) {
+    throw new Error('supplementary buyback recovery production binding metadata is invalid');
+  }
+  return value;
+}
+
+/** Resolves the buyback entry of the shared Collector production binding registry, or `null` when
+ *  no registry is configured -- the legacy static policy remains the only path in that case. */
+function resolveHeldProductionBinding(config) {
+  const registry = config?.collectorCrypt?.productionBindingRegistry;
+  if (registry === undefined || registry === null) return null;
+  return resolveCollectorProductionBinding({
+    registry,
+    authority: config.collectorCrypt.productionBindingAuthority,
+    stage: 'buyback',
+    config,
+  });
+}
+
+/**
+ * Preflight-only (money-safe) resolution of the production binding for one held resale: resolves
+ * the registered buyback binding, requires the held position's identity to match the finalized
+ * original open evidence and be a verifiable MPL Core asset, performs the first on-chain ownership
+ * verification, and binds the independently configured settlement mint/decimals/account to the
+ * approved binding's own `proceeds` fields -- all before the provider is ever asked to generate a
+ * transaction. Returns `null` when no production binding is configured (the legacy static policy
+ * path). Never derives anything from a decoded candidate transaction.
+ */
+async function prepareHeldProductionBinding({ adapters, config, cycleRepository, position, prepared }) {
+  const resolvedBinding = resolveHeldProductionBinding(config);
+  if (resolvedBinding === null) return null;
+  const openPack = await heldPositionOpenEvidence(cycleRepository, position);
+  if (openPack.assetKind !== 'mpl-core') {
+    throw new Error('supplementary buyback production binding requires a finalized MPL Core held asset');
+  }
+  await verifiedHeldAssetOwner({ adapters, config, mint: position.mint });
+  // Binds the independently configured settlement mint/decimals to the approved binding's own
+  // pinned proceeds identity -- `binding.proceeds.source` is Collector's own fixed vault account
+  // (the transfer's source role), never the operator's own settlement account, so it is not
+  // compared here; the verified operator account (`prepared.settlementAccount`) instead becomes
+  // this position's own `cycleFacts.proceedsDestination`, resolved fresh per position, never a
+  // static binding field.
+  const asset = configuredSettlementAsset(config);
+  const { proceeds } = resolvedBinding.binding;
+  if (proceeds.mint !== asset.assetId || proceeds.decimals !== asset.decimals) {
+    throw new Error('supplementary buyback production binding proceeds asset does not match the configured settlement asset');
+  }
+  if (typeof prepared.settlementAccount !== 'string' || prepared.settlementAccount.length === 0) {
+    throw new Error('supplementary buyback production binding requires a verified operator settlement account');
+  }
+  return { resolvedBinding };
+}
+
+/** Fetches a fresh Solana blockhash/height context for the production binding factory -- never the
+ *  candidate's own decoded blockhash, and never reused across positions or attempts. */
+async function heldProductionBindingBlockhashContext(adapters) {
+  const latest = await readUsableLatestBlockhash(adapters.solana.client);
+  const currentHeight = await readBlockHeight(adapters.solana.client);
+  return Object.freeze({
+    blockhash: latest.blockhash,
+    lastValidBlockHeight: String(latest.lastValidBlockHeight),
+    currentBlockHeight: currentHeight.toString(),
+  });
 }
 
 function sourceFinalityFromStatus(signature, status) {
@@ -351,7 +483,7 @@ async function prepareResale({ adapters, config, position }) {
   if (!available?.available) return { unavailable: true };
   const offer = typedBuybackAmount(available.amount, 'supplementary buyback offer');
   const request = buildCollectorBuybackRequest({ config, mint: position.mint });
-  return { unavailable: false, money, proceedsAccount, offer, request };
+  return { unavailable: false, money, proceedsAccount, offer, request, settlementAccount: account.address };
 }
 
 function walletFencingContext({ config, context, stage }) {
@@ -373,15 +505,57 @@ function walletFencingContext({ config, context, stage }) {
  * a recovered stale intent -- see the caller). Any failure here leaves the durable attempt at
  * `PREPARED`; it is never retried automatically, only resolved via `reconcileSupplementaryBuybackSale`.
  */
-async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepository, context, position, prepared, requestDigest }) {
-  const { money, proceedsAccount, offer, request } = prepared;
-  requireSupplementaryMutationAuthority(config);
+async function signAndRecordBuyback({
+  adapters, config, signerClient, cycleRepository, context, position, prepared, productionBinding, requestDigest, preflightAuthority,
+}) {
+  const { money, proceedsAccount, offer, request, settlementAccount } = prepared;
+  requireSupplementaryMutationAuthority(config, preflightAuthority);
   const built = await adapters.collectorCrypt.buyback(request);
   const refundAmount = typedBuybackAmount(built.refundAmount, 'supplementary buyback refund amount');
   if (built.memo !== position.memo || !sameAmount(refundAmount, offer)) {
     throw new Error('supplementary buyback provider response did not bind the held card memo and offer');
   }
-  const buyback = configuredBuybackPolicy(config);
+
+  // Two seams, never both at once: the production binding registry (a second, independently
+  // verified on-chain owner check and a per-position frozen fact set, resolved and bound to the
+  // approved binding's own proceeds identity before this point) and the legacy static canonical
+  // policy. Neither seam's facts are ever derived from `decoded` below or from the ordinary
+  // buyback stage's own sold-pack identity -- every fact here is this position's own durable,
+  // already-verified data.
+  let buyback;
+  let productionBindingRecovery = null;
+  if (productionBinding !== null) {
+    // Recheck after the provider await, before signing: a transfer landing during the round-trip
+    // above is caught here, not trusted from the preflight read in prepareHeldProductionBinding.
+    const verifiedOwner = await verifiedHeldAssetOwner({ adapters, config, mint: position.mint });
+    const cycleFacts = Object.freeze({
+      operatorFeePayer: config.accounts.solana,
+      proceedsDestination: settlementAccount,
+      openedAssetMint: position.mint,
+      currentOwner: verifiedOwner,
+      quoteAtomic: offer.amountAtomic,
+      minimumAtomic: offer.amountAtomic,
+      refundAtomic: refundAmount.amountAtomic,
+      requestDigest,
+    });
+    const blockhashContext = await heldProductionBindingBlockhashContext(adapters);
+    const { resolvedBinding } = productionBinding;
+    const productionPolicy = createCollectorBuybackPolicy({
+      binding: resolvedBinding.binding,
+      expectedDigest: resolvedBinding.expectedDigest,
+      cycleFacts,
+      blockhashContext,
+    });
+    buyback = {
+      policy: productionPolicy,
+      collectorProgramId: resolvedBinding.binding.instructions[COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX].programId,
+      collectorRecipient: resolvedBinding.binding.collectorRecipient,
+    };
+    productionBindingRecovery = Object.freeze({ expectedDigest: resolvedBinding.expectedDigest, cycleFacts, blockhashContext });
+  } else {
+    buyback = configuredBuybackPolicy(config);
+  }
+
   const decodeOptions = trustedSolanaDecodeOptions({ adapters, config });
   const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction: built.serializedTransaction });
   if (!decoded.blockhash || !(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
@@ -402,10 +576,11 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
     backend: {
       role: signerClient.solana.role ?? OPERATOR_SOLANA_ROLE,
       async sign(signRequest) {
-        requireSupplementaryMutationAuthority(config);
+        requireSupplementaryMutationAuthority(config, preflightAuthority);
         const refreshed = await adapters.collectorCrypt.getBuybackAvailable({ nft: position.mint, wallet: config.accounts.solana });
         const refreshedOffer = typedBuybackAmount(refreshed.amount, 'supplementary buyback offer');
         if (!sameAmount(refreshedOffer, offer)) throw new Error('supplementary buyback offer changed before signing');
+        if (productionBinding !== null) await verifiedHeldAssetOwner({ adapters, config, mint: position.mint });
         return signerClient.solana.sign(signRequest);
       },
     },
@@ -428,6 +603,7 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
     approvedSemanticsDigest: approval.approvedSemanticsDigest,
     rawSignedBytesHash,
     signedMessageDigest: approval.signedMessageDigest,
+    productionBinding: productionBindingRecovery,
   });
   const signingMaterial = {
     rawBytes: signed.signedTxBase64,
@@ -450,13 +626,40 @@ async function signAndRecordBuyback({ adapters, config, signerClient, cycleRepos
  * Reauthorizes and broadcasts the exact durably-recorded signed bytes -- never re-signs. Runs
  * whether the attempt was just signed this call or recovered `SIGNED` from a prior crash.
  */
-async function broadcastRecordedBuyback({ adapters, config, cycleRepository, position, record, requestDigest }) {
+async function broadcastRecordedBuyback({ adapters, config, cycleRepository, position, record, requestDigest, preflightAuthority }) {
   const recoveryRecord = await cycleRepository.readSupplementaryChainAttemptRecoveryContext(position.positionId, requestDigest);
   const recoveryContext = recoveryRecord?.context ?? null;
   if (!recoveryContext || recoveryRecord.rawSignedBytesHash !== record.attempt.hash) {
     throw new Error('supplementary buyback signed bytes have no durable policy recovery context');
   }
-  const buyback = configuredBuybackPolicy(config);
+  // Durable signed-byte replay is bound to the exact same position-specific frozen facts, quote/
+  // refund, and approved binding digest this attempt was signed under -- never re-derived from
+  // whatever the registry happens to resolve to now. A drifted or missing binding refuses here,
+  // before any reauthorized broadcast, rather than silently rebuilding a different policy. A
+  // genuinely historical record that predates this field entirely (no key at all) is not a drifted
+  // binding -- it routes through the same unchanged legacy policy every pre-existing SIGNED resale
+  // already resumes through.
+  const productionBindingRecovery = recoveredProductionBinding(recoveryContext);
+  let buyback;
+  if (productionBindingRecovery !== null) {
+    const resolvedBinding = resolveHeldProductionBinding(config);
+    if (resolvedBinding === null || resolvedBinding.expectedDigest !== productionBindingRecovery.expectedDigest) {
+      throw new Error('supplementary buyback recovery requires the same approved production binding this attempt was signed under');
+    }
+    const productionPolicy = createCollectorBuybackPolicy({
+      binding: resolvedBinding.binding,
+      expectedDigest: resolvedBinding.expectedDigest,
+      cycleFacts: productionBindingRecovery.cycleFacts,
+      blockhashContext: productionBindingRecovery.blockhashContext,
+    });
+    buyback = {
+      policy: productionPolicy,
+      collectorProgramId: resolvedBinding.binding.instructions[COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX].programId,
+      collectorRecipient: resolvedBinding.binding.collectorRecipient,
+    };
+  } else {
+    buyback = configuredBuybackPolicy(config);
+  }
   const decodeOptions = trustedSolanaDecodeOptions({ adapters, config });
   const policySigner = createPolicySigner({
     backend: {
@@ -469,7 +672,7 @@ async function broadcastRecordedBuyback({ adapters, config, cycleRepository, pos
       if (!(await readBlockhashValidity(adapters.solana.client, record.attempt.blockhash))) {
         throw new Error('supplementary buyback provider transaction blockhash expired before submission');
       }
-      requireSupplementaryMutationAuthority(config);
+      requireSupplementaryMutationAuthority(config, preflightAuthority);
       return adapters.collectorCrypt.submitTransaction({ signedTransaction: signed.signedTxBase64 });
     },
   });
@@ -540,7 +743,7 @@ async function advanceToBuybackSentUnknown(cycleRepository, position, confirmedS
 export function createSupplementaryBuybackHandler() {
   return Object.freeze({
     stage: SUPPLEMENTARY_BUYBACK_STAGE,
-    async reconcile({ adapters, signerClient, config, cycleRepository, context, position, settlement }) {
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position, settlement, preflightAuthority }) {
       assertHeldPositionForResale(position);
       if (settlement.state !== 'PREPARED') {
         throw new Error('supplementary buyback handler requires a PREPARED settlement');
@@ -576,8 +779,12 @@ export function createSupplementaryBuybackHandler() {
           return undefined; // capabilities unavailable; the settlement stays truthfully PREPARED.
         }
         let prepared;
+        let productionBinding;
         try {
           prepared = await prepareResale({ adapters, config, position });
+          productionBinding = prepared.unavailable
+            ? null
+            : await prepareHeldProductionBinding({ adapters, config, cycleRepository, position, prepared });
         } catch {
           return undefined; // preflight failure is money-safe: nothing was sent to the provider.
         }
@@ -601,7 +808,9 @@ export function createSupplementaryBuybackHandler() {
 
         if (record.attempt.state === 'PREPARED') {
           try {
-            record = await signAndRecordBuyback({ adapters, config, signerClient, cycleRepository, context, position, prepared, requestDigest });
+            record = await signAndRecordBuyback({
+              adapters, config, signerClient, cycleRepository, context, position, prepared, productionBinding, requestDigest, preflightAuthority,
+            });
           } catch {
             // The provider mutation (or decode/policy/sign) may or may not have landed. The
             // durable attempt stays PREPARED; never resent automatically -- only
@@ -619,7 +828,7 @@ export function createSupplementaryBuybackHandler() {
 
       if (record.attempt.state === 'SIGNED') {
         try {
-          record = await broadcastRecordedBuyback({ adapters, config, cycleRepository, position, record, requestDigest });
+          record = await broadcastRecordedBuyback({ adapters, config, cycleRepository, position, record, requestDigest, preflightAuthority });
         } catch {
           // Broadcast is itself ambiguous; the exact same signed bytes remain durably recoverable
           // for the next reconcile() call via readChainAttemptRecoveryContext -- never re-signed.

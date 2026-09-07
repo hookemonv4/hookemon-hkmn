@@ -74,6 +74,8 @@ repository client.
   Production requires `manualApprovalCycles >= 3`; rehearsal requires at least one manual approval
   slot.
 
+- The supplementary buyback handler resolves the Collector production binding against the original open evidence and freshly finalized ownership, and preserves the frozen policy when replaying signed bytes. See [Supplementary Buyback](supplementary-buyback.md) for its interface and recovery rules.
+
 ## Invariants
 
 - Exactly one `CycleRepository` and policy engine serve every money mutation. Operations EVM and

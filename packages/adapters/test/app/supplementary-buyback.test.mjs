@@ -209,6 +209,10 @@ function fakeChainAttemptRepository({ openPacks = [{ packIndex: 0, memo: MEMO, d
     advances,
     calls,
     attempts,
+    // Exposed only so a test can simulate a genuinely historical durable record -- one written
+    // before a later field existed on the recovery context -- by replacing a stored entry's value
+    // with one missing that key entirely, rather than fabricating an `undefined`/`null` shortcut.
+    recoveryContexts,
     async readStage(_cycleId, stage) {
       return stage === 'open' ? { status: 'COMPLETE', evidence: { packs: openPacks } } : { status: 'PENDING' };
     },
@@ -607,6 +611,89 @@ test('reconcile records signed bytes before broadcasting, and a restart before b
     settlement: settlementFixture(),
   }));
   assert.equal(signCalls, 1); // unchanged: no second sign
+  assert.equal(cycleRepository.advances.length, 1);
+  const [advance] = cycleRepository.advances;
+  assert.equal(advance.evidence.signature, signedSolanaTransactionSignature(recordedBytes));
+  assert.equal(secondAttempt.state, 'BUYBACK_SENT_UNKNOWN');
+});
+
+// --- a genuinely historical SIGNED record predates the productionBinding recovery field ----------
+
+test('reconcile rebroadcasts a genuinely historical SIGNED attempt whose recovery context has no productionBinding field at all, under the unchanged legacy policy, without generating a new provider transaction or re-signing', async () => {
+  const cycleRepository = fakeChainAttemptRepository();
+  const transaction = resaleTransaction({ amount: 85n });
+  const policy = await decodedPolicyFor(transaction);
+  const testConfig = configuredWithPolicy(policy);
+  const proceedsSource = deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58();
+  const rpc = rpcClient({
+    entries: [
+      { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+      { tokenAccount: proceedsSource, owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+    ],
+  });
+
+  let signCalls = 0;
+  const collectorCrypt = {
+    async getBuybackCheck() { return { exists: false }; },
+    async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: '85' } }; },
+    async buyback() { return { memo: MEMO, refundAmount: { ...settlementAsset(), amountAtomic: '85' }, serializedTransaction: transaction }; },
+    async submitTransaction() { throw new Error('simulated crash: process dies after signing, before a successful broadcast'); },
+  };
+  const handler = createSupplementaryBuybackHandler();
+  const firstAttempt = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt, solana: { client: rpc } },
+    signerClient: { solana: { role: 'operator-solana', async sign(request) { signCalls += 1; return signTransaction(request); } } },
+    config: testConfig,
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(firstAttempt, undefined);
+  assert.equal(signCalls, 1);
+  const [key] = cycleRepository.attempts.keys();
+  const recordedBytes = cycleRepository.attempts.get(key).attempt.rawBytes;
+
+  // Simulate a genuinely historical durable record: the stored recovery context predates the
+  // `productionBinding` field entirely (the key is absent, not `null`). This is never fabricated
+  // by writing `productionBinding: null` -- that would only prove the already-covered explicit-null
+  // case, not the actual regression (`!== null` treating `undefined` as a present production record).
+  const [[recoveryKey, storedRecovery]] = [...cycleRepository.recoveryContexts.entries()];
+  assert.equal(Object.hasOwn(storedRecovery.context, 'productionBinding'), true);
+  const { productionBinding: _drop, ...historicalContext } = storedRecovery.context;
+  assert.equal(Object.hasOwn(historicalContext, 'productionBinding'), false);
+  cycleRepository.recoveryContexts.set(recoveryKey, { ...storedRecovery, context: historicalContext });
+
+  // `getBuybackCheck` must miss on the first call -- reconcile()'s recovery-first existing-sale
+  // check runs before the durable chain-attempt state is ever inspected. Returning "complete"
+  // immediately would confirm the sale through that memo lookup alone and never reach
+  // `broadcastRecordedBuyback` at all, so this test would pass even against the regression it is
+  // meant to catch.
+  let restartChecks = 0;
+  const collectorCryptOnRestart = {
+    async getBuybackCheck() {
+      restartChecks += 1;
+      if (restartChecks === 1) return { exists: false };
+      return {
+        exists: true, status: 'complete', buybackAmount: '85', playerWallet: OPERATOR,
+        nft: CARD_ASSET, transactionSignature: signedSolanaTransactionSignature(recordedBytes),
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    },
+    async buyback() { throw new Error('must not generate a new provider transaction for a historical SIGNED attempt'); },
+    async submitTransaction({ signedTransaction }) {
+      assert.equal(signedTransaction, recordedBytes);
+      return { success: true, signature: signedSolanaTransactionSignature(signedTransaction), confirmationStatus: 'finalized' };
+    },
+  };
+  const secondAttempt = await handler.reconcile(reconcileInput({
+    adapters: { collectorCrypt: collectorCryptOnRestart, solana: { client: rpc } },
+    signerClient: { solana: { role: 'operator-solana', async sign() { signCalls += 1; throw new Error('must not re-sign a historical attempt'); } } },
+    config: testConfig,
+    cycleRepository,
+    position: heldPosition(),
+    settlement: settlementFixture(),
+  }));
+  assert.equal(signCalls, 1); // unchanged: no re-sign
   assert.equal(cycleRepository.advances.length, 1);
   const [advance] = cycleRepository.advances;
   assert.equal(advance.evidence.signature, signedSolanaTransactionSignature(recordedBytes));
