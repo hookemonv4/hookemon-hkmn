@@ -2,7 +2,7 @@ Compiling 81 files with Solc 0.8.26
 Solc 0.8.26 finished in 1.85s
 Compiler run successful!
 
-Ran 1 test for /Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/bot-process-funding-feasibility/packages/contracts/test/feasibility/OwnerCapital.t.sol:OwnerCapitalFeasibilityTest
+Ran 1 test for [workspace]/packages/contracts/test/feasibility/OwnerCapital.t.sol:OwnerCapitalFeasibilityTest
 [PASS] test_onePackFundedByActualFeesWith150UsdgInitialCapital() (gas: 72051510)
 Logs:
   initialOwnerUsdgAtomic: 150000000
