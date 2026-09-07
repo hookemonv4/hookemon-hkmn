@@ -59,6 +59,11 @@ contracts below, or an honest "nothing observed yet" placeholder — never an in
 
 ## Invariants
 
+- Showcase buyback estimates use exact NFT membership and pack rates recorded in
+  `docs/evidence/showcase-buyback-sources.json`. Multiple verified rates produce a range;
+  unverified membership shows an unavailable estimate. Retrieval dates and the distinction
+  between insured values and estimated offers remain visible.
+
 - The illustrated homepage uses 30 px header social icons, decorative Lugia sparkles that stop
   under reduced motion, and one large footer wordmark without a duplicate logo in the bottom row.
 - Mobile navigation exposes the pack catalog in a dismissible side panel. The cycle transcript

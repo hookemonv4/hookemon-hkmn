@@ -1,0 +1,309 @@
+{
+  "rateSource": "https://gacha.collectorcrypt.com/api/gachas/all",
+  "verifiedAt": "2026-09-07",
+  "inventoryChecks": [
+    {
+      "code": "pokemon_50",
+      "pages": 13,
+      "count": 1269,
+      "complete": true,
+      "matches": []
+    },
+    {
+      "code": "pokemon_5000",
+      "pages": 4,
+      "count": 343,
+      "complete": true,
+      "matches": [
+        {
+          "id": "H1sSmJcCVdepcPQTVgD8JkjiMzn1AMRJ8i5HqawssH47",
+          "name": "2011 #SL7 Lugia-Holo PSA 10 Call of Legends",
+          "code": "pokemon_5000",
+          "rate": 93,
+          "insuredValue": 250000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_5000&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.499616+00:00"
+        },
+        {
+          "id": "5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3",
+          "name": "2003 #146 Charizard-Holo PSA 10 Skyridge",
+          "code": "pokemon_5000",
+          "rate": 93,
+          "insuredValue": 135000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_5000&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.499616+00:00"
+        },
+        {
+          "id": "CKj6vBnWppVChNCN17F8UjQSLjmRVhxaVyVGFsbyxQDC",
+          "name": "2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny",
+          "code": "pokemon_5000",
+          "rate": 93,
+          "insuredValue": 45000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_5000&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.499616+00:00"
+        },
+        {
+          "id": "3A5unBCuL8hKrmqM8cpWH4C7Ly9MkGF8briwpxdCwTdM",
+          "name": "2005 #107 Rayquaza Gold Star HOLO R BGS 8 EX Deoxys",
+          "code": "pokemon_5000",
+          "rate": 93,
+          "insuredValue": 40000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_5000&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.499616+00:00"
+        },
+        {
+          "id": "4ERfJkc6xoh1Codq7Zo7TdeCdznYua1q15HtmBmTf6Uq",
+          "name": "2021 #095 Full Art/Umbreon Vmax-Hyper PSA 10 Japanese Sword & Shield Eevee Heroes",
+          "code": "pokemon_5000",
+          "rate": 93,
+          "insuredValue": 5400,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_5000&page=2&limit=100",
+          "fetchedAt": "2026-09-07T02:52:08.162701+00:00"
+        }
+      ]
+    },
+    {
+      "code": "pokemon_2500",
+      "pages": 6,
+      "count": 523,
+      "complete": true,
+      "matches": [
+        {
+          "id": "CKj6vBnWppVChNCN17F8UjQSLjmRVhxaVyVGFsbyxQDC",
+          "name": "2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny",
+          "code": "pokemon_2500",
+          "rate": 93,
+          "insuredValue": 45000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_2500&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.778525+00:00"
+        },
+        {
+          "id": "3A5unBCuL8hKrmqM8cpWH4C7Ly9MkGF8briwpxdCwTdM",
+          "name": "2005 #107 Rayquaza Gold Star HOLO R BGS 8 EX Deoxys",
+          "code": "pokemon_2500",
+          "rate": 93,
+          "insuredValue": 40000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_2500&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.778525+00:00"
+        },
+        {
+          "id": "4ERfJkc6xoh1Codq7Zo7TdeCdznYua1q15HtmBmTf6Uq",
+          "name": "2021 #095 Full Art/Umbreon Vmax-Hyper PSA 10 Japanese Sword & Shield Eevee Heroes",
+          "code": "pokemon_2500",
+          "rate": 93,
+          "insuredValue": 5400,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_2500&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:07.778525+00:00"
+        }
+      ]
+    },
+    {
+      "code": "pokemon_1000",
+      "pages": 6,
+      "count": 588,
+      "complete": true,
+      "matches": [
+        {
+          "id": "CKj6vBnWppVChNCN17F8UjQSLjmRVhxaVyVGFsbyxQDC",
+          "name": "2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny",
+          "code": "pokemon_1000",
+          "rate": 93,
+          "insuredValue": 45000,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_1000&page=1&limit=100",
+          "fetchedAt": "2026-09-07T02:52:09.041201+00:00"
+        }
+      ]
+    },
+    {
+      "code": "pokemon_500",
+      "pages": 9,
+      "count": 879,
+      "complete": true,
+      "matches": [
+        {
+          "id": "4ERfJkc6xoh1Codq7Zo7TdeCdznYua1q15HtmBmTf6Uq",
+          "name": "2021 #095 Full Art/Umbreon Vmax-Hyper PSA 10 Japanese Sword & Shield Eevee Heroes",
+          "code": "pokemon_500",
+          "rate": 90,
+          "insuredValue": 5400,
+          "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_500&page=2&limit=100",
+          "fetchedAt": "2026-09-07T02:52:10.412999+00:00"
+        }
+      ]
+    },
+    {
+      "code": "pokemon_250",
+      "pages": 8,
+      "count": 742,
+      "complete": true,
+      "matches": []
+    },
+    {
+      "code": "pokemon_100",
+      "pages": 30,
+      "count": 3000,
+      "complete": false,
+      "matches": []
+    },
+    {
+      "code": "sealed_80",
+      "pages": 9,
+      "count": 879,
+      "complete": true,
+      "matches": []
+    },
+    {
+      "code": "pokemon_25",
+      "pages": 30,
+      "count": 3000,
+      "complete": false,
+      "matches": []
+    }
+  ],
+  "additionalChecks": [
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=1&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:52:58.247018+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=2&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:52:58.591084+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=3&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:52:59.132933+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=4&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:52:59.804184+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=5&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:00.082122+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=6&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:00.451356+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=7&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:01.176416+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=8&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:01.618982+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=9&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:01.969025+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_100&rarity=epic&page=10&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:02.431107+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=1&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:05.606702+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=2&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:05.989727+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=3&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:06.620337+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=4&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:06.984941+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=5&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:07.367044+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=6&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:07.750752+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=7&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:08.064868+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=8&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:08.500395+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=9&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:08.806097+00:00"
+    },
+    {
+      "url": "https://gacha.collectorcrypt.com/api/getNfts?code=pokemon_25&rarity=epic&page=10&limit=100",
+      "count": 100,
+      "hasMore": true,
+      "matches": [],
+      "fetchedAt": "2026-09-07T02:53:09.265457+00:00"
+    }
+  ],
+  "unverifiedIds": [
+    "6aSSRLz6eNppavyKSygZqrL3PfQU5WT5FarjwMegE14E",
+    "CqGUW13AarrctjQvehYAQkFE2xhYwZEG1Ti7Kxw8m237"
+  ]
+}

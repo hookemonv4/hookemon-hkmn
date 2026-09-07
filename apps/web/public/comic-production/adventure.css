@@ -3605,3 +3605,8 @@ summary:focus-visible {
 .collection-pack-link { margin-top: 32px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 16px 24px; text-align: center; }
 .collection-pack-link > p { margin: 0; font-size: 22px; font-weight: 800; }
 .collection-pack-link .button { font-size: 17px; }
+
+.card-valuation .card-buyback{font-size:13px;font-weight:700;line-height:1.5;color:var(--navy);margin-top:8px}
+.card-valuation .card-buyback-note{font-size:11px;line-height:1.5;color:var(--muted)}
+.card-lugia .card-valuation .card-buyback{font-size:15px;color:var(--yellow)}
+.card-lugia .card-valuation .card-buyback-note{font-size:12px;color:#d3e0ee}
