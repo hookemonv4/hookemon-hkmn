@@ -101,7 +101,7 @@
     {
       "id": "signing",
       "path": "docs/modules/signing.md",
-      "sha256": "9a90cfe6083589d966429953fa8ca40e9a8af4ed28366f13e20ea56b5623a520"
+      "sha256": "45985e15dace810ca073f8002235f0823d86b1e78c86ee385493357922ab5330"
     },
     {
       "id": "cycle-repository",

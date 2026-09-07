@@ -681,7 +681,9 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
   const canonicalPolicy = policyBinding.policy;
   const policyRules = policyBinding.rules;
   const approvals = new Map();
-  const policyDigest = canonicalDigest(canonicalPolicy);
+  const policyDigest = policyRules.some(rule => rule.deadline?.type === 'rpc-blockhash-validity')
+    ? canonicalDigest({ policy: canonicalPolicy, rules: policyRules })
+    : canonicalDigest(canonicalPolicy);
   async function recoveredApproval(signed, recoveryContext) {
     const envelope = signedEnvelope(signed, family);
     const expected = normalizeTransactionPolicyApprovalContext(recoveryContext);
