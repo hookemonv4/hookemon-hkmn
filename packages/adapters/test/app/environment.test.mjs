@@ -16,6 +16,7 @@ import {
   loadStandingAuthority,
   EnvironmentConfigurationError,
 } from '../../src/app/environment.mjs';
+import { mutateReturn } from '../../src/app/stages/return.mjs';
 import { mutateEpicGate } from '../../src/app/stages/epic-gate.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../src/collector-crypt.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
@@ -903,4 +904,33 @@ test('missing epic configuration remains data-unverified and wrong settlement id
   assert.match(held.evidence.reason, /explicit Collector field configuration/);
   const configured = await epicEnvironment(t, explicitEpicFields);
   assert.throws(() => readEnvironment({ ...configured, HOOKEMON_RELAY_SOLANA_MINT: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' }, { profile: 'production' }), /documented Collector settlement asset/);
+});
+
+
+test('explicit return window reaches the real return pre-sign request guard without a default', async t => {
+  const env = await productionEnv(t);
+  let effects = 0;
+  const repository = new Proxy({ async describeCycle() { return { custodyLedgers: new Map() }; } }, {
+    get(target, name) { return target[name] ?? (async () => { effects += 1; throw new Error('unexpected effect'); }); },
+  });
+  const invoke = (config, window) => mutateReturn({
+    liveMode: true, config, adapters: { solana: { client: {} } }, cycleRepository: repository,
+    context: { cycleId: 'window-cycle', requestDigest: `sha256:${'a'.repeat(64)}` },
+    request: { schema: 'hookemon.return-relay-request.v1', cycleId: 'window-cycle', requestCreatedAtUnixSeconds: '1', maxSettlementWindowSeconds: window },
+  });
+  const absent = readEnvironment({ ...env, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' }, { profile: 'production' });
+  assert.equal(absent.relay.maxSettlementWindowSeconds, undefined);
+  await assert.rejects(invoke(absent, '300'), /configured positive max settlement window/);
+  const configured = readEnvironment({ ...env, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test', HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: '300' }, { profile: 'production' });
+  assert.equal(configured.relay.maxSettlementWindowSeconds, '300');
+  await assert.rejects(invoke(configured, '301'), /settlement window does not match/);
+  // A matched explicit bound passes that guard and reaches the next independent intent check.
+  await assert.rejects(invoke(configured, '300'), /missing a RETURN Relay intent/);
+  assert.equal(effects, 0, 'no durable write, nonce reservation or signing is reached');
+});
+
+test('return window refuses nonpositive, fractional and unsafe values', async () => {
+  for (const value of ['0', '-1', '1.5', '9007199254740992', 'NaN']) {
+    assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: value })), /must be a positive integer/);
+  }
 });

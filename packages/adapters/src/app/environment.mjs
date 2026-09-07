@@ -93,6 +93,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   // Explicit local allowlist for the EVM Relay depository. It is intentionally unset by default:
   // an outbound signer must never accept a provider-supplied destination as its own authority.
   'HOOKEMON_RELAY_EVM_DEPOSITORY',
+  'HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS',
   'HOOKEMON_COLLECTOR_CRYPT_BASE_URL',
   'HOOKEMON_COLLECTOR_CRYPT_API_KEY',
   'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH',
@@ -839,6 +840,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const relaySolanaMint = relaySolanaMintRaw === null ? null : readSolanaAddress(relaySolanaMintRaw, 'HOOKEMON_RELAY_SOLANA_MINT');
   const relaySolanaDecimals = readAssetDecimals(env, 'HOOKEMON_RELAY_SOLANA_DECIMALS');
   const relayEvmDepository = readEvmAddress(env, 'HOOKEMON_RELAY_EVM_DEPOSITORY');
+  const relaySettlementWindow = readPositiveInteger(env, 'HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS', { defaultValue: null });
   const collectorCryptBaseUrl = readUrl(env, 'HOOKEMON_COLLECTOR_CRYPT_BASE_URL', { defaultValue: DEFAULT_COLLECTOR_CRYPT_BASE_URL });
   const collectorCryptApiKeyRaw = readString(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY', { defaultValue: null });
   const collectorCryptApiKeyPath = readAbsolutePath(env, 'HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH', { required: false });
@@ -1068,6 +1070,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
       apiKey: relayApiKey,
       solanaMint: relaySolanaMint,
       evmDepository: relayEvmDepository,
+      ...(relaySettlementWindow === null ? {} : { maxSettlementWindowSeconds: String(relaySettlementWindow) }),
     }),
     collectorCrypt: Object.freeze({
       baseUrl: collectorCryptBaseUrl,

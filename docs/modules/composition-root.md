@@ -86,6 +86,10 @@ repository client.
 
 - The supplementary buyback handler resolves the Collector production binding against the original open evidence and freshly finalized ownership, and preserves the frozen policy when replaying signed bytes. See [Supplementary Buyback](supplementary-buyback.md) for its interface and recovery rules.
 
+`HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS` supplies the explicit positive safe-integer
+return settlement bound as a canonical decimal string. It has no default; omission retains the
+return handler's pre-sign refusal. The request must carry the same configured bound.
+
 ## Invariants
 
 - Exactly one `CycleRepository` and policy engine serve every money mutation. Operations EVM and
