@@ -1,8 +1,20 @@
 # Lease expiry during mutation
 
+## Detection
+
+The worker loses its fenced lease before the provider effect.
+
+## Safe stop
+
+Stop the stale worker. Preserve its NOT_SENT record and reservation evidence.
+
 ## Runner behavior
 
 A fence lost before a provider effect leaves the cycle nonterminal with NOT_SENT evidence and no provider mutation. A stale worker never receives authority from this retry state. Preserve the prepared request and lease evidence.
+
+## Operator recovery
+
+Only a current fenced owner may recover; a stale lease must never release a newer reservation.
 
 ## Recovery constraints
 
@@ -16,9 +28,13 @@ Failure-matrix cells: Wallet lease:lost-lease
 Owning work package: WP07
 Expected outcome: terminal=none; attempt=NOT_SENT; next=retry
 Test: packages/adapters/test/app/stage-driver.test.mjs — keeps a lost lease retryable before a provider effect and retains a NOT_SENT record
-Alarm reason/code: LEASE_CONTENTION
-Resume command: use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
+Alarm reason/code: `LEASE_CONTENTION`
+Resume command: none supported outside the approved recovery path; use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
 
 ## Escalation
 
 Preserve the cycle and stage identifiers, request digest and redacted failure evidence. Escalate conflicting canonical evidence or an attempted identity, amount or signed-byte change before allowing another effect.
+
+## Evidence
+
+Retain the cycle and attempt identifiers, original request digest, validity context and redacted failure record cited above.
