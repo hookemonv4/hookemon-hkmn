@@ -3619,3 +3619,27 @@ summary:focus-visible {
 .collection .collector-headline{color:var(--yellow);-webkit-text-stroke:0.16em #1b72bb;paint-order:stroke fill;text-shadow:0.045em 0.065em 0 #153e7e;line-height:1.1}
 .faq-list p a{text-decoration:underline;font-weight:700}
 @media(max-width:600px){.holder-share-callout{margin-top:20px}.holder-share-callout strong{font-size:20px}.holder-share-callout p{font-size:13px}}
+
+.hero h1 .hero-on { color: var(--navy); -webkit-text-stroke: 0; text-shadow: none; }
+.journey-intro .adventure-heading { color: var(--yellow); -webkit-text-stroke: .11em #1b72bb; paint-order: stroke fill; text-shadow: .045em .065em 0 #153e7e; }
+
+/* Two-line heading with the supplied transparent Robinhood Chain artwork. */
+.hero h1.shared-cycle-title { font-size: clamp(28px, 4.1vw, 59px); line-height: 1.12; }
+.hero h1 .cycle-line { display: block; white-space: nowrap; }
+.hero h1 .plain-heading { color: var(--navy); -webkit-text-stroke: 0; text-shadow: none; }
+.hero h1 .robinhood-name { display: flex; align-items: baseline; white-space: pre; color: var(--yellow); }
+.hero-description { position: relative; padding-left: 25px; }
+.hero-description .description-star { position: absolute; left: 0; top: .06em; font-size: 19px; }
+
+@media (orientation: landscape) and (max-height: 600px) and (max-width: 1100px) {
+  .hero-art { height: min(32vw, calc(100svh - 180px)); width: min(32vw, calc(100svh - 180px)); justify-self: center; align-self: start; margin-top: 20px; }
+  .hero-art .hero-coin { width: 88%; max-width: none; height: auto; left: 6%; top: 6%; }
+  .hero-art .coin-orbit { inset: 4%; }
+  .hero-art .coin-shadow { width: 65%; left: 17.5%; bottom: 0; }
+}
+
+.hero h1 .cycle-line .hero-on { display: inline; font-size: inherit; margin: 0; }
+.hero h1 .robinhood-name { margin-top: .17em; }
+@media (max-width: 600px) { .hero h1.shared-cycle-title { font-size: clamp(23px, 7.4vw, 41px); } }
+
+.hero h1 img.robinhood-wordmark { display: block; width: 100%; max-width: 100%; height: auto; filter: none; }
