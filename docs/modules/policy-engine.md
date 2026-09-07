@@ -62,6 +62,20 @@ canonical micro-USDG integer strings.
   catalog read, Relay quote, or hook liability read, so a request this far above the ceiling never
   reaches a Relay quote, a claim, or a durably admitted cycle at all -- not merely this later
   normalizer.
+- A `hookemon.policy-admission.v2` binds one typed catalog unit target (`unitPurchase`), its checked
+  aggregate target (`aggregatePurchase`), a separate N=1 source funding quote (`unitFundingQuote`),
+  an aggregate source funding quote (`aggregateFundingQuote`), and the `EXACT_OUTPUT` Relay identity
+  for each. `unitRelayQuote` is the full immutable, parser-shaped N=1 Relay response: policy rechecks
+  its raw request/order, route, accounts, deadline, order payments, exact amounts, and the same
+  canonical full-response digest produced by the Relay adapter. The persisted raw quote is an
+  integrity commitment, not a cryptographic Relay attestation; `buildAdmissionPlanner` obtains it
+  through `parseQuoteResponse` before it is ever persisted. The canonical funding/settlement route
+  and Operations sender/recipient are required. The unit rail compares only the independently
+  verified `unitFundingQuote.amountAtomic` against the per-unit ceiling; per-cycle and
+  trailing-24-hour reservations compare only `aggregateFundingQuote.amountAtomic` once. The
+  aggregate quote is never divided by quantity to obtain a unit price, and the unit is never
+  multiplied by quantity to obtain the aggregate: fees and slippage are not linear in quantity, so
+  either substitution would authorize an unquoted spend.
 - Purchases require the exact existing cycle digest and reservation. Before signing, policy checks
   typed unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string
   quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share one
