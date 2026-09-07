@@ -1811,6 +1811,23 @@ function assertPayoutDustConsumption(value, label = 'payout dust consumption') {
   return consumption;
 }
 
+/**
+ * ADR-0026: the sole raw-to-canonical relation this repository independently recognizes for a
+ * payout quarantine reservation -- chain 4663, six decimals, and a normalized (lower-case) 20-byte
+ * EVM token -- matching the exact formula payout's `canonicalEvmUsdgCustodyIdentity` derives from
+ * `MoneyConfigurationV1.assets.usdg`. Never a generic alias: any other chain, decimals, or
+ * malformed/mixed-case token returns null and only the raw identity applies.
+ */
+function evmUsdgCanonicalCustodyIdentity(amount) {
+  if (amount.chainId !== '4663' || amount.decimals !== 6) return null;
+  if (typeof amount.assetId !== 'string' || !evmAddressPattern.test(amount.assetId)
+    || amount.assetId !== amount.assetId.toLowerCase()) {
+    return null;
+  }
+  const chainId = 'eip155:4663';
+  return { chainId, assetId: `${chainId}/erc20:${amount.assetId}`, decimals: amount.decimals };
+}
+
 function assertPayoutQuarantineReservation(value, label = 'payout quarantine reservation') {
   assertPlainExactObject(value, [
     'schema', 'cycleId', 'planDigest', 'recipient', 'amount', 'reason', 'evidence', 'ledger',
@@ -1824,8 +1841,15 @@ function assertPayoutQuarantineReservation(value, label = 'payout quarantine res
   const reason = assertQuarantineReason(value.reason, `${label} reason`);
   const evidence = cloneChainObservationEvidence(value.evidence, `${label} evidence`);
   const ledger = assertCustodyLedger(value.ledger, `${label} custody ledger`);
-  if (ledger.cycleId !== value.cycleId || ledger.chainId !== amount.chainId
-    || ledger.assetId !== amount.assetId || ledger.decimals !== amount.decimals) {
+  // The old rule required the embedded custody row to sit at the exact raw amount identity; a
+  // canonical-v2 reservation instead sits at the independently recomputed canonical identity for
+  // the one recognized USDG relation. Both are checked here so historical raw-identity journal
+  // entries keep replaying under the original rule while new reservations validate against the
+  // canonical row they actually reserved against -- never a caller-supplied identity taken on trust.
+  const canonical = evmUsdgCanonicalCustodyIdentity(amount);
+  const identityMatches = (ledger.chainId === amount.chainId && ledger.assetId === amount.assetId)
+    || (canonical !== null && ledger.chainId === canonical.chainId && ledger.assetId === canonical.assetId);
+  if (ledger.cycleId !== value.cycleId || !identityMatches || ledger.decimals !== amount.decimals) {
     throw new Error(`${label} custody ledger does not match the quarantined amount`);
   }
   return {
@@ -5073,8 +5097,22 @@ export class CycleRepository {
       }
       return structuredClone(existing);
     }
-    const ledgerKey = custodyLedgerKey(amount);
-    const previousLedger = state.custodyLedgers.get(ledgerKey);
+    // New payout admissions only ever write the canonical-v2 row (ADR-0026); a raw row still
+    // reachable from before that migration must remain usable so a legacy cycle's quarantine keeps
+    // working. Prefer the canonical row when the recognized USDG relation applies, but refuse
+    // outright if both rows exist for the same underlying asset -- reserving against either one
+    // silently would leave the other stale, which is exactly the competing-row state this repository
+    // must never produce on its own.
+    const rawKey = custodyLedgerKey(amount);
+    const rawLedger = state.custodyLedgers.get(rawKey) ?? null;
+    const canonicalIdentity = evmUsdgCanonicalCustodyIdentity(amount);
+    const canonicalKey = canonicalIdentity ? custodyLedgerKey(canonicalIdentity) : null;
+    const canonicalLedger = canonicalKey ? (state.custodyLedgers.get(canonicalKey) ?? null) : null;
+    if (rawLedger && canonicalLedger) {
+      throw new Error('cycle-repository reservePayoutQuarantine: raw and canonical custody ledgers coexist for this asset');
+    }
+    const ledgerKey = canonicalLedger ? canonicalKey : rawKey;
+    const previousLedger = canonicalLedger ?? rawLedger;
     if (!previousLedger) {
       throw new Error('cycle-repository reservePayoutQuarantine: a matching custody ledger is required before reservation');
     }

@@ -137,6 +137,16 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   plan while that predecessor exists; both rows and their full history are left exactly as found.
   This is the explicit, intended block on payout admission until the return consumer's own
   canonical-identity migration lands -- not a bug to route around locally.
+- `reservePayoutQuarantine` resolves its custody ledger through the same one narrow relation, always
+  independently recomputed from the quarantined amount, never from a caller-trusted identity: chain
+  `4663`, six decimals, and a normalized (lower-case) 20-byte token map to `eip155:4663` /
+  `eip155:4663/erc20:<that same token>`; anything else stays at its raw amount identity. It prefers a
+  canonical row when the relation applies, still reserves against a legacy raw-identity row when only
+  that one exists, and refuses outright if a raw and a canonical row for the same asset ever coexist
+  -- reserving against either silently would leave the other stale. `assertPayoutQuarantineReservation`
+  accepts a stored reservation's embedded ledger under either the historical exact-raw-identity rule
+  or this same independently recomputed canonical relation, so a reservation made before the
+  canonical-v2 migration keeps replaying unchanged.
 
 ## State transitions
 

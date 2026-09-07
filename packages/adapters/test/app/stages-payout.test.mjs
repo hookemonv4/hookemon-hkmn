@@ -149,12 +149,15 @@ async function durableCycle(t) {
   return { directory, repository, cycleId };
 }
 
+// Canonical EVM USDG custody-v2 identity (ADR-0026): direct payout only ever creates or consumes
+// this row, never the pre-migration raw chainId/assetId pair, so a fixture seeding a custody row
+// ahead of `advanceDirectPayout`/`mutatePayout` must seed it at this identity too.
 function custodyLedger(cycleId, returnReceived) {
   return {
-    schema: 'hookemon.custody-ledger.v1',
+    schema: 'hookemon.custody-ledger.v2',
     cycleId,
-    chainId: '4663',
-    assetId: TOKEN,
+    chainId: 'eip155:4663',
+    assetId: `eip155:4663/erc20:${TOKEN.toLowerCase()}`,
     decimals: 6,
     claimed: '0',
     bridgeOut: '0',
@@ -170,6 +173,8 @@ function custodyLedger(cycleId, returnReceived) {
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
+    verifiedCurrentBalance: null,
+    expectedCycleAsset: null,
   };
 }
 

@@ -2810,6 +2810,209 @@ test('payout quarantine atomically records its evidence and the matching custody
   assert.equal((await reopened.describeCycle(cycleId)).custodyLedgers.get(`${amount.chainId}\u0000${amount.assetId}`).payoutLiability, '30');
 });
 
+// ADR-0026 required quarantine integration: direct payout only ever writes the canonical-v2 USDG
+// row (chain 4663, six decimals, `eip155:4663`/`eip155:4663/erc20:<token>`), so reservePayoutQuarantine
+// must resolve that same relation independently -- never a raw lookup alone, never a caller-trusted
+// alias, and never silently across a mismatched chain or decimals.
+const QUARANTINE_USDG_RAW_CHAIN_ID = '4663';
+const QUARANTINE_USDG_DECIMALS = 6;
+
+function quarantineRecipient(suffix) {
+  return `0x${'0'.repeat(38)}${suffix}`;
+}
+
+function quarantineLedgerKey(chainId, assetId) {
+  return `${chainId}\u0000${assetId}`;
+}
+
+test('reservePayoutQuarantine reserves against the canonical-v2 USDG row, rejects conflicting evidence, and replays after reopen', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const token = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const canonicalChainId = `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}`;
+  const canonicalAssetId = `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}/erc20:${token}`;
+  const canonicalKey = quarantineLedgerKey(canonicalChainId, canonicalAssetId);
+  await repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, {
+    chainId: canonicalChainId,
+    assetId: canonicalAssetId,
+    returnReceived: '100',
+  }));
+  const amount = { chainId: QUARANTINE_USDG_RAW_CHAIN_ID, assetId: token, decimals: QUARANTINE_USDG_DECIMALS, amountAtomic: '30' };
+  const input = {
+    planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'canonical-only' }),
+    recipient: quarantineRecipient('c1'),
+    amount,
+    reason: 'USDG_FROZEN',
+    evidence: { frozenAt: 'finalized' },
+  };
+  const reservation = await repository.reservePayoutQuarantine(cycleId, input);
+  assert.equal(reservation.ledger.chainId, canonicalChainId);
+  assert.equal(reservation.ledger.assetId, canonicalAssetId);
+  const state = await repository.describeCycle(cycleId);
+  assert.equal(state.custodyLedgers.get(canonicalKey).payoutLiability, '30');
+  assert.equal(
+    state.custodyLedgers.get(quarantineLedgerKey(QUARANTINE_USDG_RAW_CHAIN_ID, token)),
+    undefined,
+    'reserving must never manufacture a competing raw row',
+  );
+
+  assert.deepEqual(await repository.reservePayoutQuarantine(cycleId, input), reservation, 'an exact retry does not reserve the amount twice');
+  await assert.rejects(
+    () => repository.reservePayoutQuarantine(cycleId, { ...input, amount: { ...amount, amountAtomic: '31' } }),
+    /already has different evidence/,
+  );
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPayoutQuarantine(cycleId, input.planDigest, input.recipient), reservation);
+  assert.equal((await reopened.describeCycle(cycleId)).custodyLedgers.get(canonicalKey).payoutLiability, '30');
+});
+
+test('reservePayoutQuarantine refuses when a raw and canonical USDG row coexist for the same asset', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const token = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  await repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, {
+    chainId: QUARANTINE_USDG_RAW_CHAIN_ID,
+    assetId: token,
+    returnReceived: '100',
+  }));
+  await repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, {
+    chainId: `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}`,
+    assetId: `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}/erc20:${token}`,
+    returnReceived: '100',
+  }));
+  const amount = { chainId: QUARANTINE_USDG_RAW_CHAIN_ID, assetId: token, decimals: QUARANTINE_USDG_DECIMALS, amountAtomic: '10' };
+  await assert.rejects(
+    () => repository.reservePayoutQuarantine(cycleId, {
+      planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'coexisting' }),
+      recipient: quarantineRecipient('c2'),
+      amount,
+      reason: 'USDG_FROZEN',
+      evidence: { frozenAt: 'finalized' },
+    }),
+    /raw and canonical custody ledgers coexist/,
+  );
+});
+
+test('reservePayoutQuarantine still reserves against a legacy raw-identity USDG row when no canonical row exists, and replays under the raw rule', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const token = '0xcccccccccccccccccccccccccccccccccccccccc';
+  await repository.recordCustodyLedger(cycleId, custodyLedger(cycleId, {
+    chainId: QUARANTINE_USDG_RAW_CHAIN_ID,
+    assetId: token,
+    returnReceived: '100',
+  }));
+  const amount = { chainId: QUARANTINE_USDG_RAW_CHAIN_ID, assetId: token, decimals: QUARANTINE_USDG_DECIMALS, amountAtomic: '15' };
+  const input = {
+    planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'raw-only' }),
+    recipient: quarantineRecipient('c3'),
+    amount,
+    reason: 'USDG_FROZEN',
+    evidence: { frozenAt: 'finalized' },
+  };
+  const reservation = await repository.reservePayoutQuarantine(cycleId, input);
+  assert.equal(reservation.ledger.chainId, QUARANTINE_USDG_RAW_CHAIN_ID);
+  assert.equal(reservation.ledger.assetId, token);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readPayoutQuarantine(cycleId, input.planDigest, input.recipient), reservation);
+  assert.equal(
+    (await reopened.describeCycle(cycleId)).custodyLedgers.get(quarantineLedgerKey(QUARANTINE_USDG_RAW_CHAIN_ID, token)).payoutLiability,
+    '15',
+  );
+});
+
+test('reservePayoutQuarantine refuses a backing shortfall against the canonical USDG row', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const token = '0xdddddddddddddddddddddddddddddddddddddddd';
+  await repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, {
+    chainId: `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}`,
+    assetId: `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}/erc20:${token}`,
+    returnReceived: '5',
+  }));
+  const amount = { chainId: QUARANTINE_USDG_RAW_CHAIN_ID, assetId: token, decimals: QUARANTINE_USDG_DECIMALS, amountAtomic: '6' };
+  await assert.rejects(
+    () => repository.reservePayoutQuarantine(cycleId, {
+      planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'shortfall' }),
+      recipient: quarantineRecipient('c4'),
+      amount,
+      reason: 'USDG_FROZEN',
+      evidence: { frozenAt: 'finalized' },
+    }),
+    /recorded returned custody cannot back this liability/,
+  );
+});
+
+test('reservePayoutQuarantine never splices a mismatched chain or decimals onto the canonical USDG row', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const token = '0x111111111111111111111111111111111111111a';
+  await repository.recordCustodyLedger(cycleId, custodyLedgerV2(cycleId, {
+    chainId: `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}`,
+    assetId: `eip155:${QUARANTINE_USDG_RAW_CHAIN_ID}/erc20:${token}`,
+    returnReceived: '100',
+  }));
+  await assert.rejects(
+    () => repository.reservePayoutQuarantine(cycleId, {
+      planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'wrong-decimals' }),
+      recipient: quarantineRecipient('c5'),
+      amount: { chainId: QUARANTINE_USDG_RAW_CHAIN_ID, assetId: token, decimals: 18, amountAtomic: '1' },
+      reason: 'USDG_FROZEN',
+      evidence: { frozenAt: 'finalized' },
+    }),
+    /matching custody ledger is required/,
+  );
+  await assert.rejects(
+    () => repository.reservePayoutQuarantine(cycleId, {
+      planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'wrong-chain' }),
+      recipient: quarantineRecipient('c6'),
+      amount: { chainId: '1', assetId: token, decimals: QUARANTINE_USDG_DECIMALS, amountAtomic: '1' },
+      reason: 'USDG_FROZEN',
+      evidence: { frozenAt: 'finalized' },
+    }),
+    /matching custody ledger is required/,
+  );
+});
+
+test('reservePayoutQuarantine preserves every other custody bucket, verifiedCurrentBalance, and a populated expectedCycleAsset', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const leg = returnRelayLeg(cycleId);
+  const expectationLedger = expectationLedgerFor(leg, cycleId);
+  await repository.recordReturnRelayLegExpectation(cycleId, leg, expectationLedger);
+  const funded = {
+    ...expectationLedger,
+    claimed: '40',
+    heldAssets: '3',
+    returnReceived: '100',
+    verifiedCurrentBalance: custodyBalanceObservation(expectationLedger),
+  };
+  await repository.recordCustodyLedger(cycleId, funded);
+
+  const amount = {
+    chainId: leg.destinationChainId,
+    assetId: leg.destinationAssetId,
+    decimals: leg.destinationDecimals,
+    amountAtomic: '30',
+  };
+  const reservation = await repository.reservePayoutQuarantine(cycleId, {
+    planDigest: digest({ schema: 'test-payout-plan.v1', cycleId, case: 'preserve-buckets' }),
+    recipient: quarantineRecipient('c7'),
+    amount,
+    reason: 'USDG_FROZEN',
+    evidence: { frozenAt: 'finalized' },
+  });
+  assert.deepEqual(reservation.ledger, { ...funded, payoutLiability: '30' });
+});
+
 test('the EVM nonce lock fences stale signers and remains wallet-wide across recovery', async t => {
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
