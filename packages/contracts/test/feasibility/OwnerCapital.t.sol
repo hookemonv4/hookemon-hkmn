@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test} from "forge-std/Test.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
-import {AccountedCanonicalMarketHook, AccountedCanonicalMarketHookDeployer} from "../market/CanonicalMarket.t.sol";
-import {MarketTestToken, RecipientPoolSwapTest} from "../market/CanonicalMarketCallbackSurface.t.sol";
+import { Test } from "forge-std/Test.sol";
+import { PoolManager } from "@uniswap/v4-core/src/PoolManager.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { PoolModifyLiquidityTest } from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { LiquidityAmounts } from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {
+    AccountedCanonicalMarketHook,
+    AccountedCanonicalMarketHookDeployer
+} from "../market/CanonicalMarket.t.sol";
+import {
+    MarketTestToken,
+    RecipientPoolSwapTest
+} from "../market/CanonicalMarketCallbackSurface.t.sol";
 
 // Local model: production callback/accounting + real pinned PoolManager. It is not a launch,
 // live transaction, price oracle, or receipt for a successful external cycle.
@@ -32,9 +38,15 @@ contract OwnerCapitalFeasibilityTest is Test {
         (usdg, hkmn) = address(first) < address(second) ? (first, second) : (second, first);
         hook = new AccountedCanonicalMarketHookDeployer()
             .deploy(
-                manager, Currency.wrap(address(usdg)), Currency.wrap(address(hkmn)), address(0xC001), address(0xC002)
+                manager,
+                Currency.wrap(address(usdg)),
+                Currency.wrap(address(hkmn)),
+                address(0xC001),
+                address(0xC002)
             );
-        key = PoolKey(Currency.wrap(address(usdg)), Currency.wrap(address(hkmn)), 0, 60, IHooks(address(hook)));
+        key = PoolKey(
+            Currency.wrap(address(usdg)), Currency.wrap(address(hkmn)), 0, 60, IHooks(address(hook))
+        );
         usdg.mint(address(this), 150_000_000);
         hkmn.mint(address(this), 1_000_000_000 ether);
         usdg.approve(address(liquidityRouter), type(uint256).max);
@@ -65,7 +77,11 @@ contract OwnerCapitalFeasibilityTest is Test {
             uint256 available = usdg.balanceOf(address(this));
             uint256 start = gasleft();
             router.swap(
-                key, SwapParams(true, -int256(available), TickMath.MIN_SQRT_PRICE + 1), address(this), address(this), ""
+                key,
+                SwapParams(true, -int256(available), TickMath.MIN_SQRT_PRICE + 1),
+                address(this),
+                address(this),
+                ""
             );
             gasUsed += start - gasleft() + 21_000;
             gross += hook.lastExecutedUsdg();
@@ -84,9 +100,12 @@ contract OwnerCapitalFeasibilityTest is Test {
             gross += hook.lastExecutedUsdg();
             swaps++;
             assertEq(hkmn.balanceOf(address(this)), unseededHkmn);
-            if (usdg.balanceOf(address(this)) < minTrader) minTrader = usdg.balanceOf(address(this));
+            if (usdg.balanceOf(address(this)) < minTrader) {
+                minTrader = usdg.balanceOf(address(this));
+            }
             assertEq(
-                usdg.balanceOf(address(this)) + usdg.balanceOf(address(manager)) + usdg.balanceOf(address(hook)),
+                usdg.balanceOf(address(this)) + usdg.balanceOf(address(manager))
+                    + usdg.balanceOf(address(hook)),
                 150_000_000
             );
             assertEq(hook.processLiability(), gross * 250 / 10_000);
