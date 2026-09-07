@@ -56,11 +56,21 @@ function relayClient() {
 
 function custodyLedger({ proceeds = '24000000', committed = '0' } = {}) {
   return {
-    chainId: '792703809',
+    chainId: 'solana-mainnet',
     assetId: SOLANA_MINT,
     decimals: 6,
     buybackProceeds: proceeds,
     returnInput: committed,
+  };
+}
+
+// The native Collector/Solana settlement identity return.mjs resolves custody rows against --
+// distinct from Relay's own wire SOLANA_CHAIN_ID (792703809), which every request/intent/quote
+// fixture in this file keeps unchanged.
+function nativeSolanaSettlementFields() {
+  return {
+    solana: { chainId: 'solana-mainnet' },
+    collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: SOLANA_MINT, decimals: 6 } },
   };
 }
 
@@ -72,6 +82,9 @@ function repository(ledger = custodyLedger(), { heldPositions = [] } = {}) {
         heldPositions: new Map(heldPositions),
       };
     },
+    // No durable buyback stage-attempt evidence in this fixture: a genuinely all-held cycle,
+    // never a sold pack recorded without its custody ledger row.
+    async readStageAttempt() { return null; },
   };
 }
 
@@ -84,6 +97,7 @@ test('prepareReturnRequest bridges only the custody-ledger-attributed proceeds d
       accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
+      ...nativeSolanaSettlementFields(),
     },
     cycleRepository: repository(),
     context: { cycleId: 'cycle-return-1' },
@@ -114,6 +128,7 @@ test('prepareReturnRequest refuses a fresh return when every cycle-attributed pr
         accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
         moneyConfiguration: moneyConfiguration(),
+        ...nativeSolanaSettlementFields(),
       },
       cycleRepository: repository(custodyLedger({ proceeds: '24000000', committed: '24000000' })),
       context: { cycleId: 'cycle-return-2' },
@@ -139,6 +154,7 @@ test('prepareReturnRequest records a zero-proceeds cycle return without quoting 
       accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
+      ...nativeSolanaSettlementFields(),
     },
     cycleRepository: repository(custodyLedger({ proceeds: '0', committed: '0' })),
     context: { cycleId: 'cycle-return-all-held' },
@@ -172,6 +188,7 @@ test('prepareReturnRequest records a zero-proceeds return when every card is hel
       accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
+      ...nativeSolanaSettlementFields(),
     },
     cycleRepository: repository(null, {
       heldPositions: [['position-return-all-held', { positionId: 'position-return-all-held' }]],
@@ -194,6 +211,7 @@ test('a zero-proceeds return persists final evidence without a signer or bridge 
       accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
       moneyConfiguration: moneyConfiguration(),
+      ...nativeSolanaSettlementFields(),
     },
     cycleRepository: repository(custodyLedger({ proceeds: '0', committed: '0' })),
     context: { cycleId: 'cycle-return-all-held' },
@@ -202,6 +220,9 @@ test('a zero-proceeds return persists final evidence without a signer or bridge 
   let stored = null;
   let signerCalls = 0;
   const cycleRepository = {
+    async describeCycle() {
+      return { custodyLedgers: new Map([['solana-mainnet ' + SOLANA_MINT, custodyLedger({ proceeds: '0', committed: '0' })]]), heldPositions: new Map() };
+    },
     async recordStageAttempt(cycleId, stage, evidence) {
       stored = { cycleId, stage, evidence };
     },
@@ -216,6 +237,7 @@ test('a zero-proceeds return persists final evidence without a signer or bridge 
     accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: moneyConfiguration(),
+    ...nativeSolanaSettlementFields(),
   };
 
   const mutation = await mutateReturn({
@@ -1116,6 +1138,7 @@ test('mutateReturn preserves the configured lamport reserve after the maximum pr
         accounts: { evm: EVM_ACCOUNT, solana: operator.publicKey.toBase58() },
         relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
         moneyConfiguration: moneyConfiguration(),
+        ...nativeSolanaSettlementFields(),
       },
       cycleRepository,
       context: {
@@ -1174,6 +1197,7 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
     accounts: { evm: EVM_ACCOUNT, solana: operator.publicKey.toBase58() },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: moneyConfiguration(),
+    ...nativeSolanaSettlementFields(),
   };
   let signCalls = 0;
   let broadcastCalls = 0;

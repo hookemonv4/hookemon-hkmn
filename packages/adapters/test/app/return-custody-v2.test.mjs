@@ -49,6 +49,8 @@ function baseConfig() {
   return {
     chainId: 4663,
     accounts: { evm: OPERATIONS, solana: SOLANA_OPERATOR },
+    solana: { chainId: 'solana-mainnet' },
+    collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: SOLANA_MINT, decimals: 6 } },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: {
       schema: 'hookemon.money-configuration.v1',
@@ -163,7 +165,7 @@ async function seedSolanaProceeds(cycleRepository, cycleId, proceeds = '17') {
   await cycleRepository.recordCustodyLedger(cycleId, {
     schema: 'hookemon.custody-ledger.v1',
     cycleId,
-    chainId: '792703809',
+    chainId: 'solana-mainnet',
     assetId: SOLANA_MINT,
     decimals: 6,
     claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: proceeds,

@@ -4006,7 +4006,7 @@ function returnSignOnlyChainRepository(proceeds, solanaMint) {
     get attempts() { return attempts; },
     async describeCycle() {
       const custodyLedgers = new Map([['ledger', {
-        chainId: '792703809', assetId: solanaMint, decimals: 6, buybackProceeds: proceeds, returnInput: '0',
+        chainId: 'solana-mainnet', assetId: solanaMint, decimals: 6, buybackProceeds: proceeds, returnInput: '0',
       }]]);
       if (evmLedger !== null) custodyLedgers.set(`${evmLedger.chainId} ${evmLedger.assetId}`, evmLedger);
       return {
@@ -4109,6 +4109,8 @@ function returnSignOnlyFixture() {
     accounts: { evm: recipient, solana: sender },
     relay: { solanaMint, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: returnSignOnlyMoneyConfiguration(solanaMint, usdgAddress),
+    solana: { chainId: 'solana-mainnet' },
+    collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: solanaMint, decimals: 6 } },
   };
   const quote = {
     direction: 'RETURN',

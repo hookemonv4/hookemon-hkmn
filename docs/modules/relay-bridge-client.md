@@ -118,6 +118,25 @@ record.
 - Before a Relay request reaches a signer, its source and destination asset identities and decimal
   precisions must match `MoneyConfigurationV1`. Quote metadata cannot introduce a different Solana
   precision or an implicit money minimum.
+- A return leg's *source* custody delta is attributed under the native Collector/Solana settlement
+  identity (`config.collectorCrypt.settlementAsset`, chain id `solana-mainnet`,
+  `COLLECTOR_CRYPT_SETTLEMENT_ASSET` -- the same identity `buyback.mjs` records realized proceeds
+  under) -- never Relay's own wire `SOLANA_CHAIN_ID` (792703809), which stays exactly as Relay
+  expects for every quote, intent, request, and transaction-policy identity. `return.mjs`
+  (`resolveReturnNativeSolanaCustodyIdentity`) resolves this once and reuses it in
+  `prepareReturnRequest`, `probeReturn`, and mutation validation, so a positive prepare and its
+  mutation always read the same backing row. The configured asset is checked against the trusted
+  constant itself (matching `assertSolanaSignerMoneyConfiguration` in `solana-money-controls.mjs`),
+  not merely for self-consistency between `config.solana.chainId` and
+  `config.collectorCrypt.settlementAsset.chainId` -- two configured fields that could otherwise both
+  be wrong in the same way and still "agree". A custody row also present at the Relay wire chain id
+  for the same mint is a conflicting identity, refused rather than summed or preferred over the
+  native row. Preparation permits a missing native row as zero-proceeds when a held position
+  exists and neither a competing wire-identity row nor durable buyback attempt evidence of a sold
+  pack exists. Sold evidence without its native ledger is inconsistent recovery state and refuses.
+  Mutation and reconciliation recheck recorded zero requests and evidence against the current
+  native ledger and, when that ledger is absent, durable buyback attempt evidence. Positive
+  attributed proceeds or a sold pack without its ledger invalidate the zero return.
 - `assertQuoteUsable` rejects at the exact recorded order deadline. A caller that needs a new
   quote must retain the same cycle reserve and request a new intent; it must not silently reuse an
   expired one.
@@ -241,6 +260,7 @@ record.
 cd packages/adapters && npm ci --ignore-scripts
 node --test packages/adapters/test/relay-client.test.mjs
 node --test packages/adapters/test/app/outbound.test.mjs packages/adapters/test/app/return.test.mjs
+node --test packages/adapters/test/app/return-chain-identity.test.mjs packages/adapters/test/app/return-custody-v2.test.mjs
 # Separate, non-blocking, real network call — never part of the required CI gate:
 node packages/adapters/test/relay-client.live-chains.mjs
 ```
@@ -274,6 +294,19 @@ node packages/adapters/test/relay-client.live-chains.mjs
 - When a terminal Relay pointer, source finality, or process-RPC destination receipt is absent,
   retain the leg `RECORDED` and do not attribute custody or start payout. A duplicate source or
   destination hash remains rejected across every cycle.
+- `RETURN_ZERO_PROCEEDS_EVIDENCE_STALE` means a durably recorded zero-proceeds return evidence no
+  longer matches the current native custody ledger -- a positive delta now exists for the configured
+  native Solana settlement identity. This is an owner recovery decision (likely a false zero
+  produced before this identity fix, or proceeds attributed after the zero record was written), not
+  a retry: do not fabricate a return request from the stale evidence, and do not clear the recorded
+  evidence without an explicit owner decision. `RETURN_ZERO_PROCEEDS_EVIDENCE_SOLD_WITHOUT_LEDGER`
+  means the same durable evidence instead conflicts with a durable buyback stage-attempt record of a
+  sold pack that has no matching native custody ledger row. The normal buyback path writes the
+  ledger before returning reconciled evidence; investigate this inconsistent recovery state and
+  restore attribution only from verified evidence before treating the cycle as zero. `RETURN_ZERO_PROCEEDS_EVIDENCE_UNVERIFIABLE` means the repository exposes
+  `readStageAttempt` without `describeCycle`, or lacks `readStageAttempt` entirely, so one of these
+  rechecks could not run; treat it the same as the other two until the repository capability gap is
+  closed.
 - When the outbound approval attempt's receipt is missing, reverted, or non-canonical, or its own
   durable raw bytes do not decode to the exact expected role, leave that attempt — and the whole
   outbound stage — unresolved (`OutboundRecoveryRequiredError` with `OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS`

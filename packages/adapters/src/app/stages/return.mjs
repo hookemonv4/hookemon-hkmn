@@ -25,6 +25,7 @@ import {
   CUSTODY_LEDGER_BUCKETS,
 } from '../../../../runner/src/cycle/money-schemas.mjs';
 import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import {
   createCanonicalTransactionPolicy,
   createTransactionPolicy,
@@ -127,6 +128,60 @@ function custodyLedgerFor(state, { chainId, assetId }) {
   return values.find(ledger => ledger?.chainId === chainId && ledger?.assetId === assetId) ?? null;
 }
 
+function sameReturnCustodyAsset(left, right) {
+  return left?.chainId === right?.chainId && left?.assetId === right?.assetId && left?.decimals === right?.decimals;
+}
+
+/**
+ * The native Solana custody identity that buyback.mjs actually attributes realized proceeds under
+ * (`configuredSettlementAsset`/`COLLECTOR_CRYPT_SETTLEMENT_ASSET`, chain id `solana-mainnet` +
+ * `CIRCLE_USD_MINT`) -- never Relay's own wire `SOLANA_CHAIN_ID` (792703809), which identifies a
+ * transport route, not a custody attribution namespace. Matches
+ * `assertSolanaSignerMoneyConfiguration` (`solana-money-controls.mjs`): the configured asset is
+ * proven against the trusted constant `COLLECTOR_CRYPT_SETTLEMENT_ASSET` itself, not merely
+ * checked for self-consistency between two configured fields (`config.solana.chainId` and
+ * `config.collectorCrypt.settlementAsset.chainId` could otherwise both be wrongly set to the same
+ * incorrect value and still "agree"). Then cross-checked against the Relay-facing
+ * `configured.solanaMint` and `MoneyConfigurationV1.assets.solanaStablecoin` so the two namespaces
+ * are proven to name the same mint before either is trusted.
+ */
+function resolveReturnNativeSolanaCustodyIdentity(config, configured, money) {
+  const asset = config?.collectorCrypt?.settlementAsset;
+  if (!asset || typeof asset !== 'object' || Array.isArray(asset)
+    || typeof asset.chainId !== 'string' || asset.chainId.length === 0
+    || typeof asset.assetId !== 'string' || asset.assetId.length === 0
+    || !Number.isInteger(asset.decimals) || asset.decimals < 0 || asset.decimals > 255) {
+    throw new Error('return requires a configured native Solana settlement asset');
+  }
+  if (!sameReturnCustodyAsset(asset, COLLECTOR_CRYPT_SETTLEMENT_ASSET) || config?.solana?.chainId !== asset.chainId) {
+    throw new Error('return native Solana settlement asset does not match the trusted native Collector settlement identity');
+  }
+  if (asset.assetId !== configured.solanaMint) {
+    throw new Error('return native Solana settlement asset does not match the configured Relay Solana mint');
+  }
+  if (asset.decimals !== money.assets.solanaStablecoin.decimals) {
+    throw new Error('return native Solana settlement asset decimals do not match MoneyConfigurationV1');
+  }
+  return Object.freeze({ chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals });
+}
+
+/**
+ * A custody row keyed by Relay's wire chain ID for the same mint is never a legitimate second
+ * source of proceeds -- it is either stale data from before this identity fix or a conflicting
+ * write from elsewhere. Either way this refuses rather than summing it with, or preferring it
+ * over, the native-identity row.
+ */
+function competingReturnCustodyLedger(cycle, nativeIdentity) {
+  if (nativeIdentity.chainId === SOLANA_CHAIN_ID) return null;
+  return custodyLedgerFor(cycle, { chainId: SOLANA_CHAIN_ID, assetId: nativeIdentity.assetId });
+}
+
+function assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity) {
+  if (competingReturnCustodyLedger(cycle, nativeIdentity) !== null) {
+    throw new Error('return has a Solana custody ledger row keyed by the Relay wire chain id, conflicting with the native settlement identity');
+  }
+}
+
 /** Only a ledger-attributed, not a wallet-wide, proceeds delta may enter the return quote. */
 export function returnableProceedsDelta(ledger) {
   if (!ledger) throw new Error('return requires a cycle custody ledger for the configured Solana mint');
@@ -195,6 +250,29 @@ function hasHeldPositionWithoutProceedsLedger(cycle) {
   return cycle?.heldPositions instanceof Map && cycle.heldPositions.size > 0;
 }
 
+/**
+ * True when the durable buyback stage-attempt evidence (`stage-driver.mjs`'s generic
+ * `recordStageAttempt`/`readStageAttempt('buyback', ...)`, populated from
+ * `reconcileLiveBuyback`'s own `{ packs, soldCount }` result) already records a sold pack. The
+ * custody-ledger write precedes the reconciled result in the normal buyback path. Sold evidence
+ * without that ledger is inconsistent recovery state, not evidence of a normal interruption
+ * between those writes. A held position cannot override that inconsistency.
+ */
+function hasDurableSoldBuybackEvidence(buybackAttempt) {
+  return Boolean(buybackAttempt) && typeof buybackAttempt === 'object' && !Array.isArray(buybackAttempt)
+    && Array.isArray(buybackAttempt.packs) && buybackAttempt.packs.some(pack => pack?.decision === 'sold');
+}
+
+async function assertReturnNoSoldEvidenceWithoutLedger({ cycleRepository, context }) {
+  if (typeof cycleRepository?.readStageAttempt !== 'function') {
+    throw new Error('return requires cycleRepository.readStageAttempt to rule out durable sold buyback evidence before a zero-proceeds return');
+  }
+  const buybackAttempt = await cycleRepository.readStageAttempt(context.cycleId, 'buyback');
+  if (hasDurableSoldBuybackEvidence(buybackAttempt)) {
+    throw new Error('return cannot treat this cycle as zero-proceeds: durable buyback evidence records a sold pack with no matching native custody ledger row');
+  }
+}
+
 export function assertReturnQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.RETURN) throw new Error('return requires a RETURN Relay quote');
   if (quote.origin?.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID || quote.origin?.address !== config.solanaMint) {
@@ -251,8 +329,11 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const ledger = custodyLedgerFor(cycle, { chainId: String(RELAY_CONSTANTS.SOLANA_CHAIN_ID), assetId: configured.solanaMint });
+  const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+  assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+  const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
   if (ledger === null && hasHeldPositionWithoutProceedsLedger(cycle)) {
+    await assertReturnNoSoldEvidenceWithoutLedger({ cycleRepository, context });
     return zeroProceedsReturnRequest({ context, configured, money });
   }
   const amountAtomic = returnableProceedsDelta(ledger);
@@ -296,9 +377,13 @@ export async function probeReturn({ adapters, config, cycleRepository, context }
     return { wouldBridgeReturn: true, configured: false, reason: 'Relay, Operations accounts, or the Solana mint is not configured' };
   }
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const ledger = custodyLedgerFor(cycle, { chainId: String(RELAY_CONSTANTS.SOLANA_CHAIN_ID), assetId: config.relay.solanaMint });
   let amountAtomic;
   try {
+    const configured = assertReturnConfiguration(config);
+    const money = assertReturnMoneyConfiguration(config, configured);
+    const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+    assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+    const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
     amountAtomic = returnableProceedsDelta(ledger);
   } catch (error) {
     return { wouldBridgeReturn: true, configured: true, reason: error.message };
@@ -609,7 +694,7 @@ async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, con
   return cycleRepository.recordReturnRelayLegExpectation(leg.cycleId, leg, ledger);
 }
 
-function assertReturnRequest({ request, context, cycle, configured, money }) {
+function assertReturnRequest({ request, context, cycle, configured, money, nativeIdentity }) {
   if (!request || request.schema !== 'hookemon.return-relay-request.v1' || request.cycleId !== context.cycleId) {
     throw new Error('return requires the canonical request prepared for this cycle');
   }
@@ -640,7 +725,7 @@ function assertReturnRequest({ request, context, cycle, configured, money }) {
   canonicalAmount(request.inputAmount.amountAtomic, 'return request input amount');
   canonicalAmount(request.destinationAmount.amountAtomic, 'return request destination amount');
   if (request.inputAmount.amountAtomic === '0') throw new Error('return requires positive cycle-attributed proceeds');
-  const ledger = custodyLedgerFor(cycle, { chainId: SOLANA_CHAIN_ID, assetId: configured.solanaMint });
+  const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
   if (request.inputAmount.amountAtomic !== returnableProceedsDelta(ledger)) {
     throw new Error('return may sign only the cycle-attributed proceeds delta');
   }
@@ -895,6 +980,23 @@ export async function mutateReturn({
     if (typeof cycleRepository?.readStageAttempt !== 'function' || typeof cycleRepository?.recordStageAttempt !== 'function') {
       throw new Error('return zero-proceeds settlement requires a durable stage-attempt repository');
     }
+    if (typeof cycleRepository?.describeCycle !== 'function') {
+      throw new Error('return zero-proceeds settlement requires cycleRepository.describeCycle to recheck current proceeds');
+    }
+    // A durable zero-proceeds request or its already-recorded evidence is never trusted from its
+    // own shape alone: this rechecks the current native ledger (and refuses a competing row)
+    // every time, first creation and every replay alike, so a stale false-zero produced before
+    // this identity fix can never finalize or replay while positive attributed proceeds exist now.
+    const cycle = await cycleRepository.describeCycle(context.cycleId);
+    const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+    assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+    const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
+    if (ledger !== null && returnableProceedsDelta(ledger) !== '0') {
+      throw new Error('return zero-proceeds request conflicts with a positive cycle-attributed proceeds delta observed now');
+    }
+    if (ledger === null) {
+      await assertReturnNoSoldEvidenceWithoutLedger({ cycleRepository, context });
+    }
     const existing = await cycleRepository.readStageAttempt(context.cycleId, 'return');
     if (existing !== null && existing !== undefined) {
       if (canonicalDigest(existing) !== canonicalDigest(evidence)) {
@@ -909,7 +1011,9 @@ export async function mutateReturn({
   const client = adapters?.solana?.client;
   if (!client) throw new Error('return requires a configured Solana RPC client');
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  assertReturnRequest({ request, context, cycle, configured, money });
+  const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+  assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+  assertReturnRequest({ request, context, cycle, configured, money, nativeIdentity });
   assertQuoteUsable({ quote: request.intent, nowMs: now() });
   const candidateLeg = returnRelayLeg(context, request);
   const existingLeg = cycle?.relayLegs?.get?.(candidateLeg.relayRequestId) ?? null;
@@ -1213,6 +1317,42 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
           'RETURN_ZERO_PROCEEDS_EVIDENCE_INVALID',
           'the durable zero-proceeds return evidence does not bind the configured cycle route',
         );
+      }
+      // A durably recorded zero-proceeds evidence is not trusted from its recorded shape alone: a
+      // record produced before this identity fix (via the wrong Relay-wire lookup) could be a false
+      // zero for a genuinely sold cycle. Reverify against the current native ledger every time this
+      // reconciles, so a stale false zero can never keep reporting settled while positive
+      // cycle-attributed proceeds now exist.
+      if (typeof cycleRepository?.describeCycle !== 'function') {
+        throw new ReturnRecoveryRequiredError(
+          'RETURN_ZERO_PROCEEDS_EVIDENCE_UNVERIFIABLE',
+          'the durable zero-proceeds return evidence cannot be rechecked against current custody without cycleRepository.describeCycle',
+        );
+      }
+      const zeroCycle = await cycleRepository.describeCycle(context.cycleId);
+      const zeroNativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+      assertNoCompetingReturnCustodyLedger(zeroCycle, zeroNativeIdentity);
+      const zeroLedger = custodyLedgerFor(zeroCycle, { chainId: zeroNativeIdentity.chainId, assetId: zeroNativeIdentity.assetId });
+      if (zeroLedger !== null && returnableProceedsDelta(zeroLedger) !== '0') {
+        throw new ReturnRecoveryRequiredError(
+          'RETURN_ZERO_PROCEEDS_EVIDENCE_STALE',
+          'the durable zero-proceeds return evidence conflicts with a positive cycle-attributed proceeds delta observed now',
+        );
+      }
+      if (zeroLedger === null) {
+        if (typeof cycleRepository?.readStageAttempt !== 'function') {
+          throw new ReturnRecoveryRequiredError(
+            'RETURN_ZERO_PROCEEDS_EVIDENCE_UNVERIFIABLE',
+            'the durable zero-proceeds return evidence cannot be rechecked against durable buyback evidence without cycleRepository.readStageAttempt',
+          );
+        }
+        const zeroBuybackAttempt = await cycleRepository.readStageAttempt(context.cycleId, 'buyback');
+        if (hasDurableSoldBuybackEvidence(zeroBuybackAttempt)) {
+          throw new ReturnRecoveryRequiredError(
+            'RETURN_ZERO_PROCEEDS_EVIDENCE_SOLD_WITHOUT_LEDGER',
+            'the durable zero-proceeds return evidence conflicts with durable buyback evidence recording a sold pack with no matching native custody ledger row',
+          );
+        }
       }
       return Object.freeze(structuredClone(zeroEvidence));
     }
