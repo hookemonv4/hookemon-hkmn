@@ -330,6 +330,66 @@ test('rebindCompletionCommit rejects merge commits, empty patches, and mismatche
   }
 });
 
+test('rebindCompletionCommit refuses a rewrite whose non-UTF-8 payload bytes differ, even though naive UTF-8 decoding would collapse them', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'x' });
+  const { token } = claimTask(db, 'T1', 'worker');
+
+  const build = byte => {
+    writeFileSync(join(root, 'shared.txt'), 'same content\n');
+    execFileSync('git', ['-C', root, 'add', 'shared.txt']);
+    writeFileSync(join(root, 'legacy.txt'), Buffer.from([0x61, byte, 0x0a]));
+    execFileSync('git', ['-C', root, 'add', 'legacy.txt']);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', `change ${byte}`]);
+    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+
+  const original = build(0x80);
+  completeTask(db, 'T1', 'worker', token, original);
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+  const rewritten = build(0x81);
+
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  assert.throws(
+    () => rebindCompletionCommit(db, 'T1', original, rewritten),
+    /stable patch id does not match/,
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+});
+
+test('rebindCompletionCommit refuses a rewrite that only differs in a gitlink target hidden by an inherited diff.ignoreSubmodules config', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'T1', title: 'x' });
+  const { token } = claimTask(db, 'T1', 'worker');
+
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'other-target']);
+  const otherTarget = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+
+  const build = gitlinkSha => {
+    writeFileSync(join(root, 'shared.txt'), 'same content\n');
+    execFileSync('git', ['-C', root, 'add', 'shared.txt']);
+    execFileSync('git', ['-C', root, 'update-index', '--add', '--cacheinfo', `160000,${gitlinkSha},module`]);
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', `link ${gitlinkSha}`]);
+    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+
+  const original = build(head);
+  completeTask(db, 'T1', 'worker', token, original);
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', head]);
+  const rewritten = build(otherTarget);
+  execFileSync('git', ['-C', root, 'config', 'diff.ignoreSubmodules', 'all']);
+
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  assert.throws(
+    () => rebindCompletionCommit(db, 'T1', original, rewritten),
+    /stable patch id does not match/,
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+});
+
 test('rebindCompletionCommit rejects invalid state or ancestry without mutation', () => {
   const assertRejectedWithoutMutation = ({ db, root, attempt, error }) => {
     const before = {
