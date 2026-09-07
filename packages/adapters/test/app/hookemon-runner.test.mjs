@@ -18,7 +18,7 @@ import { runOperatorCli } from '../../../runner/src/operator/cli.mjs';
 import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
-import { canonicalJson } from '../../../runner/src/cycle/journal.mjs';
+import { canonicalJson, digest } from '../../../runner/src/cycle/journal.mjs';
 import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
@@ -199,18 +199,26 @@ test('compositionInput resolves a persisted authority artifact bound to the veri
   );
 
   await rm(join(stateDir, 'standing-authority-step-authorizations.json'));
-  assert.throws(
-    () => compositionInput({
-      env: base,
-      statePath: join(stateDir, 'operator-state.json'),
-      dashboard: null,
-      signerClient: null,
-      signerReadiness: null,
-      rehearsalCapUsdg: null,
-      rehearsalSessionId: null,
-      restartInjector: null,
-      operatorAuditLogPath: undefined,
-      logTicks: false,
+  const inputAfterArtifactRemoval = compositionInput({
+    env: base,
+    statePath: join(stateDir, 'operator-state.json'),
+    dashboard: null,
+    signerClient: null,
+    signerReadiness: null,
+    rehearsalCapUsdg: null,
+    rehearsalSessionId: null,
+    restartInjector: null,
+    operatorAuditLogPath: undefined,
+    logTicks: false,
+  });
+  assert.equal(typeof inputAfterArtifactRemoval.standingAuthorityStepAuthorization, 'function');
+  await assert.rejects(
+    () => inputAfterArtifactRemoval.standingAuthorityStepAuthorization({
+      cycleId: 'cycle-artifact',
+      stage: 'outbound',
+      authorizationKind: 'sign',
+      requestDigest: intent.subjectDigest,
+      signerRole: 'operator-evm',
     }),
     /artifact/i,
   );
@@ -951,6 +959,38 @@ function productionObservabilityConfig({ baseUrl, stateDir }) {
   };
 }
 
+function productionEligibilitySnapshotConfig() {
+  const launchManifest = {
+    supply: { chainId: '4663', assetId: `0x${'d'.repeat(40)}`, decimals: 18, amountAtomic: '1' },
+    hook: `0x${'7'.repeat(40)}`,
+    poolManager: `0x${'3'.repeat(40)}`,
+    custody: `0x${'b'.repeat(40)}`,
+    operations: PRODUCTION_RETURN_EVM_ACCOUNT,
+    treasury: `0x${'8'.repeat(40)}`,
+    programmableRecipient: `0x${'4'.repeat(40)}`,
+    launchContracts: [`0x${'b'.repeat(40)}`],
+    burnAddresses: [`0x${'0'.repeat(36)}dead`],
+    roleHistory: [],
+  };
+  return {
+    finality: { policyId: 'robinhood-stage-finality-v1', depth: '2' },
+    launchManifest,
+    launchManifestDigest: digest({ domain: 'hookemon.eligibility-launch-manifest.v1', launchManifest }),
+    primaryLogSourceId: 'fixture-primary',
+    secondaryLogSourceId: 'fixture-secondary',
+    logPageSize: '2',
+    maxRetriesPerPage: 2,
+    feasibility: {
+      measuredTransferGas: '50000',
+      maxGasPriceWei: '2',
+      nativeReserveWei: '10',
+      nativeBalanceWei: '400000',
+      maxRecipientCount: 2,
+      maxTransactionCount: 2,
+    },
+  };
+}
+
 async function readRequestBody(request) {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -1215,7 +1255,7 @@ async function seedProductionReturnCycle(stateDir) {
   await repository.recordCustodyLedger(cycle.cycleId, {
     schema: 'hookemon.custody-ledger.v1',
     cycleId: cycle.cycleId,
-    chainId: '792703809',
+    chainId: 'solana-mainnet',
     assetId: PRODUCTION_RETURN_SOLANA_MINT,
     decimals: 6,
     claimed: '0',
@@ -1295,6 +1335,8 @@ test('fresh production resume composes keychain and observability before refusin
   const keychainLogPath = join(stateDir, 'keychain.log');
   const observabilityPath = join(stateDir, 'observability.json');
   await writeFile(observabilityPath, `${JSON.stringify(productionObservabilityConfig({ baseUrl: fixtureServer.baseUrl, stateDir }))}\n`, 'utf8');
+  const eligibilitySnapshotPath = join(stateDir, 'eligibility-snapshot.json');
+  await writeFile(eligibilitySnapshotPath, `${JSON.stringify(productionEligibilitySnapshotConfig())}\n`, 'utf8');
   const { cycle, repository } = await seedProductionReturnCycle(stateDir);
   const { NODE_TLS_REJECT_UNAUTHORIZED: _unsafeTlsOverride, ...trustedBaseEnv } = baseEnv(stateDir);
   const env = {
@@ -1336,6 +1378,7 @@ test('fresh production resume composes keychain and observability before refusin
     HOOKEMON_BUDGET_RETURN_CAP_USDG: '17',
     HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
     HKMN_KEYCHAIN_LOG: keychainLogPath,
     NODE_EXTRA_CA_CERTS: fixtureServer.caCertificatePath,
   };
