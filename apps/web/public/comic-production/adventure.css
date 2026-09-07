@@ -1673,7 +1673,9 @@ summary:focus-visible {
   overflow: hidden;
 }
 .card-lugia .card-display {
-  height: 480px;
+  align-self: stretch;
+  height: auto;
+  min-height: 480px;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -1744,7 +1746,7 @@ summary:focus-visible {
 }
 @media (max-width: 800px) {
   .collectible-card.card-lugia { grid-template-columns: 1fr; }
-  .card-lugia .card-display { height: 410px; }
+  .card-lugia .card-display { height: 410px; min-height: 0; }
   .card-lugia .card-image { max-width: 215px; }
   .card-lugia figcaption { padding: 28px 24px 32px; gap: 20px 10px; }
   .card-lugia .card-valuation { padding-top: 20px; }
