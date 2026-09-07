@@ -807,7 +807,8 @@ function requireReturnMutationAuthority(preflightAuthority) {
 }
 
 export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return', recoveryRepository, context }) {
-  if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function' || typeof signerClient.solana.broadcast !== 'function') {
+  if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function'
+    || (typeof signerClient.solana.broadcast !== 'function' && typeof signerClient.solana.broadcastApproved !== 'function')) {
     throw new Error('return requires an Operations Solana signer with sign and broadcast capabilities');
   }
   if (typeof now !== 'function') throw new Error('return requires a wall-clock function');
@@ -840,7 +841,9 @@ export async function createReturnPolicySigner({ signerClient, client, configure
   const delegatingClient = forwardOwnedKeychainSignOnlyIdentity(rawSigner, {
     role: rawSigner.role ?? OPERATOR_SOLANA_ROLE,
     sign: requestValue => rawSigner.sign(requestValue),
-    broadcast: signed => rawSigner.broadcast(signed),
+    ...(typeof rawSigner.broadcast === 'function'
+      ? { broadcast: signed => rawSigner.broadcast(signed) }
+      : {}),
     ...(typeof rawSigner.signApproved === 'function'
       ? { signApproved: (requestValue, proof) => rawSigner.signApproved(requestValue, proof) }
       : {}),

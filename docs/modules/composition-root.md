@@ -90,6 +90,10 @@ repository client.
 return settlement bound as a canonical decimal string. It has no default; omission retains the
 return handler's pre-sign refusal. The request must carry the same configured bound.
 
+The return policy signer accepts either a plain broadcast port or the owned Keychain client’s
+policy-approved broadcast port. The latter stays behind transaction revalidation and the stage
+driver’s lease and authority checks; the Keychain child remains sign-only.
+
 ## Invariants
 
 - Exactly one `CycleRepository` and policy engine serve every money mutation. Operations EVM and
