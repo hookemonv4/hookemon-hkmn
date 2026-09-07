@@ -3613,11 +3613,13 @@ summary:focus-visible {
 .card-lugia .card-valuation .card-buyback{font-size:15px;color:var(--yellow)}
 .card-lugia .card-valuation .card-buyback-note{font-size:12px;color:#d3e0ee}
 
-.holder-share-callout{margin-top:40px;padding-left:16px;border-left:4px solid var(--yellow);max-width:460px}
-.holder-share-callout strong{display:block;font-size:19px;line-height:1.25;font-weight:800;color:var(--navy)}
+.hero-copy{--hero-text-gap:48px}
+.hero h1.shared-cycle-title{margin-top:0}
+.holder-share-callout{margin-top:var(--hero-text-gap);padding-left:16px;border-left:4px solid var(--yellow);max-width:460px}
+.holder-share-callout strong{display:block;font-size:25px;line-height:1.25;font-weight:800;color:var(--navy)}
 .collection .collector-headline{color:var(--yellow);-webkit-text-stroke:0.16em #1b72bb;paint-order:stroke fill;text-shadow:0.045em 0.065em 0 #153e7e;line-height:1.1}
 .faq-list p a{text-decoration:underline;font-weight:700}
-@media(max-width:600px){.holder-share-callout{margin-top:32px}}
+@media(max-width:600px){.hero-copy{--hero-text-gap:32px}}
 
 .hero h1 .hero-on { color: var(--navy); -webkit-text-stroke: 0; text-shadow: none; }
 .journey-intro .adventure-heading { color: var(--yellow); -webkit-text-stroke: .11em #1b72bb; paint-order: stroke fill; text-shadow: .045em .065em 0 #153e7e; }
@@ -3627,7 +3629,7 @@ summary:focus-visible {
 .hero h1 .cycle-line { display: block; white-space: nowrap; }
 .hero h1 .plain-heading { color: var(--navy); -webkit-text-stroke: 0; text-shadow: none; }
 .hero h1 .robinhood-name { display: flex; align-items: baseline; white-space: pre; color: var(--yellow); }
-.hero-description { position: relative; padding-left: 25px; }
+.hero .hero-copy .hero-description { position: relative; padding-left: 25px; font-size: 16px; margin-top: var(--hero-text-gap); }
 .hero-description .description-star { position: absolute; left: 0; top: .06em; font-size: 19px; }
 
 @media (orientation: landscape) and (max-height: 600px) and (max-width: 1100px) {
