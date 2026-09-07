@@ -82,8 +82,9 @@ function buildFreeze() {
   // The freeze records the current interface snapshot while retaining older model results as
   // historical evidence. Phase 3 is explicitly provisional, so its snapshot cannot promote the
   // Phase 1 or Phase 2 model results into Phase 3 feasibility evidence.
-  const requirementsRevision = frozen.requirementsRevision;
-  const architectureRevision = frozen.architectureRevision;
+  if (previous.offchainAmendment) validateInterfaceFreeze({ freeze: previous, frozen, provisional, manifest, projectRoot });
+  const requirementsRevision = previous.offchainAmendment ? previous.requirementsRevision : frozen.requirementsRevision;
+  const architectureRevision = previous.offchainAmendment ? previous.architectureRevision : frozen.architectureRevision;
   invariant(requirements.revision >= requirementsRevision,
     'live requirements revision must not regress behind the frozen interface evidence');
   invariant(provisional.requirementsRevision === requirementsRevision, 'provisional requirements revision mismatch');
@@ -128,7 +129,8 @@ function buildFreeze() {
 
   const inputHashes = {};
   for (const relativePath of [...INTERFACE_FREEZE_INPUTS].sort()) {
-    inputHashes[relativePath] = interfaceFreezeInputDigest(projectRoot, relativePath);
+    inputHashes[relativePath] = previous.offchainAmendment
+      ? previous.inputHashes[relativePath] : interfaceFreezeInputDigest(projectRoot, relativePath);
   }
 
   return {
@@ -193,6 +195,7 @@ function buildFreeze() {
           ? 'The Phase 3 interface is provisional and cannot authorize signing, broadcast, deployment, asset movement, gas spend, or publication.'
           : previous.productionReadiness.rule,
       },
+      ...(previous.offchainAmendment ? { offchainAmendment: previous.offchainAmendment } : {}),
     },
     frozen,
     provisional,

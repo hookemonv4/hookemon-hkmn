@@ -424,8 +424,8 @@ test('current Phase 3 interface evidence remains non-authoritative', () => {
   const freeze = JSON.parse(readFileSync(join(templateRoot, 'feasibility', 'interface-freeze.json'), 'utf8'));
 
   assert.equal(interfaces.productPhase, 3);
-  assert.equal(interfaces.requirementsRevision, 65);
-  assert.equal(interfaces.architectureRevision, 9);
+  assert.equal(interfaces.requirementsRevision, 67);
+  assert.equal(interfaces.architectureRevision, 10);
   assert.equal(interfaces.bindingManifestDigest, null);
   assert.equal(interfaces.providerBinding.status, 'INTEGRATION_PENDING');
   assert.equal(interfaces.phaseBoundary.codeReadinessDoesNotAuthorizeLive, true);

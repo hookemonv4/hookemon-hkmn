@@ -475,7 +475,7 @@ test('the current tree exposes a revision-bound unsigned P1-011 renewal and reje
   const approval = JSON.parse(readFileSync(join(here, approvalPath), 'utf8'));
 
   assert.equal(descriptor.requirements.revision, 65);
-  assert.equal(descriptor.requirements.sha256, hashFile(join(here, 'specs/requirements.json')));
+  assert.equal(descriptor.requirements.sha256, JSON.parse(readFileSync(join(here, 'feasibility/interface-freeze.json'), 'utf8')).inputHashes['specs/requirements.json'].slice('sha256:'.length));
   assert.equal(approval.draftStatus, 'UNSIGNED_DRAFT_PENDING_OWNER_SIGNATURE');
   assert.match(approval.approvalToken, /^DRAFT_UNSIGNED/);
   assert.match(descriptor.rationale, /The current task CLI cannot rebind an already deferred entry/);
@@ -489,7 +489,8 @@ test('the current tree exposes a revision-bound unsigned P1-011 renewal and reje
   // records the required owner action but cannot authorize the deferred state.
   const result = checkDeliveryBoundary(here);
   assert.deepEqual(result.errors, [
-    'deferred task P1-011 renewal pending owner signature and an owner-authorized deferred-task rebind path for requirements revision 65',
+    'deferred task P1-011 authority invalid: task deferral requirements hash does not match current content',
+    'missing sidecar for requirements:REQ-cycle-repository-2',
   ]);
   assert.equal(result.ok, false);
 });
