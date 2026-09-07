@@ -29,6 +29,12 @@ interface, never the repository's writer methods.
   unattributed value. The first record for a key fixes its decimal value; replay rejects a later
   record that changes atomic units.
 
+Return attribution retains either the historical exact 16-field Relay intent or the current exact
+18-field intent with both `tradeType` and `quoteDigest`. Partial pairs, unknown fields, unsupported
+trade types and malformed digests refuse; accepted fields round-trip unchanged. The nested quote
+digest is distinct from the enclosing Relay-leg digest. Historical records remain readable, but the
+current live Relay adapter refuses restoring a 16-field intent without its original trade evidence.
+
 The general chain-attempt runtime is v1; the frozen v2 policy, fencing, refusal,
 and approval-digest fields are unavailable. Built-in outbound and return retain their
 recovery authority with the repository's combined Relay signing record. Provider pre-call recovery
