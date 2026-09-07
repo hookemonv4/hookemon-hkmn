@@ -3601,3 +3601,7 @@ summary:focus-visible {
   0%, 100% { opacity: 0.25; transform: rotate(-10deg) scale(0.65); }
   50% { opacity: 1; transform: rotate(18deg) scale(1.15); }
 }
+
+.collection-pack-link { margin-top: 32px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 16px 24px; text-align: center; }
+.collection-pack-link > p { margin: 0; font-size: 22px; font-weight: 800; }
+.collection-pack-link .button { font-size: 17px; }
