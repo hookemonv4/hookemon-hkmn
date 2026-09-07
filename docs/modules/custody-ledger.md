@@ -14,6 +14,17 @@ producer or writer, not a historical observer, not a valuation, and not a readin
 `product/SOLANA_CUSTODY_CURRENT_BALANCE_OBSERVATION_DRAFT.md` (DRAFT, non-authoritative) for what
 remains unresolved before any writer may treat its output as custody evidence.
 
+`packages/adapters/src/evm-custody-balance-observation.mjs` is the EVM USDG row's own producer: given
+a pre-validated, frozen canonical identity and a distinct public/archive Robinhood client pair, it
+owns the public-finalized-head → archive-balance-at-that-height/hash → public-same-height-recheck
+read itself (unlike the Solana combiner, it performs the RPC calls; it accepts no caller-supplied read
+sides). `packages/adapters/src/app/stages/claim-process.mjs`'s `recordClaimCustodyLedger` is the EVM
+USDG row's `v1`→`v2` writer: it derives the row's `chainId`/`assetId`/`decimals` only from
+`assertClaimConfiguration`, never from this producer's output, and calls the producer only after the
+canonical claim transaction, receipt, `ProcessClaimed` event, and exact USDG credit are already
+independently verified — the producer's non-null observation is current wallet-level custody
+evidence, never claim attribution.
+
 ## Public interface
 
 - `projectPolicyCustody({cycleRepository, evmUsdg})` reads every active and archived cycle.

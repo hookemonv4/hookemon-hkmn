@@ -6,6 +6,7 @@ import {
   recoverTransactionAddress,
 } from 'viem';
 
+import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
 import { buildClaimProcessCall, HOOK_ABI } from '../../hook-contract-client.mjs';
 import {
   RobinhoodMalformedResponseError,
@@ -641,7 +642,31 @@ function claimCustodyAsset(configured) {
   });
 }
 
-async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured) {
+/**
+ * ADR-0026's dedicated EVM USDG `CustodyBalanceObservationV1` producer, invoked at the moment this
+ * writer records a v2 row for the claim key. `identity` is built only from `assertClaimConfiguration`
+ * output (`asset`, already the canonical CAIP identity `claimCustodyAsset` derives, plus the
+ * configured Operations address) -- never from any RPC response or candidate evidence. Reuses the
+ * public-finalized-head -> distinct-archive-read-at-that-height/hash -> public-same-height-recheck
+ * discipline `createEvmCustodyBalanceObservationReader` already owns; this function neither reads
+ * chain state directly nor claims causal provenance for the claim -- that authority is the already
+ * -verified canonical transaction/event/credit this is only ever called after.
+ */
+async function observeClaimCustodyBalance({ adapters, configured, asset }) {
+  const observeBalance = createEvmCustodyBalanceObservationReader({
+    publicClient: adapters?.robinhood?.client ?? null,
+    archiveClient: adapters?.robinhood?.historicalEvidenceClient ?? null,
+    identity: {
+      chainId: asset.chainId,
+      assetId: asset.assetId,
+      decimals: asset.decimals,
+      account: String(configured.operations).toLowerCase(),
+    },
+  });
+  return observeBalance();
+}
+
+async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters) {
   if (typeof cycleRepository?.recordCustodyLedger !== 'function') {
     throw new Error('claim-process requires custody-ledger persistence before finality');
   }
@@ -659,20 +684,28 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
     if (existing.claimed !== '0' && existing.claimed !== amountAtomic) {
       throw new Error('claim-process existing custody ledger has a conflicting claimed amount');
     }
-    if (existing.claimed === amountAtomic) return;
-    await cycleRepository.recordCustodyLedger(
-      request.cycleId,
-      Object.freeze({ ...existing, claimed: amountAtomic }),
-    );
-    return;
   }
+  // The observation is fetched, and can refuse, before any write -- a missing/drifted/malformed
+  // read never reaches `recordCustodyLedger` and never advances finality (both callers only proceed
+  // to `recordFinality` after this resolves).
+  const verifiedCurrentBalance = await observeClaimCustodyBalance({ adapters, configured, asset });
+  const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [
+    bucket,
+    bucket === 'claimed' ? amountAtomic : (existing?.[bucket] ?? '0'),
+  ]));
+  // ADR-0026: only the dedicated return-leg writers may populate or clear `expectedCycleAsset`; this
+  // generic claim writer must carry an existing v2 row's value forward unchanged, never null it out
+  // from under an in-flight return expectation.
+  const expectedCycleAsset = existing?.schema === 'hookemon.custody-ledger.v2' ? existing.expectedCycleAsset : null;
   await cycleRepository.recordCustodyLedger(
     request.cycleId,
     Object.freeze({
-      schema: 'hookemon.custody-ledger.v1',
+      schema: 'hookemon.custody-ledger.v2',
       cycleId: request.cycleId,
       ...asset,
-      ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [bucket, bucket === 'claimed' ? amountAtomic : '0'])),
+      ...buckets,
+      verifiedCurrentBalance,
+      expectedCycleAsset,
     }),
   );
 }
@@ -706,7 +739,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
   const request = await prepareClaimProcessRequest({ config, cycleRepository, context });
   const configured = assertClaimConfiguration(config);
   if (chain.attempt.state === 'FINALIZED') {
-    await recordClaimCustodyLedger(cycleRepository, cycle, request, configured);
+    await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters);
     await releaseClaimWalletNonce({ cycleRepository, context, configured });
     return Object.freeze(chain.finalityEvidence);
   }
@@ -789,7 +822,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
     claimedAmountAtomic: request.amount.amountAtomic,
     destination: request.destination,
   });
-  await recordClaimCustodyLedger(cycleRepository, cycle, request, configured);
+  await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters);
   await cycleRepository.recordFinality(context.cycleId, 'claim-process', chain.attempt.requestDigest, evidence);
   await releaseClaimWalletNonce({ cycleRepository, context, configured });
   return evidence;
