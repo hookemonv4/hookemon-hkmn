@@ -358,3 +358,5 @@ No live binding values ship with this implementation; existing schemas and synth
 remain enforced.
 
 Live Collector bindings require an executable-pinned SHA-256 of the exact release manifest bytes. The pin remains unset until real, separately owner-approved purchase and buyback artifacts exist. Loaded entries preserve the manifest identity, revisions, binding path and digest, receipt identity and approval evidence hashes; resolution compares that complete identity again. A release change cannot reuse an admitted registry merely because transaction binding bytes match. Synthetic isolated child contexts cannot select live authority.
+
+`createOriginalSolanaBlockhashContextResolver(client)` wires `config.solana.originalBlockhashContextResolver` for purchase only. It reads `isBlockhashValid` for the original provider hash and returns its validity observation slot. It never substitutes the latest hash or an unrelated expiry height. Legacy and buyback resolver behavior is unchanged.

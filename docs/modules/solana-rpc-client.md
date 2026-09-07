@@ -7,7 +7,7 @@
 ## Public interface
 
 - `createSolanaRpcClient({ rpcUrl?, fetchImpl?, timeoutMs?, commitment? })` creates a lightweight client with one explicit JSON-RPC request per call.
-- Finality and liveness reads: `readLatestBlockhash`, `readBlockHeight`, `readBlockhashValidity`, `readUsableLatestBlockhash`, `readSignatureStatus`, `readFinalizedSignatureStatus`, `getFinalizedTransaction`, and `getFinalizedTokenBalanceChanges`.
+- Finality and liveness reads: `readLatestBlockhash`, `readBlockHeight`, `readBlockhashValidity`, `readOriginalBlockhashContext`, `readUsableLatestBlockhash`, `readSignatureStatus`, `readFinalizedSignatureStatus`, `getFinalizedTransaction`, and `getFinalizedTokenBalanceChanges`.
 - Asset reads: `getTransactionTokenBalanceChanges`, `getTransactionMplCoreTransfers`, `readMplCoreAssetOwner`, and `readAssociatedTokenAccount(owner, mint, { tokenProgramId? })`. The associated-account read verifies the derived address, token program, mint, owner, amount, and decimals; a missing account is returned as `exists: false`.
 - Construction helpers: `deriveAssociatedTokenAddress`, `buildTransferCheckedInstruction`, `buildPriorityFeeInstructions({ computeUnitLimit, microLamports })`, and `buildUnsignedTransaction`.
 - `submitSignedTransaction(client, signedTxBase64, { skipPreflight? })` broadcasts bytes that an external signer already produced.
@@ -43,3 +43,5 @@ node --test packages/adapters/test/solana-rpc.test.mjs
 - A not-finalized or unavailable signature remains pending. Do not re-sign or substitute a new transaction merely because RPC observation is delayed.
 - A stale blockhash discovered before signing can be replaced by a fresh blockhash under a bounded stage-owned retry. A stale blockhash after signing requires reconciliation of the recorded signed transaction.
 - Fixture coverage is in `packages/adapters/test/solana-rpc.test.mjs`; update response-shape checks only from current RPC documentation or a pinned captured response.
+
+`readOriginalBlockhashContext(client, blockhash)` requires `isBlockhashValid` to return true and a non-negative safe-integer context slot. It returns an immutable `rpc-blockhash-validity` observation and refuses malformed or expired responses. The RPC supplies no expiry height, so this method derives none. Source: https://solana.com/docs/rpc/http/isblockhashvalid.

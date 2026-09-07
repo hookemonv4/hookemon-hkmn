@@ -81,7 +81,7 @@
     {
       "id": "solana-rpc-client",
       "path": "docs/modules/solana-rpc-client.md",
-      "sha256": "c9321ce6eb62d81c65d948720ea9633ab635d4e09d555e68221fcf5130fef5bf"
+      "sha256": "15f5bc6919d71715d9dc1909f29b3b53374f0b944a1864547c6a093f8cb211aa"
     },
     {
       "id": "relay-bridge-client",
@@ -101,7 +101,7 @@
     {
       "id": "signing",
       "path": "docs/modules/signing.md",
-      "sha256": "7cc48768579831a35d6559113bbe94053859e70b538f732afbb7ea0e959cee9c"
+      "sha256": "9a90cfe6083589d966429953fa8ca40e9a8af4ed28366f13e20ea56b5623a520"
     },
     {
       "id": "cycle-repository",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "752f1dc5bd61457a9cf3ca539fd4ac709609359f4a896825e0bb37a80db7445c"
+      "sha256": "a2d9ccd3a50094076d01f8ca945d02dd808c9bf4fa1d1fe90fc13a2e28cc0299"
     },
     {
       "id": "dashboard",

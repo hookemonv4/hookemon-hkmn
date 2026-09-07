@@ -412,9 +412,17 @@ function decodedSignedMessageBytes(signed, family) {
   return bytes;
 }
 
+// RPC observation slots advance without changing the approved message. The policy digest
+// separately pins their minimum; every fresh decode still checks that bound before use.
+function stableApprovalSemantics(approved) {
+  if (approved.family !== 'solana' || approved.deadline?.type !== 'rpc-blockhash-validity') return approved;
+  const { observedSlot, ...deadline } = approved.deadline;
+  return { ...approved, deadline };
+}
+
 function transactionPolicyApprovalContext({ family, policyDigest, approved, signed }) {
   const signedMessageDigest = `sha256:${createHash('sha256').update(decodedSignedMessageBytes(signed, family)).digest('hex')}`;
-  const approvedSemanticsDigest = canonicalDigest(approved);
+  const approvedSemanticsDigest = canonicalDigest(stableApprovalSemantics(approved));
   const approvalDigest = canonicalDigest({
     schema: TRANSACTION_POLICY_APPROVAL_SCHEMA,
     family,
@@ -546,7 +554,7 @@ function assertSignOnlyRecoveryOption(recovery) {
 async function reapproveBeforeSignOnlyInvocation({ input, canonicalPolicy, policyRules, expectedValidityContextDigest }) {
   const reApproved = await decodeProviderTransaction(input);
   evaluateTransactionPolicy(canonicalPolicy, reApproved, { rules: policyRules });
-  if (canonicalDigest(reApproved) !== expectedValidityContextDigest) {
+  if (canonicalDigest(stableApprovalSemantics(reApproved)) !== expectedValidityContextDigest) {
     fail('sign-only retry refuses: decoded validity semantics changed since the pre-sign binding was recorded');
   }
 }
@@ -604,7 +612,7 @@ async function signWithBoundedSignOnlyRecovery({
     unsignedWireBytes: canonicalWireBytesText(wireBytes),
     unsignedRequestDigest: signRequestDigest(wireBytes),
     policyDigest,
-    validityContextDigest: canonicalDigest(approved),
+    validityContextDigest: canonicalDigest(stableApprovalSemantics(approved)),
   };
   // Binds before the first invocation, unconditionally -- not only on a timeout -- so a restart
   // that reaches this exact call again (with regenerated request material) is CAS-refused before
