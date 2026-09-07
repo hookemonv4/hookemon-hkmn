@@ -16,7 +16,7 @@ export function installCoinSpin(root = globalThis.document, browser = globalThis
     spinner.append(edge);
     edges.push(edge);
   }
-  let angle = 0, velocity = 0, frame = 0;
+  let angle = 0, velocity = 0, frame = 0, direction = 1;
   let auto = !reduced.matches, visible = true, disposed = false;
   let last = null, drag = null, suppressClick = false;
   function listen(target, name, fn) {
@@ -49,7 +49,7 @@ export function installCoinSpin(root = globalThis.document, browser = globalThis
     frame = 0;
     const dt = last === null ? 0 : Math.min((now - last) / 1000, 0.05);
     last = now;
-    angle += ((auto ? 18 : 0) + velocity) * dt;
+    angle += ((auto ? 18 * direction : 0) + velocity) * dt;
     velocity *= Math.exp(-2.6 * dt);
     paint();
     schedule();
@@ -83,6 +83,7 @@ export function installCoinSpin(root = globalThis.document, browser = globalThis
       coin.setAttribute("data-dragging", "");
     }
     const delta = (event.clientX - drag.x) / drag.width * 360;
+    if (delta) direction = Math.sign(delta);
     velocity = reduced.matches ? 0 : Math.max(-900, Math.min(900, delta / Math.max(0.008, (event.timeStamp - drag.time) / 1000)));
     angle += delta;
     drag.x = event.clientX;

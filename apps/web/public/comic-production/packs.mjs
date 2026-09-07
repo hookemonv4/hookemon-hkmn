@@ -66,7 +66,7 @@ function packView(pack) {
     } finally { if (id === requestId) { busy = false; more.disabled = false; } }
   }
   for (const tier of pack.tiers) {
-    const button = element("button"); button.type = "button"; button.setAttribute("aria-pressed", String(active === tier.rarity));
+    const button = element("button"); button.type = "button"; button.dataset.rarity = tier.rarity; button.setAttribute("aria-pressed", String(active === tier.rarity));
     button.append(element("span", "", label(tier.rarity)), element("small", "", tier.minimum === null ? "Value band not reported" : tier.maximum === null ? `${currency.format(tier.minimum)}+` : `${currency.format(tier.minimum)} – ${currency.format(tier.maximum)}`));
     button.addEventListener("click", () => { active = tier.rarity; buttons.forEach(([node, rarity]) => node.setAttribute("aria-pressed", String(rarity === active))); load(true); });
     buttons.push([button, tier.rarity]); filters.append(button);

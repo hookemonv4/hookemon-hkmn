@@ -3643,3 +3643,20 @@ summary:focus-visible {
 @media (max-width: 600px) { .hero h1.shared-cycle-title { font-size: clamp(23px, 7.4vw, 41px); } }
 
 .hero h1 img.robinhood-wordmark { display: block; width: 100%; max-width: 100%; height: auto; filter: none; }
+/* Keep the two mobile header groups balanced around the viewport centre. */
+@media(max-width:600px){
+  .site-header .nav{grid-template-columns:44px minmax(0,1fr) 44px}
+  .site-header .brand{grid-column:2;justify-self:center}
+  .mobile-menu{grid-column:3}
+  .site-header .nav-actions{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;position:relative}
+  .nav-actions::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line);pointer-events:none}
+  .nav-actions .nav-cycle{grid-column:1 / 4;grid-row:1;border:0;padding:0;margin:0;align-items:center;text-align:center;justify-self:stretch}
+  .nav-actions .social-link{grid-row:1;justify-self:center}
+  .nav-actions .social-link:nth-child(1){grid-column:4}
+  .nav-actions .social-link:nth-child(2){grid-column:5}
+  .nav-actions .social-link:nth-child(3){grid-column:6}
+}
+.collectible-card .card-image{transform:none}
+.collectible-card:not(.card-lugia){border:2px solid var(--navy);border-radius:18px;overflow:hidden;background:var(--cream);box-shadow:0 5px 0 #15345f18}
+.collectible-card:not(.card-lugia) .card-display{border:0;border-bottom:1px solid #15345f30;border-radius:0}
+.collectible-card:not(.card-lugia) figcaption{padding:20px 18px}
