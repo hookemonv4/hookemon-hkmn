@@ -73,9 +73,14 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   initialization protocol rather than one raw storage write: a restart repairs an unbound matching
   page state with the same predecessor source and plan, never with zero dust. Positive successor
   dust is recorded after terminal conservation.
-- `DIRECT_PAYOUT_RECIPIENT_LIMIT` bounds plan compilation and the feasibility gate at 1,025.
-  Recipient-keyed durable pages retain the full manifest outside bounded journal payload arrays;
-  journal entries retain only compact state metadata and page roots.
+- Direct payout accepts at most 10,000 recipients, subject to the configured recipient and
+  transaction limits and native fee/reserve checks. Offline scale coverage compiles a real
+  10,000-recipient plan and round-trips both its initial state and a normalizer-valid fully
+  finalized fixture through durable paging and reopen, preserving every recipient and atomic-unit
+  conservation. This coverage excludes replacement histories, quarantine entries and held-position
+  exclusions at that scale; it does not represent live signing or transfers. Recipient-keyed
+  durable pages retain the full manifest outside bounded journal payload arrays; journal entries
+  retain only compact state metadata and page roots.
 - The stage driver uses direct payout by default even if unrelated historical contract identities
   remain configured. The old vault flow is selected only by explicit `payout.legacyVault: true`.
 - Before a payout reads a nonce, it reserves `WalletNonceReservationV1` for the Operations wallet
