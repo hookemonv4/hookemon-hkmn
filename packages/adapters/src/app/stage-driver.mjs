@@ -1474,6 +1474,24 @@ export function createStageDriver({
         context,
         stageRequestDigest: preparedRequestDigest,
       });
+      // claim-process reserves the global wallet nonce (reserveClaimWalletNonce) before it reaches
+      // any signer, and its own missing-authority refusal only happens later, inside the guarded
+      // sign() call. A refusal that late leaves that nonce reservation durably held under this
+      // attempt's fencing token with no signature ever produced; the next lease's token differs, so
+      // cycle-repository.mjs's reserveWalletNonce refuses the retry until that fence expires (a
+      // real, bounded delay, not a permanent deadlock -- expiry takeover is a repository invariant
+      // this fix does not touch). Resolving and verifying the exact operator-evm step authorization
+      // for this stage/cycle/request digest here, before handler.mutate is even called, refuses the
+      // same missing-authority case before that nonce reservation ever happens.
+      // verifyAndRecordStepAuthorization is idempotent -- a second
+      // call for the same intent only reads back its already-persisted first-use decision -- so this
+      // is a real availability check, not a cached permission: every guard that already runs at the
+      // actual sign() boundary inside guardedSignerRole below (lease, nonce fence, standing authority)
+      // still runs unchanged when handler.mutate actually reaches it.
+      if (usesBuiltInHandlers && context.stage === 'claim-process' && standingAuthoritySigningGuard !== null) {
+        await standingAuthoritySigningGuard({ role: { role: 'operator-evm' } });
+        context.assertLease?.();
+      }
       try {
         evidence = await handler.mutate({
           liveMode,

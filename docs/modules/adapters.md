@@ -153,6 +153,20 @@ infrastructure.
   and broadcast. The reservation is globally durable, contains its fencing token and lease window,
   and cannot be replaced until expiry; no production composition wires the compatibility-only third
   Operations role.
+- For `claim-process` specifically, `stage-driver.mjs`'s `execute()` resolves and verifies the exact
+  `operator-evm` standing-authority step authorization for the durably recorded stage/cycle/request
+  digest -- through the same `config.standingAuthorityStepAuthorization` resolver and
+  `verifyAndRecordStepAuthorization` contract the real sign-time guard uses -- before calling
+  `claim-process.mjs`'s own `mutate`, and therefore before that handler's own wallet-nonce
+  reservation (`reserveClaimWalletNonce`, which itself precedes any signer call). This is a real
+  availability check, not a cached permission: `verifyAndRecordStepAuthorization` is idempotent (a
+  repeat call for the same intent only reads back its persisted first-use decision), and every guard
+  that already runs at the actual `sign()`/`signApproved()` boundary inside `guardedSignerRole`
+  (lease, nonce fence, standing authority) still runs unchanged when `mutate` reaches it. The check
+  applies only when a standing authority is required (`execution.profile === 'production'` and
+  `providerMode === 'live'`) and only to this one built-in stage; it prevents a first attempt whose
+  authorization is not yet available from ever reserving the wallet nonce, so a later retry under a
+  rotated lease fencing token is never blocked by a stranded reservation from that refused attempt.
 - `src/app/stages/purchase.mjs`'s `preparePurchaseRequest` sources the number of packs a cycle
   purchases from the cycle's own durably admitted record (`cycleRepository.describeCycle(cycleId)
   .admission`, written once at admission by `buildAdmissionPlanner.plan` from the operator's

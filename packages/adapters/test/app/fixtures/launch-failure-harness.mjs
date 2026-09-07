@@ -13,8 +13,8 @@
 // (`environment.mjs`'s `readPrivateStandingAuthorityArtifact`) before it can reach the signer.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
-import { cp, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { generateKeyPairSync, sign as signMessage } from 'node:crypto';
+import { cp, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +28,8 @@ import {
 import { createEmptyOperatorState, mutateOperatorState } from '../../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../../runner/src/config/state-schema.mjs';
 import { canonicalJson, digest } from '../../../../runner/src/cycle/journal.mjs';
+import { assertCycleSnapshot } from '../../../../runner/src/cycle/cycle-store.mjs';
+import { stepAuthorizationIntentDigest } from '../../../../runner/src/cycle/authorization-provider.mjs';
 import { createTestKeychain } from '../../fixtures/keychain/fixture.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../../src/signing/standing-authority.mjs';
 
@@ -210,13 +212,33 @@ function respond(response, value) {
  *    the same production `readUsdgFrozen` call the observability canary makes immediately before
  *    every mutation, so "first call" and "next call" are exactly "startup" and "the next scheduled
  *    mutation check" in real request order.
+ *  - `freezeBarrier({ readCount })`: an optional async override of `freezeAfterFirstRead`, awaited
+ *    before this same `isFrozen` response is released. Because the child under test is itself
+ *    awaiting this exact HTTPS response before it can proceed (`beforeMutation` blocks
+ *    `stageDriver.execute()`, `automated-cycle-service.mjs`), a barrier here pins a real,
+ *    already-existing request-ordering point instead of adding a race. Caution confirmed by direct
+ *    observation while building this: the generic per-stage `prepareStage` entry does precede this
+ *    call, but for a chain-journal stage the *request-digest*-bearing entry a standing-authority
+ *    producer needs to match against (`recordStageRequestDigest`, `stage-driver.mjs`) is written
+ *    *inside* `stageDriver.execute()` -- i.e. strictly after this call, not before it, on that
+ *    stage's first-ever attempt. A barrier here can therefore observe that digest deterministically
+ *    only from the second call onward (see `readCommittedPreparedAttempts`/`peekPrepared`, exported
+ *    below, which reads the same durable state this reasons about); see `authorityGate` for the
+ *    barrier this file also offers at a point that does not have that limitation.
+ *  - `authorityGate()`: an optional async hook awaited before *every* request this server handles,
+ *    regardless of URL or RPC method -- a real, generic public-RPC-boundary point rather than one
+ *    tied to `isFrozen` specifically. Since the request-digest for a chain-journal stage's first
+ *    attempt is only known partway through that same attempt's own `execute()` (see above), and that
+ *    `execute()` still makes further real RPC calls of its own before it ever reaches a signer (this
+ *    fixture's own hook-liability reads among them), a caller can hold up whichever of those later
+ *    calls happens to be made first once the digest is durably committed, and publish for it there.
  */
 export async function fixtureServer(
   t,
   directory,
   operationsAccount = () => `0x${'0'.repeat(40)}`,
   operationsSolanaAccount = () => null,
-  { catalogAvailable = () => true, freezeAfterFirstRead = false } = {},
+  { catalogAvailable = () => true, freezeAfterFirstRead = false, freezeBarrier = null, authorityGate = null } = {},
 ) {
   const paths = {
     caKey: join(directory, 'ca-key.pem'), caCert: join(directory, 'ca-cert.pem'),
@@ -246,9 +268,15 @@ export async function fixtureServer(
     [toFunctionSelector('function isSolvent() view returns (bool)'), () => abiUint(1n)],
     [
       toFunctionSelector('function isFrozen(address account) view returns (bool)'),
-      () => {
+      // Async on purpose: when `freezeBarrier` is supplied, this is the real public RPC boundary a
+      // test can hold open while it deterministically confirms authority state on disk (see that
+      // option's own doc comment above `fixtureServer`) before releasing the response the child is
+      // awaiting -- no different in kind from any other real, possibly slow, RPC dependency.
+      async () => {
         frozenReadCount += 1;
-        const frozen = freezeAfterFirstRead && frozenReadCount > 1;
+        const frozen = typeof freezeBarrier === 'function'
+          ? await freezeBarrier({ readCount: frozenReadCount })
+          : (freezeAfterFirstRead && frozenReadCount > 1);
         calls.usdgFrozenObservations.push(frozen);
         return abiUint(frozen ? 1n : 0n);
       },
@@ -273,6 +301,11 @@ export async function fixtureServer(
   ]);
   const broadcasts = new Map();
   const server = createServer({ key, cert }, async (request, response) => {
+    // A real, generic public-RPC-boundary hook: awaited before any request is even routed, so it
+    // can hold up whichever real request happens to be the first one made after some durable
+    // condition the child under test does not know this fixture is watching for (see
+    // `freeze-authority-boundary.test.mjs`'s `createAuthorityGate` for the concrete use).
+    if (typeof authorityGate === 'function') await authorityGate();
     if (request.url === '/alert') { response.writeHead(204); response.end(); return; }
     if (request.url === '/chains') { respond(response, RELAY_CHAINS); return; }
     if (request.url === '/api/machines') {
@@ -338,7 +371,7 @@ export async function fixtureServer(
         const call = rpc.params?.[0] ?? {};
         const selector = (call.data ?? '').slice(0, 10).toLowerCase();
         const hookValue = HOOK_STATE_SELECTORS.get(selector);
-        if (hookValue !== undefined) return reply(hookValue(operationsAccount()));
+        if (hookValue !== undefined) return reply(await hookValue(operationsAccount()));
       }
       if (rpc.method === 'eth_call') {
         const data = rpc.params?.[0]?.data ?? '';
@@ -571,6 +604,186 @@ export async function writeStandingAuthorityDocument(directory) {
   }), ownerKeys.privateKey);
   await writeFile(documentPath, `${canonicalJson(document)}\n`, { mode: 0o600 });
   return { documentPath, ownerPublicKeyPath, policyPublicKeyPath };
+}
+
+/**
+ * Owner-signed standing-authority document PLUS the real per-step-authorization producer: the
+ * durable-poll-and-publish loop `writeStandingAuthorityDocument` above deliberately omits. Read-only
+ * reference: this is a straight copy of `testPolicyAuthority` from the reserved
+ * `launch-production-graph.test.mjs` at commit ccb55a4fb11282f807884c4c8236a065853a6fc7 (still
+ * present unedited at this worktree's base `fa62117c`) -- no field, guard, or validity rule here was
+ * invented; every one of them is that function's own. It is copied rather than imported because that
+ * file is reserved and importing it would execute its own tests.
+ *
+ * With this producer running, a stage's first real signing attempt is genuinely authorizable: once
+ * this loop observes the stage's own durably committed `*-prepared` entry, it independently signs
+ * and publishes a matching step-authorization intent, so a real signature can and (given enough
+ * ticks) does happen -- the positive control this file's own boundary case needs. No production key,
+ * network, or broadcast is used: `policyKeys`/`ownerKeys` are local, process-only ed25519 keypairs,
+ * and the artifact only ever authorizes signing against the loopback fixture.
+ *
+ * `autoStart: false` skips both the initial publish and the 10ms interval, leaving the artifact
+ * unpublished until a caller explicitly awaits the returned `publishOnce()` -- letting a test pin the
+ * exact moment authority becomes available to a single, real request-ordering point (e.g. inside a
+ * loopback RPC handler already being awaited by the child under test) instead of a background race.
+ * `publishOnce()` returns the prepared attempts it just read and whether it wrote a new artifact, so
+ * a caller can assert the exact stage/digest it published without re-deriving it.
+ */
+export async function createStandingAuthorityProducer(t, directory, { autoStart = true } = {}) {
+  const ownerKeys = generateKeyPairSync('ed25519');
+  const policyKeys = generateKeyPairSync('ed25519');
+  const ownerPublicKeyPath = join(directory, 'test-owner-public.pem');
+  const policyPublicKeyPath = join(directory, 'test-policy-public.pem');
+  const documentPath = join(directory, 'test-standing-authority.json');
+  const artifactPath = join(directory, 'standing-authority-step-authorizations.json');
+  const artifactNextPath = join(directory, 'standing-authority-step-authorizations.next.json');
+  await Promise.all([
+    writeFile(ownerPublicKeyPath, ownerKeys.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 }),
+    writeFile(policyPublicKeyPath, policyKeys.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 }),
+  ]);
+  const document = attachOwnerSignature(buildCanonicalStandingAuthorityDocument({
+    owner: 'test-loopback-authority',
+    policyPublicKey: policyKeys.publicKey,
+    perCycleSpendCap: '34',
+    maxCyclesPerDay: 64,
+    allowedPacks: ['return-fixture'],
+    allowedDestinations: ['test-loopback-authority-destination'],
+    issuedAt: '2026-01-01T00:00:00.000Z',
+    expiresAt: '2027-01-01T00:00:00.000Z',
+    documentId: 'test-loopback-authority-boundary-policy',
+  }), ownerKeys.privateKey);
+  await writeFile(documentPath, `${canonicalJson(document)}\n`, { mode: 0o600 });
+
+  const entries = new Map();
+  const diagnostics = { publishAttempts: 0, publishWrites: 0, enoent: 0, keys: [] };
+  let publishing = false;
+  let publishedArtifact = null;
+  let producerError = null;
+  // Deliberately not CycleRepository.open(): that bootstrap takes the durable store's exclusive
+  // zero-tolerance SQLite lock, and a producer polling on the same lock starves the very runner it
+  // is meant to authorize. Reads the committed active-cycle files directly instead, re-verifying
+  // the journal hash chain (assertCycleSnapshot) before anything here is treated as authorized.
+  async function readCommittedPreparedAttempts() {
+    const activeDirectory = join(directory, 'cycles', 'active');
+    let names;
+    try {
+      names = await readdir(activeDirectory);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    const prepared = [];
+    for (const name of names) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue;
+      let text;
+      try {
+        text = await readFile(join(activeDirectory, name), 'utf8');
+      } catch (error) {
+        if (error?.code === 'ENOENT') continue;
+        throw error;
+      }
+      const parsed = JSON.parse(text);
+      if (`${canonicalJson(parsed)}\n` !== text) throw new Error('active cycle file is not canonical JSON plus one newline');
+      const cycle = assertCycleSnapshot(parsed.cycle);
+      for (const entry of cycle.entries) {
+        if (entry?.kind === 'stage-request-prepared') {
+          const { stage, requestDigest } = entry.payload ?? {};
+          if (typeof stage === 'string' && typeof requestDigest === 'string') {
+            prepared.push({ cycleId: cycle.cycleId, stage, requestDigest });
+          }
+          continue;
+        }
+        if (typeof entry?.kind !== 'string' || !entry.kind.endsWith('attempt-prepared')) continue;
+        const attempt = entry.payload?.attempt;
+        if (typeof attempt?.stage !== 'string' || typeof attempt?.requestDigest !== 'string') continue;
+        prepared.push({ cycleId: cycle.cycleId, stage: attempt.stage, requestDigest: attempt.requestDigest });
+      }
+    }
+    return prepared;
+  }
+
+  async function publish() {
+    if (publishing) return { prepared: [], wrote: false };
+    publishing = true;
+    diagnostics.publishAttempts += 1;
+    try {
+      const prepared = await readCommittedPreparedAttempts();
+      for (const { cycleId, stage, requestDigest } of prepared) {
+        for (const signerRole of ['operator-evm', 'operator-solana']) {
+          const unsignedIntent = {
+            schema: 'hookemon.standing-authority-step-intent.v1',
+            standingAuthorityDigest: document.documentDigest,
+            cycleId,
+            actionKind: stage,
+            authorizationKind: 'sign',
+            subjectDigest: requestDigest,
+            destination: 'test-loopback-authority-destination',
+            pack: 'return-fixture',
+            spendAmount: '1',
+            nonce: `test-${digest({ cycleId, stage, requestDigest, signerRole }).slice('sha256:'.length)}`,
+            issuedAt: '2026-09-06T00:00:00.000Z',
+          };
+          const intent = Object.freeze({
+            ...unsignedIntent,
+            policySignature: signMessage(null, Buffer.from(stepAuthorizationIntentDigest(unsignedIntent), 'utf8'), policyKeys.privateKey).toString('base64url'),
+          });
+          const entryKey = canonicalJson({ cycleId, stage, requestDigest, signerRole });
+          if (!entries.has(entryKey)) diagnostics.keys.push({ atMs: Date.now(), stage, requestDigest, signerRole });
+          entries.set(entryKey, Object.freeze({ signerRole, intent }));
+        }
+      }
+      const artifact = {
+        schema: 'hookemon.standing-authority-step-authorizations.v1',
+        authorityDigest: document.documentDigest,
+        entries: [...entries.values()],
+      };
+      const artifactText = `${canonicalJson(artifact)}\n`;
+      if (artifactText === publishedArtifact) return { prepared, wrote: false };
+      await writeFile(artifactNextPath, artifactText, { mode: 0o600 });
+      await rename(artifactNextPath, artifactPath);
+      publishedArtifact = artifactText;
+      diagnostics.publishWrites += 1;
+      return { prepared, wrote: true };
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      diagnostics.enoent += 1;
+      return { prepared: [], wrote: false };
+    } finally {
+      publishing = false;
+    }
+  }
+  let timer = null;
+  if (autoStart) {
+    await publish();
+    timer = setInterval(() => {
+      void publish().catch(error => { producerError = error; });
+    }, 10);
+    t.after(() => clearInterval(timer));
+  }
+  return {
+    documentPath,
+    ownerPublicKeyPath,
+    policyPublicKeyPath,
+    artifactPath,
+    diagnostics,
+    // Read-only: the same durable committed-state read `publishOnce` uses internally, without
+    // writing anything. Lets a caller decide *whether* a stage's own request has been durably
+    // committed yet before choosing to publish, rather than publishing (and thereby creating an
+    // artifact that may not yet match anything) on every call.
+    async peekPrepared() {
+      return readCommittedPreparedAttempts();
+    },
+    // Runs exactly one read-sign-rename pass and returns only once the atomic rename has completed,
+    // so a caller awaiting this knows the artifact on disk already reflects it -- no polling.
+    async publishOnce() {
+      return publish();
+    },
+    async stop() {
+      if (timer !== null) clearInterval(timer);
+      while (publishing) await new Promise(resolve => setTimeout(resolve, 5));
+    },
+    assertHealthy() { if (producerError !== null) throw producerError; },
+  };
 }
 
 const POLICY_ENGINE_RELATIVE = 'packages/runner/src/automation/policy-engine.mjs';
