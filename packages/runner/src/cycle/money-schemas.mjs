@@ -237,6 +237,98 @@ export function createPreparedChainTransactionAttempt({ cycleId, stage, requestD
   });
 }
 
+export const SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA = 'hookemon.sign-only-pre-sign-binding.v1';
+
+/**
+ * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: the exact material a bounded
+ * Keychain sign-only retry may reuse, durably bound before the first sign-only invocation for a
+ * PREPARED chain attempt. `unsignedWireBytes` is the canonical encoding of the exact request the
+ * signer receives -- not a digest -- so a restart can prove it never regenerated it;
+ * `unsignedRequestDigest`, `policyDigest`, and `validityContextDigest` pin the request, the
+ * approved policy, and the decoded chain-validity semantics (nonce/blockhash/deadline) a retry or
+ * a restart must reproduce unchanged.
+ */
+export function assertSignOnlyPreSignBinding(value, label = 'sign-only pre-sign binding') {
+  assertPlainObject(value, [
+    'schema',
+    'cycleId',
+    'stage',
+    'requestDigest',
+    'role',
+    'account',
+    'unsignedWireBytes',
+    'unsignedRequestDigest',
+    'policyDigest',
+    'validityContextDigest',
+  ], label);
+  if (value.schema !== SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA) throw new Error(`${label} schema is invalid`);
+  assertNonEmptyString(value.cycleId, `${label} cycleId`);
+  assertStage(value.stage, `${label} stage`);
+  assertDigest(value.requestDigest, `${label} requestDigest`);
+  assertNonEmptyString(value.role, `${label} role`);
+  assertNonEmptyString(value.account, `${label} account`);
+  if (typeof value.unsignedWireBytes !== 'string' || value.unsignedWireBytes.length === 0) {
+    throw new Error(`${label} unsignedWireBytes is invalid`);
+  }
+  assertDigest(value.unsignedRequestDigest, `${label} unsignedRequestDigest`);
+  assertDigest(value.policyDigest, `${label} policyDigest`);
+  assertDigest(value.validityContextDigest, `${label} validityContextDigest`);
+  return clone(value);
+}
+
+export const SIGN_ONLY_INVOCATION_LEDGER_SCHEMA = 'hookemon.sign-only-invocation-ledger.v1';
+
+export const SIGN_ONLY_INVOCATION_LEDGER_STATES = Object.freeze([
+  'ORDINAL_1_ALLOCATED',
+  'ORDINAL_1_TIMED_OUT',
+  'ORDINAL_2_ALLOCATED',
+  'ORDINAL_2_TIMED_OUT',
+]);
+
+const signOnlyInvocationLedgerStateSet = new Set(SIGN_ONLY_INVOCATION_LEDGER_STATES);
+
+/**
+ * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: the durable invocation budget for
+ * one sign-only pre-sign binding, independent of any single process's local retry logic. Exactly
+ * two invocation ordinals ever exist for a binding. `ORDINAL_1_ALLOCATED` permits calling Keychain
+ * once; a classified timeout durably advances to `ORDINAL_1_TIMED_OUT`, which is the only state
+ * that ever permits allocating `ORDINAL_2_ALLOCATED`. `ORDINAL_2_TIMED_OUT` is terminal -- no third
+ * ordinal exists. A crash, a generic error, or a proven pre-invocation denial after an allocation
+ * never advances this record, so no later caller (a restart, a concurrent second wrapper, or the
+ * same process) can ever treat that ambiguous outcome as eligible for another invocation.
+ */
+export function assertSignOnlyInvocationLedger(value, label = 'sign-only invocation ledger') {
+  assertPlainObject(value, ['schema', 'cycleId', 'stage', 'requestDigest', 'state'], label);
+  if (value.schema !== SIGN_ONLY_INVOCATION_LEDGER_SCHEMA) throw new Error(`${label} schema is invalid`);
+  assertNonEmptyString(value.cycleId, `${label} cycleId`);
+  assertStage(value.stage, `${label} stage`);
+  assertDigest(value.requestDigest, `${label} requestDigest`);
+  if (!signOnlyInvocationLedgerStateSet.has(value.state)) throw new Error(`${label} state is invalid`);
+  return clone(value);
+}
+
+export function createReservedSignOnlyInvocationLedger({ cycleId, stage, requestDigest }) {
+  return assertSignOnlyInvocationLedger({
+    schema: SIGN_ONLY_INVOCATION_LEDGER_SCHEMA,
+    cycleId,
+    stage,
+    requestDigest,
+    state: 'ORDINAL_1_ALLOCATED',
+  });
+}
+
+export function transitionSignOnlyInvocationLedger(value, nextState) {
+  const current = assertSignOnlyInvocationLedger(value);
+  const permitted = {
+    ORDINAL_1_ALLOCATED: new Set(['ORDINAL_1_TIMED_OUT']),
+    ORDINAL_1_TIMED_OUT: new Set(['ORDINAL_2_ALLOCATED']),
+    ORDINAL_2_ALLOCATED: new Set(['ORDINAL_2_TIMED_OUT']),
+    ORDINAL_2_TIMED_OUT: new Set(),
+  };
+  if (!permitted[current.state].has(nextState)) throw new Error('sign-only invocation ledger transition is invalid');
+  return assertSignOnlyInvocationLedger({ ...current, state: nextState });
+}
+
 export function transitionChainTransactionAttempt(value, nextState, evidence = {}) {
   const current = assertChainTransactionAttempt(value);
   const permitted = {

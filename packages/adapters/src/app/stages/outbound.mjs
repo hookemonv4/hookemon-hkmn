@@ -520,6 +520,8 @@ export async function createOutboundPolicySigner({
   }),
   now = Date.now,
   preflightAuthority,
+  recoveryRepository,
+  context,
 }) {
   if (!outboundPlanBrand.has(plan)) {
     throw new Error('outbound policy signer requires a verified Relay plan produced by prepareOutboundRequest');
@@ -538,7 +540,16 @@ export async function createOutboundPolicySigner({
     rules: [exactPolicyRule(decoded, 'relay-outbound-step')],
   });
   const policyRules = readTransactionPolicyRules(policy);
-  const signer = wrapTransactionPolicySignerClient({ client: signerClient, policy, rules: policyRules, decodeOptions });
+  // ADR-0025 `retry-sign-only-with-durable-binding`: `recoveryRepository`/`context` are supplied
+  // only by the live `mutateOutbound` caller, which already holds the durable stage identity this
+  // exact chain attempt was PREPARED under; a bare policy-signer construction (e.g. a fixture test)
+  // omits them and gets today's unchanged, non-retrying behavior. `recoveryRepository` is the
+  // narrow, lease-fenced sign-only-recovery facade the stage driver builds -- never the raw,
+  // unfenced `cycleRepository` this same caller uses for every other durable write.
+  const recovery = recoveryRepository && context
+    ? { repository: recoveryRepository, cycleId: context.cycleId, stage: 'outbound', requestDigest }
+    : undefined;
+  const signer = wrapTransactionPolicySignerClient({ client: signerClient, policy, rules: policyRules, decodeOptions, recovery });
   const assertPlanQuoteUsable = () => assertQuoteUsable({ quote: plan.relayQuote, nowMs: now() });
   return Object.freeze({
     decoded,
@@ -842,6 +853,7 @@ export async function mutateOutbound({
   signerClient,
   config,
   cycleRepository,
+  signOnlyRecoveryRepository,
   context,
   request,
   preflightAuthority,
@@ -913,6 +925,8 @@ export async function mutateOutbound({
         requestDigest: entry.requestDigest,
         now,
         preflightAuthority,
+        recoveryRepository: signOnlyRecoveryRepository,
+        context,
       });
       const signed = await approved.signer.sign({
         transaction: plan.transaction,

@@ -29,6 +29,7 @@ import {
   decodeProviderTransaction,
   readTransactionPolicyRules,
 } from '../../signing/transaction-policy.mjs';
+import { forwardOwnedKeychainSignOnlyIdentity } from '../../signing/keychain-signer.mjs';
 import {
   OPERATOR_SOLANA_ROLE,
   readTransactionPolicyApprovalContext,
@@ -594,7 +595,7 @@ function requireReturnMutationAuthority(preflightAuthority) {
   return requireLiveMutationAuthority();
 }
 
-export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return' }) {
+export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return', recoveryRepository, context }) {
   if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function' || typeof signerClient.solana.broadcast !== 'function') {
     throw new Error('return requires an Operations Solana signer with sign and broadcast capabilities');
   }
@@ -618,15 +619,35 @@ export async function createReturnPolicySigner({ signerClient, client, configure
   });
   const policyRules = readTransactionPolicyRules(policy);
   const rawSigner = signerClient.solana;
+  // ADR-0025 `retry-sign-only-with-durable-binding`: this facade only ever delegates to
+  // `rawSigner`'s own methods unchanged, so it can carry the owned-Keychain attestation through to
+  // the object `wrapTransactionPolicySignerClient` actually checks. `signApproved`/
+  // `broadcastApproved` -- the stronger variants a Solana Keychain backend exposes once a real
+  // broadcast transport is wired -- are forwarded only when `rawSigner` itself exposes them, so this
+  // facade is a faithful, complete delegate rather than one that silently drops the path
+  // `wrapTransactionPolicySignerClient` actually prefers.
+  const delegatingClient = forwardOwnedKeychainSignOnlyIdentity(rawSigner, {
+    role: rawSigner.role ?? OPERATOR_SOLANA_ROLE,
+    sign: requestValue => rawSigner.sign(requestValue),
+    broadcast: signed => rawSigner.broadcast(signed),
+    ...(typeof rawSigner.signApproved === 'function'
+      ? { signApproved: (requestValue, proof) => rawSigner.signApproved(requestValue, proof) }
+      : {}),
+    ...(typeof rawSigner.broadcastApproved === 'function'
+      ? { broadcastApproved: (signed, proof) => rawSigner.broadcastApproved(signed, proof) }
+      : {}),
+  });
+  // `recoveryRepository` is the narrow, lease-fenced sign-only-recovery facade the stage driver
+  // builds -- never the raw, unfenced `cycleRepository` `mutateReturn` uses for every other write.
+  const recovery = recoveryRepository && context
+    ? { repository: recoveryRepository, cycleId: context.cycleId, stage, requestDigest }
+    : undefined;
   const policySigner = wrapTransactionPolicySignerClient({
-    client: {
-      role: rawSigner.role ?? OPERATOR_SOLANA_ROLE,
-      sign: requestValue => rawSigner.sign(requestValue),
-      broadcast: signed => rawSigner.broadcast(signed),
-    },
+    client: delegatingClient,
     policy,
     rules: policyRules,
     decodeOptions,
+    recovery,
   });
   const quoteUsable = () => assertQuoteUsable({ quote: request.intent, nowMs: now() });
   return Object.freeze({
@@ -731,6 +752,7 @@ export async function mutateReturn({
   signerClient,
   config,
   cycleRepository,
+  signOnlyRecoveryRepository,
   context,
   request,
   preflightAuthority,
@@ -789,6 +811,8 @@ export async function mutateReturn({
       money,
       now,
       preflightAuthority,
+      recoveryRepository: signOnlyRecoveryRepository,
+      context,
     });
     await assertReturnLamportReserve({ client, configured, money, decoded: approved.decoded });
     const signed = await approved.sign();

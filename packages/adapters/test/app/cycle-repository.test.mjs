@@ -4955,3 +4955,354 @@ test('a stored outbound quote refresh selection naming an already-expired replac
     /replacement quote deadlines must be strictly later than the selection time/,
   );
 });
+
+// REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: the durable pre-sign binder a
+// bounded Keychain sign-only retry reuses. These focused tests exercise the repository/money-schema
+// CAS contract in isolation, independent of signer-client.mjs's retry facade (covered separately).
+function signOnlyPreSignBinding(cycleId, stage, requestDigest, overrides = {}) {
+  return {
+    schema: 'hookemon.sign-only-pre-sign-binding.v1',
+    cycleId,
+    stage,
+    requestDigest,
+    role: 'operator-evm',
+    account: 'hookemon-operator-primary',
+    unsignedWireBytes: canonicalJson({ to: '0x1', nonce: '1' }),
+    unsignedRequestDigest: digest({ to: '0x1', nonce: '1' }),
+    policyDigest: digest({ policy: 'p' }),
+    validityContextDigest: digest({ validity: 'v' }),
+    ...overrides,
+  };
+}
+
+test('persistSignOnlyPreSignBinding requires an existing PREPARED chain attempt', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await assert.rejects(
+    () => repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, signOnlyPreSignBinding(cycleId, 'claim-process', requestDigest)),
+    /chain attempt is not PREPARED/,
+  );
+  assert.equal(await repository.readSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest), null);
+});
+
+test('persistSignOnlyPreSignBinding binds exactly once before signing and replays byte-identical material idempotently', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', preparedChainAttempt(cycleId, 'claim-process', requestDigest));
+  const binding = signOnlyPreSignBinding(cycleId, 'claim-process', requestDigest);
+
+  const first = await repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, binding);
+  assert.deepEqual(first, binding);
+  assert.deepEqual(await repository.readSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest), binding);
+
+  // Idempotent replay of the exact same material -- as a restart's regenerated request must be --
+  // never throws and never creates a second durable record.
+  const second = await repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, binding);
+  assert.deepEqual(second, binding);
+});
+
+test('persistSignOnlyPreSignBinding refuses changed wire bytes, role, account, digest, or validity context for the same request', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', preparedChainAttempt(cycleId, 'claim-process', requestDigest));
+  const binding = signOnlyPreSignBinding(cycleId, 'claim-process', requestDigest);
+  await repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, binding);
+
+  const conflictCases = {
+    unsignedWireBytes: canonicalJson({ to: '0x1', nonce: '2' }),
+    role: 'operator-solana',
+    account: 'a-different-account',
+    policyDigest: digest({ policy: 'a different policy' }),
+    validityContextDigest: digest({ validity: 'a different validity' }),
+  };
+  for (const [field, value] of Object.entries(conflictCases)) {
+    await assert.rejects(
+      () => repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, { ...binding, [field]: value }),
+      /already has a different pre-sign binding/,
+      `expected a conflict on ${field}`,
+    );
+  }
+  // The durable record is untouched by every refused conflict above.
+  assert.deepEqual(await repository.readSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest), binding);
+});
+
+test('persistSignOnlyPreSignBinding refuses once the chain attempt is no longer PREPARED', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', preparedChainAttempt(cycleId, 'claim-process', requestDigest));
+  await repository.recordSignedTransaction(cycleId, 'claim-process', requestDigest, {
+    rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash: '0xdeadbeef',
+  });
+  await assert.rejects(
+    () => repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, signOnlyPreSignBinding(cycleId, 'claim-process', requestDigest)),
+    /chain attempt is not PREPARED/,
+  );
+});
+
+test('a durable sign-only pre-sign binding survives restart and is read back unchanged', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', preparedChainAttempt(cycleId, 'claim-process', requestDigest));
+  const binding = signOnlyPreSignBinding(cycleId, 'claim-process', requestDigest);
+  await repository.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, binding);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.deepEqual(await reopened.readSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest), binding);
+  // Restart never regenerates: a second bind attempt against the reopened repository with the exact
+  // same material is still the idempotent no-op, not a new record.
+  await reopened.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, binding);
+  await assert.rejects(
+    () => reopened.persistSignOnlyPreSignBinding(cycleId, 'claim-process', requestDigest, { ...binding, unsignedWireBytes: canonicalJson({ to: '0x1', nonce: '999' }) }),
+    /already has a different pre-sign binding/,
+  );
+});
+
+test('readSignOnlyPreSignBinding returns null for a request with no durable binding', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  assert.equal(await repository.readSignOnlyPreSignBinding(cycleId, 'claim-process', `sha256:${'a'.repeat(64)}`), null);
+});
+
+// REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: the durable invocation ledger a
+// bounded Keychain sign-only retry consumes -- distinct from the immutable pre-sign binding above.
+async function preparedBindingFixture(repository, cycleId, stage, requestDigest) {
+  await repository.prepareChainTransactionAttempt(cycleId, stage, preparedChainAttempt(cycleId, stage, requestDigest));
+  return repository.persistSignOnlyPreSignBinding(cycleId, stage, requestDigest, signOnlyPreSignBinding(cycleId, stage, requestDigest));
+}
+
+test('reserveSignOnlyInvocation requires a durable pre-sign binding and a PREPARED chain attempt', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1),
+    /no durable pre-sign binding/,
+  );
+  await repository.prepareChainTransactionAttempt(cycleId, 'claim-process', preparedChainAttempt(cycleId, 'claim-process', requestDigest));
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1),
+    /no durable pre-sign binding/,
+  );
+});
+
+test('reserveSignOnlyInvocation permits ordinal 1 only from a fresh binding and refuses a second ordinal-1 reservation', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+
+  const ledger = await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  assert.equal(ledger.state, 'ORDINAL_1_ALLOCATED');
+  assert.deepEqual(await repository.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest), ledger);
+
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1),
+    /ordinal 1 was already reserved/,
+  );
+});
+
+test('reserveSignOnlyInvocation refuses ordinal 2 before ordinal 1 has a recorded timeout', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+    /ordinal 2 requires a recorded ordinal 1 timeout/,
+  );
+
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  // Allocated but no outcome yet (simulates a crash, or a generic non-timeout error) -- ordinal 2
+  // must remain ineligible.
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+    /ordinal 2 requires a recorded ordinal 1 timeout/,
+  );
+});
+
+test('recordSignOnlyInvocationTimeout requires the exact allocated ordinal and rejects gaps or reordering', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+
+  await assert.rejects(
+    () => repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1),
+    /ordinal 1 is not in the allocated state/,
+  );
+  await assert.rejects(
+    () => repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 2),
+    /ordinal 2 is not in the allocated state/,
+  );
+
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  await assert.rejects(
+    () => repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 2),
+    /ordinal 2 is not in the allocated state/,
+  );
+  const timedOut1 = await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1);
+  assert.equal(timedOut1.state, 'ORDINAL_1_TIMED_OUT');
+  // Recording the identical true outcome again is idempotent.
+  assert.deepEqual(await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1), timedOut1);
+
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2);
+  const timedOut2 = await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 2);
+  assert.equal(timedOut2.state, 'ORDINAL_2_TIMED_OUT');
+  // Exhausted: no third ordinal exists, and nothing can be reserved or recorded past this point.
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1),
+    /ordinal 1 was already reserved/,
+  );
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+    /ordinal 2 requires a recorded ordinal 1 timeout/,
+  );
+});
+
+test('reserveSignOnlyInvocation re-checks PREPARED atomically: a chain attempt that advanced refuses ordinal 2 before signing', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1);
+
+  // The attempt advances to SIGNED between the recorded timeout and the retry (e.g. the timed-out
+  // call actually produced a signature that reached the repository through another path).
+  await repository.recordSignedTransaction(cycleId, 'claim-process', requestDigest, {
+    rawBytes: '0xabcdef', nonce: '8', blockhash: null, hash: '0xdeadbeef',
+  });
+
+  await assert.rejects(
+    () => repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+    /chain attempt is not PREPARED/,
+  );
+});
+
+test('restart: reopening after the first timeout permits exactly one remaining invocation, never two', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1);
+
+  const reopened = await CycleRepository.open(directory);
+  const ledger = await reopened.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest);
+  assert.equal(ledger.state, 'ORDINAL_1_TIMED_OUT');
+
+  const ordinal2 = await reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2);
+  assert.equal(ordinal2.state, 'ORDINAL_2_ALLOCATED');
+  // No third invocation exists under any restart.
+  await assert.rejects(
+    () => reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1),
+    /ordinal 1 was already reserved/,
+  );
+  await reopened.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 2);
+  await assert.rejects(
+    () => reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+    /ordinal 2 requires a recorded ordinal 1 timeout/,
+  );
+});
+
+test('restart: reopening after both ordinals timed out grants no remaining invocation', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2);
+  await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 2);
+
+  const reopened = await CycleRepository.open(directory);
+  assert.equal((await reopened.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest)).state, 'ORDINAL_2_TIMED_OUT');
+  await assert.rejects(() => reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1), /ordinal 1 was already reserved/);
+  await assert.rejects(() => reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2), /ordinal 2 requires a recorded ordinal 1 timeout/);
+});
+
+test('restart: reopening after an allocated-but-unrecorded ordinal 1 (crash or unknown result) grants no invocation', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  // No outcome ever recorded -- simulates a crash, or a generic error the ledger never advances for.
+
+  const reopened = await CycleRepository.open(directory);
+  assert.equal((await reopened.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest)).state, 'ORDINAL_1_ALLOCATED');
+  await assert.rejects(() => reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1), /ordinal 1 was already reserved/);
+  await assert.rejects(() => reopened.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2), /ordinal 2 requires a recorded ordinal 1 timeout/);
+});
+
+test('concurrency: two racing callers for ordinal 2 allocate exactly one, the loser refuses before signing', async t => {
+  const repository = await CycleRepository.open(await tempDirectory(t));
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+  await repository.recordSignOnlyInvocationTimeout(cycleId, 'claim-process', requestDigest, 1);
+
+  const results = await Promise.allSettled([
+    repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+    repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 2),
+  ]);
+  const fulfilled = results.filter(result => result.status === 'fulfilled');
+  const rejected = results.filter(result => result.status === 'rejected');
+  assert.equal(fulfilled.length, 1, 'exactly one concurrent caller wins the ordinal-2 reservation');
+  assert.equal(rejected.length, 1, 'the other concurrent caller refuses rather than also winning');
+  // The loser refuses either through this method's own eligibility check or through the durable
+  // store's own optimistic-concurrency conflict at commit time; both mean it never won the right
+  // to invoke Keychain.
+  assert.match(rejected[0].reason.message, /ordinal 2 requires a recorded ordinal 1 timeout|already reserved|stale cycle journal version/);
+  assert.equal((await repository.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest)).state, 'ORDINAL_2_ALLOCATED');
+});
+
+test('replay rejects an invocation-outcome record without a matching prior allocation or with an ordinal gap', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+
+  await injectRawJournalEntry(directory, cycleId, 'sign-only-invocation-timed-out', {
+    ledger: {
+      schema: 'hookemon.sign-only-invocation-ledger.v1',
+      cycleId, stage: 'claim-process', requestDigest, state: 'ORDINAL_1_TIMED_OUT',
+    },
+  });
+  await assert.rejects(
+    () => CycleRepository.open(directory).then(reopened => reopened.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest)),
+    /timeout transition is invalid/,
+  );
+});
+
+test('replay rejects an ordinal-2 reservation that skips a recorded ordinal-1 timeout', async t => {
+  const directory = await tempDirectory(t);
+  const repository = await CycleRepository.open(directory);
+  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const requestDigest = `sha256:${'a'.repeat(64)}`;
+  await preparedBindingFixture(repository, cycleId, 'claim-process', requestDigest);
+  await repository.reserveSignOnlyInvocation(cycleId, 'claim-process', requestDigest, 1);
+
+  await injectRawJournalEntry(directory, cycleId, 'sign-only-invocation-reserved', {
+    ledger: {
+      schema: 'hookemon.sign-only-invocation-ledger.v1',
+      cycleId, stage: 'claim-process', requestDigest, state: 'ORDINAL_2_ALLOCATED',
+    },
+  });
+  await assert.rejects(
+    () => CycleRepository.open(directory).then(reopened => reopened.readSignOnlyInvocationLedger(cycleId, 'claim-process', requestDigest)),
+    /ordinal 2 reservation is invalid/,
+  );
+});

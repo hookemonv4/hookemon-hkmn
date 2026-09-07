@@ -15,11 +15,24 @@
 import { createHash } from 'node:crypto';
 
 import { canonicalJson, digest as canonicalDigest } from '../../../runner/src/cycle/journal.mjs';
+import { SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA } from '../../../runner/src/cycle/money-schemas.mjs';
 import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
   requireLiveRetainedCustodyMutationAuthority,
 } from '../../../runner/src/cycle/preflight.mjs';
+// ADR-0025 sign-only bounded retry: this is the one, mutual seam between the generic
+// transaction-policy signer facade and the one signer backend this repository has proven a
+// sign-only timeout is safe to auto-retry (see keychain-signer.mjs's own header). Circular at the
+// module-graph level (keychain-signer.mjs imports the base signer-client exports above), but safe:
+// these are plain functions, not classes, so nothing here reads their bindings until
+// `wrapTransactionPolicySignerClient` actually runs a sign(), long after both modules finish
+// evaluating (the error classes both modules need are defined directly above, precisely to avoid
+// the top-level class-`extends` circularity a class import here would hit).
+import {
+  isOwnedKeychainSignOnlyClient,
+  readOwnedKeychainSignOnlyIdentity,
+} from './keychain-signer.mjs';
 import {
   bindTransactionPolicy,
   captureSolanaCoSignerSignatures,
@@ -66,6 +79,13 @@ export const ROLE_CAPABILITIES = Object.freeze({
 const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 
 export class SignerClientError extends Error {}
+
+// ADR-0025 sign-only bounded retry classification. Defined here, not in keychain-signer.mjs, purely
+// to avoid a circular top-level class-`extends` evaluation between the two modules; keychain-signer.mjs
+// is still the only module that ever constructs either one (see its own header comment) -- these are
+// exported from the base module for the same reason `SignerClientError` itself is.
+export class KeychainSignOnlyTimeoutError extends SignerClientError {}
+export class KeychainPreInvocationDenialError extends SignerClientError {}
 
 function fail(message) {
   throw new SignerClientError(message);
@@ -180,6 +200,16 @@ export function signRequestDigest(request) {
   if (request instanceof Uint8Array) return `sha256:${createHash('sha256').update(Buffer.from(request)).digest('hex')}`;
   if (typeof request === 'string') return `sha256:${createHash('sha256').update(request, 'utf8').digest('hex')}`;
   return `sha256:${createHash('sha256').update(canonicalJson(request)).digest('hex')}`;
+}
+
+/** A durable, JSON-safe textual form of a wire payload -- mirrors `signRequestDigest`'s own
+ * Buffer/Uint8Array/string/object type dispatch, since a durable pre-sign binding's
+ * `unsignedWireBytes` must survive the same storage round trip `canonicalJson` requires. */
+function canonicalWireBytesText(value) {
+  if (Buffer.isBuffer(value)) return value.toString('base64');
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('base64');
+  if (typeof value === 'string') return value;
+  return canonicalJson(value);
 }
 
 /**
@@ -477,11 +507,152 @@ export async function recoverTransactionPolicyBroadcast({ client, signed, recove
  * Adds decode, allowlist evaluation, and signed-message revalidation to a broadcast-capable
  * signer client. The wrapped client sees the original request unchanged. Its signed bytes are
  * never broadcast unless they decode to exactly the semantic description approved before sign().
+ *
+ * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: `recovery`, when supplied, is the
+ * `{repository, cycleId, stage, requestDigest}` this exact request's chain attempt was PREPARED
+ * under. Passing it is what makes a classified Keychain sign-only timeout eligible for exactly one
+ * bounded, identical-bytes retry -- and only when `client` also carries the owned-Keychain
+ * capability (see keychain-signer.mjs); every other backend, and every call with no `recovery`,
+ * keeps today's no-automatic-retry behavior unchanged.
  */
-export function wrapTransactionPolicySignerClient({ client, policy, rules, decodeOptions, broadcast }) {
+function assertSignOnlyRecoveryOption(recovery) {
+  if (recovery === undefined) return undefined;
+  if (!recovery || typeof recovery !== 'object' || Array.isArray(recovery)) {
+    fail('transaction policy signer recovery option must be an object');
+  }
+  if (!recovery.repository || typeof recovery.repository !== 'object') {
+    fail('transaction policy signer recovery option requires a repository');
+  }
+  if (typeof recovery.cycleId !== 'string' || recovery.cycleId.length === 0) {
+    fail('transaction policy signer recovery option cycleId is invalid');
+  }
+  if (typeof recovery.stage !== 'string' || recovery.stage.length === 0) {
+    fail('transaction policy signer recovery option stage is invalid');
+  }
+  if (typeof recovery.requestDigest !== 'string' || recovery.requestDigest.length === 0) {
+    fail('transaction policy signer recovery option requestDigest is invalid');
+  }
+  return recovery;
+}
+
+/**
+ * Re-decodes and re-evaluates the exact persisted unsigned bytes immediately before every actual
+ * sign-only invocation -- including the first -- and refuses if the decoded validity semantics
+ * (nonce/blockhash/deadline/etc., pinned at bind time as `expectedValidityContextDigest`) have
+ * drifted. This never regenerates the request: `input` is the same immutable decode input every
+ * caller already built from the same durably bound bytes; a mismatch here means something about
+ * chain state or policy changed underneath the binding, not that new material was substituted.
+ */
+async function reapproveBeforeSignOnlyInvocation({ input, canonicalPolicy, policyRules, expectedValidityContextDigest }) {
+  const reApproved = await decodeProviderTransaction(input);
+  evaluateTransactionPolicy(canonicalPolicy, reApproved, { rules: policyRules });
+  if (canonicalDigest(reApproved) !== expectedValidityContextDigest) {
+    fail('sign-only retry refuses: decoded validity semantics changed since the pre-sign binding was recorded');
+  }
+}
+
+/**
+ * Binds, then invokes, the exact bounded Keychain sign-only sequence this ADR-0025 retry guarantee
+ * covers. Every branch that is not "an owned Keychain client, with a recovery binding, that threw
+ * the classified timeout" falls straight through to a single unmodified sign call -- an external
+ * module, a spoofed/cloned object, a generic error, and a denial before invocation all take that
+ * same single-call path, exactly like before this guarantee existed. The repository's sign-only
+ * recovery API is required only once `client` has already proven ownership -- a `recovery` option
+ * paired with an ordinary fixture signer (the common case in this repository's non-Keychain tests)
+ * never touches `recovery.repository` at all.
+ *
+ * The retry budget itself is durable, not a property of this one function call: every actual
+ * invocation, at either ordinal, is preceded by `recovery.repository.reserveSignOnlyInvocation`, an
+ * atomic CAS that only succeeds from the exact expected predecessor state (no record for ordinal 1,
+ * an ordinal-1 timeout for ordinal 2) and while the bound chain attempt is still PREPARED. A fresh
+ * `wrapTransactionPolicySignerClient` call -- whether a genuine in-process retry or an unrelated
+ * process that reopened the repository after a restart -- always re-reads the durable ledger before
+ * deciding what, if anything, it may still invoke; it never infers eligibility from having caught a
+ * timeout locally. A timeout at ordinal 2 is terminal: this guarantee never retries more than once.
+ */
+async function signWithBoundedSignOnlyRecovery({
+  client, family, requestSnapshot, input, canonicalPolicy, policyRules, approved, policyDigest, recovery, invokeSign,
+}) {
+  if (recovery === undefined || !isOwnedKeychainSignOnlyClient(client)) {
+    return invokeSign();
+  }
+  if (typeof recovery.repository.persistSignOnlyPreSignBinding !== 'function'
+    || typeof recovery.repository.readSignOnlyPreSignBinding !== 'function'
+    || typeof recovery.repository.reserveSignOnlyInvocation !== 'function'
+    || typeof recovery.repository.recordSignOnlyInvocationTimeout !== 'function'
+    || typeof recovery.repository.readSignOnlyInvocationLedger !== 'function') {
+    fail('transaction policy signer recovery option requires a repository with the sign-only recovery API');
+  }
+  const identity = readOwnedKeychainSignOnlyIdentity(client);
+  // Only the Solana Keychain transport narrows a `sign()`/`signApproved()` request down to the bare
+  // transaction before it reaches a wire (keychain-signer.mjs's `solanaSignTransportPayload`) --
+  // the EVM child sends the full envelope this caller built (`{transaction, transactionPolicy,
+  // transactionPolicyRules, transactionDecodeOptions, liveMode}`, see e.g. outbound.mjs's own
+  // `policySigner.sign()` call), unnarrowed. The durable binding must record exactly what a given
+  // family actually sends, or a caller could change `transactionPolicy`/`transactionPolicyRules`/
+  // `liveMode` between a bound request and a retried one without the binding ever detecting it.
+  // `family` is the same trusted value `wrapTransactionPolicySignerClient` itself derived from
+  // `assertRole(client.role)` above -- never inferred here from `input`/a caller-supplied flag.
+  const wireBytes = family === 'solana' ? input.transaction : requestSnapshot;
+  const binding = {
+    schema: SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA,
+    cycleId: recovery.cycleId,
+    stage: recovery.stage,
+    requestDigest: recovery.requestDigest,
+    role: identity.role,
+    account: identity.account,
+    unsignedWireBytes: canonicalWireBytesText(wireBytes),
+    unsignedRequestDigest: signRequestDigest(wireBytes),
+    policyDigest,
+    validityContextDigest: canonicalDigest(approved),
+  };
+  // Binds before the first invocation, unconditionally -- not only on a timeout -- so a restart
+  // that reaches this exact call again (with regenerated request material) is CAS-refused before
+  // ever reaching Keychain if that material silently differs, and is a no-op idempotent replay if
+  // it does not. Neither outcome is distinguishable from "this is the first attempt" from here.
+  const bound = await recovery.repository.persistSignOnlyPreSignBinding(
+    recovery.cycleId,
+    recovery.stage,
+    recovery.requestDigest,
+    binding,
+  );
+
+  async function attempt(ordinal) {
+    // Atomically re-verifies the bound chain attempt is still PREPARED and that this exact ordinal
+    // is the durable ledger's next eligible step. A concurrent second caller racing for the same
+    // ordinal, a chain attempt that advanced or was refused, or an already-exhausted ledger all
+    // throw here -- before this function ever calls `invokeSign()`.
+    await recovery.repository.reserveSignOnlyInvocation(recovery.cycleId, recovery.stage, recovery.requestDigest, ordinal);
+    await reapproveBeforeSignOnlyInvocation({
+      input, canonicalPolicy, policyRules, expectedValidityContextDigest: bound.validityContextDigest,
+    });
+    try {
+      return await invokeSign();
+    } catch (error) {
+      if (!(error instanceof KeychainSignOnlyTimeoutError) || ordinal === 2) throw error;
+      await recovery.repository.recordSignOnlyInvocationTimeout(recovery.cycleId, recovery.stage, recovery.requestDigest, ordinal);
+      return attemptNextEligible();
+    }
+  }
+
+  async function attemptNextEligible() {
+    const ledger = await recovery.repository.readSignOnlyInvocationLedger(recovery.cycleId, recovery.stage, recovery.requestDigest);
+    if (ledger === null) return attempt(1);
+    if (ledger.state === 'ORDINAL_1_TIMED_OUT') return attempt(2);
+    // Ordinal 1 is allocated but has no recorded outcome (a crash or an unknown/generic-error
+    // result), or ordinal 2 already exists (timed out or, in a benign race, still being attempted
+    // by whoever legitimately won it): either way this call has nothing left it may invoke.
+    fail('sign-only invocation budget is exhausted or its outcome is ambiguous; refusing to invoke Keychain');
+  }
+
+  return attemptNextEligible();
+}
+
+export function wrapTransactionPolicySignerClient({ client, policy, rules, decodeOptions, broadcast, recovery }) {
   if (!client || typeof client !== 'object' || Array.isArray(client)) {
     fail('transaction policy signer requires a signer client');
   }
+  const recoveryOption = assertSignOnlyRecoveryOption(recovery);
   const role = assertRole(client.role);
   const family = signerFamily(role);
   const trustedDecodeOptions = trustedTransactionDecodeOptions(family, decodeOptions);
@@ -538,9 +709,20 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
       // proof any other way (see `assertPolicyEvaluationProof`'s own doc comment), so a backend
       // that gates a trust marker on this proof can never emit that marker for an unevaluated
       // request, regardless of how a caller constructs or configures that backend.
-      const rawSigned = typeof client.signApproved === 'function'
-        ? await client.signApproved(requestSnapshot, issuePolicyEvaluationProof())
-        : await client.sign(requestSnapshot);
+      const rawSigned = await signWithBoundedSignOnlyRecovery({
+        client,
+        family,
+        requestSnapshot,
+        input,
+        canonicalPolicy,
+        policyRules,
+        approved,
+        policyDigest,
+        recovery: recoveryOption,
+        invokeSign: () => (typeof client.signApproved === 'function'
+          ? client.signApproved(requestSnapshot, issuePolicyEvaluationProof())
+          : client.sign(requestSnapshot)),
+      });
       const signed = signedEnvelope(rawSigned, family);
       approvals.set(signedApprovalKey(signed, family), Object.freeze({
         approved,
@@ -623,6 +805,6 @@ export function wrapTransactionPolicySignerClient({ client, policy, rules, decod
  * genuinely evaluated policy first. This is a thin, clearly-named alias for
  * `wrapTransactionPolicySignerClient` — the same function, same guarantees.
  */
-export function createPolicySigner({ backend, policy, rules, decodeOptions, broadcast }) {
-  return wrapTransactionPolicySignerClient({ client: backend, policy, rules, decodeOptions, broadcast });
+export function createPolicySigner({ backend, policy, rules, decodeOptions, broadcast, recovery }) {
+  return wrapTransactionPolicySignerClient({ client: backend, policy, rules, decodeOptions, broadcast, recovery });
 }

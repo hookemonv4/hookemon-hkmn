@@ -17,6 +17,8 @@
 // JSON object on stdout and an exit code of `0` on success. A nonzero exit code or malformed stdout
 // is treated as a hard failure, never a partial success.
 import {
+  KeychainPreInvocationDenialError,
+  KeychainSignOnlyTimeoutError,
   OPERATOR_SOLANA_ROLE,
   ROLE_CAPABILITIES,
   SignerClientError,
@@ -26,8 +28,65 @@ import {
   wrapTransactionPolicySignerClient,
 } from './signer-client.mjs';
 
+export { KeychainPreInvocationDenialError, KeychainSignOnlyTimeoutError };
+
 const MAX_STDERR_IN_ERROR = 500;
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+// ADR-0025 sign-only bounded retry: this module is the one place a `sign`/`signApproved` timeout
+// can be classified as retry-eligible, because it is the one place this repository can prove the
+// checked-in Keychain broker's own sign-only/broadcast separation (see this module's header). Both
+// error classes are defined in signer-client.mjs (re-exported above, purely to avoid a circular
+// top-level class-`extends` evaluation) but this is the only module that ever constructs either
+// one. The "owned" capability below is module-private in the same sense: nothing outside this file
+// can *mint* it, so a recovery-aware caller that requires both (see signer-client.mjs's
+// `wrapTransactionPolicySignerClient`) cannot be satisfied by an external module, a hand-built
+// object with matching method names, or a generic exec/parse failure.
+function isProvenPreInvocationDenial(error) {
+  return Boolean(error) && typeof error === 'object' && (error.code === 'ENOENT' || error.code === 'EACCES');
+}
+
+// Keyed by the exact frozen client object `createKeychainSignerClient` returns, mapped to the
+// non-secret `{role, account}` identity a durable pre-sign binding records. Deliberately not a
+// WeakSet keyed by an exposed property or symbol value: those survive an object spread
+// (`{...client}`) performed by *legitimate* wrapping code, which is also exactly the shape a
+// spoofed clone would copy. Checking the live object reference itself means a spread produces a
+// structurally identical but reference-distinct object this WeakMap does not recognize -- a caller
+// that needs the capability to survive a legitimate wrap (see `forwardOwnedKeychainSignOnlyIdentity`
+// below) must say so explicitly, once, at the exact place it constructs that wrapper.
+const ownedKeychainSignOnlyClients = new WeakMap();
+
+/** True only for the exact object this module's own `createKeychainSignerClient` returned, or an
+ * object a trusted in-repository wrapper explicitly re-attested with `forwardOwnedKeychainSignOnlyIdentity`. */
+export function isOwnedKeychainSignOnlyClient(client) {
+  return Boolean(client) && typeof client === 'object' && ownedKeychainSignOnlyClients.has(client);
+}
+
+/** The non-secret `{role, account}` identity a durable pre-sign binding records, or `null` when
+ * `client` is not owned. `account` is a keychain entry label (never a secret), per this module's own
+ * `createKeychainSignerClient` doc comment. */
+export function readOwnedKeychainSignOnlyIdentity(client) {
+  if (!isOwnedKeychainSignOnlyClient(client)) return null;
+  return ownedKeychainSignOnlyClients.get(client);
+}
+
+/**
+ * Lets a trusted in-repository wrapper (e.g. a stage's `{role, sign, broadcast}` facade that only
+ * ever delegates unchanged to `rawSigner`) carry the owned-Keychain attestation through to the
+ * object a recovery-aware signer facade actually sees. This is not a general "mint ownership"
+ * escape hatch: it only ever re-attests a *different* object once `original` has already, itself,
+ * passed `isOwnedKeychainSignOnlyClient` -- it can never make an unrelated or spoofed object pass
+ * that check on its own. Call it only where `wrapper`'s `sign`/`signApproved` provably call straight
+ * through to `original`'s.
+ */
+export function forwardOwnedKeychainSignOnlyIdentity(original, wrapper) {
+  const identity = readOwnedKeychainSignOnlyIdentity(original);
+  if (identity && wrapper && typeof wrapper === 'object') {
+    ownedKeychainSignOnlyClients.set(wrapper, identity);
+  }
+  return wrapper;
+}
+
 const SECRET_ASSIGNMENT = /\b(private[ _-]?key|secret[ _-]?key|seed(?:[ _-]?phrase)?|mnemonic|credential)\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\r\n]*)/gi;
 const RAW_SECRET_HEX = /(?:0x)?[a-f0-9]{64,128}/gi;
 const MNEMONIC_PHRASE = /\b(?:[a-z]{3,}\s+){11,23}[a-z]{3,}\b/gi;
@@ -207,12 +266,17 @@ export function createKeychainSignerClient({
         new Promise((resolve, reject) => {
           timeout = setTimeout(() => {
             controller.abort();
-            reject(new SignerClientError(`keychain command "${command} ${operation}" timed out after ${timeoutMs}ms`));
+            const TimeoutErrorClass = operation === 'sign' ? KeychainSignOnlyTimeoutError : SignerClientError;
+            reject(new TimeoutErrorClass(`keychain command "${command} ${operation}" timed out after ${timeoutMs}ms`));
           }, timeoutMs);
         }),
       ]);
     } catch (error) {
       if (controller.signal.aborted && error instanceof SignerClientError) throw error;
+      if (isProvenPreInvocationDenial(error)) {
+        const message = redactErrorText(error instanceof Error ? error.message : String(error));
+        throw new KeychainPreInvocationDenialError(`keychain command "${command} ${operation}" was never invoked: ${message}`);
+      }
       const message = redactErrorText(error instanceof Error ? error.message : String(error));
       throw new SignerClientError(`keychain command "${command} ${operation}" failed: ${message}`);
     } finally {
@@ -222,7 +286,8 @@ export function createKeychainSignerClient({
       throw new SignerClientError(`keychain command produced no result for "${operation}"`);
     }
     if (result.timedOut === true) {
-      throw new SignerClientError(`keychain command "${command} ${operation}" timed out after ${timeoutMs}ms`);
+      const TimeoutErrorClass = operation === 'sign' ? KeychainSignOnlyTimeoutError : SignerClientError;
+      throw new TimeoutErrorClass(`keychain command "${command} ${operation}" timed out after ${timeoutMs}ms`);
     }
     if (result.code !== 0) {
       const stderrHint = result.stderr ? `: ${redactErrorText(result.stderr)}` : '';
@@ -293,7 +358,7 @@ export function createKeychainSignerClient({
       rules: transactionPolicyRules,
       decodeOptions: transactionDecodeOptions,
     });
-  return Object.freeze({
+  const ownedClient = Object.freeze({
     ...policyClient,
     async probe() {
       const result = await invoke('probe', { kind: 'hookemon-keychain-sign-only-readiness.v1' });
@@ -303,4 +368,10 @@ export function createKeychainSignerClient({
       return { ready: true };
     },
   });
+  // ADR-0025: this exact object is the "verified owned Keychain broker" a recovery-aware policy
+  // signer may bounded-retry on a classified sign-only timeout. Minted only here, once, for the
+  // object this factory itself returns -- never reachable from `external-module-signer.mjs`, a
+  // hand-built lookalike, or a plain-object clone of this one (see `isOwnedKeychainSignOnlyClient`).
+  ownedKeychainSignOnlyClients.set(ownedClient, Object.freeze({ role, account }));
+  return ownedClient;
 }

@@ -33,12 +33,16 @@ import {
   assertRelayFinality,
   assertTypedAmount,
   assertReturnLegDestinationProof,
+  assertSignOnlyInvocationLedger,
+  assertSignOnlyPreSignBinding,
+  createReservedSignOnlyInvocationLedger,
   OPERATIONAL_CYCLE_STAGES,
   PACK_OPERATION_STAGES,
   RELAY_LEG_TERMINAL_STATES,
   transitionChainTransactionAttempt,
   transitionRelayLeg,
   transitionProviderMutationAttempt,
+  transitionSignOnlyInvocationLedger,
 } from '../../../runner/src/cycle/money-schemas.mjs';
 
 // The scheduler dispatches only OPERATIONAL_CYCLE_STAGES. These retired names remain readable for
@@ -183,6 +187,11 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'releaseWalletNonce',
   'persistChainAttemptRecoveryContext',
   'readChainAttemptRecoveryContext',
+  'persistSignOnlyPreSignBinding',
+  'readSignOnlyPreSignBinding',
+  'reserveSignOnlyInvocation',
+  'recordSignOnlyInvocationTimeout',
+  'readSignOnlyInvocationLedger',
   'readPagedPayoutState',
   'persistPagedPayoutState',
   'consumePayoutDustAndPersistPagedPayoutState',
@@ -429,6 +438,8 @@ function createStateDirectoryRecoveryRepository(hold) {
         standingAuthorityDecisions: new Map(),
         walletNonceReservations: new Map(),
         chainAttemptRecoveryContexts: new Map(),
+        signOnlyPreSignBindings: new Map(),
+        signOnlyInvocationLedgers: new Map(),
         custodyLedgers: new Map(),
         heldPositions: new Map(),
         heldPositionLedgerKeys: new Map(),
@@ -783,6 +794,14 @@ function assertCustodyLedgerExpectedAssetUnchanged(previous, next, label = 'cycl
 
 function custodyLedgerKey(ledger) {
   return `${ledger.chainId}\u0000${ledger.assetId}`;
+}
+
+function signOnlyPreSignBindingKey(stage, requestDigest) {
+  return chainAttemptKey(stage, requestDigest);
+}
+
+function signOnlyInvocationLedgerKey(stage, requestDigest) {
+  return chainAttemptKey(stage, requestDigest);
 }
 
 function chainAttemptKey(stage, requestDigest) {
@@ -2819,6 +2838,8 @@ export class CycleRepository {
     const standingAuthorityDecisions = new Map();
     const walletNonceReservations = new Map();
     const chainAttemptRecoveryContexts = new Map();
+    const signOnlyPreSignBindings = new Map();
+    const signOnlyInvocationLedgers = new Map();
     const custodyLedgers = new Map();
     const heldPositions = new Map();
     const heldPositionLedgerKeys = new Map();
@@ -2849,6 +2870,8 @@ export class CycleRepository {
       standingAuthorityDecisions,
       walletNonceReservations,
       chainAttemptRecoveryContexts,
+      signOnlyPreSignBindings,
+      signOnlyInvocationLedgers,
       custodyLedgers,
       heldPositions,
       heldPositionLedgerKeys,
@@ -3112,6 +3135,55 @@ export class CycleRepository {
           throw new Error('stored chain attempt recovery context conflicts with prior context');
         }
         chainAttemptRecoveryContexts.set(key, context);
+      } else if (entry.kind === 'sign-only-pre-sign-binding-persisted') {
+        const binding = assertSignOnlyPreSignBinding(entry.payload.binding, 'stored sign-only pre-sign binding');
+        if (binding.cycleId !== cycleId) throw new Error('stored sign-only pre-sign binding cycleId is invalid');
+        const chain = chainAttempts.get(chainAttemptKey(binding.stage, binding.requestDigest));
+        if (!chain || chain.attempt.state !== 'PREPARED') {
+          throw new Error('stored sign-only pre-sign binding does not bind a PREPARED chain attempt');
+        }
+        const key = signOnlyPreSignBindingKey(binding.stage, binding.requestDigest);
+        if (signOnlyPreSignBindings.has(key)) {
+          throw new Error('stored sign-only pre-sign binding already exists');
+        }
+        signOnlyPreSignBindings.set(key, binding);
+      } else if (entry.kind === 'sign-only-invocation-reserved') {
+        const ledger = assertSignOnlyInvocationLedger(entry.payload.ledger, 'stored sign-only invocation ledger');
+        if (ledger.cycleId !== cycleId) throw new Error('stored sign-only invocation ledger cycleId is invalid');
+        const chain = chainAttempts.get(chainAttemptKey(ledger.stage, ledger.requestDigest));
+        if (!chain || chain.attempt.state !== 'PREPARED') {
+          throw new Error('stored sign-only invocation ledger reservation does not bind a PREPARED chain attempt');
+        }
+        const key = signOnlyInvocationLedgerKey(ledger.stage, ledger.requestDigest);
+        const previous = signOnlyInvocationLedgers.get(key) ?? null;
+        if (ledger.state === 'ORDINAL_1_ALLOCATED') {
+          if (previous || !signOnlyPreSignBindings.has(signOnlyPreSignBindingKey(ledger.stage, ledger.requestDigest))) {
+            throw new Error('stored sign-only invocation ledger ordinal 1 reservation is invalid');
+          }
+        } else if (ledger.state === 'ORDINAL_2_ALLOCATED') {
+          if (!previous || previous.state !== 'ORDINAL_1_TIMED_OUT') {
+            throw new Error('stored sign-only invocation ledger ordinal 2 reservation is invalid');
+          }
+          if (canonicalJson(ledger) !== canonicalJson(transitionSignOnlyInvocationLedger(previous, 'ORDINAL_2_ALLOCATED'))) {
+            throw new Error('stored sign-only invocation ledger ordinal 2 reservation is invalid');
+          }
+        } else {
+          throw new Error('stored sign-only invocation ledger reservation state is invalid');
+        }
+        signOnlyInvocationLedgers.set(key, ledger);
+      } else if (entry.kind === 'sign-only-invocation-timed-out') {
+        const ledger = assertSignOnlyInvocationLedger(entry.payload.ledger, 'stored sign-only invocation ledger');
+        if (ledger.cycleId !== cycleId) throw new Error('stored sign-only invocation ledger cycleId is invalid');
+        const key = signOnlyInvocationLedgerKey(ledger.stage, ledger.requestDigest);
+        const previous = signOnlyInvocationLedgers.get(key) ?? null;
+        const expectedPredecessor = ledger.state === 'ORDINAL_1_TIMED_OUT' ? 'ORDINAL_1_ALLOCATED' : 'ORDINAL_2_ALLOCATED';
+        if (!previous || previous.state !== expectedPredecessor) {
+          throw new Error('stored sign-only invocation ledger timeout transition is invalid');
+        }
+        if (canonicalJson(ledger) !== canonicalJson(transitionSignOnlyInvocationLedger(previous, ledger.state))) {
+          throw new Error('stored sign-only invocation ledger timeout transition is invalid');
+        }
+        signOnlyInvocationLedgers.set(key, ledger);
       } else if (entry.kind === 'supplementary-chain-attempt-prepared') {
         const attempt = assertSupplementaryChainAttempt(entry.payload.attempt, 'stored supplementary chain transaction attempt');
         const key = supplementaryChainAttemptKey(attempt.positionId, attempt.requestDigest);
@@ -3620,6 +3692,8 @@ export class CycleRepository {
       standingAuthorityDecisions,
       walletNonceReservations,
       chainAttemptRecoveryContexts,
+      signOnlyPreSignBindings,
+      signOnlyInvocationLedgers,
       custodyLedgers,
       heldPositions,
       heldPositionLedgerKeys,
@@ -5940,6 +6014,162 @@ export class CycleRepository {
     );
     if (!stored) return null;
     return recoveryContextPublicValue(stored);
+  }
+
+  /**
+   * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: commits the exact unsigned
+   * wire bytes, signer role/account identity, request digest, policy/authorization digest, and
+   * chain validity context a bounded Keychain sign-only retry may reuse, before the first
+   * sign-only invocation. A CAS-like write: byte-identical replay is idempotent, and a changed
+   * field, a concurrent conflicting binding, or a chain attempt that is not (still) PREPARED all
+   * refuse before any binding is durable.
+   */
+  async persistSignOnlyPreSignBinding(cycleId, stage, requestDigest, bindingValue) {
+    assertStageName(stage);
+    const binding = assertSignOnlyPreSignBinding(bindingValue);
+    if (binding.cycleId !== cycleId || binding.stage !== stage || binding.requestDigest !== requestDigest) {
+      throw new Error('cycle-repository persistSignOnlyPreSignBinding: binding does not match cycle, stage, or request');
+    }
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository persistSignOnlyPreSignBinding: cycle is terminal as ${state.terminalState}`);
+    }
+    const chain = chainAttemptFor(state, stage, requestDigest, 'persistSignOnlyPreSignBinding');
+    if (!chain || chain.attempt.state !== 'PREPARED') {
+      throw new Error('cycle-repository persistSignOnlyPreSignBinding: chain attempt is not PREPARED');
+    }
+    const key = signOnlyPreSignBindingKey(stage, requestDigest);
+    const current = state.signOnlyPreSignBindings.get(key);
+    if (current) {
+      if (canonicalJson(current) !== canonicalJson(binding)) {
+        throw new Error('cycle-repository persistSignOnlyPreSignBinding: request already has a different pre-sign binding');
+      }
+      return structuredClone(current);
+    }
+    await this.#append(cycleId, 'sign-only-pre-sign-binding-persisted', { binding }, {
+      operation: 'persistSignOnlyPreSignBinding',
+      assertState: currentState => {
+        if (currentState.signOnlyPreSignBindings.has(key)) {
+          throw new Error('cycle-repository persistSignOnlyPreSignBinding: a concurrent binding was already recorded');
+        }
+        const latestChain = chainAttemptFor(currentState, stage, requestDigest, 'persistSignOnlyPreSignBinding');
+        if (!latestChain || latestChain.attempt.state !== 'PREPARED') {
+          throw new Error('cycle-repository persistSignOnlyPreSignBinding: chain attempt changed while recording');
+        }
+      },
+    });
+    return structuredClone(binding);
+  }
+
+  /** @returns {Promise<object|null>} */
+  async readSignOnlyPreSignBinding(cycleId, stage, requestDigest) {
+    assertStageName(stage);
+    const state = await this.#replay(cycleId);
+    const current = state.signOnlyPreSignBindings.get(signOnlyPreSignBindingKey(stage, requestDigest));
+    return current ? structuredClone(current) : null;
+  }
+
+  /**
+   * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: atomically reserves the durable
+   * invocation budget's next ordinal (1 or 2) for a sign-only pre-sign binding, immediately before
+   * a caller may invoke Keychain. Ordinal 1 is permitted only when no invocation ledger exists yet
+   * for this binding; ordinal 2 is permitted only when the ledger's current state is exactly
+   * `ORDINAL_1_TIMED_OUT`. Both require the bound chain attempt to still be PREPARED, re-verified
+   * atomically at the moment of reservation. Unlike the binding itself, this reservation is never
+   * idempotent-on-match: a concurrent second caller racing for the same ordinal, or a caller that
+   * arrives after the ordinal was already reserved, always refuses -- exactly one caller ever wins
+   * the right to make that invocation.
+   */
+  async reserveSignOnlyInvocation(cycleId, stage, requestDigest, ordinal) {
+    assertStageName(stage);
+    if (ordinal !== 1 && ordinal !== 2) throw new Error('cycle-repository reserveSignOnlyInvocation: ordinal must be 1 or 2');
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository reserveSignOnlyInvocation: cycle is terminal as ${state.terminalState}`);
+    }
+    if (!state.signOnlyPreSignBindings.has(signOnlyPreSignBindingKey(stage, requestDigest))) {
+      throw new Error('cycle-repository reserveSignOnlyInvocation: no durable pre-sign binding for this request');
+    }
+    const chain = chainAttemptFor(state, stage, requestDigest, 'reserveSignOnlyInvocation');
+    if (!chain || chain.attempt.state !== 'PREPARED') {
+      throw new Error('cycle-repository reserveSignOnlyInvocation: chain attempt is not PREPARED');
+    }
+    const ledgerKey = signOnlyInvocationLedgerKey(stage, requestDigest);
+    const currentLedger = state.signOnlyInvocationLedgers.get(ledgerKey) ?? null;
+    let ledger;
+    if (ordinal === 1) {
+      if (currentLedger) throw new Error('cycle-repository reserveSignOnlyInvocation: ordinal 1 was already reserved');
+      ledger = createReservedSignOnlyInvocationLedger({ cycleId, stage, requestDigest });
+    } else {
+      if (!currentLedger || currentLedger.state !== 'ORDINAL_1_TIMED_OUT') {
+        throw new Error('cycle-repository reserveSignOnlyInvocation: ordinal 2 requires a recorded ordinal 1 timeout');
+      }
+      ledger = transitionSignOnlyInvocationLedger(currentLedger, 'ORDINAL_2_ALLOCATED');
+    }
+    await this.#append(cycleId, 'sign-only-invocation-reserved', { ledger }, {
+      operation: 'reserveSignOnlyInvocation',
+      assertState: currentState => {
+        const latestChain = chainAttemptFor(currentState, stage, requestDigest, 'reserveSignOnlyInvocation');
+        if (!latestChain || latestChain.attempt.state !== 'PREPARED') {
+          throw new Error('cycle-repository reserveSignOnlyInvocation: chain attempt changed while reserving');
+        }
+        const latestLedger = currentState.signOnlyInvocationLedgers.get(ledgerKey) ?? null;
+        if (ordinal === 1) {
+          if (latestLedger) throw new Error('cycle-repository reserveSignOnlyInvocation: ordinal 1 was already reserved');
+        } else if (!latestLedger || canonicalJson(latestLedger) !== canonicalJson(currentLedger)) {
+          throw new Error('cycle-repository reserveSignOnlyInvocation: ordinal 1 outcome changed while reserving ordinal 2');
+        }
+      },
+    });
+    return structuredClone(ledger);
+  }
+
+  /**
+   * Durably records that a reserved ordinal's Keychain invocation was classified as a sign-only
+   * timeout -- the only outcome this repository ever records for an invocation, and the only fact
+   * that ever makes ordinal 2 eligible. A generic error, a proven pre-invocation denial, or a crash
+   * with no observed outcome never calls this method, so the ledger simply never advances past
+   * `ORDINAL_{ordinal}_ALLOCATED` for that case, permanently refusing any further ordinal.
+   */
+  async recordSignOnlyInvocationTimeout(cycleId, stage, requestDigest, ordinal) {
+    assertStageName(stage);
+    if (ordinal !== 1 && ordinal !== 2) throw new Error('cycle-repository recordSignOnlyInvocationTimeout: ordinal must be 1 or 2');
+    const state = await this.#replay(cycleId);
+    if (state.terminalState) {
+      throw new Error(`cycle-repository recordSignOnlyInvocationTimeout: cycle is terminal as ${state.terminalState}`);
+    }
+    const ledgerKey = signOnlyInvocationLedgerKey(stage, requestDigest);
+    const currentLedger = state.signOnlyInvocationLedgers.get(ledgerKey) ?? null;
+    const expectedCurrentState = ordinal === 1 ? 'ORDINAL_1_ALLOCATED' : 'ORDINAL_2_ALLOCATED';
+    const nextState = ordinal === 1 ? 'ORDINAL_1_TIMED_OUT' : 'ORDINAL_2_TIMED_OUT';
+    if (currentLedger?.state === nextState) {
+      // Recording the same true outcome twice (e.g. a crash between commit and the in-memory catch
+      // that would otherwise have observed it) is idempotent: unlike reservation, this documents a
+      // fact that already happened exactly once, rather than granting new permission to invoke.
+      return structuredClone(currentLedger);
+    }
+    if (!currentLedger || currentLedger.state !== expectedCurrentState) {
+      throw new Error(`cycle-repository recordSignOnlyInvocationTimeout: ordinal ${ordinal} is not in the allocated state`);
+    }
+    const ledger = transitionSignOnlyInvocationLedger(currentLedger, nextState);
+    await this.#append(cycleId, 'sign-only-invocation-timed-out', { ledger }, {
+      operation: 'recordSignOnlyInvocationTimeout',
+      assertState: currentState => {
+        const latest = currentState.signOnlyInvocationLedgers.get(ledgerKey) ?? null;
+        if (!latest || canonicalJson(latest) !== canonicalJson(currentLedger)) {
+          throw new Error(`cycle-repository recordSignOnlyInvocationTimeout: ledger changed while recording ordinal ${ordinal} timeout`);
+        }
+      },
+    });
+    return structuredClone(ledger);
+  }
+
+  /** @returns {Promise<object|null>} */
+  async readSignOnlyInvocationLedger(cycleId, stage, requestDigest) {
+    assertStageName(stage);
+    const state = await this.#replay(cycleId);
+    const current = state.signOnlyInvocationLedgers.get(signOnlyInvocationLedgerKey(stage, requestDigest));
+    return current ? structuredClone(current) : null;
   }
 
   /** Reads a recipient-paged payout snapshot that is deliberately outside the 64-item journal limit. */

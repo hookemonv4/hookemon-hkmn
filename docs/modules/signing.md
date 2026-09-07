@@ -9,7 +9,8 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
 - Frozen but unimplemented interface names are `requestExternalSignature`,
   `checkSignOnlyReadiness`, and `verifyReturnedSignature`. Current clients expose `probe`, `sign`,
   and guarded `broadcast` through the concrete wrappers below.
-- `packages/adapters/src/signing/signer-client.mjs` exports `wrapTransactionPolicySignerClient({ client, policy, rules, decodeOptions, broadcast? })`. `policy` is the runner-owned canonical envelope and `rules` are the explicit adapter-only decoded-transaction rules. It accepts only the broadcast-capable `operator-evm` and `operator-solana` roles, snapshots the request before its first asynchronous boundary, evaluates the decoded transaction before `sign()`, records the approved semantics under the returned bytes, returns a frozen envelope containing only `signedTx` or `signedTxBase64`, and revalidates the envelope before calling `client.broadcast()` or the supplied transport callback. Provider requests supply only `transaction`; they cannot replace trusted chain, lookup-table, token-metadata, blockhash, or height controls. `isTransactionPolicySignerClient(client)` recognizes only clients created by this wrapper, so direct money-stage call sites can reject raw signers. The compatibility API also exports `SIGNER_ROLES`, `ROLE_CAPABILITIES`, `wrapSignerClient`, `signRequestDigest`, `assertNoSecretLookingValue`, and `SignerClientError`; `operations-trigger` is a compatibility enum only and is absent from production composition.
+- `packages/adapters/src/signing/signer-client.mjs` exports `wrapTransactionPolicySignerClient({ client, policy, rules, decodeOptions, broadcast?, recovery? })`. `policy` is the runner-owned canonical envelope and `rules` are the explicit adapter-only decoded-transaction rules. It accepts only the broadcast-capable `operator-evm` and `operator-solana` roles, snapshots the request before its first asynchronous boundary, evaluates the decoded transaction before `sign()`, records the approved semantics under the returned bytes, returns a frozen envelope containing only `signedTx` or `signedTxBase64`, and revalidates the envelope before calling `client.broadcast()` or the supplied transport callback. Provider requests supply only `transaction`; they cannot replace trusted chain, lookup-table, token-metadata, blockhash, or height controls. `isTransactionPolicySignerClient(client)` recognizes only clients created by this wrapper, so direct money-stage call sites can reject raw signers. The compatibility API also exports `SIGNER_ROLES`, `ROLE_CAPABILITIES`, `wrapSignerClient`, `signRequestDigest`, `assertNoSecretLookingValue`, `SignerClientError`, and the ADR-0025 sign-only classification pair `KeychainSignOnlyTimeoutError`/`KeychainPreInvocationDenialError`; `operations-trigger` is a compatibility enum only and is absent from production composition.
+- `recovery`, when supplied to `wrapTransactionPolicySignerClient`, is `{repository, cycleId, stage, requestDigest}` naming the durable cycle-repository chain attempt this exact request was `prepareChainTransactionAttempt`-ed under. It has an effect only when `client` also carries the module-private owned-Keychain capability `packages/adapters/src/signing/keychain-signer.mjs` mints on its own `createKeychainSignerClient` output (`isOwnedKeychainSignOnlyClient`/`readOwnedKeychainSignOnlyIdentity`, or a trusted delegating wrapper that explicitly re-attests it with `forwardOwnedKeychainSignOnlyIdentity`): it then persists a `hookemon.sign-only-pre-sign-binding.v1` record through `cycleRepository.persistSignOnlyPreSignBinding`/`readSignOnlyPreSignBinding`, reserves each actual invocation's ordinal through `reserveSignOnlyInvocation` (atomically re-checking the bound chain attempt is still `PREPARED`), re-decodes and re-evaluates the exact persisted bytes against the pinned validity digest immediately before that invocation, and records a classified timeout through `recordSignOnlyInvocationTimeout` before the one bounded retry (ordinal 2) ever becomes eligible -- durably, through `cycleRepository`'s `hookemon.sign-only-invocation-ledger.v1`, so a restart, a concurrent second wrapper, or a fresh in-process call all observe the identical remaining budget rather than each independently believing it may retry. `createOutboundPolicySigner` (outbound.mjs, EVM) and `createReturnPolicySigner` (return.mjs, Solana) wire this option from their own `cycleRepository`/`context`. `claim-process.mjs` uses the repository's `chainAttempts` model but signs by passing `transactionPolicy` fields inline to the Keychain EVM child process rather than through this wrapper. The direct-payout signer (`payout.mjs`) reaches this same wrapper but keys its own per-recipient attempt by `{recipient, nonce}`, not by a `chainAttempts` PREPARED record, so `recovery`'s binder precondition can never be satisfied for it as written. `purchase.mjs`/`buyback.mjs` use durable pack-batch/supplementary-settlement records instead of `chainAttempts` entirely. None of the four currently pair this exact decode/evaluate/sign boundary with a `chainAttempts` PREPARED record, so this bounded retry does not yet apply to them.
 - `wrapSignerClient` re-reads the active authority immediately before every backend `sign()` and
   `broadcast()` call. Operations roles require the generic frozen mutation authority;
   distribution-signer and verifier roles require the retained-custody authority and remain
@@ -27,7 +28,7 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
   bytes; that does not change the ordinary v1 schema.
 - EVM decoding supports legacy and EIP-1559 envelopes. It rejects access lists, authorization lists, blob fields, other unmodeled typed-envelope fields, and unsafe JavaScript integer inputs. ERC-20 decoding requires explicit token metadata. Solana compute-unit prices use `native-microlamports-per-compute-unit` with 15 decimals. Solana v0 address lookup tables come from `lookupTableResolver` or `lookupTableRpc.getAddressLookupTable`; reads use finalized commitment and reject unresolved, mismatched, or inactive tables. `blockhashContextResolver` must return the transaction's exact blockhash with `lastValidBlockHeight`, and `currentBlockHeightResolver` must return a canonical non-negative height.
 - `packages/adapters/src/signing/external-module-signer.mjs` exports `createExternalModuleSignerClient({ modulePath, role, liveMode, transactionPolicy, transactionPolicyRules, transactionDecodeOptions })`. It wraps the operator module with `wrapSignerClient` and adds the transaction-policy wrapper when a canonical policy and its separately named adapter rules are supplied. Digest-only and caller-owned integrations remain low-level until composition supplies policy, rules, and trusted decoding context.
-- `packages/adapters/src/signing/keychain-signer.mjs` exports `createKeychainSignerClient({ role, liveMode, exec, command, account, args, timeoutMs, transactionPolicy, transactionPolicyRules, transactionDecodeOptions })`. Its executor receives `{ command, args, input, timeoutMs, signal }`; the default timeout is 10 seconds. `probe()` sends a non-broadcast readiness operation and accepts only `{ ready: true }`. Executor errors and stderr are bounded, and credential assignments, raw secret hex, and mnemonic-shaped text are redacted. The module imports neither `node:child_process` nor `node:fs`.
+- `packages/adapters/src/signing/keychain-signer.mjs` exports `createKeychainSignerClient({ role, liveMode, exec, command, account, args, timeoutMs, transactionPolicy, transactionPolicyRules, transactionDecodeOptions })`. Its executor receives `{ command, args, input, timeoutMs, signal }`; the default timeout is 10 seconds. `probe()` sends a non-broadcast readiness operation and accepts only `{ ready: true }`. Executor errors and stderr are bounded, and credential assignments, raw secret hex, and mnemonic-shaped text are redacted. The module imports neither `node:child_process` nor `node:fs`. A `sign`/`signApproved` timeout is classified as the typed `KeychainSignOnlyTimeoutError`; a proven pre-invocation denial (the executor never spawned the command at all, e.g. `ENOENT`/`EACCES`) is classified separately as `KeychainPreInvocationDenialError`; every other failure stays the untyped `SignerClientError`. The module also mints, and exposes as `isOwnedKeychainSignOnlyClient(client)`/`readOwnedKeychainSignOnlyIdentity(client)` (returning `{role, account}`), an unforgeable module-private capability on the exact client object it returns; `forwardOwnedKeychainSignOnlyIdentity(original, wrapper)` lets a trusted delegating wrapper (one whose `sign`/`signApproved` provably call straight through to `original`'s, e.g. `stage-driver.mjs`'s lease/nonce guard or `return.mjs`'s local `{role, sign, broadcast}` facade) carry that capability through to the object `wrapTransactionPolicySignerClient`'s `recovery` option actually inspects. Neither the capability nor either error class is reachable from `external-module-signer.mjs`, a hand-built lookalike object, or a structural clone (`{...client}`) of a real client.
 - `packages/adapters/src/signing/keychain-process-exec.mjs` exports `createProcessExec()`. Both keychain-backed command-line entry points use it. A timeout or abort sends `SIGTERM`, escalates to `SIGKILL` after 100 ms, and settles only after the child exits.
 - `packages/adapters/bin/hookemon-keychain-signer.mjs` implements the keychain wire protocol for `operator-evm` and `operator-solana`. It accepts `<probe|sign|broadcast> --role <role> --account <account>` plus one JSON line `{ operation, role, account, digest, request }`, checks the request digest, returns `{ ready: true }` for a successful probe and signed transaction bytes for signing, and reports `broadcast_not_supported` because the RPC transport broadcasts. Its Solana route delegates raw non-live signing to the Operations child and refuses live requests because trusted policy resolver callbacks cannot cross the one-line JSON boundary. It uses the `hookemon-operations` service and checks the configured role-to-account binding.
 - `packages/adapters/src/signing/keychain-child-evm.mjs` and `packages/adapters/src/signing/operations-wallet-keychain-child.mjs` create or read Operations credentials only in short-lived wallet or keychain helpers. They derive and validate the public identity, sign readiness or transaction payloads, and clear known secret buffers before exit.
@@ -55,6 +56,36 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
 - A keychain interaction denial reaches the stage driver as a pre-call failure. The driver records
   `NOT_SENT`, holds the cycle `HELD_UNAVAILABLE`, retains only redacted operating-system text, and
   invokes no broadcast.
+- ADR-0025 `retry-sign-only-with-durable-binding`: a classified Keychain sign-only timeout retries
+  automatically, exactly once, only when `wrapTransactionPolicySignerClient`'s `client` carries the
+  owned-Keychain capability and a `recovery` option names the durable chain attempt. Every other
+  case -- no `recovery`, a non-owned client (an external-module signer, a hand-built lookalike, or a
+  structural clone of a real client, even one that itself throws `KeychainSignOnlyTimeoutError`), a
+  generic or pre-invocation-denial error, or a chain attempt that is not `PREPARED` -- takes the
+  unchanged single-call path and never retries. The retry reuses only the exact unsigned wire bytes,
+  role, account, request digest, policy digest, and decoded validity semantics durably bound by
+  `cycle-repository.mjs`'s `persistSignOnlyPreSignBinding` before the first invocation; it never
+  regenerates the provider transaction, nonce, blockhash, memo, account, or role, and it never
+  reaches `broadcast()`, which stays a distinct guarded method this facade never wraps. A signature
+  returned by either the timed-out or the retried attempt is captured exactly once through the
+  unchanged `recordSignedTransaction`/`recordSignedTransactionWithRecoveryContext` record.
+- The retry budget itself is a durable invocation ledger, not a property of one function call or one
+  process: every actual invocation, at either ordinal, is preceded by
+  `cycleRepository.reserveSignOnlyInvocation`, an atomic reservation that only succeeds from the
+  exact expected predecessor ledger state (nothing recorded yet, for ordinal 1; an ordinal-1 timeout,
+  for ordinal 2) and while the chain attempt is still `PREPARED`, and is never idempotent-on-match --
+  a concurrent second caller racing for the same ordinal always refuses rather than also invoking
+  Keychain. A restarted process re-reads this durable ledger before deciding what, if anything, it
+  may still invoke; it never infers eligibility from a locally caught timeout. Immediately before
+  every actual invocation, the exact persisted unsigned bytes are re-decoded and re-evaluated against
+  the pinned validity digest, and mutation/lease/standing authority is re-checked through the same
+  per-call guard every `sign()`/`signApproved()` call already passes through (see stage-driver.mjs's
+  `guardedSignerRole`) -- so a chain-attempt transition, a validity-context change, or a revoked
+  authority between the timeout and the retry all refuse before a second Keychain call, not after.
+  A generic error, a proven pre-invocation denial, or a crash with no observed outcome after a
+  reservation never records a timeout outcome, so the ledger never advances past
+  `ORDINAL_{ordinal}_ALLOCATED` for that case and no further ordinal is ever eligible for that
+  binding -- including after a restart.
 - The Operations wallet writer sends `/usr/bin/security -i` a command through standard input and never places the credential in a process argument. It requires the default Keychain to equal the login Keychain, passes the verified login-Keychain path explicitly, and clears known secret buffers after writing.
 - The policy wrapper's approval cache and direct-payout derived-policy cache are process-local. An
   ordinary CycleRepository v1 signing record persists signed bytes but not the frozen policy or
@@ -81,6 +112,12 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
 - A returned signature becomes `SIGNED` only when its bytes, required signature slots, co-signers, identity, and trusted chain context verify exactly. An unavailable, timed-out, malformed, expired, or changed response leaves the transaction unsigned; a stage-level pre-call failure records `NOT_SENT` and its terminal hold before recovery.
 - A current durable chain record advances only
   `PREPARED -> SIGNED -> BROADCAST -> FINALIZED`. Frozen v2 adds the fenced `REFUSED` record.
+- A `hookemon.sign-only-pre-sign-binding.v1` record is durable, immutable, and keyed by
+  `(cycleId, stage, requestDigest)`: it is created once, before the chain attempt's first sign-only
+  invocation, while that attempt is `PREPARED`; a byte-identical rebind (a restart replaying the
+  same unchanged request) is an idempotent no-op, and any other rebind attempt -- changed bytes,
+  role, account, digest, or validity context, a concurrent conflicting write, or a chain attempt
+  that already advanced past `PREPARED` -- is refused before Keychain is ever invoked.
 - An Operations wallet helper follows **start** → **generate or keychain read** → **derive and validate public identity** → **readiness or transaction signature** → **clear known secret buffers** → **exit**.
 
 ## Operational commands
@@ -101,6 +138,7 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
     test/signing/hookemon-verifier.test.mjs \
     test/signing/keychain-process-exec.test.mjs \
     test/signing/keychain-signer.test.mjs \
+    test/signing/signer-client-sign-only-recovery.test.mjs \
     test/signing/transaction-policy.test.mjs
   ```
 
@@ -130,7 +168,11 @@ The signing module is the external sign-only boundary for the two Phase 3 Operat
 - For a v0 lookup-table refusal, supply the requested table through the read-only resolver and
   inspect its returned table key before approval. For an expired Solana blockhash, obtain and
   approve a new provider transaction; the wrapper will not broadcast the old signed message.
-- If a keychain helper times out or reports `User interaction is not allowed`, restore interactive access or correct access controls, then run its sign-only probe before another attempt.
+- If a keychain helper times out on `outbound` or `return`'s sign-only call, the bounded retry above
+  already covers the single-timeout case automatically; no operator action is needed for it. If it
+  times out repeatedly, reports `User interaction is not allowed`, or the request is on a stage this
+  bounded retry does not yet cover (see the `signer-client.mjs` bullet above), restore interactive
+  access or correct access controls, then run its sign-only probe before another attempt.
 - A rehearsal account mismatch requires correcting `expectedAccount` or the external signer
   binding; transaction policy cannot repair an identity mismatch.
 - If the owner Mac or login Keychain is unavailable, do not export a secret. Generate replacements, rotate the Operations EVM address through the approved path, and update the Solana policy and public bindings before funding or signing.

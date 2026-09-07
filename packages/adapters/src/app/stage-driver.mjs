@@ -2,6 +2,7 @@ import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { isStandingAuthorityProvider } from '../../../runner/src/cycle/authorization-provider.mjs';
 import { assertCollectorPolicyBundleRuntimeReady } from '../signing/collector-policy-loader.mjs';
+import { forwardOwnedKeychainSignOnlyIdentity } from '../signing/keychain-signer.mjs';
 import { TransactionPolicyError } from '../signing/transaction-policy.mjs';
 import { walletNonceLeaseWindow } from './wallet-nonce-lease.mjs';
 import {
@@ -195,6 +196,19 @@ const CHAIN_JOURNAL_REPOSITORY_METHODS = Object.freeze([
   'recordCustodyLedger',
   'recordFinality',
 ]);
+// Only outbound and ordinary return construct a sign-only recovery-aware policy signer today (see
+// createOutboundPolicySigner/createReturnPolicySigner); claim-process signs through the inline
+// Keychain child contract and never reaches this facade, so it must not be forced onto claim-process
+// fixtures that never needed it. Checked in addition to CHAIN_JOURNAL_REPOSITORY_METHODS, not merged
+// into it, for exactly that reason.
+const SIGN_ONLY_RECOVERY_REPOSITORY_METHODS = Object.freeze([
+  'persistSignOnlyPreSignBinding',
+  'readSignOnlyPreSignBinding',
+  'reserveSignOnlyInvocation',
+  'recordSignOnlyInvocationTimeout',
+  'readSignOnlyInvocationLedger',
+]);
+const SIGN_ONLY_RECOVERY_STAGES = new Set(['outbound', 'return']);
 const SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS = Object.freeze([
   ...RECONCILIATION_REPOSITORY_METHODS,
   'readHeldPosition',
@@ -276,10 +290,17 @@ function assertWriteAheadJournal(cycleRepository) {
 // holds for conditions that make the cycle itself unattributable, such as a missing predecessor or
 // snapshot evidence.
 
-function assertChainJournal(cycleRepository) {
+function assertChainJournal(cycleRepository, stage) {
   for (const method of CHAIN_JOURNAL_REPOSITORY_METHODS) {
     if (typeof cycleRepository[method] !== 'function') {
       throw new Error(`stage-driver cycleRepository.${method} is required for chain-attempt mutation safety`);
+    }
+  }
+  if (SIGN_ONLY_RECOVERY_STAGES.has(stage)) {
+    for (const method of SIGN_ONLY_RECOVERY_REPOSITORY_METHODS) {
+      if (typeof cycleRepository[method] !== 'function') {
+        throw new Error(`stage-driver cycleRepository.${method} is required for sign-only recovery on "${stage}"`);
+      }
     }
   }
 }
@@ -435,7 +456,19 @@ function createStandingAuthoritySigningGuard({ config, cycleRepository, context,
 function guardedSignerRole(role, guard, nonceFence = null, standingAuthorityGuard = null) {
   if (!role || typeof role !== 'object') return role;
   const guarded = { ...role };
-  for (const [method, boundary] of [['sign', 'signature'], ['broadcast', 'broadcast']]) {
+  // `signApproved`/`broadcastApproved` are the stronger variants a backend exposes once a real
+  // transport is wired (see keychain-signer.mjs); `wrapTransactionPolicySignerClient` prefers
+  // either one over its bare counterpart whenever present. A spread alone would copy them
+  // unguarded straight from `role`, bypassing every lease/nonce/standing-authority check below at
+  // exactly the boundary those checks exist for -- so each variant gets the identical guard chain
+  // as its bare counterpart, with its own arguments (including a `signApproved`/`broadcastApproved`
+  // policy-evaluation proof, which is opaque to this function) forwarded unchanged.
+  for (const [method, boundary] of [
+    ['sign', 'signature'],
+    ['signApproved', 'signature'],
+    ['broadcast', 'broadcast'],
+    ['broadcastApproved', 'broadcast'],
+  ]) {
     if (typeof role[method] !== 'function') continue;
     guarded[method] = async (...args) => {
       await guard(boundary);
@@ -443,13 +476,46 @@ function guardedSignerRole(role, guard, nonceFence = null, standingAuthorityGuar
         await nonceFence(role);
         await guard(boundary);
       }
-      if (method === 'sign' && standingAuthorityGuard !== null) {
+      if ((method === 'sign' || method === 'signApproved') && standingAuthorityGuard !== null) {
         await standingAuthorityGuard({ role });
+        // `standingAuthorityGuard` above is itself an await -- exactly like the nonce fence's own
+        // await just above -- long enough for a lease or mutation-policy change to land during it.
+        // Re-checking here, immediately before the actual broker call, closes that window the same
+        // way the nonce-fence branch already does for its own await.
+        await guard(boundary);
       }
       return role[method](...args);
     };
   }
-  return guarded;
+  // ADR-0025 sign-only bounded retry: every callable signing method on `guarded` above delegates
+  // unchanged to `role`'s own (only wrapping it with the lease/nonce/standing-authority checks that
+  // already ran before this point in every existing path), so a caller further down the stack that
+  // still needs to prove `role` is the verified owned Keychain broker can do so through this guarded
+  // facade too -- forwarding is only correct because that now holds for every one of them, not just
+  // `sign`.
+  return forwardOwnedKeychainSignOnlyIdentity(role, guarded);
+}
+
+/**
+ * ADR-0025: `createLeaseFencedCapability` wraps each `signerClient[role]` in a fresh Proxy --
+ * necessarily a different object reference than the real owned Keychain client, since a Proxy can
+ * never be reference-equal to its target. `isOwnedKeychainSignOnlyClient`'s WeakMap is keyed by
+ * exact reference on purpose (see its own doc comment: a spread, a clone, or a Proxy must never
+ * inherit ownership on their own), so that Proxy does not start out recognized as owned. This is
+ * the one place the *trusted* stage-driver wrapper explicitly re-attests each such Proxy against
+ * the exact original it faithfully wraps -- a plain, verbatim-delegating property forward, no
+ * different in kind from the plain-object forward `guardedSignerRole` already performs next -- so
+ * that later, real forward inside `guardedSignerRole` has an owned Proxy to find.
+ */
+function reattestOwnedKeychainSignOnlyRoles(rawSignerClient, leaseFencedSignerClient) {
+  if (!rawSignerClient || typeof rawSignerClient !== 'object'
+    || !leaseFencedSignerClient || typeof leaseFencedSignerClient !== 'object') {
+    return leaseFencedSignerClient;
+  }
+  for (const role of Object.keys(rawSignerClient)) {
+    forwardOwnedKeychainSignOnlyIdentity(rawSignerClient[role], leaseFencedSignerClient[role]);
+  }
+  return leaseFencedSignerClient;
 }
 
 function guardedSignerClient(signerClient, guard, nonceFence = null, standingAuthorityGuard = null) {
@@ -893,6 +959,26 @@ function reconciliationInput(context, config, reconciliationAdapters, cycleRepos
   });
 }
 
+/**
+ * The exact, narrow lease-fenced facade `createOutboundPolicySigner`/`createReturnPolicySigner`
+ * receive as `recovery.repository` -- never the raw `cycleRepository` handed to `handler.mutate`
+ * for everything else. Every one of ADR-0025's five sign-only recovery methods is present and
+ * re-checks the lease immediately before each durable read or write; no other repository method is
+ * exposed through it, so a policy signer holding this reference cannot reach any unrelated durable
+ * write. This does not replace or weaken the existing per-call signer, nonce, standing-authority,
+ * policy, or validity guards `guardedSignerClient`/`wrapTransactionPolicySignerClient` already run
+ * on every actual Keychain invocation -- it only fences the repository calls the retry facade
+ * itself makes (persisting the binding, reserving each invocation ordinal, recording a timeout).
+ */
+function signOnlyRecoveryRepository(cycleRepository, assertLease) {
+  const repository = {};
+  for (const method of SIGN_ONLY_RECOVERY_REPOSITORY_METHODS) {
+    const fenced = leaseFencedReadMethod(cycleRepository, method, assertLease);
+    if (fenced) repository[method] = fenced;
+  }
+  return Object.freeze(repository);
+}
+
 function chainReconciliationRepository(cycleRepository, assertLease) {
   const repository = { ...createLeaseFencedReadRepository(cycleRepository, assertLease) };
   for (const method of [
@@ -1175,7 +1261,7 @@ export function createStageDriver({
         return evidence === null ? null : toEvidenceValue(evidence);
       }
       if (usesBuiltInHandlers && isChainJournalHandler(handler)) {
-        assertChainJournal(cycleRepository);
+        assertChainJournal(cycleRepository, context.stage);
         let evidence;
         try {
           evidence = await handler.reconcileLive(
@@ -1264,11 +1350,11 @@ export function createStageDriver({
           context.assertLease,
           markProviderCapability,
         );
-        const leaseFencedSignerClient = createLeaseFencedCapability(
+        const leaseFencedSignerClient = reattestOwnedKeychainSignOnlyRoles(signerClient, createLeaseFencedCapability(
           signerClient,
           context.assertLease,
           () => {},
-        );
+        ));
         const nonceFence = createEvmNonceFence({ cycleRepository, context, config });
         const standingAuthoritySigningGuard = createStandingAuthoritySigningGuard({
           config,
@@ -1334,7 +1420,7 @@ export function createStageDriver({
         });
         await cycleRepository.prepareStageAttempt(context.cycleId, context.stage, prepared);
       } else {
-        assertChainJournal(cycleRepository);
+        assertChainJournal(cycleRepository, context.stage);
         // A chain-journal stage records its attempts under per-transaction digests, but the
         // standing-authority guard below resolves against this stage-level digest. Publish it
         // durably so an external policy service can authorize the boundary that will actually be
@@ -1369,11 +1455,11 @@ export function createStageDriver({
         context.assertLease,
         markProviderCapability,
       );
-      const leaseFencedSignerClient = createLeaseFencedCapability(
+      const leaseFencedSignerClient = reattestOwnedKeychainSignOnlyRoles(signerClient, createLeaseFencedCapability(
         signerClient,
         context.assertLease,
         () => {},
-      );
+      ));
       const nonceFence = createEvmNonceFence({ cycleRepository, context, config });
       const standingAuthoritySigningGuard = createStandingAuthoritySigningGuard({
         config,
@@ -1395,6 +1481,12 @@ export function createStageDriver({
           policySignerClient: signerClient,
           config: currentHandlerConfig,
           cycleRepository,
+          // ADR-0025: the only repository reference `createOutboundPolicySigner`/
+          // `createReturnPolicySigner` are ever given for `recovery.repository` -- lease-fenced,
+          // exposing exactly the five sign-only recovery methods, nothing else. `cycleRepository`
+          // above remains the unfenced full repository these two stages already use for every
+          // other durable write; this does not replace or narrow that.
+          signOnlyRecoveryRepository: signOnlyRecoveryRepository(cycleRepository, context.assertLease),
           context: Object.freeze({ ...context, request, requestDigest: preparedRequestDigest }),
           request,
           preflightAuthority,

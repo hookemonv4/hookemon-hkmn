@@ -8,6 +8,8 @@ import {
   MAXIMUM_PACK_BATCH_SIZE,
   OPERATIONAL_CYCLE_STAGES,
   PROVIDER_MUTATION_ATTEMPT_STATES,
+  SIGN_ONLY_INVOCATION_LEDGER_SCHEMA,
+  SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA,
   assertChainTransactionAttempt,
   assertCustodyBalanceObservation,
   assertCustodyLedger,
@@ -16,14 +18,18 @@ import {
   assertPackBatchRequestEntry,
   assertPublicAmount,
   assertPublicCardEvent,
+  assertSignOnlyInvocationLedger,
+  assertSignOnlyPreSignBinding,
   toPublicAmount,
   assertTransactionPolicy,
   assertTypedAmount,
   assertProviderMutationAttempt,
   createPreparedChainTransactionAttempt,
+  createReservedSignOnlyInvocationLedger,
   packOperationId,
   transitionChainTransactionAttempt,
   transitionProviderMutationAttempt,
+  transitionSignOnlyInvocationLedger,
   RELAY_LEG_STATES,
   RELAY_LEG_TERMINAL_STATES,
   assertMoneyConfiguration,
@@ -224,6 +230,68 @@ test('requires signed chain material before broadcast and never permits substitu
     }),
     /requires exactly one nonce or blockhash/,
   );
+});
+
+function signOnlyPreSignBindingFixture(overrides = {}) {
+  return {
+    schema: SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA,
+    cycleId: 'cycle-contract-1',
+    stage: 'claim-process',
+    requestDigest: DIGEST_A,
+    role: 'operator-evm',
+    account: 'hookemon-operator-primary',
+    unsignedWireBytes: '{"to":"0x1"}',
+    unsignedRequestDigest: DIGEST_B,
+    policyDigest: DIGEST_A,
+    validityContextDigest: DIGEST_B,
+    ...overrides,
+  };
+}
+
+test('assertSignOnlyPreSignBinding requires the exact ADR-0025 schema and every digest field', () => {
+  const binding = signOnlyPreSignBindingFixture();
+  assert.deepEqual(assertSignOnlyPreSignBinding(binding), binding);
+
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, schema: 'wrong' }), /schema is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, stage: 'not-a-stage' }), /stage is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, requestDigest: 'not-a-digest' }), /requestDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, role: '' }), /role is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, account: '' }), /account is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, unsignedWireBytes: '' }), /unsignedWireBytes is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, unsignedRequestDigest: 'nope' }), /unsignedRequestDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, policyDigest: 'nope' }), /policyDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, validityContextDigest: 'nope' }), /validityContextDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, extra: 'field' }), /exact schema/);
+});
+
+test('the sign-only invocation ledger only ever advances ORDINAL_1_ALLOCATED -> ORDINAL_1_TIMED_OUT -> ORDINAL_2_ALLOCATED -> ORDINAL_2_TIMED_OUT', () => {
+  const ordinal1 = createReservedSignOnlyInvocationLedger({ cycleId: 'cycle-contract-1', stage: 'claim-process', requestDigest: DIGEST_A });
+  assert.deepEqual(ordinal1, {
+    schema: SIGN_ONLY_INVOCATION_LEDGER_SCHEMA,
+    cycleId: 'cycle-contract-1',
+    stage: 'claim-process',
+    requestDigest: DIGEST_A,
+    state: 'ORDINAL_1_ALLOCATED',
+  });
+  assert.deepEqual(assertSignOnlyInvocationLedger(ordinal1), ordinal1);
+
+  const ordinal1TimedOut = transitionSignOnlyInvocationLedger(ordinal1, 'ORDINAL_1_TIMED_OUT');
+  assert.equal(ordinal1TimedOut.state, 'ORDINAL_1_TIMED_OUT');
+  const ordinal2 = transitionSignOnlyInvocationLedger(ordinal1TimedOut, 'ORDINAL_2_ALLOCATED');
+  assert.equal(ordinal2.state, 'ORDINAL_2_ALLOCATED');
+  const ordinal2TimedOut = transitionSignOnlyInvocationLedger(ordinal2, 'ORDINAL_2_TIMED_OUT');
+  assert.equal(ordinal2TimedOut.state, 'ORDINAL_2_TIMED_OUT');
+
+  // No transition skips a state, runs backwards, or continues past the terminal ordinal-2 outcome.
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal1, 'ORDINAL_2_ALLOCATED'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal1, 'ORDINAL_2_TIMED_OUT'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal1TimedOut, 'ORDINAL_1_ALLOCATED'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal2TimedOut, 'ORDINAL_1_ALLOCATED'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal2TimedOut, 'ORDINAL_2_ALLOCATED'), /transition is invalid/);
+
+  assert.throws(() => assertSignOnlyInvocationLedger({ ...ordinal1, schema: 'wrong' }), /schema is invalid/);
+  assert.throws(() => assertSignOnlyInvocationLedger({ ...ordinal1, state: 'BOGUS' }), /state is invalid/);
+  assert.throws(() => assertSignOnlyInvocationLedger({ ...ordinal1, requestDigest: 'nope' }), /requestDigest is invalid/);
 });
 
 test('freezes a transaction policy against a typed amount and one expected recipient', () => {

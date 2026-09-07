@@ -14,6 +14,7 @@ import { preparePurchaseRequest } from '../../src/app/stages/purchase.mjs';
 import {
   CIRCLE_USD_DECIMALS,
   CIRCLE_USD_MINT,
+  TOKEN_PROGRAM_ID,
   createSolanaRpcClient,
   deriveAssociatedTokenAddress,
   submitSignedTransaction,
@@ -29,7 +30,7 @@ import { createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-
 import { createHistoricalErc20EvidenceClient, ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { RelayQuoteExpiredError } from '../../src/relay-client.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
-import { createKeychainSignerClient } from '../../src/signing/keychain-signer.mjs';
+import { KeychainSignOnlyTimeoutError, createKeychainSignerClient } from '../../src/signing/keychain-signer.mjs';
 import { TransactionPolicyError } from '../../src/signing/transaction-policy.mjs';
 import { buildAndSignStepAuthorization, createProductionTestFixture } from '../../../runner/test/cycle/production-cycle.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
@@ -3754,4 +3755,525 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
   assert.equal(releaseCount, 1);
   assert.equal(evidence.recipients[0].state, 'FINALIZED');
   assert.equal(evidence.recipients[0].amount.amountAtomic, amount.amountAtomic);
+});
+
+// ADR-0025 production integration gap: the real built-in RETURN chain handler seam (Solana) -- the
+// one stage whose owned Keychain client actually exposes the preferred `signApproved` method
+// `wrapTransactionPolicySignerClient` prefers over the bare `sign`. Proves the stage driver's
+// `signOnlyRecoveryRepository` -- not the raw `cycleRepository` -- is what `createReturnPolicySigner`
+// receives; that it exposes the complete five-method sign-only recovery surface; that every one of
+// those calls is lease-fenced exactly like every other durable repository write the driver already
+// fences; that `signApproved` itself now runs the same lease/mutation/nonce/standing-authority guard
+// chain as `sign` (`guardedSignerRole` no longer copies it unguarded through its spread); and that a
+// lease lost between the recorded ordinal-1 timeout and the ordinal-2 retry refuses before a second
+// `signApproved` broker call -- never a broadcast. A companion negative proves the committed
+// WeakMap-by-reference ownership design in keychain-signer.mjs: a plain spread/clone of the real
+// owned client, carried through the exact same stage-driver wrapping, is never recognized as owned.
+function returnSignOnlyMoneyConfiguration(solanaMint, usdgAddress) {
+  return {
+    schema: 'hookemon.money-configuration.v1',
+    assets: {
+      usdg: { chainId: '4663', assetId: usdgAddress, decimals: 6 },
+      solanaStablecoin: { chainId: '792703809', assetId: solanaMint, decimals: 6 },
+    },
+    minimums: {
+      robinhoodReceive: { chainId: '4663', assetId: usdgAddress, decimals: 6, amountAtomic: '0' },
+      solanaReceive: { chainId: '792703809', assetId: solanaMint, decimals: 6, amountAtomic: '0' },
+      returnUsdg: { chainId: '4663', assetId: usdgAddress, decimals: 6, amountAtomic: '0' },
+    },
+    evm: {
+      perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '100' },
+      nativeReserve: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '1000' },
+    },
+    solana: {
+      priorityFeeCap: { chainId: '792703809', assetId: 'microlamports-per-compute-unit', decimals: 0, amountAtomic: '100' },
+      lamportReserve: { chainId: '792703809', assetId: 'native', decimals: 9, amountAtomic: '1000' },
+    },
+  };
+}
+
+function returnSignOnlySolanaClient(blockhash, state = { blockHeight: 10, balance: 10_000 }) {
+  return createSolanaRpcClient({
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const resultByMethod = {
+        getBalance: { context: { slot: 9 }, value: state.balance ?? 10_000 },
+        getLatestBlockhash: { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 100 } },
+        isBlockhashValid: { context: { slot: 10 }, value: true },
+        getBlockHeight: state.blockHeight,
+      };
+      if (!Object.hasOwn(resultByMethod, body.method)) throw new Error(`unexpected Solana RPC ${body.method}`);
+      return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: body.id, result: resultByMethod[body.method] }) };
+    },
+  });
+}
+
+function returnSignOnlySplTransferCheckedPlan({ owner, mint, source, destination, amountAtomic }) {
+  const data = Buffer.alloc(10);
+  data.writeUInt8(12, 0);
+  data.writeBigUInt64LE(BigInt(amountAtomic), 1);
+  data.writeUInt8(6, 9);
+  return {
+    instructions: [{
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: source, isSigner: false, isWritable: true },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: destination, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: true, isWritable: false },
+      ],
+      data: data.toString('hex'),
+    }],
+    addressLookupTableAddresses: [],
+  };
+}
+
+/**
+ * The exact five-method sign-only recovery contract, self-contained (no chain-attempt CAS reuse
+ * from cycle-repository.mjs -- this fake exists only to prove the *stage-driver wiring and lease
+ * fencing*, not to re-prove the repository's own CAS semantics, which cycle-repository.test.mjs
+ * already covers).
+ */
+function returnSignOnlyRecoveryFake(attempts) {
+  const bindings = new Map();
+  const ledgers = new Map();
+  const key = (stage, requestDigest) => `${stage} ${requestDigest}`;
+  const isPrepared = (stage, requestDigest) => attempts.get(key(stage, requestDigest))?.attempt.state === 'PREPARED';
+  return {
+    async persistSignOnlyPreSignBinding(_cycleId, stage, requestDigest, binding) {
+      if (!isPrepared(stage, requestDigest)) throw new Error('fake sign-only repository: chain attempt is not PREPARED');
+      const k = key(stage, requestDigest);
+      const current = bindings.get(k);
+      if (current) {
+        if (JSON.stringify(current) !== JSON.stringify(binding)) throw new Error('fake sign-only repository: binding conflict');
+        return current;
+      }
+      bindings.set(k, binding);
+      return binding;
+    },
+    async readSignOnlyPreSignBinding(_cycleId, stage, requestDigest) {
+      return bindings.get(key(stage, requestDigest)) ?? null;
+    },
+    async reserveSignOnlyInvocation(_cycleId, stage, requestDigest, ordinal) {
+      if (!bindings.has(key(stage, requestDigest))) throw new Error('fake sign-only repository: no durable pre-sign binding for this request');
+      if (!isPrepared(stage, requestDigest)) throw new Error('fake sign-only repository: chain attempt is not PREPARED');
+      const k = key(stage, requestDigest);
+      const current = ledgers.get(k) ?? null;
+      if (ordinal === 1) {
+        if (current) throw new Error('fake sign-only repository: ordinal 1 was already reserved');
+        ledgers.set(k, { state: 'ORDINAL_1_ALLOCATED' });
+      } else {
+        if (!current || current.state !== 'ORDINAL_1_TIMED_OUT') throw new Error('fake sign-only repository: ordinal 2 requires a recorded ordinal 1 timeout');
+        ledgers.set(k, { state: 'ORDINAL_2_ALLOCATED' });
+      }
+      return ledgers.get(k);
+    },
+    async recordSignOnlyInvocationTimeout(_cycleId, stage, requestDigest, ordinal) {
+      const k = key(stage, requestDigest);
+      const current = ledgers.get(k) ?? null;
+      const expected = ordinal === 1 ? 'ORDINAL_1_ALLOCATED' : 'ORDINAL_2_ALLOCATED';
+      const next = ordinal === 1 ? 'ORDINAL_1_TIMED_OUT' : 'ORDINAL_2_TIMED_OUT';
+      if (current?.state === next) return current;
+      if (!current || current.state !== expected) throw new Error(`fake sign-only repository: ordinal ${ordinal} is not in the allocated state`);
+      ledgers.set(k, { state: next });
+      return ledgers.get(k);
+    },
+    async readSignOnlyInvocationLedger(_cycleId, stage, requestDigest) {
+      return ledgers.get(key(stage, requestDigest)) ?? null;
+    },
+  };
+}
+
+function returnSignOnlyChainRepository(proceeds, solanaMint) {
+  const attempts = new Map();
+  let relayLeg = null;
+  const reservations = [];
+  const signOnly = returnSignOnlyRecoveryFake(attempts);
+  return {
+    get attempts() { return attempts; },
+    async describeCycle() {
+      return {
+        custodyLedgers: new Map([['ledger', {
+          chainId: '792703809', assetId: solanaMint, decimals: 6, buybackProceeds: proceeds, returnInput: '0',
+        }]]),
+        chainAttempts: new Map(attempts),
+        relayLegs: relayLeg === null ? new Map() : new Map([[relayLeg.relayRequestId, relayLeg]]),
+      };
+    },
+    // Return is a chain-journal stage: it never touches the generic write-ahead provider-attempt
+    // store this driver also requires at construction. `readOperationalStageAttempt` genuinely runs
+    // (and must report "none") before every execute(); the rest are unreachable safety nets.
+    async readOperationalStageAttempt() { return null; },
+    async prepareStageAttempt() { throw new Error('sign-only lease-fencing test must never use the generic write-ahead journal'); },
+    async markStageAttemptNotSent() { throw new Error('sign-only lease-fencing test must never use the generic write-ahead journal'); },
+    async markStageAttemptSentUnknown() { throw new Error('sign-only lease-fencing test must never use the generic write-ahead journal'); },
+    async recordStageAttemptResponse() { throw new Error('sign-only lease-fencing test must never use the generic write-ahead journal'); },
+    async reconcileStageAttempt() { throw new Error('sign-only lease-fencing test must never use the generic write-ahead journal'); },
+    async readChainTransactionAttempt(_cycleId, stage, requestDigest) {
+      return attempts.get(`${stage} ${requestDigest}`) ?? null;
+    },
+    async prepareChainTransactionAttempt(_cycleId, stage, attempt) {
+      const key = `${stage} ${attempt.requestDigest}`;
+      const existing = attempts.get(key);
+      if (existing) return existing;
+      const record = { attempt, broadcastEvidence: null, finalityEvidence: null };
+      attempts.set(key, record);
+      return record;
+    },
+    async recordSignedTransaction(_cycleId, stage, requestDigest, material) {
+      throw new Error('sign-only lease-fencing test must never durably record a signature');
+    },
+    async recordBroadcast() {
+      throw new Error('sign-only lease-fencing test must never broadcast');
+    },
+    async recordCustodyLedger() {
+      throw new Error('sign-only lease-fencing test must never reach custody ledger recording');
+    },
+    async recordFinality() {
+      throw new Error('sign-only lease-fencing test must never reach finality');
+    },
+    async recordRelayLeg(_cycleId, leg) {
+      if (relayLeg === null) relayLeg = structuredClone(leg);
+      return structuredClone(relayLeg);
+    },
+    async recordRelayLegSource() {
+      throw new Error('sign-only lease-fencing test must never reach source attribution');
+    },
+    async readRelayLeg() { return relayLeg === null ? null : structuredClone(relayLeg); },
+    async reserveWalletNonce(cycleId, reservation) { reservations.push(['reserve', cycleId, structuredClone(reservation)]); },
+    async assertWalletNonce() {},
+    async persistChainAttemptRecoveryContext() {
+      throw new Error('sign-only lease-fencing test must never persist a signed-bytes recovery context');
+    },
+    async readChainAttemptRecoveryContext() { return null; },
+    ...signOnly,
+  };
+}
+
+
+
+
+// `prepareReturnRequest`'s real relay-client (relay-client.mjs) always builds an 18-field intent
+// (it also carries `tradeType`/`quoteDigest`), while `returnRelayLeg` -> `assertReturnRelayIntent`
+// (money-schemas.mjs) accepts only a 16-field one -- a pre-existing schema gap between those two
+// modules, unrelated to ADR-0025 and out of this change's scope. Rather than route around it with
+// a custom `stageHandlers.return` override (which would also disable the driver's own built-in
+// chain-journal wiring this test exists to prove -- `usesBuiltInHandlers` is keyed off
+// `stageHandlers === null`), `adapters.relay` here is a minimal hand-written stub exposing exactly
+// the two methods `prepareReturnRequest` calls, so it can hand back an already-conformant
+// (16-field) intent directly. Everything downstream of it -- `prepareReturnRequest` itself, the
+// stage driver's real built-in return handler selection, and `mutateReturn` -- is exercised
+// unmodified.
+function returnSignOnlyRelayStub({ quote, execution }) {
+  return {
+    async quoteReturnBridge() { return quote; },
+    prepareExecution({ liveMode }) {
+      if (liveMode !== true) throw new Error('return sign-only relay stub requires liveMode');
+      return execution;
+    },
+  };
+}
+
+function returnSignOnlyFixture() {
+  const cycleId = 'cycle-return-sign-only';
+  const solanaMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const usdgAddress = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+  const sender = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+  const recipient = '0x000000000000000000000000000000000000dEaD';
+  const amountAtomic = '24000000';
+  const destinationAmountAtomic = '23843750';
+  const requestId = 'relay-return-sign-only';
+  const config = {
+    chainId: 4663,
+    accounts: { evm: recipient, solana: sender },
+    relay: { solanaMint, maxSettlementWindowSeconds: '600' },
+    moneyConfiguration: returnSignOnlyMoneyConfiguration(solanaMint, usdgAddress),
+  };
+  const quote = {
+    direction: 'RETURN',
+    requestId,
+    origin: { chainId: 792703809, address: solanaMint, decimals: 6, amount: amountAtomic },
+    destination: { chainId: 4663, address: usdgAddress, decimals: 6, amount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic },
+    sender,
+    recipient,
+    deadlineUnixSeconds: 4_102_444_800,
+  };
+  const intent = {
+    schema: 'hookemon.relay-intent.v1',
+    requestId,
+    orderId: `0x${'9'.repeat(64)}`,
+    direction: 'RETURN',
+    originChainId: 792703809,
+    destinationChainId: 4663,
+    originAssetId: solanaMint,
+    originDecimals: 6,
+    destinationAssetId: usdgAddress,
+    destinationDecimals: 6,
+    originAmount: amountAtomic,
+    quotedDestinationAmount: destinationAmountAtomic,
+    quotedDestinationMinimumAmount: destinationAmountAtomic,
+    sender,
+    recipient,
+    deadlineUnixSeconds: 4_102_444_800,
+  };
+  const steps = [{
+    kind: 'transaction',
+    requestId,
+    items: [{
+      data: returnSignOnlySplTransferCheckedPlan({
+        owner: sender,
+        mint: solanaMint,
+        source: '8MWgLuNVQAhpoTUQZiUUkG9Q1569HCkJbmAivoQ5VhDN',
+        destination: '4nvJ5zWdVspxJiNZzB127U6amPH98SFFkBx2JZrAduia',
+        amountAtomic,
+      }),
+    }],
+  }];
+  const relay = returnSignOnlyRelayStub({ quote, execution: { intent, steps } });
+  return { cycleId, solanaMint, config, relay, proceeds: amountAtomic };
+}
+test('the real built-in return handler receives a lease-fenced sign-only recovery facade with the complete method surface, and a lost lease refuses before a second Keychain signApproved call', async () => {
+  const { cycleId, solanaMint, config, relay, proceeds } = returnSignOnlyFixture();
+  const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
+
+  let brokerCalls = 0;
+  let broadcastCalls = 0;
+  const keychain = createKeychainSignerClient({
+    role: 'operator-solana',
+    liveMode: true,
+    ...fixtureStageDriverOptions,
+    timeoutMs: 5,
+    // Always times out: the real broker is never reached a second time if lease fencing works.
+    exec: async call => {
+      if (call.args[0] === 'broadcast') {
+        broadcastCalls += 1;
+        throw new Error('sign-only lease-fencing test must never broadcast');
+      }
+      brokerCalls += 1;
+      return new Promise(() => {});
+    },
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-solana-sign-only-test',
+  });
+
+  const adapters = {
+    collectorCrypt: null,
+    relay,
+    robinhood: { client: null },
+    solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
+  };
+
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters,
+    signerClient: { solana: keychain },
+    config,
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+  });
+
+  // Lease loss is expressed exactly like every other lease-fencing test in this file: a stateful
+  // `assertLease` that starts failing once a specific durable fact becomes true. Here, that fact is
+  // "the ordinal-1 timeout was already durably recorded" -- i.e. exactly the boundary between the
+  // classified timeout and the one bounded retry. It is set from the *outside*, by wrapping the
+  // fake's own recordSignOnlyInvocationTimeout, never by the facade itself, so this proves the
+  // driver's lease fencing independently of the retry facade's own internal logic.
+  const originalRecordTimeout = cycleRepository.recordSignOnlyInvocationTimeout.bind(cycleRepository);
+  let ordinal1TimedOutRecorded = false;
+  cycleRepository.recordSignOnlyInvocationTimeout = async (...args) => {
+    const result = await originalRecordTimeout(...args);
+    ordinal1TimedOutRecorded = true;
+    return result;
+  };
+
+  const context = {
+    cycleId,
+    stage: 'return',
+    intent: { journalHead: 'sign-only-lease-fencing-return' },
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {
+      if (ordinal1TimedOutRecorded) throw new LeaseLostError('expired', { owner: 'cycle-runner', version: 1 });
+    },
+    async assertMutationAllowed() {},
+  };
+
+  await assert.rejects(() => driver.execute(context), LeaseLostError);
+
+  // The complete method surface was genuinely exercised (not stubbed out): a real durable binding,
+  // a real ordinal-1 reservation, and a real recorded timeout all happened before the lease refused
+  // anything further.
+  const requestDigest = [...cycleRepository.attempts.keys()][0].split(' ')[1];
+  assert.notEqual(await cycleRepository.readSignOnlyPreSignBinding(cycleId, 'return', requestDigest), null);
+  const ledger = await cycleRepository.readSignOnlyInvocationLedger(cycleId, 'return', requestDigest);
+  assert.equal(ledger.state, 'ORDINAL_1_TIMED_OUT');
+
+  // The lease refused before the owned Keychain client's preferred signApproved() was invoked a
+  // second time, and broadcast was never reached at all.
+  assert.equal(brokerCalls, 1, 'the lost lease must refuse ordinal 2 before a second signApproved broker call');
+  assert.equal(broadcastCalls, 0, 'the lost lease must refuse before any broadcast');
+});
+
+test('a plain clone of the real owned Keychain client is never recognized as owned, so a sign-only timeout is never retried through the durable ledger', async () => {
+  const { solanaMint, config, relay, proceeds } = returnSignOnlyFixture();
+  const cycleId = 'cycle-return-sign-only-clone';
+  const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
+
+  let brokerCalls = 0;
+  const realKeychain = createKeychainSignerClient({
+    role: 'operator-solana',
+    liveMode: true,
+    ...fixtureStageDriverOptions,
+    timeoutMs: 5,
+    exec: async () => { brokerCalls += 1; return new Promise(() => {}); },
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-solana-sign-only-clone-test',
+  });
+  // The committed WeakMap-by-reference design (keychain-signer.mjs): a spread copies every
+  // property -- role, sign, signApproved, broadcast -- but produces a new object reference the
+  // module's own WeakMap never saw, so it is structurally identical yet never recognized as owned.
+  const clonedKeychain = { ...realKeychain };
+
+  const adapters = {
+    collectorCrypt: null,
+    relay,
+    robinhood: { client: null },
+    solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
+  };
+
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters,
+    signerClient: { solana: clonedKeychain },
+    config,
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+  });
+
+  const context = {
+    cycleId,
+    stage: 'return',
+    intent: { journalHead: 'sign-only-lease-fencing-return-clone' },
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {},
+    async assertMutationAllowed() {},
+  };
+
+  // Never a LeaseLostError/ledger-mediated refusal: with no owned client, `wrapTransactionPolicySignerClient`
+  // never touches the sign-only recovery repository at all, so the raw classified timeout surfaces
+  // directly from the single unmodified sign call.
+  await assert.rejects(() => driver.execute(context), KeychainSignOnlyTimeoutError);
+  assert.equal(brokerCalls, 1, 'an unowned client must never be retried a second time');
+
+  const requestDigest = [...cycleRepository.attempts.keys()][0].split(' ')[1];
+  assert.equal(
+    await cycleRepository.readSignOnlyPreSignBinding(cycleId, 'return', requestDigest),
+    null,
+    'an unowned client must never even reach the durable pre-sign binding',
+  );
+});
+
+test('a lease lost while the standing-authority guard await is genuinely suspended refuses the preferred signApproved call before the broker is ever reached', async () => {
+  // Reuses the exact same real owned Keychain client + real built-in return handler + real
+  // signOnlyRecoveryRepository facade as the positive sign-only test above -- this test is only
+  // about the standing-authority guard's own recheck, not a second huge fixture.
+  const { cycleId, solanaMint, config, relay, proceeds } = returnSignOnlyFixture();
+  const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
+  // The only method the real standing-authority provider's own first-use reservation needs beyond
+  // the narrow sign-only recovery surface above -- added directly since this is the one test in
+  // the file that exercises a real (not custom-stubbed) standing-authority guard.
+  cycleRepository.recordStandingAuthorityDecision = async (_cycleId, decision) => decision;
+
+  let brokerCalls = 0;
+  const keychain = createKeychainSignerClient({
+    role: 'operator-solana',
+    liveMode: true,
+    ...fixtureStageDriverOptions,
+    timeoutMs: 60_000,
+    // The race below never lets this resolve either way -- the driver must refuse before ever
+    // calling it, not because it happens to time out.
+    exec: async () => { brokerCalls += 1; return new Promise(() => {}); },
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-solana-standing-authority-race',
+  });
+
+  const adapters = {
+    collectorCrypt: null,
+    relay,
+    robinhood: { client: null },
+    solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
+  };
+
+  // Default-dated (issued 2026-01-01, expires 2099-01-01): genuinely valid right now, so the
+  // standing-authority guard's real verification actually runs to completion instead of being
+  // refused outright on an expired fixture.
+  const fixture = createProductionTestFixture();
+
+  // `createStandingAuthoritySigningGuard`'s guard body is exactly two awaits in sequence: first
+  // `authority.resolveStepAuthorization(...)` (this hook -- entirely caller-supplied), then
+  // `authority.provider.verifyAndRecordStepAuthorization(...)` (the real, WeakSet-branded
+  // provider, which -- like the owned Keychain client -- cannot be wrapped or spread without
+  // losing its own unforgeable identity, so it is used completely unmodified below). Suspending
+  // this first await genuinely suspends the guard as a whole, the same race window as suspending
+  // the second one, without needing to touch the branded provider at all.
+  let signalSuspended;
+  const suspended = new Promise(resolve => { signalSuspended = resolve; });
+  let releaseAuthority;
+  const releaseGate = new Promise(resolve => { releaseAuthority = resolve; });
+
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters,
+    signerClient: { solana: keychain },
+    config: {
+      ...config,
+      execution: { profile: 'production', providerMode: 'live' },
+      standingAuthority: { ...fixture.standingAuthority, provider: fixture.standingAuthorityProvider },
+      // Called with the driver's own real, freshly-prepared requestDigest -- built here rather
+      // than precomputed, since `prepareReturnRequest` embeds a wall-clock-dependent field.
+      async standingAuthorityStepAuthorization(intent) {
+        signalSuspended();
+        await releaseGate;
+        return buildAndSignStepAuthorization(fixture, {
+          cycleId: intent.cycleId,
+          actionKind: intent.stage,
+          authorizationKind: intent.authorizationKind,
+          subjectDigest: intent.requestDigest,
+          destination: fixture.standingAuthority.allowedDestinations[0],
+          pack: fixture.standingAuthority.allowedPacks[0],
+          spendAmount: '10',
+          nonce: 'return-standing-authority-race',
+        });
+      },
+    },
+    cycleRepository,
+    ...fixtureStageDriverOptions,
+  });
+
+  // The lease-fenced Proxy wrapping `signerClient.solana` re-checks `assertLease` at the exact
+  // moment `signApproved` would actually be invoked (its own `get` trap's returned wrapper, called
+  // only when `guardedSignerRole` finally forwards through it) -- immediately after the
+  // standing-authority guard's `await` above resolves. Flipping this only once that await is
+  // genuinely suspended, then releasing it, proves a lease lost *during* the await refuses before
+  // any broker call, not merely before some later unrelated step. `assertMutationAllowed` -- the
+  // guard `guardedSignerRole` also reruns right after the same await, covering an authority
+  // revocation through the identical call site -- is left permissive here to isolate the lease.
+  let leaseLost = false;
+  const context = {
+    cycleId,
+    stage: 'return',
+    intent: { journalHead: 'standing-authority-race' },
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {
+      if (leaseLost) throw new LeaseLostError('expired', { owner: 'cycle-runner', version: 1 });
+    },
+    async assertMutationAllowed() {},
+  };
+
+  const executed = driver.execute(context);
+  await suspended;
+  leaseLost = true;
+  releaseAuthority();
+
+  await assert.rejects(() => executed, LeaseLostError);
+  assert.equal(brokerCalls, 0, 'a lease lost during the standing-authority await must refuse before the broker is ever reached');
 });
