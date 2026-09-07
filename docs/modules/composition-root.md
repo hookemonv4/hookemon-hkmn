@@ -337,3 +337,12 @@ Supplementary dispatch accepts active settlements only. After a payout handler r
 result may be `COMPLETE` from either payout dispatch state. The driver rechecks the held-position
 identity, original manifest and eligibility digest, any established payout-source digest, and
 the current lease before reporting advancement; a completed settlement cannot start dispatch.
+
+The literal production acceptance graph runs `hookemon-runner` against synthetic loopback
+providers and the module-owned isolated signing child. It admits two packs, finalizes an ordinary
+90-unit payout and a later 45-unit held-sale payout to the original holder snapshot, and checks
+conservation and custody independently. Fresh CLI processes reopen both completions without new
+logical purchases or payments; durable manifests, attempts, recipients and provider counts remain
+stable. Every process must complete without a failed tick, and copied runtime bytes may differ
+only at the two fixture identity pins and fixed synthetic interface metadata. This test does not
+establish live provider acceptance or authorize live signing, spending or deployment.
