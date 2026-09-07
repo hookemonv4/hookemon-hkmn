@@ -36,3 +36,6 @@
 
 .inventory-buyback{font-size:13px;font-weight:700;line-height:1.5;margin:12px 0 3px;color:var(--navy)}
 .pack-summary-main .pack-buyback-rate{font-size:12px;font-weight:700;color:var(--navy);margin-top:7px}
+
+.pack-filters button[data-rarity="epic"]{border-color:#7c3aed;color:#6d28d9;background:#f3e8ff}
+.pack-filters button[data-rarity="epic"][aria-pressed="true"]{background:#7c3aed;border-color:#7c3aed;color:#fff}

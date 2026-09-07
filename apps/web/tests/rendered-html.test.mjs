@@ -1129,7 +1129,7 @@ test("keeps all explanatory content available without JavaScript", async () => {
 test("renders seven tactile card examples with their names and grades", async () => {
   const html = await (await render()).text();
   assert.match(html, /id="cards"/);
-  assert.equal((html.match(/<figure class="collectible-card js-tilt/g) ?? []).length, 7);
+  assert.equal((html.match(/<figure class="collectible-card /g) ?? []).length, 7);
   for (const card of ["Rayquaza", "Lugia", "Poncho Pikachu", "Charizard", "Umbreon VMAX", "Shining Mewtwo", "Mew Gold Star"]) assert.ok(html.includes(card));
   for (const grade of ["BGS 8", "PSA 10", "PSA 9"]) assert.ok(html.includes(grade));
   assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);

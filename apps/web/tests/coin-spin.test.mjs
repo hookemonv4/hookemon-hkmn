@@ -85,6 +85,23 @@ test("vertical touch intent and cancellation never leave the coin captured", () 
   f.cleanup();
 });
 
+test("autoplay follows each flick direction instead of reversing when momentum fades", () => {
+  const f = fixture();
+  for (const direction of [-1, 1, -1]) {
+    f.coin.emit("pointerdown", { pointerType: "touch" });
+    f.coin.emit("pointermove", { clientX: direction * 80, timeStamp: 100 });
+    f.coin.emit("pointerup", { timeStamp: 110 });
+    f.coin.emit("click");
+    for (let frame = 0; frame < 300; frame++) {
+      const before = f.angle();
+      f.step();
+      const delta = ((f.angle() - before + 540) % 360) - 180;
+      assert.ok(delta * direction >= -0.000001, `rotation reversed after ${frame} frames`);
+    }
+  }
+  f.cleanup();
+});
+
 test("reduced motion permits direct rotation without autoplay or inertia", () => {
   const f = fixture(true);
   assert.equal(f.frames.size, 0);

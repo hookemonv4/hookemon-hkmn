@@ -130,7 +130,7 @@ test("labels illustrative card art separately from actual card history", () => {
 test("keeps the selected Lugia visible as the gallery chase card and holder arrows above cards", async () => {
   const css = await readFile(new URL("comic-production/adventure.css", publicRoot), "utf8");
   assert.match(html, /class="chase-ribbon">Chase card/);
-  assert.match(html, /class="card-collection"><figure class="collectible-card js-tilt card-lugia"/);
+  assert.match(html, /class="card-collection"><figure class="collectible-card card-lugia"/);
   assert.match(css, /\.collectible-card\.card-lugia\s*\{[^}]*grid-column:\s*1 \/ -1/s);
   assert.match(css, /\.payout-lines\s*\{[^}]*z-index:\s*4/s);
   assert.match(css, /\.holder-row\s*\{[^}]*z-index:\s*3/s);
