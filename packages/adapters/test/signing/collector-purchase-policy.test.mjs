@@ -531,3 +531,21 @@ test('candidate decode options cannot inject an original hash validity observati
   const decoded = await decodeCandidate(buildCandidateTransaction(), { originalBlockhashValidity: { type: originalContext.type, valid: true, observedSlot: '999' } });
   assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
 });
+
+test('recovery refuses a reconstructed policy that lowers the original observation bound', async () => {
+  let context = { ...originalContext };
+  const options = {
+    client: { role: OPERATOR_SOLANA_ROLE, async sign(transaction) { return { signedTxBase64: transaction }; } },
+    decodeOptions: { family: 'solana', chainId: 'solana-mainnet', currentBlockHeightResolver: async () => '100', blockhashContextResolver: async () => context },
+    broadcast: async () => { throw new Error('transport must not run'); },
+  };
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  const wrapper = wrapTransactionPolicySignerClient({ ...options, policy });
+  const signed = await wrapper.sign(buildCandidateTransaction());
+  const approval = wrapper.readApprovalContext(signed);
+  context = { ...originalContext, observedSlot: '119' };
+  const loweredPolicy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: context }));
+  assert.deepEqual(loweredPolicy, policy, 'canonical envelopes match while rule sidecars differ');
+  const reconstructed = wrapTransactionPolicySignerClient({ ...options, policy: loweredPolicy });
+  await assert.rejects(() => reconstructed.recoverApproval(signed, approval), /recovery context does not match the active policy/);
+});
