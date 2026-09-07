@@ -464,6 +464,85 @@ test('a return Relay leg persists its request window and accepts only a terminal
   );
 });
 
+function currentReturnRelayLegInput(overrides = {}) {
+  const returnIntent = {
+    schema: 'hookemon.relay-intent.v1',
+    requestId: 'relay-return-proof-2',
+    orderId: `0x${'f'.repeat(64)}`,
+    direction: 'RETURN',
+    tradeType: 'EXACT_INPUT',
+    quoteDigest: DIGEST_B,
+    originChainId: 792703809,
+    destinationChainId: 4663,
+    originAssetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    originDecimals: 6,
+    destinationAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    destinationDecimals: 6,
+    originAmount: '17',
+    quotedDestinationAmount: '16',
+    quotedDestinationMinimumAmount: '16',
+    sender: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto',
+    recipient: '0x000000000000000000000000000000000000dead',
+    deadlineUnixSeconds: 1_800_000_000,
+    ...overrides,
+  };
+  return {
+    cycleId: 'cycle-return-proof-2',
+    direction: 'return',
+    relayRequestId: returnIntent.requestId,
+    quoteDigest: DIGEST_A,
+    source: { chainId: '792703809', assetId: returnIntent.originAssetId, decimals: 6, amountAtomic: '17' },
+    destination: { chainId: '4663', assetId: returnIntent.destinationAssetId, decimals: 6, amountAtomic: '16' },
+    returnAttribution: {
+      schema: 'hookemon.return-leg-attribution-context.v1',
+      intent: returnIntent,
+      requestCreatedAtUnixSeconds: '1700000000',
+      maxSettlementWindowSeconds: '600',
+    },
+  };
+}
+
+test('a return Relay leg also accepts the current Relay intent shape with tradeType and quoteDigest', () => {
+  const input = currentReturnRelayLegInput();
+  const leg = createRecordedRelayLeg(input);
+  assert.deepEqual(Object.keys(leg.returnAttribution.intent).sort(), Object.keys(input.returnAttribution.intent).sort());
+  assert.equal(leg.returnAttribution.intent.tradeType, 'EXACT_INPUT');
+  assert.equal(leg.returnAttribution.intent.quoteDigest, DIGEST_B);
+  assert.deepEqual(assertRelayLeg(leg), leg);
+
+  // The nested intent.quoteDigest (Relay's own quote-evidence digest) is intentionally distinct
+  // from the outer relay leg's quoteDigest (return.mjs's canonical envelope digest) — they must
+  // never be compared for equality.
+  assert.notEqual(leg.returnAttribution.intent.quoteDigest, leg.quoteDigest);
+});
+
+test('a return Relay intent requires tradeType and quoteDigest together, not as a partial pair', () => {
+  const withOnlyTradeType = currentReturnRelayLegInput();
+  delete withOnlyTradeType.returnAttribution.intent.quoteDigest;
+  assert.throws(() => createRecordedRelayLeg(withOnlyTradeType), /tradeType and quoteDigest together/);
+
+  const withOnlyQuoteDigest = currentReturnRelayLegInput();
+  delete withOnlyQuoteDigest.returnAttribution.intent.tradeType;
+  assert.throws(() => createRecordedRelayLeg(withOnlyQuoteDigest), /tradeType and quoteDigest together/);
+});
+
+test('a return Relay intent rejects an unsupported tradeType and a malformed quoteDigest', () => {
+  const badTradeType = currentReturnRelayLegInput({ tradeType: 'MARKET_ORDER' });
+  assert.throws(() => createRecordedRelayLeg(badTradeType), /tradeType is invalid/);
+
+  const numericDigest = currentReturnRelayLegInput({ quoteDigest: 12345 });
+  assert.throws(() => createRecordedRelayLeg(numericDigest), /quoteDigest is invalid/);
+
+  const malformedDigest = currentReturnRelayLegInput({ quoteDigest: 'not-a-digest' });
+  assert.throws(() => createRecordedRelayLeg(malformedDigest), /quoteDigest is invalid/);
+});
+
+test('a return Relay intent rejects an arbitrary extra field on the current 18-field shape', () => {
+  const withExtraField = currentReturnRelayLegInput();
+  withExtraField.returnAttribution.intent.unexpectedField = 'x';
+  assert.throws(() => createRecordedRelayLeg(withExtraField), /exact schema/);
+});
+
 test('a standing-authority decision binds its digests and both reservations exactly', () => {
   const decision = {
     schema: 'hookemon.standing-authority-decision.v1',

@@ -512,6 +512,33 @@ const RETURN_RELAY_INTENT_FIELDS = Object.freeze([
   'deadlineUnixSeconds',
 ]);
 
+// The Relay client (packages/adapters/src/relay-client.mjs RELAY_INTENT_KEYS) has carried
+// tradeType and quoteDigest since revision67's Relay client; both fields are required together
+// or not at all — a record predating that client has neither, one recorded with it has both.
+const RETURN_RELAY_INTENT_FIELDS_WITH_TRADE_EVIDENCE = Object.freeze([
+  'schema',
+  'requestId',
+  'orderId',
+  'direction',
+  'tradeType',
+  'quoteDigest',
+  'originChainId',
+  'destinationChainId',
+  'originAssetId',
+  'originDecimals',
+  'destinationAssetId',
+  'destinationDecimals',
+  'originAmount',
+  'quotedDestinationAmount',
+  'quotedDestinationMinimumAmount',
+  'sender',
+  'recipient',
+  'deadlineUnixSeconds',
+]);
+
+// Mirrors relay-client.mjs's own TRADE_TYPES exactly; this is the producer's enum, not a new one.
+const RETURN_RELAY_INTENT_TRADE_TYPES = new Set(['EXACT_INPUT', 'EXACT_OUTPUT', 'EXPECTED_OUTPUT']);
+
 export const RETURN_LEG_DESTINATION_PROOF_FIELDS = Object.freeze([
   'schema',
   'relayRequestId',
@@ -538,10 +565,24 @@ function assertNullableString(value, label) {
 }
 
 function assertReturnRelayIntent(value, relayRequestId, label) {
-  assertPlainObject(value, RETURN_RELAY_INTENT_FIELDS, label);
+  const isPlainObject = value && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+  const hasTradeType = isPlainObject && Object.hasOwn(value, 'tradeType');
+  const hasQuoteDigest = isPlainObject && Object.hasOwn(value, 'quoteDigest');
+  if (hasTradeType !== hasQuoteDigest) {
+    throw new Error(`${label} must carry tradeType and quoteDigest together or neither`);
+  }
+  const carriesTradeEvidence = hasTradeType;
+  assertPlainObject(value, carriesTradeEvidence ? RETURN_RELAY_INTENT_FIELDS_WITH_TRADE_EVIDENCE : RETURN_RELAY_INTENT_FIELDS, label);
   if (value.schema !== 'hookemon.relay-intent.v1') throw new Error(`${label} schema is invalid`);
   if (value.requestId !== relayRequestId) throw new Error(`${label} requestId does not match its Relay leg`);
   if (value.direction !== 'RETURN') throw new Error(`${label} direction is invalid`);
+  if (carriesTradeEvidence) {
+    if (typeof value.tradeType !== 'string' || !RETURN_RELAY_INTENT_TRADE_TYPES.has(value.tradeType)) {
+      throw new Error(`${label} tradeType is invalid`);
+    }
+    assertDigest(value.quoteDigest, `${label} quoteDigest`);
+  }
   if (!Number.isSafeInteger(value.originChainId) || value.originChainId <= 0
     || !Number.isSafeInteger(value.destinationChainId) || value.destinationChainId <= 0) {
     throw new Error(`${label} chain identity is invalid`);
