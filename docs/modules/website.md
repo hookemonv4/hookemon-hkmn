@@ -65,7 +65,7 @@ The hero uses a two-line shared-cycle heading and the supplied transparent Robin
   spaced social icons on the right. Gallery cards remain upright in individual frames.
   Coin autoplay follows the most recent drag direction instead of reversing a leftward flick.
 
-- Homepage content below the initial viewport reveals once with a short upward fade.
+- Homepage content below the initial viewport reveals once with an upward fade tied to scroll progress. The movement spans up to 112 px and completes without a timed backlog during fast scrolling.
   Reduced motion disables reveals, and content stays visible without animation support.
 
 - Showcase buyback estimates use exact NFT membership and pack rates recorded in
