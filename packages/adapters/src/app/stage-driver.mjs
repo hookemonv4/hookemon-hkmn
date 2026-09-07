@@ -1299,7 +1299,9 @@ export function createStageDriver({
           reconciliationInput(
             context,
             currentHandlerConfig,
-            isLiveCollectorOnlyRehearsal(currentHandlerConfig) ? reconciliationAdapters ?? adapters : reconciliationAdapters,
+            usesBuiltInHandlers || isLiveCollectorOnlyRehearsal(currentHandlerConfig)
+              ? reconciliationAdapters ?? adapters
+              : reconciliationAdapters,
             cycleRepository,
           ),
         );

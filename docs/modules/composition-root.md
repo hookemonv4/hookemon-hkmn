@@ -46,8 +46,10 @@ repository client.
 - `createStageDriver({liveMode, adapters, reconciliationAdapters, signerClient, config,
   cycleRepository, preflightAuthority})` returns the `reconcile`, `execute`, and side-effect-free `commit` methods
   used by `AutomatedCycleService`. `preflightAuthority` accepts only the exact Node test fixture;
-  production construction omits it. The ordinary reconciliation seam is read-only and separate from
-  mutation adapters. Chain-journal reconciliation for claim, outbound, and return additionally
+  production construction omits it. Built-in card reconciliation uses the real adapters when no
+  explicit reconciliationAdapters are supplied; explicit observation adapters retain precedence.
+  Custom handlers retain their separate reconciliation seam. Adapter calls and the narrow
+  reconciliation repository remain lease-fenced, and reconciliation does not resend provider mutations. Chain-journal reconciliation for claim, outbound, and return additionally
   receives only fenced broadcast, finality, custody, Relay-settlement, recovery-context, and
   wallet-nonce-release writers after canonical chain observation. Direct payout may idempotently
   record successor dust and release its nonce fence before returning terminal recovery evidence.

@@ -4400,3 +4400,68 @@ test('a lease lost while the standing-authority guard await is genuinely suspend
   await assert.rejects(() => executed, LeaseLostError);
   assert.equal(brokerCalls, 0, 'a lease lost during the standing-authority await must refuse before the broker is ever reached');
 });
+
+
+for (const explicit of [false, true]) {
+  test(`built-in production purchase reconciliation observes default adapters with explicit precedence=${explicit}`, async () => {
+    const repository = writeAheadRepository();
+    const owner = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+    const money = claimMoneyConfiguration();
+    const amount = { ...money.assets.solanaStablecoin, amountAtomic: '17' };
+    repository.describeCycle = async () => ({ admission: { unitPurchase: amount } });
+    repository.readPackBatchIntent = async () => ({ intent: { playerAddress: owner } });
+    repository.readPackBatchRequest = async () => ({ requestedAtMs: 0, packs: [{ packIndex: 0, memo: 'accepted-pack', expectedCardCount: 1 }] });
+    await repository.prepareStageAttempt(CYCLE_ID, 'purchase', {
+      schema: 'hookemon.provider-mutation-attempt.v1', cycleId: CYCLE_ID, stage: 'purchase',
+      state: 'PREPARED', requestDigest: `sha256:${'a'.repeat(64)}`, responseDigest: null, reconciliationDigest: null,
+    });
+    let statusReads = 0;
+    let rpcReads = 0;
+    let leaseCurrent = true;
+    const observedAdapters = {
+      collectorCrypt: {
+        async getPackStatus({ memo }) {
+          statusReads += 1;
+          return { memo, pack: { transaction_signature: 'accepted-signature', token_mint: CIRCLE_USD_MINT } };
+        },
+        async submitTransaction() { assert.fail('reconciliation must never submit again'); },
+        async generateYoloPacks() { assert.fail('reconciliation must never generate again'); },
+      },
+      solana: { client: createSolanaRpcClient({ rpcUrl: 'https://solana.invalid', fetchImpl: async (_url, options) => {
+        const { method, id } = JSON.parse(options.body);
+        const reply = result => ({ ok: true, async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); } });
+        rpcReads += 1;
+        if (method === 'getSignatureStatuses') return reply({ value: [{ confirmationStatus: 'finalized', err: null }] });
+        assert.equal(method, 'getTransaction');
+        return reply({ meta: { err: null,
+          preTokenBalances: [{ accountIndex: 0, owner, mint: CIRCLE_USD_MINT, uiTokenAmount: { amount: '20' } }],
+          postTokenBalances: [{ accountIndex: 0, owner, mint: CIRCLE_USD_MINT, uiTokenAmount: { amount: '3' } }],
+        }, transaction: { message: { accountKeys: [owner] } } });
+      } }) },
+    };
+    const driver = createStageDriver({ liveMode: true,
+      adapters: explicit ? { collectorCrypt: throwingCollectorCrypt(), solana: { client: null } } : observedAdapters,
+      ...(explicit ? { reconciliationAdapters: observedAdapters } : {}),
+      signerClient: throwingSigner(), cycleRepository: repository,
+      config: baseConfig({ execution: { profile: 'production', providerMode: 'live' },
+        accounts: { solana: owner }, solana: { chainId: 'solana-mainnet' },
+        collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: 6 } },
+        moneyConfiguration: money,
+      }),
+    });
+    const context = { cycleId: CYCLE_ID, stage: 'purchase', assertLease() { if (!leaseCurrent) throw new Error('lost reconciliation lease'); } };
+    await assert.rejects(() => driver.execute(context), /requires reconciliation/);
+    const evidence = await driver.reconcile(context);
+    assert.equal(evidence.purchasedCount, 1);
+    assert.equal(evidence.packs[0].packCost.amountAtomic, '17');
+    assert.equal(statusReads, 1);
+    assert.equal(rpcReads, 2);
+    assert.deepEqual(await driver.reconcile(context), evidence);
+    assert.equal(statusReads, 1, 'durably reconciled attempt must not query or resend again');
+    // Re-open the unresolved boundary in this narrow journal fixture to isolate the existing fence.
+    repository.attempts.get(`${CYCLE_ID}:purchase`).attempt.state = 'PREPARED';
+    leaseCurrent = false;
+    await assert.rejects(() => driver.reconcile(context), /lost reconciliation lease/);
+    assert.equal(statusReads, 1, 'expired lease must prevent the provider observation');
+  });
+}
