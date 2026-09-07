@@ -16,6 +16,8 @@ import {
   loadStandingAuthority,
   EnvironmentConfigurationError,
 } from '../../src/app/environment.mjs';
+import { mutateEpicGate } from '../../src/app/stages/epic-gate.mjs';
+import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../src/collector-crypt.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
 
 const fixtureSignerOptions = Object.freeze({ preflightAuthority: createTestProfileMutationAuthority() });
@@ -833,4 +835,72 @@ test('loadStandingAuthority rejects symlinked and non-private production artifac
     () => nonPrivateAuthority.resolveStepAuthorization({}),
     /standing authority artifact must be a private regular file/,
   );
+});
+
+
+const explicitEpicFields = Object.freeze({
+  nftAddressField: 'card_id', insuredValueField: 'insured_units', prizeTierField: 'tier', rarityField: 'rarity_name',
+});
+
+async function epicEnvironment(t, document) {
+  const env = await productionEnv(t, { HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' });
+  const path = join(env.HOOKEMON_STATE_DIR, 'epic-fields.json');
+  await writeFile(path, JSON.stringify(document));
+  return { ...env, HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH: path };
+}
+
+test('explicit epic field configuration reaches the real handler from the production environment', async t => {
+  const env = await epicEnvironment(t, explicitEpicFields);
+  const config = readEnvironment(env, { profile: 'production' });
+  assert.deepEqual(config.collectorCrypt.epicGate, { ...explicitEpicFields, asset: COLLECTOR_CRYPT_SETTLEMENT_ASSET });
+  assert.ok(Object.isFrozen(config.collectorCrypt.epicGate));
+  const mint = 'isolated-opened-card';
+  const facts = { card_id: mint, insured_units: 100, tier: 4, rarity_name: 'common' };
+  const result = await mutateEpicGate({ liveMode: true, config,
+    adapters: { collectorCrypt: {
+      async getPackStatus({ memo }) { return { memo, pack: { pack_type: 'collector-25' }, send: facts }; },
+      async getNfts({ page, limit }) { return { nfts: [facts], page, limit, hasMore: false }; },
+      async getMachines() { return { machines: [{ code: 'collector-25', instantBuyback: 90 }] }; },
+      async getBuybackAvailable() { return { available: true, amount: { ...COLLECTOR_CRYPT_SETTLEMENT_ASSET, amountAtomic: '90' } }; },
+    } },
+    cycleRepository: { async recordHeldPosition() { assert.fail('independent valid facts must not become a hold'); } },
+    context: { cycleId: 'epic-config-cycle' },
+    request: { packs: [{ packIndex: 0, memo: 'epic-config-memo', mint, expectedCardCount: 1 }] },
+  });
+  assert.equal(result.packs[0].decision, 'sell');
+  assert.equal(result.packs[0].insuredValue.amountAtomic, '100');
+  assert.equal(result.packs[0].offer.amountAtomic, '90');
+  await writeFile(env.HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH, '{}');
+  assert.equal(config.collectorCrypt.epicGate.nftAddressField, 'card_id', 'loaded mapping is fixed before provider reads');
+});
+
+test('epic field configuration refuses malformed mappings and caller-authored assets', async t => {
+  for (const document of [{}, { ...explicitEpicFields, rarityField: '' }, { ...explicitEpicFields, nftAddressField: '__proto__' },
+    { ...explicitEpicFields, asset: { chainId: '792703809', assetId: 'wrong', decimals: 6 } }]) {
+    const env = await epicEnvironment(t, document);
+    assert.throws(() => readEnvironment(env, { profile: 'production' }), /COLLECTOR_EPIC_GATE_CONFIG_PATH/);
+  }
+  const config = readEnvironment(await productionEnv(t, { HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' }), { profile: 'production' });
+  assert.equal(config.collectorCrypt.epicGate, undefined, 'absence supplies no invented provider mapping');
+});
+
+
+test('missing epic configuration remains data-unverified and wrong settlement identity refuses loading', async t => {
+  const env = await productionEnv(t, { HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' });
+  const config = readEnvironment(env, { profile: 'production' });
+  let held;
+  const result = await mutateEpicGate({ liveMode: true, config,
+    adapters: { collectorCrypt: { async getPackStatus() { assert.fail('missing mapping must refuse before provider reads'); } } },
+    cycleRepository: {
+      async describeCycle() { return { releaseAmount: '17' }; },
+      async recordHeldPosition(_cycleId, value) { held = value; return { ...value, positionId: 'held-test', evidenceDigest: 'test' }; },
+    },
+    context: { cycleId: 'missing-epic-config' },
+    request: { packs: [{ packIndex: 0, memo: 'memo', mint: 'mint', expectedCardCount: 1 }] },
+  });
+  assert.equal(result.packs[0].decision, 'held');
+  assert.equal(held.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.match(held.evidence.reason, /explicit Collector field configuration/);
+  const configured = await epicEnvironment(t, explicitEpicFields);
+  assert.throws(() => readEnvironment({ ...configured, HOOKEMON_RELAY_SOLANA_MINT: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' }, { profile: 'production' }), /documented Collector settlement asset/);
 });

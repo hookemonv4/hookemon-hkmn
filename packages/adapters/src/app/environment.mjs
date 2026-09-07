@@ -163,6 +163,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   // An approved, non-secret canary/start-preflight document. The runner reads and validates it
   // before constructing a transaction-capable signer.
   'HOOKEMON_OBSERVABILITY_CONFIG_PATH',
+  'HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH',
   // WP-36: distribution.mjs's own configuration. HOOKEMON_HKMN_ADDRESS is the HKMN token contract
   // (once launched); HOOKEMON_HKMN_DEPLOY_BLOCK bounds how far back getTransferLogs must page from
   // (never guessed — 0 by default, a correct but expensive-to-page starting point until an operator
@@ -628,6 +629,28 @@ function readJsonObjectFile(env, name, { required = false } = {}) {
   return Object.freeze(value);
 }
 
+/** Provider field names are explicit operator configuration, never inferred from a response. */
+function readEpicGateConfiguration(env, moneyConfiguration) {
+  const name = 'HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH';
+  const value = readJsonObjectFile(env, name);
+  if (value === null) return null;
+  const fields = ['nftAddressField', 'insuredValueField', 'prizeTierField', 'rarityField'];
+  if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) {
+    fail(`${name} must contain exactly the four epic gate field mappings`);
+  }
+  const reserved = new Set(['__proto__', 'prototype', 'constructor']);
+  if (fields.some(field => typeof value[field] !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value[field]) || reserved.has(value[field]))
+    || new Set(fields.map(field => value[field])).size !== fields.length) {
+    fail(`${name} must contain distinct, nonempty plain field names`);
+  }
+  const asset = moneyConfiguration?.assets?.solanaStablecoin;
+  if (asset?.chainId !== '792703809' || asset.assetId !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.assetId
+    || asset.decimals !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.decimals) {
+    fail(`${name} requires the configured native Collector settlement asset`);
+  }
+  return Object.freeze({ ...value, asset: COLLECTOR_CRYPT_SETTLEMENT_ASSET });
+}
+
 /** Reads a private, regular credential file without following a symlink. The result stays only in
  * the in-memory adapter configuration and is never returned by a CLI projection or journal. */
 function readPrivateCredentialFile(path, label) {
@@ -996,6 +1019,8 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     solanaLamportReserve: readBudgetAmount(env, 'HOOKEMON_SOLANA_LAMPORT_RESERVE', { defaultValue: null }),
   });
 
+  const epicGate = readEpicGateConfiguration(env, moneyConfiguration);
+
   const hkmnAddress = readEvmAddress(env, 'HOOKEMON_HKMN_ADDRESS');
   const hkmnDecimals = readAssetDecimals(env, 'HOOKEMON_HKMN_DECIMALS');
   if (hkmnAddress !== null && hkmnDecimals === null) {
@@ -1047,6 +1072,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     collectorCrypt: Object.freeze({
       baseUrl: collectorCryptBaseUrl,
       apiKey: collectorCryptApiKey,
+      ...(epicGate === null ? {} : { epicGate }),
       ...(collectorOnlyRehearsal ? {
         executionBundleRequired: true,
         settlementAsset: Object.freeze({

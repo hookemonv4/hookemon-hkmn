@@ -53,6 +53,14 @@ repository client.
   receives only fenced broadcast, finality, custody, Relay-settlement, recovery-context, and
   wallet-nonce-release writers after canonical chain observation. Direct payout may idempotently
   record successor dust and release its nonce fence before returning terminal recovery evidence.
+- `HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH` optionally names a JSON object containing exactly
+  `nftAddressField`, `insuredValueField`, `prizeTierField`, and `rarityField`. Values are distinct
+  plain field identifiers supplied independently of provider responses; there are no default field
+  names. The loader freezes the mapping and derives its asset from the native Collector settlement
+  identity after validating the configured money asset. The file cannot override that asset or any
+  epic threshold. Missing configuration preserves the handler's data-unverified refusal; malformed
+  configuration refuses loading. This configuration selects provider fields, not transaction signing
+  authority or approval of live provider facts.
 - `readEnvironment` accepts standing-authority material only as one document path, one owner public
   key path, and one policy public key path. `loadStandingAuthority` verifies the owner signature and
   policy-key binding, then loads the private canonical state-directory artifact
