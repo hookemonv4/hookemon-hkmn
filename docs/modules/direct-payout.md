@@ -242,3 +242,5 @@ node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.
 The guarded Operations EVM backend supplies signing and either plain or approval-bound
 broadcast. The payout policy wrapper remains the active signer and broadcast gate for both
 ports; an approval-bound backend never receives an invented plain broadcast capability.
+
+The wallet nonce boundary resolves a renewed automation context against the durable reservation before asserting or releasing it. Only the same cycle, chain, wallet, stage, fencing token and acquisition timestamp may retain that reservation's original expiry. A later context expiry does not extend a held nonce lease; signing still refuses after its original deadline. Released handles retain their original window only for idempotent release. A new reservation after release uses the current active lease window. Reopening the repository or rebuilding a context does not change the binding, and a stale release cannot remove a successor's global reservation.

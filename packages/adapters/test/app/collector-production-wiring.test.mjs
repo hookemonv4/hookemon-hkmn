@@ -42,12 +42,12 @@ function baseConfig(overrides = {}) {
 // A minimal durable write-ahead repository: enough for the driver's own bookkeeping
 // (prepareStageAttempt/markStageAttemptNotSent/readOperationalStageAttempt) plus the read-only
 // methods a real prepareRequest may call (readStage, describeCycle, listHeldPositions).
-function productionCycleRepository(stages = new Map()) {
+function productionCycleRepository(stages = new Map(), admission = null) {
   const attempts = new Map();
   return {
     attempts,
     async readStage(cycleId, stage) { return stages.get(stage) ?? { status: 'PENDING' }; },
-    async describeCycle() { return { releaseAmount: '1' }; },
+    async describeCycle() { return { releaseAmount: '1', admission }; },
     async listHeldPositions() { return []; },
     async readOperationalStageAttempt(cycleId, stage) { return attempts.get(stage) ?? null; },
     async prepareStageAttempt(cycleId, stage, attempt) {
@@ -132,7 +132,11 @@ test('purchase preparation in true production mode receives only a lease-fenced 
 });
 
 test('purchase reaches the real Collector machine catalog in true production mode instead of throwing on missing wiring, then still refuses at its own Solana-configuration boundary', async () => {
-  const cycleRepository = productionCycleRepository();
+  const cycleRepository = productionCycleRepository(new Map(), {
+    packId: 'collector-25', quantity: 1,
+    unitPurchase: { amountAtomic: '25000000' },
+    aggregatePurchase: { amountAtomic: '25000000' },
+  });
   const driver = createStageDriver({
     liveMode: true,
     adapters: throwingAdapters({

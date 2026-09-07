@@ -931,10 +931,10 @@ test("keeps the hero focused on the coin while showing inventory cards later", a
   const cardsStart = html.indexOf('id="cards"');
   assert.ok(heroStart > -1 && heroEnd > heroStart && cardsStart > heroEnd);
   assert.doesNotMatch(html.slice(heroStart, heroEnd), /d1xpxki1g4htqu\.cloudfront\.net/);
-  assert.match(html.slice(cardsStart), /Lugia-Holo SL7/);
+  assert.match(html.slice(cardsStart), /Mario Pikachu/);
 });
 
-test("shows the same labelled example cards in the scroll scene and collection", async () => {
+test("keeps the scroll scene and selected collection explicitly illustrative", async () => {
   const html = await (await render()).text();
   const journeyStart = html.indexOf('id="journey"');
   const cardsStart = html.indexOf('id="cards"');
@@ -944,8 +944,8 @@ test("shows the same labelled example cards in the scroll scene and collection",
   const collection = html.slice(cardsStart, collectionEnd);
   assert.match(journey, /Illustrative cycle · example cards/);
   assert.match(collection, /Example cards from Collector Crypt inventory/);
-  const sharedImages = showcaseImages.filter((image) => journey.includes(image) && collection.includes(image));
-  assert.equal(sharedImages.length, 3);
+  assert.equal(showcaseImages.filter((image) => journey.includes(image)).length, 3);
+  assert.match(collection, /highest insured-value individual card for each Pokémon across all 9 listed packs/);
 });
 
 test("keeps the Collector Crypt partner secret out of every client asset", async () => {
@@ -1126,12 +1126,12 @@ test("keeps all explanatory content available without JavaScript", async () => {
   assert.doesNotMatch(html, /class="[^"]*\breveal\b|\bhidden\b[^>]*id="(?:machine|economics|faq)"/);
 });
 
-test("renders seven tactile card examples with their names and grades", async () => {
+test("renders Lugia and six upright iconic cards with their names and grades", async () => {
   const html = await (await render()).text();
   assert.match(html, /id="cards"/);
   assert.equal((html.match(/<figure class="collectible-card /g) ?? []).length, 7);
-  for (const card of ["Rayquaza", "Lugia", "Poncho Pikachu", "Charizard", "Umbreon VMAX", "Shining Mewtwo", "Mew Gold Star"]) assert.ok(html.includes(card));
-  for (const grade of ["BGS 8", "PSA 10", "PSA 9"]) assert.ok(html.includes(grade));
+  for (const card of ["Mew", "Mewtwo", "Charizard", "Blastoise", "Venusaur", "Pikachu"]) assert.ok(html.includes(card));
+  for (const grade of ["PSA 10"]) assert.ok(html.includes(grade));
   assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);
 });
 
@@ -1144,9 +1144,9 @@ test("summarizes recent cards and the latest cycle payout separately", async () 
   assert.match(html, /Awaiting verified payout data/);
 });
 
-test("targets inner tilt surfaces and links only the gallery valuations", async () => {
+test("keeps tilt in the scene and gallery source links explicit", async () => {
   const html = await (await render()).text();
-  assert.equal((html.match(/data-tilt-surface/g) ?? []).length, 10);
+  assert.equal((html.match(/data-tilt-surface/g) ?? []).length, 3);
   assert.match(html, /<figure class="scene-card [^"]+ js-tilt"><div data-tilt-surface>/);
   assert.match(html, /src="\/comic-production\/motion\.mjs"/);
   const cards = html.slice(html.indexOf('id="cards"'), html.indexOf('id="economics"'));
@@ -1154,7 +1154,7 @@ test("targets inner tilt surfaces and links only the gallery valuations", async 
   const valuationLinks = links.filter((tag) => tag.includes('class="card-valuation"'));
   assert.equal(valuationLinks.length, 7);
   assert.ok(valuationLinks.every((tag) => tag.includes('href="https://collectorcrypt.com/assets/solana/')));
-  const packCtaLinks = links.filter((tag) => !tag.includes('class="card-valuation"'));
+  const packCtaLinks = links.filter((tag) => tag.includes('class="button"'));
   assert.equal(packCtaLinks.length, 1);
   assert.equal(packCtaLinks[0], '<a class="button" href="/packs">');
   assert.match(cards, /<a class="button" href="\/packs">Explore the packs/);

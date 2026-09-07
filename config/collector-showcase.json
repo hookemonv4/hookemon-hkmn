@@ -1,71 +1,550 @@
 {
-  "checkedAt": "2026-09-05",
+  "checkedAt": "2026-09-07T05:40:16.366Z",
   "currency": "USD",
   "valueType": "insuredValue",
-  "source": "Collector Crypt public asset API",
+  "source": "Collector Crypt public pack inventory API",
+  "coverage": {
+    "packs": 9,
+    "tiers": 36,
+    "pages": 620,
+    "cardRows": 14508,
+    "uniqueAssets": 10156,
+    "completedTiers": 36,
+    "uncoveredPages": [],
+    "errors": []
+  },
+  "selectionRules": {
+    "rank": "Highest current provider insured value, not sale price",
+    "species": "Exact word match; Mew does not match Mewtwo",
+    "individualCards": "Exclude ungraded named sealed boxes and products; chosen six are graded individual cards",
+    "membership": "Same asset in multiple packs: display membership of highest price pack; rarity is pack-relative",
+    "featured": "Lugia remains the featured chase card above the six selected species."
+  },
   "cards": [
     {
-      "itemName": "2005 #107 Rayquaza Gold Star HOLO R BGS 8 EX Deoxys",
-      "grade": "8-NM-MT",
-      "gradingCompany": "Beckett",
-      "gradingID": "0015554214",
-      "nftAddress": "3A5unBCuL8hKrmqM8cpWH4C7Ly9MkGF8briwpxdCwTdM",
-      "insuredValue": "40000",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/G7-UpVecMsF9fyxKMoVun6yRqahg-2fDLtHvwS9Lt34"
-    },
-    {
-      "itemName": "2011 #SL7 Lugia-Holo PSA 10 Call of Legends",
+      "id": "H1sSmJcCVdepcPQTVgD8JkjiMzn1AMRJ8i5HqawssH47",
+      "name": "2011 #SL7 Lugia-Holo PSA 10 Call of Legends",
+      "rarity": "epic",
+      "insuredValue": 250000,
+      "currency": "USD",
+      "estimatedBuybackUsd": 232500,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/DvR84utcDLE8YBxQkl2Q-nlpQdpJjVxKan0ULfUlL2w",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/2dEAWJCk4yDLCDU67LL4WthRtU0qn1ElGt8Fl36S4iY",
       "grade": "GEM-MT 10",
       "gradingCompany": "PSA",
-      "gradingID": "28478646",
+      "certification": "28478646",
+      "year": "2011",
+      "category": "Pokemon",
+      "parallel": "Base",
+      "population": 19,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/H1sSmJcCVdepcPQTVgD8JkjiMzn1AMRJ8i5HqawssH47",
+      "species": "Lugia",
       "nftAddress": "H1sSmJcCVdepcPQTVgD8JkjiMzn1AMRJ8i5HqawssH47",
-      "insuredValue": "250000",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/A7Vvp6B8ov3_jFmjR-gFmW2wf3J93_oL67PgCYK8Sn4"
+      "gradingID": "28478646",
+      "itemName": "2011 #SL7 Lugia-Holo PSA 10 Call of Legends",
+      "pack": {
+        "code": "pokemon_5000",
+        "name": "Celestial Pokémon Gacha Pack",
+        "category": "Pokémon",
+        "price": 5000,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 93,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_5000/thumb-tDYyrGyQhgv7b7ui9YEHvH5Suabie3.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 2500,
+            "maximum": 5000
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 5000,
+            "maximum": 10000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 10000,
+            "maximum": 20000
+          },
+          {
+            "rarity": "epic",
+            "minimum": 20000,
+            "maximum": 280001
+          }
+        ]
+      },
+      "buybackCashOutRangeUsd": [
+        232500,
+        232500
+      ]
     },
     {
-      "itemName": "2016 #231 PONCHO-WEARING PIKACHU PSA 10 POKEMON JAPANESE XY PROMO | RAYQUAZA PONCHO-WEARING PIKACHU BOX",
+      "id": "6rFgwVV6Uie7kAnWGEY6BbgrHkLxCJR1mzMVE8eot6hr",
+      "name": "2013 #024 Full Art/Mew EX 1st Edition PSA 10 Japanese Black & White Shiny Collection",
+      "rarity": "uncommon",
+      "insuredValue": 7350,
+      "currency": "USD",
+      "estimatedBuybackUsd": 6835.5,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/tQSb5KGQ2MG52pnoA5aGAHtAOmRhiolLv4XGBhf-hLY",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/ercSk1DYPBJW7dsS08HU6lmAdTFTEu-uYV5liMrDA2k",
       "grade": "GEM-MT 10",
       "gradingCompany": "PSA",
-      "gradingID": "110630657",
-      "nftAddress": "6aSSRLz6eNppavyKSygZqrL3PfQU5WT5FarjwMegE14E",
-      "insuredValue": "17500",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/-bohVu_T0vqivMHLHBvJq46JcuPFl0N3g-QWI2uIBHY"
+      "certification": "84041565",
+      "year": "2013",
+      "category": "Pokemon",
+      "parallel": "1st Edition",
+      "population": 782,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/6rFgwVV6Uie7kAnWGEY6BbgrHkLxCJR1mzMVE8eot6hr",
+      "pack": {
+        "code": "pokemon_5000",
+        "name": "Celestial Pokémon Gacha Pack",
+        "category": "Pokémon",
+        "price": 5000,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 93,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_5000/thumb-tDYyrGyQhgv7b7ui9YEHvH5Suabie3.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 2500,
+            "maximum": 5000
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 5000,
+            "maximum": 10000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 10000,
+            "maximum": 20000
+          },
+          {
+            "rarity": "epic",
+            "minimum": 20000,
+            "maximum": 280001
+          }
+        ]
+      },
+      "page": 1,
+      "species": "Mew",
+      "itemName": "2013 #024 Full Art/Mew EX 1st Edition PSA 10 Japanese Black & White Shiny Collection",
+      "nftAddress": "6rFgwVV6Uie7kAnWGEY6BbgrHkLxCJR1mzMVE8eot6hr",
+      "gradingID": "84041565",
+      "memberships": [
+        {
+          "packCode": "pokemon_500",
+          "packName": "Hyper Pokémon Gacha",
+          "rarity": "epic",
+          "instantBuybackPercent": 90,
+          "estimatedBuybackUsd": 6615,
+          "page": 4
+        },
+        {
+          "packCode": "pokemon_5000",
+          "packName": "Celestial Pokémon Gacha Pack",
+          "rarity": "uncommon",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 6835.5,
+          "page": 1
+        }
+      ],
+      "buybackCashOutRangeUsd": [
+        6615,
+        6835.5
+      ]
     },
     {
-      "itemName": "2003 #146 Charizard-Holo PSA 10 Skyridge",
+      "id": "6CKQDzygkPZ4yM92gnScHxgyNmqMeUjqzoG6BpSPXArD",
+      "name": "2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny",
+      "rarity": "epic",
+      "insuredValue": 45000,
+      "currency": "USD",
+      "estimatedBuybackUsd": 41850,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/vxXD-B_fAqtcm3FYRDhPzkSefTdmjs58q69L09IgN00",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/wJVh6-3EOM-Dx2mQ9Qjp06ZXpgmg_UDIEzT3Dw72uF8",
       "grade": "GEM-MT 10",
       "gradingCompany": "PSA",
-      "gradingID": "25067462",
-      "nftAddress": "5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3",
-      "insuredValue": "135000",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/k-xZqCMa5kCE2IxBvf682ssG8BpLTT-qp03D3wpkCFo"
-    },
-    {
-      "itemName": "2021 #095 Full Art/Umbreon Vmax-Hyper PSA 10 Japanese Sword & Shield Eevee Heroes",
-      "grade": "GEM-MT 10",
-      "gradingCompany": "PSA",
-      "gradingID": "91564783",
-      "nftAddress": "4ERfJkc6xoh1Codq7Zo7TdeCdznYua1q15HtmBmTf6Uq",
-      "insuredValue": "5400",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/DpcxDIltAT6DxRXoxe5hxa2N1hRec_hCh7cHZC3KFFY"
-    },
-    {
+      "certification": "43900017",
+      "year": "2002",
+      "category": "Pokemon",
+      "parallel": "1st Edition",
+      "population": 235,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/6CKQDzygkPZ4yM92gnScHxgyNmqMeUjqzoG6BpSPXArD",
+      "pack": {
+        "code": "pokemon_5000",
+        "name": "Celestial Pokémon Gacha Pack",
+        "category": "Pokémon",
+        "price": 5000,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 93,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_5000/thumb-tDYyrGyQhgv7b7ui9YEHvH5Suabie3.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 2500,
+            "maximum": 5000
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 5000,
+            "maximum": 10000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 10000,
+            "maximum": 20000
+          },
+          {
+            "rarity": "epic",
+            "minimum": 20000,
+            "maximum": 280001
+          }
+        ]
+      },
+      "page": 1,
+      "species": "Mewtwo",
       "itemName": "2002 #109 Shining Mewtwo 1st Edition PSA 10 Neo Destiny",
-      "grade": "GEM-MT 10",
-      "gradingCompany": "PSA",
-      "gradingID": "24125808",
-      "nftAddress": "CKj6vBnWppVChNCN17F8UjQSLjmRVhxaVyVGFsbyxQDC",
-      "insuredValue": "45000",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/bSiRn8DaTiIF8wOhkfyUy6b2bmMgTBlRFpUmK6aHS_s"
+      "nftAddress": "6CKQDzygkPZ4yM92gnScHxgyNmqMeUjqzoG6BpSPXArD",
+      "gradingID": "43900017",
+      "memberships": [
+        {
+          "packCode": "pokemon_2500",
+          "packName": "Mythic Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 41850,
+          "page": 1
+        },
+        {
+          "packCode": "pokemon_5000",
+          "packName": "Celestial Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 41850,
+          "page": 1
+        }
+      ],
+      "buybackCashOutRangeUsd": [
+        41850,
+        41850
+      ]
     },
     {
-      "itemName": "2006 #101 Mew-Holo Gold Star PSA 9 EX Dragon Frontiers Pokemon",
-      "grade": "MINT 9",
+      "id": "5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3",
+      "name": "2003 #146 Charizard-Holo PSA 10 Skyridge",
+      "rarity": "epic",
+      "insuredValue": 135000,
+      "currency": "USD",
+      "estimatedBuybackUsd": 125550,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/U9FB1MU94P_o7-pkVi_rPzeH23sWxuoA4Cjh82vCme8",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/_3TMuZJ_UTaQw0B5tm4YBZdls5c1E2v7H5OLsbHvG0o",
+      "grade": "GEM-MT 10",
       "gradingCompany": "PSA",
-      "gradingID": "123599299",
-      "nftAddress": "CqGUW13AarrctjQvehYAQkFE2xhYwZEG1Ti7Kxw8m237",
-      "insuredValue": "11500",
-      "image": "https://d1xpxki1g4htqu.cloudfront.net/9weuzxf7QdOYDfRw91Ysn9UMvwCL0aE1dwgXJxwNY9M"
+      "certification": "25067462",
+      "year": "2003",
+      "category": "Pokemon",
+      "parallel": "Base",
+      "population": 250,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3",
+      "pack": {
+        "code": "pokemon_5000",
+        "name": "Celestial Pokémon Gacha Pack",
+        "category": "Pokémon",
+        "price": 5000,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 93,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_5000/thumb-tDYyrGyQhgv7b7ui9YEHvH5Suabie3.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 2500,
+            "maximum": 5000
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 5000,
+            "maximum": 10000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 10000,
+            "maximum": 20000
+          },
+          {
+            "rarity": "epic",
+            "minimum": 20000,
+            "maximum": 280001
+          }
+        ]
+      },
+      "page": 1,
+      "species": "Charizard",
+      "itemName": "2003 #146 Charizard-Holo PSA 10 Skyridge",
+      "nftAddress": "5ttf7yKiLi7zANSMhyhEr8EmDYqmwNYRTLSGDhNEe2o3",
+      "gradingID": "25067462",
+      "memberships": [
+        {
+          "packCode": "pokemon_5000",
+          "packName": "Celestial Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 125550,
+          "page": 1
+        }
+      ],
+      "buybackCashOutRangeUsd": [
+        125550,
+        125550
+      ]
+    },
+    {
+      "id": "DPcmwck5hR9zKH12g87n3TUcqKkPC8sGDkTUxtDrZJNa",
+      "name": "1999 #2 Blastoise-Holo 1st Edition PSA 10 Game",
+      "rarity": "epic",
+      "insuredValue": 82500,
+      "currency": "USD",
+      "estimatedBuybackUsd": 76725,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/_Omra13upymrmLi5mpgdGOTyFvc_tlCsHDn9xh0mDE8",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/wYxM_H1ih7xC9GAwjnuOZABk_M-RCJHIcV2XBbXWwyU",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "certification": "26106125",
+      "year": "1999",
+      "category": "Pokemon",
+      "parallel": "1st Edition",
+      "population": 101,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/DPcmwck5hR9zKH12g87n3TUcqKkPC8sGDkTUxtDrZJNa",
+      "pack": {
+        "code": "pokemon_5000",
+        "name": "Celestial Pokémon Gacha Pack",
+        "category": "Pokémon",
+        "price": 5000,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 93,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_5000/thumb-tDYyrGyQhgv7b7ui9YEHvH5Suabie3.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 2500,
+            "maximum": 5000
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 5000,
+            "maximum": 10000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 10000,
+            "maximum": 20000
+          },
+          {
+            "rarity": "epic",
+            "minimum": 20000,
+            "maximum": 280001
+          }
+        ]
+      },
+      "page": 1,
+      "species": "Blastoise",
+      "itemName": "1999 #2 Blastoise-Holo 1st Edition PSA 10 Game",
+      "nftAddress": "DPcmwck5hR9zKH12g87n3TUcqKkPC8sGDkTUxtDrZJNa",
+      "gradingID": "26106125",
+      "memberships": [
+        {
+          "packCode": "pokemon_2500",
+          "packName": "Mythic Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 76725,
+          "page": 1
+        },
+        {
+          "packCode": "pokemon_5000",
+          "packName": "Celestial Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 76725,
+          "page": 1
+        }
+      ],
+      "buybackCashOutRangeUsd": [
+        76725,
+        76725
+      ]
+    },
+    {
+      "id": "6hhiW8pbdT9ypL8rgUwSX9aGBkjTcVBnsvzr7iC82yWf",
+      "name": "1999 #15 Venusaur-Holo 1st Edition PSA 10 Game",
+      "rarity": "epic",
+      "insuredValue": 42000,
+      "currency": "USD",
+      "estimatedBuybackUsd": 39060,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/XO1t__Yh4wWgcMefl_tumIT4dayrRgVJQ6eRaK3kPCo",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/bBh2V_TjNB1eI4WINlLyJ9teN85xdBxEprKcxGMhFcs",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "certification": "14914156",
+      "year": "1999",
+      "category": "Pokemon",
+      "parallel": "1st Edition",
+      "population": 145,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/6hhiW8pbdT9ypL8rgUwSX9aGBkjTcVBnsvzr7iC82yWf",
+      "pack": {
+        "code": "pokemon_5000",
+        "name": "Celestial Pokémon Gacha Pack",
+        "category": "Pokémon",
+        "price": 5000,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 93,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_5000/thumb-tDYyrGyQhgv7b7ui9YEHvH5Suabie3.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 2500,
+            "maximum": 5000
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 5000,
+            "maximum": 10000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 10000,
+            "maximum": 20000
+          },
+          {
+            "rarity": "epic",
+            "minimum": 20000,
+            "maximum": 280001
+          }
+        ]
+      },
+      "page": 1,
+      "species": "Venusaur",
+      "itemName": "1999 #15 Venusaur-Holo 1st Edition PSA 10 Game",
+      "nftAddress": "6hhiW8pbdT9ypL8rgUwSX9aGBkjTcVBnsvzr7iC82yWf",
+      "gradingID": "14914156",
+      "memberships": [
+        {
+          "packCode": "pokemon_2500",
+          "packName": "Mythic Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 39060,
+          "page": 1
+        },
+        {
+          "packCode": "pokemon_5000",
+          "packName": "Celestial Pokémon Gacha Pack",
+          "rarity": "epic",
+          "instantBuybackPercent": 93,
+          "estimatedBuybackUsd": 39060,
+          "page": 1
+        }
+      ],
+      "buybackCashOutRangeUsd": [
+        39060,
+        39060
+      ]
+    },
+    {
+      "id": "D15nVr8z3kHXnufaqGASbUymK6gJbioRJy8FSENM6TJV",
+      "name": "2016 #294 Full Art/Mario Pikachu PSA 10 Japanese XY Promo",
+      "rarity": "epic",
+      "insuredValue": 30000,
+      "currency": "USD",
+      "estimatedBuybackUsd": 27000,
+      "image": "https://d1xpxki1g4htqu.cloudfront.net/i2d1MKNt2-VCsUIsjN6puBEbExqM0dw1Z7sMfHg-uRE",
+      "backImage": "https://d1xpxki1g4htqu.cloudfront.net/dlPivMBxPtcVTWnh-FZpFCFtnFgzenX1CY3yNnnLLac",
+      "grade": "GEM-MT 10",
+      "gradingCompany": "PSA",
+      "certification": "123608651",
+      "year": "2016",
+      "category": "Pokemon",
+      "parallel": "Mario Pikachu Special Box",
+      "population": 2212,
+      "vault": "OmniVault",
+      "sourceUrl": "https://collectorcrypt.com/assets/solana/D15nVr8z3kHXnufaqGASbUymK6gJbioRJy8FSENM6TJV",
+      "pack": {
+        "code": "pokemon_500",
+        "name": "Hyper Pokémon Gacha",
+        "category": "Pokémon",
+        "price": 500,
+        "currency": "USD",
+        "contains": 1,
+        "availability": "open",
+        "instantBuybackPercent": 90,
+        "sourceUrl": "https://gacha.collectorcrypt.com/",
+        "image": "https://degwuxynwtb2zaso.public.blob.vercel-storage.com/machines/pokemon_500/thumb-LMUZ2Qvweg6274nDWr8PHZ0v97I6dV.png",
+        "tiers": [
+          {
+            "rarity": "common",
+            "minimum": 250,
+            "maximum": 500
+          },
+          {
+            "rarity": "uncommon",
+            "minimum": 500,
+            "maximum": 1000
+          },
+          {
+            "rarity": "rare",
+            "minimum": 1000,
+            "maximum": 2500
+          },
+          {
+            "rarity": "epic",
+            "minimum": 2500,
+            "maximum": 50001
+          }
+        ]
+      },
+      "page": 1,
+      "species": "Pikachu",
+      "itemName": "2016 #294 Full Art/Mario Pikachu PSA 10 Japanese XY Promo",
+      "nftAddress": "D15nVr8z3kHXnufaqGASbUymK6gJbioRJy8FSENM6TJV",
+      "gradingID": "123608651",
+      "memberships": [
+        {
+          "packCode": "pokemon_500",
+          "packName": "Hyper Pokémon Gacha",
+          "rarity": "epic",
+          "instantBuybackPercent": 90,
+          "estimatedBuybackUsd": 27000,
+          "page": 1
+        }
+      ],
+      "buybackCashOutRangeUsd": [
+        27000,
+        27000
+      ]
     }
   ]
 }

@@ -13,7 +13,7 @@ import { openSqliteProjection } from '../../src/storage/sqlite-projection.mjs';
 import { createOperatorControl } from '../../../runner/src/operator/control.mjs';
 import { createDefaultOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { CUSTODY_LEDGER_BUCKETS } from '../../../runner/src/cycle/money-schemas.mjs';
-import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
+import { OPERATOR_HARD_CAPS, createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 
 const CREDENTIAL = 'a'.repeat(40);
 const AUTH = { 'x-hookemon-proxy-credential': CREDENTIAL };
@@ -72,7 +72,7 @@ async function buildTestServer(t, overrides = {}) {
   const sqliteProjection = openSqliteProjection(':memory:');
   let revision = 0;
   let currentConfiguration = configuration();
-  const calls = { status: 0, execute: [] };
+  const calls = { status: 0, execute: [], errors: [] };
   const authority = {
     async status() {
       calls.status += 1;
@@ -95,6 +95,7 @@ async function buildTestServer(t, overrides = {}) {
     },
   };
   const ctx = {
+    onError: (operation, error) => calls.errors.push({ operation, message: error.message }),
     profileId: 'mainnet',
     proxyCredential: CREDENTIAL,
     operatorControl: authority,
@@ -127,7 +128,7 @@ async function buildTestServer(t, overrides = {}) {
     if (text) {
       try { parsed = JSON.parse(text); } catch { parsed = text; }
     }
-    return { status, body: parsed };
+    return { status, body: parsed, diagnostics: JSON.stringify(calls.errors) };
   }
   return {
     ctx,
@@ -179,9 +180,18 @@ test('bootstrap accepts the proxy credential and an optional valid Access assert
   assert.equal(missing.status, 401);
   assert.equal(missing.body.code, 'ACCESS_ASSERTION_REQUIRED');
   const result = await server.get('/operator/api/bootstrap', { ...AUTH, 'cf-access-jwt-assertion': 'token' });
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 200, result.diagnostics);
   assert.equal(result.body.identity.email, 'operator-console');
   assert.equal(result.body.state.desiredStatus, 'active');
+});
+
+test('bootstrap projects only its published hard caps when runner custody caps are present', async t => {
+  assert.equal(OPERATOR_HARD_CAPS.maxHeldPositions, '1000');
+  const server = await buildTestServer(t);
+  const result = await server.get('/operator/api/bootstrap', AUTH);
+  assert.equal(result.status, 200, result.diagnostics);
+  const fields = ['maxBoostersPerCycle', 'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg'];
+  assert.deepEqual(result.body.hardCaps, Object.fromEntries(fields.map(field => [field, OPERATOR_HARD_CAPS[field]])));
 });
 
 test('authority mutations appear in the next bootstrap view and its durable audit projection', async (t) => {
@@ -212,7 +222,7 @@ test('run-cycle-now invokes the authority once and retains its precomputed recei
   const result = await server.post('/operator/api/decisions', {
     requestId: 'run-now', expectedVersion: 0, command: { type: 'run-cycle-now' },
   }, AUTH);
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 200, result.diagnostics);
   assert.equal(result.body.code, 'TICK_TRIGGERED');
   assert.deepEqual(server.calls.execute, [{ expectedRevision: 0, requestId: 'run-now', command: { type: 'run-cycle-now' } }]);
 });
@@ -277,7 +287,7 @@ test('owner dashboard projects cycles and custody from an authority built with a
   });
   const server = await buildTestServer(t, { operatorControl: authority });
   const result = await server.get('/operator/api/dashboard', AUTH);
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 200, result.diagnostics);
   assert.equal(result.body.cycles[0].cycleId, cycleId);
   assert.equal(result.body.custody.buckets[0].cycleId, cycleId);
   assert.equal(result.body.custody.buckets[0].buckets.claimed.amountAtomic, '0');
@@ -379,6 +389,7 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -406,7 +417,7 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
   const stale = await server.post('/operator/api/decisions', {
     requestId: 'stale-revision', expectedVersion: 1, command: { type: 'pause' },
   }, AUTH);
-  assert.equal(stale.status, 409);
+  assert.equal(stale.status, 409, stale.diagnostics);
   assert.equal(stale.body.code, 'COMMAND_REJECTED');
   assert.equal(stale.body.commandState, 'REJECTED');
   assert.equal((await readOperatorState(statePath)).configuration.paused, false);
@@ -428,7 +439,7 @@ test('reusing a request id with another command is rejected without another auth
 test('reconcile maps to one read-only authority command', async (t) => {
   const server = await buildTestServer(t);
   const result = await server.post('/operator/api/decisions', { requestId: 'reconcile-1', expectedVersion: 0, command: { type: 'reconcile' } }, AUTH);
-  assert.equal(result.status, 200);
+  assert.equal(result.status, 200, result.diagnostics);
   assert.deepEqual(server.calls.execute, [{ expectedRevision: 0, requestId: 'reconcile-1', command: { type: 'reconcile' } }]);
 });
 

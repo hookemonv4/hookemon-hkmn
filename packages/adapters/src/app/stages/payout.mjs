@@ -44,7 +44,7 @@ import {
 } from '../../signing/transaction-policy.mjs';
 import { deriveAuthorizationNonce, deriveOnchainCycleId } from './action-builder.mjs';
 import { StageMutationRevertedError } from './errors.mjs';
-import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
 const STAGE = 'payout';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -1573,13 +1573,13 @@ async function assertDurablePayoutRecoveryContext({ cycleRepository, state, atte
   if (!cycleRepository || typeof cycleRepository.assertWalletNonce !== 'function') {
     fail('direct payout recovery requires the wallet nonce reservation');
   }
-  await cycleRepository.assertWalletNonce(state.cycleId, {
+  await cycleRepository.assertWalletNonce(state.cycleId, await resolveWalletNonceReservation(cycleRepository, state.cycleId, {
     chainId: '4663',
     wallet: state.operations,
     stage: STAGE,
     fencingToken: payload.fencingToken,
-    ...walletNonceLeaseWindow({ ...nonceLeaseContext, fencingToken: payload.fencingToken }, 'direct payout recovery wallet nonce reservation'),
-  });
+    ...walletNonceLeaseWindow(nonceLeaseContext, 'direct payout recovery wallet nonce reservation'),
+  }));
   return payload;
 }
 
@@ -3158,7 +3158,7 @@ async function reserveDirectPayoutWalletNonce({ cycleRepository, context, config
   if (typeof cycleRepository.reserveWalletNonce !== 'function' || typeof cycleRepository.assertWalletNonce !== 'function') {
     fail('direct payout production execution requires a global wallet nonce reservation repository');
   }
-  const reservation = directPayoutWalletNonceReservationInput({ context, config });
+  const reservation = await resolveWalletNonceReservation(cycleRepository, context.cycleId, directPayoutWalletNonceReservationInput({ context, config }));
   await cycleRepository.reserveWalletNonce(context.cycleId, reservation);
   await cycleRepository.assertWalletNonce(context.cycleId, reservation);
   return reservation;
@@ -3170,7 +3170,7 @@ async function assertDirectPayoutWalletNonce({ cycleRepository, context, config 
   }
   await cycleRepository.assertWalletNonce(
     context.cycleId,
-    directPayoutWalletNonceReservationInput({ context, config }),
+    await resolveWalletNonceReservation(cycleRepository, context.cycleId, directPayoutWalletNonceReservationInput({ context, config })),
   );
 }
 
@@ -3180,7 +3180,7 @@ async function releaseDirectPayoutWalletNonce({ cycleRepository, context, config
   }
   await cycleRepository.releaseWalletNonce(
     context.cycleId,
-    directPayoutWalletNonceReservationInput({ context, config }),
+    await resolveWalletNonceReservation(cycleRepository, context.cycleId, directPayoutWalletNonceReservationInput({ context, config }), { release: true }),
   );
 }
 
@@ -3201,7 +3201,7 @@ async function recoverDirectPayoutWalletNonce({ cycleRepository, context, config
     stage: STAGE,
     fencingToken: context.fencingToken,
   });
-  const input = directPayoutWalletNonceReservationInput({ context, config });
+  const input = await resolveWalletNonceReservation(cycleRepository, context.cycleId, directPayoutWalletNonceReservationInput({ context, config }), { release: true });
   try {
     await cycleRepository.releaseWalletNonce(context.cycleId, input);
     return;

@@ -151,7 +151,7 @@
     {
       "id": "dashboard",
       "path": "docs/modules/dashboard.md",
-      "sha256": "9e4c754f6f9ff1b4c47f21dc7955e4539fd2234e4d9483eb30b9d4fcbc6f71d4"
+      "sha256": "152234724f572ae038d7ddb5ef6b312806fcf1e8b1628f9f241069a15172889a"
     },
     {
       "id": "release-evidence",
@@ -161,7 +161,7 @@
     {
       "id": "website",
       "path": "docs/modules/website.md",
-      "sha256": "905d2fd801b2d8c0751147043112a1a4fcfc508db0bbddb514a90857478d2690"
+      "sha256": "314505f7dacd8f6c962fbc5bbd80edb8762bec6c805468fd5f07cda870772f6d"
     }
   ]
 }
