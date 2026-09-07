@@ -44,6 +44,8 @@
 // real, read-only network calls — `simulateExecution` is the only "would have done X" stand-in,
 // used when the caller does not want to expose the raw steps for signing.
 
+import { digest } from '../../runner/src/cycle/journal.mjs';
+
 const RELAY_BASE_URL = 'https://api.relay.link';
 const ROBINHOOD_CHAIN_ID = 4663;
 const SOLANA_CHAIN_ID = 792703809;
@@ -179,6 +181,7 @@ function invariant(condition, ErrorClass, message, details) {
 }
 
 const CANONICAL_DECIMAL = /^(?:0|[1-9][0-9]*)$/;
+const QUOTE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 function assertCanonicalAmount(value, label) {
   invariant(
     typeof value === 'string' && CANONICAL_DECIMAL.test(value),
@@ -345,7 +348,32 @@ function assertPositiveUnixSeconds(value, label) {
   return value;
 }
 
-function assertQuoteIdentity(raw, { direction, origin, destination, user, recipient, amount }) {
+const TRADE_TYPES = new Set(['EXACT_INPUT', 'EXACT_OUTPUT', 'EXPECTED_OUTPUT']);
+
+function assertTradeType(value, label = 'tradeType') {
+  invariant(typeof value === 'string' && TRADE_TYPES.has(value), RelayAdapterError, `${label} is invalid`);
+  return value;
+}
+
+/** A content address for the fully parsed Relay response, including executable steps. */
+export function relayQuoteDigest(quote) {
+  invariant(quote && typeof quote === 'object' && quote.raw && typeof quote.raw === 'object', RelayMalformedResponseError, 'Relay quote digest requires a parsed quote with raw response');
+  return digest({
+    schema: 'hookemon.relay-quote.v1',
+    direction: quote.direction,
+    tradeType: quote.tradeType,
+    requestId: quote.requestId,
+    orderId: quote.orderId,
+    sender: quote.sender,
+    recipient: quote.recipient,
+    deadlineUnixSeconds: quote.deadlineUnixSeconds,
+    origin: quote.origin,
+    destination: quote.destination,
+    raw: quote.raw,
+  });
+}
+
+function assertQuoteIdentity(raw, { direction, origin, destination, user, recipient, amount, tradeType = 'EXACT_INPUT' }) {
   const sender = raw?.details?.sender;
   const quotedRecipient = raw?.details?.recipient;
   invariant(typeof sender === 'string' && sender.length > 0, RelayMalformedResponseError, 'quote response is missing details.sender');
@@ -368,11 +396,12 @@ function assertQuoteIdentity(raw, { direction, origin, destination, user, recipi
     );
   }
   if (amount !== undefined) {
+    const quotedAmount = tradeType === 'EXACT_OUTPUT' ? destination.amount : origin.amount;
     invariant(
-      origin.amount === amount,
+      quotedAmount === amount,
       RelayMalformedResponseError,
-      'quote response details.currencyIn.amount does not match the requested amount',
-      { expected: amount, got: origin.amount },
+      `quote response ${tradeType === 'EXACT_OUTPUT' ? 'details.currencyOut.amount' : 'details.currencyIn.amount'} does not match the requested amount`,
+      { expected: amount, got: quotedAmount, tradeType },
     );
   }
 
@@ -446,8 +475,9 @@ function assertQuoteIdentity(raw, { direction, origin, destination, user, recipi
  * differently-shaped route, which "loosely matched by chain/asset/amount alone" would miss).
  */
 export function parseQuoteResponse(raw, {
-  direction, user, recipient, amount, originCurrency, destinationCurrency,
+  direction, user, recipient, amount, originCurrency, destinationCurrency, tradeType = 'EXACT_INPUT',
 } = {}) {
+  assertTradeType(tradeType);
   const route = routeFor(direction, { originCurrency, destinationCurrency });
   invariant(typeof raw?.requestId === 'string' && raw.requestId.length > 0, RelayMalformedResponseError, 'quote response is missing requestId');
   invariant(Array.isArray(raw?.steps), RelayMalformedResponseError, 'quote response is missing a steps array');
@@ -468,9 +498,10 @@ export function parseQuoteResponse(raw, {
     { expected: route.destination, got: destination },
   );
 
-  const identity = assertQuoteIdentity(raw, { direction, origin, destination, user, recipient, amount });
-  return Object.freeze({
+  const identity = assertQuoteIdentity(raw, { direction, origin, destination, user, recipient, amount, tradeType });
+  const parsed = {
     direction,
+    tradeType,
     requestId: raw.requestId,
     orderId: identity.orderId,
     sender: identity.sender,
@@ -480,7 +511,8 @@ export function parseQuoteResponse(raw, {
     destination: Object.freeze(destination),
     stepCount: raw.steps.length,
     raw,
-  });
+  };
+  return Object.freeze({ ...parsed, quoteDigest: relayQuoteDigest(parsed) });
 }
 
 /** Refuses a quote at its exact deadline; callers must obtain a fresh quote from the same reserve. */
@@ -503,6 +535,8 @@ const RELAY_INTENT_KEYS = Object.freeze([
   'requestId',
   'orderId',
   'direction',
+  'tradeType',
+  'quoteDigest',
   'originChainId',
   'destinationChainId',
   'originAssetId',
@@ -531,6 +565,8 @@ function assertRelayIntent(value, label = 'Relay intent') {
   invariant(typeof value.orderId === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value.orderId), RelayMalformedResponseError, `${label}.orderId is invalid`);
   const route = ROUTES[value.direction];
   invariant(route !== undefined, RelayMalformedResponseError, `${label}.direction is invalid`);
+  assertTradeType(value.tradeType, `${label}.tradeType`);
+  invariant(typeof value.quoteDigest === 'string' && QUOTE_DIGEST.test(value.quoteDigest), RelayMalformedResponseError, `${label}.quoteDigest is invalid`);
   invariant(value.originChainId === route.origin.chainId, RelayMalformedResponseError, `${label}.originChainId does not match its direction`);
   invariant(value.destinationChainId === route.destination.chainId, RelayMalformedResponseError, `${label}.destinationChainId does not match its direction`);
   invariant(typeof value.originAssetId === 'string' && value.originAssetId.length > 0, RelayMalformedResponseError, `${label}.originAssetId is invalid`);
@@ -748,11 +784,12 @@ export function createRelayClient({
   }
 
   async function quote({
-    direction, amount, user, recipient, originCurrency, destinationCurrency, tradeType = 'EXACT_INPUT', referrer, slippageTolerance, skipRouteCheck = false,
+      direction, amount, user, recipient, originCurrency, destinationCurrency, tradeType = 'EXACT_INPUT', referrer, slippageTolerance, skipRouteCheck = false,
   }) {
     const route = routeFor(direction, { originCurrency, destinationCurrency });
     invariant(typeof user === 'string' && user.length > 0, RelayAdapterError, 'user is required');
     assertCanonicalAmount(amount, 'amount');
+    assertTradeType(tradeType);
 
     if (!skipRouteCheck) {
       const chainsResponse = await getChains();
@@ -779,6 +816,7 @@ export function createRelayClient({
       amount,
       originCurrency,
       destinationCurrency,
+      tradeType,
     });
   }
 
@@ -797,6 +835,8 @@ export function createRelayClient({
       wouldExecute: true,
       liveMode: false,
       direction: quoteResult.direction,
+      tradeType: quoteResult.tradeType,
+      quoteDigest: relayQuoteDigest(quoteResult),
       requestId: quoteResult.requestId,
       quotedDestinationAmount: quoteResult.destination.amount,
       stepCount: quoteResult.stepCount,
@@ -822,6 +862,8 @@ export function createRelayClient({
       requestId: quoteResult.requestId,
       orderId: quoteResult.orderId,
       direction: quoteResult.direction,
+      tradeType: quoteResult.tradeType,
+      quoteDigest: relayQuoteDigest(quoteResult),
       originChainId: quoteResult.origin.chainId,
       destinationChainId: quoteResult.destination.chainId,
       originAssetId: quoteResult.origin.address,

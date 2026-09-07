@@ -13,13 +13,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { PublicKey, Transaction } from '@solana/web3.js';
+
 import { acquireLease } from '../../../runner/src/automation/exclusive-lease.mjs';
 import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
+import { relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
-import { compose as composeRoot } from '../../src/app/compose.mjs';
+import { buildQuoteRefreshPlanner, compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
 import {
   CYCLE_REPOSITORY_CLIENT_INTERFACE,
   assertCycleRepositoryClientInterface,
@@ -28,9 +31,19 @@ import {
 import { createFileLeaseStore } from '../../src/app/lease-store.mjs';
 import { runOnePass as runVerifierPass } from '../../bin/hookemon-verifier.mjs';
 import { DISTRIBUTION_SIGNER_ROLE, VERIFIER_ROLE } from '../../../runner/src/distribution/distribution-signer.mjs';
-import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
+import {
+  CIRCLE_USD_DECIMALS,
+  CIRCLE_USD_MINT,
+  SolanaAdapterError,
+  TOKEN_PROGRAM_ID,
+  buildTransferCheckedInstruction,
+  createSolanaRpcClient,
+  deriveAssociatedTokenAddress,
+} from '../../src/solana-rpc.mjs';
 import { MoneyConfigurationRejected } from '../../src/app/environment.mjs';
+import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
 import {
@@ -41,6 +54,40 @@ import { privateKeyToAccount, serializeSignature, sign as signSecp256k1 } from '
 
 const DASHBOARD_CREDENTIAL = 'd'.repeat(40);
 const SOLANA_MAINNET_GENESIS_HASH = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
+
+// Isolated, test-only attributable process liability, standing in for the production hook reader
+// wired at composition. A test that needs a live cycle supplies this explicitly rather than
+// exercising the real archive client; nothing here lets a wallet balance or a configured figure
+// stand in for attribution evidence -- the planner validates this shape exactly as it validates the
+// real reader's output.
+function testProcessLiabilityReader(amountAtomic = '1000000') {
+  return {
+    async read({ cycleId }) {
+      return {
+        schema: 'hookemon.process-liability-evidence.v1',
+        chainId: '4663',
+        assetId: FULL_USDG,
+        decimals: 6,
+        hook: FULL_HOOK,
+        cycleId,
+        onchainCycleId: deriveOnchainCycleId(cycleId),
+        blockNumber: '10',
+        blockHash: `0x${'1'.repeat(64)}`,
+        finalized: true,
+        processLiability: amountAtomic,
+        remainingProcessClaimCapacity: amountAtomic,
+        processClaimsPaused: false,
+        processClaimCycleUsed: false,
+        activeProcessClaimLimit: amountAtomic,
+        totalLiability: amountAtomic,
+        hookUsdgBalance: amountAtomic,
+        isSolvent: true,
+        operations: FULL_EVM_ACCOUNT.toLowerCase(),
+        ceilingAtomic: amountAtomic,
+      };
+    },
+  };
+}
 
 const SUFFICIENT_BUDGET = Object.freeze({
   availableProcessUsdg: '10',
@@ -83,6 +130,31 @@ function productionMoneyConfiguration() {
         amountAtomic: '25000',
       },
       lamportReserve: { chainId: '792703809', assetId: 'native', decimals: 9, amountAtomic: '5000000' },
+    },
+  };
+}
+
+function collectorOnlyMoneyConfiguration() {
+  const production = productionMoneyConfiguration();
+  const solanaStablecoin = {
+    chainId: 'solana-mainnet',
+    assetId: CIRCLE_USD_MINT,
+    decimals: CIRCLE_USD_DECIMALS,
+  };
+  return {
+    ...production,
+    assets: { ...production.assets, solanaStablecoin },
+    minimums: {
+      ...production.minimums,
+      solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
+    },
+    solana: {
+      priorityFeeCap: {
+        chainId: 'solana-mainnet', assetId: 'microlamports-per-compute-unit', decimals: 0, amountAtomic: '25000',
+      },
+      lamportReserve: {
+        chainId: 'solana-mainnet', assetId: 'native', decimals: 9, amountAtomic: '5000000',
+      },
     },
   };
 }
@@ -148,16 +220,34 @@ async function seedCycle(stateDir, {
   mode = 'production',
   providerMode = null,
   completedStages = [],
+  packBatchRequests = [],
+  // `admission` may be the durable admission object itself, or a factory `reservedCycleId =>
+  // admission` for a caller whose admission must name a cycleId reserved before createCycle opens
+  // it (the admission rides inside `cycle-opened` itself, so it has to be built first). `operations`
+  // is the matching deployment identity `assertDurableCycleAdmission` validates it against --
+  // production identity by default.
+  admission = null,
+  operations = null,
 }) {
   const cycleRepository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const reservedCycleId = admission === null ? null : cycleRepository.nextCycleId();
+  const resolvedAdmission = typeof admission === 'function' ? admission(reservedCycleId) : admission;
   const cycle = await cycleRepository.createCycle({
     releaseAmount,
     mode,
     ...(providerMode === null ? {} : { providerMode }),
+    ...(reservedCycleId === null ? {} : { cycleId: reservedCycleId }),
+    ...(resolvedAdmission === null ? {} : { admission: resolvedAdmission, operations }),
   });
   for (const { stage, evidence = { seeded: true } } of completedStages) {
     await cycleRepository.prepareStage(cycle.cycleId, stage);
     await cycleRepository.completeStage(cycle.cycleId, stage, evidence);
+  }
+  // Recorded through this same connection, sequentially before it returns: durable-store.mjs's
+  // single-writer identity witness makes overlapping a second, independently-opened connection
+  // against the same store unsafe, so a test never opens one just to seed one extra durable fact.
+  for (const { stage, packs } of packBatchRequests) {
+    await cycleRepository.recordPackBatchRequest(cycle.cycleId, stage, packs);
   }
   return cycle;
 }
@@ -191,6 +281,17 @@ function livePolicyPatch(packId) {
   };
 }
 
+function collectorOnlyLivePolicyPatch() {
+  return {
+    ...livePolicyPatch('collector-25'),
+    maxUnitPriceMicroUsdg: '25000000',
+    maxCycleBudgetMicroUsdg: '25000000',
+    max24HourBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000',
+    manualApprovalCycles: 1,
+  };
+}
+
 async function writeOperatorState(statePath, patch = {}) {
   return mutateOperatorState(statePath, null, state => ({
     ...(state ?? createEmptyOperatorState()),
@@ -210,7 +311,9 @@ function throwingAdapters() {
   };
   return {
     collectorCrypt: {
-      async getMachines() { return { machines: [] }; },
+      // The configured pack must exist in the catalog: purchase derives its per-pack card count
+      // from it, and admission prices from its exact catalog price.
+      async getMachines() { return { machines: [{ code: 'base-pack', price: '0.000005', contains: 1 }] }; },
       async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
       async getPackStatus() { return { memo: 'unused', pack: null, send: null, buyback: [] }; },
       generatePack: boom('collectorCrypt.generatePack'),
@@ -270,6 +373,765 @@ function compose(config) {
     ? config
     : { ...config, networkIdentity: networkIdentity() });
 }
+
+function collectorOnlySolanaCanaryClient({ balance = 5_000_000n } = {}) {
+  return createSolanaRpcClient({
+    rpcUrl: 'https://solana.example.test',
+    fetchImpl: async (_url, request) => {
+      const { id, method } = JSON.parse(request.body);
+      const result = method === 'getLatestBlockhash'
+        ? { value: { blockhash: 'SysvarC1ock11111111111111111111111111111111', lastValidBlockHeight: 101 } }
+        : method === 'isBlockhashValid'
+          ? { value: true }
+          : method === 'getBalance'
+            ? { value: Number(balance) }
+            : null;
+      return {
+        ok: true,
+        async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); },
+      };
+    },
+  });
+}
+
+test('compose starts a live collector-only rehearsal with only Solana identity and canaries', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  await writeOperatorState(statePath, collectorOnlyLivePolicyPatch());
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    solana: { rpcUrl: 'https://solana.example.test', chainId: 'solana-mainnet' },
+    collectorCrypt: {
+      baseUrl: 'https://collector.example.test',
+      apiKey: 'fixture-api-key',
+      settlementAsset: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS },
+      packPrice: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS, amountAtomic: '25000000' },
+    },
+    accounts: { evm: null, solana: operator },
+    pack: { code: 'collector-25' },
+    budget: {
+      availableProcessUsdg: '25000000',
+      packPriceUsdg: '25000000',
+      outboundCapUsdg: '0',
+      returnCapUsdg: '0',
+      operatingMarginUsdg: '0',
+    },
+    moneyConfiguration: collectorOnlyMoneyConfiguration(),
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+      payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+      split: 'equal',
+    },
+    execution: { profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    adapters: {
+      collectorCrypt: {},
+      relay: {},
+      robinhood: { client: null },
+      solana: { client: collectorOnlySolanaCanaryClient() },
+    },
+    networkIdentity: {
+      async readSolanaGenesisHash() { return SOLANA_MAINNET_GENESIS_HASH; },
+    },
+  });
+  t.after(() => composition.shutdown());
+
+  assert.deepEqual(await composition.assertStartReadiness({
+    liveMode: true,
+    mode: 'rehearsal',
+    requirePolicyConfiguration: true,
+    requireCanaryPreflight: true,
+  }), { cycleCount: 0, preflight: 'PASSED' });
+});
+
+/** A configured-RPC double for `createTrustedSolanaBlockhashContextResolver`: `getLatestBlockhash`
+ * and `isBlockhashValid` answer from the given fixed values, and every call is counted so a test can
+ * assert the resolver actually reached this exact client instance instead of some other. */
+function configurableSolanaRpcClient({ blockhash, lastValidBlockHeight = 101, valid = true } = {}) {
+  const calls = { getLatestBlockhash: 0, isBlockhashValid: 0 };
+  const client = createSolanaRpcClient({
+    rpcUrl: 'https://solana.example.test',
+    fetchImpl: async (_url, request) => {
+      const { id, method } = JSON.parse(request.body);
+      calls[method] = (calls[method] ?? 0) + 1;
+      const result = method === 'getLatestBlockhash'
+        ? { value: { blockhash, lastValidBlockHeight } }
+        : method === 'isBlockhashValid'
+          ? { value: valid }
+          : null;
+      return { ok: true, async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); } };
+    },
+  });
+  return { client, calls };
+}
+
+test('the trusted Solana blockhashContextResolver returns the exact RPC pair on an exact latest-blockhash match', async () => {
+  const latestBlockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { client } = configurableSolanaRpcClient({ blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+  const resolver = createTrustedSolanaBlockhashContextResolver(client);
+
+  const context = await resolver(latestBlockhash);
+
+  assert.deepEqual(context, { blockhash: latestBlockhash, lastValidBlockHeight: 4242 });
+});
+
+test('the trusted Solana blockhashContextResolver refuses a provider blockhash that is not the current latest', async () => {
+  const { client } = configurableSolanaRpcClient({ blockhash: 'SysvarC1ock11111111111111111111111111111111' });
+  const resolver = createTrustedSolanaBlockhashContextResolver(client);
+
+  await assert.rejects(
+    () => resolver('SysvarRecentB1ockHashes11111111111111111111'),
+    /compose Solana blockhashContextResolver refuses a blockhash that is not the current latest/,
+  );
+});
+
+test('the trusted Solana blockhashContextResolver refuses when the RPC latest blockhash is already unusable', async () => {
+  const latestBlockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { client } = configurableSolanaRpcClient({ blockhash: latestBlockhash, valid: false });
+  const resolver = createTrustedSolanaBlockhashContextResolver(client);
+
+  await assert.rejects(() => resolver(latestBlockhash), SolanaAdapterError);
+});
+
+test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase targets/liability evidence and prices only fresh Relay quotes', async () => {
+  const requests = [];
+  const evmAccount = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
+  const solanaAccount = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const config = {
+    accounts: { evm: evmAccount, solana: solanaAccount },
+    moneyConfiguration: productionMoneyConfiguration(),
+  };
+  const adapters = {
+    relay: {
+      async quoteOutboundBridge(request) {
+        requests.push(request);
+        const isUnit = requests.length === 1;
+        return {
+          requestId: isUnit ? 'relay-unit-refresh' : 'relay-aggregate-refresh',
+          orderId: `0x${(isUnit ? '1' : '2').repeat(64)}`,
+          deadlineUnixSeconds: 5_000_000,
+          sender: evmAccount,
+          recipient: solanaAccount,
+          origin: { amount: isUnit ? '10000000' : '20000000' },
+          destination: { amount: request.amount, minimumAmount: request.amount },
+          quoteDigest: `sha256:${(isUnit ? 'a' : 'b').repeat(64)}`,
+        };
+      },
+    },
+  };
+  const admission = {
+    quantity: 2,
+    unitPurchase: {
+      chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '5000000',
+    },
+    aggregatePurchase: {
+      chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '10000000',
+    },
+    processLiabilityEvidence: { schema: 'hookemon.process-liability-evidence.v1', marker: 'original-evidence' },
+  };
+  const planner = buildQuoteRefreshPlanner({ config, adapters });
+  const replacement = await planner.plan({
+    cycleId: 'cycle-refresh-plan',
+    packId: 'base-pack',
+    admission,
+    custody: { cycleId: 'cycle-refresh-plan' },
+  });
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0], {
+    user: evmAccount,
+    recipient: solanaAccount,
+    destinationCurrency: config.moneyConfiguration.assets.solanaStablecoin.assetId,
+    tradeType: 'EXACT_OUTPUT',
+    amount: '5000000',
+  });
+  assert.deepEqual(requests[1], { ...requests[0], amount: '10000000' });
+  assert.equal(replacement.schema, 'hookemon.policy-admission.v2');
+  assert.equal(replacement.cycleId, 'cycle-refresh-plan');
+  assert.equal(replacement.packId, 'base-pack');
+  assert.equal(replacement.quantity, 2);
+  assert.equal(replacement.unitPurchase, admission.unitPurchase);
+  assert.equal(replacement.aggregatePurchase, admission.aggregatePurchase);
+  assert.equal(replacement.processLiabilityEvidence, admission.processLiabilityEvidence);
+  assert.equal(replacement.unitFundingQuote.amountAtomic, '10000000');
+  assert.equal(replacement.aggregateFundingQuote.amountAtomic, '20000000');
+  assert.equal(replacement.relay.requestId, 'relay-aggregate-refresh');
+  assert.equal(replacement.unitRelay.requestId, 'relay-unit-refresh');
+  assert.equal(replacement.quoteDigest, `sha256:${'b'.repeat(64)}`);
+});
+
+test('buildQuoteRefreshPlanner refuses to plan without repository-owned finalized claim/custody evidence bound to this exact cycle', async () => {
+  const planner = buildQuoteRefreshPlanner({
+    config: {
+      accounts: { evm: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384', solana: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE' },
+      moneyConfiguration: productionMoneyConfiguration(),
+    },
+    adapters: { relay: { async quoteOutboundBridge() { throw new Error('must not quote without custody evidence'); } } },
+  });
+  assert.equal(await planner.plan({ cycleId: 'cycle-refresh-no-custody', packId: 'base-pack', admission: {}, custody: null }), null);
+  assert.equal(
+    await planner.plan({ cycleId: 'cycle-refresh-no-custody', packId: 'base-pack', admission: {}, custody: { cycleId: 'another-cycle' } }),
+    null,
+  );
+});
+
+/** A syntactically real, structurally valid legacy Solana transaction (deserializable by
+ * `VersionedTransaction.deserialize`, exactly what `decodeProviderTransaction` requires to ever
+ * reach `blockhashContextResolver`): a single-instruction SPL transfer-checked from the configured
+ * operator to itself, signed by nobody (`decodeProviderTransaction` never verifies signatures, only
+ * shape) so no private key is needed. `recentBlockhash` is the one field this test controls per
+ * case. */
+function realUnsignedPurchaseTransaction({ operator, recentBlockhash }) {
+  const operatorKey = new PublicKey(operator);
+  const source = deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT);
+  const transaction = new Transaction({ feePayer: operatorKey, recentBlockhash }).add(
+    buildTransferCheckedInstruction({
+      source: source.toBase58(),
+      destination: source.toBase58(),
+      owner: operator,
+      mint: CIRCLE_USD_MINT,
+      amount: 1n,
+      decimals: CIRCLE_USD_DECIMALS,
+    }),
+  );
+  return Buffer.from(transaction.serialize({ requireAllSignatures: false, verifySignatures: false })).toString('base64');
+}
+
+/** The configured-RPC double a real composed purchase mutation actually reaches: `getLatestBlockhash`
+ * / `isBlockhashValid` (consumed twice on the exact-match path -- once by `requireLiveCollectorOnlyCanary`'s
+ * own startup canary, once again inside the resolver itself during decode), `getBlockHeight` (the
+ * decode options' independent `currentBlockHeightResolver`), and `getAccountInfo` (the operator's
+ * settlement associated-token-account existence read gating admission before any provider call).
+ * `invalidFromCall` lets a test keep the startup canary healthy while making only the resolver's own
+ * later `isBlockhashValid` read report the latest blockhash as already unusable. */
+function collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidFromCall = null }) {
+  let isBlockhashValidCalls = 0;
+  return createSolanaRpcClient({
+    rpcUrl: 'https://solana.example.test',
+    fetchImpl: async (_url, request) => {
+      const { id, method } = JSON.parse(request.body);
+      let result;
+      if (method === 'getLatestBlockhash') result = { value: { blockhash: latestBlockhash, lastValidBlockHeight: 4242 } };
+      else if (method === 'isBlockhashValid') {
+        isBlockhashValidCalls += 1;
+        result = { value: invalidFromCall === null || isBlockhashValidCalls < invalidFromCall };
+      } else if (method === 'getBlockHeight') result = 100;
+      else if (method === 'getBalance') result = { value: 10_000_000 };
+      else if (method === 'getAccountInfo') {
+        result = {
+          value: {
+            owner: TOKEN_PROGRAM_ID,
+            data: {
+              program: 'spl-token',
+              parsed: {
+                type: 'account',
+                info: {
+                  mint: CIRCLE_USD_MINT,
+                  owner: operator,
+                  tokenAmount: { amount: '1000000', decimals: CIRCLE_USD_DECIMALS },
+                },
+              },
+            },
+          },
+        };
+      } else result = null;
+      return { ok: true, async text() { return JSON.stringify({ jsonrpc: '2.0', id, result }); } };
+    },
+  });
+}
+
+async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transactionBlockhash, invalidFromCall = null }) {
+  const operator = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  // The loss/outstanding-custody caps are raised to the same 25000000 atomic units as the release
+  // amount below -- `collectorOnlyLivePolicyPatch`'s base `livePolicyPatch` caps them at a token '20'.
+  await writeOperatorState(statePath, {
+    ...collectorOnlyLivePolicyPatch(),
+    lossCapMicroUsdg: '25000000',
+    maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const cycle = await seedCycle(stateDir, {
+    releaseAmount: '25000000',
+    mode: 'rehearsal',
+    providerMode: 'live',
+    completedStages: [
+      { stage: 'eligibility-snapshot' },
+      { stage: 'claim-process' },
+      { stage: 'outbound' },
+    ],
+  });
+
+  const calls = { generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid', chainId: 'solana-mainnet' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: {
+      baseUrl: 'https://example.invalid',
+      settlementAsset: asset,
+      packPrice: { ...asset, amountAtomic: '25000000' },
+    },
+    // A collector-only rehearsal has no EVM leg, but the policy engine's custody projection still
+    // needs a typed EVM USDG valuation asset to report a valued (not `UNVALUED_CUSTODY`-refused)
+    // custody state -- the same placeholder pin `productionMoneyConfiguration` uses elsewhere here.
+    contracts: { vault: null, hook: null, usdg: '0x0000000000000000000000000000000000000001', usdgDecimals: 6 },
+    accounts: { evm: null, solana: operator },
+    pack: { code: 'collector-25' },
+    signer: {
+      backend: 'keychain',
+      liveMode: true,
+      roles: ['operator-solana'],
+      keychain: { solanaAccount: 'operator-solana' },
+    },
+    moneyConfiguration: collectorOnlyMoneyConfiguration(),
+    rehearsal: {
+      mode: 'collector-only',
+      proceedsAccount: deriveAssociatedTokenAddress(operator, CIRCLE_USD_MINT).toBase58(),
+      payoutRecipients: ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm'],
+      split: 'equal',
+    },
+    execution: { profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    preflightAuthority: createTestProfileMutationAuthority(),
+    adapters: {
+      collectorCrypt: {
+        async getMachines() { return { machines: [{ code: 'collector-25', price: '0.025', contains: 1 }] }; },
+        async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
+        async generateYoloPacks({ playerAddress }) {
+          calls.generateYoloPacks += 1;
+          assert.equal(playerAddress, operator);
+          return {
+            packs: [{
+              memo: 'memo-composed-purchase',
+              transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
+            }],
+          };
+        },
+        submitTransaction: () => {
+          calls.submitTransaction += 1;
+          throw new Error('submitTransaction must never be reached before a pinned policy exists');
+        },
+      },
+      relay: {
+        quoteOutboundBridge: () => { throw new Error('unused: outbound is already seeded complete'); },
+        quoteReturnBridge: () => { throw new Error('unused'); },
+        simulateExecution: () => { throw new Error('unused'); },
+        prepareExecution: () => { throw new Error('unused'); },
+      },
+      robinhood: { client: { async readContract() { return { requirementsRevision: 0n, chainId: 4663n }; } } },
+      solana: { client: collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidFromCall }) },
+    },
+    signerClient: {
+      solana: {
+        probe: async () => ({ ready: true }),
+        async sign() { calls.sign += 1; throw new Error('signer must never be reached before a pinned policy exists'); },
+      },
+    },
+    now: () => 1_000,
+  });
+  t.after(() => composition.shutdown());
+
+  // `collectorOnlyLivePolicyPatch`'s manualApprovalCycles: 1 requires this cycle's own policy digest
+  // to be pre-approved -- collector-only rehearsal policy refuses a manualApprovalCycles of 0
+  // outright, so the approval is recorded rather than the requirement disabled.
+  const approvedConfiguration = (await readOperatorState(statePath)).configuration;
+  const cycleDigest = deriveCyclePolicyDigest({
+    configuration: approvedConfiguration,
+    cycleId: cycle.cycleId,
+    releaseAmountMicroUsdg: cycle.releaseAmount,
+    packId: 'collector-25',
+    liveMode: true,
+    mode: 'rehearsal',
+  });
+  await composition.policyEngine.recordManualApproval({ cycleDigest, cycleId: cycle.cycleId, approvedAtMs: 999 });
+
+  // The predecessor stages above are seeded directly into the repository (this test isolates
+  // purchase), but the policy engine's own claim-process ledger entry is not a byproduct of that --
+  // it is what lets the purchase boundary find `existingCycle(...)` instead of refusing
+  // CYCLE_POLICY_MISSING before purchase's own handler ever runs.
+  const admission = await composition.policyEngine.admit({
+    boundary: 'claim-process',
+    cycleId: cycle.cycleId,
+    releaseAmountMicroUsdg: cycle.releaseAmount,
+    packId: 'collector-25',
+    liveMode: true,
+    mode: 'rehearsal',
+  });
+  assert.equal(admission.allowed, true);
+
+  const error = await composition.service.recoverActiveCycle({ liveMode: true, mode: 'rehearsal' }).then(
+    () => null,
+    caught => caught,
+  );
+  return { error, calls, composition, cycle };
+}
+
+// compose-resolver-diagnosis.md: Collector-only rehearsal cannot carry the durable
+// `hookemon.policy-admission.v2` admission purchase.mjs now requires (purchase.mjs:420-421) --
+// CycleRepository replay always re-validates a durable admission against the fixed production
+// settlement route (chain id 792703809, policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY),
+// unconditionally, on every read; this rehearsal's own money configuration and native Solana
+// signer identity are independently pinned to the `solana-mainnet` Collector namespace
+// (solana-money-controls.mjs, collector-only-authorization.mjs). No admission can satisfy both
+// at once. This is an honest, current-boundary regression test for that unsupported combination,
+// not a resolver test -- closing it needs a separate, explicitly scoped sealed Collector-only
+// purchase binding (compose-resolver-diagnosis.md's "If the owner requires this specific
+// rehearsal mode operational again"), not a fixture change here.
+test('a live collector-only rehearsal purchase remains unsupported under the durable-admission requirement: it refuses before any provider or signer call', async t => {
+  const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+    latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+    transactionBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+  });
+
+  assert.match(error?.message ?? '', /purchase mutation requires the admitted unitPurchase amount/);
+  assert.equal(calls.generateYoloPacks, 0);
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
+
+// The recorded production Operations identity and canonical policy-engine routes
+// (packages/runner/src/automation/policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY / USDG_ROUTE /
+// COLLECTOR_SETTLEMENT_ROUTE). CycleRepository replay re-validates every durable admission against
+// exactly these, regardless of what identity built it, so a durable admission meant to survive
+// being read back has no choice but to use them verbatim -- never a namespace alias, never
+// `createTestOnlyAdmissionIdentity` (which replay ignores entirely).
+const PRODUCTION_ADMISSION_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
+const PRODUCTION_ADMISSION_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+const PRODUCTION_ADMISSION_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const PRODUCTION_ADMISSION_SETTLEMENT_MINT = CIRCLE_USD_MINT;
+const PRODUCTION_ADMISSION_ROUTES = Object.freeze({
+  evm: PRODUCTION_ADMISSION_EVM,
+  solana: PRODUCTION_ADMISSION_SOLANA,
+  fundingRoute: Object.freeze({ chainId: '4663', assetId: PRODUCTION_ADMISSION_USDG, decimals: 6 }),
+  settlementRoute: Object.freeze({ chainId: '792703809', assetId: PRODUCTION_ADMISSION_SETTLEMENT_MINT, decimals: 6 }),
+});
+
+function productionPurchaseMoneyConfiguration() {
+  const configuration = productionMoneyConfiguration();
+  const usdg = { ...configuration.assets.usdg, assetId: PRODUCTION_ADMISSION_USDG };
+  return {
+    ...configuration,
+    assets: { ...configuration.assets, usdg },
+    minimums: {
+      ...configuration.minimums,
+      robinhoodReceive: { ...configuration.minimums.robinhoodReceive, assetId: PRODUCTION_ADMISSION_USDG },
+      returnUsdg: { ...configuration.minimums.returnUsdg, assetId: PRODUCTION_ADMISSION_USDG },
+    },
+  };
+}
+
+/** A parsed Relay quote binding exactly `fundingAtomic` of the pinned production funding route to
+ * `purchaseAtomic` of the pinned production settlement route, self-consistent under
+ * `normalizeUnitRelayQuote` (packages/runner/src/automation/policy-engine.mjs): the quote digest is
+ * recomputed from this same evidence, never trusted as supplied. */
+function pinnedAdmissionRelayQuote({ requestId, orderId, fundingAtomic, purchaseAtomic, deadlineUnixSeconds = 2_000_000_000 }) {
+  const routes = PRODUCTION_ADMISSION_ROUTES;
+  const origin = { chainId: 4663, address: routes.fundingRoute.assetId, decimals: 6, amount: fundingAtomic };
+  const destination = {
+    chainId: 792703809, address: routes.settlementRoute.assetId, decimals: 6, amount: purchaseAtomic, minimumAmount: purchaseAtomic,
+  };
+  const raw = {
+    requestId,
+    details: {
+      sender: routes.evm,
+      recipient: routes.solana,
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
+    },
+    protocol: { v2: { orderId, orderData: {
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient: routes.solana, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
+    } } },
+    steps: [],
+  };
+  const quote = {
+    direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender: routes.evm, recipient: routes.solana,
+    deadlineUnixSeconds, origin, destination, stepCount: raw.steps.length, raw,
+  };
+  return {
+    ...quote,
+    quoteDigest: digest({
+      schema: 'hookemon.relay-quote.v1', direction: quote.direction, tradeType: quote.tradeType,
+      requestId: quote.requestId, orderId: quote.orderId, sender: quote.sender, recipient: quote.recipient,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds, origin: quote.origin, destination: quote.destination, raw: quote.raw,
+    }),
+  };
+}
+
+/** A finalized hook process-liability evidence record covering exactly `ceilingAtomic`, shaped
+ * exactly as `normalizeProcessLiabilityEvidence` requires: finalized, solvent, unused, unpaused,
+ * denominated in the pinned production funding route. */
+function pinnedAdmissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
+  const routes = PRODUCTION_ADMISSION_ROUTES;
+  return {
+    schema: 'hookemon.process-liability-evidence.v1',
+    chainId: routes.fundingRoute.chainId,
+    assetId: routes.fundingRoute.assetId,
+    decimals: routes.fundingRoute.decimals,
+    hook: `0x${'8'.repeat(40)}`,
+    cycleId,
+    onchainCycleId: deriveOnchainCycleId(cycleId),
+    blockNumber: '12345',
+    blockHash: `0x${'3'.repeat(64)}`,
+    finalized: true,
+    processLiability: ceilingAtomic,
+    remainingProcessClaimCapacity: ceilingAtomic,
+    processClaimsPaused: false,
+    processClaimCycleUsed: false,
+    activeProcessClaimLimit: ceilingAtomic,
+    totalLiability: ceilingAtomic,
+    hookUsdgBalance: ceilingAtomic,
+    isSolvent: true,
+    operations: routes.evm,
+    ceilingAtomic,
+  };
+}
+
+/** A complete, self-consistent quantity-1 `hookemon.policy-admission.v2` admission, denominated
+ * exactly in the fixed production routes CycleRepository replay validates every durable admission
+ * against -- independently authored, never derived from a candidate provider transaction. */
+function pinnedProductionPurchaseAdmission({ cycleId, packId, amountAtomic }) {
+  const unitRelayQuote = pinnedAdmissionRelayQuote({ requestId: `req-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: amountAtomic });
+  const relayQuote = pinnedAdmissionRelayQuote({ requestId: `req-aggregate-${cycleId}`, orderId: `0x${'2'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: amountAtomic });
+  const routes = PRODUCTION_ADMISSION_ROUTES;
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    packId,
+    quantity: 1,
+    quoteDigest: relayQuote.quoteDigest,
+    unitPurchase: { ...routes.settlementRoute, amountAtomic },
+    aggregatePurchase: { ...routes.settlementRoute, amountAtomic },
+    unitFundingQuote: { ...routes.fundingRoute, amountAtomic },
+    aggregateFundingQuote: { ...routes.fundingRoute, amountAtomic },
+    unitRelay: {
+      tradeType: 'EXACT_OUTPUT', requestId: unitRelayQuote.requestId, orderId: unitRelayQuote.orderId,
+      quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds: unitRelayQuote.deadlineUnixSeconds,
+      sender: routes.evm, recipient: routes.solana, destinationAmount: amountAtomic, destinationMinimumAmount: amountAtomic,
+    },
+    unitRelayQuote,
+    relayQuote,
+    relay: {
+      tradeType: 'EXACT_OUTPUT', requestId: relayQuote.requestId, orderId: relayQuote.orderId,
+      quoteDigest: relayQuote.quoteDigest, deadlineUnixSeconds: relayQuote.deadlineUnixSeconds,
+      sender: routes.evm, recipient: routes.solana, destinationAmount: amountAtomic, destinationMinimumAmount: amountAtomic,
+    },
+    processLiabilityEvidence: pinnedAdmissionProcessLiabilityEvidence(cycleId, amountAtomic),
+  };
+}
+
+/** An independently authored canonical transaction policy (never derived from a candidate decoded
+ * transaction) pinning a settlement recipient this fixture's actual self-transfer purchase
+ * transaction does not use. `requirePolicy` (purchase.mjs) accepts it before any provider call;
+ * `evaluate` (transaction-policy.mjs) genuinely refuses it once purchase actually decodes a
+ * candidate transaction against it, at `canonicalPolicyConstraint`'s `expectedRecipient` check --
+ * the real next boundary past the trusted resolver, not a re-assertion of the earlier admission
+ * refusal. */
+function pinnedPurchaseTransactionPolicy() {
+  return {
+    policy: {
+      schema: 'hookemon.transaction-policy.v1',
+      chainId: 'solana-mainnet',
+      stage: 'purchase',
+      requestDigest: digest({ schema: 'hookemon.transaction-policy-request.v1', stage: 'purchase', fixture: 'production-purchase-resolver' }),
+      expectedRecipient: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm',
+      amount: { chainId: 'solana-mainnet', assetId: PRODUCTION_ADMISSION_SETTLEMENT_MINT, decimals: 6, amountAtomic: '10' },
+      allowedTargets: [],
+      allowedPrograms: [TOKEN_PROGRAM_ID],
+    },
+    // Never evaluated by the two resolver-refusal cases below: the resolver refuses before decode
+    // reaches policy evaluation at all. Kept non-empty only to satisfy `explicitRules`.
+    rules: [{ id: 'production-purchase-fixture-rule' }],
+  };
+}
+
+/** A real composed production-profile purchase: real compose/service/stage-driver, a durable
+ * canonical admission pinned to the fixed production routes above, an independently pinned
+ * transaction policy, and fake EVM/archive/Solana RPC boundaries -- exactly the pattern other
+ * production compose fixtures in this file use (`throwingAdapters`, `liveObservabilityConfig`,
+ * `createTestProfileMutationAuthority`). Predecessor stages are seeded directly into the repository
+ * so this isolates purchase, exactly as `composedCollectorOnlyPurchaseAttempt` does above. */
+async function composedProductionPurchaseAttempt(t, { latestBlockhash, transactionBlockhash, invalidFromCall = null }) {
+  const operator = PRODUCTION_ADMISSION_SOLANA;
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  // `livePolicyPatch`'s caps (maxUnitPriceMicroUsdg/maxCycleBudgetMicroUsdg/max24HourBudgetMicroUsdg:
+  // '10', lossCapMicroUsdg/maxOutstandingCustodyMicroUsdg: '20') are used unchanged: the admission
+  // below is denominated at the same '10' atomic units, so no override is needed.
+  await writeOperatorState(statePath, livePolicyPatch('base-pack'));
+  const amountAtomic = '10';
+  const cycle = await seedCycle(stateDir, {
+    releaseAmount: amountAtomic,
+    mode: 'production',
+    providerMode: 'live',
+    completedStages: [
+      { stage: 'eligibility-snapshot' },
+      { stage: 'claim-process' },
+      { stage: 'outbound' },
+    ],
+    admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic }),
+  });
+
+  const calls = { generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid', chainId: 'solana-mainnet' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: {
+      baseUrl: 'https://example.invalid',
+      settlementAsset: asset,
+      packPrice: { ...asset, amountAtomic },
+      purchase: { policy: pinnedPurchaseTransactionPolicy() },
+    },
+    contracts: { vault: null, hook: null, usdg: PRODUCTION_ADMISSION_USDG, usdgDecimals: 6 },
+    accounts: { evm: PRODUCTION_ADMISSION_EVM, solana: operator },
+    pack: { code: 'base-pack' },
+    moneyConfiguration: productionPurchaseMoneyConfiguration(),
+    execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    preflightAuthority: createTestProfileMutationAuthority(),
+    observability: liveObservabilityConfig(['solana']),
+    observabilityDeps: {
+      ...liveObservabilityDeps(),
+      readers: {
+        async readUsdgPaused() { return false; },
+        async readUsdgFrozen() { return false; },
+      },
+    },
+    adapters: {
+      collectorCrypt: {
+        async getMachines() { return { machines: [{ code: 'base-pack', price: '0.00001', contains: 1 }] }; },
+        async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
+        async generateYoloPacks({ playerAddress }) {
+          calls.generateYoloPacks += 1;
+          assert.equal(playerAddress, operator);
+          return {
+            packs: [{
+              memo: 'memo-production-purchase',
+              transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
+            }],
+          };
+        },
+        submitTransaction: () => {
+          calls.submitTransaction += 1;
+          throw new Error('submitTransaction must never be reached before the pinned policy explicitly allows this transaction');
+        },
+      },
+      relay: {
+        quoteOutboundBridge: () => { throw new Error('unused: outbound is already seeded complete'); },
+        quoteReturnBridge: () => { throw new Error('unused'); },
+        simulateExecution: () => { throw new Error('unused'); },
+        prepareExecution: () => { throw new Error('unused'); },
+      },
+      robinhood: {
+        client: {
+          async getChainId() { return 4663; },
+          async readContract() { return { requirementsRevision: 0n, chainId: 4663n }; },
+        },
+        historicalEvidenceClient: { async readErc20BalanceAtBlock() { return { value: '0' }; } },
+      },
+      solana: { client: collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidFromCall }) },
+    },
+    signerClient: {
+      solana: {
+        probe: async () => ({ ready: true }),
+        async sign() { calls.sign += 1; throw new Error('signer must never be reached before the pinned policy explicitly allows this transaction'); },
+      },
+    },
+    now: () => 1_000,
+  });
+  t.after(() => composition.shutdown());
+
+  // Predecessor stages above are seeded directly into the repository (this test isolates purchase),
+  // but the policy engine's own claim-process ledger entry is not a byproduct of that -- it is what
+  // lets the purchase boundary find `existingCycle(...)` instead of refusing CYCLE_POLICY_MISSING
+  // before purchase's own handler ever runs. `admission: cycle.admission` matches exactly what
+  // `automated-cycle-service.mjs` re-presents at every later execution boundary for an admitted
+  // cycle, so the recorded spend reservation's digest keeps matching.
+  const admission = await composition.policyEngine.admit({
+    boundary: 'claim-process',
+    cycleId: cycle.cycleId,
+    releaseAmountMicroUsdg: cycle.releaseAmount,
+    packId: 'base-pack',
+    liveMode: true,
+    mode: 'production',
+    admission: cycle.admission,
+  });
+  assert.equal(admission.allowed, true);
+
+  const error = await composition.service.recoverActiveCycle({ liveMode: true }).then(
+    () => null,
+    caught => caught,
+  );
+  return { error, calls, composition, cycle };
+}
+
+test('a composed production purchase refuses at the trusted resolver before any signer or submit call, on a stale provider blockhash', async t => {
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
+    latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+    transactionBlockhash: 'SysvarRecentB1ockHashes11111111111111111111',
+  });
+
+  assert.match(
+    error?.message ?? '',
+    /Solana blockhashContextResolver failed: compose Solana blockhashContextResolver refuses a blockhash that is not the current latest/,
+  );
+  assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
+
+test('a composed production purchase refuses at the trusted resolver before any signer or submit call, when the RPC latest blockhash is already unusable', async t => {
+  const blockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
+    latestBlockhash: blockhash,
+    transactionBlockhash: blockhash,
+    // Unlike the collector-only rehearsal path, production purchase has no separate startup canary
+    // consuming an earlier `isBlockhashValid` call -- call 1 is the resolver's own internal
+    // `readUsableLatestBlockhash` during decode, so that is the one this test makes report the
+    // latest blockhash as no longer usable.
+    invalidFromCall: 1,
+  });
+
+  assert.match(
+    error?.message ?? '',
+    /Solana blockhashContextResolver failed: latest Solana blockhash is no longer valid before signing/,
+  );
+  assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
+
+test('a composed production purchase advances past the trusted resolver on an exact blockhash match, refusing only at the genuine next pinned-policy boundary', async t => {
+  const blockhash = 'SysvarC1ock11111111111111111111111111111111';
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
+    latestBlockhash: blockhash,
+    transactionBlockhash: blockhash,
+  });
+
+  assert.equal(calls.generateYoloPacks, 1, 'the resolver match must let the batch call and decode actually happen');
+  // The pinned fixture policy (`pinnedPurchaseTransactionPolicy`) is configured and accepted by
+  // `requirePolicy` before generateYoloPacks -- the batch call above already proves that -- so the
+  // refusal below is the real next boundary the decoded candidate transaction meets: the policy's
+  // independently authored `expectedRecipient` does not name this fixture's actual self-transfer
+  // settlement destination.
+  assert.match(error?.message ?? '', /canonical policy expectedRecipient is not explicitly allowed/);
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
 
 test('compose refuses a production profile without MoneyConfigurationV1 before opening durable state', async t => {
   const stateDir = await tempStateDir(t);
@@ -336,6 +1198,36 @@ test('compose requires a distinct archive-capable historical evidence client for
   t.after(() => composition.shutdown());
 
   assert.equal(composition.adapters.robinhood.historicalEvidenceClient, archiveEvidenceClient);
+});
+
+test('production composition wires its own owned cycle-attributable payout-availability reader over any injected same-named client method', async t => {
+  const stateDir = await tempStateDir(t);
+  const adapters = throwingAdapters();
+  const injectedSelfAttestation = async () => ({
+    chainId: '4663', assetId: `0x${'9'.repeat(40)}`, decimals: 6, amountAtomic: '999999999999999999',
+  });
+  adapters.robinhood.client.readCycleAttributableFinalizedAvailable = injectedSelfAttestation;
+  const composition = await compose({
+    stateDir,
+    statePath: join(stateDir, 'operator-state.json'),
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: { baseUrl: 'https://example.invalid' },
+    moneyConfiguration: productionMoneyConfiguration(),
+    execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    adapters,
+  });
+  t.after(() => composition.shutdown());
+
+  const composedReader = composition.adapters.robinhood.client.readCycleAttributableFinalizedAvailable;
+  assert.notEqual(composedReader, injectedSelfAttestation);
+  // An untrusted injected client can never self-attest its own cycle-attributable availability:
+  // the composed method is the real owned reader, proven by its distinct refusal vocabulary
+  // rather than the injected fixture's fixed resolved amount.
+  await assert.rejects(() => composedReader({}), /payout-availability reader refuses/);
 });
 
 test('compose constructs archive evidence from a distinct configured archive RPC when no explicit client is injected', async t => {
@@ -675,7 +1567,8 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
 
   assert.deepEqual(CYCLE_REPOSITORY_CLIENT_INTERFACE, [
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
-    'readChainTransactionAttempt', 'readClaimPreconditions', 'listKnownCycleIds',
+    'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'listHeldPositions',
+    'readSupplementarySettlement', 'listKnownCycleIds', 'readOutboundQuoteRefresh', 'readFinalizedClaimCustodyEvidence',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
   assert.deepEqual(Object.keys(composition.cycleRepository).sort(), [...CYCLE_REPOSITORY_CLIENT_INTERFACE].sort());
@@ -1041,7 +1934,7 @@ test('compose default profile enforcement refuses a live call without observabil
   assert.equal(await composition.cycleRepository.readActiveCycle(), null);
 });
 
-test('explicit production readiness requires the owner\'s first three manual-approval slots before signer construction', async t => {
+test('explicit production readiness permits an activated automatic policy before signer construction', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
   await writeOperatorState(statePath, livePolicyPatch('base-pack'));
@@ -1068,18 +1961,6 @@ test('explicit production readiness requires the owner\'s first three manual-app
   });
   t.after(() => composition.shutdown());
 
-  await assert.rejects(
-    () => composition.assertStartReadiness({
-      liveMode: true, mode: 'production', requirePolicyConfiguration: true, requireCanaryPreflight: true,
-    }),
-    /manualApprovalCycles must be at least 3/,
-  );
-
-  const state = await readOperatorState(statePath);
-  await mutateOperatorState(statePath, state.revision, current => ({
-    ...current,
-    configuration: applyOperatorConfiguration(current.configuration, { manualApprovalCycles: 3 }),
-  }));
   assert.deepEqual(await composition.assertStartReadiness({
     liveMode: true, mode: 'production', requirePolicyConfiguration: true, requireCanaryPreflight: true,
   }), { cycleCount: 0, preflight: 'PASSED' });
@@ -1287,7 +2168,9 @@ test('liveMode true: the composed service freezes purchase before any legacy pro
   const calls = { generatePack: 0, submitTransaction: 0, openPack: 0 };
   const adapters = {
     collectorCrypt: {
-      async getMachines() { return { machines: [] }; },
+      // The configured pack must exist in the catalog: purchase derives its per-pack card count
+      // from it, and admission prices from its exact catalog price.
+      async getMachines() { return { machines: [{ code: 'base-pack', price: '0.000005', contains: 1 }] }; },
       async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
       async generatePack({ playerAddress }) {
         calls.generatePack += 1;
@@ -1366,19 +2249,27 @@ test('liveMode true: the composed service freezes purchase before any legacy pro
   });
   assert.equal(admission.allowed, true);
 
+  // Purchase now prepares a real request against the wired-in collector-crypt catalog (stage-driver
+  // "Collector-capable" preparation) and reaches the live mutation-authority gate next, which fails
+  // closed independently of Collector wiring: architecture/interfaces.json is still
+  // PROVISIONAL_PHASE3_PENDING_FEASIBILITY, not the FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING
+  // status requireLiveMutationAuthority() requires for every live mutating stage.
   await assert.rejects(
     () => composition.service.recoverActiveCycle({ liveMode: true }),
-    /stage "purchase" live-mode mutation is INTEGRATION_PENDING/,
-    'purchase must stay closed until WP08b supplies policy and finality evidence',
+    /active frozen interface authority is invalid/,
+    'purchase must stay closed while the build-contract interface authority remains provisional',
   );
 
-  assert.equal(calls.generatePack, 0, 'purchase must not call collector-crypt before WP08b owns the integration');
-  assert.equal(calls.submitTransaction, 0, 'purchase must not sign or submit before WP08b owns the integration');
+  assert.equal(calls.generatePack, 0, 'purchase must not call collector-crypt before the interface authority is frozen');
+  assert.equal(calls.submitTransaction, 0, 'purchase must not sign or submit before the interface authority is frozen');
   assert.equal(calls.openPack, 0, 'open must stay unreachable before purchase reconciles');
 
   const purchase = await composition.cycleRepository.readStage(cycle.cycleId, 'purchase');
   assert.equal(purchase.status, 'PENDING');
-  assert.equal((await composition.cycleRepository.readOperationalStageAttempt(cycle.cycleId, 'purchase')).attempt.state, 'PREPARED');
+  // The real request prepares and persists first, then the live mutation-authority gate refuses as
+  // a pre-call failure: the driver records that refusal by returning the attempt to NOT_SENT rather
+  // than leaving it PREPARED as if a provider call were still pending.
+  assert.equal((await composition.cycleRepository.readOperationalStageAttempt(cycle.cycleId, 'purchase')).attempt.state, 'NOT_SENT');
 });
 
 test('liveMode true: the remaining pending operational integration refuses through the composed service loop', async t => {
@@ -1427,9 +2318,13 @@ test('liveMode true: the remaining pending operational integration refuses throu
       });
       assert.equal(admission.allowed, true, 'a post-claim stage needs the durable claim reservation');
     }
+    // epic-gate now prepares a real request from its own durable predecessor evidence (stage-driver
+    // "Collector-capable" preparation); the seeded "completed" `open` stage here carries no real
+    // pack ledger, so epic-gate reaches its own genuine predecessor-evidence refusal rather than the
+    // retired INTEGRATION_PENDING scaffolding.
     await assert.rejects(
       () => composition.service.recoverActiveCycle({ liveMode: true }),
-      new RegExp(`stage "${stage}" live-mode mutation is INTEGRATION_PENDING`),
+      /epic gate requires a completed open stage with a pack ledger/,
       `stage "${stage}" must refuse through the real reconcile-then-execute path`,
     );
   }
@@ -1742,6 +2637,84 @@ test('dashboard composed in-process: restart-request/reconcile-request over HTTP
   assert.equal(decision.body.code, 'RECOVERY_NO_ACTIVE_CYCLE');
 });
 
+test('operator resume-cycle recovers a supplementary settlement after its completed cycle is no longer active', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  await writeOperatorState(statePath);
+
+  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const cycle = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  for (const stage of AUTOMATED_CYCLE_STAGES) {
+    await repository.prepareStage(cycle.cycleId, stage);
+    await repository.completeStage(cycle.cycleId, stage, { stage, finalized: true });
+  }
+  const position = await repository.recordHeldPosition(cycle.cycleId, {
+    packId: 'base-pack',
+    memo: 'memo-resume-supplementary',
+    mint: 'mint-resume-supplementary',
+    cardRef: 'mint-resume-supplementary',
+    costMicroUsdg: '1',
+    valueMicroUsdg: '1',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidence: { stage: 'epic-gate', decision: 'hold' },
+  });
+  await repository.completeCycle(cycle.cycleId);
+  await repository.recordHeldOwnerDecision(position.positionId, {
+    heldEvidenceDigest: position.evidenceDigest,
+    requestId: 'resume-supplementary-sell',
+    expectedRevision: 0,
+    choice: 'sell',
+  });
+  assert.equal(await repository.readActiveCycle(), null, 'the completed main cycle is deliberately no longer active');
+
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: { baseUrl: 'https://example.invalid' },
+    adapters: minimalInjectedAdapters(),
+    now: () => 1_000,
+    supplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        async reconcile({ cycleRepository, position: heldPosition, settlement }) {
+          await cycleRepository.advanceSupplementarySettlement(heldPosition.positionId, {
+            expectedState: settlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'a'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+  t.after(() => composition.shutdown());
+
+  const outcome = await composition.executeAudited({
+    requestId: 'resume-supplementary-1',
+    expectedRevision: 0,
+    command: { type: 'resume-cycle' },
+    effect: () => composition.operatorControl.execute({
+      expectedRevision: 0,
+      requestId: 'resume-supplementary-1',
+      command: { type: 'resume-cycle' },
+    }),
+  });
+
+  assert.equal(outcome.commandState, 'APPLIED');
+  // `operatorAuditResultCode` classifies every `resume-cycle` command as `RECOVERY_DISPATCHED`
+  // unconditionally (packages/adapters/src/app/compose.mjs) -- there is no more specific
+  // per-recovery-kind code today. The durable proof this test exists for is the settlement
+  // actually advancing, asserted next.
+  assert.equal(outcome.receipt.resultCode, 'RECOVERY_DISPATCHED');
+  assert.equal((await composition.cycleRepository.readSupplementarySettlement(position.positionId)).state, 'BUYBACK_SENT_UNKNOWN');
+});
+
 test('dashboard composed in-process: pause/activate decisions are read fresh by the real scheduler on its next tick', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
@@ -1789,6 +2762,70 @@ test('dashboard composed in-process: ctx.readAccounting is wired to the real cyc
   // once at the dashboard-package level (cycle-status-projection.test.mjs), so this only needs to
   // prove compose.mjs's own wiring reaches a real, non-fabricated value.
   assert.notEqual(accounting.packSpendMicroUsdg, '0');
+});
+
+test('dashboard composed in-process: ctx.getSchedulerView is wired to the real scheduler.getView(), never a second timer', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, { statePath, stateDir });
+
+  const view = server.composition.dashboard.ctx.getSchedulerView();
+  assert.deepEqual(view, server.composition.scheduler.getView());
+});
+
+test('dashboard composed in-process: ctx.listRecentWinners derives real deduplicated cards from the durable pack-batch ledger, never a fabricated placeholder', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, {
+    statePath,
+    stateDir,
+    cycleSeed: {
+      releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg,
+      completedStages: [
+        { stage: 'eligibility-snapshot' },
+        { stage: 'claim-process' },
+        { stage: 'outbound' },
+        {
+          stage: 'purchase',
+          evidence: { packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', signature: 'sig-0' },
+            { packIndex: 1, memo: 'memo-1', status: 'not_purchased' },
+          ] },
+        },
+      ],
+      packBatchRequests: [{ stage: 'purchase', packs: [
+        { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: 'pokemon_25' },
+        { packIndex: 1, memo: 'memo-1', expectedCardCount: 1, packType: 'pokemon_25' },
+      ] }],
+    },
+  });
+  const cycle = server.seededCycle;
+  assert.notEqual(cycle, null);
+
+  const cards = await server.composition.dashboard.ctx.listRecentWinners({ limit: 10 });
+  assert.equal(cards.length, 1, 'only the actually-purchased pack becomes a card; the not_purchased pack never fabricates one');
+  assert.equal(cards[0].cycleId, cycle.cycleId);
+  assert.equal(cards[0].operationId, `pack:${cycle.cycleId}:0`);
+  assert.equal(cards[0].memo, 'memo-0');
+  assert.equal(cards[0].state, 'observed');
+  assert.equal(cards[0].transactionId, 'sig-0');
+
+  // An observation whose memo is not among this project's own trusted operations must never appear,
+  // even if it otherwise looks like a well-formed card for the same cycle.
+  const foreignCards = await server.composition.dashboard.ctx.listRecentWinners({ limit: 10 });
+  assert.ok(foreignCards.every(card => card.memo === 'memo-0' || card.memo === 'memo-1'));
+});
+
+test('dashboard composed in-process: ctx.listRecentWinners returns no cards when no pack batch has been requested yet', async t => {
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  const server = await buildComposedDashboard(t, {
+    statePath,
+    stateDir,
+    cycleSeed: { releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg, completedStages: [{ stage: 'eligibility-snapshot' }] },
+  });
+
+  assert.deepEqual(await server.composition.dashboard.ctx.listRecentWinners({ limit: 10 }), []);
 });
 
 // --- WP-36: the full eight-stage liveMode true cycle ---------------------------------------------
@@ -1842,12 +2879,16 @@ function evmDigestSignerClient(role, privateKey) {
 
 const FULL_VAULT = `0x${'a'.repeat(40)}`;
 const FULL_HOOK = `0x${'b'.repeat(40)}`;
-const FULL_EVM_ACCOUNT = `0x${'c'.repeat(40)}`;
-const FULL_USDG = `0x${'e'.repeat(40)}`;
+// Pinned deployment identity, so a live composition is admitted against the same accounts and assets
+// production enforces rather than against a weakened check. Same pair as the policy engine's pins,
+// RobinhoodBindings.sol and the recorded owner inputs.
+const FULL_EVM_ACCOUNT = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
+const FULL_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const FULL_HKMN = `0x${'f'.repeat(40)}`;
 const FULL_RETURN_ESCROW = `0x${'d'.repeat(40)}`;
-const FULL_SOLANA_ACCOUNT = 'HWPRgtDGpBm8mByTGS57BWCsijMo53qPPSbskWDukfTc';
+const FULL_SOLANA_ACCOUNT = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 const FULL_ROUTE_DATA = '0x1234abcd';
+const FULL_SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const FULL_OPEN_TX_SIGNATURE = 'OpenTransactionSignature1111111111111111111111111111111111111111111111111111';
 const FULL_CARD_MINT = 'CardMintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1';
 const FULL_HOLDER = `0x${'9'.repeat(39)}9`;
@@ -2030,7 +3071,9 @@ function fullCollectorCryptClient() {
       assert.equal(nftAddress, FULL_CARD_MINT);
       return { success: true, serializedTransaction: 'dW5zaWduZWQtYnV5YmFjaw==', refundAmount: 5_000_000, memo: 'memo-full-1:buyback' };
     },
-    getMachines: () => { throw new Error('unused in liveMode true'); },
+    // The admission planner prices the pack from the catalog before a live cycle is created, so
+    // getMachines is now reached ahead of the claim boundary this fixture exercises.
+    getMachines: async () => ({ machines: [{ code: 'base-pack', price: '0.000005', contains: 1 }, { code: 'collector-nova', price: '0.000005', contains: 1 }] }),
     getStatus: () => { throw new Error('unused in liveMode true'); },
     getPackStatus: () => { throw new Error('unused in liveMode true'); },
   };
@@ -2039,7 +3082,49 @@ function fullCollectorCryptClient() {
 function fullRelayClient() {
   return {
     async quoteOutboundBridge({ amount, user, recipient }) {
-      return { requestId: 'req-outbound-full', origin: { amount }, destination: { amount }, raw: { steps: [{ data: { data: FULL_ROUTE_DATA } }] } };
+      // Parser-shaped, because the admission planner persists the returned QuoteResult verbatim and
+      // the policy engine re-derives its digest from exactly these fields. Distinct per target: the
+      // planner refuses one quote reused for both the unit and aggregate above quantity one.
+      const parsed = {
+        direction: 'OUTBOUND',
+        tradeType: 'EXACT_OUTPUT',
+        requestId: `req-outbound-full-${amount}`,
+        orderId: `0x${String(amount).padStart(64, '0')}`,
+        sender: user,
+        recipient,
+        deadlineUnixSeconds: 2_000_000_000,
+        origin: { chainId: 4663, address: FULL_USDG, symbol: 'USDG', decimals: 6, amount, amountFormatted: null, minimumAmount: null },
+        destination: { chainId: 792703809, address: FULL_SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6, amount, amountFormatted: null, minimumAmount: amount },
+        stepCount: 1,
+        raw: {
+          requestId: `req-outbound-full-${amount}`,
+          steps: [{ data: { data: FULL_ROUTE_DATA } }],
+          details: {
+            sender: user,
+            recipient,
+            currencyIn: { currency: { chainId: 4663, address: FULL_USDG, symbol: 'USDG', decimals: 6 }, amount },
+            currencyOut: { currency: { chainId: 792703809, address: FULL_SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 }, amount, minimumAmount: amount },
+          },
+          protocol: {
+            v2: {
+              orderId: `0x${String(amount).padStart(64, '0')}`,
+              orderData: {
+                output: {
+                  chainId: 'solana',
+                  deadline: 2_000_000_000,
+                  calls: [],
+                  payments: [{ recipient, currency: FULL_SOLANA_MINT, expectedAmount: amount, minimumAmount: amount }],
+                },
+                inputs: [{
+                  payment: { chainId: 'robinhood', currency: FULL_USDG, amount },
+                  refunds: [{ chainId: 'robinhood', currency: FULL_USDG, recipient: user, deadline: 2_000_000_000 }],
+                }],
+              },
+            },
+          },
+        },
+      };
+      return { ...parsed, quoteDigest: relayQuoteDigest(parsed) };
     },
     async quoteReturnBridge({ amount }) {
       return { requestId: 'req-return-full', origin: { amount }, destination: { amount }, raw: { steps: [{ transaction: 'dW5zaWduZWQtcmV0dXJu' }] } };
@@ -2074,6 +3159,7 @@ test('liveMode true fails closed before claim signing when canonical nonce reads
   };
 
   const composition = await compose({
+    processLiabilityReader: testProcessLiabilityReader(),
     stateDir,
     statePath,
     workerOwner: 'test-worker',

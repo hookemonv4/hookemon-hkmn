@@ -16,7 +16,9 @@ import {
 import { TRANSACTION_POLICY_SCHEMA, decodeProviderTransaction } from '../../src/signing/transaction-policy.mjs';
 import { policyFor } from '../signing/policy-fixture.mjs';
 import {
+  createRehearsalSkipHandler,
   mutateRehearsalPayout,
+  prepareRehearsalPayoutRequest,
   probeRehearsalPayout,
   reconcileLiveRehearsalPayout,
 } from '../../src/app/stages/rehearsal.mjs';
@@ -26,24 +28,50 @@ const OPERATOR = OPERATOR_KEYPAIR.publicKey.toBase58();
 const RECIPIENTS = ['GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm', 'H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA'];
 const SIGNATURE = 'buyback-signature';
 const PAYOUT_SIGNATURE = 'payout-signature';
+const PROCEEDS_ACCOUNT = deriveAssociatedTokenAddress(OPERATOR, CIRCLE_USD_MINT).toBase58();
 
 function rpcResponse(result) {
   return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: 1, result }) };
 }
 
-function makeRpcClient({ missingRecipients = [], blockhashValidities = [true] } = {}) {
+function transactionResponse(entries) {
+  const accountKeys = entries.map(entry => entry.tokenAccount);
+  const preTokenBalances = entries.map((entry, accountIndex) => ({
+    accountIndex,
+    mint: entry.mint,
+    owner: entry.owner,
+    uiTokenAmount: { amount: entry.preAmount },
+  }));
+  const postTokenBalances = entries.map((entry, accountIndex) => ({
+    accountIndex,
+    mint: entry.mint,
+    owner: entry.owner,
+    uiTokenAmount: { amount: entry.postAmount },
+  }));
+  return {
+    transaction: { message: { accountKeys } },
+    meta: { preTokenBalances, postTokenBalances },
+  };
+}
+
+function makeRpcClient({ missingRecipients = [], blockhashValidities = [true], transactions = {} } = {}) {
+  const recipientAccounts = RECIPIENTS.map(recipient => deriveAssociatedTokenAddress(recipient, CIRCLE_USD_MINT).toBase58());
+  const defaultTransactions = {
+    [SIGNATURE]: transactionResponse([
+      { tokenAccount: PROCEEDS_ACCOUNT, mint: CIRCLE_USD_MINT, owner: OPERATOR, preAmount: '1000000', postAmount: '1123457' },
+    ]),
+    [PAYOUT_SIGNATURE]: transactionResponse([
+      { tokenAccount: PROCEEDS_ACCOUNT, mint: CIRCLE_USD_MINT, owner: OPERATOR, preAmount: '1123457', postAmount: '1000000' },
+      { tokenAccount: recipientAccounts[0], mint: CIRCLE_USD_MINT, owner: RECIPIENTS[0], preAmount: '0', postAmount: '61729' },
+      { tokenAccount: recipientAccounts[1], mint: CIRCLE_USD_MINT, owner: RECIPIENTS[1], preAmount: '0', postAmount: '61728' },
+    ]),
+  };
   const calls = [];
   const fetchImpl = async (_url, options) => {
     const body = JSON.parse(options.body);
     calls.push(body.method);
     if (body.method === 'getTransaction') {
-      return rpcResponse({
-        transaction: { message: { accountKeys: [OPERATOR] } },
-        meta: {
-          preTokenBalances: [{ accountIndex: 0, mint: CIRCLE_USD_MINT, owner: OPERATOR, uiTokenAmount: { amount: '1000000' } }],
-          postTokenBalances: [{ accountIndex: 0, mint: CIRCLE_USD_MINT, owner: OPERATOR, uiTokenAmount: { amount: '1123457' } }],
-        },
-      });
+      return rpcResponse(transactions[body.params[0]] ?? defaultTransactions[body.params[0]]);
     }
     if (body.method === 'getAccountInfo') {
       const tokenAccount = body.params[0];
@@ -85,15 +113,34 @@ function repository() {
 
 function config(overrides = {}) {
   return {
+    execution: { profile: 'rehearsal', providerMode: 'live' },
     accounts: { solana: OPERATOR },
     solana: { chainId: 'solana-rehearsal' },
-    rehearsal: { mode: 'collector-only', payoutRecipients: RECIPIENTS, split: 'equal' },
+    rehearsal: { mode: 'collector-only', proceedsAccount: PROCEEDS_ACCOUNT, payoutRecipients: RECIPIENTS, split: 'equal' },
     ...overrides,
   };
 }
 
+function typedCircle(amountAtomic) {
+  return {
+    chainId: 'solana-rehearsal',
+    assetId: CIRCLE_USD_MINT,
+    decimals: CIRCLE_USD_DECIMALS,
+    amountAtomic,
+  };
+}
+
+function proceedsProjection() {
+  return {
+    account: PROCEEDS_ACCOUNT,
+    beforeAtomic: '1000000',
+    afterAtomic: '1123457',
+    delta: typedCircle('123457'),
+  };
+}
+
 async function payoutPolicy(configuration) {
-  const source = deriveAssociatedTokenAddress(OPERATOR, CIRCLE_USD_MINT).toBase58();
+  const source = PROCEEDS_ACCOUNT;
   const plan = ['61729', '61728'];
   const instructions = [
     ...(configuration.rehearsal.priorityFee === undefined
@@ -135,7 +182,7 @@ test('rehearsal payout observes and plans proceeds but refuses the provisional a
   const context = { cycleId: 'cycle-rehearsal-1', stage: 'payout' };
   const input = { adapters: { solana: { client: rpc.client } }, config: await configWithPayoutPolicy(), cycleRepository, context };
   const probe = await probeRehearsalPayout(input);
-  assert.deepEqual(probe.plan, [
+  assert.deepEqual(probe.plan.map(({ recipient, amountMicroSolanaStable }) => ({ recipient, amountMicroSolanaStable })), [
     { recipient: RECIPIENTS[0], amountMicroSolanaStable: '61729' },
     { recipient: RECIPIENTS[1], amountMicroSolanaStable: '61728' },
   ]);
@@ -144,6 +191,7 @@ test('rehearsal payout observes and plans proceeds but refuses the provisional a
   await assert.rejects(
     () => mutateRehearsalPayout({
       ...input,
+      config: { ...input.config, execution: { profile: 'rehearsal', providerMode: 'fake' } },
       liveMode: true,
       signerClient: { solana: { async sign() { signed += 1; return { signedTxBase64: 'signed-transaction' }; } } },
     }),
@@ -151,8 +199,83 @@ test('rehearsal payout observes and plans proceeds but refuses the provisional a
   );
   assert.equal(signed, 0);
   assert.deepEqual(rpc.calls.filter(method => method === 'sendTransaction'), []);
-  await cycleRepository.recordStageAttempt(context.cycleId, 'payout', { signature: PAYOUT_SIGNATURE });
+  await cycleRepository.recordStageAttempt(context.cycleId, 'payout', {
+    signature: PAYOUT_SIGNATURE,
+    sourceTokenAccount: PROCEEDS_ACCOUNT,
+    proceedsAccount: PROCEEDS_ACCOUNT,
+    proceeds: typedCircle('123457'),
+    proceedsProjection: proceedsProjection(),
+    allocated: typedCircle('123457'),
+    recipients: [
+      { recipient: RECIPIENTS[0], tokenAccount: deriveAssociatedTokenAddress(RECIPIENTS[0], CIRCLE_USD_MINT).toBase58(), amountMicroSolanaStable: '61729', amount: typedCircle('61729') },
+      { recipient: RECIPIENTS[1], tokenAccount: deriveAssociatedTokenAddress(RECIPIENTS[1], CIRCLE_USD_MINT).toBase58(), amountMicroSolanaStable: '61728', amount: typedCircle('61728') },
+    ],
+    buybackSignature: SIGNATURE,
+  });
   assert.equal((await reconcileLiveRehearsalPayout(input)).confirmationStatus, 'finalized');
+});
+
+test('rehearsal payout refuses a proceeds address that is not the operator canonical Circle token account', async () => {
+  const badConfiguration = config({
+    rehearsal: { mode: 'collector-only', proceedsAccount: SystemProgram.programId.toBase58(), payoutRecipients: RECIPIENTS, split: 'equal' },
+  });
+  await assert.rejects(
+    () => prepareRehearsalPayoutRequest({
+      adapters: { solana: { client: makeRpcClient().client } },
+      config: badConfiguration,
+      cycleRepository: repository(),
+      context: { cycleId: 'cycle-rehearsal-proceeds-account', stage: 'payout' },
+    }),
+    /canonical Circle token account/,
+  );
+});
+
+test('rehearsal payout reconciliation requires the exact finalized proceeds debit and recipient credits', async () => {
+  const recipientAccounts = RECIPIENTS.map(recipient => deriveAssociatedTokenAddress(recipient, CIRCLE_USD_MINT).toBase58());
+  const rpc = makeRpcClient({
+    transactions: {
+      [PAYOUT_SIGNATURE]: transactionResponse([
+        { tokenAccount: PROCEEDS_ACCOUNT, mint: CIRCLE_USD_MINT, owner: OPERATOR, preAmount: '1123457', postAmount: '1000000' },
+        { tokenAccount: recipientAccounts[0], mint: CIRCLE_USD_MINT, owner: RECIPIENTS[0], preAmount: '0', postAmount: '61729' },
+        { tokenAccount: recipientAccounts[1], mint: CIRCLE_USD_MINT, owner: RECIPIENTS[1], preAmount: '0', postAmount: '61727' },
+      ]),
+    },
+  });
+  const cycleRepository = repository();
+  await cycleRepository.recordStageAttempt('cycle-rehearsal-delta', 'payout', {
+    signature: PAYOUT_SIGNATURE,
+    sourceTokenAccount: PROCEEDS_ACCOUNT,
+    proceedsAccount: PROCEEDS_ACCOUNT,
+    proceeds: typedCircle('123457'),
+    proceedsProjection: proceedsProjection(),
+    allocated: typedCircle('123457'),
+    recipients: [
+      { recipient: RECIPIENTS[0], tokenAccount: recipientAccounts[0], amountMicroSolanaStable: '61729', amount: typedCircle('61729') },
+      { recipient: RECIPIENTS[1], tokenAccount: recipientAccounts[1], amountMicroSolanaStable: '61728', amount: typedCircle('61728') },
+    ],
+    buybackSignature: SIGNATURE,
+  });
+  await assert.rejects(
+    () => reconcileLiveRehearsalPayout({
+      adapters: { solana: { client: rpc.client } },
+      config: config(),
+      cycleRepository,
+      context: { cycleId: 'cycle-rehearsal-delta', stage: 'payout' },
+    }),
+    /finalized payout deltas do not match the dedicated proceeds plan/,
+  );
+});
+
+test('rehearsal skip handler supplies a canonical no-effect request and durable evidence', async () => {
+  const handler = createRehearsalSkipHandler('outbound');
+  const request = await handler.prepareRequest({ context: { stage: 'outbound' } });
+  assert.deepEqual(request, { provider: 'collector-only', operation: 'no-effect', stage: 'outbound' });
+  assert.deepEqual(await handler.mutate({ request }), {
+    skipped: true,
+    rehearsalMode: 'collector-only',
+    stage: 'outbound',
+    reason: 'Robinhood-chain leg is out of scope for the collector-only rehearsal',
+  });
 });
 
 test('rehearsal payout probe reports missing recipient token accounts without throwing', async () => {
@@ -187,6 +310,7 @@ test('rehearsal payout retries a stale blockhash before refusing the provisional
   const rpc = makeRpcClient({ blockhashValidities: [false, true] });
   const configuration = await configWithPayoutPolicy({ rehearsal: {
     mode: 'collector-only',
+    proceedsAccount: PROCEEDS_ACCOUNT,
     payoutRecipients: RECIPIENTS,
     split: 'equal',
     priorityFee: { computeUnitLimit: 200_000, microLamports: '1234' },
@@ -196,7 +320,7 @@ test('rehearsal payout retries a stale blockhash before refusing the provisional
     () => mutateRehearsalPayout({
       liveMode: true,
       adapters: { solana: { client: rpc.client } },
-      config: configuration,
+      config: { ...configuration, execution: { profile: 'rehearsal', providerMode: 'fake' } },
       cycleRepository: repository(),
       context: { cycleId: 'cycle-rehearsal-priority', stage: 'payout' },
       signerClient: { solana: { async sign() { signed += 1; return { signedTxBase64: 'signed-transaction' }; } } },

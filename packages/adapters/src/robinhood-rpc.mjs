@@ -26,6 +26,8 @@ import {
   parseAbi,
 } from 'viem';
 
+import { HOOK_ABI } from './hook-contract-client.mjs';
+
 export const ROBINHOOD_CHAIN_ID = 4663;
 export const ROBINHOOD_TESTNET_CHAIN_ID = 46630;
 export const ROBINHOOD_MAINNET_RPC_URL = 'https://rpc.mainnet.chain.robinhood.com';
@@ -138,6 +140,67 @@ export function createHistoricalErc20EvidenceClient({ client } = {}) {
         throw new RobinhoodMalformedResponseError('historical ERC20 balance evidence block hash does not match the requested canonical block');
       }
       return Object.freeze({ value, blockNumber: observed.number, blockHash: observed.hash });
+    },
+
+    /**
+     * Reads the deployed hook's process-liability ledger and every control guarding a claim against
+     * it, all at one explicit block, then re-reads that block to confirm the canonical hash has not
+     * moved underneath the reads.
+     *
+     * Every getter is issued with the same `blockNumber`, so no value can come from a different or
+     * newer height. There is no latest read here and no fallback: a missing capability, a failed or
+     * malformed getter, a mixed height, or a changed hash is a refusal, because the alternative is
+     * authorizing a claim against state nobody can point to.
+     */
+    async readHookProcessStateAtBlock({ hook, onchainCycleId, blockNumber, blockHash } = {}) {
+      const hookAddress = assertAddress(hook, 'hook');
+      const requestedBlock = assertBlockNumber(blockNumber, 'blockNumber');
+      if (typeof onchainCycleId !== 'string' || !BLOCK_HASH.test(onchainCycleId)) {
+        throw new RobinhoodRpcError('onchainCycleId must be a 32-byte 0x-prefixed value');
+      }
+      if (typeof blockHash !== 'string' || !BLOCK_HASH.test(blockHash)) {
+        throw new RobinhoodRpcError('blockHash must be a 32-byte 0x-prefixed hash');
+      }
+      const expectedHash = blockHash.toLowerCase();
+      const at = (functionName, args = []) => client.readContract({
+        address: hookAddress, abi: HOOK_ABI, functionName, args, blockNumber: requestedBlock,
+      });
+      const [
+        processLiability, remainingProcessClaimCapacity, processClaimsPaused, processClaimCycleUsed,
+        activeProcessClaimLimit, totalLiability, hookUsdgBalance, isSolvent, roles, block,
+      ] = await Promise.all([
+        at('processLiability'), at('remainingProcessClaimCapacity'), at('processClaimsPaused'),
+        at('processClaimCycleUsed', [onchainCycleId]), at('activeProcessClaimLimit'),
+        at('totalLiability'), at('hookUsdgBalance'), at('isSolvent'),
+        at('readRoles', [onchainCycleId]), client.getBlock({ blockNumber: requestedBlock }),
+      ]);
+      for (const [label, value] of [
+        ['processLiability', processLiability], ['remainingProcessClaimCapacity', remainingProcessClaimCapacity],
+        ['activeProcessClaimLimit', activeProcessClaimLimit], ['totalLiability', totalLiability],
+        ['hookUsdgBalance', hookUsdgBalance],
+      ]) {
+        if (typeof value !== 'bigint' || value < 0n) {
+          throw new RobinhoodMalformedResponseError(`hook process state ${label} is not a nonnegative uint256`);
+        }
+      }
+      if (typeof processClaimsPaused !== 'boolean' || typeof processClaimCycleUsed !== 'boolean' || typeof isSolvent !== 'boolean') {
+        throw new RobinhoodMalformedResponseError('hook process state returned a non-boolean control flag');
+      }
+      const operations = Array.isArray(roles) ? roles[0]?.operations : roles?.roles?.operations;
+      if (typeof operations !== 'string' || !isAddress(operations)) {
+        throw new RobinhoodMalformedResponseError('hook process state readRoles did not return an Operations address');
+      }
+      const observed = normalizeBlockIdentity(block, requestedBlock, `historical Robinhood RPC block ${requestedBlock}`);
+      if (observed.hash !== expectedHash) {
+        throw new RobinhoodMalformedResponseError('hook process state evidence block hash does not match the requested canonical block');
+      }
+      return Object.freeze({
+        processLiability, remainingProcessClaimCapacity, processClaimsPaused, processClaimCycleUsed,
+        activeProcessClaimLimit, totalLiability, hookUsdgBalance, isSolvent,
+        operations: operations.toLowerCase(),
+        blockNumber: observed.number,
+        blockHash: observed.hash,
+      });
     },
   });
 }

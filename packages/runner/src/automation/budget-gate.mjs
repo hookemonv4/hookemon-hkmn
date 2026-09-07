@@ -18,7 +18,21 @@ function parseAtomicUsdg(value, label, { positive = false } = {}) {
   return amount;
 }
 
-export function decideCycleBudget(input) {
+/**
+ * Decides whether a new cycle may open and, when it may, what USDG principal it is opened for.
+ *
+ * With `admittedAggregateFundingUsdg` supplied -- the origin input of the cycle's own N-quantity
+ * EXACT_OUTPUT Relay quote -- that quoted amount *is* the required and released principal. Relay
+ * has already priced its own fee into that origin amount, so nothing here may add to it: the
+ * static pack/outbound/return/margin figures below are configuration, not a contemporaneous price,
+ * and adding them would authorize spending beyond the amount actually quoted. They are still
+ * parsed, because a configuration that cannot even fund the quote is a real refusal, but they never
+ * raise the release amount.
+ *
+ * Without an admission (rehearsal and other non-quote-bound callers) the legacy static sum is kept
+ * unchanged.
+ */
+export function decideCycleBudget(input, { admittedAggregateFundingUsdg = null } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('cycle budget input must be a plain object');
   }
@@ -35,8 +49,12 @@ export function decideCycleBudget(input) {
   const outboundCap = parseAtomicUsdg(input.outboundCapUsdg, 'outboundCapUsdg');
   const returnCap = parseAtomicUsdg(input.returnCapUsdg, 'returnCapUsdg');
   const operatingMargin = parseAtomicUsdg(input.operatingMarginUsdg, 'operatingMarginUsdg');
-  const required = packPrice + outboundCap + returnCap + operatingMargin;
-  if (required > MAX_UINT256) throw new Error('required process budget overflow');
+  const staticRequired = packPrice + outboundCap + returnCap + operatingMargin;
+  if (staticRequired > MAX_UINT256) throw new Error('required process budget overflow');
+  const admitted = admittedAggregateFundingUsdg === null
+    ? null
+    : parseAtomicUsdg(admittedAggregateFundingUsdg, 'admittedAggregateFundingUsdg', { positive: true });
+  const required = admitted === null ? staticRequired : admitted;
 
   const result = {
     ready: false,

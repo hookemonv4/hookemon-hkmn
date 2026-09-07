@@ -47,7 +47,7 @@ const FORK_PIN_VERIFIER_IMPORT_PATH = 'scripts/programmable/lib/keccak.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_PATH = 'scripts/verify-control-dependencies.mjs';
 const CONTROL_DEPENDENCY_VERIFIER_IMPORT_PATH = 'scripts/lib/util.mjs';
 const ARCHIVE_FORK_PROOF_TEST_PATH = 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol';
-const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '305870c57fa003dcc60e849ad81f279ec7a2ee6473c013222ac9a69f075df37d';
+const SUPPORTED_V4_GATES_WORKFLOW_SHA256 = '41d59fb12a421ef0ef4ea7833be2dde68ee01fdff134f41a6dfc139849812740';
 const SUPPORTED_FORK_PROOF_WORKFLOW_SHA256 = 'b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975';
 const SUPPORTED_FORK_PIN_CANARY_WORKFLOW_SHA256 = 'd96801f9885587e84ffc390acbee7f2b973aff1ad42e4b98b5d25d31aa5cca2a';
 const SUPPORTED_IDENTITY_GATE_WORKFLOW_SHA256 = '65a80e8c0ac8cc4430b12e7aaf61c640e38a398fe40f4f604fd742f56a8defeb';
@@ -196,7 +196,10 @@ regexes = ['''^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse$''']
 [[rules.allowlists]]
 description = "Public Robinhood token contract address (lowercase form) test default misclassified as a generic API key"
 condition = "AND"
-paths = ['''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''']
+paths = [
+  '''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''',
+  '''(?:^|/)packages/adapters/test/app/return-custody-v2\.test\.mjs$''',
+]
 regexTarget = "secret"
 regexes = ['''^0x5fc5360d0400a0fd4f2af552add042d716f1d168$''']
 

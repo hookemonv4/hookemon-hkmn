@@ -59,7 +59,7 @@ const readyBudget = () => ({
   activeCycleId: null,
 });
 
-function fixture({ budget = readyBudget(), crashStage = null, liveMode = false, mode = undefined, providerMode = undefined, policyEngine = undefined, packId = undefined, recoveryGuard = undefined, beforeComplete = undefined } = {}) {
+function fixture({ budget = readyBudget(), crashStage = null, liveMode = false, mode = undefined, providerMode = undefined, policyEngine = undefined, packId = undefined, recoveryGuard = undefined, beforeComplete = undefined, now = () => 1_000, stageContextSink = undefined } = {}) {
   const leaseStore = new MemoryLeaseStore();
   const cycles = new MemoryCycleRepository();
   const executions = [];
@@ -69,14 +69,20 @@ function fixture({ budget = readyBudget(), crashStage = null, liveMode = false, 
   const serviceConfig = {
     owner: 'worker-one',
     leaseTtlMs: 1_000,
-    now: () => 1_000,
+    now,
     leaseStore,
     budgetReader: { read: async () => structuredClone(budget) },
     cycleRepository: cycles,
     runnerFactory: cycleId => ({ cycleId }),
     stageDriver: {
-      async reconcile({ cycleId, stage }) { return providerEvidence.get(`${cycleId}:${stage}`) ?? null; },
-      async execute({ cycleId, stage, intent }) {
+      async reconcile(context) {
+        stageContextSink?.(context);
+        const { cycleId, stage } = context;
+        return providerEvidence.get(`${cycleId}:${stage}`) ?? null;
+      },
+      async execute(context) {
+        stageContextSink?.(context);
+        const { cycleId, stage, intent } = context;
         executions.push(stage);
         const evidence = { transactionId: `${cycleId}-${stage}`, intentId: intent.intentId };
         providerEvidence.set(`${cycleId}:${stage}`, evidence);
@@ -148,6 +154,137 @@ test('waits without creating a cycle when process liability is below budget', as
   assert.equal(cycles.active, null);
 });
 
+test('recovers a prepared supplementary settlement without a normal active cycle', async () => {
+  const cycles = new MemoryCycleRepository();
+  const position = {
+    positionId: `held:${'a'.repeat(64)}`,
+    cycleId: 'cycle-complete',
+    packId: 'base-pack',
+    memo: 'memo-supplementary',
+    mint: 'mint-supplementary',
+    cardRef: 'mint-supplementary',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'b'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  const settlement = {
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    manifestId: `${position.cycleId}:supplementary:1`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  cycles.listHeldPositions = async () => [structuredClone(position)];
+  cycles.readSupplementarySettlement = async positionId => {
+    assert.equal(positionId, position.positionId);
+    return structuredClone(settlement);
+  };
+  const dispatched = [];
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    liveMode: false,
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => structuredClone(readyBudget()) },
+    cycleRepository: cycles,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: {
+      async runSupplementarySettlement(context) {
+        dispatched.push(context);
+        return {
+          status: 'ADVANCED',
+          positionId: context.position.positionId,
+          cycleId: context.settlement.cycleId,
+          manifestId: context.settlement.manifestId,
+          stage: 'supplementary-buyback',
+          state: 'BUYBACK_SENT_UNKNOWN',
+        };
+      },
+      async reconcile() { return { transactionId: 'unexpected-main-stage' }; },
+      async execute() { throw new Error('normal cycle must not execute during supplementary recovery'); },
+      async commit() {},
+    },
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+  });
+
+  assert.deepEqual(await service.recoverActiveCycle(), {
+    status: 'SUPPLEMENTARY_SETTLEMENT',
+    cycleId: position.cycleId,
+    stage: 'supplementary-buyback',
+    positionId: position.positionId,
+    manifestId: settlement.manifestId,
+    settlementState: 'BUYBACK_SENT_UNKNOWN',
+  });
+  assert.equal(dispatched.length, 1);
+  assert.equal(cycles.created.length, 0);
+});
+
+test('leaves normal recovery idle when a supplementary handler is pending', async () => {
+  const cycles = new MemoryCycleRepository();
+  const position = {
+    positionId: `held:${'c'.repeat(64)}`,
+    cycleId: 'cycle-complete-pending',
+    packId: 'base-pack',
+    memo: 'memo-supplementary-pending',
+    mint: 'mint-supplementary-pending',
+    cardRef: 'mint-supplementary-pending',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'d'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  const settlement = {
+    positionId: position.positionId,
+    cycleId: position.cycleId,
+    manifestId: `${position.cycleId}:supplementary:1`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  cycles.listHeldPositions = async () => [structuredClone(position)];
+  cycles.readSupplementarySettlement = async () => structuredClone(settlement);
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    liveMode: false,
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => structuredClone(readyBudget()) },
+    cycleRepository: cycles,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: {
+      async runSupplementarySettlement() {
+        return {
+          status: 'PENDING',
+          positionId: position.positionId,
+          cycleId: position.cycleId,
+          manifestId: settlement.manifestId,
+          stage: null,
+          state: settlement.state,
+        };
+      },
+      async reconcile() { return { transactionId: 'unexpected-main-stage' }; },
+      async execute() { throw new Error('normal cycle must not execute during inactive recovery'); },
+      async commit() {},
+    },
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+  });
+
+  assert.deepEqual(await service.recoverActiveCycle(), {
+    status: 'NO_ACTIVE_CYCLE', cycleId: null, stage: null,
+  });
+  assert.equal(cycles.created.length, 0);
+});
+
 test('runs one cycle in fixed order and keeps fee settlement observational', async () => {
   const { service, cycles, executions, commits } = fixture();
   const result = await service.runOnce();
@@ -158,6 +295,19 @@ test('runs one cycle in fixed order and keeps fee settlement observational', asy
   assert.deepEqual(executions, AUTOMATED_CYCLE_STAGES);
   assert.deepEqual(commits, AUTOMATED_CYCLE_STAGES);
   assert.deepEqual(cycles.completed, ['cycle-1']);
+});
+
+test('passes a deterministic clock value to every stage context', async () => {
+  const contexts = [];
+  const { service } = fixture({
+    now: () => 123_456,
+    stageContextSink: context => contexts.push(context),
+  });
+
+  await service.runOnce();
+
+  assert.ok(contexts.length > 0);
+  assert.ok(contexts.every(context => context.nowMs === 123_456));
 });
 
 test('seals rehearsal evidence after reconciliation and before archival', async () => {
@@ -228,6 +378,141 @@ test('freezes the operations-wallet stage order', () => {
     'return',
     'payout',
   ]);
+});
+
+/**
+ * ADR-0025 `refresh-after-readmission`'s repository surface, minimal enough for the orchestration
+ * tests below: one active cycle carrying an immutable `admission`, plus the quote-refresh
+ * projection accessors and selector `AutomatedCycleService` reads and calls directly.
+ */
+function refreshFixtureRepository({ admission, releaseAmount = '55000000' } = {}) {
+  const stages = new Map();
+  const selectCalls = [];
+  const completed = [];
+  let active = { cycleId: 'cycle-refresh-1', releaseAmount, mode: 'rehearsal', admission };
+  let refresh = { state: 'REFRESH_REQUIRED', expiryDigest: `sha256:${'1'.repeat(64)}` };
+  return {
+    get selectCalls() { return selectCalls; },
+    get completed() { return completed; },
+    async readActiveCycle() { return active; },
+    async createCycle() { throw new Error('must not create a new cycle while one is already active'); },
+    async readStage(_cycleId, stage) { return stages.get(stage) ?? { status: 'PENDING' }; },
+    async prepareStage(cycleId, stage) {
+      const prepared = { status: 'PREPARED', intentId: `${cycleId}:${stage}` };
+      stages.set(stage, prepared);
+      return prepared;
+    },
+    async completeStage(_cycleId, stage, evidence) { stages.set(stage, { status: 'COMPLETE', evidence }); },
+    async completeCycle() { completed.push(active.cycleId); active = null; },
+    async readClaimPreconditions() { return { unattributed: false, unresolvedObligations: false }; },
+    async readOutboundQuoteRefresh() { return refresh; },
+    async readFinalizedClaimCustodyEvidence() { return { cycleId: 'cycle-refresh-1' }; },
+    async selectOutboundQuoteRefresh(cycleId, args) {
+      selectCalls.push({ cycleId, ...args });
+      refresh = { state: 'ACTIVE', replacement: args.replacement };
+    },
+  };
+}
+
+/** The same reconcile/execute-then-reconcile provider shape `fixture()`'s stageDriver uses. */
+function providerStageDriver() {
+  const providerEvidence = new Map();
+  const executions = [];
+  return {
+    executions,
+    driver: {
+      async reconcile(context) {
+        return providerEvidence.get(`${context.cycleId}:${context.stage}`) ?? null;
+      },
+      async execute(context) {
+        executions.push(context.stage);
+        providerEvidence.set(`${context.cycleId}:${context.stage}`, { transactionId: `${context.cycleId}-${context.stage}` });
+      },
+      async commit() {},
+    },
+  };
+}
+
+test('reports a benign wait instead of a crash loop when a quote refresh is durably required but no refresh capability is wired', async () => {
+  const cycleRepository = refreshFixtureRepository({ admission: { cycleId: 'cycle-refresh-1', marker: 'original' } });
+  const { driver, executions } = providerStageDriver();
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => readyBudget() },
+    cycleRepository,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: driver,
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+    liveMode: false,
+  });
+
+  const result = await service.recoverActiveCycle();
+  assert.deepEqual(result, { status: 'WAITING_FOR_QUOTE_REFRESH', cycleId: 'cycle-refresh-1', stage: 'outbound' });
+  assert.deepEqual(executions, ['eligibility-snapshot', 'claim-process']);
+  assert.equal(cycleRepository.selectCalls.length, 0);
+  assert.equal(cycleRepository.completed.length, 0);
+});
+
+test('a later tick fetches and atomically selects a replacement, then proceeds through outbound normally', async () => {
+  const originalAdmission = { cycleId: 'cycle-refresh-1', marker: 'original' };
+  const cycleRepository = refreshFixtureRepository({ admission: originalAdmission });
+  const { driver, executions } = providerStageDriver();
+  const planCalls = [];
+  const evaluateCalls = [];
+  const replacement = { schema: 'hookemon.policy-admission.v2', cycleId: 'cycle-refresh-1', marker: 'replacement' };
+  const quoteRefreshPlanner = {
+    async plan(input) { planCalls.push(input); return replacement; },
+  };
+  const policyEngine = {
+    async evaluate() { return { allowed: true }; },
+    async admit() { return { allowed: true, cycleDigest: 'sha256:policy' }; },
+    async evaluatePurchase() { return { allowed: true, cycleDigest: 'sha256:policy' }; },
+    async assertExecutionAllowed() { return { allowed: true }; },
+    async evaluateQuoteRefresh(input) {
+      evaluateCalls.push(input);
+      return { allowed: true, refreshPolicyDecisionDigest: `sha256:${'2'.repeat(64)}` };
+    },
+  };
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => readyBudget() },
+    cycleRepository,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: driver,
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+    liveMode: false,
+    policyEngine,
+    quoteRefreshPlanner,
+  });
+
+  const result = await service.recoverActiveCycle();
+  assert.equal(result.status, 'COMPLETE');
+  assert.deepEqual(executions, ['eligibility-snapshot', 'claim-process', 'outbound', 'purchase', 'open', 'epic-gate', 'buyback', 'return', 'payout']);
+
+  assert.equal(planCalls.length, 1);
+  assert.equal(planCalls[0].cycleId, 'cycle-refresh-1');
+  assert.equal(planCalls[0].admission, originalAdmission);
+  assert.deepEqual(planCalls[0].custody, { cycleId: 'cycle-refresh-1' });
+
+  assert.equal(evaluateCalls.length, 1);
+  assert.equal(evaluateCalls[0].admission, originalAdmission);
+  assert.equal(evaluateCalls[0].replacement, replacement);
+
+  assert.equal(cycleRepository.selectCalls.length, 1);
+  assert.deepEqual(cycleRepository.selectCalls[0], {
+    cycleId: 'cycle-refresh-1',
+    predecessorExpiryDigest: `sha256:${'1'.repeat(64)}`,
+    replacement,
+    refreshPolicyDecisionDigest: `sha256:${'2'.repeat(64)}`,
+    operations: null,
+    assertLease: cycleRepository.selectCalls[0].assertLease,
+  });
 });
 
 test('reconciles a crash after broadcast without executing the stage twice', async () => {
@@ -340,6 +625,45 @@ test('fences a stalled stage after lease expiry and replacement acquisition', as
   releaseStalledStage();
   await assert.rejects(first, /owner token|lease/);
   assert.equal(snapshotExecutions, 1);
+});
+
+test('allows claim processing when held positions are within policy limits', async () => {
+  const cycles = new MemoryCycleRepository();
+  cycles.active = { cycleId: 'cycle-held-position', releaseAmount: '50000000', mode: 'rehearsal' };
+  cycles.stages.set(cycles.active.cycleId, new Map([
+    ['eligibility-snapshot', { status: 'COMPLETE', evidence: { blockHash: '0xabc' } }],
+  ]));
+  cycles.readClaimPreconditions = async () => ({
+    heldAssets: true,
+    unattributed: false,
+    unresolvedObligations: false,
+  });
+  const executions = [];
+  const evidence = new Map();
+  const service = new AutomatedCycleService({
+    owner: 'worker-one',
+    liveMode: false,
+    leaseTtlMs: 1_000,
+    now: () => 1_000,
+    leaseStore: new MemoryLeaseStore(),
+    budgetReader: { read: async () => structuredClone(readyBudget()) },
+    cycleRepository: cycles,
+    runnerFactory: cycleId => ({ cycleId }),
+    stageDriver: {
+      async reconcile({ cycleId, stage }) { return evidence.get(`${cycleId}:${stage}`) ?? null; },
+      async execute({ cycleId, stage }) {
+        executions.push(stage);
+        evidence.set(`${cycleId}:${stage}`, { transactionId: `${cycleId}-${stage}` });
+      },
+      async commit() {},
+    },
+    feeSettlementObserver: { observe: async () => ({ status: 'PENDING_BENEFICIARY_CLAIMS' }) },
+  });
+
+  const result = await service.recoverActiveCycle();
+
+  assert.equal(result.status, 'COMPLETE');
+  assert.ok(executions.includes('claim-process'));
 });
 
 test('requires the eligibility snapshot before claim and both snapshot plus return before payout', async () => {

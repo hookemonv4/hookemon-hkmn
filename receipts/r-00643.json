@@ -1,0 +1,20 @@
+{
+  "id": "r-00643",
+  "at": "2026-09-06T19:23:26.561Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/revision-66-spec-s5-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Approve requirements revision 66 for held-position settlement and bounded recovery."
+  },
+  "inputHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "a327db3d5dd470c62865b41e63517c5314490818110510c9e5559db5ea138162",
+    "decisions/owner-approvals/revision-66-spec-s5-approved.json": "858abff882d5835b835e935791f5c05cc77232a9ae340d399c4e8a1ec0594b31"
+  }
+}

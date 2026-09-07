@@ -2,6 +2,15 @@ const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
 const canonicalSignedInteger = /^(?:0|[1-9][0-9]*|-[1-9][0-9]*)$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 
+// The durable journal bounds a single event payload to 64 array items / object fields
+// (packages/runner/src/cycle/journal.mjs RECOVERY_LIMITS.payloadArrayItems /
+// canonicalObjectFields). Collector's documented /api/generateYoloPacks accepts 1-100 packs per
+// call, but a pack batch recorded in one journal event cannot exceed that shared bound. Until a
+// paged/chunked pack ledger exists, 64 is the system-enforced ceiling, not the provider's.
+export const MAXIMUM_PACK_BATCH_SIZE = 64;
+
+export const PACK_OPERATION_STAGES = Object.freeze(['purchase', 'open', 'epic-gate', 'buyback']);
+
 export const OPERATIONAL_CYCLE_STAGES = Object.freeze([
   'eligibility-snapshot',
   'claim-process',
@@ -62,6 +71,7 @@ export const CUSTODY_LEDGER_BUCKETS = Object.freeze([
   'refunds',
   'residual',
   'heldAssets',
+  'heldPositions',
   'payoutLiability',
   'dust',
   'unattributed',
@@ -227,6 +237,98 @@ export function createPreparedChainTransactionAttempt({ cycleId, stage, requestD
   });
 }
 
+export const SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA = 'hookemon.sign-only-pre-sign-binding.v1';
+
+/**
+ * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: the exact material a bounded
+ * Keychain sign-only retry may reuse, durably bound before the first sign-only invocation for a
+ * PREPARED chain attempt. `unsignedWireBytes` is the canonical encoding of the exact request the
+ * signer receives -- not a digest -- so a restart can prove it never regenerated it;
+ * `unsignedRequestDigest`, `policyDigest`, and `validityContextDigest` pin the request, the
+ * approved policy, and the decoded chain-validity semantics (nonce/blockhash/deadline) a retry or
+ * a restart must reproduce unchanged.
+ */
+export function assertSignOnlyPreSignBinding(value, label = 'sign-only pre-sign binding') {
+  assertPlainObject(value, [
+    'schema',
+    'cycleId',
+    'stage',
+    'requestDigest',
+    'role',
+    'account',
+    'unsignedWireBytes',
+    'unsignedRequestDigest',
+    'policyDigest',
+    'validityContextDigest',
+  ], label);
+  if (value.schema !== SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA) throw new Error(`${label} schema is invalid`);
+  assertNonEmptyString(value.cycleId, `${label} cycleId`);
+  assertStage(value.stage, `${label} stage`);
+  assertDigest(value.requestDigest, `${label} requestDigest`);
+  assertNonEmptyString(value.role, `${label} role`);
+  assertNonEmptyString(value.account, `${label} account`);
+  if (typeof value.unsignedWireBytes !== 'string' || value.unsignedWireBytes.length === 0) {
+    throw new Error(`${label} unsignedWireBytes is invalid`);
+  }
+  assertDigest(value.unsignedRequestDigest, `${label} unsignedRequestDigest`);
+  assertDigest(value.policyDigest, `${label} policyDigest`);
+  assertDigest(value.validityContextDigest, `${label} validityContextDigest`);
+  return clone(value);
+}
+
+export const SIGN_ONLY_INVOCATION_LEDGER_SCHEMA = 'hookemon.sign-only-invocation-ledger.v1';
+
+export const SIGN_ONLY_INVOCATION_LEDGER_STATES = Object.freeze([
+  'ORDINAL_1_ALLOCATED',
+  'ORDINAL_1_TIMED_OUT',
+  'ORDINAL_2_ALLOCATED',
+  'ORDINAL_2_TIMED_OUT',
+]);
+
+const signOnlyInvocationLedgerStateSet = new Set(SIGN_ONLY_INVOCATION_LEDGER_STATES);
+
+/**
+ * REQ-cycle-repository-2 `retry-sign-only-with-durable-binding`: the durable invocation budget for
+ * one sign-only pre-sign binding, independent of any single process's local retry logic. Exactly
+ * two invocation ordinals ever exist for a binding. `ORDINAL_1_ALLOCATED` permits calling Keychain
+ * once; a classified timeout durably advances to `ORDINAL_1_TIMED_OUT`, which is the only state
+ * that ever permits allocating `ORDINAL_2_ALLOCATED`. `ORDINAL_2_TIMED_OUT` is terminal -- no third
+ * ordinal exists. A crash, a generic error, or a proven pre-invocation denial after an allocation
+ * never advances this record, so no later caller (a restart, a concurrent second wrapper, or the
+ * same process) can ever treat that ambiguous outcome as eligible for another invocation.
+ */
+export function assertSignOnlyInvocationLedger(value, label = 'sign-only invocation ledger') {
+  assertPlainObject(value, ['schema', 'cycleId', 'stage', 'requestDigest', 'state'], label);
+  if (value.schema !== SIGN_ONLY_INVOCATION_LEDGER_SCHEMA) throw new Error(`${label} schema is invalid`);
+  assertNonEmptyString(value.cycleId, `${label} cycleId`);
+  assertStage(value.stage, `${label} stage`);
+  assertDigest(value.requestDigest, `${label} requestDigest`);
+  if (!signOnlyInvocationLedgerStateSet.has(value.state)) throw new Error(`${label} state is invalid`);
+  return clone(value);
+}
+
+export function createReservedSignOnlyInvocationLedger({ cycleId, stage, requestDigest }) {
+  return assertSignOnlyInvocationLedger({
+    schema: SIGN_ONLY_INVOCATION_LEDGER_SCHEMA,
+    cycleId,
+    stage,
+    requestDigest,
+    state: 'ORDINAL_1_ALLOCATED',
+  });
+}
+
+export function transitionSignOnlyInvocationLedger(value, nextState) {
+  const current = assertSignOnlyInvocationLedger(value);
+  const permitted = {
+    ORDINAL_1_ALLOCATED: new Set(['ORDINAL_1_TIMED_OUT']),
+    ORDINAL_1_TIMED_OUT: new Set(['ORDINAL_2_ALLOCATED']),
+    ORDINAL_2_ALLOCATED: new Set(['ORDINAL_2_TIMED_OUT']),
+    ORDINAL_2_TIMED_OUT: new Set(),
+  };
+  if (!permitted[current.state].has(nextState)) throw new Error('sign-only invocation ledger transition is invalid');
+  return assertSignOnlyInvocationLedger({ ...current, state: nextState });
+}
+
 export function transitionChainTransactionAttempt(value, nextState, evidence = {}) {
   const current = assertChainTransactionAttempt(value);
   const permitted = {
@@ -249,14 +351,73 @@ export function transitionChainTransactionAttempt(value, nextState, evidence = {
   return assertChainTransactionAttempt({ ...current, ...evidence, state: nextState });
 }
 
-export function assertCustodyLedger(value, label = 'custody ledger') {
-  assertPlainObject(value, ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS], label);
-  if (value.schema !== 'hookemon.custody-ledger.v1') throw new Error(`${label} schema is invalid`);
+/**
+ * Custody ledgers written before `heldPositions` existed carry the other thirteen buckets and
+ * nothing else. Replay must still be able to read them, so a stored value missing exactly that one
+ * bucket is completed with '0' -- the truthful historical figure, since the bucket it stands for did
+ * not exist when the record was written. Only reads opt into this; every write still has to supply
+ * the full canonical set, so nothing new is ever persisted in the legacy shape.
+ */
+const LEGACY_OPTIONAL_CUSTODY_BUCKETS = Object.freeze(['heldPositions']);
+
+function completeLegacyCustodyBuckets(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const missing = LEGACY_OPTIONAL_CUSTODY_BUCKETS.filter(bucket => !Object.hasOwn(value, bucket));
+  if (missing.length === 0) return value;
+  return { ...value, ...Object.fromEntries(missing.map(bucket => [bucket, '0'])) };
+}
+
+export const CUSTODY_BALANCE_OBSERVATION_FIELDS = Object.freeze(['schema', 'account', 'balance', 'finality']);
+
+/** CustodyBalanceObservationV1 (ADR-0026): a finalized observed on-chain balance, not a valuation. */
+export function assertCustodyBalanceObservation(value, label = 'custody balance observation') {
+  assertPlainObject(value, CUSTODY_BALANCE_OBSERVATION_FIELDS, label);
+  if (value.schema !== 'hookemon.custody-balance-observation.v1') throw new Error(`${label} schema is invalid`);
+  assertNonEmptyString(value.account, `${label} account`);
+  const balance = assertTypedAmount(value.balance, `${label} balance`);
+  const finality = assertRelayFinality(value.finality, `${label} finality`);
+  return { schema: value.schema, account: value.account, balance, finality };
+}
+
+const CUSTODY_LEDGER_V2_FIELDS = Object.freeze(['verifiedCurrentBalance', 'expectedCycleAsset']);
+
+function assertCustodyRowIdentity(value, rowIdentity, label) {
+  if (value.chainId !== rowIdentity.chainId || value.assetId !== rowIdentity.assetId || value.decimals !== rowIdentity.decimals) {
+    throw new Error(`${label} identity must equal the custody ledger row's own chainId, assetId, and decimals`);
+  }
+}
+
+/**
+ * hookemon.custody-ledger.v1 or hookemon.custody-ledger.v2 (ADR-0026). v2 keeps every v1 field,
+ * bucket, and key unchanged and adds exactly `verifiedCurrentBalance` and `expectedCycleAsset`; a
+ * non-null value of either must carry the row's own canonical chainId/assetId/decimals exactly.
+ */
+export function assertCustodyLedger(value, label = 'custody ledger', { allowLegacyBuckets = false } = {}) {
+  if (allowLegacyBuckets) value = completeLegacyCustodyBuckets(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a plain object`);
+  if (value.schema !== 'hookemon.custody-ledger.v1' && value.schema !== 'hookemon.custody-ledger.v2') {
+    throw new Error(`${label} schema is invalid`);
+  }
+  const isV2 = value.schema === 'hookemon.custody-ledger.v2';
+  const fields = isV2
+    ? ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS, ...CUSTODY_LEDGER_V2_FIELDS]
+    : ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS];
+  assertPlainObject(value, fields, label);
   assertNonEmptyString(value.cycleId, `${label} cycleId`);
   assertNonEmptyString(value.chainId, `${label} chainId`);
   assertNonEmptyString(value.assetId, `${label} assetId`);
   if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) throw new Error(`${label} decimals is invalid`);
   for (const bucket of CUSTODY_LEDGER_BUCKETS) assertAtomic(value[bucket], `${label} ${bucket}`);
+  if (!isV2) return clone(value);
+  const rowIdentity = { chainId: value.chainId, assetId: value.assetId, decimals: value.decimals };
+  if (value.verifiedCurrentBalance !== null) {
+    const observation = assertCustodyBalanceObservation(value.verifiedCurrentBalance, `${label} verifiedCurrentBalance`);
+    assertCustodyRowIdentity(observation.balance, rowIdentity, `${label} verifiedCurrentBalance balance`);
+  }
+  if (value.expectedCycleAsset !== null) {
+    const expected = assertTypedAmount(value.expectedCycleAsset, `${label} expectedCycleAsset`);
+    assertCustodyRowIdentity(expected, rowIdentity, `${label} expectedCycleAsset`);
+  }
   return clone(value);
 }
 
@@ -351,6 +512,33 @@ const RETURN_RELAY_INTENT_FIELDS = Object.freeze([
   'deadlineUnixSeconds',
 ]);
 
+// The Relay client (packages/adapters/src/relay-client.mjs RELAY_INTENT_KEYS) has carried
+// tradeType and quoteDigest since revision67's Relay client; both fields are required together
+// or not at all — a record predating that client has neither, one recorded with it has both.
+const RETURN_RELAY_INTENT_FIELDS_WITH_TRADE_EVIDENCE = Object.freeze([
+  'schema',
+  'requestId',
+  'orderId',
+  'direction',
+  'tradeType',
+  'quoteDigest',
+  'originChainId',
+  'destinationChainId',
+  'originAssetId',
+  'originDecimals',
+  'destinationAssetId',
+  'destinationDecimals',
+  'originAmount',
+  'quotedDestinationAmount',
+  'quotedDestinationMinimumAmount',
+  'sender',
+  'recipient',
+  'deadlineUnixSeconds',
+]);
+
+// Mirrors relay-client.mjs's own TRADE_TYPES exactly; this is the producer's enum, not a new one.
+const RETURN_RELAY_INTENT_TRADE_TYPES = new Set(['EXACT_INPUT', 'EXACT_OUTPUT', 'EXPECTED_OUTPUT']);
+
 export const RETURN_LEG_DESTINATION_PROOF_FIELDS = Object.freeze([
   'schema',
   'relayRequestId',
@@ -377,10 +565,24 @@ function assertNullableString(value, label) {
 }
 
 function assertReturnRelayIntent(value, relayRequestId, label) {
-  assertPlainObject(value, RETURN_RELAY_INTENT_FIELDS, label);
+  const isPlainObject = value && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+  const hasTradeType = isPlainObject && Object.hasOwn(value, 'tradeType');
+  const hasQuoteDigest = isPlainObject && Object.hasOwn(value, 'quoteDigest');
+  if (hasTradeType !== hasQuoteDigest) {
+    throw new Error(`${label} must carry tradeType and quoteDigest together or neither`);
+  }
+  const carriesTradeEvidence = hasTradeType;
+  assertPlainObject(value, carriesTradeEvidence ? RETURN_RELAY_INTENT_FIELDS_WITH_TRADE_EVIDENCE : RETURN_RELAY_INTENT_FIELDS, label);
   if (value.schema !== 'hookemon.relay-intent.v1') throw new Error(`${label} schema is invalid`);
   if (value.requestId !== relayRequestId) throw new Error(`${label} requestId does not match its Relay leg`);
   if (value.direction !== 'RETURN') throw new Error(`${label} direction is invalid`);
+  if (carriesTradeEvidence) {
+    if (typeof value.tradeType !== 'string' || !RETURN_RELAY_INTENT_TRADE_TYPES.has(value.tradeType)) {
+      throw new Error(`${label} tradeType is invalid`);
+    }
+    assertDigest(value.quoteDigest, `${label} quoteDigest`);
+  }
   if (!Number.isSafeInteger(value.originChainId) || value.originChainId <= 0
     || !Number.isSafeInteger(value.destinationChainId) || value.destinationChainId <= 0) {
     throw new Error(`${label} chain identity is invalid`);
@@ -687,4 +889,116 @@ export function assertMoneyConfiguration(value, label = 'money configuration') {
       lamportReserve: assertMoneyAmount(value.solana.lamportReserve, solanaNative, `${label} solana lamportReserve`),
     },
   };
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Multiple-pack lifecycle records (Task C). One cycle can request several packs from a supported
+// Collector batch operation; each pack keeps its own durable identity, memo, mint, and settlement
+// evidence so several packs are never conflated with several cards returned by one operation.
+
+const packMemoPattern = /^[\x21-\x7e]{1,255}$/;
+const packTypeFieldPattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
+
+/** One durably generated pack request within a batch, before any signing risk. */
+export function assertPackBatchRequestEntry(value, label = 'pack batch request entry') {
+  assertPlainObject(value, ['packIndex', 'memo', 'expectedCardCount', 'packType'], label);
+  if (!Number.isInteger(value.packIndex) || value.packIndex < 0) throw new Error(`${label} packIndex is invalid`);
+  if (typeof value.memo !== 'string' || !packMemoPattern.test(value.memo)) throw new Error(`${label} memo is invalid`);
+  if (!Number.isInteger(value.expectedCardCount) || value.expectedCardCount < 1) throw new Error(`${label} expectedCardCount is invalid`);
+  if (value.packType !== null && (typeof value.packType !== 'string' || !packTypeFieldPattern.test(value.packType))) {
+    throw new Error(`${label} packType is invalid`);
+  }
+  return clone(value);
+}
+
+/** The full set of packs a batch purchase durably generated, indexed 0..n-1 with unique memos. */
+export function assertPackBatchRequest(value, label = 'pack batch request') {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAXIMUM_PACK_BATCH_SIZE) {
+    throw new Error(`${label} must be a non-empty array of at most ${MAXIMUM_PACK_BATCH_SIZE} packs`);
+  }
+  const seenMemos = new Set();
+  return value.map((entry, index) => {
+    const asserted = assertPackBatchRequestEntry(entry, `${label}[${index}]`);
+    if (asserted.packIndex !== index) throw new Error(`${label}[${index}] packIndex must equal its array position`);
+    if (seenMemos.has(asserted.memo)) throw new Error(`${label} memo values must be unique`);
+    seenMemos.add(asserted.memo);
+    return asserted;
+  });
+}
+
+/** Frozen contract: durable identity shared by every lifecycle record for one pack operation. */
+export function assertOperationIdentity(value, label = 'operation identity') {
+  assertPlainObject(value, ['cycleId', 'operationId', 'packIndex', 'memo', 'mint'], label);
+  assertNonEmptyString(value.cycleId, `${label} cycleId`);
+  assertNonEmptyString(value.operationId, `${label} operationId`);
+  if (!Number.isInteger(value.packIndex) || value.packIndex < 0) throw new Error(`${label} packIndex is invalid`);
+  if (value.memo !== null) assertNonEmptyString(value.memo, `${label} memo`);
+  if (value.mint !== null) assertNonEmptyString(value.mint, `${label} mint`);
+  return clone(value);
+}
+
+/** Deterministic durable identity for one pack within a cycle; stable across every observation. */
+export function packOperationId(cycleId, packIndex) {
+  if (typeof cycleId !== 'string' || cycleId.length === 0) throw new Error('packOperationId cycleId is invalid');
+  if (!Number.isInteger(packIndex) || packIndex < 0) throw new Error('packOperationId packIndex is invalid');
+  return `pack:${cycleId}:${packIndex}`;
+}
+
+export const PUBLIC_CARD_EVENT_STATES = Object.freeze(['PURCHASED', 'OPENED', 'GATED', 'SOLD', 'HELD', 'REFUNDED']);
+const publicCardEventStateSet = new Set(PUBLIC_CARD_EVENT_STATES);
+
+/**
+ * Frozen contract: one normalized observation of a pack/card's progress. Several observations of
+ * the same operationId are idempotent updates to one card's public history, never distinct cards.
+ */
+export function assertPublicCardEvent(value, label = 'public card event') {
+  assertPlainObject(value, [
+    'cycleId', 'operationId', 'packIndex', 'memo', 'mint',
+    'eventId', 'sequence', 'state', 'name', 'imageUrl',
+    'observedAt', 'finalizedAt', 'transactionId', 'proceeds',
+  ], label);
+  assertOperationIdentity({
+    cycleId: value.cycleId,
+    operationId: value.operationId,
+    packIndex: value.packIndex,
+    memo: value.memo,
+    mint: value.mint,
+  }, label);
+  assertNonEmptyString(value.eventId, `${label} eventId`);
+  assertAtomic(value.sequence, `${label} sequence`);
+  if (!publicCardEventStateSet.has(value.state)) throw new Error(`${label} state is invalid`);
+  if (value.name !== null) assertNonEmptyString(value.name, `${label} name`);
+  if (value.imageUrl !== null) assertNonEmptyString(value.imageUrl, `${label} imageUrl`);
+  if (typeof value.observedAt !== 'string' || !isoTimestampPattern.test(value.observedAt)) {
+    throw new Error(`${label} observedAt is invalid`);
+  }
+  if (value.finalizedAt !== null
+    && (typeof value.finalizedAt !== 'string' || !isoTimestampPattern.test(value.finalizedAt))) {
+    throw new Error(`${label} finalizedAt is invalid`);
+  }
+  if (value.transactionId !== null) assertNonEmptyString(value.transactionId, `${label} transactionId`);
+  if (value.proceeds !== null) assertPublicAmount(value.proceeds, `${label} proceeds`);
+  return clone(value);
+}
+
+/**
+ * Frozen public contract: `{chainId, assetId, units, decimals}`. Every internal amount in this
+ * codebase is `{chainId, assetId, decimals, amountAtomic}` (`assertTypedAmount`); `units` is that
+ * same unsigned integer string renamed at the public boundary. The two are never interchangeable
+ * field names on the same object.
+ */
+export function assertPublicAmount(value, label = 'public amount') {
+  assertPlainObject(value, ['chainId', 'assetId', 'units', 'decimals'], label);
+  assertNonEmptyString(value.chainId, `${label} chainId`);
+  assertNonEmptyString(value.assetId, `${label} assetId`);
+  if (!Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) throw new Error(`${label} decimals is invalid`);
+  assertAtomic(value.units, `${label} units`);
+  return clone(value);
+}
+
+/** Converts one internal typed amount to the frozen public `Amount` shape. Null maps to null. */
+export function toPublicAmount(value) {
+  if (value === null) return null;
+  const amount = assertTypedAmount(value, 'internal amount');
+  return { chainId: amount.chainId, assetId: amount.assetId, decimals: amount.decimals, units: amount.amountAtomic };
 }

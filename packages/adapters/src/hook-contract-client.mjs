@@ -92,6 +92,24 @@ export const PEG_CYCLE_VAULT_ABI = parseAbi([
 export const HOOK_ABI = parseAbi([
   ...STRUCTS,
   'struct ReleasedCycle { bytes32 cycleId; uint256 amount; address operationsTrigger; }',
+  // The deployed hook's accrued process-liability ledger and the controls guarding a claim against
+  // it. This is the only authoritative pre-claim principal source: FeeAccounting increments
+  // processLiability only after exact fee collection, whereas an Operations USDG balance is
+  // post-claim custody that can include unrelated deposits. Field order of the readRoles structs
+  // matches MoneyRoles.sol exactly.
+  'struct RoleState { address programmableBeneficiary; address treasury; address operations; }',
+  'struct PendingRoleTransfer { bytes32 role; address currentAccount; address proposedAccount; }',
+  'struct CycleBoundOperations { bytes32 cycleId; address operations; }',
+  'function processLiability() view returns (uint256)',
+  'function remainingProcessClaimCapacity() view returns (uint256)',
+  'function processClaimsPaused() view returns (bool)',
+  'function processClaimCycleUsed(bytes32 cycleId) view returns (bool)',
+  'function activeProcessClaimLimit() view returns (uint256)',
+  'function totalLiability() view returns (uint256)',
+  'function hookUsdgBalance() view returns (uint256)',
+  'function isSolvent() view returns (bool)',
+  'function readRoles(bytes32 cycleId) view returns (RoleState roles, PendingRoleTransfer treasuryTransfer, PendingRoleTransfer operationsTransfer, CycleBoundOperations cycle)',
+  'function scheduledOperationsRotation() view returns (address expectedOperations, address nextOperations, uint256 executableAt)',
   'function claimProcess(bytes32 cycleId, uint256 amountAtomicUsdg, address destination)',
   'function openPegCycle(bytes32 cycleId) returns (ReleasedCycle released)',
   'function readReleasedCycle(bytes32 cycleId) view returns (ReleasedCycle)',

@@ -61,6 +61,14 @@ test('accepts the exact manually selected pack binding schema', () => {
   assert.throws(() => validateBinding({ ...binding, liveReady: true }), /exact schema/);
 });
 
+test('binding pack accepts hyphenated and underscored pack codes and rejects malformed codes', () => {
+  assert.equal(validateBinding({ ...binding, pack: 'return-fixture' }).pack, 'return-fixture');
+  assert.equal(validateBinding({ ...binding, pack: 'pokemon_50' }).pack, 'pokemon_50');
+  for (const pack of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    assert.throws(() => validateBinding({ ...binding, pack }), /pack/);
+  }
+});
+
 test('requires a distinct cycle return escrow', () => {
   const custody = {
     operationsTrigger: action.operationsTrigger,

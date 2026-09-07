@@ -70,6 +70,17 @@ function selectedBinding(overrides = {}) {
   };
 }
 
+test('cycle draft pack accepts hyphenated and underscored pack codes and rejects malformed codes', () => {
+  const exactSnapshot = snapshot();
+  for (const pack of ['return-fixture', 'pokemon_50']) {
+    assert.equal(createCycleDraft(validDraft(exactSnapshot, { pack })).pack, pack);
+  }
+
+  for (const pack of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    assert.throws(() => createCycleDraft(validDraft(exactSnapshot, { pack })), /pack/i);
+  }
+});
+
 test('revises a draft before freeze and freezes one immutable canonical plan', () => {
   const exactSnapshot = snapshot();
   const draft = createCycleDraft(validDraft(exactSnapshot));

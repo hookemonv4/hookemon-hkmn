@@ -71,6 +71,7 @@ function custodyLedger(cycleId) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -83,6 +84,7 @@ function safetyTelemetry(overrides = {}) {
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
     ...overrides,
@@ -114,6 +116,7 @@ function createRepository({ activeCycleId = 'cycle-one', knownCycleIds = [active
         version: 0,
         heldEvidenceDigest: null,
         ownerDecision: null,
+        heldPositions: new Map(),
         stages: new Map(),
         operationalAttempts: new Map(),
         custodyLedgers: new Map(),
@@ -132,6 +135,7 @@ function policyEngineForState(statePath) {
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
       cycles: [],
@@ -274,6 +278,12 @@ test('status projects cycle facts and typed custody buckets from the repository'
       limitMicroUsdg: '100',
       remainingMicroUsdg: '100',
     },
+    heldPositions: {
+      count: 0,
+      maxCount: 10,
+      valueMicroUsdg: '0',
+      maxValueMicroUsdg: '5000000000',
+    },
     onChainRemainingCapacity: null,
   });
   assert.deepEqual(status.cycles[0].stages, [
@@ -361,6 +371,7 @@ test('status projects canonical lifecycle order and durable chain transaction ev
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -475,12 +486,63 @@ test('status leaves a payout unavailable when no durable payout stage exists', a
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
   });
 
   assert.equal((await control.status()).cycles[0].payout, null);
+});
+
+test('status carries the repository\'s durable terminalAtMs for a terminal cycle, and null when a non-terminal cycle or a legacy terminal record has none', async t => {
+  const statePath = await temporaryState(t);
+  const repository = createRepository({
+    activeCycleId: null,
+    knownCycleIds: ['cycle-one', 'cycle-two', 'cycle-three'],
+    descriptions: new Map([
+      ['cycle-one', {
+        cycleId: 'cycle-one',
+        releaseAmount: '40',
+        terminalState: 'COMPLETED',
+        terminalAtMs: 1_700_000_000_000,
+        stages: new Map([['purchase', { status: 'COMPLETE' }]]),
+        operationalAttempts: new Map(),
+        chainAttempts: new Map(),
+        custodyLedgers: new Map(),
+      }],
+      ['cycle-two', {
+        cycleId: 'cycle-two',
+        releaseAmount: '40',
+        terminalState: null,
+        stages: new Map([['purchase', { status: 'COMPLETE' }]]),
+        operationalAttempts: new Map(),
+        chainAttempts: new Map(),
+        custodyLedgers: new Map(),
+      }],
+      ['cycle-three', {
+        cycleId: 'cycle-three',
+        releaseAmount: '40',
+        terminalState: 'HELD_OWNER_DECISION',
+        stages: new Map([['purchase', { status: 'COMPLETE' }]]),
+        operationalAttempts: new Map(),
+        chainAttempts: new Map(),
+        custodyLedgers: new Map(),
+      }],
+    ]),
+  });
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: repository,
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  const cycles = (await control.status()).cycles;
+  assert.equal(cycles.find(cycle => cycle.cycleId === 'cycle-one').terminalAtMs, 1_700_000_000_000);
+  assert.equal(cycles.find(cycle => cycle.cycleId === 'cycle-two').terminalAtMs, null);
+  assert.equal(cycles.find(cycle => cycle.cycleId === 'cycle-three').terminalAtMs, null);
 });
 
 test('status preserves held owner-decision facts from the repository', async t => {
@@ -538,6 +600,7 @@ test('status projects loss and outstanding custody cap usage from policy telemet
       atRiskMicroUsdg: '8',
       outstandingMicroUsdg: '19',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -559,6 +622,47 @@ test('status projects loss and outstanding custody cap usage from policy telemet
   });
   assert.deepEqual(status.alertSources, { safetyTelemetry: true });
   assert.deepEqual(status.alerts, []);
+});
+
+test('status exposes held-position limit usage and the open positions', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath, configuration({ maxHeldPositions: 3, maxHeldValueMicroUsdg: '100' }));
+  const position = {
+    positionId: 'position-one',
+    cycleId: 'cycle-one',
+    packId: 'base-pack',
+    memo: 'memo-one',
+    mint: 'mint-one',
+    cardRef: 'card-one',
+    costMicroUsdg: '7',
+    insuredValue: null,
+    reason: 'HELD_UNAVAILABLE',
+    terminalState: 'OPEN',
+    evidenceDigest: hash('e'),
+    openedAtMs: nowMs,
+    ownerDecision: null,
+    resolution: null,
+    positionRevision: 0,
+  };
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry({
+      heldPositions: { count: 1, valueMicroUsdg: '7', positions: [position] },
+    }),
+  });
+
+  const status = await control.status();
+
+  assert.deepEqual(status.cap.heldPositions, {
+    count: 1,
+    maxCount: 3,
+    valueMicroUsdg: '7',
+    maxValueMicroUsdg: '100',
+  });
+  assert.deepEqual(status.heldPositions, [position]);
 });
 
 test('status marks unavailable safety telemetry with an authority alert', async t => {
@@ -625,6 +729,26 @@ test('an exposure-increasing configuration update refuses unavailable safety tel
   );
 });
 
+test('increasing the unresolved-card deadline requires safety telemetry', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => { throw new Error('reader offline'); },
+  });
+
+  await assert.rejects(
+    control.execute({
+      expectedRevision: 0,
+      command: { type: 'update-configuration', configuration: { unresolvedCardDeadlineMinutes: 31 } },
+    }),
+    /safety telemetry.*unavailable/i,
+  );
+});
+
 test('pause and kill persist execution guards before the policy engine observes them', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
@@ -651,6 +775,83 @@ test('pause and kill persist execution guards before the policy engine observes 
   );
 });
 
+test('retrying pause after an unrelated configuration change advanced the revision is a real conflict, never a false success', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  // An unrelated command advances the revision while pause's own retry still targets revision 0 —
+  // the exact independent-repro shape: pause never durably applied, but a generic revision CAS
+  // failure alone must not be read as proof that it did.
+  await control.execute({
+    expectedRevision: 0,
+    command: { type: 'update-configuration', configuration: { intervalMinutes: 10 } },
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'pause' } }),
+    /stale operator state revision/,
+  );
+  const status = await control.status();
+  assert.equal(status.configuration.paused, false, 'pause was never durably applied by the failed retry');
+});
+
+test('retrying pause against a revision it already durably applied recognizes the authoritative postcondition instead of failing', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  const first = await control.execute({ expectedRevision: 0, command: { type: 'pause' } });
+  assert.equal(first.revision, 1);
+  assert.equal(first.configuration.paused, true);
+
+  // A retry with the same original (now stale) expectedRevision — the exact shape a crashed effect's
+  // safe re-execution produces — must recognize the postcondition it already reached, not throw.
+  const retried = await control.execute({ expectedRevision: 0, command: { type: 'pause' } });
+  assert.equal(retried.action, 'pause');
+  assert.equal(retried.revision, 1);
+  assert.equal(retried.configuration.paused, true);
+});
+
+test('retrying update-configuration against a revision it already durably applied recognizes the authoritative postcondition', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+  const patch = { intervalMinutes: 15 };
+
+  const first = await control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: patch } });
+  assert.equal(first.configuration.intervalMinutes, 15);
+
+  const retried = await control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: patch } });
+  assert.equal(retried.revision, first.revision);
+  assert.equal(retried.configuration.intervalMinutes, 15);
+
+  // A retry whose patch would produce a functionally different result than what is durably current
+  // remains a real, reported conflict.
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: { intervalMinutes: 20 } } }),
+    /stale operator state revision/,
+  );
+});
+
 test('manual approval delegates one exact digest-bound request to the policy engine', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
@@ -670,6 +871,7 @@ test('manual approval delegates one exact digest-bound request to the policy eng
 
   const result = await control.execute({
     expectedRevision: 0,
+    requestId: 'manual-approval-1',
     command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest: hash('c') },
   });
 
@@ -677,7 +879,96 @@ test('manual approval delegates one exact digest-bound request to the policy eng
   assert.deepEqual(result.approval, { cycleId: 'cycle-one', cycleDigest: hash('c'), approvedAtMs: nowMs });
 });
 
-test('held owner decisions carry the audited request and held-cycle revision to the repository authority', async t => {
+test('manual approval requires a stable request identity', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('must not be called without a requestId'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  await assert.rejects(
+    control.execute({
+      expectedRevision: 0,
+      command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest: hash('c') },
+    }),
+    /requestId is invalid/,
+  );
+});
+
+test('a manual approval that crashed after its effect but before audit completion recovers by reading back the exact durable approval, not by failing UNCERTAIN', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const cycleDigest = hash('e');
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    // Stands in for production composition's injected mutateConfiguration: it rejects a stale
+    // expectedRevision before recordManualApproval's own cycleDigest idempotency check ever runs --
+    // exactly the shape of a crash-after-effect replay, since the approval itself is what advanced
+    // the revision this retry still expects.
+    policyEngine: { recordManualApproval: async () => { throw new Error('stale operator state revision'); } },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  // An unrelated command first advances the revision (matching the real shape: the crashed attempt's
+  // own effect is what moves the revision the retry's expectedRevision still targets), then a
+  // policyEngine that performs a real, expectedRevision-honoring durable write -- mirroring
+  // production's actual mutateConfiguration dependency, unlike the always-succeeds-against-latest
+  // policyEngineForState() test helper -- durably records the approval.
+  await control.execute({
+    expectedRevision: 0,
+    requestId: 'seed-approval',
+    command: { type: 'update-configuration', configuration: { intervalMinutes: 10 } },
+  });
+  const seeded = await createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: {
+      recordManualApproval: async ({ cycleId, cycleDigest: digestValue, expectedRevision }) => {
+        const { mutateOperatorState } = await stateFileModule();
+        await mutateOperatorState(statePath, expectedRevision, current => ({
+          ...current,
+          configuration: {
+            ...current.configuration,
+            approvalsByCycleDigest: { ...current.configuration.approvalsByCycleDigest, [digestValue]: { cycleId, approvedAtMs: 5_000 } },
+          },
+        }));
+        return { cycleId, cycleDigest: digestValue, approvedAtMs: 5_000 };
+      },
+    },
+    readCustody: async () => safetyTelemetry(),
+  }).execute({
+    expectedRevision: 1,
+    requestId: 'real-approval',
+    command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest },
+  });
+  assert.equal(seeded.approval.cycleId, 'cycle-one');
+
+  // The retry replays the crashed attempt's original (now stale) expectedRevision.
+  const retried = await control.execute({
+    expectedRevision: 1,
+    requestId: 'real-approval',
+    command: { type: 'manual-approval', cycleId: 'cycle-one', cycleDigest },
+  });
+  assert.deepEqual(retried.approval, { cycleId: 'cycle-one', cycleDigest, approvedAtMs: 5_000 });
+
+  // A retry for a cycleId that was never actually approved remains a real, reported conflict.
+  await assert.rejects(
+    control.execute({
+      expectedRevision: 1,
+      requestId: 'real-approval-other',
+      command: { type: 'manual-approval', cycleId: 'cycle-two', cycleDigest },
+    }),
+    /stale operator state revision/,
+  );
+});
+
+test('held owner decisions carry the audited request and position revision to the repository authority', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
   const calls = [];
@@ -697,15 +988,15 @@ test('held owner decisions carry the audited request and held-cycle revision to 
     requestId: 'held-decision-1',
     command: {
       type: 'held-owner-decision',
-      cycleId: 'cycle-held',
+      positionId: 'position-held',
       heldEvidenceDigest: hash('d'),
-      expectedCycleRevision: 4,
+      expectedPositionRevision: 4,
       choice: 'keep-holding',
     },
   });
 
   const decision = {
-    cycleId: 'cycle-held',
+    positionId: 'position-held',
     heldEvidenceDigest: hash('d'),
     expectedRevision: 4,
     requestId: 'held-decision-1',
@@ -715,7 +1006,7 @@ test('held owner decisions carry the audited request and held-cycle revision to 
   assert.deepEqual(result, { action: 'held-owner-decision', revision: 0, decision });
 });
 
-test('reconcile reads repository state without invoking an effect callback', async t => {
+test('reconcile without a wired reconciliation authority reads repository state and invokes nothing', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
   let ticks = 0;
@@ -738,7 +1029,71 @@ test('reconcile reads repository state without invoking an effect callback', asy
   assert.equal(approvals, 0);
 });
 
-test('resume-cycle and run-cycle-now each call their injected authority once', async t => {
+test('reconcile with a wired reconciliation authority triggers serialized recovery and never opens a new cycle', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  let ticks = 0;
+  let reconciles = 0;
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository(),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    triggerTick: async () => { ticks += 1; return { tick: 'started' }; },
+    reconcileActiveCycle: async input => { reconciles += 1; assert.deepEqual(input, { requestId: 'reconcile-request-1' }); return { status: 'IN_PROGRESS', cycleId: 'cycle-one' }; },
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  const result = await control.execute({
+    expectedRevision: 0, requestId: 'reconcile-request-1', command: { type: 'reconcile' },
+  });
+
+  assert.deepEqual(result, {
+    action: 'reconcile',
+    resultCode: 'RECOVERY_IN_PROGRESS',
+    result: { status: 'IN_PROGRESS', cycleId: 'cycle-one' },
+    revision: 0,
+  });
+  assert.equal(reconciles, 1);
+  assert.equal(ticks, 0, 'reconcile never opens a new cycle, wired or not');
+});
+
+test('reconcile with a wired authority requires a stable request identity, so a compliant authority can check its own durable postcondition', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository(),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    reconcileActiveCycle: async () => ({ status: 'NO_ACTIVE_CYCLE' }),
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'reconcile' } }),
+    /requestId is invalid/,
+  );
+});
+
+test('a wired reconcile refuses without safety telemetry, same as resume-cycle', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository(),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    reconcileActiveCycle: async () => { throw new Error('must not be called without safety telemetry'); },
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'reconcile' } }),
+    /safety telemetry is unavailable/,
+  );
+});
+
+test('resume-cycle and run-cycle-now each call their injected authority once, threading the stable request identity', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath);
   let ticks = 0;
@@ -748,13 +1103,13 @@ test('resume-cycle and run-cycle-now each call their injected authority once', a
     statePath,
     cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
-    triggerTick: async () => { ticks += 1; return { tick: 'started' }; },
-    resumeActiveCycle: async () => { resumes += 1; return { status: 'RESUMED', cycle: 'resumed' }; },
+    triggerTick: async input => { ticks += 1; assert.deepEqual(input, { requestId: 'run-now-1' }); return { tick: 'started' }; },
+    resumeActiveCycle: async input => { resumes += 1; assert.deepEqual(input, { requestId: 'resume-1' }); return { status: 'RESUMED', cycle: 'resumed' }; },
     readCustody: async () => safetyTelemetry(),
   });
 
   assert.deepEqual(
-    await control.execute({ expectedRevision: 0, command: { type: 'resume-cycle' } }),
+    await control.execute({ expectedRevision: 0, requestId: 'resume-1', command: { type: 'resume-cycle' } }),
     {
       action: 'resume-cycle',
       resultCode: 'RECOVERY_RESUMED',
@@ -763,7 +1118,7 @@ test('resume-cycle and run-cycle-now each call their injected authority once', a
     },
   );
   assert.deepEqual(
-    await control.execute({ expectedRevision: 0, command: { type: 'run-cycle-now' } }),
+    await control.execute({ expectedRevision: 0, requestId: 'run-now-1', command: { type: 'run-cycle-now' } }),
     {
       action: 'run-cycle-now',
       resultCode: 'TICK_TRIGGERED',
@@ -773,6 +1128,29 @@ test('resume-cycle and run-cycle-now each call their injected authority once', a
   );
   assert.equal(resumes, 1);
   assert.equal(ticks, 1);
+});
+
+test('resume-cycle and run-cycle-now each require a stable request identity, so a compliant authority can check its own durable postcondition instead of trusting a bare retry', async t => {
+  const statePath = await temporaryState(t);
+  await seedConfiguration(statePath);
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    triggerTick: async () => ({ tick: 'started' }),
+    resumeActiveCycle: async () => ({ status: 'RESUMED' }),
+    readCustody: async () => safetyTelemetry(),
+  });
+
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'resume-cycle' } }),
+    /requestId is invalid/,
+  );
+  await assert.rejects(
+    control.execute({ expectedRevision: 0, command: { type: 'run-cycle-now' } }),
+    /requestId is invalid/,
+  );
 });
 
 test('configuration updates use the runner schema and reject unknown fields', async t => {
@@ -817,12 +1195,12 @@ test('configuration updates reject monetary values above the fixed operator ceil
     command: {
       type: 'update-configuration',
       configuration: {
-        maxUnitPriceMicroUsdg: '25000000',
-        maxCycleBudgetMicroUsdg: '50000000',
-        max24HourBudgetMicroUsdg: '3600000000',
-        perCycleCapMicroUsdg: '50000000',
-        lossCapMicroUsdg: '50000000',
-        maxOutstandingCustodyMicroUsdg: '50000000',
+        maxUnitPriceMicroUsdg: '55000000',
+        maxCycleBudgetMicroUsdg: '165000000',
+        max24HourBudgetMicroUsdg: '495000000',
+        perCycleCapMicroUsdg: '165000000',
+        lossCapMicroUsdg: '495000000',
+        maxOutstandingCustodyMicroUsdg: '495000000',
       },
     },
   });
@@ -831,7 +1209,15 @@ test('configuration updates reject monetary values above the fixed operator ceil
   await assert.rejects(
     control.execute({
       expectedRevision: 1,
-      command: { type: 'update-configuration', configuration: { maxUnitPriceMicroUsdg: '25000001' } },
+      command: {
+        type: 'update-configuration',
+        configuration: {
+          maxUnitPriceMicroUsdg: '55000001',
+          maxCycleBudgetMicroUsdg: '165000001',
+          perCycleCapMicroUsdg: '165000001',
+          max24HourBudgetMicroUsdg: '495000001',
+        },
+      },
     }),
     /hard cap|ceiling/i,
   );

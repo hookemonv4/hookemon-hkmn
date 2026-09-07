@@ -153,6 +153,38 @@ test('verifies a well-formed owner-signed standing authority document', () => {
   assert.equal(verified.maxCyclesPerDay, 72);
 });
 
+test('verifyStandingAuthorityDocument allowedPacks accepts hyphenated and underscored pack codes and rejects malformed codes', () => {
+  const owner = freshKeyPair();
+  const policy = freshKeyPair();
+
+  const document = standingAuthority(owner, policy, { allowedPacks: ['return-fixture', 'pokemon_50'] });
+  const verified = verifyStandingAuthorityDocument(document, { ownerPublicKey: owner.publicKey });
+  assert.deepEqual(verified.allowedPacks, ['return-fixture', 'pokemon_50']);
+
+  for (const pack of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    const invalidDocument = standingAuthority(owner, policy, { allowedPacks: [pack] });
+    assert.throws(() => verifyStandingAuthorityDocument(invalidDocument, { ownerPublicKey: owner.publicKey }), /allowed packs/i);
+  }
+});
+
+test('StandingAuthorityProvider verifyStepAuthorization pack accepts hyphenated and underscored pack codes and rejects malformed codes', () => {
+  const owner = freshKeyPair();
+  const policy = freshKeyPair();
+  const document = standingAuthority(owner, policy, { allowedPacks: ['return-fixture', 'pokemon_50'] });
+  const provider = createStandingAuthorityProvider({ standingAuthority: document, ownerPublicKey: owner.publicKey, policyPublicKey: policy.publicKey });
+
+  for (const pack of ['return-fixture', 'pokemon_50']) {
+    const intent = stepIntent(document.documentDigest, policy, { pack, nonce: `cycle-1-pack-${pack}-nonce` });
+    const verified = provider.verifyStepAuthorization(intent, { now: '2026-06-01T00:00:01.000Z' });
+    assert.equal(verified.pack, pack);
+  }
+
+  for (const pack of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    const intent = stepIntent(document.documentDigest, policy, { pack, nonce: `cycle-1-invalid-pack-nonce-${pack}` });
+    assert.throws(() => provider.verifyStepAuthorization(intent, { now: '2026-06-01T00:00:01.000Z' }), /pack/i);
+  }
+});
+
 test('rejects a standing authority document signed by the wrong key', () => {
   const owner = freshKeyPair();
   const impostor = freshKeyPair();

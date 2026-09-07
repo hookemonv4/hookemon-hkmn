@@ -16,6 +16,10 @@ canonical micro-USDG integer strings.
   `admit`, `recordManualApproval`, and `assertExecutionAllowed`.
 - `recordManualApproval` accepts an optional `expectedRevision` and forwards it to the durable
   configuration mutation as an atomic compare-and-swap condition.
+- `assertPolicyAdmission(admission, operations?)` normalizes a quote-bound `hookemon.policy-admission.v2`
+  record and requires its `processLiabilityEvidence`. `CycleRepository` and `deriveCyclePolicyDigest`
+  both call it, so the durable record, its replay, and the cycle policy digest all bind exactly the
+  evidence this normalizer accepted; there is no evidence-free variant of this schema.
 
 ## Invariants
 
@@ -34,6 +38,44 @@ canonical micro-USDG integer strings.
 - A reservation at or beyond the trailing-24-hour boundary is refused. A current reservation counts
   as pending principal for loss and outstanding-custody limits; this policy state has no
   execution-evidence release path, so an incomplete reservation remains conservative until expiry.
+- Every `hookemon.policy-admission.v2` admission requires `processLiabilityEvidence`; there is no
+  evidence-free equivalent for a quote-bound admission, so an admission missing it is refused
+  outright rather than treated as valid without a hook observation. A rehearsal or other cycle that
+  has no such read uses the existing no-admission path instead of this schema. Every getter, control
+  flag, and `ceilingAtomic` is re-validated against the resolved deployment identity's funding route,
+  independent of whichever reader produced it, including the three relationships the hook's own
+  accounting guarantees (`remainingProcessClaimCapacity <= activeProcessClaimLimit`,
+  `processLiability <= totalLiability`, and `isSolvent` exactly tracking `hookUsdgBalance >=
+  totalLiability`) and rejecting any unrecognized field, and the aggregate funding quote must not
+  exceed that ceiling. A one-field mutation to a validated record either fails one of these checks or
+  survives into the normalized result the policy digest covers.
+- A `hookemon.policy-admission.v2` admission's `quantity` is a positive integer bounded to the
+  shared purchase-stage batch/catalog ceiling (`MAXIMUM_PACK_BATCH_SIZE`,
+  packages/runner/src/cycle/money-schemas.mjs), refused here -- before `CycleRepository` durably
+  persists the admission, and therefore before the cycle exists or claim-process can run -- rather
+  than only at the later purchase stage's own defense-in-depth check. The operator's own
+  `requestedOrders` ceiling (`maxBoostersPerCycle`, up to 1,000,
+  packages/runner/src/config/state-schema.mjs) can exceed this batch/catalog bound, so an admitted
+  quantity is never trusted past it merely because an operator configured it. The same ceiling is
+  independently enforced earlier still, at admission construction: `buildAdmissionPlanner.plan`
+  (packages/adapters/src/app/compose.mjs) refuses an over-ceiling `requestedOrders` before any
+  catalog read, Relay quote, or hook liability read, so a request this far above the ceiling never
+  reaches a Relay quote, a claim, or a durably admitted cycle at all -- not merely this later
+  normalizer.
+- A `hookemon.policy-admission.v2` binds one typed catalog unit target (`unitPurchase`), its checked
+  aggregate target (`aggregatePurchase`), a separate N=1 source funding quote (`unitFundingQuote`),
+  an aggregate source funding quote (`aggregateFundingQuote`), and the `EXACT_OUTPUT` Relay identity
+  for each. `unitRelayQuote` is the full immutable, parser-shaped N=1 Relay response: policy rechecks
+  its raw request/order, route, accounts, deadline, order payments, exact amounts, and the same
+  canonical full-response digest produced by the Relay adapter. The persisted raw quote is an
+  integrity commitment, not a cryptographic Relay attestation; `buildAdmissionPlanner` obtains it
+  through `parseQuoteResponse` before it is ever persisted. The canonical funding/settlement route
+  and Operations sender/recipient are required. The unit rail compares only the independently
+  verified `unitFundingQuote.amountAtomic` against the per-unit ceiling; per-cycle and
+  trailing-24-hour reservations compare only `aggregateFundingQuote.amountAtomic` once. The
+  aggregate quote is never divided by quantity to obtain a unit price, and the unit is never
+  multiplied by quantity to obtain the aggregate: fees and slippage are not linear in quantity, so
+  either substitution would authorize an unquoted spend.
 - Purchases require the exact existing cycle digest and reservation. Before signing, policy checks
   typed unitPriceAtomic, totalAtomic, and boundedOverheadAtomic plus positive integer-string
   quantity; totalAtomic equals quantity multiplied by unitPriceAtomic, all money fields share one

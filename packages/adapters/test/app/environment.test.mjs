@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign as signMessage } from 'node:crypto';
 import { mkdtemp, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { canonicalJson } from '../../../runner/src/cycle/journal.mjs';
+import { stepAuthorizationIntentDigest } from '../../../runner/src/cycle/authorization-provider.mjs';
 import {
   readEnvironment,
   loadSignerClient,
@@ -14,6 +16,9 @@ import {
   loadStandingAuthority,
   EnvironmentConfigurationError,
 } from '../../src/app/environment.mjs';
+import { mutateReturn } from '../../src/app/stages/return.mjs';
+import { mutateEpicGate } from '../../src/app/stages/epic-gate.mjs';
+import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../src/collector-crypt.mjs';
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
 
 const fixtureSignerOptions = Object.freeze({ preflightAuthority: createTestProfileMutationAuthority() });
@@ -26,7 +31,9 @@ async function productionEnv(t, overrides = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-env-production-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   return baseEnv({
     HOOKEMON_STATE_DIR: directory,
     HOOKEMON_CHAIN_ID: '4663',
@@ -65,6 +72,7 @@ async function productionEnv(t, overrides = {}) {
     HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
     HOOKEMON_PROVIDER_MODE: 'live',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
     ...overrides,
   });
 }
@@ -337,17 +345,24 @@ test('readEnvironment defaults the new WP-33 fields to their safe, backward-comp
 test('readEnvironment defaults the new WP-36 distribution fields (HKMN never guessed, distribution directory unset)', () => {
   const config = readEnvironment(baseEnv());
   assert.equal(config.hkmn.address, null);
+  assert.equal(config.hkmn.decimals, null);
   assert.equal(config.hkmn.deployBlock, 0n);
   assert.equal(config.distribution.dir, null);
 });
 
-test('readEnvironment accepts HOOKEMON_HKMN_ADDRESS/HOOKEMON_HKMN_DEPLOY_BLOCK/HOOKEMON_DISTRIBUTION_DIR', () => {
+test('readEnvironment requires explicit HKMN precision with its address', () => {
+  assert.throws(
+    () => readEnvironment(baseEnv({ HOOKEMON_HKMN_ADDRESS: `0x${'7'.repeat(40)}` })),
+    /HOOKEMON_HKMN_DECIMALS is required/,
+  );
   const config = readEnvironment(baseEnv({
     HOOKEMON_HKMN_ADDRESS: `0x${'7'.repeat(40)}`,
+    HOOKEMON_HKMN_DECIMALS: '18',
     HOOKEMON_HKMN_DEPLOY_BLOCK: '12345',
     HOOKEMON_DISTRIBUTION_DIR: '/var/hookemon/distribution',
   }));
   assert.equal(config.hkmn.address, `0x${'7'.repeat(40)}`);
+  assert.equal(config.hkmn.decimals, 18);
   assert.equal(config.hkmn.deployBlock, 12345n);
   assert.equal(config.distribution.dir, '/var/hookemon/distribution');
 });
@@ -563,6 +578,33 @@ test('loadOperatorSignerClient(keychain backend): constructs a live client only 
   assert.equal(calls.length, 0);
 });
 
+test('loadOperatorSignerClient constructs only the selected Solana Operations role for a live collector-only rehearsal', async () => {
+  const calls = [];
+  const client = await loadOperatorSignerClient({
+    execution: { profile: 'rehearsal', providerMode: 'live' },
+    rehearsal: { mode: 'collector-only' },
+    signer: {
+      backend: 'keychain',
+      liveMode: true,
+      roles: ['operator-solana'],
+      keychain: { command: '/opt/hookemon/bin/keychain-sign', evmAccount: null, solanaAccount: 'operator-solana' },
+    },
+  }, {
+    ...fixtureSignerOptions,
+    exec: async call => {
+      calls.push(call);
+      return { code: 0, stdout: JSON.stringify({ signedTxBase64: 'AQ==' }), stderr: '' };
+    },
+  });
+
+  assert.equal(client.evm, null);
+  assert.equal(typeof client.solana.sign, 'function');
+  await client.solana.sign('AQ==');
+  assert.deepEqual(calls[0].args, [
+    'sign', '--role', 'operator-solana', '--account', 'operator-solana',
+  ]);
+});
+
 test('loadOperatorSignerClient(keychain backend) requires an injected exec function', async () => {
   const config = readEnvironment(baseEnv({
     HOOKEMON_SIGNER_BACKEND: 'keychain',
@@ -592,6 +634,30 @@ test('probeKeychainOperations checks both configured Operations identities befor
     ['probe', '--role', 'operator-solana', '--account', 'operator-solana'],
   ]);
   assert.deepEqual(result, { 'operator-evm': { ready: true }, 'operator-solana': { ready: true } });
+});
+
+test('probeKeychainOperations uses only the configured Solana role and binds its public key for live collector-only rehearsal', async () => {
+  const calls = [];
+  const publicKey = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const result = await probeKeychainOperations({
+    execution: { profile: 'rehearsal', providerMode: 'live' },
+    accounts: { solana: publicKey },
+    signer: {
+      backend: 'keychain',
+      roles: ['operator-solana'],
+      keychain: { command: '/opt/hookemon/bin/keychain-sign', evmAccount: null, solanaAccount: 'operator-solana' },
+    },
+  }, {
+    exec: async call => {
+      calls.push(call);
+      return { code: 0, stdout: JSON.stringify({ ready: true, publicKey }), stderr: '' };
+    },
+  });
+
+  assert.deepEqual(calls.map(call => call.args), [
+    ['probe', '--role', 'operator-solana', '--account', 'operator-solana'],
+  ]);
+  assert.deepEqual(result, { 'operator-solana': { ready: true, publicKey } });
 });
 
 test('loadStandingAuthority returns null when no document path is configured, and the real verified document otherwise', async t => {
@@ -629,6 +695,66 @@ test('loadStandingAuthority returns null when no document path is configured, an
   const verified = loadStandingAuthority(configuredEnv);
   assert.equal(verified.documentDigest, unsigned.documentDigest);
   assert.equal(verified.provider.standingAuthorityDigest, unsigned.documentDigest);
+});
+
+test('loadStandingAuthority reloads only the private policy artifact at each signing boundary', async t => {
+  const env = await productionEnv(t, {
+    HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive-rpc.example.test',
+  });
+  const directory = env.HOOKEMON_STATE_DIR;
+  const ownerKeys = generateKeyPairSync('ed25519');
+  const policyKeys = generateKeyPairSync('ed25519');
+  const ownerPublicKeyPath = join(directory, 'owner-public.pem');
+  const policyPublicKeyPath = join(directory, 'policy-public.pem');
+  const documentPath = join(directory, 'standing-authority.json');
+  await Promise.all([
+    writeFile(ownerPublicKeyPath, ownerKeys.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 }),
+    writeFile(policyPublicKeyPath, policyKeys.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 }),
+  ]);
+  const unsignedDocument = buildCanonicalStandingAuthorityDocument({
+    owner: 'fixture-owner', policyPublicKey: policyKeys.publicKey, perCycleSpendCap: '10', maxCyclesPerDay: 1,
+    allowedPacks: ['collector-25'], allowedDestinations: ['fixture-solana-policy-account'],
+    issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2027-01-01T00:00:00.000Z', documentId: 'fixture-reload-authority',
+  });
+  const document = attachOwnerSignature(unsignedDocument, ownerKeys.privateKey);
+  await writeFile(documentPath, `${canonicalJson(document)}\n`, { mode: 0o600 });
+  const request = {
+    cycleId: 'cycle-authority-reload', stage: 'claim-process', authorizationKind: 'sign',
+    requestDigest: `sha256:${'a'.repeat(64)}`, signerRole: 'operator-evm',
+  };
+  const unsignedIntent = {
+    schema: 'hookemon.standing-authority-step-intent.v1', standingAuthorityDigest: document.documentDigest,
+    cycleId: request.cycleId, actionKind: request.stage, authorizationKind: request.authorizationKind,
+    subjectDigest: request.requestDigest, destination: 'fixture-solana-policy-account', pack: 'collector-25',
+    spendAmount: '1', nonce: 'authority-reload-1', issuedAt: '2026-09-06T00:00:00.000Z',
+  };
+  const intent = {
+    ...unsignedIntent,
+    policySignature: signMessage(null, Buffer.from(stepAuthorizationIntentDigest(unsignedIntent), 'utf8'), policyKeys.privateKey).toString('base64url'),
+  };
+  const artifactPath = join(directory, 'standing-authority-step-authorizations.json');
+  const writeArtifact = artifact => writeFile(artifactPath, `${canonicalJson(artifact)}\n`, { mode: 0o600 });
+  await writeArtifact({
+    schema: 'hookemon.standing-authority-step-authorizations.v1', authorityDigest: document.documentDigest,
+    entries: [{ signerRole: request.signerRole, intent }],
+  });
+  const configured = readEnvironment({
+    ...env,
+    HOOKEMON_STANDING_AUTHORITY_PATH: documentPath,
+    HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH: ownerPublicKeyPath,
+    HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH: policyPublicKeyPath,
+  }, { profile: 'production' });
+  const authority = loadStandingAuthority(configured);
+  assert.deepEqual(await authority.resolveStepAuthorization(request), intent);
+
+  await writeArtifact({
+    schema: 'hookemon.standing-authority-step-authorizations.v1', authorityDigest: `sha256:${'b'.repeat(64)}`,
+    entries: [],
+  });
+  await assert.rejects(
+    () => authority.resolveStepAuthorization(request),
+    /artifact is invalid: standing authority artifact authority digest does not match the verified document/,
+  );
 });
 
 test('loadStandingAuthority rejects a configured policy key that is not bound by the owner-signed document', async t => {
@@ -697,15 +823,114 @@ test('loadStandingAuthority rejects symlinked and non-private production artifac
   const artifactTarget = join(directory, 'authority-artifact-target.json');
   await writeFile(artifactTarget, '{}\n', { mode: 0o600 });
   await symlink(artifactTarget, artifactPath);
-  assert.throws(
-    () => loadStandingAuthority(config),
+  const symlinkedAuthority = loadStandingAuthority(config);
+  await assert.rejects(
+    () => symlinkedAuthority.resolveStepAuthorization({}),
     /standing authority artifact must be a private regular file/,
   );
 
   await unlink(artifactPath);
   await writeFile(artifactPath, '{}\n', { mode: 0o644 });
-  assert.throws(
-    () => loadStandingAuthority(config),
+  const nonPrivateAuthority = loadStandingAuthority(config);
+  await assert.rejects(
+    () => nonPrivateAuthority.resolveStepAuthorization({}),
     /standing authority artifact must be a private regular file/,
   );
+});
+
+
+const explicitEpicFields = Object.freeze({
+  nftAddressField: 'card_id', insuredValueField: 'insured_units', prizeTierField: 'tier', rarityField: 'rarity_name',
+});
+
+async function epicEnvironment(t, document) {
+  const env = await productionEnv(t, { HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' });
+  const path = join(env.HOOKEMON_STATE_DIR, 'epic-fields.json');
+  await writeFile(path, JSON.stringify(document));
+  return { ...env, HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH: path };
+}
+
+test('explicit epic field configuration reaches the real handler from the production environment', async t => {
+  const env = await epicEnvironment(t, explicitEpicFields);
+  const config = readEnvironment(env, { profile: 'production' });
+  assert.deepEqual(config.collectorCrypt.epicGate, { ...explicitEpicFields, asset: COLLECTOR_CRYPT_SETTLEMENT_ASSET });
+  assert.ok(Object.isFrozen(config.collectorCrypt.epicGate));
+  const mint = 'isolated-opened-card';
+  const facts = { card_id: mint, insured_units: 100, tier: 4, rarity_name: 'common' };
+  const result = await mutateEpicGate({ liveMode: true, config,
+    adapters: { collectorCrypt: {
+      async getPackStatus({ memo }) { return { memo, pack: { pack_type: 'collector-25' }, send: facts }; },
+      async getNfts({ page, limit }) { return { nfts: [facts], page, limit, hasMore: false }; },
+      async getMachines() { return { machines: [{ code: 'collector-25', instantBuyback: 90 }] }; },
+      async getBuybackAvailable() { return { available: true, amount: { ...COLLECTOR_CRYPT_SETTLEMENT_ASSET, amountAtomic: '90' } }; },
+    } },
+    cycleRepository: { async recordHeldPosition() { assert.fail('independent valid facts must not become a hold'); } },
+    context: { cycleId: 'epic-config-cycle' },
+    request: { packs: [{ packIndex: 0, memo: 'epic-config-memo', mint, expectedCardCount: 1 }] },
+  });
+  assert.equal(result.packs[0].decision, 'sell');
+  assert.equal(result.packs[0].insuredValue.amountAtomic, '100');
+  assert.equal(result.packs[0].offer.amountAtomic, '90');
+  await writeFile(env.HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH, '{}');
+  assert.equal(config.collectorCrypt.epicGate.nftAddressField, 'card_id', 'loaded mapping is fixed before provider reads');
+});
+
+test('epic field configuration refuses malformed mappings and caller-authored assets', async t => {
+  for (const document of [{}, { ...explicitEpicFields, rarityField: '' }, { ...explicitEpicFields, nftAddressField: '__proto__' },
+    { ...explicitEpicFields, asset: { chainId: '792703809', assetId: 'wrong', decimals: 6 } }]) {
+    const env = await epicEnvironment(t, document);
+    assert.throws(() => readEnvironment(env, { profile: 'production' }), /COLLECTOR_EPIC_GATE_CONFIG_PATH/);
+  }
+  const config = readEnvironment(await productionEnv(t, { HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' }), { profile: 'production' });
+  assert.equal(config.collectorCrypt.epicGate, undefined, 'absence supplies no invented provider mapping');
+});
+
+
+test('missing epic configuration remains data-unverified and wrong settlement identity refuses loading', async t => {
+  const env = await productionEnv(t, { HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' });
+  const config = readEnvironment(env, { profile: 'production' });
+  let held;
+  const result = await mutateEpicGate({ liveMode: true, config,
+    adapters: { collectorCrypt: { async getPackStatus() { assert.fail('missing mapping must refuse before provider reads'); } } },
+    cycleRepository: {
+      async describeCycle() { return { releaseAmount: '17' }; },
+      async recordHeldPosition(_cycleId, value) { held = value; return { ...value, positionId: 'held-test', evidenceDigest: 'test' }; },
+    },
+    context: { cycleId: 'missing-epic-config' },
+    request: { packs: [{ packIndex: 0, memo: 'memo', mint: 'mint', expectedCardCount: 1 }] },
+  });
+  assert.equal(result.packs[0].decision, 'held');
+  assert.equal(held.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.match(held.evidence.reason, /explicit Collector field configuration/);
+  const configured = await epicEnvironment(t, explicitEpicFields);
+  assert.throws(() => readEnvironment({ ...configured, HOOKEMON_RELAY_SOLANA_MINT: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' }, { profile: 'production' }), /documented Collector settlement asset/);
+});
+
+
+test('explicit return window reaches the real return pre-sign request guard without a default', async t => {
+  const env = await productionEnv(t);
+  let effects = 0;
+  const repository = new Proxy({ async describeCycle() { return { custodyLedgers: new Map() }; } }, {
+    get(target, name) { return target[name] ?? (async () => { effects += 1; throw new Error('unexpected effect'); }); },
+  });
+  const invoke = (config, window) => mutateReturn({
+    liveMode: true, config, adapters: { solana: { client: {} } }, cycleRepository: repository,
+    context: { cycleId: 'window-cycle', requestDigest: `sha256:${'a'.repeat(64)}` },
+    request: { schema: 'hookemon.return-relay-request.v1', cycleId: 'window-cycle', requestCreatedAtUnixSeconds: '1', maxSettlementWindowSeconds: window },
+  });
+  const absent = readEnvironment({ ...env, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' }, { profile: 'production' });
+  assert.equal(absent.relay.maxSettlementWindowSeconds, undefined);
+  await assert.rejects(invoke(absent, '300'), /configured positive max settlement window/);
+  const configured = readEnvironment({ ...env, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test', HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: '300' }, { profile: 'production' });
+  assert.equal(configured.relay.maxSettlementWindowSeconds, '300');
+  await assert.rejects(invoke(configured, '301'), /settlement window does not match/);
+  // A matched explicit bound passes that guard and reaches the next independent intent check.
+  await assert.rejects(invoke(configured, '300'), /missing a RETURN Relay intent/);
+  assert.equal(effects, 0, 'no durable write, nonce reservation or signing is reached');
+});
+
+test('return window refuses nonpositive, fractional and unsafe values', async () => {
+  for (const value of ['0', '-1', '1.5', '9007199254740992', 'NaN']) {
+    assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: value })), /must be a positive integer/);
+  }
 });

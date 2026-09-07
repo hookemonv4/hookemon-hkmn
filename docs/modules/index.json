@@ -66,7 +66,7 @@
     {
       "id": "adapters",
       "path": "docs/modules/adapters.md",
-      "sha256": "d8a70df0ce3a522d0f1c0420610526c745660672015a1c2be1904fe41443d2a8"
+      "sha256": "9274b2cbb9ddafe8611b20e006422986d0dad0e6b9b7511ab15a772b254dbb56"
     },
     {
       "id": "hook-contract-client",
@@ -86,7 +86,7 @@
     {
       "id": "relay-bridge-client",
       "path": "docs/modules/relay-bridge-client.md",
-      "sha256": "4ca997ac2d604e62d86925eb99c4d5d9d1ea5c973e40b3b6ca1b63260e64ea03"
+      "sha256": "9231a96ff207f01b2278071dd94ec22b0b63d3263fd2c582c59107f96fde579d"
     },
     {
       "id": "collector-crypt-adapter",
@@ -101,17 +101,17 @@
     {
       "id": "signing",
       "path": "docs/modules/signing.md",
-      "sha256": "de7208984d54511b2c45c3cd3ffb64df6cc7a6b8ede1aa9f70c1f5761cdc2826"
+      "sha256": "bcafcf96e36611c91b0966beac81a4001aa59895e363151b75591a57e731a1b4"
     },
     {
       "id": "cycle-repository",
       "path": "docs/modules/cycle-repository.md",
-      "sha256": "2edd4425784972b5d4970a21c3bf35bd1b4001e2c1efcf8ed78c7b0ad2f9d29f"
+      "sha256": "39710d7301115f82ed815c2056c0507b2cf6e45d5c0051613458a9e8915e7895"
     },
     {
       "id": "policy-engine",
       "path": "docs/modules/policy-engine.md",
-      "sha256": "09e8cc1527523c7564fedde60d73cf368e258df3e56538f7df490dd01676c4ab"
+      "sha256": "6e7067ea4028c3ca37002a0f783cad83a0acdd13fada157e0a7655835809840d"
     },
     {
       "id": "eligibility-snapshot",
@@ -121,12 +121,12 @@
     {
       "id": "cycle-runner",
       "path": "docs/modules/cycle-runner.md",
-      "sha256": "8cc42696004559ad324e7cb4e4b520e9a185fade0c20d881e2a2616b165b6e01"
+      "sha256": "719af68e0190b733e82fb5401e29ef262db5f2dc1c2ee8ce1f5822e0215d43b1"
     },
     {
       "id": "direct-payout",
       "path": "docs/modules/direct-payout.md",
-      "sha256": "5e3572dbaa7f6f73fee7d861ec6d89cc8d5e2524d2a77bfc26a075c9f9adcce5"
+      "sha256": "600d85a9f8c92489bad1ea0f887f895876cb83760328d9029dffc0ba08c68a34"
     },
     {
       "id": "automation",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "af6f3b083424c8256e90a0b8cee20201728b9a8497e7d36808ccaacf52cb8e95"
+      "sha256": "34f2c94233683a6a3e09a419697c760e7c9090e16edd2f8a53f6f83e5c548dcb"
     },
     {
       "id": "dashboard",

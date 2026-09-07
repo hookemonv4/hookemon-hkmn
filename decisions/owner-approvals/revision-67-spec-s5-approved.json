@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Approve requirements revision 67 for the offline Collector purchase-policy binding and EVM-only custody-ledger v2 contract.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "d9e287c5bf9d5cc93ebddc84e72756a1d0e02004214f53f394a3e1e7aee60d18"
+  }
+}

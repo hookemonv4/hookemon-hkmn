@@ -58,17 +58,28 @@ infrastructure.
   configuration, and a lease-fenced repository facade containing only read methods. The chain-journal
   facade for claim, outbound, and return additionally exposes lease-fenced broadcast, finality,
   custody, Relay settlement, recovery-context, and wallet-nonce release methods after canonical
-  chain observation. Direct payout reads its recipient journal and may idempotently record successor
-  dust and release its wallet nonce fence during terminal recovery. Reconciliation receives no
-  signer, runner, or provider-mutation capability.
+  chain observation. The card-stage facade for purchase, open, epic-gate, and buyback additionally
+  exposes lease-fenced held-position and whole-cycle hold methods for an unattributable card;
+  buyback's own facade also exposes a lease-fenced custody-ledger writer, since only buyback sums
+  realized proceeds into the durable custody ledger. Direct payout reads its recipient journal and
+  may idempotently record successor dust and release its wallet nonce fence during terminal
+  recovery. Reconciliation receives no signer, runner, or provider-mutation capability.
 - `src/app/stages/eligibility-snapshot.mjs`, `claim-process.mjs`, and `epic-gate.mjs` provide
   read-only probes. Eligibility snapshot completes through direct read-only reconciliation. Claim
   processing persists `PREPARED → SIGNED → BROADCAST → FINALIZED` in the chain journal and records
   exact custody before finality. Direct payout owns a recipient-level journal and emits evidence only
   after terminal conservation. Outbound and return are built-in chain-journal stages: they retain a
   Relay leg, complete only after their own RPC settlement evidence, and return canonical settlement
-  evidence on a `SETTLED` replay. Purchase, open, epic gate, and buyback durably record `PREPARED`
-  and then throw `LiveModeIntegrationPendingError`.
+  evidence on a `SETTLED` replay. Purchase, open, epic gate, and buyback are Collector-capable
+  built-in stages: in true production mode (`execution.profile !== 'rehearsal'`), not only the
+  narrower collector-only rehearsal profile, their `prepareRequest` receives its own dedicated
+  frozen input carrying `liveMode`, a lease-fenced read-only Collector machine-catalog reader
+  (purchase only), a lease-fenced read-only `cycleRepository` facade, `config`, and `context` --
+  never a signer, a writable repository, or any other adapter. Each reaches its own real refusal
+  (missing durable predecessor-stage evidence, the Collector policy evidence-only gate, or a
+  downstream configuration or mutation-authority refusal) rather than the frozen
+  `LiveModeIntegrationPendingError`, which the driver keeps defined only as inert historical
+  journal-compatibility scaffolding; no stage currently maps to it.
 - The general chain-attempt runtime is v1; the frozen v2 policy, fencing, refusal, and
   approval-digest fields are unavailable. Live Relay signing uses the separate combined
   recovery record rather than claiming schema parity for all chain attempts.
@@ -142,8 +153,45 @@ infrastructure.
   and broadcast. The reservation is globally durable, contains its fencing token and lease window,
   and cannot be replaced until expiry; no production composition wires the compatibility-only third
   Operations role.
+- For `claim-process` specifically, `stage-driver.mjs`'s `execute()` resolves and verifies the exact
+  `operator-evm` standing-authority step authorization for the durably recorded stage/cycle/request
+  digest -- through the same `config.standingAuthorityStepAuthorization` resolver and
+  `verifyAndRecordStepAuthorization` contract the real sign-time guard uses -- before calling
+  `claim-process.mjs`'s own `mutate`, and therefore before that handler's own wallet-nonce
+  reservation (`reserveClaimWalletNonce`, which itself precedes any signer call). This is a real
+  availability check, not a cached permission: `verifyAndRecordStepAuthorization` is idempotent (a
+  repeat call for the same intent only reads back its persisted first-use decision), and every guard
+  that already runs at the actual `sign()`/`signApproved()` boundary inside `guardedSignerRole`
+  (lease, nonce fence, standing authority) still runs unchanged when `mutate` reaches it. The check
+  applies only when a standing authority is required (`execution.profile === 'production'` and
+  `providerMode === 'live'`) and only to this one built-in stage; it prevents a first attempt whose
+  authorization is not yet available from ever reserving the wallet nonce, so a later retry under a
+  rotated lease fencing token is never blocked by a stranded reservation from that refused attempt.
+- `src/app/stages/purchase.mjs`'s `preparePurchaseRequest` sources the number of packs a cycle
+  purchases from the cycle's own durably admitted record (`cycleRepository.describeCycle(cycleId)
+  .admission`, written once at admission by `buildAdmissionPlanner.plan` from the operator's
+  `requestedOrders`), not from a second, independently configured quantity. A caller-supplied
+  `config.pack.quantity` is consulted only to refuse an explicit contradiction against that
+  admission, and, for a genuinely unadmitted context, as a bounded default of 1. In the composed
+  production execution profile (`config.execution.profile === 'production'`) a missing admission --
+  no cycle-scoped repository/context at all, or a real cycle record whose admission is `null` -- is
+  refused before catalog access, policy authorization, signer, or provider mutation, rather than
+  silently constructing an unpriced one-pack request; the bounded default remains available for
+  every other, explicitly non-production context (a standalone probe/dry run, or the Collector-only
+  rehearsal profile). An admitted quantity is independently re-bounded to the shared purchase-stage
+  batch/catalog ceiling (`MAXIMUM_PACK_BATCH_SIZE`, packages/runner/src/cycle/money-schemas.mjs) as
+  defense against a corrupt or replayed record; the same ceiling is independently enforced earlier,
+  before the cycle exists, at both `packages/runner/src/automation/policy-engine.mjs`'s
+  `assertPolicyAdmission` (before `CycleRepository` durably persists the admission) and
+  `buildAdmissionPlanner.plan`'s own construction boundary in `packages/adapters/src/app/compose.mjs`
+  (before any catalog read, Relay quote, or hook liability read).
 - A custody ledger key is `(cycleId, chainId, assetId)`. Its first record fixes `decimals`; later
   records with another decimal value are rejected both while writing and during journal replay.
+  Buyback reconciliation reads the cycle's existing row for its settlement asset before it writes
+  its realized-proceeds total, so every other bucket that row already carried (claimed, bridge,
+  pack cost, and the rest) survives unchanged; only `buybackProceeds` is replaced. A consumer that
+  looks this row up must reconstruct the repository's own key exactly, never a different separator
+  or format, or it silently finds nothing and overwrites the whole row with a fresh, empty one.
 - A generic chain transaction is keyed by `(cycleId, stage, requestDigest)`. It persists raw bytes,
   one nonce or blockhash, a signing hash, and later broadcast and finality observations. The current
   schema does not retain policy digest, approved-semantics recovery material, fencing, or a terminal

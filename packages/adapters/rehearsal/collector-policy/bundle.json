@@ -1,0 +1,38 @@
+{
+  "schema": "hookemon.collector-policy-bundle.v1",
+  "version": 1,
+  "provider": "collector-crypt",
+  "chainId": "solana-mainnet",
+  "integrity": {
+    "algorithm": "sha256-canonical-json",
+    "digest": "sha256:cc5fe7f96012642685c6e68a68945e7850d95397fd85ef48109756285a78006d"
+  },
+  "runtime": {
+    "status": "evidence-only",
+    "currentOperator": "BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE",
+    "reason": "No Collector transaction specimen exists for the current operator, and the historic signer is not reusable.",
+    "coverage": {
+      "formats": ["legacy"],
+      "addressLookupTables": "none-observed",
+      "machinePda": "unverified",
+      "alternateRecipientTokenAccount": "unverified"
+    }
+  },
+  "specimens": [
+    {
+      "action": "purchase",
+      "path": "specimens/purchase.json",
+      "digest": "sha256:980f2e10e27d590e1c9e3ee635095922fe37e634297e0bb2617c03f36f76e69d"
+    },
+    {
+      "action": "open",
+      "path": "specimens/open.json",
+      "digest": "sha256:48fa06f2c03d0db6f9a89c1ae8d79c89e18270d2f9edf8ee8c971d144a08b73f"
+    },
+    {
+      "action": "buyback",
+      "path": "specimens/buyback.json",
+      "digest": "sha256:e8d861fef0ff63415209a4cc91da85f5954949067d3b1103d6377b5f051c5e7a"
+    }
+  ]
+}

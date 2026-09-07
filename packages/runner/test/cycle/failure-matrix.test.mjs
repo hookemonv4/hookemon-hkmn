@@ -43,6 +43,14 @@ const REQUIRED_CELLS = [
   ['USDG canary', 'frozen'],
   ['External signer', 'keychain-interaction'],
   ['Standing authority', 'replay-after-expiry'],
+  ['Held position', 'card-carved-out-cycle-completes'],
+  ['Claim admission', 'held-position-count-limit'],
+  ['Claim admission', 'held-position-value-limit'],
+  ['Supplementary payout', 'restart-between-broadcast-and-finality'],
+  ['Card mutation', 'sent-unknown-deadline'],
+  ['Held position', 'sent-unknown-late-resolution'],
+  ['Cycle settlement', 'all-cards-held-zero-proceeds'],
+  ['Cycle custody', 'interleaved-held-position-isolation'],
 ];
 
 const outcome = (expectedTerminalState, expectedNextStage, owningWp, expectedAttemptState = null) => ({
@@ -62,16 +70,16 @@ const EXPECTED_OUTCOMES = new Map([
   ['Relay leg:wrong-asset-finalized-delta', outcome('HELD_RELAY_WRONG_ASSET', 'owner-decision', 'WP07', 'FINALIZED')],
   ['Transaction policy:wrong-asset', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP08a', 'NOT_SENT')],
   ['Transaction policy:wrong-recipient', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP08a', 'NOT_SENT')],
-  ['Relay quote:expired-quote', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP07')],
-  ['Chain transaction:expired-blockhash', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP08a', 'BROADCAST')],
+  ['Relay quote:expired-quote', outcome(null, 'retry', 'WP07')],
+  ['Chain transaction:expired-blockhash', outcome(null, 'reconcile-or-rebroadcast', 'WP08a', 'BROADCAST')],
   ['EVM transaction:dropped', outcome(null, 'reconcile-or-rebroadcast', 'WP08a', 'BROADCAST')],
   ['EVM transaction:replaced', outcome('HELD_OWNER_DECISION', 'owner-decision', 'WP08a', 'NONCE_INTERFERENCE')],
-  ['Wallet lease:lost-lease', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP07', 'NOT_SENT')],
+  ['Wallet lease:lost-lease', outcome(null, 'retry', 'WP07', 'NOT_SENT')],
   ['Repository recovery:state-directory-loss', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP10a')],
-  ['Open result:missing-mint-response-recorded', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP08b', 'RESPONSE_RECORDED')],
-  ['Open result:missing-mint-sent-unknown-retry', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP08b', 'SENT_UNKNOWN')],
+  ['Open result:missing-mint-response-recorded', outcome(null, 'held-position-owner-decision', 'WP08b', 'RESPONSE_RECORDED')],
+  ['Open result:missing-mint-sent-unknown-retry', outcome(null, 'held-position-owner-decision', 'WP08b', 'SENT_UNKNOWN')],
   ['Epic gate:threshold-equality', outcome(null, 'buyback', 'WP08b')],
-  ['Buyback API:unavailable', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP08b')],
+  ['Buyback API:unavailable', outcome(null, 'held-position-owner-decision', 'WP08b')],
   ['Snapshot:incomplete-logs', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP09a')],
   ['Snapshot:reorg', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP09a')],
   ['Payout:frozen-recipient', outcome('HELD_OWNER_DECISION', 'owner-decision', 'WP09b', 'REFUSED')],
@@ -79,9 +87,19 @@ const EXPECTED_OUTCOMES = new Map([
   ['Payout feasibility:holder-count-above-envelope', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP09b')],
   ['USDG canary:paused', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP14')],
   ['USDG canary:frozen', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP14')],
-  ['External signer:keychain-interaction', outcome('HELD_UNAVAILABLE', 'owner-decision', 'WP08a', 'NOT_SENT')],
+  ['External signer:keychain-interaction', outcome(null, 'retry', 'WP08a', 'NOT_SENT')],
   ['Standing authority:replay-after-expiry', outcome(null, 'reconcile', 'WP07', 'RESPONSE_RECORDED')],
+  ['Held position:card-carved-out-cycle-completes', outcome('COMPLETED', 'return-and-payout', 'WP08b')],
+  ['Claim admission:held-position-count-limit', outcome(null, 'claim-refused', 'WP10a')],
+  ['Claim admission:held-position-value-limit', outcome(null, 'claim-refused', 'WP10a')],
+  ['Supplementary payout:restart-between-broadcast-and-finality', outcome('COMPLETED', 'reconcile', 'WP09b', 'BROADCAST')],
+  ['Card mutation:sent-unknown-deadline', outcome(null, 'held-position-owner-decision-or-reconcile', 'WP08b', 'SENT_UNKNOWN')],
+  ['Held position:sent-unknown-late-resolution', outcome('COMPLETED', 'supplementary-settlement-or-close', 'WP09b', 'SENT_UNKNOWN')],
+  ['Cycle settlement:all-cards-held-zero-proceeds', outcome('COMPLETED', 'zero-payout', 'WP09b')],
+  ['Cycle custody:interleaved-held-position-isolation', outcome('COMPLETED', 'independent-settlement', 'WP07-0')],
 ]);
+
+const OPEN_FACT_CELL_KEYS = new Set();
 
 const RECOVERY_TUPLE_CITATIONS = new Map([
   ['Relay leg:partial-finalized-delta', {
@@ -159,10 +177,11 @@ test('failure matrix names every WP13 contract cell exactly once against the fro
   assert.deepEqual([...keys].sort(), REQUIRED_CELLS.map(([system, failureClass]) => `${system}:${failureClass}`).sort());
 });
 
-// A cell's `test` field is an executable conformance binding. It must point to a test that is
-// in the CI manifest and passes when run by its exact name. Source-text matching is deliberately
-// insufficient: it cannot distinguish a comment, a skipped test, or an unregistered file from
-// a conformance test that CI actually executes.
+// An executable cell's `test` field is a conformance binding. It must point to a test that is in
+// the CI manifest and passes when run by its exact name. The named OPEN FACT cells below are the
+// only temporary exception. Source-text matching is deliberately insufficient: it cannot
+// distinguish a comment, a skipped test, or an unregistered file from a conformance test that CI
+// actually executes.
 const repoRoot = new URL('../../../../', import.meta.url);
 const repoRootPath = fileURLToPath(repoRoot);
 const TEST_CITATION_PATTERN = /^packages\/(?:adapters|runner)\/test\/[A-Za-z0-9_./-]+\.test\.mjs — [^\r\n]+$/;
@@ -224,14 +243,22 @@ function assertOpenFactRecord(record, owningWp) {
   assert.ok(match[4].trim().length > 0, 'OPEN FACT verified alternative is required');
 }
 
-test('every failure-matrix cell binds to one passing test executed by the CI manifest', async () => {
+test('every executable failure-matrix cell binds to one passing test executed by the CI manifest', async () => {
   const matrix = JSON.parse(await readFile(matrixUrl, 'utf8'));
+  const openFactKeys = new Set();
   for (const cell of matrix.cells) {
     const key = `${cell.system}:${cell.failureClass}`;
     assert.equal(typeof cell.test, 'string', `${key} must have a test citation`);
-    assert.equal(cell.test.startsWith('OPEN FACT'), false, `${key} has an OPEN FACT and cannot count as conformance`);
+    if (cell.test.startsWith('OPEN FACT')) {
+      openFactKeys.add(key);
+      assert.equal(OPEN_FACT_CELL_KEYS.has(key), true, `${key} cannot bypass executable conformance with an OPEN FACT`);
+      assertOpenFactRecord(cell.test, cell.owningWp);
+      continue;
+    }
+    assert.equal(OPEN_FACT_CELL_KEYS.has(key), false, `${key} must retain its explicit OPEN FACT until executable coverage exists`);
     assertCitesAnExecutedTest(cell.test, key);
   }
+  assert.deepEqual([...openFactKeys].sort(), [...OPEN_FACT_CELL_KEYS].sort(), 'only documented implementation gaps may bypass executable conformance');
 });
 
 test('Relay holds and authority replay cite distinct executed tests for the full recovery tuple', async () => {

@@ -57,7 +57,7 @@ const bytes32Pattern = /^0x[0-9a-f]{64}$/;
 const zeroDigest = `sha256:${'0'.repeat(64)}`;
 const zeroBytes32 = `0x${'0'.repeat(64)}`;
 const maximumUint256 = (1n << 256n) - 1n;
-const packCodePattern = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const packCodePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const evmAddress = /^0x[0-9a-f]{40}$/;
 const zeroAddress = `0x${'0'.repeat(40)}`;
 

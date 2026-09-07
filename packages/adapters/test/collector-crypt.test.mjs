@@ -99,7 +99,10 @@ test('createCollectorCryptClient refuses a mutation retry override', () => {
 
 test('DEFAULT_BASE_URL and MUTATION_ENDPOINT_NAMES are the documented values', () => {
   assert.equal(DEFAULT_BASE_URL, 'https://gacha.collectorcrypt.com');
-  assert.deepEqual([...MUTATION_ENDPOINT_NAMES].sort(), ['buyback', 'generatePack', 'openPack', 'submitTransaction'].sort());
+  assert.deepEqual(
+    [...MUTATION_ENDPOINT_NAMES].sort(),
+    ['buyback', 'generatePack', 'generateYoloPacks', 'openPack', 'submitTransaction'].sort(),
+  );
 });
 
 // --- acceptance: every documented mutation endpoint has a typed client function -----------------
@@ -132,17 +135,24 @@ test('x-api-key is sent on every GET call', async () => {
 
 test('x-api-key is sent on every mutation call', async () => {
   const fetchImpl = recordingFetch(callIndex => {
-    const map = [loadFixture('generate-pack'), loadFixture('open-pack'), loadFixture('buyback'), loadFixture('submit-transaction')];
+    const map = [
+      loadFixture('generate-pack'),
+      loadFixture('generate-yolo-packs'),
+      loadFixture('open-pack'),
+      loadFixture('buyback'),
+      loadFixture('submit-transaction'),
+    ];
     return jsonResponse(200, map[callIndex - 1]);
   });
   const client = makeClient(fetchImpl);
 
   await client.generatePack({ playerAddress: PLAYER_ADDRESS });
+  await client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 2 });
   await client.openPack({ memo: MEMO });
   await client.buyback({ playerAddress: PLAYER_ADDRESS, nftAddress: NFT_ADDRESS });
   await client.submitTransaction({ signedTransaction: 'QQ==' });
 
-  assert.equal(fetchImpl.calls.length, 4);
+  assert.equal(fetchImpl.calls.length, 5);
   for (const call of fetchImpl.calls) {
     assert.equal(call.init.method, 'POST');
     assert.equal(call.init.headers['x-api-key'], API_KEY);
@@ -212,6 +222,22 @@ test('getNfts accepts the documented non-paginated response when page is omitted
   assert.equal(fetchImpl.calls[0].url.searchParams.has('limit'), false);
 });
 
+test('getNfts code accepts hyphenated and underscored pack codes and rejects malformed codes before any network call', async () => {
+  for (const code of ['return-fixture', 'pokemon_50']) {
+    const fetchImpl = recordingFetch(() => jsonResponse(200, loadFixture('get-nfts')));
+    const client = makeClient(fetchImpl);
+    await client.getNfts({ code });
+    assert.equal(fetchImpl.calls[0].url.searchParams.get('code'), code);
+  }
+
+  for (const code of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    const fetchImpl = recordingFetch(() => jsonResponse(200, {}));
+    const client = makeClient(fetchImpl);
+    await assert.rejects(() => client.getNfts({ code }), TypeError);
+    assert.equal(fetchImpl.calls.length, 0);
+  }
+});
+
 test('getNfts requires pagination metadata when a page size is supplied', async () => {
   const response = {
     nfts: [{ nft_address: NFT_ADDRESS, rarity: 'epic', insured_value: 50000000 }],
@@ -249,6 +275,75 @@ test('generatePack rejects an unknown request field before any network call', as
 
   await assert.rejects(() => client.generatePack({ playerAddress: PLAYER_ADDRESS, unknownField: true }), TypeError);
   assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('generatePack packType accepts hyphenated and underscored pack codes and rejects malformed codes before any network call', async () => {
+  for (const packType of ['return-fixture', 'pokemon_50']) {
+    const fetchImpl = recordingFetch(() => jsonResponse(200, loadFixture('generate-pack')));
+    const client = makeClient(fetchImpl);
+    await client.generatePack({ playerAddress: PLAYER_ADDRESS, packType });
+    assert.equal(JSON.parse(fetchImpl.calls[0].init.body).packType, packType);
+  }
+
+  for (const packType of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    const fetchImpl = recordingFetch(() => jsonResponse(200, {}));
+    const client = makeClient(fetchImpl);
+    await assert.rejects(() => client.generatePack({ playerAddress: PLAYER_ADDRESS, packType }), TypeError);
+    assert.equal(fetchImpl.calls.length, 0);
+  }
+});
+
+test('generateYoloPacks posts the documented batch body to /api/generateYoloPacks', async () => {
+  const fixture = loadFixture('generate-yolo-packs');
+  const fetchImpl = recordingFetch(() => jsonResponse(200, fixture));
+  const client = makeClient(fetchImpl);
+
+  const result = await client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, packType: 'pokemon_25', quantity: 2 });
+
+  const call = fetchImpl.calls[0];
+  assert.equal(call.url.pathname, '/api/generateYoloPacks');
+  assert.deepEqual(JSON.parse(call.init.body), { playerAddress: PLAYER_ADDRESS, packType: 'pokemon_25', quantity: 2 });
+  assert.deepEqual(result, fixture);
+});
+
+test('generateYoloPacks rejects a quantity outside the documented 1-100 range before any network call', async () => {
+  const fetchImpl = recordingFetch(() => jsonResponse(200, {}));
+  const client = makeClient(fetchImpl);
+
+  await assert.rejects(() => client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 0 }), TypeError);
+  await assert.rejects(() => client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 101 }), TypeError);
+  await assert.rejects(() => client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 1.5 }), TypeError);
+  await assert.rejects(() => client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS }), TypeError);
+  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('generateYoloPacks packType accepts hyphenated and underscored pack codes and rejects malformed codes before any network call', async () => {
+  for (const packType of ['return-fixture', 'pokemon_50']) {
+    const fetchImpl = recordingFetch(() => jsonResponse(200, loadFixture('generate-yolo-packs')));
+    const client = makeClient(fetchImpl);
+    await client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, packType, quantity: 2 });
+    assert.equal(JSON.parse(fetchImpl.calls[0].init.body).packType, packType);
+  }
+
+  for (const packType of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    const fetchImpl = recordingFetch(() => jsonResponse(200, {}));
+    const client = makeClient(fetchImpl);
+    await assert.rejects(() => client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, packType, quantity: 2 }), TypeError);
+    assert.equal(fetchImpl.calls.length, 0);
+  }
+});
+
+test('generateYoloPacks fails closed on a response that does not carry exactly quantity unique memo/transaction pairs', async () => {
+  const client = makeClient(recordingFetch(() => jsonResponse(200, { packs: [{ memo: 'a', transaction: 'AA==' }] })));
+  await assert.rejects(() => client.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 2 }), CollectorCryptError);
+
+  const duplicateMemoClient = makeClient(recordingFetch(() => jsonResponse(200, {
+    packs: [{ memo: 'a', transaction: 'AA==' }, { memo: 'a', transaction: 'AQ==' }],
+  })));
+  await assert.rejects(() => duplicateMemoClient.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 2 }), CollectorCryptError);
+
+  const legacyShapeClient = makeClient(recordingFetch(() => jsonResponse(200, loadFixture('generate-pack'))));
+  await assert.rejects(() => legacyShapeClient.generateYoloPacks({ playerAddress: PLAYER_ADDRESS, quantity: 1 }), CollectorCryptError);
 });
 
 test('openPack posts { memo } to /api/openPack and passes through every documented response variant', async () => {

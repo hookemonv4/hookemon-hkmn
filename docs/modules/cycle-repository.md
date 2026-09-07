@@ -81,6 +81,30 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
   is a writer-only transition for `HELD_OWNER_DECISION`. `choice` is `sell` or `keep-holding`;
   the method is deliberately outside the read facade until a separately authorized control path
   consumes it.
+- `persistSignOnlyPreSignBinding(cycleId, stage, requestDigest, binding)` and
+  `readSignOnlyPreSignBinding(cycleId, stage, requestDigest)` manage the ADR-0025
+  `hookemon.sign-only-pre-sign-binding.v1` record `signer-client.mjs`'s recovery-aware policy-sign
+  facade persists before a verified owned Keychain broker's first sign-only invocation for a given
+  chain attempt: exact unsigned wire bytes, signer role and account, the request and policy digests,
+  and a decoded chain-validity-context digest. `persistSignOnlyPreSignBinding` requires that
+  `(cycleId, stage, requestDigest)` already name a `PREPARED` chain attempt, is idempotent for a
+  byte-identical replay, and refuses a changed field, a concurrent conflicting write, or a chain
+  attempt that has moved past `PREPARED`.
+- `reserveSignOnlyInvocation(cycleId, stage, requestDigest, ordinal)`,
+  `recordSignOnlyInvocationTimeout(cycleId, stage, requestDigest, ordinal)`, and
+  `readSignOnlyInvocationLedger(cycleId, stage, requestDigest)` manage the durable
+  `hookemon.sign-only-invocation-ledger.v1` record that bounds the sign-only pre-sign binding's
+  retry budget -- exactly two invocation ordinals ever exist for one binding. `reserveSignOnlyInvocation`
+  is a one-shot reservation, never idempotent-on-match: ordinal 1 succeeds only when no ledger
+  exists yet, ordinal 2 only when the ledger's current state is exactly `ORDINAL_1_TIMED_OUT`, and
+  both re-verify the bound chain attempt is still `PREPARED` atomically at the moment of
+  reservation, so a concurrent second caller racing for the same ordinal always refuses rather than
+  also winning. `recordSignOnlyInvocationTimeout` is idempotent for the identical already-recorded
+  outcome (recording a fact, not granting new permission) and otherwise requires the exact
+  currently-allocated ordinal. A generic error, a proven pre-invocation denial, or a crash with no
+  observed outcome after a reservation never calls `recordSignOnlyInvocationTimeout`, so the ledger
+  simply never advances past `ORDINAL_{ordinal}_ALLOCATED` for that case -- permanently refusing any
+  further ordinal for that binding, including after a restart.
 - `readPayoutDust(cycleId, {chainId, assetId, decimals})` returns either the one unconsumed prior
   record as `{amount, source: {cycleId, digest, planDigest}}` or a zero amount with `source: null`.
   `recordPayoutDust` records positive successor dust, `consumePayoutDust` consumes its exact source,
@@ -97,6 +121,14 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 
 ## Invariants
 
+- `createCycle`'s optional `admission` is validated by the policy engine's own
+  `assertPolicyAdmission` (`assertDurableCycleAdmission`), so the stored record is exactly the
+  normalized result that engine will later digest, including its required `processLiabilityEvidence`.
+  A quote-bound admission missing that evidence is refused at `createCycle` and, for a record written
+  before this requirement existed, at replay -- neither path accepts an evidence-free admission as
+  equivalent to a covered one. The admission rides in `cycle-opened` itself and is immutable for the
+  cycle's life; replay re-validates the stored record on every read, so a resumed cycle's evidence and
+  policy digest reproduce unchanged.
 - Provider attempts progress through `PREPARED -> NOT_SENT -> PREPARED` for a pre-call failure,
   `PREPARED -> SENT_UNKNOWN -> RESPONSE_RECORDED -> RECONCILED` for post-send ambiguity, or
   `PREPARED -> RESPONSE_RECORDED -> RECONCILED` for a recorded response. `SENT_UNKNOWN` is
@@ -168,6 +200,19 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 - A held-owner decision binds the cycle id, a digest of the original held evidence, request id,
   and the journal revision observed by the owner. An exact retry is idempotent; any changed
   request, revision, evidence digest, or choice conflicts. Replay validates the same binding.
+- A sign-only pre-sign binding exists only while its chain attempt is `PREPARED` and is never
+  mutated once written: `outbound` (EVM) and `return` (Solana) are the two stages whose live signer
+  facade currently persists one, always before that attempt's first Keychain sign-only call. It
+  durably fixes the exact unsigned bytes, role, account, and digests a bounded sign-only retry, and
+  a restart that reaches the same call again, must reuse unchanged; it grants no broadcast authority
+  and is unrelated to `persistChainAttemptRecoveryContext`, which binds already-*signed* bytes.
+- The sign-only invocation ledger's retry budget is durable, not a property of one in-process call:
+  it advances only `ORDINAL_1_ALLOCATED -> ORDINAL_1_TIMED_OUT -> ORDINAL_2_ALLOCATED ->
+  ORDINAL_2_TIMED_OUT`, each transition re-verified atomically against the bound chain attempt's
+  own `PREPARED` state, and a caller that reserves a specific ordinal is the only caller ever
+  permitted to invoke Keychain for it -- a restart, a concurrent second wrapper, or the same process
+  calling again all observe the identical durable ledger and refuse before Keychain once nothing
+  remains eligible. No ordinal beyond 2 exists for one binding.
 
 ## State transitions
 
@@ -195,6 +240,16 @@ dashboard, CLI, and runner callers receive a frozen read client rather than a se
 - Cycle lifecycle: active -> held terminal state or fully closed -> archived.
 - Owner-decision lifecycle: `HELD_OWNER_DECISION -> HELD_OWNER_DECISION + owner decision record`.
   Recording `sell` or `keep-holding` never resumes an effect on its own.
+- Sign-only pre-sign binding lifecycle: no binding, chain attempt `PREPARED` -> durable binding ->
+  (byte-identical rebind stays the same record; any other rebind, or a chain attempt that leaves
+  `PREPARED`, is refused). It never transitions further on its own; the chain attempt's own
+  `SIGNED`/`BROADCAST`/`FINALIZED` progression is unaffected and unrelated.
+- Sign-only invocation ledger lifecycle: no ledger -> `ORDINAL_1_ALLOCATED` (only from no ledger,
+  only while the chain attempt is `PREPARED`) -> `ORDINAL_1_TIMED_OUT` (only from an allocated
+  ordinal 1) -> `ORDINAL_2_ALLOCATED` (only from an ordinal-1 timeout, only while still `PREPARED`)
+  -> `ORDINAL_2_TIMED_OUT`, terminal. A generic error, a proven pre-invocation denial, or a crash
+  after either allocation leaves the ledger exactly where it is -- no third ordinal, no
+  reallocation of the same ordinal, and no path back to an earlier state ever exists.
 
 ## Operational commands
 
@@ -247,6 +302,17 @@ node --test --test-timeout=120000 packages/runner/test/cycle/money-schemas.test.
   clients rather than reconstructing a settlement payload.
 - A recovery context that is absent, changed, or bound to different bytes leaves the chain attempt
   unresolved. Recovery never manufactures a replacement signature.
+- A sign-only pre-sign binding is read, never regenerated, on restart: if one already exists for a
+  `PREPARED` `outbound`/`return` chain attempt, the live signer facade's next attempt must reproduce
+  the exact same bytes/role/account/digests or it is refused before Keychain is invoked. See
+  [keychain sign-only timeout](../runbooks/keychain-user-interaction.md) for the bounded-retry
+  contract this binding backs.
+- The sign-only invocation ledger, not local retry logic, is the source of truth for how many
+  Keychain calls remain for a binding. On restart, `readSignOnlyInvocationLedger` before deciding
+  anything: no ledger means ordinal 1 is still available, `ORDINAL_1_TIMED_OUT` means exactly
+  ordinal 2 remains, and any other state (including a crash-ambiguous `ORDINAL_1_ALLOCATED` with no
+  recorded outcome) means nothing remains -- `reserveSignOnlyInvocation` enforces this atomically
+  and refuses before Keychain regardless of what a caller assumes locally.
 - If the sibling identity, in-directory device-and-inode witness, or sibling identity-witness hard
   link is absent or changed, use the durable recovery facade instead of recreating the directory.
   There is no supported way to mint or restore a missing witness link for an existing store; doing

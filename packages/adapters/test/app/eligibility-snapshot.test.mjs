@@ -538,6 +538,102 @@ test('retains every holder above 1024 and lets the feasibility envelope refuse t
   assert.equal(client.calls.filter(call => call.method === 'eth_getLogs').length > 1, true);
 });
 
+test('accepts 10,000 recipients through the actual feasibility gate: the justified paged-storage acceptance target', async () => {
+  const holders = Array.from({ length: 10_000 }, (_, index) => `0x${(index + 5000).toString(16).padStart(40, '0')}`);
+  const client = fakeRpc({
+    hashes: new Map([[8n, hash('7')]]),
+    logs: holders.map((holder, index) => rawTransfer({
+      blockNumber: 1,
+      logIndex: index,
+      from: ZERO_ADDRESS,
+      to: holder,
+      value: 1,
+    })),
+  });
+  const launchManifest = {
+    ...baseConfig().eligibilitySnapshot.launchManifest,
+    supply: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '10000' },
+  };
+  const config = baseConfig({
+    eligibilitySnapshot: {
+      ...baseConfig().eligibilitySnapshot,
+      launchManifest,
+      launchManifestDigest: launchManifestDigest(launchManifest),
+      feasibility: {
+        ...baseConfig().eligibilitySnapshot.feasibility,
+        maxRecipientCount: 20_000,
+        maxTransactionCount: 20_000,
+        nativeBalanceWei: '2000000000',
+      },
+    },
+  });
+
+  const manifest = await freezeEligibilityBeforeClaim({
+    adapters: dualSourceAdapters(client),
+    config,
+    context: { cycleId: 'cycle-10000-accepted', assertLease() {} },
+  });
+
+  assert.equal(manifest.entries.length, 10_000);
+  assert.equal(manifest.feasibility.recipientCount, 10_000);
+  assert.equal(manifest.feasibility.transactionCount, 10_000);
+  // Still clamped to the technical ceiling even though the configured maximum (20,000) is higher.
+  assert.equal(manifest.feasibility.maxRecipientCount, 10_000);
+  assert.equal(manifest.feasibility.maxTransactionCount, 10_000);
+  assert.equal(manifest.feasibility.feasible, true);
+  assert.equal(manifest.feasibility.reason, null);
+});
+
+test('refuses 10,001 recipients at the direct-payout capacity boundary even though the configured maximum and gas budget allow them', async () => {
+  const holders = Array.from({ length: 10_001 }, (_, index) => `0x${(index + 5000).toString(16).padStart(40, '0')}`);
+  const client = fakeRpc({
+    hashes: new Map([[8n, hash('8')]]),
+    logs: holders.map((holder, index) => rawTransfer({
+      blockNumber: 1,
+      logIndex: index,
+      from: ZERO_ADDRESS,
+      to: holder,
+      value: 1,
+    })),
+  });
+  const cycleRepository = holdingRepository();
+  const launchManifest = {
+    ...baseConfig().eligibilitySnapshot.launchManifest,
+    supply: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '10001' },
+  };
+  const config = baseConfig({
+    eligibilitySnapshot: {
+      ...baseConfig().eligibilitySnapshot,
+      launchManifest,
+      launchManifestDigest: launchManifestDigest(launchManifest),
+      feasibility: {
+        ...baseConfig().eligibilitySnapshot.feasibility,
+        maxRecipientCount: 20_000,
+        maxTransactionCount: 20_000,
+        nativeBalanceWei: '2000000000',
+      },
+    },
+  });
+
+  let error;
+  await assert.rejects(
+    reconcileLiveEligibilitySnapshot({
+      adapters: dualSourceAdapters(client),
+      config,
+      cycleRepository,
+      context: { cycleId: 'cycle-10001-refused', assertLease() {} },
+    }),
+    caught => {
+      error = caught;
+      return /recipient-count-exceeds-direct-payout-capacity/.test(caught.message);
+    },
+  );
+
+  assert.equal(error.manifest.entries.length, 10_001);
+  assert.equal(error.manifest.feasibility.maxRecipientCount, 10_000);
+  assert.equal(cycleRepository.holds.at(-1).terminalState, 'HELD_UNAVAILABLE');
+});
+
 test('holds a holder envelope breach durably after reopen before the sole claim transition', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   const holders = Array.from({ length: 1025 }, (_, index) => `0x${(index + 1000).toString(16).padStart(40, '0')}`);
@@ -580,10 +676,53 @@ test('holds a holder envelope breach durably after reopen before the sole claim 
   await assert.rejects(() => reopened.prepareStage(cycleId, 'claim-process'), /terminal as HELD_UNAVAILABLE/);
 });
 
-test('refuses 1,026 recipients at the direct-payout capacity before claim processing', async () => {
+test('accepts 1,026 recipients when the actual gas budget covers them: count alone never truncates', async () => {
   const holders = Array.from({ length: 1026 }, (_, index) => `0x${(index + 3000).toString(16).padStart(40, '0')}`);
   const client = fakeRpc({
     hashes: new Map([[8n, hash('6')]]),
+    logs: holders.map((holder, index) => rawTransfer({
+      blockNumber: 1,
+      logIndex: index,
+      from: ZERO_ADDRESS,
+      to: holder,
+      value: 1,
+    })),
+  });
+  const launchManifest = {
+    ...baseConfig().eligibilitySnapshot.launchManifest,
+    supply: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '1026' },
+  };
+  const config = baseConfig({
+    eligibilitySnapshot: {
+      ...baseConfig().eligibilitySnapshot,
+      launchManifest,
+      launchManifestDigest: launchManifestDigest(launchManifest),
+      feasibility: {
+        ...baseConfig().eligibilitySnapshot.feasibility,
+        nativeBalanceWei: '200000000',
+      },
+    },
+  });
+
+  const manifest = await freezeEligibilityBeforeClaim({
+    adapters: dualSourceAdapters(client),
+    config,
+    context: { cycleId: 'cycle-1026-accepted', assertLease() {} },
+  });
+
+  assert.equal(manifest.entries.length, 1026);
+  assert.equal(manifest.feasibility.recipientCount, 1026);
+  assert.equal(manifest.feasibility.transactionCount, 1026);
+  assert.equal(manifest.feasibility.maxRecipientCount, 2000);
+  assert.equal(manifest.feasibility.maxTransactionCount, 2000);
+  assert.equal(manifest.feasibility.feasible, true);
+  assert.equal(manifest.feasibility.reason, null);
+});
+
+test('reports the exact native-gas deficit for 1,026 recipients before any admission', async () => {
+  const holders = Array.from({ length: 1026 }, (_, index) => `0x${(index + 4000).toString(16).padStart(40, '0')}`);
+  const client = fakeRpc({
+    hashes: new Map([[8n, hash('7')]]),
     logs: holders.map((holder, index) => rawTransfer({
       blockNumber: 1,
       logIndex: index,
@@ -603,8 +742,12 @@ test('refuses 1,026 recipients at the direct-payout capacity before claim proces
       launchManifest,
       launchManifestDigest: launchManifestDigest(launchManifest),
       feasibility: {
-        ...baseConfig().eligibilitySnapshot.feasibility,
-        nativeBalanceWei: '200000000',
+        measuredTransferGas: '52000',
+        maxGasPriceWei: '600000000',
+        nativeReserveWei: '1000000000000000',
+        nativeBalanceWei: '30000000000000000',
+        maxRecipientCount: 2000,
+        maxTransactionCount: 2000,
       },
     },
   });
@@ -615,18 +758,18 @@ test('refuses 1,026 recipients at the direct-payout capacity before claim proces
       adapters: dualSourceAdapters(client),
       config,
       cycleRepository,
-      context: { cycleId: 'cycle-direct-payout-capacity', assertLease() {} },
+      context: { cycleId: 'cycle-gas-deficit-1026', assertLease() {} },
     }),
     caught => {
       error = caught;
-      return /direct-payout.*capacity/i.test(caught.message);
+      return true;
     },
   );
 
-  assert.equal(error.manifest.entries.length, 1026);
-  assert.equal(error.manifest.feasibility.maxRecipientCount, 1025);
-  assert.equal(error.manifest.feasibility.maxTransactionCount, 1025);
-  assert.match(error.manifest.feasibility.reason, /recipient-count-exceeds-direct-payout-capacity/);
+  assert.equal(error.manifest.feasibility.feasible, false);
+  assert.equal(error.manifest.feasibility.estimatedNativeFee.amountAtomic, '32011200000000000');
+  assert.equal(error.manifest.feasibility.requiredNativeAmount.amountAtomic, '33011200000000000');
+  assert.match(error.manifest.feasibility.reason, /deficitWei=3011200000000000/);
   assert.equal(cycleRepository.holds.at(-1).terminalState, 'HELD_UNAVAILABLE');
 });
 
