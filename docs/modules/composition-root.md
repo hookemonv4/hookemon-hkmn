@@ -332,3 +332,8 @@ evidence digest and attributed payout source, alongside the original completed e
 snapshot. After `PAYOUT_BROADCAST`, it reads the carried return boundary and resumes the same
 payout manifest without new signatures or transfers for finalized recipients. Both dispatch
 states retain exact boundary schema, snapshot, source, and digest validation.
+
+Supplementary dispatch accepts active settlements only. After a payout handler returns, its
+result may be `COMPLETE` from either payout dispatch state. The driver rechecks the held-position
+identity, original manifest and eligibility digest, any established payout-source digest, and
+the current lease before reporting advancement; a completed settlement cannot start dispatch.

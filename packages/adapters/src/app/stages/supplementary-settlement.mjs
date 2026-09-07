@@ -21,7 +21,7 @@ function object(value, label) {
  * that may act on it. Provider-specific handlers own their durable write-ahead boundaries; the
  * dispatcher owns only discovery, identity binding, and lease fencing.
  */
-export function assertSupplementarySettlementDispatch(positionValue, settlementValue) {
+function assertSupplementarySettlementIdentity(positionValue, settlementValue) {
   const position = object(positionValue, 'position');
   const settlement = object(settlementValue, 'settlement');
   if (typeof position.positionId !== 'string' || !HELD_POSITION_ID.test(position.positionId)) {
@@ -40,9 +40,31 @@ export function assertSupplementarySettlementDispatch(positionValue, settlementV
   if (typeof settlement.manifestId !== 'string' || !settlement.manifestId.startsWith(`${position.cycleId}:supplementary:`)) {
     fail('settlement manifestId is invalid');
   }
-  if (!SETTLEMENT_STATES.has(settlement.state)) fail('settlement state is not dispatchable');
   return Object.freeze({
     position: Object.freeze(structuredClone(position)),
     settlement: Object.freeze(structuredClone(settlement)),
   });
+}
+
+export function assertSupplementarySettlementDispatch(positionValue, settlementValue) {
+  const checked = assertSupplementarySettlementIdentity(positionValue, settlementValue);
+  if (!SETTLEMENT_STATES.has(checked.settlement.state)) fail('settlement state is not dispatchable');
+  return checked;
+}
+
+/** Validates a handler result without admitting a terminal settlement for another dispatch. */
+export function assertSupplementarySettlementResult(positionValue, previous, settlementValue) {
+  const checked = assertSupplementarySettlementIdentity(positionValue, settlementValue);
+  const { settlement } = checked;
+  if (!SETTLEMENT_STATES.has(settlement.state)
+    && !(settlement.state === 'COMPLETE' && ['RETURN_BROADCAST', 'PAYOUT_BROADCAST'].includes(previous.state))) {
+    fail('settlement result state is invalid');
+  }
+  for (const key of ['manifestId', 'eligibilitySnapshotEvidenceDigest']) {
+    if (settlement[key] !== previous[key]) fail('settlement identity changed during reconciliation');
+  }
+  if (previous.payoutSourceDigest != null && settlement.payoutSourceDigest !== previous.payoutSourceDigest) {
+    fail('settlement payout source identity changed during reconciliation');
+  }
+  return checked;
 }

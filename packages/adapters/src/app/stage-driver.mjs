@@ -60,7 +60,7 @@ import {
   reconcileLiveReturn,
 } from './stages/return.mjs';
 import { preparePayoutRequest, probePayout, mutatePayout, reconcileLivePayout } from './stages/payout.mjs';
-import { assertSupplementarySettlementDispatch } from './stages/supplementary-settlement.mjs';
+import { assertSupplementarySettlementDispatch, assertSupplementarySettlementResult } from './stages/supplementary-settlement.mjs';
 import {
   createRehearsalSkipHandler,
   prepareRehearsalPayoutRequest,
@@ -1235,7 +1235,7 @@ export function createStageDriver({
       if (refreshed === null) {
         throw new Error('stage-driver supplementary settlement disappeared during reconciliation');
       }
-      const checked = assertSupplementarySettlementDispatch(position, refreshed).settlement;
+      const checked = assertSupplementarySettlementResult(position, settlement, refreshed).settlement;
       if (checked.state === settlement.state) return pending;
       return Object.freeze({
         status: 'ADVANCED',

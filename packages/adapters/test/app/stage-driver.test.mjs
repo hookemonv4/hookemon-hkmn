@@ -4465,3 +4465,51 @@ for (const explicit of [false, true]) {
     assert.equal(statusReads, 1, 'expired lease must prevent the provider observation');
   });
 }
+
+
+test('supplementary payout completion validates terminal identity without dispatching completed settlements', async () => {
+  const position = { positionId: `held:${'a'.repeat(64)}`, cycleId: CYCLE_ID, evidenceDigest: `sha256:${'b'.repeat(64)}`, ownerDecision: { choice: 'sell' }, resolution: null };
+  const initial = { positionId: position.positionId, cycleId: CYCLE_ID, manifestId: `${CYCLE_ID}:supplementary:1`, state: 'PAYOUT_BROADCAST', positionEvidenceDigest: position.evidenceDigest, eligibilitySnapshotEvidenceDigest: `sha256:${'c'.repeat(64)}`, payoutSourceDigest: `sha256:${'d'.repeat(64)}` };
+  let refreshed = initial;
+  let nextPatch = {};
+  let calls = 0;
+  let loseLease = false;
+  const repository = fakeCycleRepository();
+  repository.readSupplementarySettlement = async () => structuredClone(refreshed);
+  repository.advanceSupplementarySettlement = async (id, input) => {
+    assert.equal(id, position.positionId);
+    assert.equal(input.expectedState, 'PAYOUT_BROADCAST');
+    assert.equal(input.nextState, 'COMPLETE');
+    refreshed = { ...initial, state: input.nextState, ...nextPatch };
+    return refreshed;
+  };
+  const driver = createStageDriver({
+    liveMode: true, adapters: {}, signerClient: null, config: baseConfig(), cycleRepository: repository,
+    supplementaryAdapters: {}, supplementarySignerClient: {},
+    productionSupplementaryStageHandlers: {
+      PAYOUT_BROADCAST: { stage: 'supplementary-payout', async reconcile({ cycleRepository }) {
+        calls += 1;
+        await cycleRepository.advanceSupplementarySettlement(position.positionId, { expectedState: 'PAYOUT_BROADCAST', nextState: 'COMPLETE', evidence: { schema: 'hookemon.supplementary-payout-complete-evidence.v1', planDigest: `sha256:${'e'.repeat(64)}` } });
+      } },
+    },
+  });
+  const run = settlement => driver.runSupplementarySettlement({ position, settlement, assertLease() { if (loseLease && refreshed.state === 'COMPLETE') throw new Error('completion lease lost'); } });
+  assert.deepEqual(await run(initial), { status: 'ADVANCED', positionId: position.positionId, cycleId: CYCLE_ID, manifestId: initial.manifestId, stage: 'supplementary-payout', state: 'COMPLETE' });
+  await assert.rejects(() => run(refreshed), /not dispatchable/);
+  assert.equal(calls, 1);
+  for (const patch of [
+    { positionId: `held:${'f'.repeat(64)}` },
+    { cycleId: 'foreign-cycle' },
+    { manifestId: `${CYCLE_ID}:supplementary:2` },
+    { eligibilitySnapshotEvidenceDigest: `sha256:${'f'.repeat(64)}` },
+    { payoutSourceDigest: `sha256:${'f'.repeat(64)}` },
+  ]) {
+    nextPatch = patch;
+    refreshed = initial;
+    await assert.rejects(() => run(initial), /does not bind|identity changed/);
+  }
+  nextPatch = {};
+  refreshed = initial;
+  loseLease = true;
+  await assert.rejects(() => run(initial), /completion lease lost/);
+});
