@@ -1,4 +1,5 @@
 import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
+import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import { assertQuoteUsable, DIRECTIONS, RELAY_CONSTANTS } from '../../relay-client.mjs';
 import {
   buildRelayLegacyTransaction,
@@ -91,10 +92,12 @@ export function prepareSupplementaryReturnRequest({ settlement, confirmedSale, c
   if (mint !== configured.solanaMint || proceeds.assetId !== configured.solanaMint) {
     fail('supplementary confirmed sale mint does not match the configured Solana settlement asset');
   }
-  if (proceeds.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID && String(proceeds.chainId) !== String(RELAY_CONSTANTS.SOLANA_CHAIN_ID)) {
+  if (proceeds.chainId !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.chainId) {
     fail('supplementary confirmed sale proceeds chainId is invalid');
   }
-  if (proceeds.decimals !== money.assets.solanaStablecoin.decimals) {
+  if (proceeds.assetId !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.assetId
+    || proceeds.decimals !== COLLECTOR_CRYPT_SETTLEMENT_ASSET.decimals
+    || proceeds.decimals !== money.assets.solanaStablecoin.decimals) {
     fail('supplementary confirmed sale proceeds decimals do not match MoneyConfigurationV1');
   }
   if (typeof proceeds.amountAtomic !== 'string' || !ATOMIC.test(proceeds.amountAtomic) || proceeds.amountAtomic === '0') {

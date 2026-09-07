@@ -26,6 +26,7 @@ import {
   signedSolanaTransactionSignature,
 } from '../../src/solana-rpc.mjs';
 import { createStageDriver } from '../../src/app/stage-driver.mjs';
+import { prepareSupplementaryReturnRequest } from '../../src/app/stages/supplementary-money.mjs';
 import { createSupplementaryBuybackHandler } from '../../src/app/stages/supplementary-buyback.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
@@ -522,6 +523,14 @@ test('reconcile signs, broadcasts, and confirms a held resale through the produc
   assert.equal(advance.evidence.memo, MEMO);
   assert.deepEqual(advance.evidence.proceeds, { ...settlementAsset(), amountAtomic: OFFER_ATOMIC });
   assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
+  const request = prepareSupplementaryReturnRequest({
+    settlement: settlementFixture({ state: 'BUYBACK_SENT_UNKNOWN' }),
+    confirmedSale: advance.evidence,
+    config: { ...config, accounts: { ...config.accounts, evm: `0x${'1'.repeat(40)}` }, relay: { ...config.relay, solanaMint: CIRCLE_USD_MINT } },
+  });
+  assert.equal(request.solanaAmountAtomic, OFFER_ATOMIC);
+  assert.equal(request.solanaMint, CIRCLE_USD_MINT);
+
 });
 
 // --- refusals, all before any provider mutation -------------------------------------------------

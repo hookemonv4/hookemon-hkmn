@@ -86,7 +86,7 @@ function confirmedSale(overrides = {}) {
     memo: `hookemon:${POSITION_ID}`,
     mint: SOLANA_MINT,
     signature: `${'g'.repeat(88)}`,
-    proceeds: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '17' },
+    proceeds: { chainId: 'solana-mainnet', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '17' },
     createdAt: '1700000000',
     ...overrides,
   };
@@ -269,7 +269,7 @@ test('prepareSupplementaryReturnRequest rejects a proceeds mint outside the conf
   assert.throws(
     () => prepareSupplementaryReturnRequest({
       settlement: settlement('cycle-x', 'BUYBACK_SENT_UNKNOWN'),
-      confirmedSale: confirmedSale({ mint: 'So11111111111111111111111111111111111111112', proceeds: { chainId: '792703809', assetId: 'So11111111111111111111111111111111111111112', decimals: 6, amountAtomic: '17' } }),
+      confirmedSale: confirmedSale({ mint: 'So11111111111111111111111111111111111111112', proceeds: { chainId: 'solana-mainnet', assetId: 'So11111111111111111111111111111111111111112', decimals: 6, amountAtomic: '17' } }),
       config: returnConfig(operator),
     }),
     error => error instanceof SupplementaryMoneyError && /configured Solana settlement asset/.test(error.message),
@@ -658,4 +658,19 @@ test('mutateSupplementaryPayout drives a return-broadcast settlement through the
   assert.equal(advances.length, 2);
   assert.equal(advances[0].nextState, 'PAYOUT_BROADCAST');
   assert.equal(advances[1].nextState, 'COMPLETE');
+});
+
+
+test('supplementary return accepts native sale namespace and refuses aliases or invalid proceeds', () => {
+  const operator = Keypair.generate().publicKey.toBase58();
+  const input = { settlement: settlement('cycle-x', 'BUYBACK_SENT_UNKNOWN'), confirmedSale: confirmedSale(), config: returnConfig(operator) };
+  const request = prepareSupplementaryReturnRequest(input);
+  assert.equal(request.solanaAmountAtomic, '17');
+  assert.equal(request.solanaMint, SOLANA_MINT);
+  for (const chainId of ['792703809', 792703809, 'solana:mainnet']) {
+    assert.throws(() => prepareSupplementaryReturnRequest({ ...input, confirmedSale: confirmedSale({ proceeds: { ...confirmedSale().proceeds, chainId } }) }), /chainId is invalid/);
+  }
+  for (const patch of [{ decimals: 9 }, { amountAtomic: '0' }, { amountAtomic: '-1' }, { amountAtomic: '1.5' }]) {
+    assert.throws(() => prepareSupplementaryReturnRequest({ ...input, confirmedSale: confirmedSale({ proceeds: { ...confirmedSale().proceeds, ...patch } }) }), /decimals|amountAtomic/);
+  }
 });

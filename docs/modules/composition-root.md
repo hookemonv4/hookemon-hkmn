@@ -312,3 +312,8 @@ node --test packages/runner/test/cycle/money-schemas.test.mjs packages/runner/te
 Supplementary handlers receive the driver's existing opaque `preflightAuthority` unchanged.
 Production callers without that capability retain the frozen-interface authorization check;
 the branded fixture authority remains restricted to the Node test runner.
+
+Supplementary return consumes finalized Collector sale proceeds in the native Solana namespace,
+with the documented settlement mint and decimals checked against MoneyConfiguration. It preserves
+the position-attributed atomic amount; Relay transport identifiers belong to the subsequently
+validated bridge quote, not to the confirmed sale evidence.
