@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Approve requirements revision 68 for independently pinned Collector purchase and buyback production bindings and an isolated synthetic CLI full-flow proof, without live binding authority.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "5b440ee917a60b5626a88f90f6608e1d653b583f1462f5f5aaebba2120b13cae"
+  }
+}
