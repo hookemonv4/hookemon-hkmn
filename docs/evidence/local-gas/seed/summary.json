@@ -1,0 +1,22 @@
+{
+  "initial": {
+    "payerUsdg": "100000000",
+    "managerUsdg": "52925837235188",
+    "hookHkmn": "1000000000000000000000000000",
+    "managerHkmn": "0"
+  },
+  "final": {
+    "payerUsdg": "0",
+    "managerUsdg": "52925937235188",
+    "hookHkmn": "0",
+    "managerHkmn": "1000000000000000000000000000"
+  },
+  "positionId": "2120364",
+  "positionOwner": "0x9D6895a38e5D58C931837e74a41fD98E0daC32F8",
+  "gasEach": [
+    "57916",
+    "47602",
+    "664385"
+  ],
+  "totalGas": "769903"
+}

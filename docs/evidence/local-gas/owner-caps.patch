@@ -1,0 +1,13 @@
+--- a/packages/contracts/test/launch/LocalClaimLaunchComposition.t.sol
++++ b/packages/contracts/test/launch/LocalClaimLaunchComposition.t.sol
+@@ -378,8 +378,8 @@
+             expectedDecimals: hookExpectedDecimals,
+             bindingDigest: keccak256("launch-composition-binding"),
+             runtimeDigest: keccak256("launch-composition-runtime"),
+-            processClaimLimit6h: 1_000_000,
+-            processClaimLimitMax: 2_000_000,
++            processClaimLimit6h: 50_000_000_000,
++            processClaimLimitMax: 500_000_000_000,
+             processClaimMaxCount: 8,
+             operationsRotationDelay: 3 days
+         });

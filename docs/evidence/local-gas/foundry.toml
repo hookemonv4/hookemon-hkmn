@@ -1,0 +1,28 @@
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+auto_detect_remappings = false
+solc_version = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 20_000
+fs_permissions = [
+    { access = "read-write", path = "./test/release/.generated" }
+]
+
+[profile.launch]
+solc_version = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 1000
+via_ir = false
+bytecode_hash = "none"
+cbor_metadata = false
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = true
