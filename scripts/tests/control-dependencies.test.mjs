@@ -133,7 +133,10 @@ regexes = ['''^GyGKxMyg1p9SsHfm15MkNUu1u9TN2JtTspcdmrtGUdse$''']
 [[rules.allowlists]]
 description = "Public Robinhood token contract address (lowercase form) test default misclassified as a generic API key"
 condition = "AND"
-paths = ['''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''']
+paths = [
+  '''(?:^|/)packages/adapters/test/app/return\.test\.mjs$''',
+  '''(?:^|/)packages/adapters/test/app/return-custody-v2\.test\.mjs$''',
+]
 regexTarget = "secret"
 regexes = ['''^0x5fc5360d0400a0fd4f2af552add042d716f1d168$''']
 

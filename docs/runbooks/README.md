@@ -141,3 +141,17 @@ holds (Wrong transaction recipient, above), cross-cycle attribution failure,
 conflicting canonical evidence, an unattributed deposit, missing predecessor
 evidence, and a snapshot failure all keep their existing terminal whole-cycle
 `HELD_*` owner-decision runbooks unchanged.
+
+- [Held pack and continuing cycle](held-pack-cycle-continuation.md)
+
+- [Held-position admission limits](held-position-admission-limits.md)
+
+- [Supplementary payout restart](supplementary-payout-restart.md)
+
+- [Unknown card mutation deadline](card-mutation-deadline.md)
+
+- [Late held-position resolution](held-position-late-resolution.md)
+
+- [All cards held settlement](all-cards-held-settlement.md)
+
+- [Interleaved held custody](interleaved-held-custody.md)

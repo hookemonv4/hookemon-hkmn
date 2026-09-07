@@ -21,7 +21,7 @@
     {
       "id": "provider-binding",
       "path": "docs/modules/provider-binding.md",
-      "sha256": "58a3db769ec258d1e90a59d4ed921e89de82b9f62c71f78a29bcbf6308bdc4ce"
+      "sha256": "38844e7792c315e9a024714313b1114bd81d0735a5972ef6f0e9aa8e31945bb4"
     },
     {
       "id": "deployment-manifest",
@@ -126,7 +126,7 @@
     {
       "id": "direct-payout",
       "path": "docs/modules/direct-payout.md",
-      "sha256": "600d85a9f8c92489bad1ea0f887f895876cb83760328d9029dffc0ba08c68a34"
+      "sha256": "eb12a494eb5b0a0d616e1387a95eac4c4cb38892eeeb32807bd9b6591f03aca2"
     },
     {
       "id": "automation",

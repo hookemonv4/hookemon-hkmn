@@ -1,8 +1,20 @@
 # Keychain user interaction unavailable
 
+## Detection
+
+The approved signer reports a user-interaction denial before broadcast.
+
+## Safe stop
+
+Keep the same signer and request. Do not export keys or treat an opaque timeout as a refusal.
+
 ## Runner behavior
 
 A provable signing denial before any broadcast leaves the cycle nonterminal with NOT_SENT evidence and bounded redacted OS error text. Preserve the signer identity and request; never export keys or substitute an unapproved signer.
+
+## Operator recovery
+
+Check readiness with `node packages/adapters/bin/hookemon-wallet.mjs probe --identity operations-evm`. The probe grants no signing or broadcast authority.
 
 ## Recovery constraints
 
@@ -17,8 +29,12 @@ Owning work package: WP08a
 Expected outcome: terminal=none; attempt=NOT_SENT; next=retry
 Test: packages/adapters/test/app/stage-driver.test.mjs — keeps a keychain interaction denial retryable with redacted OS text before any broadcast
 Alarm reason/code: OPEN FACT (WP08a): no dedicated alert code is emitted for a signing error.
-Resume command: use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
+Resume command: none supported outside the approved recovery path; use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
 
 ## Escalation
 
 Preserve the cycle and stage identifiers, request digest and redacted failure evidence. Escalate conflicting canonical evidence or an attempted identity, amount or signed-byte change before allowing another effect.
+
+## Evidence
+
+Retain the cycle and attempt identifiers, original request digest, validity context and redacted failure record cited above.

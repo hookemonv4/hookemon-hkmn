@@ -129,11 +129,12 @@ test('the committed launch package retains only the current owner and provider i
   ]);
 });
 
-test('the unsigned revision 65 baseline pins its current approval subjects', () => {
+test('the unsigned revision 65 baseline retains its historical approval subjects', () => {
   const baseline = readJson('decisions/owner-approvals/revision-65-baseline.json');
   assert.equal(baseline.approvalToken, 'DRAFT_UNSIGNED_NOT_YET_APPROVED');
   for (const [path, digest] of Object.entries(baseline.subjectHashes)) {
-    assert.equal(digest, sha256(path), `${path} drifted from the unsigned baseline`);
+    const historical = readJson('feasibility/interface-freeze.json').inputHashes[path];
+    assert.equal(digest, historical ? historical.slice('sha256:'.length) : sha256(path), `${path} drifted from the unsigned baseline`);
   }
 });
 

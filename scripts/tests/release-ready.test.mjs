@@ -341,6 +341,9 @@ function createCurrentRequirementsAuthorization(root) {
 }
 
 function createContradictoryCurrentS5Authorization(root, approvalToken) {
+  // Isolate the negative candidate from independently valid approvals copied with the template.
+  rmSync(join(root, OWNER_APPROVALS_DIR), { recursive: true, force: true });
+  mkdirSync(join(root, OWNER_APPROVALS_DIR), { recursive: true });
   const approvalInput = 'decisions/owner-approvals/current-s5-contradiction.json';
   const rationale = 'DRAFT_UNSIGNED candidate for the current S5 authorization must not be accepted.';
   copyFileSync(join(templateRoot, 'gates', 'spec.json'), join(root, 'gates', 'spec.json'));

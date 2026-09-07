@@ -38,7 +38,7 @@ test('Phase 3 process claims use a strict six-hour window without changing the p
     ({ id }) => id === 'REQ-operations-wallet-2',
   );
 
-  assert.equal(requirements.revision, 65);
+  assert.equal(requirements.revision, JSON.parse(readFileSync(join(projectRoot, 'feasibility/phase3-offchain-interface-amendment.json'), 'utf8')).approvedRequirementsRevision);
   assert.match(processClaimRequirement.statement, /strictly less than 21600 seconds/);
   assert.match(processClaimRequirement.statement, /exactly 21600 seconds old is expired/);
   assert.match(processClaimRequirement.statement, /after 21600 seconds/);
@@ -54,7 +54,7 @@ test('canonical market ignores hook data without deriving buyer credit', () => {
     ({ id }) => id === 'REQ-canonical-market-6',
   );
 
-  assert.equal(requirements.revision, 65);
+  assert.equal(requirements.revision, JSON.parse(readFileSync(join(projectRoot, 'feasibility/phase3-offchain-interface-amendment.json'), 'utf8')).approvedRequirementsRevision);
   assert.match(canonicalMarketRequirement.statement, /hookData.*ignored/i);
   assert.doesNotMatch(canonicalMarketRequirement.statement, /buyerHkmnCredit/);
   assert.doesNotMatch(canonicalMarketRequirement.measurement, /buyerHkmnCredit/);
@@ -68,9 +68,9 @@ test('revision 65 carries full-supply canonical allocation and preserves bridge 
   const failureMatrix = JSON.parse(readFileSync(join(projectRoot, 'docs', 'audit', '2026-09-04', 'failure-matrix.json'), 'utf8'));
   const byId = new Map(requirements.requirements.map((requirement) => [requirement.id, requirement]));
 
-  assert.equal(requirements.revision, 65);
-  assert.equal(interfaces.requirementsRevision, 65);
-  assert.equal(interfaces.architectureRevision, 9);
+  assert.equal(requirements.revision, JSON.parse(readFileSync(join(projectRoot, 'feasibility/phase3-offchain-interface-amendment.json'), 'utf8')).approvedRequirementsRevision);
+  assert.equal(interfaces.requirementsRevision, 67);
+  assert.equal(interfaces.architectureRevision, 10);
   assert.equal(provisional.requirementsRevision, 65);
   assert.equal(provisional.architectureRevision, 9);
   assert.equal(capabilityMap.requirementsRevision, 65);
@@ -206,7 +206,7 @@ test('revision 65 carries full-supply canonical allocation and preserves bridge 
   assert.match(byId.get('REQ-cycle-repository-1').statement, /RelayLegV1/);
   assert.match(byId.get('REQ-cycle-repository-1').statement, /StandingAuthorityDecisionV1/);
   assert.match(byId.get('REQ-cycle-runner-3').statement, /eligibility-snapshot/);
-  assert.match(byId.get('REQ-cycle-runner-3').statement, /cycle-attributed proceeds delta/);
+  assert.match(byId.get('REQ-cycle-runner-3').statement, /Only finalized, cycle-attributed return deltas may become an Operations USDG credit or payout basis/);
   assert.match(byId.get('REQ-policy-engine-1').statement, /quantity multiplied by unitPriceAtomic/);
   assert.match(byId.get('REQ-policy-engine-1').statement, /production return minimum/);
   assert.match(byId.get('REQ-transaction-policy-1').statement, /gas cap/);
@@ -1380,7 +1380,7 @@ test('interface freeze refresh is deterministic and validation rejects tampering
   freeze.inputHashes['architecture/interfaces.json'] = `sha256:${'0'.repeat(64)}`;
   assert.throws(
     () => validateInterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot }),
-    /interface freeze input hash mismatch: architecture\/interfaces\.json/,
+    /offchain historical (interface anchor|binding) mismatch/,
   );
 });
 

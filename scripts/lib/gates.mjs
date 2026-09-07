@@ -364,8 +364,22 @@ function validateModuleIndex(root) {
       || index.productPhase !== capability.productPhase
       || index.architectureRevision !== capability.architectureRevision
       || index.requirementsRevision !== capability.requirementsRevision
-      || index.requirementsRevision !== requirements.revision) {
+      ) {
     throw new Error('architecture/A6 revision binding does not match current architecture and requirements');
+  }
+  const amendmentInputs = [];
+  if (index.requirementsRevision !== requirements.revision) {
+    const freeze = readJson(join(root, 'feasibility/interface-freeze.json'));
+    const frozen = readJson(join(root, 'architecture/interfaces.json'));
+    const provisional = readJson(join(root, 'architecture/provisional-interfaces.json'));
+    const manifest = readJson(join(root, 'bindings/robinhood-chain.json'));
+    if (!freeze.offchainAmendment || index.requirementsRevision !== freeze.requirementsRevision
+      || index.architectureRevision !== freeze.architectureRevision) throw new Error('architecture/A6 historical revision binding mismatch');
+    validateInterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot: root });
+    const amendment = readJson(join(root, freeze.offchainAmendment.path));
+    if (amendment.approvedRequirementsRevision !== requirements.revision) throw new Error('architecture/A6 amendment revision binding mismatch');
+    amendmentInputs.push('feasibility/interface-freeze.json', freeze.offchainAmendment.path,
+      ...Object.keys(freeze.inputHashes), ...Object.keys(amendment.ownerApprovalHashes));
   }
   const capabilityIds = capability.modules.map(module => module?.id);
   if (!sameStringSet(capabilityIds, capability.topologicalOrder)
@@ -397,7 +411,7 @@ function validateModuleIndex(root) {
       throw new Error(`architecture/A6 module card ${module.path} must have its exact title and ordered nonempty sections`);
     }
   }
-  return [capabilityInput, indexInput, requirementsInput, ...paths].sort();
+  return [...new Set([capabilityInput, indexInput, requirementsInput, ...paths, ...amendmentInputs])].sort();
 }
 
 function validateInducedFailureDrill(root) {
