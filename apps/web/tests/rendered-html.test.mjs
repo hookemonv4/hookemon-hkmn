@@ -1151,6 +1151,11 @@ test("targets inner tilt surfaces and links only the gallery valuations", async 
   assert.match(html, /src="\/comic-production\/motion\.mjs"/);
   const cards = html.slice(html.indexOf('id="cards"'), html.indexOf('id="economics"'));
   const links = [...cards.matchAll(/<a\b[^>]*>/g)].map(([tag]) => tag);
-  assert.equal(links.length, 7);
-  assert.ok(links.every((tag) => tag.includes('class="card-valuation"') && tag.includes('href="https://collectorcrypt.com/assets/solana/')));
+  const valuationLinks = links.filter((tag) => tag.includes('class="card-valuation"'));
+  assert.equal(valuationLinks.length, 7);
+  assert.ok(valuationLinks.every((tag) => tag.includes('href="https://collectorcrypt.com/assets/solana/')));
+  const packCtaLinks = links.filter((tag) => !tag.includes('class="card-valuation"'));
+  assert.equal(packCtaLinks.length, 1);
+  assert.equal(packCtaLinks[0], '<a class="button" href="/packs">');
+  assert.match(cards, /<a class="button" href="\/packs">Explore the packs/);
 });
