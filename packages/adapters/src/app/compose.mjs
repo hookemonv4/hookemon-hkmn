@@ -31,7 +31,7 @@ import {
   createHistoricalErc20EvidenceClient, createRobinhoodClient, readBlockByNumber, readChainId,
   readFinalizedBlock,
 } from '../robinhood-rpc.mjs';
-import { createSolanaRpcClient, readSolBalance, readUsableLatestBlockhash } from '../solana-rpc.mjs';
+import { createSolanaRpcClient, readSolBalance, readUsableLatestBlockhash, readOriginalBlockhashContext } from '../solana-rpc.mjs';
 import { attachCollectorPolicyBundle, loadCollectorPolicyBundle } from '../signing/collector-policy-loader.mjs';
 import {
   COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
@@ -455,6 +455,11 @@ export function createTrustedSolanaBlockhashContextResolver(client) {
     }
     return { blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight };
   };
+}
+
+/** Purchase-only resolver for immutable, provider-signed original messages. */
+export function createOriginalSolanaBlockhashContextResolver(client) {
+  return blockhash => readOriginalBlockhashContext(client, blockhash);
 }
 
 /** The public Robinhood endpoint has verified latest-only state reads, so it is never a valid
@@ -1327,6 +1332,7 @@ export async function compose(config) {
       solana: {
         ...resolved.solana,
         blockhashContextResolver: createTrustedSolanaBlockhashContextResolver(adapters.solana.client),
+        originalBlockhashContextResolver: createOriginalSolanaBlockhashContextResolver(adapters.solana.client),
       },
     };
   }

@@ -273,6 +273,13 @@ function assertCollectorPurchaseCycleFacts(facts) {
 }
 
 function assertCollectorPurchaseBlockhashContext(context) {
+  if (context?.type === 'rpc-blockhash-validity') {
+    exactKeys(context, ['type', 'blockhash', 'valid', 'observedSlot'], 'Collector original blockhash context');
+    assertSolanaPublicKey(context.blockhash, 'Collector original blockhash');
+    assertCanonicalAtomic(context.observedSlot, 'Collector validity observation slot');
+    if (context.valid !== true) fail('Collector original blockhash is not valid');
+    return { ...context };
+  }
   exactKeys(context, BLOCKHASH_CONTEXT_FIELDS, 'Collector purchase blockhash context');
   assertSolanaPublicKey(context.blockhash, 'Collector purchase blockhash context blockhash');
   assertCanonicalAtomic(context.lastValidBlockHeight, 'Collector purchase blockhash context lastValidBlockHeight');
@@ -410,7 +417,9 @@ export function createCollectorPurchasePolicy(input) {
     instructions: resolvedInstructions.map(instruction => structuredClone(instruction)),
     extraInstructions: resolvedInstructions.filter(instruction => instruction !== primary).map(instruction => structuredClone(instruction)),
     blockhash: trusted.blockhash,
-    deadline: {
+    deadline: trusted.type === 'rpc-blockhash-validity' ? {
+      type: trusted.type, valid: true, minObservedSlot: trusted.observedSlot,
+    } : {
       type: 'block-height',
       notExpired: true,
       minLastValidBlockHeight: trusted.lastValidBlockHeight,

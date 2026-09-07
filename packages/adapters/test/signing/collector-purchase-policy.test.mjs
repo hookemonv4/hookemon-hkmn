@@ -1,3 +1,4 @@
+import { wrapTransactionPolicySignerClient, OPERATOR_SOLANA_ROLE } from '../../src/signing/signer-client.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -461,3 +462,72 @@ for (const mode of ['missing', 'corrupt', 'foreign']) {
     assert.throws(() => captureSolanaCoSignerSignatures(tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64')), TransactionPolicyError);
   });
 }
+
+const originalContext = { type: 'rpc-blockhash-validity', blockhash: BLOCKHASH_CONTEXT.blockhash, valid: true, observedSlot: '120' };
+test('purchase binds the original hash to fresh RPC validity without an invented expiry height', async () => {
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  const transaction = buildCandidateTransaction();
+  const decoded = await decodeCandidate(transaction, { blockhashContextResolver: async hash => ({ ...originalContext, blockhash: hash, observedSlot: '121' }) });
+  assert.equal(evaluate(policy, decoded).allowed, true);
+  assert.equal(decoded.blockhash, originalContext.blockhash);
+  assert.equal(Object.hasOwn(decoded.deadline, 'lastValidBlockHeight'), false);
+});
+for (const [label, context] of [
+  ['expired', { ...originalContext, valid: false }],
+  ['wrong hash', { ...originalContext, blockhash: Keypair.generate().publicKey.toBase58() }],
+  ['malformed slot', { ...originalContext, observedSlot: '-1' }],
+  ['regressing slot', { ...originalContext, observedSlot: '119' }],
+]) {
+  test(`purchase original validity rejects ${label}`, async () => {
+    const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+    await assert.rejects(async () => evaluate(policy, await decodeCandidate(buildCandidateTransaction(), { blockhashContextResolver: async () => context })), TransactionPolicyError);
+  });
+}
+
+for (const mode of ['fresh', 'regressed', 'expired', 'replaced']) {
+  test(`original blockhash recovery with ${mode} observation preserves the unsigned approval boundary`, async () => {
+    const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+    let context = { ...originalContext };
+    const options = {
+      client: { role: OPERATOR_SOLANA_ROLE, async sign(transaction) { return { signedTxBase64: transaction }; } },
+      policy,
+      broadcast: async () => { throw new Error('no transport in this test'); },
+      decodeOptions: { family: 'solana', chainId: 'solana-mainnet', currentBlockHeightResolver: async () => '100',
+        blockhashContextResolver: async () => context },
+    };
+    const wrapper = wrapTransactionPolicySignerClient(options);
+    const signed = await wrapper.sign(buildCandidateTransaction());
+    const approval = wrapper.readApprovalContext(signed);
+    context = { ...originalContext, observedSlot: mode === 'regressed' ? '119' : '121',
+      valid: mode !== 'expired', blockhash: mode === 'replaced' ? Keypair.generate().publicKey.toBase58() : originalContext.blockhash };
+    const reopened = wrapTransactionPolicySignerClient(options);
+    if (mode === 'fresh') {
+      assert.deepEqual(await reopened.recoverApproval(signed, approval), signed);
+      assert.deepEqual(reopened.readApprovalContext(signed), approval);
+    } else {
+      await assert.rejects(() => reopened.recoverApproval(signed, approval), TransactionPolicyError);
+    }
+  });
+}
+
+test('original blockhash expiration after approval refuses before transport', async () => {
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  let valid = true;
+  let calls = 0;
+  const wrapper = wrapTransactionPolicySignerClient({
+    client: { role: OPERATOR_SOLANA_ROLE, async sign(transaction) { return { signedTxBase64: transaction }; } }, policy,
+    decodeOptions: { family: 'solana', chainId: 'solana-mainnet', currentBlockHeightResolver: async () => '100',
+      blockhashContextResolver: async () => ({ ...originalContext, valid }) },
+    broadcast: async () => { calls++; throw new Error('transport must not run'); },
+  });
+  const signed = await wrapper.sign(buildCandidateTransaction());
+  valid = false;
+  await assert.rejects(() => wrapper.broadcast(signed), TransactionPolicyError);
+  assert.equal(calls, 0);
+});
+
+test('candidate decode options cannot inject an original hash validity observation', async () => {
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  const decoded = await decodeCandidate(buildCandidateTransaction(), { originalBlockhashValidity: { type: originalContext.type, valid: true, observedSlot: '999' } });
+  assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
+});
