@@ -221,12 +221,23 @@ async function seedCycle(stateDir, {
   providerMode = null,
   completedStages = [],
   packBatchRequests = [],
+  // `admission` may be the durable admission object itself, or a factory `reservedCycleId =>
+  // admission` for a caller whose admission must name a cycleId reserved before createCycle opens
+  // it (the admission rides inside `cycle-opened` itself, so it has to be built first). `operations`
+  // is the matching deployment identity `assertDurableCycleAdmission` validates it against --
+  // production identity by default.
+  admission = null,
+  operations = null,
 }) {
   const cycleRepository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const reservedCycleId = admission === null ? null : cycleRepository.nextCycleId();
+  const resolvedAdmission = typeof admission === 'function' ? admission(reservedCycleId) : admission;
   const cycle = await cycleRepository.createCycle({
     releaseAmount,
     mode,
     ...(providerMode === null ? {} : { providerMode }),
+    ...(reservedCycleId === null ? {} : { cycleId: reservedCycleId }),
+    ...(resolvedAdmission === null ? {} : { admission: resolvedAdmission, operations }),
   });
   for (const { stage, evidence = { seeded: true } } of completedStages) {
     await cycleRepository.prepareStage(cycle.cycleId, stage);
@@ -764,8 +775,312 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
   return { error, calls, composition, cycle };
 }
 
-test('a composed live collector-only purchase refuses at the trusted resolver before any signer or submit call, on a stale provider blockhash', async t => {
+// compose-resolver-diagnosis.md: Collector-only rehearsal cannot carry the durable
+// `hookemon.policy-admission.v2` admission purchase.mjs now requires (purchase.mjs:420-421) --
+// CycleRepository replay always re-validates a durable admission against the fixed production
+// settlement route (chain id 792703809, policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY),
+// unconditionally, on every read; this rehearsal's own money configuration and native Solana
+// signer identity are independently pinned to the `solana-mainnet` Collector namespace
+// (solana-money-controls.mjs, collector-only-authorization.mjs). No admission can satisfy both
+// at once. This is an honest, current-boundary regression test for that unsupported combination,
+// not a resolver test -- closing it needs a separate, explicitly scoped sealed Collector-only
+// purchase binding (compose-resolver-diagnosis.md's "If the owner requires this specific
+// rehearsal mode operational again"), not a fixture change here.
+test('a live collector-only rehearsal purchase remains unsupported under the durable-admission requirement: it refuses before any provider or signer call', async t => {
   const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+    latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+    transactionBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+  });
+
+  assert.match(error?.message ?? '', /purchase mutation requires the admitted unitPurchase amount/);
+  assert.equal(calls.generateYoloPacks, 0);
+  assert.equal(calls.sign, 0);
+  assert.equal(calls.submitTransaction, 0);
+});
+
+// The recorded production Operations identity and canonical policy-engine routes
+// (packages/runner/src/automation/policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY / USDG_ROUTE /
+// COLLECTOR_SETTLEMENT_ROUTE). CycleRepository replay re-validates every durable admission against
+// exactly these, regardless of what identity built it, so a durable admission meant to survive
+// being read back has no choice but to use them verbatim -- never a namespace alias, never
+// `createTestOnlyAdmissionIdentity` (which replay ignores entirely).
+const PRODUCTION_ADMISSION_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
+const PRODUCTION_ADMISSION_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+const PRODUCTION_ADMISSION_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const PRODUCTION_ADMISSION_SETTLEMENT_MINT = CIRCLE_USD_MINT;
+const PRODUCTION_ADMISSION_ROUTES = Object.freeze({
+  evm: PRODUCTION_ADMISSION_EVM,
+  solana: PRODUCTION_ADMISSION_SOLANA,
+  fundingRoute: Object.freeze({ chainId: '4663', assetId: PRODUCTION_ADMISSION_USDG, decimals: 6 }),
+  settlementRoute: Object.freeze({ chainId: '792703809', assetId: PRODUCTION_ADMISSION_SETTLEMENT_MINT, decimals: 6 }),
+});
+
+function productionPurchaseMoneyConfiguration() {
+  const configuration = productionMoneyConfiguration();
+  const usdg = { ...configuration.assets.usdg, assetId: PRODUCTION_ADMISSION_USDG };
+  return {
+    ...configuration,
+    assets: { ...configuration.assets, usdg },
+    minimums: {
+      ...configuration.minimums,
+      robinhoodReceive: { ...configuration.minimums.robinhoodReceive, assetId: PRODUCTION_ADMISSION_USDG },
+      returnUsdg: { ...configuration.minimums.returnUsdg, assetId: PRODUCTION_ADMISSION_USDG },
+    },
+  };
+}
+
+/** A parsed Relay quote binding exactly `fundingAtomic` of the pinned production funding route to
+ * `purchaseAtomic` of the pinned production settlement route, self-consistent under
+ * `normalizeUnitRelayQuote` (packages/runner/src/automation/policy-engine.mjs): the quote digest is
+ * recomputed from this same evidence, never trusted as supplied. */
+function pinnedAdmissionRelayQuote({ requestId, orderId, fundingAtomic, purchaseAtomic, deadlineUnixSeconds = 2_000_000_000 }) {
+  const routes = PRODUCTION_ADMISSION_ROUTES;
+  const origin = { chainId: 4663, address: routes.fundingRoute.assetId, decimals: 6, amount: fundingAtomic };
+  const destination = {
+    chainId: 792703809, address: routes.settlementRoute.assetId, decimals: 6, amount: purchaseAtomic, minimumAmount: purchaseAtomic,
+  };
+  const raw = {
+    requestId,
+    details: {
+      sender: routes.evm,
+      recipient: routes.solana,
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
+    },
+    protocol: { v2: { orderId, orderData: {
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient: routes.solana, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
+    } } },
+    steps: [],
+  };
+  const quote = {
+    direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender: routes.evm, recipient: routes.solana,
+    deadlineUnixSeconds, origin, destination, stepCount: raw.steps.length, raw,
+  };
+  return {
+    ...quote,
+    quoteDigest: digest({
+      schema: 'hookemon.relay-quote.v1', direction: quote.direction, tradeType: quote.tradeType,
+      requestId: quote.requestId, orderId: quote.orderId, sender: quote.sender, recipient: quote.recipient,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds, origin: quote.origin, destination: quote.destination, raw: quote.raw,
+    }),
+  };
+}
+
+/** A finalized hook process-liability evidence record covering exactly `ceilingAtomic`, shaped
+ * exactly as `normalizeProcessLiabilityEvidence` requires: finalized, solvent, unused, unpaused,
+ * denominated in the pinned production funding route. */
+function pinnedAdmissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
+  const routes = PRODUCTION_ADMISSION_ROUTES;
+  return {
+    schema: 'hookemon.process-liability-evidence.v1',
+    chainId: routes.fundingRoute.chainId,
+    assetId: routes.fundingRoute.assetId,
+    decimals: routes.fundingRoute.decimals,
+    hook: `0x${'8'.repeat(40)}`,
+    cycleId,
+    onchainCycleId: deriveOnchainCycleId(cycleId),
+    blockNumber: '12345',
+    blockHash: `0x${'3'.repeat(64)}`,
+    finalized: true,
+    processLiability: ceilingAtomic,
+    remainingProcessClaimCapacity: ceilingAtomic,
+    processClaimsPaused: false,
+    processClaimCycleUsed: false,
+    activeProcessClaimLimit: ceilingAtomic,
+    totalLiability: ceilingAtomic,
+    hookUsdgBalance: ceilingAtomic,
+    isSolvent: true,
+    operations: routes.evm,
+    ceilingAtomic,
+  };
+}
+
+/** A complete, self-consistent quantity-1 `hookemon.policy-admission.v2` admission, denominated
+ * exactly in the fixed production routes CycleRepository replay validates every durable admission
+ * against -- independently authored, never derived from a candidate provider transaction. */
+function pinnedProductionPurchaseAdmission({ cycleId, packId, amountAtomic }) {
+  const unitRelayQuote = pinnedAdmissionRelayQuote({ requestId: `req-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: amountAtomic });
+  const relayQuote = pinnedAdmissionRelayQuote({ requestId: `req-aggregate-${cycleId}`, orderId: `0x${'2'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: amountAtomic });
+  const routes = PRODUCTION_ADMISSION_ROUTES;
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    packId,
+    quantity: 1,
+    quoteDigest: relayQuote.quoteDigest,
+    unitPurchase: { ...routes.settlementRoute, amountAtomic },
+    aggregatePurchase: { ...routes.settlementRoute, amountAtomic },
+    unitFundingQuote: { ...routes.fundingRoute, amountAtomic },
+    aggregateFundingQuote: { ...routes.fundingRoute, amountAtomic },
+    unitRelay: {
+      tradeType: 'EXACT_OUTPUT', requestId: unitRelayQuote.requestId, orderId: unitRelayQuote.orderId,
+      quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds: unitRelayQuote.deadlineUnixSeconds,
+      sender: routes.evm, recipient: routes.solana, destinationAmount: amountAtomic, destinationMinimumAmount: amountAtomic,
+    },
+    unitRelayQuote,
+    relayQuote,
+    relay: {
+      tradeType: 'EXACT_OUTPUT', requestId: relayQuote.requestId, orderId: relayQuote.orderId,
+      quoteDigest: relayQuote.quoteDigest, deadlineUnixSeconds: relayQuote.deadlineUnixSeconds,
+      sender: routes.evm, recipient: routes.solana, destinationAmount: amountAtomic, destinationMinimumAmount: amountAtomic,
+    },
+    processLiabilityEvidence: pinnedAdmissionProcessLiabilityEvidence(cycleId, amountAtomic),
+  };
+}
+
+/** An independently authored canonical transaction policy (never derived from a candidate decoded
+ * transaction) pinning a settlement recipient this fixture's actual self-transfer purchase
+ * transaction does not use. `requirePolicy` (purchase.mjs) accepts it before any provider call;
+ * `evaluate` (transaction-policy.mjs) genuinely refuses it once purchase actually decodes a
+ * candidate transaction against it, at `canonicalPolicyConstraint`'s `expectedRecipient` check --
+ * the real next boundary past the trusted resolver, not a re-assertion of the earlier admission
+ * refusal. */
+function pinnedPurchaseTransactionPolicy() {
+  return {
+    policy: {
+      schema: 'hookemon.transaction-policy.v1',
+      chainId: 'solana-mainnet',
+      stage: 'purchase',
+      requestDigest: digest({ schema: 'hookemon.transaction-policy-request.v1', stage: 'purchase', fixture: 'production-purchase-resolver' }),
+      expectedRecipient: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm',
+      amount: { chainId: 'solana-mainnet', assetId: PRODUCTION_ADMISSION_SETTLEMENT_MINT, decimals: 6, amountAtomic: '10' },
+      allowedTargets: [],
+      allowedPrograms: [TOKEN_PROGRAM_ID],
+    },
+    // Never evaluated by the two resolver-refusal cases below: the resolver refuses before decode
+    // reaches policy evaluation at all. Kept non-empty only to satisfy `explicitRules`.
+    rules: [{ id: 'production-purchase-fixture-rule' }],
+  };
+}
+
+/** A real composed production-profile purchase: real compose/service/stage-driver, a durable
+ * canonical admission pinned to the fixed production routes above, an independently pinned
+ * transaction policy, and fake EVM/archive/Solana RPC boundaries -- exactly the pattern other
+ * production compose fixtures in this file use (`throwingAdapters`, `liveObservabilityConfig`,
+ * `createTestProfileMutationAuthority`). Predecessor stages are seeded directly into the repository
+ * so this isolates purchase, exactly as `composedCollectorOnlyPurchaseAttempt` does above. */
+async function composedProductionPurchaseAttempt(t, { latestBlockhash, transactionBlockhash, invalidFromCall = null }) {
+  const operator = PRODUCTION_ADMISSION_SOLANA;
+  const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
+  const stateDir = await tempStateDir(t);
+  const statePath = join(stateDir, 'operator-state.json');
+  // `livePolicyPatch`'s caps (maxUnitPriceMicroUsdg/maxCycleBudgetMicroUsdg/max24HourBudgetMicroUsdg:
+  // '10', lossCapMicroUsdg/maxOutstandingCustodyMicroUsdg: '20') are used unchanged: the admission
+  // below is denominated at the same '10' atomic units, so no override is needed.
+  await writeOperatorState(statePath, livePolicyPatch('base-pack'));
+  const amountAtomic = '10';
+  const cycle = await seedCycle(stateDir, {
+    releaseAmount: amountAtomic,
+    mode: 'production',
+    providerMode: 'live',
+    completedStages: [
+      { stage: 'eligibility-snapshot' },
+      { stage: 'claim-process' },
+      { stage: 'outbound' },
+    ],
+    admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic }),
+  });
+
+  const calls = { generateYoloPacks: 0, sign: 0, submitTransaction: 0 };
+  const composition = await compose({
+    stateDir,
+    statePath,
+    workerOwner: 'test-worker',
+    leaseTtlMs: 30_000,
+    robinhood: { rpcUrl: 'https://example.invalid' },
+    solana: { rpcUrl: 'https://example.invalid', chainId: 'solana-mainnet' },
+    relay: { baseUrl: 'https://example.invalid' },
+    collectorCrypt: {
+      baseUrl: 'https://example.invalid',
+      settlementAsset: asset,
+      packPrice: { ...asset, amountAtomic },
+      purchase: { policy: pinnedPurchaseTransactionPolicy() },
+    },
+    contracts: { vault: null, hook: null, usdg: PRODUCTION_ADMISSION_USDG, usdgDecimals: 6 },
+    accounts: { evm: PRODUCTION_ADMISSION_EVM, solana: operator },
+    pack: { code: 'base-pack' },
+    moneyConfiguration: productionPurchaseMoneyConfiguration(),
+    execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    preflightAuthority: createTestProfileMutationAuthority(),
+    observability: liveObservabilityConfig(['solana']),
+    observabilityDeps: {
+      ...liveObservabilityDeps(),
+      readers: {
+        async readUsdgPaused() { return false; },
+        async readUsdgFrozen() { return false; },
+      },
+    },
+    adapters: {
+      collectorCrypt: {
+        async getMachines() { return { machines: [{ code: 'base-pack', price: '0.00001', contains: 1 }] }; },
+        async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
+        async generateYoloPacks({ playerAddress }) {
+          calls.generateYoloPacks += 1;
+          assert.equal(playerAddress, operator);
+          return {
+            packs: [{
+              memo: 'memo-production-purchase',
+              transaction: realUnsignedPurchaseTransaction({ operator, recentBlockhash: transactionBlockhash }),
+            }],
+          };
+        },
+        submitTransaction: () => {
+          calls.submitTransaction += 1;
+          throw new Error('submitTransaction must never be reached before the pinned policy explicitly allows this transaction');
+        },
+      },
+      relay: {
+        quoteOutboundBridge: () => { throw new Error('unused: outbound is already seeded complete'); },
+        quoteReturnBridge: () => { throw new Error('unused'); },
+        simulateExecution: () => { throw new Error('unused'); },
+        prepareExecution: () => { throw new Error('unused'); },
+      },
+      robinhood: {
+        client: {
+          async getChainId() { return 4663; },
+          async readContract() { return { requirementsRevision: 0n, chainId: 4663n }; },
+        },
+        historicalEvidenceClient: { async readErc20BalanceAtBlock() { return { value: '0' }; } },
+      },
+      solana: { client: collectorOnlyPurchaseSolanaClient({ operator, latestBlockhash, invalidFromCall }) },
+    },
+    signerClient: {
+      solana: {
+        probe: async () => ({ ready: true }),
+        async sign() { calls.sign += 1; throw new Error('signer must never be reached before the pinned policy explicitly allows this transaction'); },
+      },
+    },
+    now: () => 1_000,
+  });
+  t.after(() => composition.shutdown());
+
+  // Predecessor stages above are seeded directly into the repository (this test isolates purchase),
+  // but the policy engine's own claim-process ledger entry is not a byproduct of that -- it is what
+  // lets the purchase boundary find `existingCycle(...)` instead of refusing CYCLE_POLICY_MISSING
+  // before purchase's own handler ever runs. `admission: cycle.admission` matches exactly what
+  // `automated-cycle-service.mjs` re-presents at every later execution boundary for an admitted
+  // cycle, so the recorded spend reservation's digest keeps matching.
+  const admission = await composition.policyEngine.admit({
+    boundary: 'claim-process',
+    cycleId: cycle.cycleId,
+    releaseAmountMicroUsdg: cycle.releaseAmount,
+    packId: 'base-pack',
+    liveMode: true,
+    mode: 'production',
+    admission: cycle.admission,
+  });
+  assert.equal(admission.allowed, true);
+
+  const error = await composition.service.recoverActiveCycle({ liveMode: true }).then(
+    () => null,
+    caught => caught,
+  );
+  return { error, calls, composition, cycle };
+}
+
+test('a composed production purchase refuses at the trusted resolver before any signer or submit call, on a stale provider blockhash', async t => {
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
     latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
     transactionBlockhash: 'SysvarRecentB1ockHashes11111111111111111111',
   });
@@ -774,38 +1089,46 @@ test('a composed live collector-only purchase refuses at the trusted resolver be
     error?.message ?? '',
     /Solana blockhashContextResolver failed: compose Solana blockhashContextResolver refuses a blockhash that is not the current latest/,
   );
+  assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
 
-test('a composed live collector-only purchase refuses at the trusted resolver before any signer or submit call, when the RPC latest blockhash is already unusable', async t => {
+test('a composed production purchase refuses at the trusted resolver before any signer or submit call, when the RPC latest blockhash is already unusable', async t => {
   const blockhash = 'SysvarC1ock11111111111111111111111111111111';
-  const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
     latestBlockhash: blockhash,
     transactionBlockhash: blockhash,
-    // Call 1 is the startup canary (must stay healthy so the run actually reaches purchase); call 2
-    // is the resolver's own internal `readUsableLatestBlockhash` during decode -- that is the one
-    // this test makes report the latest blockhash as no longer usable.
-    invalidFromCall: 2,
+    // Unlike the collector-only rehearsal path, production purchase has no separate startup canary
+    // consuming an earlier `isBlockhashValid` call -- call 1 is the resolver's own internal
+    // `readUsableLatestBlockhash` during decode, so that is the one this test makes report the
+    // latest blockhash as no longer usable.
+    invalidFromCall: 1,
   });
 
   assert.match(
     error?.message ?? '',
     /Solana blockhashContextResolver failed: latest Solana blockhash is no longer valid before signing/,
   );
+  assert.equal(calls.generateYoloPacks, 1, 'decode must reach the resolver only after the batch call and candidate transaction exist');
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
 
-test('a composed live collector-only purchase advances past the trusted resolver on an exact blockhash match, refusing only at the genuine next pinned-policy boundary', async t => {
+test('a composed production purchase advances past the trusted resolver on an exact blockhash match, refusing only at the genuine next pinned-policy boundary', async t => {
   const blockhash = 'SysvarC1ock11111111111111111111111111111111';
-  const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
     latestBlockhash: blockhash,
     transactionBlockhash: blockhash,
   });
 
   assert.equal(calls.generateYoloPacks, 1, 'the resolver match must let the batch call and decode actually happen');
-  assert.match(error?.message ?? '', /Collector purchase requires a pinned transaction policy/);
+  // The pinned fixture policy (`pinnedPurchaseTransactionPolicy`) is configured and accepted by
+  // `requirePolicy` before generateYoloPacks -- the batch call above already proves that -- so the
+  // refusal below is the real next boundary the decoded candidate transaction meets: the policy's
+  // independently authored `expectedRecipient` does not name this fixture's actual self-transfer
+  // settlement destination.
+  assert.match(error?.message ?? '', /canonical policy expectedRecipient is not explicitly allowed/);
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
@@ -1245,7 +1568,7 @@ test('compose exposes one repository-backed cycle client instead of a bare runne
   assert.deepEqual(CYCLE_REPOSITORY_CLIENT_INTERFACE, [
     'readActiveCycle', 'peekActiveCycle', 'readStage', 'describeCycle', 'readOperationalStageAttempt',
     'readChainTransactionAttempt', 'readClaimPreconditions', 'readHeldPosition', 'listHeldPositions',
-    'readSupplementarySettlement', 'listKnownCycleIds',
+    'readSupplementarySettlement', 'listKnownCycleIds', 'readOutboundQuoteRefresh', 'readFinalizedClaimCustodyEvidence',
   ]);
   assert.equal(assertCycleRepositoryClientInterface(composition.cycleRepository), composition.cycleRepository);
   assert.deepEqual(Object.keys(composition.cycleRepository).sort(), [...CYCLE_REPOSITORY_CLIENT_INTERFACE].sort());
