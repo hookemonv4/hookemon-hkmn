@@ -317,3 +317,7 @@ Supplementary return consumes finalized Collector sale proceeds in the native So
 with the documented settlement mint and decimals checked against MoneyConfiguration. It preserves
 the position-attributed atomic amount; Relay transport identifiers belong to the subsequently
 validated bridge quote, not to the confirmed sale evidence.
+
+Supplementary dispatch retains the process-local isolated signer setup by reference alongside the
+trusted Solana blockhash resolver. Other configuration remains frozen data. The production binding
+boundary still authenticates the setup's private identity; a value-identical copy is not authority.

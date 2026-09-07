@@ -751,3 +751,43 @@ test('stage driver forwards supplied authority to the real supplementary handler
     await assert.rejects(driver.runSupplementarySettlement(input), /lease expired/);
   }
 });
+
+
+test('supplementary production dispatch preserves the authentic setup identity and rejects a value clone', async () => {
+  for (const cloned of [false, true]) {
+    const repository = fakeChainAttemptRepository();
+    for (const method of ['readOperationalStageAttempt', 'prepareStageAttempt', 'markStageAttemptNotSent', 'markStageAttemptSentUnknown', 'recordStageAttemptResponse', 'reconcileStageAttempt']) {
+      repository[method] = async () => { throw new Error('ordinary stage capability must not run'); };
+    }
+    const settlement = settlementFixture();
+    repository.readSupplementarySettlement = async () => settlement;
+    const config = productionConfig();
+    if (cloned) config.signer.keychain.isolatedChildSetup = Object.freeze({ ...productionBindingIsolatedSetup });
+    const expectedSetup = config.signer.keychain.isolatedChildSetup;
+    let providerCalls = 0;
+    let receivedSetup;
+    const adapters = { solana: { client: rpcClient().client }, collectorCrypt: {
+      async getBuybackCheck() { return { exists: false }; },
+      async getBuybackAvailable() { return { available: true, amount: { ...settlementAsset(), amountAtomic: OFFER_ATOMIC } }; },
+      async buyback() { providerCalls += 1; throw new Error('verified production provider boundary reached'); },
+    } };
+    const actualHandler = createSupplementaryBuybackHandler();
+    const driver = createStageDriver({
+      liveMode: true, adapters, config, cycleRepository: repository, preflightAuthority: TEST_AUTHORITY,
+      supplementaryAdapters: adapters, supplementarySignerClient: { solana: { async sign() { throw new Error('must not sign'); } } },
+      productionSupplementaryStageHandlers: { PREPARED: {
+        stage: actualHandler.stage,
+        async reconcile(input) {
+          receivedSetup = input.config.signer.keychain.isolatedChildSetup;
+          assert.equal(Object.isFrozen(input.config.signer.keychain), true);
+          assert.equal(input.config.solana.blockhashContextResolver, config.solana.blockhashContextResolver);
+          return actualHandler.reconcile(input);
+        },
+      } },
+    });
+    await driver.runSupplementarySettlement({ position: heldPosition(), settlement, fencingToken: FENCING_TOKEN, assertLease() {} });
+    assert.equal(receivedSetup, expectedSetup, 'dispatch must preserve the exact supplied capability object');
+    assert.equal(providerCalls, cloned ? 0 : 1, 'only the genuine setup may pass the real production binding boundary');
+    assert.equal(repository.advances.length, 0);
+  }
+});

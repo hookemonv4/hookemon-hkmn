@@ -687,16 +687,25 @@ function frozenCanonicalValue(value) {
   return freezeRequest(toEvidenceValue(value));
 }
 
-/** Canonicalizes `config` like `frozenCanonicalValue`, but re-attaches the one trusted
- * `config.solana.blockhashContextResolver` function seam (compose.mjs's real production Solana RPC
- * resolver) that canonicalization would otherwise stringify away. This is the only supplementary
- * reconcile call site that reaches a live mutation boundary (the production supplementary buyback
- * handler); every other frozen preparation/reconciliation payload stays capability-free. */
+/** Canonicalizes supplementary data while retaining the existing process-local resolver and
+ * isolated signer setup references. The setup's private brand is still checked by the production
+ * binding boundary; retaining a caller's unbranded lookalike never authenticates it. */
 function frozenSupplementaryReconcileConfig(config) {
   const canonical = frozenCanonicalValue(config);
   const resolver = config?.solana?.blockhashContextResolver;
-  if (typeof resolver !== 'function') return canonical;
-  return Object.freeze({ ...canonical, solana: Object.freeze({ ...canonical.solana, blockhashContextResolver: resolver }) });
+  const isolatedChildSetup = config?.signer?.keychain?.isolatedChildSetup;
+  return Object.freeze({
+    ...canonical,
+    ...(typeof resolver === 'function'
+      ? { solana: Object.freeze({ ...canonical.solana, blockhashContextResolver: resolver }) }
+      : {}),
+    ...(isolatedChildSetup === undefined
+      ? {}
+      : { signer: Object.freeze({
+        ...canonical.signer,
+        keychain: Object.freeze({ ...canonical.signer.keychain, isolatedChildSetup }),
+      }) }),
+  });
 }
 
 function stageConfiguration(config) {
