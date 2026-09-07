@@ -144,10 +144,28 @@ async function reloadFinalizedReturnAmount({ cycleRepository, cycleId, operation
     if (canonicalJson(returnLegs[0]) !== canonicalJson(leg)) {
       refuse('the settled return leg does not match the cycle\'s durable Relay leg record');
     }
-    const ledger = stateValues(cycle?.custodyLedgers).find(
-      candidate => candidate?.chainId === leg.destinationChainId && candidate?.assetId === leg.destinationAssetId,
-    ) ?? null;
-    if (!ledger || ledger.cycleId !== cycleId) refuse('the settled return leg has no matching cycle custody ledger');
+    // The durable custody ledger is keyed by canonical CAIP identity, never the leg's raw
+    // destinationChainId/destinationAssetId pair -- the same canonical formula this file already
+    // uses to identify the Operations USDG balance below. `returnLegLedgerKeys` is the settlement
+    // writer's own durable association of this exact relayRequestId to the row it actually wrote;
+    // trusting it (rather than recomputing a key from the leg) is what makes this refuse any
+    // competing or legacy-raw row instead of quietly accepting one.
+    const canonicalChainId = `eip155:${USDG_PAYOUT_CHAIN_ID}`;
+    const canonicalAssetId = `${canonicalChainId}/erc20:${usdgAddress}`;
+    const canonicalKey = `${canonicalChainId} ${canonicalAssetId}`;
+    const associatedKey = cycle?.returnLegLedgerKeys?.get?.(leg.relayRequestId) ?? null;
+    if (associatedKey !== canonicalKey) {
+      refuse('the settled return leg has no durable association with the configured canonical USDG custody ledger');
+    }
+    const rawKey = `${leg.destinationChainId} ${leg.destinationAssetId}`;
+    if (rawKey !== canonicalKey && (cycle?.custodyLedgers?.get?.(rawKey) ?? null) !== null) {
+      refuse('the settled return leg has a competing legacy raw-identity custody ledger row');
+    }
+    const ledger = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+    if (!ledger || ledger.schema !== 'hookemon.custody-ledger.v2' || ledger.cycleId !== cycleId
+      || ledger.chainId !== canonicalChainId || ledger.assetId !== canonicalAssetId || ledger.decimals !== USDG_PAYOUT_DECIMALS) {
+      refuse('the settled return leg has no matching canonical cycle custody ledger');
+    }
     if (ledger.returnReceived !== leg.netDeltaAtomic) refuse('the cycle custody ledger returnReceived does not match the settled return leg');
     return leg.netDeltaAtomic;
   }

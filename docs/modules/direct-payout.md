@@ -37,7 +37,14 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   completed `return` stage evidence: either the zero-proceeds record with no recorded return Relay
   leg, or exactly one total return Relay leg that is itself `SETTLED` and matches the cycle's
   custody ledger `returnReceived`; a second unresolved or terminal return leg is rejected as
-  ambiguous even when the admitted leg is settled. For nonzero carried dust it accepts either the
+  ambiguous even when the admitted leg is settled. It locates that custody row by the canonical
+  CAIP identity built from the request's independently validated USDG asset -- never the settled
+  leg's own raw `destinationChainId`/`destinationAssetId` pair -- requiring the durable
+  `returnLegLedgerKeys` association this exact Relay request id was recorded under to name that
+  same canonical key, a matching v2 row for this cycle with that identity's decimals, and no
+  competing legacy raw-identity row for the same asset; a missing or mismatched association, a
+  wrong-schema/cycle/asset/decimals row, or any raw-row coexistence all refuse before the balance
+  check ever runs. For nonzero carried dust it accepts either the
   exact globally unconsumed source (the later atomic initializer still consumes it) or this exact
   cycle's already-consumed record when it is bound to the request's current plan digest with no
   conflicting payout state -- the durable restart of a crash between dust consumption and

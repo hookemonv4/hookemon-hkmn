@@ -17,6 +17,14 @@ const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const FINALIZED_NUMBER = 100n;
 const FINALIZED_HASH = `0x${'a'.repeat(64)}`;
+const NUL = String.fromCharCode(0);
+
+// The canonical CAIP identity `payout-availability.mjs` must key the USDG custody row by --
+// never the leg's raw destinationChainId/destinationAssetId pair.
+const CANONICAL_CHAIN_ID = 'eip155:4663';
+const CANONICAL_ASSET_ID = `eip155:4663/erc20:${USDG}`;
+const CANONICAL_KEY = `${CANONICAL_CHAIN_ID}${NUL}${CANONICAL_ASSET_ID}`;
+const RAW_KEY = `4663${NUL}${USDG}`;
 
 function usdg(amountAtomic) {
   return createUsdgPayoutAmount({ assetId: USDG, amountAtomic });
@@ -232,13 +240,42 @@ function returnDestinationReceiptClient({ transactionHash, observedAmountAtomic,
   };
 }
 
-async function settledReturnFixture(t, { directory = null, repository = null } = {}) {
+/** The v2 canonical USDG custody row `recordReturnRelayLegExpectation` durably associates with
+ * this exact leg -- fresh buckets, no observed balance yet, `expectedCycleAsset` bound to the
+ * leg's own destination amount (the repository's own invariant, checked in
+ * `recordReturnRelayLegExpectation`). Mirrors what `stages/return.mjs#recordReturnCustodyExpectation`
+ * would produce in production, without driving the full mutateReturn adapter wiring. */
+function canonicalReturnExpectationLedger(cycleId, leg) {
+  return {
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId,
+    chainId: CANONICAL_CHAIN_ID,
+    assetId: CANONICAL_ASSET_ID,
+    decimals: leg.destinationDecimals,
+    claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
+    returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
+    heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
+    verifiedCurrentBalance: null,
+    expectedCycleAsset: {
+      chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: leg.destinationDecimals, amountAtomic: leg.destinationAmountAtomic,
+    },
+  };
+}
+
+/** `association` selects how the leg's custody row is reached: `'canonical'` (default, the real
+ * production path via `recordReturnRelayLegExpectation`) or `'raw'` (the legacy pre-migration
+ * path via bare `recordRelayLeg`, which leaves no `returnLegLedgerKeys` association -- the exact
+ * shape of the settled leg the N2 regression this reader must still refuse). */
+async function settledReturnFixture(t, { directory = null, repository = null, association = 'canonical' } = {}) {
   if (repository === null) {
     directory = await tempDirectory(t);
     repository = await CycleRepository.open(directory);
   }
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
-  const recorded = await repository.recordRelayLeg(cycleId, returnRelayLeg(cycleId));
+  const leg = returnRelayLeg(cycleId);
+  const recorded = association === 'raw'
+    ? await repository.recordRelayLeg(cycleId, leg)
+    : await repository.recordReturnRelayLegExpectation(cycleId, leg, canonicalReturnExpectationLedger(cycleId, leg));
   const sourceTxHash = `return-source-${cycleId}`;
   const attributed = await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
   const requestDigest = `sha256:${'7'.repeat(64)}`;
@@ -497,7 +534,7 @@ test('refuses when the cycle\'s one recorded return leg is not yet settled', asy
   );
 });
 
-test('refuses when the cycle custody ledger does not bind the settled return leg', async t => {
+test('refuses a settled return leg with no durable canonical custody ledger association at all', async t => {
   const { cycleId, settled, evidence } = await settledReturnFixture(t);
   const fakeRepository = {
     async readStage() { return { status: 'COMPLETE', evidence }; },
@@ -505,10 +542,8 @@ test('refuses when the cycle custody ledger does not bind the settled return leg
     async describeCycle() {
       return {
         relayLegs: new Map([[settled.relayRequestId, settled]]),
-        custodyLedgers: new Map([[
-          `${settled.destinationChainId}_${settled.destinationAssetId}`,
-          { cycleId, chainId: settled.destinationChainId, assetId: settled.destinationAssetId, returnReceived: '1' },
-        ]]),
+        returnLegLedgerKeys: new Map(),
+        custodyLedgers: new Map([[RAW_KEY, { cycleId, chainId: '4663', assetId: USDG, decimals: 6, returnReceived: settled.netDeltaAtomic }]]),
       };
     },
   };
@@ -519,7 +554,122 @@ test('refuses when the cycle custody ledger does not bind the settled return leg
   });
   await assert.rejects(
     () => reader(baseRequest(cycleId, { returnEvidence: evidence, returnDelta: usdg(settled.netDeltaAtomic) })),
+    /no durable association with the configured canonical USDG custody ledger/,
+  );
+});
+
+test('refuses a settled return leg durably associated with the wrong custody ledger key', async t => {
+  const { cycleId, settled, evidence } = await settledReturnFixture(t);
+  const fakeRepository = {
+    async readStage() { return { status: 'COMPLETE', evidence }; },
+    async readStageAttempt() { return null; },
+    async describeCycle() {
+      return {
+        relayLegs: new Map([[settled.relayRequestId, settled]]),
+        returnLegLedgerKeys: new Map([[settled.relayRequestId, `eip155:1${NUL}eip155:1/erc20:${USDG}`]]),
+        custodyLedgers: new Map([[`eip155:1${NUL}eip155:1/erc20:${USDG}`, {
+          schema: 'hookemon.custody-ledger.v2', cycleId, chainId: 'eip155:1', assetId: `eip155:1/erc20:${USDG}`, decimals: 6, returnReceived: settled.netDeltaAtomic,
+        }]]),
+      };
+    },
+  };
+  const reader = createCycleAttributableFinalizedAvailableReader({
+    cycleRepository: fakeRepository,
+    publicClient: fakePublicClient(),
+    archiveClient: fakeArchiveClient(),
+  });
+  await assert.rejects(
+    () => reader(baseRequest(cycleId, { returnEvidence: evidence, returnDelta: usdg(settled.netDeltaAtomic) })),
+    /no durable association with the configured canonical USDG custody ledger/,
+  );
+});
+
+test('refuses a settled return leg whose associated custody row uses the legacy v1 schema', async t => {
+  const { cycleId, settled, evidence } = await settledReturnFixture(t);
+  const reader = createCycleAttributableFinalizedAvailableReader({
+    cycleRepository: {
+      async readStage() { return { status: 'COMPLETE', evidence }; },
+      async readStageAttempt() { return null; },
+      async describeCycle() {
+        return {
+          relayLegs: new Map([[settled.relayRequestId, settled]]),
+          returnLegLedgerKeys: new Map([[settled.relayRequestId, CANONICAL_KEY]]),
+          custodyLedgers: new Map([[CANONICAL_KEY, {
+            schema: 'hookemon.custody-ledger.v1', cycleId, chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, returnReceived: settled.netDeltaAtomic,
+          }]]),
+        };
+      },
+    },
+    publicClient: fakePublicClient(),
+    archiveClient: fakeArchiveClient(),
+  });
+  await assert.rejects(
+    () => reader(baseRequest(cycleId, { returnEvidence: evidence, returnDelta: usdg(settled.netDeltaAtomic) })),
+    /no matching canonical cycle custody ledger/,
+  );
+});
+
+test('refuses when the canonically associated custody ledger returnReceived does not match the settled return leg', async t => {
+  const { cycleId, settled, evidence } = await settledReturnFixture(t);
+  const reader = createCycleAttributableFinalizedAvailableReader({
+    cycleRepository: {
+      async readStage() { return { status: 'COMPLETE', evidence }; },
+      async readStageAttempt() { return null; },
+      async describeCycle() {
+        return {
+          relayLegs: new Map([[settled.relayRequestId, settled]]),
+          returnLegLedgerKeys: new Map([[settled.relayRequestId, CANONICAL_KEY]]),
+          custodyLedgers: new Map([[CANONICAL_KEY, {
+            schema: 'hookemon.custody-ledger.v2', cycleId, chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, returnReceived: '1',
+          }]]),
+        };
+      },
+    },
+    publicClient: fakePublicClient(),
+    archiveClient: fakeArchiveClient(),
+  });
+  await assert.rejects(
+    () => reader(baseRequest(cycleId, { returnEvidence: evidence, returnDelta: usdg(settled.netDeltaAtomic) })),
     /custody ledger returnReceived does not match/,
+  );
+});
+
+test('refuses a settled return leg whose custody row sits only at the legacy raw identity with no durable canonical association', async t => {
+  const { repository, cycleId, settled, evidence } = await settledReturnFixture(t, { association: 'raw' });
+  const reader = createCycleAttributableFinalizedAvailableReader({
+    cycleRepository: repository,
+    publicClient: fakePublicClient(),
+    archiveClient: fakeArchiveClient({ value: BigInt(settled.netDeltaAtomic) + 500n }),
+  });
+  await assert.rejects(
+    () => reader(baseRequest(cycleId, { returnEvidence: evidence, returnDelta: usdg(settled.netDeltaAtomic) })),
+    /no durable association with the configured canonical USDG custody ledger/,
+  );
+});
+
+test('refuses a settled return leg whose canonical association coexists with a competing legacy raw-identity custody row', async t => {
+  const { repository, cycleId, settled, evidence } = await settledReturnFixture(t);
+  // A row still sitting at the raw (non-CAIP) key is reachable historical state from before this
+  // cycle's migration (or an unrelated writer) -- this must refuse rather than silently prefer the
+  // canonical association.
+  await repository.recordCustodyLedger(cycleId, {
+    schema: 'hookemon.custody-ledger.v1',
+    cycleId,
+    chainId: '4663',
+    assetId: USDG,
+    decimals: 6,
+    claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
+    returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
+    heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
+  });
+  const reader = createCycleAttributableFinalizedAvailableReader({
+    cycleRepository: repository,
+    publicClient: fakePublicClient(),
+    archiveClient: fakeArchiveClient({ value: BigInt(settled.netDeltaAtomic) + 500n }),
+  });
+  await assert.rejects(
+    () => reader(baseRequest(cycleId, { returnEvidence: evidence, returnDelta: usdg(settled.netDeltaAtomic) })),
+    /competing legacy raw-identity custody ledger row/,
   );
 });
 
