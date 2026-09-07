@@ -15,9 +15,9 @@ response and the relevant memo or mint.
 
 ## Runner behavior
 
-The current client does not retry any mutation response, including `5xx`. It
-does not create the required durable held state or automatically move a blocked
-card to an owner decision path. That lifecycle is owned by WP08b.
+The current client does not retry any mutation response, including `5xx`. The lifecycle
+records an unavailable card as a durable held position without terminalizing
+the cycle. Other attributable packs can continue independently.
 
 ## Operator recovery
 
@@ -42,7 +42,7 @@ Traceability: L4-M8.
 
 Failure-matrix cells: Buyback API:unavailable
 Owning work package: WP08b
-Expected outcome: terminal=HELD_UNAVAILABLE; attempt=none; next=owner-decision
-Test: packages/adapters/test/app/stages-collector-lifecycle.test.mjs — holds unavailable buyback durably after reopen before its sole owner decision
+Expected outcome: terminal=none; attempt=none; next=held-position-owner-decision
+Test: packages/adapters/test/app/stages-collector-lifecycle.test.mjs — records unavailable buyback as a durable held position without terminalizing the cycle
 Alarm reason/code: OPEN FACT (WP08b): no dedicated alarm reason/code is emitted for this hold.
 Resume command: none supported; read-only availability evidence cannot authorize a replacement mutation.
