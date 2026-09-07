@@ -113,6 +113,30 @@ implements the payout durability contract in `REQ-direct-payout-1`.
 - A production-capable direct `advanceDirectPayout()` call ignores caller-supplied policy-signer
   factories and derives the same exact local policy. Isolated non-production helpers may retain
   their explicit policy-signer seam.
+- Before either durable admission point (a fresh cycle or a resumed one), `ensurePayoutCustodyLedger`
+  writes the `hookemon.custody-ledger.v2` row for the canonical EVM USDG identity
+  (`eip155:<chain>` / `eip155:<chain>/erc20:<lower-case token>`, from `MoneyConfigurationV1.assets.usdg`
+  independently cross-checked against the configured contract, chain, and the plan's own returnDelta --
+  never a raw or candidate-ledger identity). It reuses
+  `createEvmCustodyBalanceObservationReader()` (`packages/adapters/src/evm-custody-balance-observation.mjs`)
+  with the distinct `adapters.robinhood.client` / `historicalEvidenceClient` pair for
+  `verifiedCurrentBalance`, and skips that read entirely for a zero-payable-recipient cycle, matching
+  the existing rule that such a cycle never touches the chain. A pre-existing row's fourteen buckets
+  and `expectedCycleAsset` are always carried forward byte-for-byte; only `verifiedCurrentBalance` is
+  refreshed. If that row does not yet show `returnReceived` covering this payout's returnDelta, the
+  write refuses with the same finalized-return-backing error as before -- this reports a pending
+  return-leg dependency, it never migrates, downgrades, or resolves another stage's row. The
+  repository itself enforces no v2-to-v1 downgrade, no non-null-to-null balance erasure, and monotonic
+  finality on every write.
+- Before that same write, `ensurePayoutCustodyLedger` also looks up the legacy raw (non-CAIP)
+  identity for the same configured USDG asset (`{chainId: '4663', assetId: <configured contract>}` --
+  the identity the pre-migration writer, and today's not-yet-migrated return-settlement path, still
+  use). If any row exists there -- alone, or already coexisting with a canonical row -- the whole
+  custody-ledger step refuses before any new write, signature, or broadcast. It never copies a
+  balance or bucket across identities, invents alias resolution, or initializes backing from the
+  plan while that predecessor exists; both rows and their full history are left exactly as found.
+  This is the explicit, intended block on payout admission until the return consumer's own
+  canonical-identity migration lands -- not a bug to route around locally.
 
 ## State transitions
 
@@ -140,6 +164,7 @@ implements the payout durability contract in `REQ-direct-payout-1`.
 
 ```sh
 node --test --test-timeout=120000 packages/adapters/test/app/stages-payout.test.mjs
+node --test --test-timeout=120000 packages/adapters/test/app/payout-custody-v2.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/payout-availability.test.mjs
 node --test --test-timeout=120000 packages/adapters/test/app/stage-driver.test.mjs
 node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.test.mjs

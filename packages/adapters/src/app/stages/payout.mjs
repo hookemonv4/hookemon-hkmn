@@ -17,6 +17,7 @@ import {
 } from '../../../../runner/src/distribution/payout-plan.mjs';
 import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
 import { assertMoneyConfiguration } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
 import { requireLiveRetainedCustodyMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
 import { buildAuthorizePayoutCall, buildFundPayoutFromPegCycleCall, readPendingAuthorization } from '../../hook-contract-client.mjs';
 import {
@@ -2485,47 +2486,189 @@ function payoutTerminalEvidence(stateValue) {
   };
 }
 
-function payoutCustodyLedger(cycleId, amount) {
-  const buckets = {
-    claimed: '0',
-    bridgeOut: '0',
-    bridgeIn: '0',
-    packCost: '0',
-    buybackProceeds: '0',
-    returnInput: '0',
-    returnReceived: amount.amountAtomic,
-    refunds: '0',
-    residual: '0',
-    heldAssets: '0',
-    heldPositions: '0',
-    payoutLiability: '0',
-    dust: '0',
-    unattributed: '0',
-  };
+const CUSTODY_LEDGER_BUCKET_NAMES = Object.freeze([
+  'claimed',
+  'bridgeOut',
+  'bridgeIn',
+  'packCost',
+  'buybackProceeds',
+  'returnInput',
+  'returnReceived',
+  'refunds',
+  'residual',
+  'heldAssets',
+  'heldPositions',
+  'payoutLiability',
+  'dust',
+  'unattributed',
+]);
+
+function custodyLedgerBuckets(row) {
+  return Object.fromEntries(CUSTODY_LEDGER_BUCKET_NAMES.map(name => [name, row[name]]));
+}
+
+/**
+ * ADR-0026 / interfaces.json revision 67: the canonical identity for the EVM USDG custody row is
+ * built from the trusted `MoneyConfigurationV1.assets.usdg`, exactly the formula
+ * `claim-process.mjs#claimCustodyAsset` already applies -- never from a raw returnDelta or an
+ * existing candidate ledger row's own chainId/assetId.
+ */
+function canonicalEvmUsdgCustodyIdentity(money) {
+  const chainId = `eip155:${money.assets.usdg.chainId}`;
   return {
-    schema: 'hookemon.custody-ledger.v1',
-    cycleId,
-    chainId: String(amount.chainId),
-    assetId: amount.assetId,
-    decimals: amount.decimals,
-    ...buckets,
+    chainId,
+    assetId: `${chainId}/erc20:${money.assets.usdg.assetId.toLowerCase()}`,
+    decimals: money.assets.usdg.decimals,
   };
 }
 
-async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta }) {
+/**
+ * Independently proves the canonical identity before any custody write: MoneyConfigurationV1 must
+ * identify chain 4663 with six decimals and the exact configured USDG contract, and the raw payout
+ * returnDelta itself must match that same configured contract -- never trusting RPC output or a
+ * candidate ledger's own identity fields.
+ */
+function assertPayoutCustodyMoneyConfiguration({ config, returnDelta }) {
+  let money;
+  try {
+    money = assertMoneyConfiguration(config?.moneyConfiguration, 'direct payout custody ledger money configuration');
+  } catch (error) {
+    fail(`direct payout custody ledger requires MoneyConfigurationV1: ${error.message}`);
+  }
+  if (config.chainId !== undefined && Number(config.chainId) !== 4663) {
+    fail('direct payout custody ledger requires chainId 4663');
+  }
+  if (money.assets.usdg.chainId !== '4663' || money.assets.usdg.decimals !== 6
+    || money.assets.usdg.assetId.toLowerCase() !== assertAddress(config?.contracts?.usdg, 'direct payout custody ledger configured USDG contract')) {
+    fail('direct payout custody ledger MoneyConfigurationV1 USDG asset does not match the configured USDG contract');
+  }
+  const normalizedReturnDelta = assertUsdAmount(returnDelta, 'direct payout custody ledger return delta', config.contracts.usdg);
+  return { identity: canonicalEvmUsdgCustodyIdentity(money), normalizedReturnDelta };
+}
+
+/**
+ * Produces this write's `CustodyBalanceObservationV1` through the reviewed public-finalized ->
+ * distinct-archive-at-height/hash -> public-recheck producer, pinned to the canonical identity and
+ * the configured Operations account -- never a supplied balance callback, a current/latest read, or
+ * the payout-availability admission reader.
+ */
+async function readPayoutCustodyBalanceObservation({ adapters, config, identity }) {
+  const publicClient = adapters?.robinhood?.client;
+  if (!publicClient) fail('direct payout custody ledger requires a chain 4663 client for balance observation');
+  const archiveClient = adapters?.robinhood?.historicalEvidenceClient ?? publicClient.historicalEvidenceClient ?? null;
+  const account = assertAddress(config.accounts?.evm, 'direct payout custody ledger Operations account');
+  let readObservation;
+  try {
+    readObservation = createEvmCustodyBalanceObservationReader({
+      publicClient,
+      archiveClient,
+      identity: { ...identity, account },
+    });
+  } catch (error) {
+    fail(`direct payout custody ledger balance observation identity is invalid: ${error.message}`);
+  }
+  try {
+    return await readObservation();
+  } catch (error) {
+    fail(`direct payout custody ledger balance observation refused: ${error.message}`);
+  }
+}
+
+function freshPayoutCustodyLedgerV2({ cycleId, identity, returnDelta, observation }) {
+  return {
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId,
+    chainId: identity.chainId,
+    assetId: identity.assetId,
+    decimals: identity.decimals,
+    ...custodyLedgerBuckets({
+      claimed: '0',
+      bridgeOut: '0',
+      bridgeIn: '0',
+      packCost: '0',
+      buybackProceeds: '0',
+      returnInput: '0',
+      returnReceived: returnDelta.amountAtomic,
+      refunds: '0',
+      residual: '0',
+      heldAssets: '0',
+      heldPositions: '0',
+      payoutLiability: '0',
+      dust: '0',
+      unattributed: '0',
+    }),
+    verifiedCurrentBalance: observation,
+    expectedCycleAsset: null,
+  };
+}
+
+/**
+ * Writes the canonical EVM USDG custody row for this payout admission (interfaces.json revision
+ * 67, ADR-0026). Never invents `returnReceived` backing over an already-populated row: when a
+ * canonical row already exists (written by claim/return, or by a prior payout write), every one of
+ * its fourteen buckets and its `expectedCycleAsset` are carried forward byte-for-byte -- this
+ * function only ever attaches a freshly observed `verifiedCurrentBalance`. If that existing row's
+ * `returnReceived` does not yet cover this payout's returnDelta, this refuses with the exact
+ * pre-existing finalized-return-backing error instead of clearing, migrating, or resolving anything
+ * on the return leg's behalf; that is a legitimate report of pending return integration, not a bug
+ * to route around here.
+ */
+async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta, adapters, config, payableRecipientCount }) {
   if (typeof cycleRepository.recordCustodyLedger !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
     fail('direct payout production execution requires a custody ledger repository');
   }
-  const expected = payoutCustodyLedger(cycleId, returnDelta);
+  const { identity, normalizedReturnDelta } = assertPayoutCustodyMoneyConfiguration({ config, returnDelta });
+  const key = `${identity.chainId}${String.fromCharCode(0)}${identity.assetId}`;
+  // The pre-canonical writer keyed this exact asset by the raw (non-CAIP) chainId/assetId pair --
+  // `normalizedReturnDelta.chainId`/`.assetId` are that same raw pair, already independently proven
+  // to identify the configured USDG contract by `assertPayoutCustodyMoneyConfiguration`. A row still
+  // sitting at that raw key is reachable historical state from before this migration (or from a
+  // return/claim writer that has not migrated yet); it must never be treated as absent just because
+  // the canonical key has no row. Detecting it here never reads or resolves it -- only refuses.
+  const rawKey = `${String(normalizedReturnDelta.chainId)}${String.fromCharCode(0)}${normalizedReturnDelta.assetId}`;
   const state = await cycleRepository.describeCycle(cycleId);
-  const existing = state?.custodyLedgers?.get?.(`${expected.chainId}\u0000${expected.assetId}`) ?? null;
-  if (existing) {
-    if (existing.decimals !== expected.decimals || BigInt(existing.returnReceived) < BigInt(expected.returnReceived)) {
-      fail('direct payout custody ledger does not prove the finalized return backing');
-    }
+  const existing = state?.custodyLedgers?.get?.(key) ?? null;
+  const rawPredecessor = state?.custodyLedgers?.get?.(rawKey) ?? null;
+  if (rawPredecessor !== null) {
+    fail('direct payout custody ledger found a legacy raw-identity USDG predecessor row for this cycle: '
+      + 'refuses pending explicit return-consumer migration instead of creating a competing canonical row '
+      + 'or fabricating its backing');
+  }
+  // A zero-payable-recipient cycle never touches the chain anywhere else in this stage (the same
+  // `payableRecipientCount > 0` gate already skips every admission RPC below); this write must
+  // stay consistent with that and never read a balance either.
+  const shouldObserve = payableRecipientCount > 0;
+
+  if (existing === null) {
+    const observation = shouldObserve
+      ? await readPayoutCustodyBalanceObservation({ adapters, config, identity })
+      : null;
+    await cycleRepository.recordCustodyLedger(cycleId, freshPayoutCustodyLedgerV2({
+      cycleId,
+      identity,
+      returnDelta: normalizedReturnDelta,
+      observation,
+    }));
     return;
   }
-  await cycleRepository.recordCustodyLedger(cycleId, expected);
+
+  if (existing.decimals !== identity.decimals || BigInt(existing.returnReceived) < BigInt(normalizedReturnDelta.amountAtomic)) {
+    fail('direct payout custody ledger does not prove the finalized return backing');
+  }
+
+  if (!shouldObserve) return;
+
+  const observation = await readPayoutCustodyBalanceObservation({ adapters, config, identity });
+  await cycleRepository.recordCustodyLedger(cycleId, {
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId,
+    chainId: identity.chainId,
+    assetId: identity.assetId,
+    decimals: identity.decimals,
+    ...custodyLedgerBuckets(existing),
+    verifiedCurrentBalance: observation,
+    expectedCycleAsset: existing.schema === 'hookemon.custody-ledger.v2' ? existing.expectedCycleAsset : null,
+  });
 }
 
 function isPagedPayoutStateReference(value, planDigest) {
@@ -2695,6 +2838,9 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
       cycleRepository,
       cycleId: context.cycleId,
       returnDelta: request.plan.returnDelta,
+      adapters,
+      config,
+      payableRecipientCount: preparedPlan.plan.payableRecipientCount,
     });
     return { payoutStore, state: normalizedState(existing) };
   }
@@ -2826,6 +2972,9 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
     cycleRepository,
     cycleId: context.cycleId,
     returnDelta: request.plan.returnDelta,
+    adapters,
+    config,
+    payableRecipientCount: preparedPlan.plan.payableRecipientCount,
   });
   return { payoutStore, state };
 }
