@@ -1,15 +1,42 @@
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { writeJson, nowIso, sha256 } from './util.mjs';
+import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
+import {
+  writeJson, nowIso, sha256, readJson,
+} from './util.mjs';
 import { assertFrameworkPhase } from './phases.mjs';
 import {
-  assertTaskDeferralAuthority, readTaskDeferralDescriptor, validateTaskDeferralApproval,
+  assertTaskDeferralAuthority, readOwnerApproval, readTaskDeferralDescriptor,
+  validateTaskDeferralApproval,
 } from './gates.mjs';
+import { resolveReceiptInput } from './receipts.mjs';
 
 const LEDGER_ROOTS = new WeakMap();
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+
+// BOT-CLEANROOM's completion history was orphaned by a history rewrite: the strict descendant
+// and stable-patch-id routes below cannot express "five files are an exact retained patch, two
+// omitted files already entered through an independently merged domain foundation". This is a
+// separate, owner-authenticated, single-task exception — never a third generic route.
+const COMPOSITE_PROVENANCE_SCHEMA = 'v4-task-rebind-composite-provenance-v1';
+const COMPOSITE_PROVENANCE_ACTION = 'TASK_REBIND_COMPOSITE_PROVENANCE';
+const COMPOSITE_PROVENANCE_TASK_ID = 'BOT-CLEANROOM';
+const COMPOSITE_PROVENANCE_RETAINED_FILE_COUNT = 5;
+const COMPOSITE_PROVENANCE_OMITTED_FILE_COUNT = 2;
+const COMPOSITE_PROVENANCE_DESCRIPTOR_PATH = /^decisions\/task-rebinds\/[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+const COMPOSITE_PROVENANCE_DESCRIPTOR_KEYS = [
+  'action', 'domainFoundationCommit', 'domainMergeCommit', 'fromCommit', 'omittedFiles',
+  'phase', 'prestate', 'prestateFingerprint', 'rationale', 'retainedPatch', 'schema', 'target',
+  'taskId',
+];
+const COMPOSITE_PROVENANCE_PRESTATE_KEYS = [
+  'completionCommit', 'deps', 'id', 'leaseToken', 'phase', 'reqs', 'risk', 'status', 'title',
+];
+const COMPOSITE_PROVENANCE_RETAINED_PATCH_KEYS = ['paths', 'sha256', 'sourceCommit'];
+const COMPOSITE_PROVENANCE_OMITTED_FILE_KEYS = ['blob', 'path'];
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const COMPOSITE_PROVENANCE_AUTHORITIES = new WeakMap();
 
 export function openLedger(root) {
   mkdirSync(join(root, '.v4'), { recursive: true });
@@ -250,6 +277,53 @@ function isReachableFromHead(root, commitSha) {
   return gitResult(root, ['merge-base', '--is-ancestor', commitSha, 'HEAD']).status === 0;
 }
 
+function isAncestor(root, ancestorSha, descendantSha) {
+  return gitResult(root, ['merge-base', '--is-ancestor', ancestorSha, descendantSha]).status === 0;
+}
+
+function assertFullObjectId(value, label) {
+  if (typeof value !== 'string' || !FULL_COMMIT.test(value)) {
+    throw new Error(`composite-provenance rebind ${label} must be a full lowercase 40-hex object id`);
+  }
+}
+
+function blobObjectExists(root, blobSha) {
+  return gitResult(root, ['cat-file', '-e', `${blobSha}^{blob}`]).status === 0;
+}
+
+function blobAt(root, commitSha, path) {
+  const result = gitResult(root, ['rev-parse', `${commitSha}:${path}`]);
+  if (result.status !== 0) throw new Error(`path ${path} does not exist at commit ${commitSha}`);
+  return result.stdout.trim();
+}
+
+function changedPaths(root, commitSha) {
+  const result = gitResult(root, ['show', '--no-color', '--no-renames', '--name-only', '--format=', commitSha]);
+  if (result.status !== 0) throw new Error(`unable to list changed paths for commit ${commitSha}`);
+  return result.stdout.split('\n').map(line => line.trim()).filter(Boolean);
+}
+
+function sameStringArray(actual, expected) {
+  return Array.isArray(actual) && Array.isArray(expected) && actual.length === expected.length
+    && actual.every((value, index) => value === expected[index]);
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function sameKeys(value, expected) {
+  if (!isPlainObject(value)) return false;
+  const actual = Object.keys(value).sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isRepoRelativePath(value) {
+  return typeof value === 'string' && value.length > 0 && !value.startsWith('/')
+    && !value.split('/').includes('..');
+}
+
 function isMergeCommit(root, commitSha) {
   const parents = gitResult(root, ['show', '-s', '--format=%P', commitSha]);
   if (parents.status !== 0) throw new Error(`completion commit ${commitSha} is not an existing commit object`);
@@ -277,13 +351,31 @@ function canonicalizePatchBytes(rawPatch) {
 // Rendering is pinned against inherited repository configuration that could otherwise hide or
 // alter content: no external diff driver, no path-relativization, and gitlink (submodule)
 // changes always shown in full regardless of a local `diff.ignoreSubmodules` setting.
-function rewrittenCommitPatch(root, commitSha) {
-  const diff = spawnSync('git', [
+function canonicalCommitPatchArgs(root, commitSha) {
+  return [
     '-C', root, 'show',
     '--no-color', '--no-textconv', '--no-renames', '--no-ext-diff', '--no-relative',
     '--ignore-submodules=none', '--submodule=short', '--src-prefix=a/', '--dst-prefix=b/',
     '--full-index', '--binary', '--format=', commitSha,
-  ], { maxBuffer: 1024 * 1024 * 256 });
+  ];
+}
+
+// Restricted to `paths` when given, so a composite-provenance descriptor can bind the canonical
+// bytes of an exact file subset without claiming equivalence for the rest of the commit.
+function canonicalPatchSha256(root, commitSha, paths = []) {
+  const args = canonicalCommitPatchArgs(root, commitSha);
+  if (paths.length > 0) args.push('--', ...paths);
+  const diff = spawnSync('git', args, { maxBuffer: 1024 * 1024 * 256 });
+  if (diff.status !== 0) throw new Error(`unable to render patch for commit ${commitSha}`);
+  const canonical = canonicalizePatchBytes(diff.stdout);
+  if (!canonical.toString('latin1').trim()) {
+    throw new Error(`commit ${commitSha} produced an empty patch for the requested paths`);
+  }
+  return { canonical, sha256: sha256(canonical) };
+}
+
+function rewrittenCommitPatch(root, commitSha) {
+  const diff = spawnSync('git', canonicalCommitPatchArgs(root, commitSha), { maxBuffer: 1024 * 1024 * 256 });
   if (diff.status !== 0) throw new Error(`unable to render patch for completion commit ${commitSha}`);
   const rawPatch = diff.stdout;
   const patchId = spawnSync('git', ['-C', root, 'patch-id', '--stable'], {
@@ -310,8 +402,7 @@ function deriveRebindProvenance(root, fromCommitSha, commitSha) {
     throw new Error(`completion commit ${fromCommitSha} is not an existing commit object`);
   }
   if (isReachableFromHead(root, fromCommitSha)) {
-    const descended = gitResult(root, ['merge-base', '--is-ancestor', fromCommitSha, commitSha]);
-    if (descended.status !== 0) {
+    if (!isAncestor(root, fromCommitSha, commitSha)) {
       throw new Error(`completion commit ${commitSha} is not descended from ${fromCommitSha}`);
     }
     return { route: 'descendant', from: fromCommitSha, target: commitSha };
@@ -375,6 +466,325 @@ export function rebindCompletionCommit(db, taskId, fromCommitSha, commitSha) {
     const root = LEDGER_ROOTS.get(db);
     if (!root) throw new Error('ledger has no repository root');
     const provenance = deriveRebindProvenance(root, fromCommitSha, commitSha);
+    const at = nowIso();
+    db.prepare(`
+      INSERT INTO attempts(task_id,token,owner,started,ended,outcome,commit_sha,provenance)
+      VALUES(?,?,?,?,?,'done',?,?)
+    `).run(taskId, task.lease_token, 'completion-rebind', at, at, commitSha, JSON.stringify(provenance));
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function compositeProvenanceDescriptorPath(root, input, taskId) {
+  if (typeof input !== 'string' || !COMPOSITE_PROVENANCE_DESCRIPTOR_PATH.test(input)
+      || input !== `decisions/task-rebinds/${taskId}.json`) {
+    throw new Error(`composite-provenance rebind descriptor must be decisions/task-rebinds/${taskId}.json`);
+  }
+  const rootPath = realpathSync(root);
+  const lexical = resolve(rootPath, input);
+  const rel = relative(rootPath, lexical);
+  if (rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new Error('composite-provenance rebind descriptor must remain inside the repository');
+  }
+  const stat = lstatSync(lexical);
+  if (stat.isSymbolicLink() || !stat.isFile() || realpathSync(lexical) !== lexical) {
+    throw new Error('composite-provenance rebind descriptor must be a regular repo-internal file, not a symlink');
+  }
+  resolveReceiptInput(root, input);
+  return lexical;
+}
+
+function readCompositeProvenanceDescriptor(root, descriptorInput, taskId) {
+  return readJson(compositeProvenanceDescriptorPath(root, descriptorInput, taskId));
+}
+
+// Independent recomputation of a retained-file-subset canonical patch digest, exposed so a
+// descriptor author can derive the exact `retainedPatch.sha256` this validator will demand.
+export function compositeProvenanceRetainedPatchSha256(root, commitSha, paths) {
+  return canonicalPatchSha256(root, commitSha, paths).sha256;
+}
+
+export function prepareCompositeProvenanceRebind(db, taskId) {
+  if (taskId !== COMPOSITE_PROVENANCE_TASK_ID) {
+    throw new Error(`only ${COMPOSITE_PROVENANCE_TASK_ID} may use the composite-provenance rebind route`);
+  }
+  const task = listTasks(db).find(candidate => candidate.id === taskId);
+  if (!task) throw new Error(`no such task ${taskId}`);
+  if (task.status !== 'done') throw new Error(`task ${taskId} is ${task.status}`);
+  if (task.lease_owner !== null || task.lease_expires !== null) {
+    throw new Error(`task ${taskId} is leased`);
+  }
+  const prestate = {
+    id: task.id,
+    title: task.title,
+    phase: task.phase,
+    risk: task.risk,
+    deps: task.deps,
+    reqs: task.reqs,
+    status: task.status,
+    leaseToken: task.lease_token,
+    completionCommit: latestCompletionCommit(db, taskId),
+  };
+  return { prestate, fingerprint: sha256(Buffer.from(JSON.stringify(prestate))) };
+}
+
+// Verifies the full owner-approved composite-provenance disposition: exact seven-path partition,
+// canonical five-file retained-patch equality against a target-reachable source commit, and
+// byte-identical omitted files across the old completion, the domain foundation, and the target.
+// Never trusts a descriptor-declared hash or blob id without recomputing it from the repository.
+export function validateCompositeProvenanceRebindApproval(root, {
+  taskId, fromCommitSha, commitSha, rationale, descriptorInput, approvalInput, prestate, prestateFingerprint,
+}) {
+  if (taskId !== COMPOSITE_PROVENANCE_TASK_ID) {
+    throw new Error(`only ${COMPOSITE_PROVENANCE_TASK_ID} may use the composite-provenance rebind route`);
+  }
+  assertFullCommitFormat(fromCommitSha);
+  assertFullCommitFormat(commitSha);
+  const descriptor = readCompositeProvenanceDescriptor(root, descriptorInput, taskId);
+  if (!sameKeys(descriptor, COMPOSITE_PROVENANCE_DESCRIPTOR_KEYS)) {
+    throw new Error(`composite-provenance rebind descriptor must contain exactly ${COMPOSITE_PROVENANCE_DESCRIPTOR_KEYS.join(', ')}`);
+  }
+  if (descriptor.schema !== COMPOSITE_PROVENANCE_SCHEMA) {
+    throw new Error('composite-provenance rebind descriptor has unsupported schema');
+  }
+  if (descriptor.action !== COMPOSITE_PROVENANCE_ACTION) {
+    throw new Error('composite-provenance rebind descriptor has invalid action');
+  }
+  if (descriptor.taskId !== taskId) {
+    throw new Error('composite-provenance rebind descriptor does not match task id');
+  }
+  if (descriptor.fromCommit !== fromCommitSha || descriptor.target !== commitSha) {
+    throw new Error('composite-provenance rebind descriptor does not match the requested from/target commits');
+  }
+  if (typeof rationale !== 'string' || !rationale.trim()
+      || typeof descriptor.rationale !== 'string' || !descriptor.rationale.trim()) {
+    throw new Error('composite-provenance rebind descriptor rationale must be nonempty');
+  }
+  if (descriptor.rationale !== rationale.trim()) {
+    throw new Error('composite-provenance rebind descriptor rationale does not match the requested rationale');
+  }
+  if (!sameKeys(prestate, COMPOSITE_PROVENANCE_PRESTATE_KEYS)
+      || !sameKeys(descriptor.prestate, COMPOSITE_PROVENANCE_PRESTATE_KEYS)) {
+    throw new Error(`composite-provenance rebind prestate must contain exactly ${COMPOSITE_PROVENANCE_PRESTATE_KEYS.join(', ')}`);
+  }
+  if (descriptor.phase !== prestate.phase || descriptor.phase !== descriptor.prestate.phase) {
+    throw new Error('composite-provenance rebind descriptor phase does not match task phase');
+  }
+  if (descriptor.prestate.status !== 'done' || descriptor.prestate.completionCommit !== fromCommitSha) {
+    throw new Error('composite-provenance rebind descriptor prestate must reflect the current done completion');
+  }
+  const descriptorFingerprint = sha256(Buffer.from(JSON.stringify(descriptor.prestate)));
+  if (descriptor.prestateFingerprint !== descriptorFingerprint
+      || prestateFingerprint !== descriptorFingerprint
+      || sha256(Buffer.from(JSON.stringify(prestate))) !== descriptorFingerprint) {
+    throw new Error('composite-provenance rebind descriptor prestate fingerprint does not match current task');
+  }
+
+  if (!commitObjectExists(root, fromCommitSha)) {
+    throw new Error(`completion commit ${fromCommitSha} is not an existing commit object`);
+  }
+  if (isReachableFromHead(root, fromCommitSha)) {
+    throw new Error(`completion commit ${fromCommitSha} is reachable from current HEAD; use the descendant or stable-patch-id route instead`);
+  }
+  if (isMergeCommit(root, fromCommitSha)) {
+    throw new Error(`completion commit ${fromCommitSha} is a merge commit`);
+  }
+  if (!commitObjectExists(root, commitSha)) {
+    throw new Error(`completion commit ${commitSha} is not an existing commit object`);
+  }
+  if (!isReachableFromHead(root, commitSha)) {
+    throw new Error(`completion commit ${commitSha} is not reachable from current HEAD`);
+  }
+
+  if (!sameKeys(descriptor.retainedPatch, COMPOSITE_PROVENANCE_RETAINED_PATCH_KEYS)) {
+    throw new Error(`composite-provenance rebind retainedPatch must contain exactly ${COMPOSITE_PROVENANCE_RETAINED_PATCH_KEYS.join(', ')}`);
+  }
+  const { paths, sourceCommit, sha256: retainedSha256 } = descriptor.retainedPatch;
+  if (!Array.isArray(paths) || paths.length !== COMPOSITE_PROVENANCE_RETAINED_FILE_COUNT
+      || paths.some(path => !isRepoRelativePath(path))
+      || new Set(paths).size !== paths.length
+      || !sameStringArray(paths, [...paths].sort())) {
+    throw new Error(`composite-provenance rebind retainedPatch.paths must be exactly ${COMPOSITE_PROVENANCE_RETAINED_FILE_COUNT} unique sorted repo-relative paths`);
+  }
+  if (typeof retainedSha256 !== 'string' || !SHA256_PATTERN.test(retainedSha256)) {
+    throw new Error('composite-provenance rebind retainedPatch.sha256 must be a SHA-256 hex digest');
+  }
+  assertFullObjectId(sourceCommit, 'retainedPatch.sourceCommit');
+  if (!commitObjectExists(root, sourceCommit)) {
+    throw new Error(`retained-patch source commit ${sourceCommit} is not an existing commit object`);
+  }
+  if (isMergeCommit(root, sourceCommit)) {
+    throw new Error(`retained-patch source commit ${sourceCommit} is a merge commit`);
+  }
+  if (!isAncestor(root, sourceCommit, commitSha)) {
+    throw new Error(`retained-patch source commit ${sourceCommit} is not reachable from target ${commitSha}`);
+  }
+
+  if (!Array.isArray(descriptor.omittedFiles)
+      || descriptor.omittedFiles.length !== COMPOSITE_PROVENANCE_OMITTED_FILE_COUNT) {
+    throw new Error(`composite-provenance rebind omittedFiles must list exactly ${COMPOSITE_PROVENANCE_OMITTED_FILE_COUNT} paths`);
+  }
+  const omittedPaths = descriptor.omittedFiles.map(file => file?.path);
+  if (new Set(omittedPaths).size !== omittedPaths.length || !sameStringArray(omittedPaths, [...omittedPaths].sort())) {
+    throw new Error('composite-provenance rebind omittedFiles must be unique and sorted by path');
+  }
+  for (const file of descriptor.omittedFiles) {
+    if (!sameKeys(file, COMPOSITE_PROVENANCE_OMITTED_FILE_KEYS)) {
+      throw new Error(`composite-provenance rebind omitted file entry must contain exactly ${COMPOSITE_PROVENANCE_OMITTED_FILE_KEYS.join(', ')}`);
+    }
+    if (!isRepoRelativePath(file.path)) {
+      throw new Error(`composite-provenance rebind omitted file path is invalid: ${String(file.path)}`);
+    }
+    assertFullObjectId(file.blob, `omitted file blob for ${file.path}`);
+  }
+
+  const declaredPaths = new Set([...paths, ...omittedPaths]);
+  if (declaredPaths.size !== COMPOSITE_PROVENANCE_RETAINED_FILE_COUNT + COMPOSITE_PROVENANCE_OMITTED_FILE_COUNT) {
+    throw new Error('composite-provenance rebind retained and omitted paths must not overlap');
+  }
+  const sourcePartition = changedPaths(root, fromCommitSha);
+  if (sourcePartition.length !== declaredPaths.size
+      || new Set(sourcePartition).size !== sourcePartition.length
+      || !sourcePartition.every(path => declaredPaths.has(path))) {
+    throw new Error(`completion commit ${fromCommitSha} must change exactly the seven declared paths, with no omitted extra path`);
+  }
+
+  assertFullObjectId(descriptor.domainFoundationCommit, 'domainFoundationCommit');
+  assertFullObjectId(descriptor.domainMergeCommit, 'domainMergeCommit');
+  if (!commitObjectExists(root, descriptor.domainFoundationCommit)) {
+    throw new Error(`domain foundation commit ${descriptor.domainFoundationCommit} is not an existing commit object`);
+  }
+  if (!commitObjectExists(root, descriptor.domainMergeCommit)) {
+    throw new Error(`domain merge commit ${descriptor.domainMergeCommit} is not an existing commit object`);
+  }
+  if (!isMergeCommit(root, descriptor.domainMergeCommit)) {
+    throw new Error(`domain merge commit ${descriptor.domainMergeCommit} is not a merge commit`);
+  }
+  if (!isAncestor(root, descriptor.domainFoundationCommit, descriptor.domainMergeCommit)) {
+    throw new Error('domain foundation commit is not reachable from the domain merge commit');
+  }
+  if (!isAncestor(root, descriptor.domainMergeCommit, commitSha)) {
+    throw new Error('domain merge commit is not reachable from the target completion');
+  }
+
+  for (const file of descriptor.omittedFiles) {
+    if (!blobObjectExists(root, file.blob)) {
+      throw new Error(`omitted file blob ${file.blob} for ${file.path} is not an existing blob object`);
+    }
+    for (const [label, sha] of [
+      ['old completion', fromCommitSha],
+      ['domain foundation', descriptor.domainFoundationCommit],
+      ['target', commitSha],
+    ]) {
+      if (blobAt(root, sha, file.path) !== file.blob) {
+        throw new Error(`omitted file ${file.path} is not byte-identical at the ${label} commit ${sha}`);
+      }
+    }
+  }
+
+  const restricted = canonicalPatchSha256(root, fromCommitSha, paths);
+  if (restricted.sha256 !== retainedSha256) {
+    throw new Error(`completion commit ${fromCommitSha} restricted to the five retained paths does not match the declared patch hash`);
+  }
+  const sourcePatch = canonicalPatchSha256(root, sourceCommit);
+  if (sourcePatch.sha256 !== retainedSha256) {
+    throw new Error(`retained-patch source commit ${sourceCommit} does not match the declared patch hash`);
+  }
+  const sourceChangedPaths = changedPaths(root, sourceCommit);
+  if (!sameStringArray([...sourceChangedPaths].sort(), paths)) {
+    throw new Error(`retained-patch source commit ${sourceCommit} must change exactly the five retained paths`);
+  }
+
+  readOwnerApproval(root, approvalInput, {
+    action: COMPOSITE_PROVENANCE_ACTION,
+    phase: descriptor.phase,
+    itemId: taskId,
+    rationale: descriptor.rationale,
+    subjectInputs: [descriptorInput],
+  });
+
+  const authority = Object.freeze({});
+  COMPOSITE_PROVENANCE_AUTHORITIES.set(authority, Object.freeze({
+    taskId,
+    fromCommitSha,
+    commitSha,
+    prestateFingerprint,
+    descriptorInput,
+    approvalInput,
+    retainedPatch: Object.freeze({ paths: Object.freeze([...paths]), sourceCommit, sha256: retainedSha256 }),
+    omittedFiles: Object.freeze(descriptor.omittedFiles.map(file => Object.freeze({ ...file }))),
+    domainFoundationCommit: descriptor.domainFoundationCommit,
+    domainMergeCommit: descriptor.domainMergeCommit,
+  }));
+  return Object.freeze({ ...descriptor, authority });
+}
+
+function assertCompositeProvenanceAuthority(authority, {
+  taskId, fromCommitSha, commitSha, prestateFingerprint,
+}) {
+  const binding = authority && typeof authority === 'object'
+    ? COMPOSITE_PROVENANCE_AUTHORITIES.get(authority)
+    : null;
+  if (!binding
+      || binding.taskId !== taskId
+      || binding.fromCommitSha !== fromCommitSha
+      || binding.commitSha !== commitSha
+      || binding.prestateFingerprint !== prestateFingerprint) {
+    throw new Error('composite-provenance rebind requires validated owner authorization');
+  }
+  return binding;
+}
+
+export function rebindCompletionCompositeProvenance(db, taskId, fromCommitSha, commitSha, { authority }) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (taskId !== COMPOSITE_PROVENANCE_TASK_ID) {
+      throw new Error(`only ${COMPOSITE_PROVENANCE_TASK_ID} may use the composite-provenance rebind route`);
+    }
+    const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(taskId);
+    if (!task) throw new Error(`no such task ${taskId}`);
+    if (task.status !== 'done') throw new Error(`task ${taskId} is ${task.status}`);
+    if (task.lease_owner !== null || task.lease_expires !== null) {
+      throw new Error(`task ${taskId} is leased`);
+    }
+    const current = latestCompletionCommit(db, taskId);
+    if (current !== fromCommitSha) {
+      throw new Error(`current completion ${current} does not match requested ${fromCommitSha}`);
+    }
+    const prestate = {
+      id: task.id,
+      title: task.title,
+      phase: task.phase,
+      risk: task.risk,
+      deps: JSON.parse(task.deps),
+      reqs: JSON.parse(task.reqs),
+      status: task.status,
+      leaseToken: task.lease_token,
+      completionCommit: current,
+    };
+    const prestateFingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+    const binding = assertCompositeProvenanceAuthority(authority, {
+      taskId, fromCommitSha, commitSha, prestateFingerprint,
+    });
+    const root = LEDGER_ROOTS.get(db);
+    if (!root) throw new Error('ledger has no repository root');
+    if (!commitObjectExists(root, commitSha) || !isReachableFromHead(root, commitSha)) {
+      throw new Error(`completion commit ${commitSha} is not reachable from current HEAD`);
+    }
+    const provenance = {
+      route: 'owner-approved-composite-provenance',
+      from: fromCommitSha,
+      target: commitSha,
+      retainedPatch: binding.retainedPatch,
+      omittedFiles: binding.omittedFiles,
+      domainFoundationCommit: binding.domainFoundationCommit,
+      domainMergeCommit: binding.domainMergeCommit,
+      descriptorInput: binding.descriptorInput,
+      approvalInput: binding.approvalInput,
+    };
     const at = nowIso();
     db.prepare(`
       INSERT INTO attempts(task_id,token,owner,started,ended,outcome,commit_sha,provenance)
