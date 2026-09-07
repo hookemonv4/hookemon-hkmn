@@ -25,6 +25,18 @@ canonical claim transaction, receipt, `ProcessClaimed` event, and exact USDG cre
 independently verified — the producer's non-null observation is current wallet-level custody
 evidence, never claim attribution.
 
+The claim writer also checks, before that producer call and before any custody write or finality
+advancement, whether a durable row already exists at all under the legacy raw `(chainId, address)`
+identity for this same configured asset (the same raw shape a return-settlement row is keyed by),
+regardless of its bucket values — an all-zero row or the common historical-return shape of
+`claimed: '0'` with a nonzero `returnReceived` is exactly as ambiguous as a nonzero `claimed` row,
+since the identity split itself is the conflict. Because `custodyLedgerKey` is an exact string
+match, such a row is otherwise invisible to the canonical-only lookup and would let a second,
+canonical-keyed row claim the same principal again. This is refusal only: no bucket is copied or
+aliased across the two keys, no row is migrated or mutated, and the ordinary canonical `v1`→`v2`
+upgrade is unaffected when no
+such legacy row exists.
+
 ## Public interface
 
 - `projectPolicyCustody({cycleRepository, evmUsdg})` reads every active and archived cycle.

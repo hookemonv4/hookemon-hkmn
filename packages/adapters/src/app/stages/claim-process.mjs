@@ -643,6 +643,19 @@ function claimCustodyAsset(configured) {
 }
 
 /**
+ * The legacy, pre-canonical row identity for this same configured EVM USDG asset: a raw
+ * `(chainId, address)` pair (no `eip155:`/`erc20:` CAIP wrapping), the same raw shape
+ * `returnSettlementCustodyLedger` keys its own row by (ADR-0026). This claim writer has always used
+ * the canonical CAIP identity from `claimCustodyAsset` -- it never produced this raw key itself --
+ * but `custodyLedgerKey` is an exact string match, so a row already durable under this raw key for
+ * this asset is invisible to a canonical-only lookup. Derived only from `assertClaimConfiguration`
+ * output, matching `claimCustodyAsset`'s own trusted inputs exactly.
+ */
+function legacyRawClaimCustodyKey(configured) {
+  return `${String(configured.chainId)}${String.fromCharCode(0)}${configured.usdg.toLowerCase()}`;
+}
+
+/**
  * ADR-0026's dedicated EVM USDG `CustodyBalanceObservationV1` producer, invoked at the moment this
  * writer records a v2 row for the claim key. `identity` is built only from `assertClaimConfiguration`
  * output (`asset`, already the canonical CAIP identity `claimCustodyAsset` derives, plus the
@@ -669,6 +682,18 @@ async function observeClaimCustodyBalance({ adapters, configured, asset }) {
 async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters) {
   if (typeof cycleRepository?.recordCustodyLedger !== 'function') {
     throw new Error('claim-process requires custody-ledger persistence before finality');
+  }
+  // Refuse before any balance read or custody write -- and before finality ever advances -- if a
+  // durable legacy raw-identity row for this same configured asset exists at all, regardless of its
+  // bucket values (an all-zero row, or the common historical-return shape of claimed='0' with a
+  // nonzero returnReceived, is exactly as ambiguous as a nonzero claimed row: the identity split
+  // itself is the problem, not any one bucket), and whether or not a canonical row also already
+  // coexists. This is detection only: no bucket is copied or aliased across the two keys, no row is
+  // touched or migrated, and the already-legitimate canonical v1-to-v2 upgrade path is unaffected
+  // when no such row exists.
+  const legacyRawRow = cycle?.custodyLedgers?.get?.(legacyRawClaimCustodyKey(configured)) ?? null;
+  if (legacyRawRow !== null) {
+    throw new Error('claim-process refuses: a legacy raw-identity custody row exists for this asset, an unresolved raw/canonical identity conflict; resolve it before any canonical custody write or finality advancement');
   }
   const asset = claimCustodyAsset(configured);
   const key = `${asset.chainId}\u0000${asset.assetId}`;

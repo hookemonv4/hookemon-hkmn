@@ -1131,3 +1131,131 @@ test('reconcileLiveClaimProcess refuses a non-canonical configured chain identit
   assert.equal(cycleRepository.chainAttempt.attempt.state, 'BROADCAST');
   assert.equal(cycleRepository.custodyLedgers.size, 0);
 });
+
+// A durable legacy raw-identity row for this exact configured asset (`4663` / the configured USDG
+// address, no `eip155:`/`erc20:` CAIP wrapping -- the same raw shape `returnSettlementCustodyLedger`
+// keys its own row by, per ADR-0026). A canonical-only key lookup cannot see this row, so before this
+// fix the writer would happily create (or keep refreshing) a second, canonical-keyed row -- whatever
+// this row's own bucket values, including an all-zero row or the common historical-return shape of
+// `claimed: '0'` with a nonzero `returnReceived`.
+const LEGACY_RAW_IDENTITY_CONFLICT = /a legacy raw-identity custody row exists for this asset, an unresolved raw\/canonical identity conflict/;
+
+function legacyRawCustodyRow({ config, claimed = '0', returnReceived = '0' }) {
+  const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => {
+    if (bucket === 'claimed') return [bucket, claimed];
+    if (bucket === 'returnReceived') return [bucket, returnReceived];
+    return [bucket, '0'];
+  }));
+  return {
+    schema: 'hookemon.custody-ledger.v1',
+    cycleId: CYCLE_ID,
+    chainId: '4663',
+    assetId: config.contracts.usdg,
+    decimals: 6,
+    ...buckets,
+  };
+}
+
+function canonicalRowMatching(config, buckets) {
+  return {
+    schema: 'hookemon.custody-ledger.v1',
+    cycleId: CYCLE_ID,
+    chainId: 'eip155:4663',
+    assetId: `eip155:4663/erc20:${config.contracts.usdg}`,
+    decimals: 6,
+    ...buckets,
+  };
+}
+
+async function assertRefusesOverLegacyRawRow({ config, cycleRepository, rawRow, canonicalCoexisting = null }) {
+  await cycleRepository.recordCustodyLedger(CYCLE_ID, rawRow);
+  if (canonicalCoexisting) await cycleRepository.recordCustodyLedger(CYCLE_ID, canonicalCoexisting);
+  const writesBefore = cycleRepository.writes.length;
+  const rowsBefore = new Map(cycleRepository.custodyLedgers);
+
+  await assert.rejects(
+    () => reconcileLiveClaimProcess({
+      adapters: { robinhood: { client: evmFinalizedBlockClient(), historicalEvidenceClient: evmArchiveBalanceClient() } },
+      config,
+      cycleRepository,
+      context: { cycleId: CYCLE_ID, stage: 'claim-process' },
+    }),
+    LEGACY_RAW_IDENTITY_CONFLICT,
+  );
+  assert.equal(cycleRepository.writes.length, writesBefore);
+  assert.deepEqual(cycleRepository.custodyLedgers, rowsBefore);
+}
+
+async function finalizedRestartFixture() {
+  const { config, cycleRepository, transactionHash } = await broadcastClaimFixture();
+  cycleRepository.chainAttempt = {
+    ...cycleRepository.chainAttempt,
+    attempt: { ...cycleRepository.chainAttempt.attempt, state: 'FINALIZED' },
+    finalityEvidence: { transactionHash, finalized: true },
+  };
+  return { config, cycleRepository };
+}
+
+test('reconcileLiveClaimProcess refuses a raw-only legacy claimed row instead of creating a second canonical row', async () => {
+  const { config, cycleRepository } = await finalizedRestartFixture();
+  await assertRefusesOverLegacyRawRow({
+    config,
+    cycleRepository,
+    rawRow: legacyRawCustodyRow({ config, claimed: '25000000' }),
+  });
+  assert.equal(cycleRepository.custodyLedgers.size, 1);
+});
+
+test('reconcileLiveClaimProcess refuses when a legacy raw claimed row already coexists with the canonical row', async () => {
+  const { config, cycleRepository } = await finalizedRestartFixture();
+  const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [bucket, bucket === 'claimed' ? '25000000' : '0']));
+  await assertRefusesOverLegacyRawRow({
+    config,
+    cycleRepository,
+    rawRow: legacyRawCustodyRow({ config, claimed: '25000000' }),
+    canonicalCoexisting: canonicalRowMatching(config, buckets),
+  });
+  assert.equal(cycleRepository.custodyLedgers.size, 2);
+  for (const row of cycleRepository.custodyLedgers.values()) {
+    assert.equal(row.schema, 'hookemon.custody-ledger.v1');
+    assert.equal(row.claimed, '25000000');
+  }
+});
+
+test('reconcileLiveClaimProcess refuses a raw-only row carrying only a historical return, not a claimed amount', async () => {
+  const { config, cycleRepository } = await finalizedRestartFixture();
+  await assertRefusesOverLegacyRawRow({
+    config,
+    cycleRepository,
+    rawRow: legacyRawCustodyRow({ config, claimed: '0', returnReceived: '25000000' }),
+  });
+  assert.equal(cycleRepository.custodyLedgers.size, 1);
+  const [rawRow] = [...cycleRepository.custodyLedgers.values()];
+  assert.equal(rawRow.claimed, '0');
+  assert.equal(rawRow.returnReceived, '25000000');
+});
+
+test('reconcileLiveClaimProcess refuses a historical-return raw row coexisting with the canonical row', async () => {
+  const { config, cycleRepository } = await finalizedRestartFixture();
+  const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [bucket, bucket === 'claimed' ? '25000000' : '0']));
+  await assertRefusesOverLegacyRawRow({
+    config,
+    cycleRepository,
+    rawRow: legacyRawCustodyRow({ config, claimed: '0', returnReceived: '25000000' }),
+    canonicalCoexisting: canonicalRowMatching(config, buckets),
+  });
+  assert.equal(cycleRepository.custodyLedgers.size, 2);
+});
+
+test('reconcileLiveClaimProcess refuses an all-zero raw-only row -- a zero balance is not proof the identity split is resolved', async () => {
+  const { config, cycleRepository } = await finalizedRestartFixture();
+  await assertRefusesOverLegacyRawRow({
+    config,
+    cycleRepository,
+    rawRow: legacyRawCustodyRow({ config }),
+  });
+  assert.equal(cycleRepository.custodyLedgers.size, 1);
+  const [rawRow] = [...cycleRepository.custodyLedgers.values()];
+  assert.equal(rawRow.claimed, '0');
+  assert.equal(rawRow.returnReceived, '0');
+});
