@@ -33,3 +33,6 @@
 #refresh-packs{display:inline-flex;align-items:center;gap:10px}.refresh-icon{flex:none}
 
 .pack-glyph.pack-cover{background:transparent;border:0;box-shadow:none;transform:none;border-radius:0}.pack-glyph.pack-cover img{width:100%;height:100%;object-fit:contain}
+
+.inventory-buyback{font-size:13px;font-weight:700;line-height:1.5;margin:12px 0 3px;color:var(--navy)}
+.pack-summary-main .pack-buyback-rate{font-size:12px;font-weight:700;color:var(--navy);margin-top:7px}

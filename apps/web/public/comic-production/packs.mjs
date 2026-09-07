@@ -9,13 +9,16 @@ async function get(url, signal) { const response = await fetch(url, { signal, ca
 const time = date => new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const availability = value => value === "open" ? "Provider reports open" : value === "closed" ? "Provider reports closed" : "Availability not reported";
 
-function cardView(card) {
+function cardView(card, buybackPercent) {
   const article = element("article", "inventory-card"); article.dataset.rarity = card.rarity;
   const imageArea = element("div", "inventory-image");
   if (card.image) { const image = element("img"); image.src = card.image; image.alt = card.name; image.loading = "lazy"; image.width = 250; image.height = 350; image.addEventListener("error", () => imageArea.replaceChildren(element("p", "pack-status", "Image unavailable")), { once: true }); imageArea.append(image); }
   else imageArea.append(element("p", "pack-status", "Image unavailable"));
   const copy = element("div", "inventory-copy");
   copy.append(element("p", "inventory-tier", `${label(card.rarity)} · ${card.gradingCompany || "Grade not reported"}`), element("h3", "", card.name), element("p", "inventory-value", currency.format(card.insuredValue)), element("p", "inventory-value-note", "Provider insured value · USD"));
+  const hasEstimate = Number.isFinite(card.estimatedBuybackUsd) && Number.isFinite(buybackPercent) && buybackPercent > 0 && buybackPercent <= 100;
+  copy.append(element("p", "inventory-buyback", hasEstimate ? `Estimated buyback: ≈ ${currency.format(card.estimatedBuybackUsd)}` : "Buyback estimate unavailable"));
+  copy.append(element("p", "inventory-value-note", hasEstimate ? `${buybackPercent}% of insured value · Actual offer may vary.` : "No verified buyback rate reported for this pack."));
   const details = element("details"); details.append(element("summary", "", card.backImage ? "Card details & reverse" : "Card details"));
   const dl = element("dl");
   for (const [name, value] of [["Grade", card.grade], ["Certificate", card.certification], ["Year", card.year], ["Category", card.category], ["Variant", card.parallel], ["Grade population", card.population], ["Vault", card.vault]]) { dl.append(element("dt", "", name), element("dd", "", value === null || value === undefined ? "Not reported" : String(value))); }
@@ -33,6 +36,7 @@ function packView(pack) {
   }
   glyph.append(mark);
   const main = element("div", "pack-summary-main"); main.append(element("h3", "", pack.name), element("p", "", `${pack.contains} card${pack.contains === 1 ? "" : "s"} per pack · ${availability(pack.availability)}`));
+  main.append(element("p", "pack-buyback-rate", Number.isFinite(pack.instantBuybackPercent) ? `Buyback rate: ${pack.instantBuybackPercent}% of insured value` : "Buyback rate not reported"));
   const plus = element("span", "pack-chevron", "+"); plus.setAttribute("aria-hidden", "true");
   summary.append(glyph, main, element("span", "pack-price", currency.format(pack.price)), plus); accordion.append(summary);
   const body = element("div", "pack-body"); const intro = element("div", "pack-body-intro"); intro.append(element("p", "", "Choose a rarity to browse its current cards. Value bands are provider insured values."), sourceLink(pack.sourceUrl, "Explore Collector Crypt ↗"));
@@ -49,7 +53,7 @@ function packView(pack) {
     try {
       const data = await get(`/api/packs/inventory?${new URLSearchParams({ code: pack.code, rarity: active, page: String(page + 1) })}`, controller.signal);
       if (id !== requestId) return;
-      for (const card of data.cards) if (!seen.has(card.id)) { seen.add(card.id); grid.append(cardView(card)); }
+      for (const card of data.cards) if (!seen.has(card.id)) { seen.add(card.id); grid.append(cardView(card, data.instantBuybackPercent)); }
       page = data.page; loaded = true; loadedAt = Date.now();
       message.textContent = `${seen.size} ${label(active)} card${seen.size === 1 ? "" : "s"} loaded${data.hasMore ? " · more available" : ""}. ${availability(data.availability)}. Checked ${time(data.fetchedAt)}. Inventory may change before purchase.`;
       if (!seen.size) message.textContent = `No ${label(active)} cards reported in this pack at ${time(data.fetchedAt)}. This is not a guaranteed future inventory.`;

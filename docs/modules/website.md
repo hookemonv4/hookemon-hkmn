@@ -59,6 +59,22 @@ contracts below, or an honest "nothing observed yet" placeholder — never an in
 
 ## Invariants
 
+- Homepage content below the initial viewport reveals once with a short upward fade.
+  Reduced motion disables reveals, and content stays visible without animation support.
+
+- Showcase buyback estimates use exact NFT membership and pack rates recorded in
+  `docs/evidence/showcase-buyback-sources.json`. Multiple verified rates produce a range;
+  unverified membership shows an unavailable estimate. Retrieval dates and the distinction
+  between insured values and estimated offers remain visible.
+
+- The illustrated homepage uses 30 px header social icons, decorative Lugia sparkles that stop
+  under reduced motion, and one large footer wordmark without a duplicate logo in the bottom row.
+- Mobile navigation exposes the pack catalog in a dismissible side panel. The cycle transcript
+  has a prominent summary and readable body text. Portrait phone scenes follow scroll progress,
+  including shorter Safari viewports; reduced motion retains manual chapter selection.
+- Coin dragging survives implicit touch capture moving from a child face to the coin button;
+  vertical scrolling remains native. See [Pointer Events implicit capture](https://www.w3.org/TR/pointerevents3/#implicit-pointer-capture).
+
 - The site never holds a signer, private key, RPC credential, or Collector Crypt/Relay/Solana
   provider secret; `apps/web/worker/index.ts`'s `WorkerEnv` only ever carries public read
   configuration and the operator proxy credential.
