@@ -173,8 +173,8 @@ summary:focus-visible {
   place-items: center;
 }
 .social-link svg {
-  width: 17px;
-  height: 17px;
+  width: 30px;
+  height: 30px;
 }
 .partner-link {
   justify-content: center;
@@ -1532,6 +1532,31 @@ summary:focus-visible {
   transform: rotate(-7deg);
   border-radius: 9px;
   overflow: hidden;
+}
+.chase-sparkles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #fffbe0;
+}
+.chase-sparkles span {
+  position: absolute;
+  font-size: 23px;
+  line-height: 1;
+  text-shadow: 0 0 7px #fff, 0 0 16px #ffc400;
+  animation: chase-twinkle 3.2s ease-in-out infinite;
+}
+.chase-sparkles span:nth-child(1) { left: 12%; top: 18%; animation-delay: -0.4s; }
+.chase-sparkles span:nth-child(2) { left: 19%; top: 39%; font-size: 15px; animation-delay: -1.8s; }
+.chase-sparkles span:nth-child(3) { left: 10%; top: 65%; font-size: 30px; animation-delay: -2.6s; }
+.chase-sparkles span:nth-child(4) { left: 23%; top: 82%; font-size: 18px; animation-delay: -1.1s; }
+.chase-sparkles span:nth-child(5) { right: 23%; top: 19%; font-size: 16px; animation-delay: -2.1s; }
+.chase-sparkles span:nth-child(6) { right: 12%; top: 42%; font-size: 28px; animation-delay: -0.8s; }
+.chase-sparkles span:nth-child(7) { right: 18%; top: 67%; font-size: 17px; animation-delay: -2.9s; }
+.chase-sparkles span:nth-child(8) { right: 10%; top: 84%; animation-delay: -1.5s; }
+@keyframes chase-twinkle {
+  0%, 100% { opacity: 0.3; transform: scale(0.65) rotate(-12deg); }
+  50% { opacity: 1; transform: scale(1.15) rotate(12deg); }
 }
 .card-lugia .card-image {
   transform: rotate(3deg);

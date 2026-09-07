@@ -59,6 +59,9 @@ contracts below, or an honest "nothing observed yet" placeholder — never an in
 
 ## Invariants
 
+- The illustrated homepage uses 30 px header social icons, decorative Lugia sparkles that stop
+  under reduced motion, and one large footer wordmark without a duplicate logo in the bottom row.
+
 - The site never holds a signer, private key, RPC credential, or Collector Crypt/Relay/Solana
   provider secret; `apps/web/worker/index.ts`'s `WorkerEnv` only ever carries public read
   configuration and the operator proxy credential.
