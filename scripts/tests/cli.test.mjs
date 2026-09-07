@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashFile, sha256, writeJson } from '../lib/util.mjs';
+import { compositeProvenanceRetainedPatchSha256 } from '../lib/ledger.mjs';
 import { writeRawReceipt } from './helpers/raw-receipt.mjs';
 import { overrideSubjectInputs, writeOwnerApproval } from './helpers/owner-approval.mjs';
 import { copyTrackedProjectFiles } from './helpers/tracked-project.mjs';
@@ -146,6 +147,100 @@ test('task rebind-completion rejects a rewrite whose canonical raw patch differs
   );
   assert.equal(result.status, 1);
   assert.match(result.stderr, /canonical patch does not match/);
+});
+
+test('task rebind-completion-composite-provenance applies the owner-approved BOT-CLEANROOM route end to end', () => {
+  const root = proj();
+  const taskId = 'BOT-CLEANROOM';
+  v4(root, 'task', 'add', taskId, '--title', 'cleanroom import', '--req', 'REQ-core-1');
+  const { token } = v4(root, 'task', 'claim', taskId, '--owner', 'worker');
+  const base = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const branch = execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8' }).trim();
+
+  const retainedPaths = [
+    'retained-1.mjs', 'retained-2.mjs', 'retained-3.mjs', 'retained-4.mjs', 'retained-5.mjs',
+  ].sort();
+  const omittedContent = [
+    ['omitted-a.mjs', 'const omittedA = "old-a";\n'],
+    ['omitted-b.mjs', 'const omittedB = "old-b";\n'],
+  ];
+  const commitFiles = (files, message) => {
+    for (const [path, content] of files) {
+      writeFileSync(join(root, path), content);
+      execFileSync('git', ['-C', root, 'add', path]);
+    }
+    execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', message]);
+    return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+
+  const fromCommit = commitFiles([
+    ...retainedPaths.map(path => [path, `export const value = "${path} v1";\n`]),
+    ...omittedContent,
+  ], 'original composite completion');
+  v4(root, 'task', 'complete', taskId, '--owner', 'worker', '--token', String(token), '--commit', fromCommit);
+
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', base]);
+  execFileSync('git', ['-C', root, 'checkout', '--quiet', '-b', 'domain']);
+  const domainFoundationCommit = commitFiles(omittedContent, 'domain foundation');
+  execFileSync('git', ['-C', root, 'checkout', '--quiet', branch]);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'mainline progress']);
+  execFileSync('git', ['-C', root, 'merge', '--quiet', '--no-ff', 'domain', '-m', 'merge domain foundation']);
+  const domainMergeCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const sourceCommit = commitFiles(
+    retainedPaths.map(path => [path, `export const value = "${path} v1";\n`]),
+    'retained patch source',
+  );
+  const target = sourceCommit;
+
+  const retainedPatchSha256 = compositeProvenanceRetainedPatchSha256(root, fromCommit, retainedPaths);
+  const omittedFiles = omittedContent.map(([path]) => ({
+    path,
+    blob: execFileSync('git', ['-C', root, 'rev-parse', `${fromCommit}:${path}`], { encoding: 'utf8' }).trim(),
+  }));
+
+  // tasks.json is a tracked file; the `git reset --hard` above discarded its uncommitted content,
+  // so live task state must come from the ledger (`task list`), not the stale projection on disk.
+  const live = v4(root, 'task', 'list').tasks.find(t => t.id === taskId);
+  const prestate = {
+    id: taskId, title: 'cleanroom import', phase: live.phase, risk: live.risk,
+    deps: live.deps, reqs: live.reqs, status: 'done', leaseToken: token,
+    completionCommit: fromCommit,
+  };
+  const prestateFingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+  const rationale = 'Owner-approved composite provenance for the exact BOT-CLEANROOM evidence record';
+  const descriptorInput = 'decisions/task-rebinds/BOT-CLEANROOM.json';
+  writeJson(join(root, descriptorInput), {
+    schema: 'v4-task-rebind-composite-provenance-v1',
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE',
+    taskId,
+    phase: prestate.phase,
+    fromCommit,
+    target,
+    prestate,
+    prestateFingerprint,
+    retainedPatch: { paths: retainedPaths, sourceCommit, sha256: retainedPatchSha256 },
+    omittedFiles,
+    domainFoundationCommit,
+    domainMergeCommit,
+    rationale,
+  });
+  const approvalInput = 'decisions/owner-approvals/bot-cleanroom-composite-provenance.json';
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE', phase: prestate.phase, itemId: taskId, rationale,
+  }, [descriptorInput]);
+
+  assert.deepEqual(v4(
+    root, 'task', 'rebind-completion-composite-provenance', taskId,
+    '--from', fromCommit, '--commit', target, '--rationale', rationale,
+    '--record', descriptorInput, '--approval', approvalInput,
+  ), {
+    ok: true, id: taskId, commitSha: target, route: 'owner-approved-composite-provenance',
+  });
+
+  const rebound = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8'))
+    .tasks.find(t => t.id === taskId);
+  assert.equal(rebound.status, 'done');
+  assert.equal(rebound.commitSha, target);
 });
 
 test('status --check rejects recorded failed, stale, and exhausted gates', () => {

@@ -15,6 +15,8 @@ import {
   openLedger, addTask, listTasks, nextTask, claimTask, heartbeatTask,
   completeTask, releaseTask, projectTasks, mergeEnqueue, mergeNext, mergeRecord,
   setTaskDeps, prepareTaskDeferral, deferTask, rebindCompletionCommit,
+  prepareCompositeProvenanceRebind, validateCompositeProvenanceRebindApproval,
+  rebindCompletionCompositeProvenance,
 } from './lib/ledger.mjs';
 
 const root = process.cwd();
@@ -126,6 +128,26 @@ try {
       rebindCompletionCommit(db, id, values.from, values.commit);
       projectTasks(db, root);
       out({ ok: true, id, commitSha: values.commit });
+    }
+    else if (sub === 'rebind-completion-composite-provenance') {
+      const current = prepareCompositeProvenanceRebind(db, id);
+      const descriptor = validateCompositeProvenanceRebindApproval(root, {
+        taskId: id,
+        fromCommitSha: values.from,
+        commitSha: values.commit,
+        rationale: values.rationale,
+        descriptorInput: values.record,
+        approvalInput: values.approval,
+        prestate: current.prestate,
+        prestateFingerprint: current.fingerprint,
+      });
+      rebindCompletionCompositeProvenance(db, id, values.from, values.commit, {
+        authority: descriptor.authority,
+      });
+      projectTasks(db, root);
+      out({
+        ok: true, id, commitSha: values.commit, route: 'owner-approved-composite-provenance',
+      });
     }
     else if (sub === 'release') { releaseTask(db, id, values.owner, Number(values.token)); out({ ok: true }); }
     else if (sub === 'set-deps') { setTaskDeps(db, id, values.dep ?? []); projectTasks(db, root); out({ ok: true, id }); }

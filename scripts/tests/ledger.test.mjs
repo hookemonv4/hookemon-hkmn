@@ -1,15 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   openLedger, addTask, listTasks, nextTask, claimTask, completeTask, projectTasks,
   heartbeatTask, releaseTask, setTaskDeps, prepareTaskDeferral, deferTask,
-  rebindCompletionCommit,
+  rebindCompletionCommit, prepareCompositeProvenanceRebind, validateCompositeProvenanceRebindApproval,
+  rebindCompletionCompositeProvenance, compositeProvenanceRetainedPatchSha256,
 } from '../lib/ledger.mjs';
-import { hashFile, writeJson } from '../lib/util.mjs';
+import {
+  hashFile, readJson, sha256, writeJson,
+} from '../lib/util.mjs';
 import { validateTaskDeferralApproval } from '../lib/gates.mjs';
 import { writeOwnerApproval } from './helpers/owner-approval.mjs';
 
@@ -72,6 +77,142 @@ function deferralAuthority(root, db, taskId) {
     prestate: current.prestate,
     prestateFingerprint: current.fingerprint,
   }).authority;
+}
+
+function rev(root) {
+  return execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+}
+
+function blobIdAt(root, commitSha, path) {
+  return execFileSync('git', ['-C', root, 'rev-parse', `${commitSha}:${path}`], { encoding: 'utf8' }).trim();
+}
+
+function commitFiles(root, files, message) {
+  for (const [path, content] of files) {
+    writeFileSync(join(root, path), content);
+    execFileSync('git', ['-C', root, 'add', path]);
+  }
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '-m', message]);
+  return rev(root);
+}
+
+const COMPOSITE_PROVENANCE_RETAINED_PATHS = [
+  'retained-1.mjs', 'retained-2.mjs', 'retained-3.mjs', 'retained-4.mjs', 'retained-5.mjs',
+].sort();
+const COMPOSITE_PROVENANCE_OMITTED_CONTENT = [
+  ['omitted-a.mjs', 'const omittedA = "old-a";\n'],
+  ['omitted-b.mjs', 'const omittedB = "old-b";\n'],
+];
+
+// The old completion, built while it is still reachable from HEAD so `completeTask` accepts it
+// (matching how the real BOT-CLEANROOM completion was originally recorded before its history was
+// rewritten out from under it).
+function commitCompositeProvenanceOldCompletion(root) {
+  return commitFiles(root, [
+    ...COMPOSITE_PROVENANCE_RETAINED_PATHS.map(path => [path, `export const value = "${path} v1";\n`]),
+    ...COMPOSITE_PROVENANCE_OMITTED_CONTENT,
+  ], 'original composite completion');
+}
+
+// Rewrites history from `base` onward so the old completion becomes unreachable, then builds the
+// evidence shape from the proposal: five retained files carried intact by a source commit
+// reachable from the target, and two omitted files byte-identical to an independently merged
+// domain foundation reachable from the same target.
+function rewriteCompositeProvenanceHistory({
+  root, base, branch, fromCommit,
+}) {
+  execFileSync('git', ['-C', root, 'reset', '--quiet', '--hard', base]);
+  execFileSync('git', ['-C', root, 'checkout', '--quiet', '-b', 'domain']);
+  const domainFoundationCommit = commitFiles(root, COMPOSITE_PROVENANCE_OMITTED_CONTENT, 'domain foundation');
+  execFileSync('git', ['-C', root, 'checkout', '--quiet', branch]);
+  execFileSync('git', ['-C', root, 'commit', '--quiet', '--allow-empty', '-m', 'mainline progress']);
+  execFileSync('git', ['-C', root, 'merge', '--quiet', '--no-ff', 'domain', '-m', 'merge domain foundation']);
+  const domainMergeCommit = rev(root);
+
+  const sourceCommit = commitFiles(
+    root,
+    COMPOSITE_PROVENANCE_RETAINED_PATHS.map(path => [path, `export const value = "${path} v1";\n`]),
+    'retained patch source',
+  );
+  const target = commitFiles(
+    root,
+    ['retained-1.mjs', 'retained-2.mjs', 'retained-3.mjs'].map(
+      path => [path, `export const value = "${path} v2 evolved";\n`],
+    ),
+    'later evolution',
+  );
+
+  const retainedPatchSha256 = compositeProvenanceRetainedPatchSha256(
+    root, fromCommit, COMPOSITE_PROVENANCE_RETAINED_PATHS,
+  );
+  const omittedFiles = COMPOSITE_PROVENANCE_OMITTED_CONTENT
+    .map(([path]) => ({ path, blob: blobIdAt(root, fromCommit, path) }))
+    .sort((a, b) => (a.path < b.path ? -1 : 1));
+
+  return {
+    fromCommit,
+    target,
+    sourceCommit,
+    domainFoundationCommit,
+    domainMergeCommit,
+    retainedPaths: COMPOSITE_PROVENANCE_RETAINED_PATHS,
+    retainedPatchSha256,
+    omittedFiles,
+  };
+}
+
+function writeCompositeProvenanceDescriptor(root, taskId, fixture, prestate, prestateFingerprint, rationale) {
+  const descriptorInput = `decisions/task-rebinds/${taskId}.json`;
+  writeJson(join(root, descriptorInput), {
+    schema: 'v4-task-rebind-composite-provenance-v1',
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE',
+    taskId,
+    phase: prestate.phase,
+    fromCommit: fixture.fromCommit,
+    target: fixture.target,
+    prestate,
+    prestateFingerprint,
+    retainedPatch: {
+      paths: fixture.retainedPaths,
+      sourceCommit: fixture.sourceCommit,
+      sha256: fixture.retainedPatchSha256,
+    },
+    omittedFiles: fixture.omittedFiles,
+    domainFoundationCommit: fixture.domainFoundationCommit,
+    domainMergeCommit: fixture.domainMergeCommit,
+    rationale,
+  });
+  return descriptorInput;
+}
+
+function setupCompositeProvenanceCase() {
+  const { root, head: base, branch } = repo();
+  const db = openLedger(root);
+  const taskId = 'BOT-CLEANROOM';
+  addTask(db, { id: taskId, title: 'cleanroom import', phase: 'build' });
+  const { token } = claimTask(db, taskId, 'worker');
+
+  // Complete the task while the old commit is still reachable from HEAD, then rewrite history
+  // out from under it, exactly like the real orphaned-completion scenario this route repairs.
+  const fromCommit = commitCompositeProvenanceOldCompletion(root);
+  completeTask(db, taskId, 'worker', token, fromCommit);
+  const fixture = rewriteCompositeProvenanceHistory({
+    root, base, branch, fromCommit,
+  });
+
+  const current = prepareCompositeProvenanceRebind(db, taskId);
+  const rationale = 'Owner-approved composite provenance for the exact BOT-CLEANROOM evidence record';
+  const descriptorInput = writeCompositeProvenanceDescriptor(
+    root, taskId, fixture, current.prestate, current.fingerprint, rationale,
+  );
+  const approvalInput = 'decisions/owner-approvals/bot-cleanroom-composite-provenance.json';
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE', phase: current.prestate.phase, itemId: taskId, rationale,
+  }, [descriptorInput]);
+
+  return {
+    root, db, taskId, fixture, current, rationale, descriptorInput, approvalInput,
+  };
 }
 
 test('lease is atomic and fencing tokens protect completion', () => {
@@ -676,4 +817,304 @@ test('task deferral is restricted to the approved dashboard task', () => {
   for (const taskId of ['P1-009', 'P1-010', 'P1-012']) {
     assert.throws(() => prepareTaskDeferral(db, taskId), /only P1-011 may be deferred/);
   }
+});
+
+test('composite-provenance rebind accepts the exact valid seven-path partition and records provenance', () => {
+  const {
+    root, db, taskId, fixture, descriptorInput, approvalInput, rationale, current,
+  } = setupCompositeProvenanceCase();
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+
+  const descriptor = validateCompositeProvenanceRebindApproval(root, {
+    taskId,
+    fromCommitSha: fixture.fromCommit,
+    commitSha: fixture.target,
+    rationale,
+    descriptorInput,
+    approvalInput,
+    prestate: current.prestate,
+    prestateFingerprint: current.fingerprint,
+  });
+  rebindCompletionCompositeProvenance(db, taskId, fixture.fromCommit, fixture.target, {
+    authority: descriptor.authority,
+  });
+  projectTasks(db, root);
+
+  const attemptsAfter = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  assert.deepEqual(attemptsAfter.slice(0, attemptsBefore.length), attemptsBefore);
+  assert.equal(attemptsAfter.length, attemptsBefore.length + 1);
+  const last = attemptsAfter.at(-1);
+  assert.equal(last.commit_sha, fixture.target);
+  assert.equal(last.outcome, 'done');
+  assert.equal(last.owner, 'completion-rebind');
+  const provenance = JSON.parse(last.provenance);
+  assert.equal(provenance.route, 'owner-approved-composite-provenance');
+  assert.equal(provenance.from, fixture.fromCommit);
+  assert.equal(provenance.target, fixture.target);
+  assert.deepEqual(provenance.retainedPatch.paths, fixture.retainedPaths);
+  assert.equal(provenance.retainedPatch.sourceCommit, fixture.sourceCommit);
+  assert.equal(provenance.retainedPatch.sha256, fixture.retainedPatchSha256);
+  assert.deepEqual(provenance.omittedFiles, fixture.omittedFiles);
+  assert.equal(provenance.domainFoundationCommit, fixture.domainFoundationCommit);
+  assert.equal(provenance.domainMergeCommit, fixture.domainMergeCommit);
+  assert.equal(provenance.descriptorInput, descriptorInput);
+  assert.equal(provenance.approvalInput, approvalInput);
+
+  const task = listTasks(db).find(candidate => candidate.id === taskId);
+  assert.equal(task.status, 'done');
+  assert.equal(task.lease_owner, null);
+
+  const projected = JSON.parse(readFileSync(join(root, 'tasks.json'), 'utf8'))
+    .tasks.find(candidate => candidate.id === taskId);
+  assert.equal(projected.commitSha, fixture.target);
+});
+
+test('composite-provenance rebind is restricted to BOT-CLEANROOM', () => {
+  const { root, head } = repo();
+  const db = openLedger(root);
+  addTask(db, { id: 'OTHER-TASK', title: 'x' });
+  const { token } = claimTask(db, 'OTHER-TASK', 'worker');
+  completeTask(db, 'OTHER-TASK', 'worker', token, head);
+
+  assert.throws(() => prepareCompositeProvenanceRebind(db, 'OTHER-TASK'), /only BOT-CLEANROOM/);
+  assert.throws(
+    () => validateCompositeProvenanceRebindApproval(root, {
+      taskId: 'OTHER-TASK',
+      fromCommitSha: head,
+      commitSha: head,
+      rationale: 'x',
+      descriptorInput: 'decisions/task-rebinds/OTHER-TASK.json',
+      approvalInput: 'decisions/owner-approvals/other-task.json',
+      prestate: {},
+      prestateFingerprint: 'x',
+    }),
+    /only BOT-CLEANROOM/,
+  );
+  assert.throws(
+    () => rebindCompletionCompositeProvenance(db, 'OTHER-TASK', head, head, { authority: {} }),
+    /only BOT-CLEANROOM/,
+  );
+});
+
+test('composite-provenance rebind rejects tampered bytes, paths, source, target, and prestate without mutation', () => {
+  const {
+    root, db, taskId, fixture, descriptorInput, approvalInput, rationale, current,
+  } = setupCompositeProvenanceCase();
+  const originalDescriptor = readJson(join(root, descriptorInput));
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+
+  const assertTamperRejected = (mutate, errorPattern) => {
+    const tampered = JSON.parse(JSON.stringify(originalDescriptor));
+    mutate(tampered);
+    writeJson(join(root, descriptorInput), tampered);
+    assert.throws(() => validateCompositeProvenanceRebindApproval(root, {
+      taskId,
+      fromCommitSha: fixture.fromCommit,
+      commitSha: fixture.target,
+      rationale,
+      descriptorInput,
+      approvalInput,
+      prestate: current.prestate,
+      prestateFingerprint: current.fingerprint,
+    }), errorPattern);
+    assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+    writeJson(join(root, descriptorInput), originalDescriptor);
+  };
+
+  assertTamperRejected(
+    d => { d.retainedPatch.sha256 = '0'.repeat(64); },
+    /does not match the declared patch hash/,
+  );
+  assertTamperRejected(
+    d => { d.retainedPatch.sourceCommit = d.domainFoundationCommit; },
+    /does not match the declared patch hash/,
+  );
+  assertTamperRejected(
+    d => {
+      d.retainedPatch.paths = [...d.retainedPatch.paths.slice(1), 'unrelated.mjs'].sort();
+    },
+    /must change exactly the seven declared paths/,
+  );
+  assertTamperRejected(
+    d => { d.omittedFiles[0].blob = '1'.repeat(40); },
+    /is not an existing blob object/,
+  );
+  assertTamperRejected(
+    d => { d.omittedFiles[1].path = d.retainedPatch.paths.at(-1); },
+    /must not overlap/,
+  );
+  assertTamperRejected(
+    d => { d.target = d.domainFoundationCommit; },
+    /does not match the requested from\/target commits/,
+  );
+  assertTamperRejected(
+    d => { d.fromCommit = d.target; },
+    /does not match the requested from\/target commits/,
+  );
+  assertTamperRejected(
+    d => { d.prestate.title = 'a title the owner never approved'; },
+    /prestate fingerprint does not match/,
+  );
+  assertTamperRejected(
+    d => { d.rationale = 'a rationale nobody approved'; },
+    /rationale does not match the requested rationale/,
+  );
+});
+
+test('composite-provenance rebind requires the old completion to be unreachable from HEAD', () => {
+  const { root, head: base, branch } = repo();
+  const taskId = 'BOT-CLEANROOM';
+  const fromCommit = commitCompositeProvenanceOldCompletion(root);
+  const fixture = rewriteCompositeProvenanceHistory({
+    root, base, branch, fromCommit,
+  });
+  const rationale = 'x';
+  const prestate = {
+    id: taskId,
+    title: 'x',
+    phase: 'build',
+    risk: 'ordinary',
+    deps: [],
+    reqs: [],
+    status: 'done',
+    leaseToken: 1,
+    completionCommit: fixture.target,
+  };
+  const prestateFingerprint = sha256(Buffer.from(JSON.stringify(prestate)));
+  const descriptorInput = 'decisions/task-rebinds/BOT-CLEANROOM.json';
+  writeJson(join(root, descriptorInput), {
+    schema: 'v4-task-rebind-composite-provenance-v1',
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE',
+    taskId,
+    phase: prestate.phase,
+    fromCommit: fixture.target,
+    target: fixture.target,
+    prestate,
+    prestateFingerprint,
+    retainedPatch: {
+      paths: fixture.retainedPaths, sourceCommit: fixture.sourceCommit, sha256: fixture.retainedPatchSha256,
+    },
+    omittedFiles: fixture.omittedFiles,
+    domainFoundationCommit: fixture.domainFoundationCommit,
+    domainMergeCommit: fixture.domainMergeCommit,
+    rationale,
+  });
+  const approvalInput = 'decisions/owner-approvals/bot-cleanroom-composite-provenance.json';
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE', phase: prestate.phase, itemId: taskId, rationale,
+  }, [descriptorInput]);
+
+  assert.throws(
+    () => validateCompositeProvenanceRebindApproval(root, {
+      taskId,
+      fromCommitSha: fixture.target,
+      commitSha: fixture.target,
+      rationale,
+      descriptorInput,
+      approvalInput,
+      prestate,
+      prestateFingerprint,
+    }),
+    /is reachable from current HEAD; use the descendant or stable-patch-id route instead/,
+  );
+});
+
+test('composite-provenance rebind rejects an old completion that changes an extra unpartitioned path', () => {
+  const { root, head: base, branch } = repo();
+  const db = openLedger(root);
+  const taskId = 'BOT-CLEANROOM';
+  addTask(db, { id: taskId, title: 'x', phase: 'build' });
+  const { token } = claimTask(db, taskId, 'worker');
+
+  const fromCommit = commitFiles(root, [
+    ...COMPOSITE_PROVENANCE_RETAINED_PATHS.map(path => [path, `export const value = "${path} v1";\n`]),
+    ...COMPOSITE_PROVENANCE_OMITTED_CONTENT,
+    ['extra-unpartitioned.mjs', 'unaccounted for\n'],
+  ], 'original composite completion plus an unpartitioned extra file');
+  completeTask(db, taskId, 'worker', token, fromCommit);
+  const fixture = rewriteCompositeProvenanceHistory({
+    root, base, branch, fromCommit,
+  });
+  const current = prepareCompositeProvenanceRebind(db, taskId);
+  const rationale = 'x';
+  const descriptorInput = writeCompositeProvenanceDescriptor(
+    root, taskId, fixture, current.prestate, current.fingerprint, rationale,
+  );
+  const approvalInput = 'decisions/owner-approvals/bot-cleanroom-composite-provenance.json';
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE', phase: current.prestate.phase, itemId: taskId, rationale,
+  }, [descriptorInput]);
+
+  assert.throws(
+    () => validateCompositeProvenanceRebindApproval(root, {
+      taskId,
+      fromCommitSha: fromCommit,
+      commitSha: fixture.target,
+      rationale,
+      descriptorInput,
+      approvalInput,
+      prestate: current.prestate,
+      prestateFingerprint: current.fingerprint,
+    }),
+    /must change exactly the seven declared paths, with no omitted extra path/,
+  );
+});
+
+test('composite-provenance rebind rejects a missing or mismatched owner approval without mutation', () => {
+  const {
+    root, db, taskId, fixture, descriptorInput, approvalInput, rationale, current,
+  } = setupCompositeProvenanceCase();
+  const attemptsBefore = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+  const attempt = () => validateCompositeProvenanceRebindApproval(root, {
+    taskId,
+    fromCommitSha: fixture.fromCommit,
+    commitSha: fixture.target,
+    rationale,
+    descriptorInput,
+    approvalInput,
+    prestate: current.prestate,
+    prestateFingerprint: current.fingerprint,
+  });
+
+  rmSync(join(root, approvalInput));
+  assert.throws(attempt, /ENOENT/);
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+
+  writeOwnerApproval(root, approvalInput, {
+    action: 'TASK_REBIND_COMPOSITE_PROVENANCE',
+    phase: current.prestate.phase,
+    itemId: taskId,
+    rationale: 'a rationale nobody approved',
+  }, [descriptorInput]);
+  assert.throws(attempt, /owner approval rationale does not match/);
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsBefore);
+});
+
+test('composite-provenance rebind refuses stale reinvocation without creating another record', () => {
+  const {
+    root, db, taskId, fixture, descriptorInput, approvalInput, rationale, current,
+  } = setupCompositeProvenanceCase();
+
+  const descriptor = validateCompositeProvenanceRebindApproval(root, {
+    taskId,
+    fromCommitSha: fixture.fromCommit,
+    commitSha: fixture.target,
+    rationale,
+    descriptorInput,
+    approvalInput,
+    prestate: current.prestate,
+    prestateFingerprint: current.fingerprint,
+  });
+  rebindCompletionCompositeProvenance(db, taskId, fixture.fromCommit, fixture.target, {
+    authority: descriptor.authority,
+  });
+  const attemptsAfterFirst = db.prepare('SELECT * FROM attempts ORDER BY seq').all();
+
+  assert.throws(
+    () => rebindCompletionCompositeProvenance(db, taskId, fixture.fromCommit, fixture.target, {
+      authority: descriptor.authority,
+    }),
+    /current completion .* does not match requested/,
+  );
+  assert.deepEqual(db.prepare('SELECT * FROM attempts ORDER BY seq').all(), attemptsAfterFirst);
 });
