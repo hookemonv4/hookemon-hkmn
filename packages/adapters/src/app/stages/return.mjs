@@ -43,7 +43,7 @@ import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
-import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -516,7 +516,9 @@ function returnWalletReservation(configured, context) {
 }
 
 async function reserveReturnWalletNonce({ cycleRepository, configured, context }) {
-  const reservation = returnWalletReservation(configured, context);
+  const reservation = await resolveWalletNonceReservation(
+    cycleRepository, context.cycleId, returnWalletReservation(configured, context),
+  );
   await cycleRepository.reserveWalletNonce(context.cycleId, reservation);
   await cycleRepository.assertWalletNonce(context.cycleId, reservation);
   return reservation;
@@ -533,7 +535,9 @@ async function releaseReturnWalletNonce({ cycleRepository, configured, context }
   }
   await cycleRepository.releaseWalletNonce(
     context.cycleId,
-    returnWalletReservation(configured, context),
+    await resolveWalletNonceReservation(
+      cycleRepository, context.cycleId, returnWalletReservation(configured, context), { release: true },
+    ),
   );
 }
 
