@@ -27,6 +27,8 @@ import { assertPolicyAdmission } from '../../../runner/src/automation/policy-eng
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createEligibilityPayoutManifest } from '../../../runner/src/distribution/pro-rata.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
+import { buildClaimProcessCall } from '../../src/hook-contract-client.mjs';
+import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { compose } from '../../src/app/compose.mjs';
 import { assertPayoutManifestUnchanged } from '../../src/app/stages/payout.mjs';
 import { supplementaryPayoutStageId } from '../../src/app/stages/supplementary-payout.mjs';
@@ -616,6 +618,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
   // instruction list." Populated only at generation time, before any candidate exists.
   const purchaseUnsignedMessagesByMemo = new Map();
   const buybackUnsignedMessagesByMemo = new Map();
+  let beforeEligibilityResponse = async () => {};
   const server = createServer({ key, cert }, async (request, response) => {
     if (request.url === '/alert') { response.writeHead(204); response.end(); return; }
     if (request.url === '/chains') { respond(response, RELAY_CHAINS); return; }
@@ -899,6 +902,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
         return reply({ number, hash: blockHash(number), parentHash: blockHash(BigInt(number) - 1n), timestamp: toHex(blockTimestamps.get(Number(number)) ?? blockTimestamp), baseFeePerGas: '0x1' });
       }
       if (rpc.method === 'eth_getLogs') {
+        await beforeEligibilityResponse();
         const filter = rpc.params?.[0] ?? {};
         const from = BigInt(filter.fromBlock ?? '0x0');
         const to = BigInt(filter.toBlock ?? '0x0');
@@ -1199,6 +1203,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   t.after(() => new Promise(resolve => server.close(resolve)));
   return { baseUrl: `https://127.0.0.1:${server.address().port}`, caCert: paths.caCert, calls,
+    coordinateEligibilityResponse(callback) { beforeEligibilityResponse = callback; },
     changeHoldersAndEnableHeldSale() { holdersChanged = true; holdersChangedAt = ++finalizedHeight; blockTimestamps.set(holdersChangedAt, Math.floor(Date.now() / 1000)); epicGateFactsByMemo.get('graph-purchase-pack-1').buybackAvailable = true; },
     evidence() { return { broadcasts: [...broadcasts.values()], returns: [...returnTransactions.values()], purchases: [...acceptedPurchaseTransactionsBySignature], buybacks: [...acceptedBuybackTransactionsBySignature], balanceEvents: structuredClone(balanceEvents), finalizedHeight, holdersChanged }; },
     balanceAt(account, height) { return balanceAt(account.toLowerCase(), height); },
@@ -1279,7 +1284,7 @@ async function activateTwoPackPolicy(directory) {
   }));
 }
 
-async function testPolicyAuthority(t, directory) {
+async function testPolicyAuthority(t, directory, operations) {
   const ownerKeys = generateKeyPairSync('ed25519');
   const policyKeys = generateKeyPairSync('ed25519');
   const ownerPublicKeyPath = join(directory, 'test-owner-public.pem');
@@ -1312,7 +1317,9 @@ async function testPolicyAuthority(t, directory) {
 
   const entries = new Map();
   const diagnostics = { publishAttempts: 0, publishWrites: 0, enoent: 0, keys: [] };
-  let publishing = false;
+  let publication = Promise.resolve();
+  const futureClaims = new Map();
+  const matchedClaims = new Set();
   let publishedArtifact = null;
   let producerError = null;
   // Deliberately NOT `CycleRepository.open()`. That bootstrap takes the durable store's exclusive
@@ -1350,6 +1357,24 @@ async function testPolicyAuthority(t, directory) {
       const parsed = JSON.parse(text);
       if (`${canonicalJson(parsed)}\n` !== text) throw new Error('active cycle file is not canonical JSON plus one newline');
       const cycle = assertCycleSnapshot(parsed.cycle);
+      const opened = cycle.entries.find(entry => entry.kind === 'cycle-opened');
+      assert.ok(opened, 'future claim authority requires an actual committed cycle');
+      const amountAtomic = opened.payload.releaseAmount;
+      assert.match(amountAtomic, /^[1-9][0-9]*$/);
+      const onchainCycleId = deriveOnchainCycleId(cycle.cycleId);
+      const request = {
+        schema: 'hookemon.claim-process-request.v1', cycleId: cycle.cycleId, onchainCycleId,
+        destination: operations,
+        amount: { chainId: '4663', assetId: USDG.toLowerCase(), decimals: 6, amountAtomic },
+        call: buildClaimProcessCall(`0x${'c'.repeat(40)}`, onchainCycleId, amountAtomic, operations),
+      };
+      // stage-driver canonicalizes the production call's bigint argument before hashing.
+      const canonicalRequest = JSON.parse(JSON.stringify(request, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
+      const claimDigest = digest({ schema: 'hookemon.operational-stage-request.v1', cycleId: cycle.cycleId, stage: 'claim-process', request: canonicalRequest });
+      if (futureClaims.has(cycle.cycleId)) assert.equal(futureClaims.get(cycle.cycleId), claimDigest);
+      futureClaims.set(cycle.cycleId, claimDigest);
+      prepared.push({ cycleId: cycle.cycleId, stage: 'claim-process', requestDigest: claimDigest });
+
       // Payout persists its immutable plan outside the cycle journal before signing. This
       // external authority reads that actual committed plan without opening a competing writer.
       try {
@@ -1379,6 +1404,10 @@ async function testPolicyAuthority(t, directory) {
         // authorized by the same producer.
         if (entry?.kind === 'stage-request-prepared') {
           const { stage, requestDigest } = entry.payload ?? {};
+          if (stage === 'claim-process') {
+            assert.equal(requestDigest, futureClaims.get(cycle.cycleId), 'real prepared claim must equal its preauthorized subject');
+            matchedClaims.add(cycle.cycleId);
+          }
           if (typeof stage === 'string' && typeof requestDigest === 'string') {
             prepared.push({ cycleId: cycle.cycleId, stage, requestDigest });
           }
@@ -1393,9 +1422,11 @@ async function testPolicyAuthority(t, directory) {
     return prepared;
   }
 
-  async function publish() {
-    if (publishing) return;
-    publishing = true;
+  function publish() {
+    publication = publication.then(publishOnce);
+    return publication;
+  }
+  async function publishOnce() {
     diagnostics.publishAttempts += 1;
     try {
       for (const { cycleId, stage, requestDigest } of await readCommittedPreparedAttempts()) {
@@ -1437,8 +1468,6 @@ async function testPolicyAuthority(t, directory) {
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       diagnostics.enoent += 1;
-    } finally {
-      publishing = false;
     }
   }
   await publish();
@@ -1451,12 +1480,17 @@ async function testPolicyAuthority(t, directory) {
     ownerPublicKeyPath,
     policyPublicKeyPath,
     diagnostics,
+    publish,
+    assertClaimSubjectsMatched() {
+      assert.ok(futureClaims.size > 0);
+      assert.deepEqual([...matchedClaims].sort(), [...futureClaims.keys()].sort());
+    },
     // The assertions below reopen the same durable store, and `open()` takes the store's exclusive
     // zero-tolerance SQLite lock. Stop the producer and let its in-flight publish drain first, or
     // the harness reliably races itself into `durable cycle store lock contention`.
     async stop() {
       clearInterval(timer);
-      while (publishing) await new Promise(resolve => setTimeout(resolve, 5));
+      await publication;
     },
     assertHealthy() { if (producerError !== null) throw producerError; },
   };
@@ -1621,7 +1655,10 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   operationsSolana = identity.solanaPublicKey;
   // Only the copied tree's identity pins move, and only to the keys this run actually holds.
   await repointCopiedDeploymentIdentity(root, { evm: identity.evmAddress, solana: identity.solanaPublicKey });
-  const authority = await testPolicyAuthority(t, directory);
+  const authority = await testPolicyAuthority(t, directory, identity.evmAddress);
+  // Publish a signed future claim for the committed cycle before releasing eligibility RPC data.
+  // This creates no stage state; production still checks completed eligibility and exact subject.
+  fixture.coordinateEligibilityResponse(() => authority.publish());
   await activateTwoPackPolicy(directory);
   const observabilityPath = join(directory, 'observability.json');
   const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
@@ -1646,13 +1683,7 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   const env = {
     ...process.env,
     HOOKEMON_STATE_DIR: directory, HOOKEMON_DEFAULT_INTERVAL_MS: '100', HOOKEMON_CHAIN_ID: '4663', HOOKEMON_PROVIDER_MODE: 'live',
-    // Long enough that the lease heartbeat, which runs at half the TTL and rotates the fencing
-    // token, cannot fire while a stage is mid-flight. Outbound signs two Relay transactions in one
-    // execution, each through a spawned signer child, and a token rotated between them makes the
-    // second wallet-nonce reservation collide with the first. A short TTL was only attractive while
-    // every stage needed one failed tick to get authorized; now that a chain-journal stage publishes
-    // the digest its signing boundary demands, attempts are authorized on their first tick and
-    // nothing is left reserved for a later retry to trip over.
+    // Keep the existing bounded lease window; authority readiness is coordinated independently.
     HOOKEMON_LEASE_TTL_MS: '30000',
     HOOKEMON_ROBINHOOD_RPC_URL: `${fixture.baseUrl}/rpc`, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: `${fixture.baseUrl}/archive`, HOOKEMON_SOLANA_RPC_URL: `${fixture.baseUrl}/solana`,
     HOOKEMON_RELAY_BASE_URL: fixture.baseUrl, HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: '300', HOOKEMON_RELAY_API_KEY: RELAY_SYNTHETIC_API_KEY, HOOKEMON_RELAY_SOLANA_MINT: SOLANA_MINT, HOOKEMON_RELAY_SOLANA_DECIMALS: '6', HOOKEMON_RELAY_EVM_DEPOSITORY: `0x${'a'.repeat(40)}`,
@@ -1676,6 +1707,8 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   await assertCopiedProductionBytes(root, identity);
   const run = await runProductionWindow(binPath, env, GRAPH_WINDOW_MS);
   authority.assertHealthy();
+  await authority.publish();
+  authority.assertClaimSubjectsMatched();
   const { stderr } = run;
   // Read back through the same copied tree the run used. The real tree validates a stored admission
   // against the production pins, which this run's isolated keys deliberately are not.

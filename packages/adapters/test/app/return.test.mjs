@@ -868,6 +868,7 @@ function terminalReturnPointerClient({ intent, destinationTxHash }) {
 async function seededReturnReconciliation(t, {
   requestCreatedAtUnixSeconds = '1700000000',
   maxSettlementWindowSeconds = '600',
+  lease,
 } = {}) {
   const directory = await tempDirectory(t);
   const cycleRepository = await CycleRepository.open(directory);
@@ -958,14 +959,15 @@ async function seededReturnReconciliation(t, {
   const context = {
     cycleId,
     fencingToken: '22222222-2222-4222-8222-222222222222',
+    ...(lease ? { lease } : {}),
   };
   await cycleRepository.reserveWalletNonce(cycleId, {
     chainId: '792703809',
     wallet: SOLANA_ACCOUNT,
     stage: 'return',
     fencingToken: context.fencingToken,
-    leaseAcquiredAtMs: 0,
-    leaseExpiresAtMs: Number.MAX_SAFE_INTEGER,
+    leaseAcquiredAtMs: lease?.acquiredAt ?? 0,
+    leaseExpiresAtMs: lease?.expiresAt ?? Number.MAX_SAFE_INTEGER,
   });
   return { directory, cycleRepository, cycleId, context, intent, leg, requestDigest };
 }
@@ -1296,4 +1298,19 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
     leaseAcquiredAtMs: 0,
     leaseExpiresAtMs: Number.MAX_SAFE_INTEGER,
   }]]);
+});
+
+test('return reconciliation releases the durable nonce after heartbeat and repository reopen', async t => {
+  const now = Date.now();
+  const fixture = await seededReturnReconciliation(t, { lease: { acquiredAt: now, expiresAt: now + 60_000 } });
+  fixture.context.lease.expiresAt += 60_000;
+  fixture.context = structuredClone(fixture.context);
+  fixture.cycleRepository = await CycleRepository.open(fixture.directory);
+  const transactionHash = `0x${'c'.repeat(64)}`;
+  const result = await reconcileSeededReturn(fixture, { transactionHash, client: returnDestinationReceiptClient({ transactionHash }) });
+  assert.equal(result.relayLeg.state, 'SETTLED');
+  const state = await fixture.cycleRepository.describeCycle(fixture.cycleId);
+  const reservation = [...state.walletNonceReservations.values()].find(row => row.stage === 'return');
+  assert.equal(reservation.state, 'RELEASED');
+  assert.equal(reservation.leaseExpiresAtMs, now + 60_000);
 });

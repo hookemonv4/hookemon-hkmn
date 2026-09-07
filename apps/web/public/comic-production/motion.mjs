@@ -199,32 +199,63 @@ export function installJourneyMotion(root = globalThis.document, browser = globa
 export function installScrollReveal(root = globalThis.document, browser = globalThis.window) {
   const reduced = browser.matchMedia("(prefers-reduced-motion: reduce)");
   if (reduced.matches || !browser.IntersectionObserver) return () => {};
-  const animations = new Set();
+  const active = new Map();
+  let frame = 0;
+  const distance = 112;
+  function render() {
+    frame = 0;
+    // Read every position before updating animations; subtract our own translation.
+    const positions = [...active].map(([element, state]) => [element, state, element.getBoundingClientRect().top - state.shift]);
+    for (const [element, state, top] of positions) {
+      const progress = clamp((browser.innerHeight - top) / Math.min(360, browser.innerHeight * 0.45));
+      if (progress === 1) {
+        state.animation.cancel();
+        active.delete(element);
+        continue;
+      }
+      const eased = 1 - (1 - progress) ** 2;
+      state.shift = distance * (1 - eased);
+      state.animation.currentTime = eased * 1000;
+    }
+  }
+  function schedule() {
+    if (!frame && active.size) frame = browser.requestAnimationFrame(render);
+  }
   const observer = new browser.IntersectionObserver((entries) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       observer.unobserve(entry.target);
-      if (reduced.matches || !entry.target.animate) continue;
+      if (reduced.matches || !entry.target.animate || entry.target.getBoundingClientRect().top < 0) continue;
       const animation = entry.target.animate(
-        [{ opacity: 0, translate: "0 28px" }, { opacity: 1, translate: "0 0" }],
-        { duration: 650, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        [{ opacity: 0, translate: `0 ${distance}px` }, { opacity: 1, translate: "0 0" }],
+        { duration: 1000, easing: "linear", fill: "both" },
       );
-      animations.add(animation);
-      animation.addEventListener("finish", () => animations.delete(animation), { once: true });
+      animation.pause();
+      animation.currentTime = 0;
+      active.set(entry.target, { animation, shift: distance });
     }
-  }, { threshold: 0, rootMargin: "0px 0px -24px 0px" });
-  // Initial viewport and deep-link content stay still. Observe only what lies ahead.
+    render();
+  }, { threshold: 0, rootMargin: "0px 0px 160px 0px" });
   root.querySelectorAll(".section-heading, .dashboard-console, .journey-intro, .story-transcript, .collectible-card, .collection-disclosure, .collection-pack-link, .economics-layout > div, .faq-intro, .faq-list > details, .footer-banner, .footer-bottom").forEach((element) => {
     if (element.getBoundingClientRect().top >= browser.innerHeight) observer.observe(element);
   });
   const stop = () => {
     observer.disconnect();
-    animations.forEach((animation) => animation.cancel());
-    animations.clear();
+    if (frame) browser.cancelAnimationFrame(frame);
+    frame = 0;
+    active.forEach(({ animation }) => animation.cancel());
+    active.clear();
   };
   const onPreferenceChange = () => { if (reduced.matches) stop(); };
+  browser.addEventListener("scroll", schedule, { passive: true });
+  browser.addEventListener("resize", schedule, { passive: true });
   reduced.addEventListener("change", onPreferenceChange);
-  return () => { stop(); reduced.removeEventListener("change", onPreferenceChange); };
+  return () => {
+    stop();
+    browser.removeEventListener("scroll", schedule);
+    browser.removeEventListener("resize", schedule);
+    reduced.removeEventListener("change", onPreferenceChange);
+  };
 }
 
 if (globalThis.document && globalThis.window) {

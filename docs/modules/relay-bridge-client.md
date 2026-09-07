@@ -325,3 +325,5 @@ node packages/adapters/test/relay-client.live-chains.mjs
   outbound stage — unresolved (`OutboundRecoveryRequiredError` with `OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS`
   for a missing, extra, or role-invalid prerequisite). Do not substitute the deposit's own finality,
   and do not re-sign: the durable attempt is retried on its own recorded bytes only.
+
+Return wallet reservations resolve renewed automation contexts against their original durable lease window before reserve and finalized-source release. Release also resolves an already released reservation for idempotent recovery; reserve only resolves held reservations. Assertions use the captured reservation. Original expiry, fence identity and repository takeover checks remain authoritative across heartbeat and reopen.
