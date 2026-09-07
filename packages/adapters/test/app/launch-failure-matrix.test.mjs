@@ -20,9 +20,10 @@ import test from 'node:test';
 import {
   activateTwoPackPolicy, buildProductionEnv, eligibilitySnapshotFixture, fixtureServer,
   isolatedSource, observabilityConfig, productionChildSigner, readSignerInvocations,
-  repointCopiedDeploymentIdentity, runProductionWindow, writeStandingAuthorityDocument,
+  repointCopiedDeploymentIdentity, runProductionUntil, runProductionWindow, writeStandingAuthorityDocument,
 } from './fixtures/launch-failure-harness.mjs';
 
+const FREEZE_DEADLINE_MS = Number(process.env.HKMN_FREEZE_DEADLINE_MS ?? 30000);
 const WINDOW_MS = Number(process.env.HKMN_FAILURE_WINDOW_MS ?? 8000);
 
 async function bootIsolatedRun(t, directory, fixture) {
@@ -109,7 +110,7 @@ test(
 
 test(
   'I-usdg-freeze literal observability canary observes healthy then frozen and refuses every mutation from the flip onward, across restart',
-  { timeout: (WINDOW_MS * 2) + 60000 },
+  { timeout: (FREEZE_DEADLINE_MS * 2) + 60000 },
   async t => {
     const directory = await mkdtemp(join(tmpdir(), 'hookemon-failure-freeze-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -133,7 +134,10 @@ test(
       })),
     });
 
-    const run = await runProductionWindow(binPath, env, WINDOW_MS);
+    const run = await runProductionUntil(binPath, env, {
+      deadlineMs: FREEZE_DEADLINE_MS,
+      observe: ({ stderr }) => stderr.includes('TICK_COMPLETE') && stderr.includes('HELD_UNAVAILABLE'),
+    });
 
     assert.ok(
       fixture.calls.usdgFrozenObservations.length >= 2,
@@ -174,7 +178,10 @@ test(
     // Restart the same durable state while the freeze fixture stays permanently flipped (every
     // read after the first is frozen; the fixture's counter is never reset). The refusal must
     // persist rather than being a one-tick fluke.
-    const restart = await runProductionWindow(binPath, env, WINDOW_MS);
+    const restart = await runProductionUntil(binPath, env, {
+      deadlineMs: FREEZE_DEADLINE_MS,
+      observe: ({ stderr }) => stderr.includes('TICK_COMPLETE') && stderr.includes('HELD_UNAVAILABLE'),
+    });
     // An already-held cycle is reported as held on recovery without re-running the mutation gate
     // (there is nothing left to refuse a second time); the persisted refusal itself is the proof,
     // read from the tick's own reported status rather than from a re-thrown canary error.

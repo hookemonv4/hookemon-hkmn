@@ -32,11 +32,11 @@ import {
   activateTwoPackPolicy, buildProductionEnv, createStandingAuthorityProducer,
   eligibilitySnapshotFixture, fixtureServer, isolatedSource, observabilityConfig,
   productionChildSigner, readSignerInvocations, repointCopiedDeploymentIdentity,
-  runProductionWindow,
+  runProductionUntil, runProductionWindow,
 } from './fixtures/launch-failure-harness.mjs';
 
 const POSITIVE_WINDOW_MS = Number(process.env.HKMN_AUTHORITY_WINDOW_MS ?? 15000);
-const FREEZE_WINDOW_MS = Number(process.env.HKMN_FREEZE_AUTHORITY_WINDOW_MS ?? 8000);
+const FREEZE_DEADLINE_MS = Number(process.env.HKMN_FREEZE_DEADLINE_MS ?? 30000);
 
 /**
  * Core barrier engine shared by both tests below: read-only-peeks the producer's own committed-state
@@ -214,7 +214,7 @@ test(
 
 test(
   'I-authority-freeze-boundary freeze holds the cycle on exactly USDG_FROZEN, with real authority verified available and unused',
-  { timeout: (FREEZE_WINDOW_MS * 2) + 60000 },
+  { timeout: (FREEZE_DEADLINE_MS * 2) + 60000 },
   async t => {
     const directory = await mkdtemp(join(tmpdir(), 'hookemon-authority-freeze-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -238,7 +238,10 @@ test(
       })),
     });
 
-    const run = await runProductionWindow(binPath, env, FREEZE_WINDOW_MS);
+    const run = await runProductionUntil(binPath, env, {
+      deadlineMs: FREEZE_DEADLINE_MS,
+      observe: ({ stderr }) => stderr.includes('TICK_COMPLETE') && stderr.includes('HELD_UNAVAILABLE'),
+    });
 
     // Both real observations occurred (unchanged from launch-failure-matrix.test.mjs's own case).
     assert.ok(fixture.calls.usdgFrozenObservations.length >= 2, `the real freeze reader must be observed at least twice; observations=${JSON.stringify(fixture.calls.usdgFrozenObservations)}`);
@@ -271,7 +274,10 @@ test(
     // captured state is reused for every read past the second, including across restart): the hold
     // must persist, read through a fresh repository handle, not the pre-restart one, whose in-memory
     // caches only reflect the earlier snapshot.
-    const restart = await runProductionWindow(binPath, env, FREEZE_WINDOW_MS);
+    const restart = await runProductionUntil(binPath, env, {
+      deadlineMs: FREEZE_DEADLINE_MS,
+      observe: ({ stderr }) => stderr.includes('TICK_COMPLETE') && stderr.includes('HELD_UNAVAILABLE'),
+    });
     assert.match(restart.stderr, /HELD_UNAVAILABLE/, `the restart's own tick diagnostics must report the persisted hold; run=${JSON.stringify(restart)}`);
     const repositoryAfterRestart = await openIsolatedRepository(root, directory);
     assert.deepEqual(await repositoryAfterRestart.listKnownCycleIds(), cycleIds, `restart must not admit a second cycle while the freeze holds; ${await diagnostics(repositoryAfterRestart)}`);
@@ -285,7 +291,7 @@ test(
 
 test(
   'I-authority-freeze-counterfactual-control the same publish-and-verify barrier, released healthy, actually signs the same prepared claim',
-  { timeout: FREEZE_WINDOW_MS + 60000 },
+  { timeout: FREEZE_DEADLINE_MS + 60000 },
   async t => {
     const directory = await mkdtemp(join(tmpdir(), 'hookemon-authority-counterfactual-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -298,7 +304,17 @@ test(
     operationsEvm = signer.evmAccount;
     operationsSolana = signer.solanaAccount;
 
-    const run = await runProductionWindow(binPath, env, FREEZE_WINDOW_MS);
+    const run = await runProductionUntil(binPath, env, {
+      deadlineMs: FREEZE_DEADLINE_MS,
+      observe: async ({ stderr }) => {
+        if (!/TICK_(?:COMPLETE|FAILED)/.test(stderr) || getCaptured() === null || fixture.calls.evmBroadcasts === 0) return false;
+        const repository = await openIsolatedRepository(root, directory);
+        const cycleIds = await repository.listKnownCycleIds();
+        if (cycleIds.length !== 1) return false;
+        const cycle = await repository.describeCycle(cycleIds[0]);
+        return cycle.stages.get(getCaptured().prepared[0].stage)?.status === 'COMPLETE';
+      },
+    });
 
     const diagnostics = async repository => JSON.stringify({
       calls: fixture.calls, captured: getCaptured(), run,
