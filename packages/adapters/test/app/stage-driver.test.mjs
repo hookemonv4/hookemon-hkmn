@@ -3975,21 +3975,49 @@ function returnSignOnlyRecoveryFake(attempts) {
   };
 }
 
+// Return's own custody-v2 writer always obtains a real finalized public/archive/public-recheck
+// observation for a genuinely new leg -- `returnSignOnlyRobinhoodClient` below supplies it once,
+// so these sign-only lease-fencing fixtures no longer run with a null Robinhood client.
+const RETURN_SIGN_ONLY_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+
+function returnSignOnlyRobinhoodClient() {
+  return {
+    client: {
+      async getBlock() {
+        return { number: 100n, hash: `0x${'f'.repeat(64)}`, timestamp: 1_700_000_000n };
+      },
+    },
+    historicalEvidenceClient: {
+      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+        return { value: 0n, blockNumber, blockHash };
+      },
+    },
+  };
+}
+
 function returnSignOnlyChainRepository(proceeds, solanaMint) {
   const attempts = new Map();
   let relayLeg = null;
   const reservations = [];
+  const returnLegLedgerKeys = new Map();
+  let evmLedger = null;
   const signOnly = returnSignOnlyRecoveryFake(attempts);
   return {
     get attempts() { return attempts; },
     async describeCycle() {
+      const custodyLedgers = new Map([['ledger', {
+        chainId: '792703809', assetId: solanaMint, decimals: 6, buybackProceeds: proceeds, returnInput: '0',
+      }]]);
+      if (evmLedger !== null) custodyLedgers.set(`${evmLedger.chainId} ${evmLedger.assetId}`, evmLedger);
       return {
-        custodyLedgers: new Map([['ledger', {
-          chainId: '792703809', assetId: solanaMint, decimals: 6, buybackProceeds: proceeds, returnInput: '0',
-        }]]),
+        custodyLedgers,
         chainAttempts: new Map(attempts),
         relayLegs: relayLeg === null ? new Map() : new Map([[relayLeg.relayRequestId, relayLeg]]),
+        returnLegLedgerKeys: new Map(returnLegLedgerKeys),
       };
+    },
+    async recordCustodyLedger(_cycleId, ledgerValue) {
+      evmLedger = structuredClone(ledgerValue);
     },
     // Return is a chain-journal stage: it never touches the generic write-ahead provider-attempt
     // store this driver also requires at construction. `readOperationalStageAttempt` genuinely runs
@@ -4023,8 +4051,10 @@ function returnSignOnlyChainRepository(proceeds, solanaMint) {
     async recordFinality() {
       throw new Error('sign-only lease-fencing test must never reach finality');
     },
-    async recordRelayLeg(_cycleId, leg) {
+    async recordReturnRelayLegExpectation(_cycleId, leg, ledgerValue) {
       if (relayLeg === null) relayLeg = structuredClone(leg);
+      evmLedger = structuredClone(ledgerValue);
+      returnLegLedgerKeys.set(relayLeg.relayRequestId, `${evmLedger.chainId} ${evmLedger.assetId}`);
       return structuredClone(relayLeg);
     },
     async recordRelayLegSource() {
@@ -4150,7 +4180,7 @@ test('the real built-in return handler receives a lease-fenced sign-only recover
   const adapters = {
     collectorCrypt: null,
     relay,
-    robinhood: { client: null },
+    robinhood: returnSignOnlyRobinhoodClient(),
     solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
   };
 
@@ -4227,7 +4257,7 @@ test('a plain clone of the real owned Keychain client is never recognized as own
   const adapters = {
     collectorCrypt: null,
     relay,
-    robinhood: { client: null },
+    robinhood: returnSignOnlyRobinhoodClient(),
     solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
   };
 
@@ -4290,7 +4320,7 @@ test('a lease lost while the standing-authority guard await is genuinely suspend
   const adapters = {
     collectorCrypt: null,
     relay,
-    robinhood: { client: null },
+    robinhood: returnSignOnlyRobinhoodClient(),
     solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
   };
 

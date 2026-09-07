@@ -81,6 +81,14 @@ record.
   a block timestamp inside the persisted settlement window. Other finalized transfer observations
   are retained only for their named terminal hold. Each source or destination hash reserves
   globally in the same durable attribution or settlement path before custody is attributed.
+- A return leg's destination-side custody row is the canonical CAIP EVM USDG row (ADR-0026), built
+  only from `MoneyConfigurationV1.assets.usdg`, never from the leg's own raw destination fields. The
+  unsigned `RECORDED` leg and that row's newly populated `expectedCycleAsset` are written together
+  through the repository's `recordReturnRelayLegExpectation`, before nonce reservation or signing. A
+  legacy raw-identity row for the same asset — alone, or coexisting with a canonical row — refuses
+  before that write. A row that does not yet exist, or exists only as a v1 row, is (re)written with a
+  fresh finalized `CustodyBalanceObservationV1` first; an existing canonical v2 row is reused exactly
+  as recorded, so a resumed leg never re-observes the balance.
 
 ## Invariants
 
@@ -185,6 +193,11 @@ record.
   only after the exact `ReturnLegDestinationProofV1` writes `SETTLED`, its custody ledger, and the
   destination-hash reservation in the same repository settlement append. A wrong amount, late
   receipt, or wrong token or recipient writes its named terminal hold instead.
+- Before trusting a durably `SETTLED` return leg's cached success, the stage proves its credited
+  custody row is exactly the one row that leg is attributed to (its durable canonical association,
+  or its own raw-identity row for a leg settled before this migration): a distinct row at the other
+  identity coexisting alongside it, or no row at all, requires operator recovery rather than being
+  silently trusted or re-derived from the leg's raw identity.
 
 ## State transitions
 

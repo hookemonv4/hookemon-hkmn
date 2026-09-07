@@ -22,7 +22,9 @@ import {
   assertReturnLegDestinationProof,
   createPreparedChainTransactionAttempt,
   createRecordedRelayLeg,
+  CUSTODY_LEDGER_BUCKETS,
 } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
 import {
   createCanonicalTransactionPolicy,
   createTransactionPolicy,
@@ -398,7 +400,7 @@ function assertReturnMutationRepository(cycleRepository) {
     'prepareChainTransactionAttempt',
     'recordSignedTransaction',
     'recordBroadcast',
-    'recordRelayLeg',
+    'recordReturnRelayLegExpectation',
     'recordRelayLegSource',
     'reserveWalletNonce',
     'assertWalletNonce',
@@ -481,6 +483,130 @@ function returnRelayLeg(context, request) {
       maxSettlementWindowSeconds: request.maxSettlementWindowSeconds,
     },
   });
+}
+
+/**
+ * ADR-0026 / interfaces.json revision 67: the canonical identity for the EVM USDG custody row,
+ * built only from the already-validated `MoneyConfigurationV1.assets.usdg` -- exactly the formula
+ * `claim-process.mjs#claimCustodyAsset` and `payout.mjs#canonicalEvmUsdgCustodyIdentity` already
+ * apply -- never from the leg's own raw destination fields.
+ */
+function returnCustodyAsset(money) {
+  const chainId = `eip155:${money.assets.usdg.chainId}`;
+  return Object.freeze({
+    chainId,
+    assetId: `${chainId}/erc20:${money.assets.usdg.assetId.toLowerCase()}`,
+    decimals: money.assets.usdg.decimals,
+  });
+}
+
+function returnCustodyLedgerKey(asset) {
+  return `${asset.chainId} ${asset.assetId}`;
+}
+
+/**
+ * The legacy, pre-canonical row identity for this same configured EVM USDG asset: the leg's own
+ * raw `(chainId, address)` pair, the same raw shape `returnSettlementCustodyLedger` falls back to
+ * for a leg with no durable canonical association (ADR-0026).
+ */
+function legacyRawReturnCustodyKey(leg) {
+  return `${leg.destinationChainId} ${leg.destinationAssetId}`;
+}
+
+/**
+ * Reuses the reviewed public-finalized -> distinct-archive-at-height/hash -> public-recheck
+ * `CustodyBalanceObservationV1` producer, pinned to the canonical return destination identity and
+ * the configured Operations account -- never a supplied balance callback or a candidate row.
+ */
+async function observeReturnCustodyBalance({ adapters, asset, account }) {
+  const observeBalance = createEvmCustodyBalanceObservationReader({
+    publicClient: adapters?.robinhood?.client ?? null,
+    archiveClient: adapters?.robinhood?.historicalEvidenceClient ?? null,
+    identity: { chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals, account },
+  });
+  return observeBalance();
+}
+
+function returnCarriedCustodyBuckets(existing) {
+  return Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [bucket, existing?.[bucket] ?? '0']));
+}
+
+const RETURN_LEG_IDENTITY_FIELDS = Object.freeze([
+  'schema', 'cycleId', 'direction', 'relayRequestId', 'quoteDigest',
+  'sourceChainId', 'sourceAssetId', 'sourceDecimals', 'sourceAmountAtomic',
+  'destinationChainId', 'destinationAssetId', 'destinationDecimals', 'destinationAmountAtomic',
+  'returnAttribution',
+]);
+
+function returnLegIdentity(leg) {
+  return Object.fromEntries(RETURN_LEG_IDENTITY_FIELDS.map(field => [field, leg[field]]));
+}
+
+/**
+ * True when a different, already-recorded return leg already holds this same destination row's
+ * singular `expectedCycleAsset` unresolved (ADR-0026). Checked before any observation or write --
+ * `leg` itself is known not to be durably recorded yet (the caller only reaches this function for a
+ * genuinely new leg), so a non-null existing expectation can only belong to a different leg.
+ */
+function hasConflictingUnresolvedReturnExpectation(existing) {
+  return existing?.schema === 'hookemon.custody-ledger.v2' && existing.expectedCycleAsset !== null;
+}
+
+/**
+ * Records the unsigned RECORDED return leg and its custody row's newly populated singular
+ * `expectedCycleAsset` as one atomic journal entry through `recordReturnRelayLegExpectation`
+ * (ADR-0026). A legacy raw-identity USDG row for this asset -- alone or alongside a canonical row
+ * -- or a different leg's already-unresolved expectation on this same row is refused before any
+ * observation or write, leg creation, nonce reservation, signing, or broadcast -- the row and
+ * journal are left exactly as they were. Called only for a genuinely new leg (the caller never
+ * invokes this again once the leg already exists -- `sourceTxHash`/`state` legitimately advance
+ * afterward, so replaying this same atomic call against an advanced leg would wrongly look like
+ * conflicting evidence): a fresh, non-null observation is always obtained, regardless of whether
+ * the destination row already exists as v1, v2, or not at all -- every existing bucket is carried
+ * forward unchanged. `context.assertLease` is rechecked immediately after each awaited durable step
+ * -- the observation's own multi-RPC round trip, then the custody refresh write -- so a lease lost
+ * during either await reaches zero further durable calls.
+ */
+async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, configured, money, adapters, context }) {
+  const asset = returnCustodyAsset(money);
+  const canonicalKey = returnCustodyLedgerKey(asset);
+  const rawKey = legacyRawReturnCustodyKey(leg);
+  if (rawKey !== canonicalKey && (cycle?.custodyLedgers?.get?.(rawKey) ?? null) !== null) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_LEGACY_RAW_CUSTODY_PREDECESSOR',
+      'a legacy raw-identity USDG custody row exists for this asset, an unresolved raw/canonical '
+      + 'identity conflict; resolve it before recording a new return leg expectation',
+    );
+  }
+  const existing = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  if (hasConflictingUnresolvedReturnExpectation(existing)) {
+    throw new Error('cycle-repository recordReturnRelayLegExpectation: an unresolved return leg for this destination already exists');
+  }
+  if (typeof cycleRepository?.recordCustodyLedger !== 'function' && existing !== null) {
+    throw new Error('return requires cycleRepository.recordCustodyLedger to refresh an existing custody row');
+  }
+  const expectedCycleAsset = Object.freeze({
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    amountAtomic: leg.destinationAmountAtomic,
+  });
+  const observation = await observeReturnCustodyBalance({ adapters, asset, account: configured.evm.toLowerCase() });
+  context?.assertLease?.();
+  const refreshed = Object.freeze({
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId: leg.cycleId,
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    ...returnCarriedCustodyBuckets(existing),
+    verifiedCurrentBalance: observation,
+    expectedCycleAsset: null,
+  });
+  if (existing !== null) await cycleRepository.recordCustodyLedger(leg.cycleId, refreshed);
+  context?.assertLease?.();
+  const ledger = Object.freeze({ ...refreshed, expectedCycleAsset });
+  return cycleRepository.recordReturnRelayLegExpectation(leg.cycleId, leg, ledger);
 }
 
 function assertReturnRequest({ request, context, cycle, configured, money }) {
@@ -785,7 +911,23 @@ export async function mutateReturn({
   const cycle = await cycleRepository.describeCycle(context.cycleId);
   assertReturnRequest({ request, context, cycle, configured, money });
   assertQuoteUsable({ quote: request.intent, nowMs: now() });
-  await cycleRepository.recordRelayLeg(context.cycleId, returnRelayLeg(context, request));
+  const candidateLeg = returnRelayLeg(context, request);
+  const existingLeg = cycle?.relayLegs?.get?.(candidateLeg.relayRequestId) ?? null;
+  if (existingLeg === null) {
+    // A genuinely new leg: the atomic custody-v2 creator runs exactly once, here, before any
+    // nonce reservation or signing. `sourceTxHash`/`state` only ever advance after this point, so
+    // this call is never repeated against the same relayRequestId.
+    await recordReturnCustodyExpectation({ cycleRepository, cycle, leg: candidateLeg, configured, money, adapters, context });
+  } else {
+    if (canonicalDigest(returnLegIdentity(existingLeg)) !== canonicalDigest(returnLegIdentity(candidateLeg))) {
+      throw new Error('return Relay request id already has different durable leg evidence');
+    }
+    // A resume of an already-durable leg: prove its canonical association and open expectation
+    // before any nonce reservation or signing resumes, rather than trusting matching request
+    // identity alone -- a leg durably created only through the legacy bare `recordRelayLeg` would
+    // otherwise reach new effects here with no association at all.
+    assertReturnCustodyExpectationOpenForLeg(cycle, existingLeg, money);
+  }
   const reservation = await reserveReturnWalletNonce({ cycleRepository, configured, context });
   const attempt = await readOrPrepareReturnAttempt({ cycleRepository, context, request });
   let { record } = attempt;
@@ -991,6 +1133,72 @@ export async function readReturnLegDestinationProof({ client, pointer, leg, sour
 }
 
 /**
+ * Before trusting a return leg's settlement -- whether about to credit it for the first time or
+ * returning a durably SETTLED leg's cached success -- proves the leg has an exact durable canonical
+ * custody association (ADR-0026), never derived or accepted from its raw destination identity. A
+ * leg with no association (including one settled before this migration, or one this repository
+ * only ever recorded through the legacy bare `recordRelayLeg`) refuses rather than being trusted
+ * from its raw identity; a legacy raw-identity row for this asset -- present at all, whether or not
+ * it is where the leg's own credit landed -- also refuses, since only the canonical association is
+ * ever a legitimate identity going forward. Preserves every historical row and leg byte; recovery
+ * is an explicit owner decision, never a silent migration performed here.
+ */
+function assertReturnCanonicalCustodyAssociation(cycle, leg, money) {
+  const asset = returnCustodyAsset(money);
+  const canonicalKey = returnCustodyLedgerKey(asset);
+  const rawKey = legacyRawReturnCustodyKey(leg);
+  const associatedKey = cycle?.returnLegLedgerKeys?.get?.(leg.relayRequestId) ?? null;
+  if (associatedKey !== canonicalKey) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_ASSOCIATION_MISSING',
+      'the return leg has no durable canonical custody ledger association and cannot be trusted from its raw identity',
+    );
+  }
+  const row = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  if (row === null || row.schema !== 'hookemon.custody-ledger.v2'
+    || row.chainId !== asset.chainId || row.assetId !== asset.assetId || row.decimals !== asset.decimals) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_ASSOCIATION_MISSING',
+      "the return leg's durable canonical association does not resolve to a matching v2 custody ledger row",
+    );
+  }
+  if (rawKey !== canonicalKey && (cycle?.custodyLedgers?.get?.(rawKey) ?? null) !== null) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_IDENTITY_SPLIT',
+      'a legacy raw-identity USDG custody row exists for this asset alongside the return leg\'s canonical association and requires operator recovery',
+    );
+  }
+}
+
+/**
+ * For a resumed RECORDED leg only, on top of the canonical association above: proves the row's
+ * still-open `expectedCycleAsset` is this exact leg's own unresolved destination obligation --
+ * never a different leg's, and never one already cleared by a settlement this process has not yet
+ * observed. `mutateReturn` calls this before any nonce reservation or signing resumes on an
+ * already-durable leg, so a leg that only ever reached durable state through the legacy bare
+ * `recordRelayLeg` (identical immutable request identity, no association) refuses here exactly as
+ * a genuinely new leg would, instead of quietly reaching new effects on resume.
+ */
+function assertReturnCustodyExpectationOpenForLeg(cycle, leg, money) {
+  assertReturnCanonicalCustodyAssociation(cycle, leg, money);
+  const asset = returnCustodyAsset(money);
+  const canonicalKey = returnCustodyLedgerKey(asset);
+  const row = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  const expected = {
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    amountAtomic: leg.destinationAmountAtomic,
+  };
+  if (canonicalDigest(row?.expectedCycleAsset ?? null) !== canonicalDigest(expected)) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_ASSOCIATION_MISSING',
+      "the return leg's durable custody row does not carry this leg's own unresolved expectation",
+    );
+  }
+}
+
+/**
  * Finalizes the source chain attempt only after this process's own finalized Solana RPC proof,
  * then binds an authenticated Relay hash pointer to a separately finalized EVM receipt proof.
  */
@@ -1025,10 +1233,18 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
   const leg = legs[0];
   const records = stateValues(cycle?.chainAttempts).filter(record => record?.attempt?.stage === 'return');
   if (leg.state === 'SETTLED') {
+    const configured = assertReturnConfiguration(config);
+    const money = assertReturnMoneyConfiguration(config, configured);
+    assertReturnCanonicalCustodyAssociation(cycle, leg, money);
     return Object.freeze({
       schema: 'hookemon.return-relay-settlement-evidence.v1',
       relayLeg: Object.freeze(structuredClone(leg)),
     });
+  }
+  if (leg.state === 'RECORDED') {
+    const configured = assertReturnConfiguration(config);
+    const money = assertReturnMoneyConfiguration(config, configured);
+    assertReturnCanonicalCustodyAssociation(cycle, leg, money);
   }
   if (leg.state !== 'RECORDED') {
     if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && records.length === 1 && records[0].attempt?.state === 'FINALIZED') {

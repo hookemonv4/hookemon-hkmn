@@ -273,6 +273,8 @@ function returnIntent() {
     requestId: quoteFixture.requestId,
     orderId: quoteFixture.protocol.v2.orderId,
     direction: 'RETURN',
+    tradeType: 'EXACT_INPUT',
+    quoteDigest: `sha256:${'7'.repeat(64)}`,
     originChainId: 792703809,
     destinationChainId: 4663,
     originAssetId: SOLANA_MINT,
@@ -381,9 +383,33 @@ function returnReconciliationRepository({ sourceTransactionHash, relayRequestId,
     get walletReleases() { return structuredClone(walletReleases); },
     get settleCalls() { return settleCalls; },
     async describeCycle() {
+      const canonicalKey = `eip155:4663 eip155:4663/erc20:${leg.destinationAssetId}`;
       return {
         relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
-        chainAttempts: new Map([[`return\u0000${record.attempt.requestDigest}`, structuredClone(record)]]),
+        chainAttempts: new Map([[`return ${record.attempt.requestDigest}`, structuredClone(record)]]),
+        returnLegLedgerKeys: new Map([[relayRequestId, canonicalKey]]),
+        custodyLedgers: new Map([[canonicalKey, {
+          schema: 'hookemon.custody-ledger.v2',
+          cycleId: leg.cycleId,
+          chainId: 'eip155:4663',
+          assetId: `eip155:4663/erc20:${leg.destinationAssetId}`,
+          decimals: leg.destinationDecimals,
+          claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
+          returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
+          heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
+          verifiedCurrentBalance: {
+            schema: 'hookemon.custody-balance-observation.v1',
+            account: EVM_ACCOUNT.toLowerCase(),
+            balance: { chainId: 'eip155:4663', assetId: `eip155:4663/erc20:${leg.destinationAssetId}`, decimals: leg.destinationDecimals, amountAtomic: '0' },
+            finality: { height: '1', hash: `0x${'a'.repeat(64)}`, timestampUnixSeconds: '1700000000' },
+          },
+          expectedCycleAsset: {
+            chainId: 'eip155:4663',
+            assetId: `eip155:4663/erc20:${leg.destinationAssetId}`,
+            decimals: leg.destinationDecimals,
+            amountAtomic: leg.destinationAmountAtomic,
+          },
+        }]]),
       };
     },
     async recordBroadcast() {
@@ -430,7 +456,7 @@ test('reconcileLiveReturn does not inspect a destination receipt without an auth
         }),
       },
     },
-    config: { accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' } },
+    config: { accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' }, moneyConfiguration: moneyConfiguration() },
     cycleRepository,
     context: {
       cycleId: 'cycle-return-reconcile',
@@ -475,7 +501,7 @@ test('reconcileLiveReturn retains the wallet nonce reservation while source fina
         },
       },
     },
-    config: { accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' } },
+    config: { accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' }, moneyConfiguration: moneyConfiguration() },
     cycleRepository,
     context: {
       cycleId: 'cycle-return-reconcile',
@@ -556,24 +582,59 @@ function priorityFeeReturnPlan({ owner, source, destination, amountAtomic }) {
   };
 }
 
-function returnChainRepository({ operator, proceeds = '17' }) {
+// A pre-seeded canonical v2 EVM USDG custody row, matching every return fixture's destination
+// asset. Return's own custody-v2 writer (`recordReturnCustodyExpectation`) reuses an existing v2
+// row exactly as recorded rather than re-observing it, so these signing/recovery-focused fixtures
+// never need a `robinhood` balance-observation adapter at all.
+// Return's own custody-v2 writer (`recordReturnCustodyExpectation`) always obtains a real
+// finalized public/archive/public-recheck observation for a genuinely new leg (never merely
+// because a destination row happens to already be v2); it only ever skips that read when resuming
+// the exact same leg already durably RECORDED. `returnRobinhoodObservationClient` below supplies
+// that real observation once, then these signing/recovery-focused fixtures resume the same leg
+// with an untouchable Robinhood adapter to prove no re-observation happens on resume.
+function returnRobinhoodObservationClient() {
+  return {
+    client: {
+      async getBlock() {
+        return { number: 100n, hash: `0x${'f'.repeat(64)}`, timestamp: 1_700_000_000n };
+      },
+    },
+    historicalEvidenceClient: {
+      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+        return { value: 0n, blockNumber, blockHash };
+      },
+    },
+  };
+}
+
+const UNTOUCHABLE_RETURN_ROBINHOOD = new Proxy({}, { get() { throw new Error('a resumed return leg must never re-observe the custody balance'); } });
+
+function returnChainRepository({ operator, proceeds = '17', cycleId = 'cycle-return-durable' }) {
   const attempts = new Map();
   const recoveryContexts = new Map();
   const reservations = [];
   const walletReleases = [];
   let relayLeg = null;
+  const returnLegLedgerKeys = new Map();
   const ledger = custodyLedger({ proceeds, committed: '0' });
+  let evmLedger = null;
   return {
     get attempts() { return attempts; },
     get relayLeg() { return relayLeg; },
     get reservations() { return structuredClone(reservations); },
     get walletReleases() { return structuredClone(walletReleases); },
     async describeCycle() {
+      const custodyLedgers = new Map([[`${ledger.chainId} ${ledger.assetId}`, ledger]]);
+      if (evmLedger !== null) custodyLedgers.set(`${evmLedger.chainId} ${evmLedger.assetId}`, evmLedger);
       return {
-        custodyLedgers: new Map([[`${ledger.chainId}\u0000${ledger.assetId}`, ledger]]),
+        custodyLedgers,
         chainAttempts: new Map(attempts),
         relayLegs: relayLeg === null ? new Map() : new Map([[relayLeg.relayRequestId, relayLeg]]),
+        returnLegLedgerKeys: new Map(returnLegLedgerKeys),
       };
+    },
+    async recordCustodyLedger(_cycleId, ledgerValue) {
+      evmLedger = structuredClone(ledgerValue);
     },
     async readChainTransactionAttempt(_cycleId, stage, requestDigest) {
       return attempts.get(`${stage}\u0000${requestDigest}`) ?? null;
@@ -605,8 +666,10 @@ function returnChainRepository({ operator, proceeds = '17' }) {
       attempts.set(key, record);
       return record;
     },
-    async recordRelayLeg(_cycleId, leg) {
+    async recordReturnRelayLegExpectation(_cycleId, leg, ledgerValue) {
       relayLeg ??= structuredClone(leg);
+      evmLedger = structuredClone(ledgerValue);
+      returnLegLedgerKeys.set(relayLeg.relayRequestId, `${evmLedger.chainId} ${evmLedger.assetId}`);
       return structuredClone(relayLeg);
     },
     async recordRelayLegSource(_cycleId, requestId, sourceTxHash) {
@@ -686,6 +749,7 @@ function returnReconciliationConfig() {
   return {
     accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
+    moneyConfiguration: moneyConfiguration(),
   };
 }
 
@@ -795,7 +859,7 @@ async function seededReturnReconciliation(t, {
     quotedDestinationMinimumAmount: '16',
     deadlineUnixSeconds: 1800000000,
   };
-  const recorded = await cycleRepository.recordRelayLeg(cycleId, {
+  const recorded = await cycleRepository.recordReturnRelayLegExpectation(cycleId, {
     schema: 'hookemon.relay-leg.v1',
     cycleId,
     direction: 'return',
@@ -820,6 +884,32 @@ async function seededReturnReconciliation(t, {
       intent,
       requestCreatedAtUnixSeconds,
       maxSettlementWindowSeconds,
+    },
+  }, {
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId,
+    chainId: 'eip155:4663',
+    assetId: 'eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    decimals: 6,
+    claimed: '0', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
+    returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
+    heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
+    verifiedCurrentBalance: {
+      schema: 'hookemon.custody-balance-observation.v1',
+      account: EVM_ACCOUNT.toLowerCase(),
+      balance: {
+        chainId: 'eip155:4663',
+        assetId: 'eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+        decimals: 6,
+        amountAtomic: '0',
+      },
+      finality: { height: '1', hash: `0x${'a'.repeat(64)}`, timestampUnixSeconds: '1700000000' },
+    },
+    expectedCycleAsset: {
+      chainId: 'eip155:4663',
+      assetId: 'eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+      decimals: 6,
+      amountAtomic: '16',
     },
   });
   const sourceTxHash = `return-source-${cycleId}`;
@@ -886,7 +976,9 @@ test('reconcileLiveReturn settles an exact terminal Relay pointer through a fina
   const state = await reopened.describeCycle(fixture.cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.relayLegs.get(fixture.leg.relayRequestId).state, 'SETTLED');
-  assert.equal(state.custodyLedgers.get('4663\u00000x5fc5360d0400a0fd4f2af552add042d716f1d168').returnReceived, '16');
+  const canonicalRow = state.custodyLedgers.get('eip155:4663 eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168');
+  assert.equal(canonicalRow.returnReceived, '16');
+  assert.equal(canonicalRow.expectedCycleAsset, null);
   assert.equal((await reopened.readChainTransactionAttempt(fixture.cycleId, 'return', fixture.requestDigest)).attempt.state, 'FINALIZED');
 });
 
@@ -1014,7 +1106,10 @@ test('mutateReturn preserves the configured lamport reserve after the maximum pr
   await assert.rejects(
     () => mutateReturn({
       liveMode: true,
-      adapters: { solana: { client: returnSolanaClient(blockhash, { blockHeight: 10, balance: 1_001 }) } },
+      adapters: {
+        solana: { client: returnSolanaClient(blockhash, { blockHeight: 10, balance: 1_001 }) },
+        robinhood: returnRobinhoodObservationClient(),
+      },
       signerClient: { solana: { async sign() { signCalls += 1; throw new Error('signer must not be reached'); }, async broadcast() {} } },
       config: {
         chainId: 4663,
@@ -1102,11 +1197,14 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
           throw new Error('broadcast interrupted after durable signature');
         }
         assert.equal(signedTxBase64, persistedBytes);
-        return { transactionHash: sourceTransactionHash };
+        return { signature: sourceTransactionHash };
       },
     },
   };
-  const adapters = { solana: { client: returnSolanaClient(blockhash, rpcState) } };
+  const adapters = {
+    solana: { client: returnSolanaClient(blockhash, rpcState) },
+    robinhood: returnRobinhoodObservationClient(),
+  };
 
   await assert.rejects(
     () => mutateReturn({
@@ -1119,6 +1217,10 @@ test('mutateReturn records a Relay leg before signing, resumes signed bytes, and
   assert.equal(signCalls, 1);
   assert.equal(cycleRepository.relayLeg.state, 'RECORDED');
   assert.equal([...cycleRepository.attempts.values()][0].attempt.state, 'SIGNED');
+
+  // The leg is now durably RECORDED with its canonical association: every remaining call in this
+  // test resumes that exact same leg, so it must never re-observe the custody balance again.
+  adapters.robinhood = UNTOUCHABLE_RETURN_ROBINHOOD;
 
   rpcState.blockHeight = 101;
   await assert.rejects(
