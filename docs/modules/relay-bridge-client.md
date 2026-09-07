@@ -217,6 +217,19 @@ record.
   or its own raw-identity row for a leg settled before this migration): a distinct row at the other
   identity coexisting alongside it, or no row at all, requires operator recovery rather than being
   silently trusted or re-derived from the leg's raw identity.
+- The `hookemon.return-relay-settlement-evidence.v1` record `reconcileLiveReturn` returns for a
+  `SETTLED` leg carries the leg (`schema`, `relayLeg`) plus one payout-facing projection —
+  `finalized`, `destinationAccount`, `destinationAsset`, `destinationCreditAmount` — built the same
+  way whether the leg was just settled or is a later durable replay, so payout's `returnBinding`
+  digest never diverges between the two. `destinationCreditAmount` is always the leg's own
+  `netDeltaAtomic` (the repository-derived observed amount), never the leg's `destinationAmountAtomic`
+  (the Relay quote); `destinationAccount` is the leg's bound intent recipient and `destinationAsset`
+  its actual destination asset, each proven — cycle identity, source and destination finality,
+  recipient, and asset identity — before `finalized` is ever set `true`. The validated settlement
+  contract (`assertReturnLegAttribution` plus `returnRelayTerminalState`) requires the quote, the
+  recorded destination amount, and the observed amount to already agree for a leg to reach
+  `SETTLED`, so the two fields are numerically equal today; the correction is about provenance
+  (which field payout trusts), not a currently reachable numeric divergence.
 
 ## State transitions
 

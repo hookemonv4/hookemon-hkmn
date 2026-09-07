@@ -1303,6 +1303,46 @@ function assertReturnCustodyExpectationOpenForLeg(cycle, leg, money) {
 }
 
 /**
+ * The one payout-facing projection of a SETTLED return leg, built identically whether this is the
+ * first observed settlement or a later durable replay of the same leg -- so the returnBinding
+ * digest downstream (payout.mjs) never diverges between the two. Never trusts the leg's own
+ * `destinationAmountAtomic` as received proceeds -- that field is the Relay quote, not a receipt.
+ * The credited amount is always `netDeltaAtomic`, the repository-derived observed amount proven
+ * from the finalized destination receipt (ADR-0026 / cycle-repository settleRelayLeg). `finalized`
+ * is only ever true once every check below -- cycle, finality, recipient, and asset identity --
+ * has independently passed, never assumed from the leg's recorded `state` alone.
+ */
+function returnPayoutSettlementEvidence(leg, { configured, money, context }) {
+  if (leg.state !== 'SETTLED') {
+    throw new Error('return payout evidence requires a SETTLED relay leg');
+  }
+  if (leg.cycleId !== context.cycleId) {
+    throw new Error('return leg cycleId does not match the reconciling cycle');
+  }
+  if (!leg.finalizedAtSource || !leg.finalizedAtDestination) {
+    throw new Error('return leg is missing finalized source or destination evidence');
+  }
+  const recipient = leg.returnAttribution?.intent?.recipient;
+  if (typeof recipient !== 'string' || recipient.toLowerCase() !== configured.evm.toLowerCase()) {
+    throw new Error('return leg attributed recipient does not match the configured Operations EVM account');
+  }
+  if (leg.destinationChainId !== EVM_CHAIN_ID
+    || typeof leg.destinationAssetId !== 'string' || leg.destinationAssetId.toLowerCase() !== USDG_ADDRESS
+    || leg.destinationDecimals !== money.assets.usdg.decimals) {
+    throw new Error('return leg destination asset does not match the configured USDG identity');
+  }
+  const destinationCreditAmount = canonicalAmount(leg.netDeltaAtomic, 'return leg netDeltaAtomic');
+  return Object.freeze({
+    schema: 'hookemon.return-relay-settlement-evidence.v1',
+    finalized: true,
+    destinationAccount: recipient,
+    destinationAsset: leg.destinationAssetId,
+    destinationCreditAmount,
+    relayLeg: Object.freeze(structuredClone(leg)),
+  });
+}
+
+/**
  * Finalizes the source chain attempt only after this process's own finalized Solana RPC proof,
  * then binds an authenticated Relay hash pointer to a separately finalized EVM receipt proof.
  */
@@ -1376,10 +1416,7 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
     const configured = assertReturnConfiguration(config);
     const money = assertReturnMoneyConfiguration(config, configured);
     assertReturnCanonicalCustodyAssociation(cycle, leg, money);
-    return Object.freeze({
-      schema: 'hookemon.return-relay-settlement-evidence.v1',
-      relayLeg: Object.freeze(structuredClone(leg)),
-    });
+    return returnPayoutSettlementEvidence(leg, { configured, money, context });
   }
   if (leg.state === 'RECORDED') {
     const configured = assertReturnConfiguration(config);
@@ -1449,12 +1486,9 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
   const settled = await cycleRepository.settleRelayLeg(context.cycleId, leg.relayRequestId, {
     returnDestinationProof: proof,
   });
-  return settled.state === 'SETTLED'
-    ? Object.freeze({
-      schema: 'hookemon.return-relay-settlement-evidence.v1',
-      relayLeg: Object.freeze(structuredClone(settled)),
-    })
-    : null;
+  if (settled.state !== 'SETTLED') return null;
+  const money = assertReturnMoneyConfiguration(config, configured);
+  return returnPayoutSettlementEvidence(settled, { configured, money, context });
 }
 
 /** Retained only to fail closed for a removed Phase 2 custody route. */
