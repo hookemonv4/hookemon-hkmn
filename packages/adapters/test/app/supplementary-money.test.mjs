@@ -13,7 +13,6 @@ import { DIRECTIONS, RELAY_CONSTANTS } from '../../src/relay-client.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import { isDirectPayoutComplete } from '../../src/app/stages/payout.mjs';
 import {
-  mutateSupplementaryPayout,
   mutateSupplementaryReturn,
   prepareSupplementaryReturnRequest,
   reconcileSupplementaryReturn,
@@ -611,27 +610,37 @@ function payoutLifecycleConfig() {
   };
 }
 
-test('mutateSupplementaryPayout drives a return-broadcast settlement through the real direct-payout engine to COMPLETE', async () => {
+test('production supplementary payout preserves the return boundary and resumes after the durable broadcast checkpoint', async () => {
   const cycleId = 'cycle-supplementary-money-payout';
   const identity = settlementIdentity(cycleId);
-  const sourceSettlement = payoutSettlement(cycleId, 'RETURN_BROADCAST');
+  let sourceSettlement = payoutSettlement(cycleId, 'RETURN_BROADCAST');
   const durableBoundary = payoutReturnBoundary(identity);
+  let storedBoundary = durableBoundary;
+  let interruptCompletion = true;
   const records = new Map();
   const advances = [];
   const cycleRepository = {
+    async readStage(id, stage) { assert.equal(id, cycleId); assert.equal(stage, 'eligibility-snapshot'); return { status: 'COMPLETE', evidence: payoutEligibilityManifest(cycleId) }; },
     async readSupplementarySettlement(positionId) { assert.equal(positionId, identity.positionId); return sourceSettlement; },
     async readPagedPayoutState(id, stage) { return structuredClone(records.get(`${id} ${stage}`) ?? null); },
     async persistPagedPayoutState(id, stage, value) { records.set(`${id} ${stage}`, structuredClone(value)); },
-    async readSupplementarySettlementEvidence(positionId) { assert.equal(positionId, identity.positionId); return structuredClone(durableBoundary); },
-    async advanceSupplementarySettlement(positionId, input) { advances.push({ positionId, ...input }); return { ...sourceSettlement, state: input.nextState }; },
+    async readSupplementarySettlementEvidence(positionId) { assert.equal(positionId, identity.positionId); return structuredClone(storedBoundary); },
+    async advanceSupplementarySettlement(positionId, input) {
+      if (input.nextState === 'COMPLETE' && interruptCompletion) throw new Error('synthetic interruption before completion');
+      advances.push({ positionId, ...input });
+      sourceSettlement = { ...sourceSettlement, state: input.nextState };
+      storedBoundary = { state: input.nextState, evidenceDigest: digest(input.evidence), evidence: input.evidence, payoutSource: durableBoundary.payoutSource, returnBoundary: durableBoundary };
+      return sourceSettlement;
+    },
   };
   const client = payoutLifecycleRpc();
   const counter = { sign: 0 };
 
-  let state = await mutateSupplementaryPayout({
-    liveMode: true, adapters: { robinhood: { client } }, config: payoutLifecycleConfig(), signerClient: payoutLifecycleSigner(counter),
-    cycleRepository, context: { positionId: identity.positionId, eligibilityManifest: payoutEligibilityManifest(cycleId), returnBoundary: durableBoundary },
+  const reconcile = () => createProductionSupplementaryStageHandlers({ assertCanary: async () => {} })[sourceSettlement.state].reconcile({
+    adapters: { robinhood: { client } }, config: payoutLifecycleConfig(), signerClient: payoutLifecycleSigner(counter),
+    cycleRepository, context: { cycleId, positionId: identity.positionId, stage: 'supplementary-payout' }, position: identity,
   });
+  let state = await reconcile();
   assert.equal(state.recipients.find(entry => entry.recipient === RECIPIENT_A).state, 'BROADCAST');
 
   client.finalize(state.recipients[0].txHash, {
@@ -639,23 +648,32 @@ test('mutateSupplementaryPayout drives a return-broadcast settlement through the
     logs: [{ address: TOKEN, topics: [ERC20_TRANSFER_TOPIC, addressTopic(PAYOUT_OPERATIONS), addressTopic(state.recipients[0].recipient)], data: `0x${BigInt(state.recipients[0].amount.amountAtomic).toString(16).padStart(64, '0')}`, logIndex: '0' }],
   });
   client.setNonce('1');
-  state = await mutateSupplementaryPayout({
-    liveMode: true, adapters: { robinhood: { client } }, config: payoutLifecycleConfig(), signerClient: payoutLifecycleSigner(counter),
-    cycleRepository, context: { positionId: identity.positionId, eligibilityManifest: payoutEligibilityManifest(cycleId), returnBoundary: durableBoundary },
-  });
+  state = await reconcile();
   assert.equal(state.recipients.find(entry => entry.recipient === RECIPIENT_B).state, 'BROADCAST');
 
   client.finalize(state.recipients[1].txHash, {
     transactionHash: state.recipients[1].txHash, blockNumber: 100n, blockHash: `0x${'9'.repeat(64)}`, status: 'success',
     logs: [{ address: TOKEN, topics: [ERC20_TRANSFER_TOPIC, addressTopic(PAYOUT_OPERATIONS), addressTopic(state.recipients[1].recipient)], data: `0x${BigInt(state.recipients[1].amount.amountAtomic).toString(16).padStart(64, '0')}`, logIndex: '0' }],
   });
-  state = await mutateSupplementaryPayout({
-    liveMode: true, adapters: { robinhood: { client } }, config: payoutLifecycleConfig(), signerClient: payoutLifecycleSigner(counter),
-    cycleRepository, context: { positionId: identity.positionId, eligibilityManifest: payoutEligibilityManifest(cycleId), returnBoundary: durableBoundary },
-  });
+  await assert.rejects(reconcile, /synthetic interruption before completion/);
+  assert.equal(sourceSettlement.state, 'PAYOUT_BROADCAST');
+  const signedAtCheckpoint = counter.sign;
+  const broadcastAtCheckpoint = counter.broadcasts.length;
+  const validBoundary = storedBoundary;
+  storedBoundary = { ...validBoundary, returnBoundary: { ...durableBoundary, evidenceDigest: `sha256:${'0'.repeat(64)}` } };
+  await assert.rejects(reconcile, /return boundary evidence digest/);
+  storedBoundary = { ...validBoundary, returnBoundary: { ...durableBoundary, extra: true } };
+  await assert.rejects(reconcile, /return boundary must use the exact schema/);
+  storedBoundary = validBoundary;
+  interruptCompletion = false;
+  state = await reconcile();
+  assert.equal(counter.sign, signedAtCheckpoint);
+  assert.equal(counter.broadcasts.length, broadcastAtCheckpoint);
 
   assert.equal(isDirectPayoutComplete(state), true);
   assert.deepEqual(state.recipients.map(entry => entry.state), ['FINALIZED', 'FINALIZED']);
+  assert.equal(state.recipients.reduce((sum, entry) => sum + BigInt(entry.amount.amountAtomic), 0n).toString(), durableBoundary.payoutSource.finalizedReturn.amountAtomic);
+  assert.ok(state.recipients.every(entry => BigInt(entry.amount.amountAtomic) > 0n));
   assert.equal(advances.length, 2);
   assert.equal(advances[0].nextState, 'PAYOUT_BROADCAST');
   assert.equal(advances[1].nextState, 'COMPLETE');

@@ -1063,7 +1063,9 @@ export function createProductionSupplementaryStageHandlers({ assertCanary }) {
         cycleRepository.readSupplementarySettlementEvidence(position.positionId),
         cycleRepository.readStage(position.cycleId, 'eligibility-snapshot'),
       ]);
-      if (boundary?.state !== 'RETURN_BROADCAST' || !boundary.evidence
+      const returnBoundary = boundary?.state === 'RETURN_BROADCAST' ? boundary
+        : boundary?.state === 'PAYOUT_BROADCAST' ? boundary.returnBoundary : null;
+      if (!returnBoundary
         || snapshot?.status !== 'COMPLETE' || !snapshot.evidence) {
         throw new Error('supplementary payout requires durable return and eligibility evidence');
       }
@@ -1073,7 +1075,7 @@ export function createProductionSupplementaryStageHandlers({ assertCanary }) {
         signerClient,
         config,
         cycleRepository,
-        context: { ...context, eligibilityManifest: snapshot.evidence, returnBoundary: boundary.evidence },
+        context: { ...context, eligibilityManifest: snapshot.evidence, returnBoundary },
       });
     },
   };

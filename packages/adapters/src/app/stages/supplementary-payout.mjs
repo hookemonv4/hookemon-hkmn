@@ -432,7 +432,7 @@ export function prepareSupplementaryPayoutRequest(value) {
   exactObject(value, ['settlement', 'eligibilityManifest', 'returnBoundary'], 'supplementary payout preparation');
   const { settlement, eligibilityManifest, returnBoundary } = value;
   const normalizedSettlement = assertSettlement(settlement);
-  if (normalizedSettlement.state !== 'RETURN_BROADCAST') {
+  if (!['RETURN_BROADCAST', 'PAYOUT_BROADCAST'].includes(normalizedSettlement.state)) {
     fail('supplementary payout requires a return-broadcast settlement');
   }
   if (digest(eligibilityManifest) !== normalizedSettlement.eligibilitySnapshotEvidenceDigest) {

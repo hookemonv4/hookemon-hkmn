@@ -326,3 +326,9 @@ boundary still authenticates the setup's private identity; a value-identical cop
 Its return handler forwards the existing opaque `preflightAuthority` unchanged to the return
 mutation helper. Missing authority retains frozen-interface validation; the branded fixture
 authority remains restricted to the Node test runner.
+
+The supplementary payout handler passes the complete durable return boundary, including its
+evidence digest and attributed payout source, alongside the original completed eligibility
+snapshot. After `PAYOUT_BROADCAST`, it reads the carried return boundary and resumes the same
+payout manifest without new signatures or transfers for finalized recipients. Both dispatch
+states retain exact boundary schema, snapshot, source, and digest validation.
