@@ -89,7 +89,11 @@ export function installCoinSpin(root = globalThis.document, browser = globalThis
     drag.time = event.timeStamp;
     paint();
   });
-  for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) listen(coin, event, release);
+  for (const event of ["pointerup", "pointercancel"]) listen(coin, event, release);
+  listen(coin, "lostpointercapture", (event) => {
+    // Touch capture can transfer from a face to this button; ignore its bubbling loss.
+    if (event.target === coin) release(event);
+  });
   listen(coin, "pointerleave", (event) => { if (drag && !drag.active) release(event); });
   listen(coin, "click", () => {
     if (suppressClick) { suppressClick = false; return; }

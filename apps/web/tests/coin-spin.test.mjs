@@ -97,3 +97,26 @@ test("reduced motion permits direct rotation without autoplay or inertia", () =>
   assert.equal(f.angle(), 45);
   f.cleanup();
 });
+
+
+test("touch capture transfer from a coin face preserves repeated drags", () => {
+  const f = fixture(true);
+  const face = {};
+  for (let turn = 0; turn < 3; turn++) {
+    f.coin.emit("pointerdown", { pointerType: "touch", target: face });
+    f.coin.emit("pointermove", { pointerType: "touch", clientX: 20, timeStamp: 20 });
+    // Implicit capture on the hit face transfers to the button and bubbles here.
+    f.coin.emit("lostpointercapture", { pointerType: "touch", target: face });
+    f.coin.emit("pointermove", { pointerType: "touch", clientX: 200, timeStamp: 100 });
+    assert.equal(f.angle(), ((turn + 1) * 180) % 360);
+    assert.equal(f.coin.hasPointerCapture(), true);
+    f.coin.emit("pointerup", { pointerType: "touch", timeStamp: 120 });
+    f.coin.emit("click");
+  }
+  assert.equal(f.frames.size, 0);
+  f.coin.emit("pointerdown", { pointerType: "touch" });
+  f.coin.emit("pointermove", { pointerType: "touch", clientX: 20, timeStamp: 20 });
+  f.coin.emit("lostpointercapture", { pointerType: "touch", target: f.coin });
+  assert.equal(f.coin.hasPointerCapture(), false);
+  f.cleanup();
+});
