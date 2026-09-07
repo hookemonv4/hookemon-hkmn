@@ -1,3 +1,8 @@
+import { createServer } from 'node:http';
+import { parseTransaction, recoverTransactionAddress } from 'viem';
+import { createIsolatedKeychainChildSetup } from '../../src/signing/collector-production-binding.mjs';
+import { createKeychainSignerClient } from '../../src/signing/keychain-signer.mjs';
+import { chainBroadcastTransports, createProcessExec } from '../../bin/hookemon-runner.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -2774,4 +2779,48 @@ test('assertFinalizedPayoutTransferEvidence rejects a fully-shaped foreign same-
     }),
     error => error instanceof DirectPayoutError && /wrong transfer amount/.test(error.message),
   );
+});
+
+
+test('direct payout uses the owned approved-only child and runner RPC transport', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-approved-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const child = await createIsolatedKeychainChildSetup({ directory });
+  let sends = 0;
+  const server = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const rpc = JSON.parse(body);
+    assert.equal(rpc.method, 'eth_sendRawTransaction');
+    const wire = rpc.params[0];
+    const tx = parseTransaction(wire);
+    assert.equal((await recoverTransactionAddress({ serializedTransaction: wire })).toLowerCase(), child.evmAddress);
+    assert.equal(tx.to.toLowerCase(), TOKEN);
+    assert.equal(tx.chainId, 4663);
+    assert.equal(tx.value ?? 0n, 0n);
+    assert.equal(tx.data, encodeFunctionData({ abi: ERC20_TRANSFER_ABI, functionName: 'transfer', args: [RECIPIENT_A, 9n] }));
+    sends += 1;
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: keccak256(wire) }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const transports = chainBroadcastTransports({ collectorCrypt: { productionBindingAuthority: 'synthetic-offline' }, robinhood: { rpcUrl: `http://127.0.0.1:${server.address().port}` } });
+  const backend = createKeychainSignerClient({ role: 'operator-evm', liveMode: true, preflightAuthority: createTestProfileMutationAuthority(), exec: createProcessExec(), command: child.command, account: 'operator-evm', broadcast: transports.evm });
+  assert.equal(backend.broadcast, undefined);
+  const manifest = payoutManifest([{ recipient: RECIPIENT_A, hkmnBalance: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '1' } }]);
+  const plan = compileDirectPayoutPlan({ cycleId: manifest.cycleId, eligibilityManifest: manifest, finalizedReturn: usdg('9'), previousDust: usdg('0'), returnBinding: { ...RETURN_BINDING, operations: child.evmAddress } });
+  const state = createDirectPayoutState({ plan, operations: child.evmAddress, usdgAddress: TOKEN, firstNonce: '0', gasPriceWei: '2' });
+  state.recipients[0].nonce = '0';
+  state.nextNonce = '1';
+  const runtimeConfig = { ...config(), accounts: { evm: child.evmAddress } };
+  const { policySigner } = await payoutStage.createDirectPayoutPolicySigner({ signerClient: { evm: backend }, state, recipient: RECIPIENT_A, config: runtimeConfig });
+  await assert.rejects(() => backend.broadcastApproved({ signedTx: '0x01' }, {}), /proof|policy/i);
+  await assert.rejects(() => policySigner.broadcast({ signedTx: '0x01' }), /unsigned|unapproved/);
+  const signed = await policySigner.sign({ transaction: buildDirectPayoutTransaction({ state, recipient: RECIPIENT_A }) });
+  assert.equal(sends, 0);
+  await policySigner.broadcast(signed);
+  assert.equal(sends, 1);
+  await assert.rejects(() => policySigner.broadcast(signed), /unsigned|unapproved/);
+  assert.equal(sends, 1);
 });

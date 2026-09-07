@@ -1125,7 +1125,8 @@ async function createDirectPayoutPolicySignerForAttempt({ signerClient, state, a
   if (attempt.nonce === null) fail('direct payout policy signer requires a persisted nonce reservation');
   const rawSigner = signerClient?.evm;
   if (!rawSigner || rawSigner.role !== OPERATOR_EVM_ROLE
-    || typeof rawSigner.sign !== 'function' || typeof rawSigner.broadcast !== 'function') {
+    || typeof rawSigner.sign !== 'function'
+    || (typeof rawSigner.broadcast !== 'function' && typeof rawSigner.broadcastApproved !== 'function')) {
     fail('direct payout transaction-policy signer requires the guarded Operations EVM signer');
   }
   const money = assertDirectPayoutMoneyConfiguration(state, config);

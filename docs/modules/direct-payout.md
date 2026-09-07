@@ -238,3 +238,7 @@ node --test --test-timeout=120000 packages/runner/test/distribution/payout-plan.
   that finalizes reverted is quarantined before later recipients advance.
 - A missing recovery context, changed digest, stale wallet reservation, or changed signed bytes
   keeps the recipient attempt unresolved. It does not create a replacement signature.
+
+The guarded Operations EVM backend supplies signing and either plain or approval-bound
+broadcast. The payout policy wrapper remains the active signer and broadcast gate for both
+ports; an approval-bound backend never receives an invented plain broadcast capability.
