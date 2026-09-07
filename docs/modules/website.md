@@ -59,6 +59,9 @@ contracts below, or an honest "nothing observed yet" placeholder — never an in
 
 ## Invariants
 
+- Homepage content below the initial viewport reveals once with a short upward fade.
+  Reduced motion disables reveals, and content stays visible without animation support.
+
 - Showcase buyback estimates use exact NFT membership and pack rates recorded in
   `docs/evidence/showcase-buyback-sources.json`. Multiple verified rates produce a range;
   unverified membership shows an unavailable estimate. Retrieval dates and the distinction

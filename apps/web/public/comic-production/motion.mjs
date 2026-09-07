@@ -196,7 +196,39 @@ export function installJourneyMotion(root = globalThis.document, browser = globa
   };
 }
 
+export function installScrollReveal(root = globalThis.document, browser = globalThis.window) {
+  const reduced = browser.matchMedia("(prefers-reduced-motion: reduce)");
+  if (reduced.matches || !browser.IntersectionObserver) return () => {};
+  const animations = new Set();
+  const observer = new browser.IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      observer.unobserve(entry.target);
+      if (reduced.matches || !entry.target.animate) continue;
+      const animation = entry.target.animate(
+        [{ opacity: 0, translate: "0 28px" }, { opacity: 1, translate: "0 0" }],
+        { duration: 650, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+      );
+      animations.add(animation);
+      animation.addEventListener("finish", () => animations.delete(animation), { once: true });
+    }
+  }, { threshold: 0, rootMargin: "0px 0px -24px 0px" });
+  // Initial viewport and deep-link content stay still. Observe only what lies ahead.
+  root.querySelectorAll(".section-heading, .dashboard-console, .journey-intro, .story-transcript, .collectible-card, .collection-disclosure, .collection-pack-link, .economics-layout > div, .faq-intro, .faq-list > details, .footer-banner, .footer-bottom").forEach((element) => {
+    if (element.getBoundingClientRect().top >= browser.innerHeight) observer.observe(element);
+  });
+  const stop = () => {
+    observer.disconnect();
+    animations.forEach((animation) => animation.cancel());
+    animations.clear();
+  };
+  const onPreferenceChange = () => { if (reduced.matches) stop(); };
+  reduced.addEventListener("change", onPreferenceChange);
+  return () => { stop(); reduced.removeEventListener("change", onPreferenceChange); };
+}
+
 if (globalThis.document && globalThis.window) {
   installJourneyMotion();
   installCoinSpin();
+  installScrollReveal();
 }
