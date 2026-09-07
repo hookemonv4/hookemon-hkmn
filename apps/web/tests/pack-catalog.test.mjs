@@ -143,3 +143,36 @@ test("pack covers accept provider artwork and fall back past unsafe or missing U
   assert.equal(normalizePacks([{ ...pack, thumbnailUrl: "https://degwuxynwtb2zaso.public.blob.vercel-storage.com.evil.test/cover" }], state)[0].image, null);
   assert.equal(normalizePacks([pack], state)[0].image, null);
 });
+
+
+test("buyback estimates use the requested pack's current percentage", async () => {
+  const packs = [
+    { ...pack, instantBuyback: { percentageOfValue: 85 } },
+    { ...pack, code: "pokemon_500", instantBuyback: { percentageOfValue: 90 } },
+    { ...pack, code: "pokemon_5000", instantBuyback: { percentageOfValue: 93 } },
+  ];
+  const { fetcher } = upstream({ "/api/gachas/all": packs });
+  const catalogue = await (await handlePackCatalog(request("/api/packs"), fetcher)).json();
+  assert.deepEqual(catalogue.packs.map(pack => pack.instantBuybackPercent), [85, 90, 93]);
+  for (const [code, percentage, estimate] of [["pokemon_50", 85, 3230], ["pokemon_500", 90, 3420], ["pokemon_5000", 93, 3534]]) {
+    const response = await handlePackCatalog(request(`/api/packs/inventory?code=${code}`), fetcher);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.instantBuybackPercent, percentage);
+    assert.equal(body.cards[0].estimatedBuybackUsd, estimate);
+    assert.match(body.buybackNotice, /Not a guaranteed offer/);
+  }
+  assert.equal(normalizeInventory({ ...inventory, nfts: [{ ...card, insured_value: 12.34 }] }, 1, null, 93).cards[0].estimatedBuybackUsd, 11.48);
+});
+
+test("missing and malformed buyback percentages never produce an estimate", async () => {
+  for (const percentage of [undefined, null, 0, -1, 100.1, Infinity, NaN, "85", "85%", "0x55", "", true, {}, []]) {
+    assert.equal(normalizePacks([{ ...pack, instantBuyback: { percentageOfValue: percentage } }], state)[0].instantBuybackPercent, null);
+    assert.equal(normalizeInventory(inventory, 1, null, percentage).cards[0].estimatedBuybackUsd, null);
+  }
+  const { fetcher } = upstream();
+  const body = await (await handlePackCatalog(request("/api/packs/inventory?code=pokemon_50"), fetcher)).json();
+  assert.equal(body.instantBuybackPercent, null);
+  assert.equal(body.cards[0].estimatedBuybackUsd, null);
+  assert.equal(normalizeInventory(inventory, 1, null, 100).cards[0].estimatedBuybackUsd, 3800);
+});
