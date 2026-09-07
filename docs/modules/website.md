@@ -61,6 +61,10 @@ The hero uses a two-line shared-cycle heading and the supplied transparent Robin
 
 ## Invariants
 
+- On phones, the logo is centred over a split header: cycle timing on the left and evenly
+  spaced social icons on the right. Gallery cards remain upright in individual frames.
+  Coin autoplay follows the most recent drag direction instead of reversing a leftward flick.
+
 - Homepage content below the initial viewport reveals once with a short upward fade.
   Reduced motion disables reveals, and content stays visible without animation support.
 
