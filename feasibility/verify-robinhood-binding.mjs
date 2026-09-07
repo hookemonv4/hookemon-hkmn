@@ -633,7 +633,7 @@ function validatePhase3OffchainAmendment(freeze, frozen, projectRoot) {
   const amendment = JSON.parse(readFileSync(path.join(projectRoot, relativePath), "utf8"));
   invariant(amendment.schemaVersion === "hookemon.phase3-offchain-interface-amendment.v1", "unsupported offchain amendment schema");
   invariant(amendment.interfaceRequirementsRevision === 67 && amendment.interfaceArchitectureRevision === 10
-    && amendment.approvedRequirementsRevision === 68, "unsupported offchain amendment revisions");
+    && [68, 69].includes(amendment.approvedRequirementsRevision), "unsupported offchain amendment revisions");
   // Derived from the exact revision-65 interface bytes already pinned by the historical freeze.
   // These executable pins cannot be rebound by editing only the new amendment document.
   invariant(amendment.historicalInputHashes["architecture/interfaces.json"] === "sha256:3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10", "offchain historical interface anchor mismatch");
@@ -646,6 +646,7 @@ function validatePhase3OffchainAmendment(freeze, frozen, projectRoot) {
     invariant(amendment.currentInputHashes[input] === hashFile(projectRoot, input), `offchain current binding mismatch: ${input}`);
   }
   const approvalPaths = ["decisions/owner-approvals/revision-67-spec-s5-approved.json", "decisions/owner-approvals/revision-68-spec-s5-approved.json"];
+  if (amendment.approvedRequirementsRevision === 69) approvalPaths.push("decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json");
   assertExactSet(Object.keys(amendment.ownerApprovalHashes), approvalPaths, "offchain approval paths");
   for (const approvalPath of approvalPaths) {
     invariant(hashFile(projectRoot, approvalPath) === amendment.ownerApprovalHashes[approvalPath], "offchain owner approval hash mismatch");
@@ -655,7 +656,9 @@ function validatePhase3OffchainAmendment(freeze, frozen, projectRoot) {
       && approval.approvalToken === "OWNER APPROVED", "offchain amendment lacks recorded spec approval");
     if (approvalPath.includes("revision-67-")) invariant(approval.subjectHashes["specs/requirements.json"]
       === "d9e287c5bf9d5cc93ebddc84e72756a1d0e02004214f53f394a3e1e7aee60d18", "offchain revision-67 approval subject mismatch");
-    if (approvalPath.includes("revision-68-")) invariant(`sha256:${approval.subjectHashes["specs/requirements.json"]}`
+    if (approvalPath.includes("revision-68-")) invariant(approval.subjectHashes["specs/requirements.json"]
+      === "5b440ee917a60b5626a88f90f6608e1d653b583f1462f5f5aaebba2120b13cae", "offchain revision-68 approval subject mismatch");
+    if (approvalPath.includes(`revision-${amendment.approvedRequirementsRevision}-`)) invariant(`sha256:${approval.subjectHashes["specs/requirements.json"]}`
       === amendment.currentInputHashes["specs/requirements.json"], "offchain current spec is not owner approved");
   }
   const projection = structuredClone(frozen);

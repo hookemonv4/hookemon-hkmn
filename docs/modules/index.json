@@ -21,7 +21,7 @@
     {
       "id": "provider-binding",
       "path": "docs/modules/provider-binding.md",
-      "sha256": "1655fbab28e629840af7864dccba9e9829ccef0ad8ab78da56035bc071e0ce83"
+      "sha256": "58a3db769ec258d1e90a59d4ed921e89de82b9f62c71f78a29bcbf6308bdc4ce"
     },
     {
       "id": "deployment-manifest",
@@ -146,7 +146,7 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "34f2c94233683a6a3e09a419697c760e7c9090e16edd2f8a53f6f83e5c548dcb"
+      "sha256": "752f1dc5bd61457a9cf3ca539fd4ac709609359f4a896825e0bb37a80db7445c"
     },
     {
       "id": "dashboard",

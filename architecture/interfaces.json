@@ -224,19 +224,73 @@
     "collectorProductionBindingRegistry": {
       "id": "collector-production-binding-registry-v1",
       "source": "packages/adapters/src/signing/collector-production-binding.mjs",
-      "sourceDigest": "sha256:5ab3573c6760f5e6ed0fadd924a3d0cba3d466227aab3a2cfac6445150a55273",
-      "exports": ["COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA", "COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA", "COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE", "COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE", "CollectorProductionBindingError", "loadCollectorProductionBindingRegistry", "assertCollectorOfflineExecutionBoundary", "createLoopbackConfinedFetch", "createIsolatedKeychainChildSetup", "COLLECTOR_SYNTHETIC_API_KEY", "RELAY_SYNTHETIC_API_KEY", "resolveCollectorProductionBinding"],
+      "sourceDigest": "sha256:a5a9cf58762e567ad97f90fa67c07bccff3049be84e00d801d978402a435606b",
+      "exports": [
+        "COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA",
+        "COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA",
+        "COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE",
+        "COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE",
+        "CollectorProductionBindingError",
+        "loadCollectorProductionBindingRegistry",
+        "assertCollectorOfflineExecutionBoundary",
+        "createLoopbackConfinedFetch",
+        "createIsolatedKeychainChildSetup",
+        "COLLECTOR_SYNTHETIC_API_KEY",
+        "RELAY_SYNTHETIC_API_KEY",
+        "resolveCollectorProductionBinding"
+      ],
       "authorities": {
-        "live": "refused unconditionally by both loadCollectorProductionBindingRegistry and resolveCollectorProductionBinding; no independently pinned live-authority mechanism exists in this codebase, so an entry cannot grant itself live authority merely by matching its own expectedDigest",
+        "live": "refused unless both purchase and buyback live anchors are present in the independently owner-approved frozen release binding manifest; at load and resolve time the selected entry must match its exact stage/provider/chain/path/digest anchor and its existing binding schema; caller-controlled registry bytes, expectedDigest, paths, and environment values never establish approval",
         "synthetic-offline": "resolves only after assertCollectorOfflineExecutionBoundary passes every one of its independent, composite checks together: production execution profile, no rehearsal configuration, the explicit authority selection, every actually-transport-read endpoint (Collector, Solana, both Robinhood RPCs, Relay) present and resolving to an explicit loopback http/https URL with no embedded userinfo, and config.signer.keychain.isolatedChildSetup being the exact object createIsolatedKeychainChildSetup returned (module-private WeakSet membership, never a value/shape match) with config.signer.keychain.command equal to that setup's own command, running the real live-signing protocol (signer.liveMode===true) against it -- liveMode is not itself an isolation signal, only the authenticated wrapper and endpoint confinement around it make it safe"
       },
       "configSurface": {
-        "environment": ["HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY (accepts only \"synthetic-offline\", checked before any credential-file-selector env var is read)", "HOOKEMON_COLLECTOR_SYNTHETIC_ROOT (the isolated root createIsolatedKeychainChildSetup uses; required under synthetic-offline)", "HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH (a JSON file read like any other config file this module reads; the path grants no authority, only the digest-validated content does)", "under synthetic-offline, HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH is refused outright and the inline HOOKEMON_COLLECTOR_CRYPT_API_KEY/HOOKEMON_RELAY_API_KEY values must equal the fixed COLLECTOR_SYNTHETIC_API_KEY/RELAY_SYNTHETIC_API_KEY sentinels"],
+        "environment": [
+          "HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY (accepts synthetic-offline under unchanged isolation guards, or live only when the frozen release contains both independently owner-approved anchors; validate authority availability before any credential-file-selector env var is read)",
+          "HOOKEMON_COLLECTOR_SYNTHETIC_ROOT (the isolated root createIsolatedKeychainChildSetup uses; required under synthetic-offline)",
+          "HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH (a JSON file read like any other config file this module reads; the path grants no authority, only the digest-validated content does)",
+          "under synthetic-offline, HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH is refused outright and the inline HOOKEMON_COLLECTOR_CRYPT_API_KEY/HOOKEMON_RELAY_API_KEY values must equal the fixed COLLECTOR_SYNTHETIC_API_KEY/RELAY_SYNTHETIC_API_KEY sentinels"
+        ],
         "composeInjection": "config.collectorProductionBindingRegistry -- a raw registry object/JSON text (from either the environment-sourced file or direct test/CLI injection, the same seam config.adapters already uses), validated by loadCollectorProductionBindingRegistry before compose.mjs attaches it as resolved.collectorCrypt.productionBindingRegistry; bin/hookemon-runner.mjs's compositionInput forwards it, and the constructed env.signer, from readEnvironment's output. config.signer.keychain.isolatedChildSetup is never an env var (an opaque WeakSet-branded object); the real bin/hookemon-runner.mjs entrypoint constructs it itself (applySyntheticIsolatedChildSetup, called from buildComposition once readEnvironment reports synthetic-offline) and overlays it onto env.signer.keychain before composition -- no test-only manual overlay or in-process config surgery is needed",
         "isolatedChildSetup": "createIsolatedKeychainChildSetup({directory}) takes no caller-supplied security backend or command: it resolves the real bin/hookemon-keychain-signer.mjs, bin/hookemon-wallet.mjs, and test/fixtures/keychain/security all from this module's own import.meta.url root (never a caller-supplied path), requires directory to be an absolute, non-symlinked real directory, reuses an existing ephemeral identity at that root if present (never minting a replacement on every launch), and writes a wrapper (atomic temp-file-then-rename replace) spawning the fixed signer path with a minimal, explicitly allowlisted child environment (PATH pinned to the running interpreter's own directory, plus exactly the isolated backend's fixed variables, never process.env). The returned setup carries a digest over the wrapper's own bytes, re-verified at every point of use",
         "transportConfinement": "createLoopbackConfinedFetch, threaded as fetchImpl into the Collector, Relay, and Solana RPC clients, and via viem's own http(url,{fetchFn}) transport into all three Robinhood/EVM construction sites (primary client, secondaryLogClient, archiveEvidenceClientFromConfig) compose.mjs's buildAdapters constructs only for the synthetic-offline authority, and into bin/hookemon-runner.mjs's own chainBroadcastTransports (the actual already-signed-byte EVM/Solana broadcast clients, constructed independently of compose.mjs's adapters) for the same authority; refuses a nonlocal request URL and refuses to follow a 3xx redirect response. No EVM exception and no unconfined broadcast path"
       },
-      "liveBindingStatus": "no live registry entry is approved or shipped anywhere in this repository"
+      "liveAnchorContract": {
+        "source": "bindings/collector-live-release.json at the module-owned release root; canonical manifest digest must equal requireLiveMutationAuthority().bindingManifestDigest, and revisions must match",
+        "cardinality": "exactly two immutable entries: purchase and buyback; ordinary and supplementary buyback share the buyback entry",
+        "entryFields": [
+          "stage",
+          "provider",
+          "chainId",
+          "bindingPath",
+          "bindingDigest",
+          "ownerApprovalReceiptId"
+        ],
+        "approval": "each separate collector-live-binding-approved receipt is produced through receipt add and binds the exact owner approval artifact and binding file; the manifest pins receipt and approval artifact byte hashes; implementation approval supplies no actual anchor approval",
+        "identity": "provider is collector-crypt; chainId is solana-mainnet; bindingPath is repository-relative within the frozen release; bindingDigest is the existing canonical SHA-256 binding digest",
+        "verification": "verify both receipt references and tuples during release freeze; authenticate the manifest digest through the existing live-authority gate; match the selected entry at both registry load and resolve before any Collector mutation",
+        "rotation": "any binding byte, path, stage or digest change requires fresh exact owner approval and a new frozen release; running cycles retain their admitted identity or refuse, never silently adopt a replacement",
+        "unchanged": "all per-stage schemas, legacy/no-ALT restriction, instruction/account and amount checks, finalized ownership, policy/canary/lease/finality/recovery checks and synthetic-offline confinement remain mandatory",
+        "manifestFields": [
+          "schema",
+          "requirementsRevision",
+          "architectureRevision",
+          "anchors",
+          "approvalEvidence"
+        ],
+        "approvalEvidenceFields": [
+          "receiptId",
+          "receiptSha256",
+          "approvalPath",
+          "approvalSha256"
+        ],
+        "approvalArtifactFields": [
+          "schema",
+          "authority",
+          "approvalToken",
+          "anchor"
+        ]
+      },
+      "liveBindingStatus": "WIRED_NO_LIVE_ENTRY: fixed release anchors are authenticated; no actual owner-approved live binding artifacts or frozen manifest are shipped."
     }
   },
   "eligibilitySnapshot": {
