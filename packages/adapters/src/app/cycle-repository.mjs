@@ -2573,29 +2573,106 @@ function heldPositionInput(cycleId, value, openedAtMs) {
   };
 }
 
+const HELD_POSITION_CANONICAL_CHAIN_ID = 'eip155:4663';
+const HELD_POSITION_CANONICAL_ASSET_PREFIX = `${HELD_POSITION_CANONICAL_CHAIN_ID}/erc20:`;
+const HELD_POSITION_CANONICAL_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
+
+/**
+ * ADR-0026's one recognized raw-to-canonical USDG relation, mirrored exactly from
+ * evmUsdgCanonicalCustodyIdentity: chain 4663, six decimals, a normalized lower-case 20-byte EVM
+ * token. Anything else -- wrong chain, wrong decimals, or an eip155:4663/erc20:-prefixed suffix
+ * that is not itself a normalized 20-byte address -- is not this relation and returns null, so
+ * it is never treated as an authoritative canonical row.
+ */
+function heldPositionCanonicalRawKey(asset) {
+  if (asset.chainId !== HELD_POSITION_CANONICAL_CHAIN_ID || asset.decimals !== 6) return null;
+  if (typeof asset.assetId !== 'string' || !asset.assetId.startsWith(HELD_POSITION_CANONICAL_ASSET_PREFIX)) return null;
+  const address = asset.assetId.slice(HELD_POSITION_CANONICAL_ASSET_PREFIX.length);
+  if (!HELD_POSITION_CANONICAL_ADDRESS_PATTERN.test(address)) return null;
+  return `4663\u0000${address}`;
+}
+
+/**
+ * ADR-0026: a live write -- asset is the caller-resolved {chainId, assetId, decimals} triple from
+ * heldPositionInput, never a stored ledger -- against the recognized canonical identity lands on
+ * the exact row claim and payout already maintain for it: verifiedCurrentBalance and
+ * expectedCycleAsset carry forward byte-for-byte on an existing v2 row, a hypothetical canonical
+ * v1 predecessor upgrades to v2 with an honest null observation (never fabricated), and the write
+ * refuses outright if the legacy raw identity for this same asset is also durable, before any
+ * append.
+ *
+ * Replay instead passes the event's own already-validated stored ledger (assertCustodyLedger
+ * output, which always carries schema); that stored schema, taken as targetSchema directly rather
+ * than re-derived from the identity shape, is exactly what a live write would have computed at the
+ * moment this event was originally appended, so a previously durable row -- raw or canonical, v1 or
+ * v2 -- always replays back to itself byte-for-byte. The raw-predecessor coexistence refusal only
+ * ever runs for a live write: replay must never reject an event that was valid when it was appended
+ * just because a later rule would have refused it today.
+ */
 function heldPositionCustodyLedger(custodyLedgers, cycleId, asset, position) {
   const key = `${asset.chainId}\u0000${asset.assetId}`;
+  const storedSchema = Object.hasOwn(asset, 'schema') ? asset.schema : null;
+  const isLiveWrite = storedSchema === null;
+  const canonicalRawKey = isLiveWrite ? heldPositionCanonicalRawKey(asset) : null;
+  if (isLiveWrite && canonicalRawKey !== null && custodyLedgers.has(canonicalRawKey)) {
+    throw new Error('held position custody ledger refuses: a legacy raw-identity custody row exists for this asset');
+  }
+  const targetSchema = storedSchema ?? (canonicalRawKey === null ? 'hookemon.custody-ledger.v1' : 'hookemon.custody-ledger.v2');
   const previous = custodyLedgers.get(key) ?? null;
   if (previous !== null) {
     if (previous.decimals !== asset.decimals) {
       throw new Error('held position custody ledger decimals are immutable for this cycle and asset');
     }
+    const base = previous.schema !== targetSchema
+      ? { ...previous, schema: targetSchema, verifiedCurrentBalance: null, expectedCycleAsset: null }
+      : previous;
     return assertCustodyLedger({
-      ...previous,
+      ...base,
       heldPositions: (BigInt(previous.heldPositions) + BigInt(position.valueMicroUsdg)).toString(),
     }, 'held position custody ledger');
   }
+  const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [
+    bucket,
+    bucket === 'heldPositions' ? position.valueMicroUsdg : '0',
+  ]));
   return assertCustodyLedger({
-    schema: 'hookemon.custody-ledger.v1',
+    schema: targetSchema,
     cycleId,
     chainId: asset.chainId,
     assetId: asset.assetId,
     decimals: asset.decimals,
-    ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [
-      bucket,
-      bucket === 'heldPositions' ? position.valueMicroUsdg : '0',
-    ])),
+    ...buckets,
+    ...(targetSchema === 'hookemon.custody-ledger.v2' ? { verifiedCurrentBalance: null, expectedCycleAsset: null } : {}),
   }, 'held position custody ledger');
+}
+
+/**
+ * A retry that matches an already-recorded position's evidence digest still names a candidate
+ * ledger identity; silently returning the existing position without checking it would let identity
+ * drift (a since-changed configured asset, or a raw row that has since appeared) through unnoticed.
+ * ledgerAsset === null retries a position that was never attributed to a custody row and always
+ * matches.
+ */
+function assertHeldPositionLedgerAssociation(state, positionId, ledgerAsset) {
+  const recordedKey = state.heldPositionLedgerKeys.get(positionId) ?? null;
+  if (ledgerAsset === null) {
+    if (recordedKey !== null) {
+      throw new Error('cycle-repository recordHeldPosition: retry omits the custody ledger identity the position was actually recorded with');
+    }
+    return;
+  }
+  const expectedKey = `${ledgerAsset.chainId}\u0000${ledgerAsset.assetId}`;
+  if (recordedKey !== expectedKey) {
+    throw new Error('cycle-repository recordHeldPosition: retry supplies a custody ledger identity that does not match the position\'s recorded row');
+  }
+  const recordedLedger = state.custodyLedgers.get(recordedKey) ?? null;
+  if (recordedLedger === null || recordedLedger.decimals !== ledgerAsset.decimals) {
+    throw new Error('cycle-repository recordHeldPosition: retry supplies custody ledger decimals that do not match the position\'s recorded row');
+  }
+  const rawKey = heldPositionCanonicalRawKey(ledgerAsset);
+  if (rawKey !== null && state.custodyLedgers.has(rawKey)) {
+    throw new Error('cycle-repository recordHeldPosition: retry cannot be validated while a legacy raw-identity custody row exists for this asset');
+  }
 }
 
 function resolvedHeldPositionCustodyLedger(custodyLedgers, key, position) {
@@ -4326,7 +4403,10 @@ export class CycleRepository {
     const state = await this.#replay(cycleId);
     const existing = state.heldPositions.get(position.positionId) ?? null;
     if (existing !== null) {
-      if (existing.evidenceDigest === position.evidenceDigest) return structuredClone(existing);
+      if (existing.evidenceDigest === position.evidenceDigest) {
+        assertHeldPositionLedgerAssociation(state, position.positionId, ledgerAsset);
+        return structuredClone(existing);
+      }
       throw new Error('cycle-repository recordHeldPosition: card already has conflicting held custody');
     }
     if (state.terminalState) {
@@ -4360,7 +4440,10 @@ export class CycleRepository {
       if (!/stale cycle journal (?:version|head)/.test(error?.message ?? '')) throw error;
       const latest = await this.#replay(cycleId);
       const persisted = latest.heldPositions.get(position.positionId) ?? null;
-      if (persisted !== null && persisted.evidenceDigest === position.evidenceDigest) return structuredClone(persisted);
+      if (persisted !== null && persisted.evidenceDigest === position.evidenceDigest) {
+        assertHeldPositionLedgerAssociation(latest, position.positionId, ledgerAsset);
+        return structuredClone(persisted);
+      }
       throw error;
     }
     return structuredClone(position);

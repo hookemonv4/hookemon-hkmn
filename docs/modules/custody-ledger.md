@@ -37,6 +37,25 @@ aliased across the two keys, no row is migrated or mutated, and the ordinary can
 upgrade is unaffected when no
 such legacy row exists.
 
+`packages/adapters/src/app/cycle-repository.mjs`'s `recordHeldPosition` writes the held-position row
+under the same canonical EVM USDG identity claim and payout use: each of `stages/open.mjs`,
+`stages/epic-gate.mjs`, and `stages/buyback.mjs` derives `eip155:4663`/`eip155:4663/erc20:<address>`
+from its own local `heldPositionLedgerAsset(config)`, checking chain `4663`, six decimals, and a
+normalized 20-byte address before construction — never an alias, and never the repository's concern
+to re-derive or trust blindly (the repository only recognizes the exact same relation through its own
+`heldPositionCanonicalRawKey`, so a caller cannot make an arbitrary `eip155:4663/erc20:`-prefixed
+string authoritative). An existing row at that identity is incremented on `heldPositions` only, with
+every other bucket, `verifiedCurrentBalance`, and `expectedCycleAsset` carried forward byte-for-byte
+(a v1 predecessor upgrades to v2 with both fields honestly `null`, never a fabricated observation); an
+absent row is created as v2 with both fields `null`. A live write refuses outright, before any append,
+if a legacy raw-identity row already durably exists for the same asset — coexisting or not with a
+canonical row. `resolveHeldPosition` always decrements the exact row `recordHeldPosition` associated
+the position with, never re-deriving identity from configuration. Replay drives entirely off each
+stored event's own already-validated schema, never off the identity's shape, so a historical row —
+raw or canonical, v1 or v2 — always replays back to itself byte-for-byte; a retry that matches a
+position's evidence digest still has its named (or omitted) ledger identity checked against the
+position's actual recorded association before being treated as idempotent.
+
 ## Public interface
 
 - `projectPolicyCustody({cycleRepository, evmUsdg})` reads every active and archived cycle.

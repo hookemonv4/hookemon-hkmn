@@ -44,13 +44,22 @@ function heldMint(evidence) {
   return null;
 }
 
+const HELD_POSITION_EVM_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
+
+/**
+ * ADR-0026: the sole raw-to-canonical relation this repository recognizes for the configured USDG
+ * asset -- chain 4663, six decimals, a normalized lower-case 20-byte EVM token -- matching
+ * `evmUsdgCanonicalCustodyIdentity` in cycle-repository.mjs exactly, so this held write lands on
+ * the same custody row claim and payout already maintain instead of a competing raw identity.
+ */
 function heldPositionLedgerAsset(config) {
   const asset = config?.moneyConfiguration?.assets?.usdg;
   const typed = assertTypedAmount({ ...asset, amountAtomic: '0' }, 'held open USDG ledger asset');
-  if (typed.chainId !== '4663' || typed.decimals !== 6) {
-    throw new Error('held open USDG ledger asset must use the configured six-decimal USDG asset');
+  if (typed.chainId !== '4663' || typed.decimals !== 6 || !HELD_POSITION_EVM_ADDRESS_PATTERN.test(typed.assetId)) {
+    throw new Error('held open USDG ledger asset must use the configured six-decimal normalized USDG asset');
   }
-  return { chainId: typed.chainId, assetId: typed.assetId, decimals: typed.decimals };
+  const chainId = `eip155:${typed.chainId}`;
+  return { chainId, assetId: `${chainId}/erc20:${typed.assetId}`, decimals: typed.decimals };
 }
 
 /** Carves one unresolved card out without touching the cycle's terminal state or other packs. */
