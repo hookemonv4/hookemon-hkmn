@@ -1,0 +1,11 @@
+.cry-surface{position:relative}
+.cry-controls{position:absolute;z-index:6;right:10px;bottom:10px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;max-width:calc(100% - 20px)}
+.cry-button{display:inline-flex;align-items:center;min-height:36px;padding:7px 11px;border:1px solid #15345f;border-radius:999px;background:#fff9eefa;color:#15345f;font-family:inherit;font-weight:700;font-size:11px;line-height:1.2;cursor:pointer;box-shadow:0 2px 0 #15345f20;touch-action:manipulation}
+.cry-button:hover,.cry-playing .cry-button{background:#ffcf00}
+.cry-button:focus-visible,.cry-image:focus-visible{outline:3px solid #2879c2;outline-offset:4px}
+.cry-surface .cry-image{pointer-events:auto;cursor:pointer;touch-action:manipulation}
+.history-card .cry-controls{bottom:6px;right:6px}
+.history-card.cry-card{padding-bottom:48px}
+.cry-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+@media(pointer:coarse){.cry-button{min-height:44px}}
+.cry-status.cry-status-error{position:fixed;z-index:100;left:50%;bottom:20px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);height:auto;margin:0;padding:12px 18px;clip-path:none;white-space:normal;border:1px solid #15345f;border-radius:12px;background:#fff9ee;color:#15345f;font-size:14px;box-shadow:0 4px 12px #15345f30}
