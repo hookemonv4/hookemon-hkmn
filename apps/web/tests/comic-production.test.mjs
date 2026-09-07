@@ -66,15 +66,16 @@ test("states the gross-volume fee without a trading interface or deployment addr
 
 test("offers accessible market links and an honest header cycle shortcut", async () => {
   const header = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
-  for (const [url, name] of [["https://www.fomoapp.net/", "Fomo"], ["https://dexscreener.com/", "DEX Screener"]]) {
+  for (const [url, name] of [["https://dexscreener.com/", "DEX Screener"]]) {
     const tag = [...header.matchAll(/<a\b[^>]*>/g)].map(([value]) => value).find((value) => value.includes(`href="${url}"`));
     assert.ok(tag, `${name} destination is available`);
     assert.ok(tag.includes(`aria-label="Open ${name}"`));
     assert.ok(tag.includes('rel="noopener noreferrer"'));
   }
+  assert.doesNotMatch(html, /fomoapp|id="story-copy"|A peek inside|Six familiar faces/);
   assert.match(header, /href="#machine"[^>]*id="navCycle"/);
   assert.match(header, /id="navCountdown"[^>]*>--:--</);
-  for (const asset of ["fomo.svg", "dexscreener.png"]) {
+  for (const asset of ["dexscreener.png"]) {
     assert.ok((await stat(new URL(`partners/${asset}`, publicRoot))).size > 0);
   }
 });
@@ -95,7 +96,7 @@ test("provides five native stage controls and a complete textual fallback", () =
   assert.ok(controls.every(([tag]) => tag.includes('type="button"') && tag.includes("aria-pressed=")));
   assert.match(html, /class="[^"]*story-transcript/);
   assert.match(html, /data-replay/);
-  for (const id of ["journey-scene", "journey-progress", "story-title", "story-copy", "story-index", "story-coin", "story-pack", "story-cards", "story-payout"]) {
+  for (const id of ["journey-scene", "journey-progress", "story-title", "story-index", "story-coin", "story-pack", "story-cards", "story-payout"]) {
     assert.ok(html.includes(`id="${id}"`), `${id} must be present`);
   }
 });

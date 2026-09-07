@@ -1062,7 +1062,7 @@ test("defines the compact 14-inch laptop journey contract", async () => {
 test("renders progress and chapter text inside the sticky scene", async () => {
   const html = await (await render()).text();
   const scene = html.slice(html.indexOf('id="journey-scene"'), html.indexOf('class="collection'));
-  for (const id of ["journey-progress", "story-title", "story-copy", "story-index"]) assert.ok(scene.includes('id="' + id + '"'));
+  for (const id of ["journey-progress", "story-title", "story-index"]) assert.ok(scene.includes('id="' + id + '"'));
   assert.equal((scene.match(/data-scene-stage=/g) ?? []).length, 5);
   assert.match(scene, /data-replay/);
 });
