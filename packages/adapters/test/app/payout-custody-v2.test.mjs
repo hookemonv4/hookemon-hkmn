@@ -10,7 +10,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { compileDirectPayoutPlan, createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
-import { DirectPayoutError, mutatePayout } from '../../src/app/stages/payout.mjs';
+import { DirectPayoutError, mutatePayout, reconcileLivePayout } from '../../src/app/stages/payout.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 
 // Focused coverage for the payout-only EVM USDG custody-v2 write introduced by
@@ -253,6 +253,23 @@ async function rawRow(cycleRepository, cycleId, overrides = {}) {
   };
   await cycleRepository.recordCustodyLedger(cycleId, row);
   return row;
+}
+
+// Exercises `reconcileLivePayout` with zero writer capability beyond the plain read it needs:
+// every mutation-shaped method a full CycleRepository exposes throws if reached, so a passing
+// assertion here proves the custody check is genuinely read-only, never a bare repository escape.
+function reconciliationOnlyFacade(cycleRepository) {
+  return {
+    readPagedPayoutState: (...callArgs) => cycleRepository.readPagedPayoutState(...callArgs),
+    describeCycle: (...callArgs) => cycleRepository.describeCycle(...callArgs),
+    persistPagedPayoutState() { throw new Error('reconciliation must not persist paged payout state'); },
+    recordCustodyLedger() { throw new Error('reconciliation must not write the custody ledger'); },
+    recordPayoutDust() { throw new Error('reconciliation must not record successor dust'); },
+    reserveWalletNonce() { throw new Error('reconciliation must not reserve a wallet nonce'); },
+    assertWalletNonce() { throw new Error('reconciliation must not assert a wallet nonce'); },
+    releaseWalletNonce() { throw new Error('reconciliation must not release a wallet nonce'); },
+    holdCycle() { throw new Error('reconciliation must not hold the cycle'); },
+  };
 }
 
 test('refuses a raw-only legacy USDG predecessor before any custody write, signature, or broadcast', async t => {
@@ -628,4 +645,176 @@ test('a zero-payable-recipient payout never reads the chain and writes a first-e
   const row = (await cycleRepository.describeCycle(cycleId)).custodyLedgers.get(CANONICAL_KEY);
   assert.equal(row.schema, 'hookemon.custody-ledger.v2');
   assert.equal(row.verifiedCurrentBalance, null);
+});
+
+// Focused coverage for the reconciliation-time custody bypass: a zero-recipient direct payout is
+// `isDirectPayoutComplete` the instant its state is persisted, before `ensurePayoutCustodyLedger`
+// ever runs. A disallowed raw predecessor refuses that custody write, but -- before this fix --
+// the already-persisted zero-recipient state survived the refusal, and a later `reconcileLivePayout`
+// call read only `isDirectPayoutComplete` and finalized on it regardless.
+
+test('reconciliation refuses a persisted zero-recipient payout backed only by a disallowed raw predecessor, across restart and repeated attempts', async t => {
+  const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
+  await rawRow(cycleRepository, cycleId, { claimed: '100', returnReceived: '0' });
+
+  const plan = payoutPlan(cycleId, '0');
+  const counter = { sign: 0 };
+  await assert.rejects(
+    () => mutatePayout({
+      liveMode: true,
+      config: baseConfig(),
+      cycleRepository,
+      context: context(cycleId),
+      request: { plan },
+      adapters: { robinhood: { client: rpc() } },
+      signerClient: signer(counter),
+    }),
+    error => {
+      assert.ok(error instanceof DirectPayoutError);
+      assert.match(error.message, /legacy raw-identity USDG predecessor row/);
+      return true;
+    },
+  );
+  assert.equal(counter.sign, 0, 'must not sign before the raw-predecessor refusal');
+
+  const beforeReconcile = await cycleRepository.describeCycle(cycleId);
+  assert.equal(beforeReconcile.custodyLedgers.size, 1, 'must not create a competing canonical row');
+  assert.equal(beforeReconcile.custodyLedgers.get(CANONICAL_KEY), undefined);
+
+  // Reopen the repository, simulating a restart onto the already-persisted zero-recipient state.
+  const reopened = await CycleRepository.open(directory);
+  const facade = reconciliationOnlyFacade(reopened);
+  const ctx = context(cycleId);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const evidence = await reconcileLivePayout({ config: baseConfig(), cycleRepository: facade, context: ctx });
+    assert.equal(evidence, null, `reconciliation attempt ${attempt} must not return terminal evidence`);
+  }
+
+  const afterReconcile = await reopened.describeCycle(cycleId);
+  assert.equal(afterReconcile.custodyLedgers.size, 1, 'reconciliation must not create a canonical row');
+  assert.deepEqual(afterReconcile.custodyLedgers.get(RAW_KEY), beforeReconcile.custodyLedgers.get(RAW_KEY));
+});
+
+test('reconciliation refuses a completed zero-recipient payout with no existing custody row at all', async t => {
+  const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
+  // A config whose configured USDG identity cannot back any custody row causes the same
+  // atomic-persist-then-custody-refuse sequence as the raw-predecessor case, but leaves no custody
+  // row of any kind -- modeling a corrupted or never-admitted custody ledger for this cycle.
+  const mismatchedConfig = baseConfig();
+  mismatchedConfig.moneyConfiguration.assets.usdg.chainId = '1';
+  const plan = payoutPlan(cycleId, '0');
+  await assert.rejects(
+    () => mutatePayout({
+      liveMode: true,
+      config: mismatchedConfig,
+      cycleRepository,
+      context: context(cycleId),
+      request: { plan },
+      adapters: { robinhood: { client: rpc() } },
+      signerClient: signer({ sign: 0 }),
+    }),
+    DirectPayoutError,
+  );
+  assert.equal((await cycleRepository.describeCycle(cycleId)).custodyLedgers.size, 0, 'no custody row of any kind must exist');
+
+  const reopened = await CycleRepository.open(directory);
+  const facade = reconciliationOnlyFacade(reopened);
+  const evidence = await reconcileLivePayout({ config: baseConfig(), cycleRepository: facade, context: context(cycleId) });
+  assert.equal(evidence, null, 'a missing custody row must never be treated as evidence of prior admission');
+});
+
+test('reconciliation refuses a completed zero-recipient payout whose custody identity is a raw+canonical pair', async t => {
+  const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
+  const raw = await rawRow(cycleRepository, cycleId, { claimed: '40', returnReceived: '0' });
+  const canonical = await customRow(cycleRepository, cycleId, { claimed: '0', returnReceived: '0' });
+
+  const plan = payoutPlan(cycleId, '0');
+  await mutatePayout({
+    liveMode: true,
+    config: baseConfig(),
+    cycleRepository,
+    context: context(cycleId),
+    request: { plan },
+    adapters: { robinhood: { client: rpc() } },
+    signerClient: signer({ sign: 0 }),
+  }).catch(() => {});
+
+  const reopened = await CycleRepository.open(directory);
+  const facade = reconciliationOnlyFacade(reopened);
+  const evidence = await reconcileLivePayout({ config: baseConfig(), cycleRepository: facade, context: context(cycleId) });
+  assert.equal(evidence, null);
+
+  const state = await reopened.describeCycle(cycleId);
+  assert.deepEqual(state.custodyLedgers.get(RAW_KEY), raw);
+  assert.deepEqual(state.custodyLedgers.get(CANONICAL_KEY), canonical);
+});
+
+test('reconciliation recovers a genuinely completed zero-recipient payout backed by an existing canonical row', async t => {
+  const { repository: cycleRepository, cycleId } = await durableCycle(t);
+  await customRow(cycleRepository, cycleId, { claimed: '0', returnReceived: '0' });
+
+  const plan = payoutPlan(cycleId, '0');
+  const ctx = context(cycleId);
+  const evidence = await mutatePayout({
+    liveMode: true,
+    config: baseConfig(),
+    cycleRepository,
+    context: ctx,
+    request: { plan },
+    adapters: { robinhood: { client: rpc() } },
+    signerClient: signer({ sign: 0 }),
+  });
+  assert.equal(evidence.distributablePool.amountAtomic, '0');
+
+  const facade = reconciliationOnlyFacade(cycleRepository);
+  const recovered = await reconcileLivePayout({ config: baseConfig(), cycleRepository: facade, context: ctx });
+  assert.ok(recovered, 'a genuinely backed zero-recipient payout must still recover through reconciliation');
+  assert.equal(recovered.distributablePool.amountAtomic, '0');
+});
+
+test('reconciliation refuses when the runtime Operations account no longer matches the persisted payout state', async t => {
+  const { repository: cycleRepository, cycleId } = await durableCycle(t);
+  await customRow(cycleRepository, cycleId, { claimed: '0', returnReceived: '0' });
+
+  const plan = payoutPlan(cycleId, '0');
+  const ctx = context(cycleId);
+  await mutatePayout({
+    liveMode: true,
+    config: baseConfig(),
+    cycleRepository,
+    context: ctx,
+    request: { plan },
+    adapters: { robinhood: { client: rpc() } },
+    signerClient: signer({ sign: 0 }),
+  });
+
+  const driftedConfig = baseConfig();
+  driftedConfig.accounts.evm = `0x${'5'.repeat(40)}`;
+  const facade = reconciliationOnlyFacade(cycleRepository);
+  const evidence = await reconcileLivePayout({ config: driftedConfig, cycleRepository: facade, context: ctx });
+  assert.equal(evidence, null, 'a drifted Operations account must never finalize a payout signed under a different identity');
+});
+
+test('reconciliation refuses when the runtime USDG contract no longer matches the persisted payout state', async t => {
+  const { repository: cycleRepository, cycleId } = await durableCycle(t);
+  await customRow(cycleRepository, cycleId, { claimed: '0', returnReceived: '0' });
+
+  const plan = payoutPlan(cycleId, '0');
+  const ctx = context(cycleId);
+  await mutatePayout({
+    liveMode: true,
+    config: baseConfig(),
+    cycleRepository,
+    context: ctx,
+    request: { plan },
+    adapters: { robinhood: { client: rpc() } },
+    signerClient: signer({ sign: 0 }),
+  });
+
+  const driftedConfig = baseConfig();
+  driftedConfig.contracts.usdg = `0x${'c'.repeat(40)}`;
+  const facade = reconciliationOnlyFacade(cycleRepository);
+  const evidence = await reconcileLivePayout({ config: driftedConfig, cycleRepository: facade, context: ctx });
+  assert.equal(evidence, null, 'a drifted USDG contract must never finalize a payout signed under a different identity');
 });

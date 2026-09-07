@@ -89,6 +89,52 @@ function addressTopic(address) {
   return `0x${'0'.repeat(24)}${address.slice(2).toLowerCase()}`;
 }
 
+const CANONICAL_CHAIN_ID = 'eip155:4663';
+const CANONICAL_ASSET_ID = `eip155:4663/erc20:${TOKEN}`;
+const CANONICAL_CUSTODY_KEY = `${CANONICAL_CHAIN_ID}${String.fromCharCode(0)}${CANONICAL_ASSET_ID}`;
+
+function evmCustodyBalanceObservation() {
+  return {
+    schema: 'hookemon.custody-balance-observation.v1',
+    account: OPERATIONS,
+    balance: { chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, amountAtomic: '0' },
+    finality: { height: '100', hash: `0x${'f'.repeat(64)}`, timestampUnixSeconds: '1700000000' },
+  };
+}
+
+// A genuine already-proven canonical custody row for `plan`, backing its returnDelta and (unless
+// `observed: false`) carrying a valid persisted balance observation -- the durable evidence
+// `reconcileLivePayout`'s read-only custody check requires before it may finalize a terminal state.
+function backedCustodyLedgerRepositoryFakes(plan, { observed = true } = {}) {
+  const row = {
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId: plan.cycleId,
+    chainId: CANONICAL_CHAIN_ID,
+    assetId: CANONICAL_ASSET_ID,
+    decimals: 6,
+    claimed: '0',
+    bridgeOut: '0',
+    bridgeIn: '0',
+    packCost: '0',
+    buybackProceeds: '0',
+    returnInput: '0',
+    returnReceived: plan.returnDelta.amountAtomic,
+    refunds: '0',
+    residual: '0',
+    heldAssets: '0',
+    heldPositions: '0',
+    payoutLiability: '0',
+    dust: '0',
+    unattributed: '0',
+    verifiedCurrentBalance: observed ? evmCustodyBalanceObservation() : null,
+    expectedCycleAsset: null,
+  };
+  return {
+    async describeCycle() { return { custodyLedgers: new Map([[CANONICAL_CUSTODY_KEY, row]]) }; },
+    async recordCustodyLedger() {},
+  };
+}
+
 function payoutManifest(entries = [
   { recipient: RECIPIENT_A, hkmnBalance: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '2' } },
   { recipient: RECIPIENT_B, hkmnBalance: { chainId: '4663', assetId: TOKEN, decimals: 18, amountAtomic: '1' } },
@@ -1073,6 +1119,7 @@ test('keeps the prepared main payout exclusions after a held position resolves',
   };
   let resolved = false;
   let pagedState = null;
+  const custodyLedgers = new Map();
   const cycleRepository = {
     async reserveWalletNonce() { throw new Error('zero-proceeds payout must not reserve a nonce'); },
     async assertWalletNonce() { throw new Error('zero-proceeds payout must not assert a nonce'); },
@@ -1088,14 +1135,14 @@ test('keeps the prepared main payout exclusions after a held position resolves',
     async consumePayoutDustAndPersistPagedPayoutState(_cycleId, { evidence }) { pagedState = structuredClone(evidence); },
     async describeCycle() {
       return {
-        custodyLedgers: new Map(),
+        custodyLedgers,
         heldPositions: new Map([[heldPosition.positionId, {
           ...heldPosition,
           resolution: resolved ? { terminalState: 'NEVER_SENT' } : null,
         }]]),
       };
     },
-    async recordCustodyLedger() {},
+    async recordCustodyLedger(_cycleId, row) { custodyLedgers.set(`${row.chainId}${String.fromCharCode(0)}${row.assetId}`, row); },
   };
   const context = {
     cycleId: snapshot.cycleId,
@@ -1292,6 +1339,7 @@ test('reconciliation records terminal successor dust after a crash before the mu
     config: config(),
     context: { cycleId: terminal.cycleId },
     cycleRepository: {
+      ...backedCustodyLedgerRepositoryFakes(terminal.plan),
       async readPagedPayoutState() { return terminal; },
       async persistPagedPayoutState() {},
       async recordPayoutDust(cycleId, input) { dustWrites.push({ cycleId, input }); },
@@ -1324,6 +1372,7 @@ test('reconciliation replaces and releases a stranded terminal payout nonce fenc
       async assertMutationAllowed(input) { mutationCalls.push(input); },
     },
     cycleRepository: {
+      ...backedCustodyLedgerRepositoryFakes(terminal.plan),
       async readPagedPayoutState() { return terminal; },
       async persistPagedPayoutState() {},
       async recordPayoutDust() {},

@@ -17,7 +17,10 @@ import {
 } from '../../../../runner/src/distribution/payout-plan.mjs';
 import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
 import { assertMoneyConfiguration } from '../../../../runner/src/cycle/money-schemas.mjs';
-import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import {
+  createEvmCustodyBalanceObservationReader,
+  EVM_CUSTODY_BALANCE_OBSERVATION_SCHEMA,
+} from '../../evm-custody-balance-observation.mjs';
 import { requireLiveRetainedCustodyMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
 import { buildAuthorizePayoutCall, buildFundPayoutFromPegCycleCall, readPendingAuthorization } from '../../hook-contract-client.mjs';
 import {
@@ -2613,8 +2616,16 @@ function freshPayoutCustodyLedgerV2({ cycleId, identity, returnDelta, observatio
  * on the return leg's behalf; that is a legitimate report of pending return integration, not a bug
  * to route around here.
  */
-async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta, adapters, config, payableRecipientCount }) {
-  if (typeof cycleRepository.recordCustodyLedger !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
+/**
+ * Read-only identity/raw-conflict/backing predicate shared by the actual custody write
+ * (`ensurePayoutCustodyLedger`) and the reconciliation-only backing check below. Never writes,
+ * never reads a balance, never needs a signer or a caller-approved flag -- `cycleRepository`'s
+ * plain `describeCycle` facade is sufficient. `existing === null` is a valid, non-refusing result
+ * here (an as-yet-unwritten canonical row); callers that require an already-proven row check that
+ * themselves.
+ */
+async function loadPayoutCustodyLedgerState({ cycleRepository, cycleId, returnDelta, config }) {
+  if (typeof cycleRepository.describeCycle !== 'function') {
     fail('direct payout production execution requires a custody ledger repository');
   }
   const { identity, normalizedReturnDelta } = assertPayoutCustodyMoneyConfiguration({ config, returnDelta });
@@ -2634,6 +2645,23 @@ async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta
       + 'refuses pending explicit return-consumer migration instead of creating a competing canonical row '
       + 'or fabricating its backing');
   }
+  if (existing !== null
+    && (existing.decimals !== identity.decimals || BigInt(existing.returnReceived) < BigInt(normalizedReturnDelta.amountAtomic))) {
+    fail('direct payout custody ledger does not prove the finalized return backing');
+  }
+  return { identity, normalizedReturnDelta, existing };
+}
+
+async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta, adapters, config, payableRecipientCount }) {
+  if (typeof cycleRepository.recordCustodyLedger !== 'function') {
+    fail('direct payout production execution requires a custody ledger repository');
+  }
+  const { identity, normalizedReturnDelta, existing } = await loadPayoutCustodyLedgerState({
+    cycleRepository,
+    cycleId,
+    returnDelta,
+    config,
+  });
   // A zero-payable-recipient cycle never touches the chain anywhere else in this stage (the same
   // `payableRecipientCount > 0` gate already skips every admission RPC below); this write must
   // stay consistent with that and never read a balance either.
@@ -2652,10 +2680,6 @@ async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta
     return;
   }
 
-  if (existing.decimals !== identity.decimals || BigInt(existing.returnReceived) < BigInt(normalizedReturnDelta.amountAtomic)) {
-    fail('direct payout custody ledger does not prove the finalized return backing');
-  }
-
   if (!shouldObserve) return;
 
   const observation = await readPayoutCustodyBalanceObservation({ adapters, config, identity });
@@ -2669,6 +2693,65 @@ async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta
     verifiedCurrentBalance: observation,
     expectedCycleAsset: existing.schema === 'hookemon.custody-ledger.v2' ? existing.expectedCycleAsset : null,
   });
+}
+
+/**
+ * Validates the persisted `CustodyBalanceObservationV1` a positive-recipient reconciliation must
+ * find already attached to the canonical row -- shape, schema, configured Operations account, and
+ * configured chain/token/decimals identity. Never re-reads the chain: a reconciliation is not a
+ * mutation and must not gain an RPC-read capability just to finalize. A missing or mismatched
+ * observation is refused exactly like a missing custody row -- it is not evidence of anything.
+ */
+function assertPersistedPayoutCustodyObservation({ existing, identity, config }) {
+  const account = assertAddress(config.accounts?.evm, 'direct payout custody ledger Operations account');
+  const observation = existing.verifiedCurrentBalance;
+  if (!observation || typeof observation !== 'object' || Array.isArray(observation)
+    || observation.schema !== EVM_CUSTODY_BALANCE_OBSERVATION_SCHEMA) {
+    fail('direct payout reconciliation requires an already-persisted canonical custody balance observation');
+  }
+  if (assertAddress(observation.account, 'persisted custody balance observation account') !== account) {
+    fail('direct payout reconciliation persisted custody balance observation does not match the configured Operations account');
+  }
+  const balance = observation.balance;
+  if (!balance || typeof balance !== 'object' || Array.isArray(balance)
+    || balance.chainId !== identity.chainId
+    || balance.assetId !== identity.assetId
+    || balance.decimals !== identity.decimals
+    || typeof balance.amountAtomic !== 'string' || !ATOMIC.test(balance.amountAtomic)) {
+    fail('direct payout reconciliation persisted custody balance observation does not match the configured USDG identity');
+  }
+  const finality = observation.finality;
+  if (!finality || typeof finality !== 'object' || Array.isArray(finality)
+    || typeof finality.height !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(finality.height)
+    || typeof finality.hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(finality.hash)
+    || typeof finality.timestampUnixSeconds !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(finality.timestampUnixSeconds)) {
+    fail('direct payout reconciliation persisted custody balance observation has a malformed finality proof');
+  }
+}
+
+/**
+ * The read-only counterpart of `ensurePayoutCustodyLedger` for `reconcileLivePayout`: proves the
+ * frozen payout state's own `plan.returnDelta` is still backed by a genuine existing canonical
+ * custody row (raw predecessor, missing row, identity mismatch, or insufficient backing all
+ * refuse) before reconciliation is allowed to consume successor dust, recover a nonce, or return
+ * terminal evidence. Zero-payable-recipient cycles keep the accepted null-observation/no-RPC rule;
+ * a positive-recipient cycle additionally requires a shape/identity/account-valid persisted
+ * observation. Never creates, migrates, or refreshes a row -- only reads and validates.
+ */
+async function assertPayoutCustodyBackingForReconciliation({ cycleRepository, cycleId, config, plan }) {
+  const { identity, existing } = await loadPayoutCustodyLedgerState({
+    cycleRepository,
+    cycleId,
+    returnDelta: plan.returnDelta,
+    config,
+  });
+  if (existing === null) {
+    fail('direct payout reconciliation found no existing canonical custody ledger row for this cycle: '
+      + 'refuses to finalize on a missing or unproven custody backing');
+  }
+  if (plan.payableRecipientCount > 0) {
+    assertPersistedPayoutCustodyObservation({ existing, identity, config });
+  }
 }
 
 function isPagedPayoutStateReference(value, planDigest) {
@@ -3233,6 +3316,22 @@ export async function reconcileLivePayout(args = {}) {
   if (state === null || state === undefined) return null;
   try {
     if (!isDirectPayoutComplete(state)) return null;
+    const normalized = normalizedState(state);
+    // Bind reconciliation to the exact Operations/USDG identity this payout state was built and
+    // signed against, not whatever the caller's current runtime config happens to say -- a config
+    // that drifted after the state was persisted must never let a stale state finalize (or, for
+    // that matter, borrow a custody row) under a different identity's authority.
+    assertRuntimeConfiguration(normalized, args.config);
+    // A completed local state is not, by itself, evidence of a genuine prior custody admission --
+    // a zero-recipient state satisfies isDirectPayoutComplete() as soon as it is persisted, before
+    // ensurePayoutCustodyLedger ever runs. Refuse here, read-only, on any custody row that does not
+    // independently prove backing for this exact frozen plan.
+    await assertPayoutCustodyBackingForReconciliation({
+      cycleRepository: args.cycleRepository,
+      cycleId: args.context.cycleId,
+      config: args.config,
+      plan: normalized.plan,
+    });
     // A crash after the final recipient boundary but before mutatePayout() returns must still
     // write successor dust before the stage can be reconciled and completed.
     if (state.recipients.length > 0) {

@@ -152,6 +152,20 @@ implements the payout durability contract in `REQ-direct-payout-1`.
   accepts a stored reservation's embedded ledger under either the historical exact-raw-identity rule
   or this same independently recomputed canonical relation, so a reservation made before the
   canonical-v2 migration keeps replaying unchanged.
+- `reconcileLivePayout()` treats a locally complete payout state (`isDirectPayoutComplete`) as
+  necessary, never sufficient: a zero-payable-recipient state is complete the instant it is
+  persisted, before `ensurePayoutCustodyLedger` ever runs, so a crash between that persist and the
+  custody write must not let reconciliation finalize on the bare completion flag. Before it may
+  recover a stranded nonce, record successor dust, or return terminal evidence, it re-runs
+  `assertRuntimeConfiguration` against the persisted Operations/USDG identity, then independently
+  re-validates custody through the same read-only identity/raw-conflict/backing predicate
+  `ensurePayoutCustodyLedger` uses, addressed at the exact canonical row for the frozen plan's own
+  `returnDelta`. A raw predecessor, a raw-and-canonical pair, a missing canonical row, insufficient
+  `returnReceived` backing, or (for a positive-recipient plan) a missing or identity-mismatched
+  persisted `verifiedCurrentBalance` observation all refuse before any finalize-side effect; the
+  check never writes, reads the chain, or requires a signer, and a missing or corrupt custody row is
+  never treated as evidence of a genuine prior admission. A zero-payable-recipient plan keeps the
+  accepted null-observation rule -- an existing canonical row with sufficient backing is enough.
 
 ## State transitions
 
