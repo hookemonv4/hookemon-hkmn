@@ -1,3 +1,4 @@
+import { createProductionSupplementaryStageHandlers } from '../../src/app/compose.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { keccak256, TransactionReceiptNotFoundError } from 'viem';
@@ -672,5 +673,27 @@ test('supplementary return accepts native sale namespace and refuses aliases or 
   }
   for (const patch of [{ decimals: 9 }, { amountAtomic: '0' }, { amountAtomic: '-1' }, { amountAtomic: '1.5' }]) {
     assert.throws(() => prepareSupplementaryReturnRequest({ ...input, confirmedSale: confirmedSale({ proceeds: { ...confirmedSale().proceeds, ...patch } }) }), /decimals|amountAtomic/);
+  }
+});
+
+
+test('production supplementary return composition preserves the supplied authority before signing', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_700_000_000_000 });
+  for (const preflightAuthority of [createTestProfileMutationAuthority(), undefined, Object.freeze({})]) {
+    const operator = Keypair.generate();
+    const owner = operator.publicKey.toBase58();
+    const repository = fakeRepository();
+    const instructionPlan = splTransferCheckedPlan({ owner, source: Keypair.generate().publicKey.toBase58(), destination: Keypair.generate().publicKey.toBase58(), amountAtomic: '17' });
+    let signs = 0;
+    let canaries = 0;
+    const handler = createProductionSupplementaryStageHandlers({ async assertCanary() { canaries += 1; } }).BUYBACK_SENT_UNKNOWN;
+    await assert.rejects(() => handler.reconcile({
+      adapters: { solana: { client: returnSolanaClient('11111111111111111111111111111111', { blockHeight: 10 }) }, relay: fakeRelayAdapter({ requestId: 'relay-authority', instructionPlan }) },
+      signerClient: { solana: { role: 'operator-solana', async sign() { signs += 1; throw new Error('sign boundary reached'); }, async broadcast() { throw new Error('must not broadcast'); } } },
+      config: returnConfig(owner), cycleRepository: repository,
+      position: { positionId: POSITION_ID }, context: { cycleId: repository.cycleId, positionId: POSITION_ID, fencingToken: '22222222-2222-4222-8222-222222222222' }, preflightAuthority,
+    }), preflightAuthority === createTestProfileMutationAuthority() ? /sign boundary reached/ : /authority/);
+    assert.equal(canaries, 1);
+    assert.equal(signs, preflightAuthority === createTestProfileMutationAuthority() ? 1 : 0);
   }
 });

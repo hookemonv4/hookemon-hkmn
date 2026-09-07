@@ -1023,7 +1023,7 @@ function buildFeeSettlementObserver() {
   return { async observe(cycleId) { return { cycleId, status: 'PENDING_BENEFICIARY_CLAIMS' }; } };
 }
 
-function createProductionSupplementaryStageHandlers({ assertCanary }) {
+export function createProductionSupplementaryStageHandlers({ assertCanary }) {
   const guarded = handler => Object.freeze({
     stage: handler.stage,
     async reconcile(input) {
@@ -1038,7 +1038,7 @@ function createProductionSupplementaryStageHandlers({ assertCanary }) {
   const buyback = createSupplementaryBuybackHandler();
   const returnHandler = {
     stage: 'supplementary-return',
-    async reconcile({ adapters, signerClient, config, cycleRepository, context, position }) {
+    async reconcile({ adapters, signerClient, config, cycleRepository, context, position, preflightAuthority }) {
       const sale = await cycleRepository.readSupplementarySettlementEvidence(position.positionId);
       if (sale?.state !== 'BUYBACK_SENT_UNKNOWN' || !sale.evidence) {
         throw new Error('supplementary return requires durable confirmed-sale evidence');
@@ -1051,6 +1051,7 @@ function createProductionSupplementaryStageHandlers({ assertCanary }) {
         cycleRepository,
         context,
         confirmedSale: sale.evidence,
+        preflightAuthority,
       });
       return reconcileSupplementaryReturn({ adapters, config, cycleRepository, context });
     },
