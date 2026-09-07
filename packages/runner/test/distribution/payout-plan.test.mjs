@@ -244,12 +244,16 @@ test('accepts 1,026 recipients: recipient count alone never truncates a feasible
   assert.equal(plan.outcome, 'ALLOCATED');
 });
 
-test('accepts DIRECT_PAYOUT_RECIPIENT_LIMIT recipients and conserves every atomic unit (correctness/load boundary)', () => {
-  const count = DIRECT_PAYOUT_RECIPIENT_LIMIT;
+test('the justified paged-storage acceptance target is exactly 10,000 recipients, not whatever the constant currently holds', () => {
+  assert.equal(DIRECT_PAYOUT_RECIPIENT_LIMIT, 10_000);
+});
+
+test('accepts 10,000 recipients and conserves every atomic unit (the justified paged-storage acceptance target)', () => {
+  const count = 10_000;
   const entries = Array.from({ length: count }, (_, index) => holder(index, 1 + (index % 7)));
-  const manifest = eligibilityManifest(entries, { cycleId: 'cycle-recipient-limit' });
+  const manifest = eligibilityManifest(entries, { cycleId: 'cycle-10000-boundary' });
   const plan = compileDirectPayoutPlan({
-    cycleId: 'cycle-recipient-limit',
+    cycleId: 'cycle-10000-boundary',
     eligibilityManifest: manifest,
     finalizedReturn: usdg('123456789'),
     previousDust: usdg('0'),
@@ -260,6 +264,23 @@ test('accepts DIRECT_PAYOUT_RECIPIENT_LIMIT recipients and conserves every atomi
   assert.equal(recipients.size, count);
   const paid = plan.allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount.amountAtomic), 0n);
   assert.equal(paid + BigInt(plan.dust.amountAtomic), 123456789n);
+});
+
+test('rejects 10,001 recipients, one above the justified acceptance target, even when the frozen feasibility envelope would otherwise allow them', () => {
+  const count = 10_001;
+  const entries = Array.from({ length: count }, (_, index) => holder(index, 1));
+  const manifest = eligibilityManifest(entries, { cycleId: 'cycle-10001-boundary' });
+
+  assert.equal(manifest.feasibility.feasible, true);
+  assert.throws(
+    () => compileDirectPayoutPlan({
+      cycleId: 'cycle-10001-boundary',
+      eligibilityManifest: manifest,
+      finalizedReturn: usdg(String(count)),
+      previousDust: usdg('0'),
+    }),
+    /direct payout supports at most 10000 recipients/,
+  );
 });
 
 test('retains the full pool as durable dust when there are no eligible holders, instead of throwing', () => {

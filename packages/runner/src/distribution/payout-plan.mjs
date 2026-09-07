@@ -17,17 +17,20 @@ const MAX_UINT256 = (1n << 256n) - 1n;
 // eligibility-snapshot.mjs's feasibility gate, so a plan admitted here must survive its full
 // on-disk lifecycle, not just initial persistence.
 //
-// The durable store (packages/runner/src/cycle/durable-store.mjs, journal.mjs -- owned by the
-// storage-scale task, not this module) enforces a 20,000-object canonical budget per persisted
-// payout state. A recipient's object footprint grows as it progresses (SIGNED/FINALIZED add an
-// approvalContext and a finalizedTransfer object each), so the *worst case* terminal state is the
-// real ceiling, not the smaller initial-admission footprint. Measured against the unmodified store
-// on 2026-09-06: initial admission survives up to 3,995 recipients; a fully-finalized state survives
-// up to 2,854. This constant is set below both with margin for held-position-exclusion and
-// quarantine objects that add further overhead. Raising it requires a coordinated object-count (or
-// paging-scheme) increase in the durable store, not just this constant -- see D-inbox/E-inbox for
-// the handoff.
-export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 2_500;
+// The durable store (packages/runner/src/cycle/durable-store.mjs -- owned by the storage-scale
+// task, not this module) explicitly commits to a 10,000-recipient paged-payout target
+// (D-storage-requirements.md, 2026-09-06): maximumPagedStateObjects=90,000 covers a fully-
+// FINALIZED state's worst-case ~7 objects/recipient plus ~22 fixed overhead objects (70,022 for
+// 10,000 recipients, ~28% margin for held-position-exclusion/quarantine bookkeeping);
+// maximumPagedArrayItems=32,768 covers each of the state's own `recipients` and `plan.allocations`
+// arrays; maximumPagedPages=1,024 covers the 314 pages both of those arrays need paged at 64
+// items/page. 10,000 is therefore the real ceiling every storage layer (validate, encode,
+// serialize, decode, hash) actually supports, not the previous 2,500 -- itself measured against an
+// older, unpaged store whose comment this replaces. Raising this further requires a new
+// coordinated capacity increase in the durable store, not just this constant -- verify every
+// canonicalization/normalization/storage layer the real plan and payout state pass through before
+// doing so.
+export const DIRECT_PAYOUT_RECIPIENT_LIMIT = 10_000;
 
 const PAYOUT_PLAN_CANONICAL_LIMITS = Object.freeze({
   objects: 200_000,

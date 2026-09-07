@@ -9,6 +9,10 @@
 //      to reach terminal state before the next may even be signed
 //      (packages/adapters/src/app/stages/payout.mjs).
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { keccak256, TransactionReceiptNotFoundError } from 'viem';
@@ -19,11 +23,13 @@ import {
   createUsdgPayoutAmount,
   DIRECT_PAYOUT_RECIPIENT_LIMIT,
 } from '../../../runner/src/distribution/payout-plan.mjs';
+import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import {
   advanceDirectPayout,
+  assertPayoutManifestUnchanged,
   createDirectPayoutState,
   DirectPayoutBridgeAvailabilityUnknownError,
   DirectPayoutBridgeShortfallError,
@@ -103,7 +109,11 @@ function planFor(count) {
   });
 }
 
-for (const count of [1025, 1026, DIRECT_PAYOUT_RECIPIENT_LIMIT]) {
+test('DIRECT_PAYOUT_RECIPIENT_LIMIT is exactly the literal 10,000 acceptance target these scale cases prove', () => {
+  assert.equal(DIRECT_PAYOUT_RECIPIENT_LIMIT, 10_000);
+});
+
+for (const count of [1025, 1026, 10_000]) {
   test(`durable payout state scales to ${count} recipients without truncation or duplication`, () => {
     const plan = planFor(count);
     assert.equal(plan.allocations.length, count);
@@ -118,6 +128,135 @@ for (const count of [1025, 1026, DIRECT_PAYOUT_RECIPIENT_LIMIT]) {
     assert.equal(totalAllocated + BigInt(state.dust.amountAtomic), BigInt(state.distributablePool.amountAtomic));
   });
 }
+
+test('a real compiled 10,000-recipient payout state persists and reopens through the actual durable paged store, not a synthetic fixture', async t => {
+  const count = 10_000;
+  const plan = planFor(count);
+  const state = createDirectPayoutState({ plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0' });
+
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = await DurableCycleStore.open(directory);
+  await store.persistPagedPayoutState(state.cycleId, 'payout', state);
+
+  const reopened = await DurableCycleStore.open(directory);
+  const read = await reopened.readPagedPayoutState(state.cycleId, 'payout');
+
+  assert.deepEqual(read, state);
+  assert.equal(read.recipients.length, count);
+  assert.equal(new Set(read.recipients.map(attempt => attempt.recipient)).size, count);
+  const totalAllocated = read.recipients.reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
+  assert.equal(totalAllocated + BigInt(read.dust.amountAtomic), BigInt(read.distributablePool.amountAtomic));
+});
+
+function sha256Digest(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function signedBytesDigest(rawSignedBytes) {
+  return `sha256:${createHash('sha256').update(Buffer.from(rawSignedBytes.slice(2), 'hex')).digest('hex')}`;
+}
+
+const SOURCE_BALANCE_BEFORE = 999_999_999_999_999_999_999_999n;
+
+/**
+ * Upgrades a real PREPARED attempt (recipient/amount/calldata/calldataDigest/gasPriceWei already
+ * computed by the production `createDirectPayoutState`) to a domain-valid FINALIZED attempt: every
+ * field `normalizeAttempt` checks (typed amount, signed-byte/hash triple, 15-field finality
+ * evidence, 7-field approval context, unique nonce) is populated with internally consistent, valid-
+ * shaped fixture evidence -- not live-signed and not broadcast, but shaped exactly as the real
+ * transition path would leave it.
+ */
+function finalizeRecipient(prepared, index, operations) {
+  const nonce = String(index);
+  const rawSignedBytes = `0x${(index + 1).toString(16).padStart(64, '0')}`;
+  const rawSignedBytesHash = keccak256(rawSignedBytes).toLowerCase();
+  const amount = prepared.amount;
+  const finalizedBlockHash = `0x${'9'.repeat(64)}`;
+  const previousBlockHash = `0x${'8'.repeat(64)}`;
+  return {
+    ...prepared,
+    state: 'FINALIZED',
+    nonce,
+    rawSignedBytes,
+    rawSignedBytesHash,
+    txHash: rawSignedBytesHash,
+    finalizedTransfer: {
+      from: operations,
+      to: prepared.recipient,
+      amount,
+      finalizedBlockNumber: '100',
+      finalizedBlockHash,
+      receiptBlockNumber: '100',
+      receiptBlockHash: finalizedBlockHash,
+      previousBlockNumber: '99',
+      previousBlockHash,
+      sourceBalanceBeforeAtomic: SOURCE_BALANCE_BEFORE.toString(),
+      sourceBalanceAfterAtomic: (SOURCE_BALANCE_BEFORE - BigInt(amount.amountAtomic)).toString(),
+      sourceBalanceDeltaAtomic: amount.amountAtomic,
+      recipientBalanceBeforeAtomic: '0',
+      recipientBalanceAfterAtomic: amount.amountAtomic,
+      recipientBalanceDeltaAtomic: amount.amountAtomic,
+      logIndexes: ['0'],
+    },
+    approvalContext: {
+      requestDigest: null,
+      fencingToken: null,
+      fencingTokenDigest: null,
+      policyDigest: sha256Digest(`policy-${index}`),
+      approvalDigest: sha256Digest(`approval-${index}`),
+      approvedSemanticsDigest: sha256Digest(`semantics-${index}`),
+      signedMessageDigest: signedBytesDigest(rawSignedBytes),
+    },
+  };
+}
+
+// Independent review (scale-review.md) found the prior 10,000-recipient durable proof PREPARED-only,
+// and the older durable-store.test.mjs:827 synthetic fixture domain-invalid (untyped amount, missing
+// calldata/signature/finality/replacement fields, non-EVM recipients) -- so neither proves the real
+// finalized shape survives paging. This test proves that shape specifically: fully FINALIZED, no
+// replacement history, no quarantine, no held-position exclusions. It does not claim to cover the
+// bounded replacement/quarantine/held-exclusion envelope's own worst-case overhead -- that is a
+// narrower, separate claim this test does not make.
+test('a real compiled 10,000-recipient payout plan, upgraded to a domain-valid fully-FINALIZED state, persists and reopens through the durable paged store and stays isDirectPayoutComplete/assertPayoutManifestUnchanged-valid before and after', async t => {
+  const count = 10_000;
+  const plan = planFor(count);
+  const initial = createDirectPayoutState({ plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0' });
+
+  const finalizedState = {
+    ...initial,
+    manifestFrozen: true,
+    feasibilityChecked: true,
+    nextNonce: String(count),
+    recipients: initial.recipients.map((prepared, index) => finalizeRecipient(prepared, index, OPERATIONS)),
+  };
+
+  // Domain validity before persistence: both normalizers walk every recipient/evidence field.
+  assert.equal(isDirectPayoutComplete(finalizedState), true);
+  assert.equal(assertPayoutManifestUnchanged(finalizedState, plan), true);
+
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-finalized-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = await DurableCycleStore.open(directory);
+  await store.persistPagedPayoutState(finalizedState.cycleId, 'payout', finalizedState);
+
+  const reopened = await DurableCycleStore.open(directory);
+  const read = await reopened.readPagedPayoutState(finalizedState.cycleId, 'payout');
+
+  // Every recipient/evidence field, including nonces, signature hashes, and finality evidence,
+  // survives the encode/page/decode round trip exactly.
+  assert.deepEqual(read, finalizedState);
+
+  // Domain validity after the round trip: proves resume normalization, not just raw byte equality.
+  assert.equal(isDirectPayoutComplete(read), true);
+  assert.equal(assertPayoutManifestUnchanged(read, plan), true);
+
+  assert.equal(read.recipients.length, count);
+  assert.equal(new Set(read.recipients.map(attempt => attempt.recipient)).size, count);
+  assert.equal(read.recipients.every(attempt => attempt.state === 'FINALIZED'), true);
+  const paid = read.recipients.reduce((sum, attempt) => sum + BigInt(attempt.amount.amountAtomic), 0n);
+  assert.equal(paid + BigInt(read.dust.amountAtomic), BigInt(read.distributablePool.amountAtomic));
+});
 
 function memoryStore(initial) {
   let current = structuredClone(initial);
