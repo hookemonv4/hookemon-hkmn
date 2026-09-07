@@ -211,8 +211,8 @@ test("server-renders the complete illustrated Hookemon page", async () => {
 
 test("keeps public claims tied to variable proceeds and verified data", async () => {
   const html = await (await render()).text();
-  assert.match(html, /Distributions depend on finalized returned proceeds and holder eligibility/);
-  assert.match(html, /a cycle may have no distributable proceeds/);
+  assert.match(html, /proportional to the eligible HKMN you hold[\s\S]*?multiply that share by the finalized returned proceeds available to distribute/);
+  assert.match(html, /A cycle may have no distributable proceeds/);
   assert.match(html, /when a verified schedule is available/);
   assert.match(html, /not completed Hookemon pulls or a promise of future pack contents/);
   assert.doesNotMatch(html, /guaranteed (?:profit|income|returns)|risk.free|passive income|every 20 minutes|Top 200/i);
@@ -1122,7 +1122,7 @@ test("keeps all explanatory content available without JavaScript", async () => {
   assert.ok(transcript);
   assert.equal((transcript.match(/<li\b/g) ?? []).length, 5);
   assert.match(html, /<details>\s*<summary>\s*What is Hookemon\?/);
-  assert.match(html, /<details>\s*<summary>\s*How much do holders receive\?/);
+  assert.match(html, /<details>\s*<summary>\s*How much will I receive\?/);
   assert.doesNotMatch(html, /class="[^"]*\breveal\b|\bhidden\b[^>]*id="(?:machine|economics|faq)"/);
 });
 
