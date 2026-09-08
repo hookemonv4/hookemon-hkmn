@@ -664,3 +664,28 @@ test('the fixture binding is refused outside the Node test runner even when full
   assert.equal(generateCalls, 0);
   assert.equal(signSpy.calls, 0);
 });
+
+test('purchase preserves an older provider message with fresh original-hash observations', async () => {
+  const cfg = config({ fixtureBinding: FIXTURE_BINDING });
+  let observations = 0;
+  cfg.solana.originalBlockhashContextResolver = async blockhash => {
+    assert.equal(blockhash, FIXED_BLOCKHASH);
+    return { type: 'rpc-blockhash-validity', blockhash, valid: true, observedSlot: String(200 + observations++) };
+  };
+  const candidate = buildCandidateTransaction({ memoValue: PACK_MEMO_0 });
+  let submitted = null;
+  const latestBlockhashSpy = { calls: 0 };
+  const signSpy = { calls: 0 };
+  const collectorCrypt = {
+    async generateYoloPacks() { return { packs: [{ memo: PACK_MEMO_0, transaction: candidate }] }; },
+    async submitTransaction({ signedTransaction }) {
+      submitted = signedTransaction;
+      return { signature: signedSolanaTransactionSignature(signedTransaction) };
+    },
+  };
+  await mutatePurchase(baseArgs({ collectorCrypt, signSpy, cfg, latestBlockhashSpy,
+    blockhashSequence: [{ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: LAST_VALID_BLOCK_HEIGHT }] }));
+  assert.equal(latestBlockhashSpy.calls, 0);
+  assert.ok(observations >= 3, 'each validation must obtain a fresh observation');
+  assert.deepEqual(Transaction.from(Buffer.from(submitted, 'base64')).serializeMessage(), Transaction.from(Buffer.from(candidate, 'base64')).serializeMessage());
+});

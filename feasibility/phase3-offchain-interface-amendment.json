@@ -3,18 +3,20 @@
   "scope": "Approved offchain Collector policies and EVM custody evidence only; historical onchain proof remains revision 65 architecture 9.",
   "interfaceRequirementsRevision": 67,
   "interfaceArchitectureRevision": 10,
-  "approvedRequirementsRevision": 68,
+  "approvedRequirementsRevision": 70,
   "historicalInputHashes": {
     "architecture/interfaces.json": "sha256:3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10",
     "specs/requirements.json": "sha256:927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
   },
   "currentInputHashes": {
-    "architecture/interfaces.json": "sha256:aa30507161b301f64a1b102f0ca202c4d24f3f394a671ad773c6ae95bdcc6b22",
-    "specs/requirements.json": "sha256:5b440ee917a60b5626a88f90f6608e1d653b583f1462f5f5aaebba2120b13cae"
+    "architecture/interfaces.json": "sha256:521d20a8fd9e5e4ef3a25b3f27ea95df32c841ff727af5abf30839a884196460",
+    "specs/requirements.json": "sha256:d8162e9fdbcc0e2b2f2e4091b25bca9d51e6250afbcc1dabd8817cf762826d51"
   },
   "preservedInterfaceProjectionDigest": "sha256:1b2a01dea4235af5c45df4c87dad67d693c1114044dced4ca813fae76d7df63a",
   "ownerApprovalHashes": {
     "decisions/owner-approvals/revision-67-spec-s5-approved.json": "sha256:aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b",
-    "decisions/owner-approvals/revision-68-spec-s5-approved.json": "sha256:38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2"
+    "decisions/owner-approvals/revision-68-spec-s5-approved.json": "sha256:38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2",
+    "decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json": "sha256:e576590ea782085ff791887a7f9dac4ef52f7a68e6066b436ae722d82cc869fb",
+    "decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json": "sha256:c5381d6e698ac50a15c65a766f8c6d941dd06f6c34020e25fec5e97632a62061"
   }
 }

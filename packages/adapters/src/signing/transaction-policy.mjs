@@ -613,6 +613,13 @@ async function resolveSolanaBlockhashContext(message, input) {
   if (context.blockhash !== message.recentBlockhash) {
     fail('Solana blockhashContextResolver returned a blockhash that does not match the transaction');
   }
+  if (context.type === 'rpc-blockhash-validity') {
+    if (Object.keys(context).sort().join(',') !== 'blockhash,observedSlot,type,valid' || context.valid !== true) {
+      fail('Solana original blockhash validity context is invalid');
+    }
+    const observedSlot = decimalString(context.observedSlot, 'Solana validity observation slot');
+    return { ...input, originalBlockhashValidity: { type: context.type, valid: true, observedSlot } };
+  }
   return {
     ...input,
     lastValidBlockHeight: decimalString(context.lastValidBlockHeight, 'Solana blockhash context lastValidBlockHeight'),
@@ -637,7 +644,7 @@ async function decodeSolanaTransaction(input) {
       fail(`Solana transaction or message could not be deserialized: ${error.message}`);
     }
   }
-  input = await resolveSolanaBlockhashContext(message, input);
+  input = await resolveSolanaBlockhashContext(message, { ...input, originalBlockhashValidity: undefined });
   const tables = await resolveAddressLookupTables(message, input);
   let accountKeys;
   try {
@@ -679,7 +686,7 @@ async function decodeSolanaTransaction(input) {
   const currentBlockHeight = input.currentBlockHeight === undefined
     ? null
     : decimalString(input.currentBlockHeight, 'Solana currentBlockHeight');
-  const deadline = lastValidBlockHeight === null ? null : Object.freeze({
+  const deadline = input.originalBlockhashValidity ? Object.freeze({ ...input.originalBlockhashValidity }) : lastValidBlockHeight === null ? null : Object.freeze({
     type: 'block-height',
     lastValidBlockHeight,
     observedBlockHeight: currentBlockHeight,
@@ -888,6 +895,14 @@ function blockhashConstraint(expected, actual) {
 }
 
 function deadlineConstraint(expected, actual) {
+  if (expected?.type === 'rpc-blockhash-validity') {
+    if (Object.keys(expected).sort().join(',') !== 'minObservedSlot,type,valid' || expected.valid !== true
+      || actual?.type !== expected.type || actual.valid !== true) fail('original blockhash validity is not explicitly allowed');
+    if (BigInt(canonicalAtomic(actual.observedSlot, 'validity.observedSlot')) < BigInt(canonicalAtomic(expected.minObservedSlot, 'validity.minObservedSlot'))) {
+      fail('original blockhash validity observation regressed');
+    }
+    return;
+  }
   if (expected && typeof expected === 'object' && !Array.isArray(expected) && Object.hasOwn(expected, 'notExpired')) {
     const allowedKeys = new Set(['type', 'notExpired', 'minLastValidBlockHeight', 'maxLastValidBlockHeight']);
     const keys = Object.keys(expected);
@@ -1001,6 +1016,10 @@ function signedTransactionPayload(signedMessage, family) {
 }
 
 function comparableDescription(description) {
+  if (description.family === 'solana' && description.deadline?.type === 'rpc-blockhash-validity') {
+    const { observedSlot, ...deadline } = description.deadline;
+    return { ...description, deadline };
+  }
   if (description.family !== 'solana' || description.deadline?.type !== 'block-height') return description;
   const { observedBlockHeight, expired, ...deadline } = description.deadline;
   return { ...description, deadline };
@@ -1032,6 +1051,11 @@ export async function revalidateSignedMessage(signedMessage, approved, options =
   }
   const redecoded = await decodeProviderTransaction(input);
   if (redecoded.deadline?.expired === true) fail('signed message deadline has expired');
+  if (approvedDescription.deadline?.type === 'rpc-blockhash-validity'
+    && (redecoded.deadline?.type !== 'rpc-blockhash-validity' || redecoded.deadline.valid !== true
+      || BigInt(redecoded.deadline.observedSlot) < BigInt(approvedDescription.deadline.observedSlot))) {
+    fail('signed message original blockhash validity regressed');
+  }
   if (stableJson(comparableDescription(redecoded)) !== stableJson(comparableDescription(approvedDescription))) {
     fail('signed message differs from its approved semantic description');
   }

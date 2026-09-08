@@ -1,3 +1,4 @@
+import { wrapTransactionPolicySignerClient, OPERATOR_SOLANA_ROLE } from '../../src/signing/signer-client.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -19,7 +20,7 @@ import {
   assertCollectorPurchaseBindingV1,
   createCollectorPurchasePolicy,
 } from '../../src/signing/collector-purchase-policy.mjs';
-import { TransactionPolicyError, decodeProviderTransaction, evaluate } from '../../src/signing/transaction-policy.mjs';
+import { TransactionPolicyError, captureSolanaCoSignerSignatures, decodeProviderTransaction, evaluate } from '../../src/signing/transaction-policy.mjs';
 
 const COMPUTE_BUDGET_PROGRAM_ID = 'ComputeBudget111111111111111111111111111111';
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -144,6 +145,7 @@ function buildCandidateTransaction(overrides = {}) {
     blockhash = BLOCKHASH_CONTEXT.blockhash,
     instructionOrder = ['limit', 'price', 'transfer', 'memo'],
     extraInstruction = false,
+    duplicateAuthority = null,
   } = overrides;
 
   const instructionsByKind = {
@@ -156,6 +158,7 @@ function buildCandidateTransaction(overrides = {}) {
         { pubkey: mintKey, isSigner: false, isWritable: false },
         { pubkey: destinationKey, isSigner: false, isWritable: destinationWritable },
         { pubkey: feePayer.publicKey, isSigner: true, isWritable: false },
+        ...(duplicateAuthority === null ? [] : [{ pubkey: duplicateAuthority, isSigner: true, isWritable: false }]),
       ],
       data: transferCheckedData(amountAtomic, decimals),
     }),
@@ -395,4 +398,154 @@ test('refuses a v0 candidate transaction because the binding only ever authorize
   const transactionBase64 = Buffer.from(transaction.serialize()).toString('base64');
   const decoded = await decodeCandidate(transactionBase64);
   assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
+});
+
+const liveBinding = structuredClone(RAW_BINDING);
+liveBinding.instructions = [liveBinding.instructions[0], liveBinding.instructions[3], liveBinding.instructions[2], liveBinding.instructions[1]];
+liveBinding.instructions[0].computeUnitLimit = 80000;
+liveBinding.instructions[1].memoPrefix = '';
+liveBinding.instructions[2].accounts.push({ role: 'operator-fee-payer', isSigner: true, isWritable: true });
+liveBinding.instructions[3].priorityFeeCapAtomic = '10000';
+const liveFacts = { ...CYCLE_FACTS, amountAtomic: '25000000' };
+function livePolicy() {
+  return createCollectorPurchasePolicy(factoryInput({ binding: liveBinding, expectedDigest: digest(liveBinding), cycleFacts: liveFacts }));
+}
+function liveCandidate(overrides = {}) {
+  return buildCandidateTransaction({ instructionOrder: ['limit', 'memo', 'transfer', 'price'],
+    computeUnitLimit: 80000, priorityFeeMicroLamports: 10000, amountAtomic: liveFacts.amountAtomic,
+    memoText: `${liveFacts.memoValue}:open`, duplicateAuthority: overrides.feePayer?.publicKey ?? operator.publicKey, ...overrides });
+}
+test('accepts the exact generatePack profile with duplicate operator and durable memo suffix', async () => {
+  assert.equal(evaluate(livePolicy(), await decodeCandidate(liveCandidate())).allowed, true);
+});
+for (const [label, overrides] of [
+  ['amount', { amountAtomic: '25000001' }],
+  ['recipient', { destinationKey: Keypair.generate().publicKey }],
+  ['memo', { memoText: 'other:open' }],
+  ['missing suffix', { memoText: liveFacts.memoValue }],
+  ['signer', { feePayer: Keypair.generate() }],
+  ['duplicate authority', { duplicateAuthority: coSigner.publicKey }],
+  ['order', { instructionOrder: ['limit', 'price', 'transfer', 'memo'] }],
+  ['extra instruction', { extraInstruction: true }],
+]) {
+  test(`generatePack profile rejects changed ${label}`, async () => {
+    const policy = livePolicy();
+    const decoded = await decodeCandidate(liveCandidate(overrides));
+    assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
+  });
+}
+for (const [label, mutate] of [
+  ['memo prefix', binding => { binding.instructions[1].memoPrefix = 'prefix'; }],
+  ['memo signer', binding => { binding.instructions[1].accounts[0].role = 'operator-fee-payer'; }],
+  ['transfer flags', binding => { binding.instructions[2].accounts[4].isWritable = false; }],
+  ['transfer role', binding => { binding.instructions[2].accounts[4].role = 'provider-co-signer'; }],
+]) {
+  test(`generatePack binding rejects changed ${label} even with a matching digest`, () => {
+    const binding = structuredClone(liveBinding); mutate(binding);
+    assert.throws(() => assertCollectorPurchaseBindingV1(binding, digest(binding)), CollectorPurchasePolicyError);
+  });
+}
+
+test('generatePack pre-sign boundary accepts a verified provider signature with an unsigned operator', () => {
+  const tx = Transaction.from(Buffer.from(liveCandidate(), 'base64'));
+  tx.signatures.find(item => item.publicKey.equals(operator.publicKey)).signature = null;
+  assert.equal(captureSolanaCoSignerSignatures(tx.serialize({ requireAllSignatures: false }).toString('base64')).length, 1);
+});
+
+for (const mode of ['missing', 'corrupt', 'foreign']) {
+  test(`generatePack pre-sign boundary rejects a ${mode} provider signature`, () => {
+    const tx = Transaction.from(Buffer.from(liveCandidate(), 'base64'));
+    const slot = tx.signatures.find(item => item.publicKey.equals(coSigner.publicKey));
+    if (mode === 'missing') slot.signature = null;
+    if (mode === 'corrupt') slot.signature[0] ^= 0xff;
+    if (mode === 'foreign') slot.signature = tx.signatures.find(item => item.publicKey.equals(operator.publicKey)).signature;
+    assert.throws(() => captureSolanaCoSignerSignatures(tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString('base64')), TransactionPolicyError);
+  });
+}
+
+const originalContext = { type: 'rpc-blockhash-validity', blockhash: BLOCKHASH_CONTEXT.blockhash, valid: true, observedSlot: '120' };
+test('purchase binds the original hash to fresh RPC validity without an invented expiry height', async () => {
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  const transaction = buildCandidateTransaction();
+  const decoded = await decodeCandidate(transaction, { blockhashContextResolver: async hash => ({ ...originalContext, blockhash: hash, observedSlot: '121' }) });
+  assert.equal(evaluate(policy, decoded).allowed, true);
+  assert.equal(decoded.blockhash, originalContext.blockhash);
+  assert.equal(Object.hasOwn(decoded.deadline, 'lastValidBlockHeight'), false);
+});
+for (const [label, context] of [
+  ['expired', { ...originalContext, valid: false }],
+  ['wrong hash', { ...originalContext, blockhash: Keypair.generate().publicKey.toBase58() }],
+  ['malformed slot', { ...originalContext, observedSlot: '-1' }],
+  ['regressing slot', { ...originalContext, observedSlot: '119' }],
+]) {
+  test(`purchase original validity rejects ${label}`, async () => {
+    const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+    await assert.rejects(async () => evaluate(policy, await decodeCandidate(buildCandidateTransaction(), { blockhashContextResolver: async () => context })), TransactionPolicyError);
+  });
+}
+
+for (const mode of ['fresh', 'regressed', 'expired', 'replaced']) {
+  test(`original blockhash recovery with ${mode} observation preserves the unsigned approval boundary`, async () => {
+    const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+    let context = { ...originalContext };
+    const options = {
+      client: { role: OPERATOR_SOLANA_ROLE, async sign(transaction) { return { signedTxBase64: transaction }; } },
+      policy,
+      broadcast: async () => { throw new Error('no transport in this test'); },
+      decodeOptions: { family: 'solana', chainId: 'solana-mainnet', currentBlockHeightResolver: async () => '100',
+        blockhashContextResolver: async () => context },
+    };
+    const wrapper = wrapTransactionPolicySignerClient(options);
+    const signed = await wrapper.sign(buildCandidateTransaction());
+    const approval = wrapper.readApprovalContext(signed);
+    context = { ...originalContext, observedSlot: mode === 'regressed' ? '119' : '121',
+      valid: mode !== 'expired', blockhash: mode === 'replaced' ? Keypair.generate().publicKey.toBase58() : originalContext.blockhash };
+    const reopened = wrapTransactionPolicySignerClient(options);
+    if (mode === 'fresh') {
+      assert.deepEqual(await reopened.recoverApproval(signed, approval), signed);
+      assert.deepEqual(reopened.readApprovalContext(signed), approval);
+    } else {
+      await assert.rejects(() => reopened.recoverApproval(signed, approval), TransactionPolicyError);
+    }
+  });
+}
+
+test('original blockhash expiration after approval refuses before transport', async () => {
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  let valid = true;
+  let calls = 0;
+  const wrapper = wrapTransactionPolicySignerClient({
+    client: { role: OPERATOR_SOLANA_ROLE, async sign(transaction) { return { signedTxBase64: transaction }; } }, policy,
+    decodeOptions: { family: 'solana', chainId: 'solana-mainnet', currentBlockHeightResolver: async () => '100',
+      blockhashContextResolver: async () => ({ ...originalContext, valid }) },
+    broadcast: async () => { calls++; throw new Error('transport must not run'); },
+  });
+  const signed = await wrapper.sign(buildCandidateTransaction());
+  valid = false;
+  await assert.rejects(() => wrapper.broadcast(signed), TransactionPolicyError);
+  assert.equal(calls, 0);
+});
+
+test('candidate decode options cannot inject an original hash validity observation', async () => {
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  const decoded = await decodeCandidate(buildCandidateTransaction(), { originalBlockhashValidity: { type: originalContext.type, valid: true, observedSlot: '999' } });
+  assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
+});
+
+test('recovery refuses a reconstructed policy that lowers the original observation bound', async () => {
+  let context = { ...originalContext };
+  const options = {
+    client: { role: OPERATOR_SOLANA_ROLE, async sign(transaction) { return { signedTxBase64: transaction }; } },
+    decodeOptions: { family: 'solana', chainId: 'solana-mainnet', currentBlockHeightResolver: async () => '100', blockhashContextResolver: async () => context },
+    broadcast: async () => { throw new Error('transport must not run'); },
+  };
+  const policy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: originalContext }));
+  const wrapper = wrapTransactionPolicySignerClient({ ...options, policy });
+  const signed = await wrapper.sign(buildCandidateTransaction());
+  const approval = wrapper.readApprovalContext(signed);
+  context = { ...originalContext, observedSlot: '119' };
+  const loweredPolicy = createCollectorPurchasePolicy(factoryInput({ blockhashContext: context }));
+  assert.deepEqual(loweredPolicy, policy, 'canonical envelopes match while rule sidecars differ');
+  const reconstructed = wrapTransactionPolicySignerClient({ ...options, policy: loweredPolicy });
+  await assert.rejects(() => reconstructed.recoverApproval(signed, approval), /recovery context does not match the active policy/);
 });

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "productPhase": 3,
-  "requirementsRevision": 65,
+  "requirementsRevision": 71,
   "architectureRevision": 9,
   "freezePhase": "feasibility",
   "status": "PROVISIONAL",
@@ -38,7 +38,7 @@
         {"name": "OperationsRotationScheduled(address,address,uint256)", "status": "PROVISIONAL"},
         {"name": "OperationsRotationExecuted(address,address)", "status": "PROVISIONAL"}
       ],
-      "unresolved": ["The initial process-claim limit X remains a launch input; Xmax, processClaimMaxCount, and the emergency rotation delay are fixed by revision 65."]
+      "unresolved": ["Positive processClaimLimit6hWei and processClaimLimitMaxWei are explicit launch inputs bound to current valuation and the existing USD ceiling; count cap 64 and rotation delay 43200 seconds remain fixed."]
     },
     {
       "id": "launch-orchestration",
@@ -87,12 +87,12 @@
         {"name": "CycleRecord", "status": "PROVISIONAL"},
         {"name": "ProviderMutationAttemptV2", "status": "PROVISIONAL"},
         {"name": "ChainTransactionAttemptV2", "status": "PROVISIONAL"},
-        {"name": "RelayLegV1", "status": "PROVISIONAL"},
+        {"name": "RelayLegV2", "status": "PROVISIONAL"},
         {"name": "StandingAuthorityDecisionV1", "status": "PROVISIONAL"},
         {"name": "WalletNonceReservationV1", "status": "PROVISIONAL"},
         {"name": "PurchaseRequestV1", "status": "PROVISIONAL"},
         {"name": "CycleMode", "status": "PROVISIONAL"},
-        {"name": "CustodyLedgerV2", "status": "PROVISIONAL"}
+        {"name": "CustodyLedgerV3", "status": "PROVISIONAL"}
       ],
       "events": [
         {"name": "CycleTransitionRecorded", "status": "PROVISIONAL"},
@@ -104,7 +104,7 @@
         {"name": "WalletNonceReserved", "status": "PROVISIONAL"},
         {"name": "TransactionReconciled", "status": "PROVISIONAL"}
       ],
-      "unresolved": ["Durable storage implementation, wallet-wide nonce fencing, RelayLegV1 observations, and standing-authority reservation remain build work, not a second authority model."]
+      "unresolved": ["Durable storage implementation, wallet-wide nonce fencing, RelayLegV2 observations, and standing-authority reservation remain build work, not a second authority model."]
     },
     {
       "id": "transaction-policy",
@@ -119,7 +119,7 @@
       "data": [
         {"name": "DecodedTransaction", "status": "PROVISIONAL"},
         {"name": "CanonicalTransactionPolicyV1", "status": "PROVISIONAL"},
-        {"name": "MoneyConfigurationV1", "status": "PROVISIONAL"},
+        {"name": "MoneyConfigurationV2", "status": "PROVISIONAL"},
         {"name": "SignerReadiness", "status": "PROVISIONAL"}
       ],
       "events": [
@@ -154,7 +154,7 @@
         {"name": "broadcastPayout", "status": "PROVISIONAL"},
         {"name": "recoverDroppedBroadcast", "status": "PROVISIONAL"},
         {"name": "finalizePayout", "status": "PROVISIONAL"},
-        {"name": "quarantineFrozenRecipient", "status": "PROVISIONAL"},
+        {"name": "quarantineRejectingRecipient", "status": "PROVISIONAL"},
         {"name": "persistDustCarry", "status": "PROVISIONAL"}
       ],
       "data": [
@@ -172,7 +172,7 @@
         {"name": "RecipientQuarantined", "status": "PROVISIONAL"},
         {"name": "PayoutDustCarried", "status": "PROVISIONAL"}
       ],
-      "unresolved": ["The live recipient-count and gas envelope must be measured before a claim is allowed."]
+      "unresolved": ["The live recipient-count and gas envelope must be measured before claim; producer-authenticated native payment proof is required and rejecting-recipient liabilities are quarantined."]
     },
     {
       "id": "policy-engine",
@@ -189,7 +189,7 @@
         {"name": "PolicySnapshot", "status": "PROVISIONAL"},
         {"name": "SpendWindow", "status": "PROVISIONAL"},
         {"name": "PurchaseRequestV1", "status": "PROVISIONAL"},
-        {"name": "CustodyLedgerV2", "status": "PROVISIONAL"},
+        {"name": "CustodyLedgerV3", "status": "PROVISIONAL"},
         {"name": "ManualApproval", "status": "PROVISIONAL"},
         {"name": "HeldCardState", "status": "PROVISIONAL"},
         {"name": "CanaryResult", "status": "PROVISIONAL"}
@@ -199,7 +199,7 @@
         {"name": "HeldCardRecorded", "status": "PROVISIONAL"},
         {"name": "CanaryDriftDetected", "status": "PROVISIONAL"}
       ],
-      "unresolved": ["The adapter must persist reconciliation evidence proving the insured-value unit against the machine instantBuyback percentage; absent or contradictory evidence enters HELD_DATA_UNVERIFIED."]
+      "unresolved": ["Preserve insured-value evidence for the existing epic decision only; held exposure uses attributed purchase costMicroUsd, never insured or market value. Missing unit/valuation evidence refuses new risk and permits observation/recovery."]
     },
     {
       "id": "deployment-manifest",
@@ -221,7 +221,7 @@
   "rules": [
     "Every interface in this artifact is provisional until Phase 3 feasibility freezes a replacement.",
     "The legacy custody family stays frozen and never enters the Phase 3 deployment manifest.",
-    "Amounts use chainId, assetId, decimals, and integer-string amountAtomic; chain-4663 USDG and Solana stablecoins are distinct assets.",
+    "Amounts use chainId, assetId, decimals, and integer-string amountAtomic; chain-4663 native ETH and Solana stablecoins are distinct assets.",
     "A provider response never becomes signable before semantic decoding, positive allowlisting, write-ahead persistence, and policy approval.",
     "Operations claims, bridge actions, purchases, returns, and direct payouts share one CycleRepository and wallet-wide fencing lock.",
     "Eligibility is frozen before claim at a finalized block; payout manifests are immutable after first broadcast.",

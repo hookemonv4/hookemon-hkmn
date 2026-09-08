@@ -120,14 +120,16 @@ function requireSolanaConfiguration({ adapters, config, signerClient, stage }) {
 }
 
 function trustedSolanaDecodeOptions({ adapters, config, stage }) {
-  if (typeof config?.solana?.blockhashContextResolver !== 'function') {
+  const resolver = stage === 'purchase' && config?.solana?.originalBlockhashContextResolver !== undefined
+    ? config.solana.originalBlockhashContextResolver : config?.solana?.blockhashContextResolver;
+  if (typeof resolver !== 'function') {
     throw new Error(`Collector ${stage} requires a trusted Solana blockhashContextResolver`);
   }
   return Object.freeze({
     family: 'solana',
     chainId: config.solana.chainId,
     lookupTableResolver: config.solana.lookupTableResolver,
-    blockhashContextResolver: config.solana.blockhashContextResolver,
+    blockhashContextResolver: resolver,
     currentBlockHeightResolver: async () => readBlockHeight(adapters.solana.client),
   });
 }
@@ -458,6 +460,9 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       });
       assertFixtureBindingMatchesSettlementAsset(resolvedBinding.binding, asset);
       trustedBinding = Object.freeze({ binding: resolvedBinding.binding, expectedDigest: resolvedBinding.expectedDigest });
+      if (typeof config?.solana?.originalBlockhashContextResolver !== 'function') {
+        throw new Error('live Collector purchase requires originalBlockhashContextResolver');
+      }
     } else {
       legacyPolicy = requirePolicy(config, 'purchase');
     }
@@ -498,17 +503,26 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
 
       let policy;
       if (trustedBinding !== null) {
-        // Read a fresh usable latest blockhash and current height from the configured fixture RPC
-        // immediately before this pack's own policy and decode -- never a shared batch-wide read.
-        // Neither the approved binding nor the provider API contract guarantees one blockhash for
-        // a generated batch.
-        const latest = await readUsableLatestBlockhash(adapters.solana.client);
-        const currentHeight = await readBlockHeight(adapters.solana.client);
-        const blockhashContext = Object.freeze({
-          blockhash: latest.blockhash,
-          lastValidBlockHeight: String(latest.lastValidBlockHeight),
-          currentBlockHeight: currentHeight.toString(),
-        });
+        let blockhashContext;
+        if (config.solana.originalBlockhashContextResolver !== undefined) {
+          // Only the hash is candidate-derived. Its usability comes from independent RPC;
+          // all financial and authority facts below remain from trusted durable inputs.
+          const observed = await decodeProviderTransaction({
+            ...trustedSolanaDecodeOptions({ adapters, config, stage: 'purchase' }), transaction,
+          });
+          if (observed.deadline?.type !== 'rpc-blockhash-validity' || observed.deadline.valid !== true) {
+            throw new Error('Collector purchase requires an original blockhash validity observation');
+          }
+          blockhashContext = Object.freeze({ ...observed.deadline, blockhash: observed.blockhash });
+        } else {
+          const latest = await readUsableLatestBlockhash(adapters.solana.client);
+          const currentHeight = await readBlockHeight(adapters.solana.client);
+          blockhashContext = Object.freeze({
+            blockhash: latest.blockhash,
+            lastValidBlockHeight: String(latest.lastValidBlockHeight),
+            currentBlockHeight: currentHeight.toString(),
+          });
+        }
         // A separate, real policy per pack, built only from the trusted binding snapshot, the
         // immutable admitted unit amount, the durable request digest, this durably recorded pack's
         // own memo, the independently read source ATA, the configured Operations payer, and this
