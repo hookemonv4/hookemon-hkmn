@@ -1,0 +1,89 @@
+Missing dependencies found. Installing now...
+
+fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/liquidity-launcher.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' failed
+Failed to clone 'packages/contracts/lib/liquidity-launcher'. Retry scheduled
+fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/uerc20-factory' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/uerc20-factory.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/uerc20-factory' failed
+Failed to clone 'packages/contracts/lib/uerc20-factory'. Retry scheduled
+fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-core' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/v4-core.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-core' failed
+Failed to clone 'packages/contracts/lib/v4-core'. Retry scheduled
+fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-periphery' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/v4-periphery.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/v4-periphery' failed
+Failed to clone 'packages/contracts/lib/v4-periphery'. Retry scheduled
+fatal: destination path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' already exists and is not an empty directory.
+fatal: clone of 'https://github.com/Uniswap/liquidity-launcher.git' into submodule path '/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-funding-20260908/packages/contracts/lib/liquidity-launcher' failed
+Failed to clone 'packages/contracts/lib/liquidity-launcher' a second time, aborting
+Warning: Your project has missing dependencies that could not be installed.
+Compiling 148 files with Solc 0.8.26
+Solc 0.8.26 finished in 2.00s
+Compiler run successful!
+
+Ran 3 tests for test/native/NativeFundingFeasibility.t.sol:NativeFundingFeasibilityTest
+[PASS] testSeed004Float001CannotReachHistoricalBridgePrincipal() (gas: 80219207)
+Logs:
+  tokenDeploymentGasLocal: 725263
+  hookDeploymentGasLocal: 6412849
+  custodyDeploymentGasLocal: 666212
+  graphWiringGasLocal: 188756
+  seedGasLocal: 582652
+  initialCapitalWei: 50000000000000000
+  seedLockedWei: 39999999999999657
+  initialTradingFloatWei: 10000000000000000
+  grossExecutedWei: 333196420954146554
+  earnedProcessWei: 8329910523853663
+  feeLiabilitiesWei: 9995892628624395
+  traderRemainingWei: 4107371375477
+  poolRemainingWei: 39999999999999785
+  minimumAfterBuyWei: 0
+  minimumRoundEndWei: 4107371375477
+  swapCount: 256
+  swapExecutionGasLocal: 45817118
+
+[PASS] testSeed004Float002EarnsAndClaimsHistoricalBridgePrincipal() (gas: 47664935)
+Logs:
+  tokenDeploymentGasLocal: 725263
+  hookDeploymentGasLocal: 6412849
+  custodyDeploymentGasLocal: 666212
+  graphWiringGasLocal: 188756
+  seedGasLocal: 582652
+  initialCapitalWei: 60000000000000000
+  seedLockedWei: 39999999999999657
+  initialTradingFloatWei: 20000000000000000
+  grossExecutedWei: 415128299471828390
+  earnedProcessWei: 10378207486795709
+  feeLiabilitiesWei: 12453848984154850
+  traderRemainingWei: 7546151015845134
+  poolRemainingWei: 39999999999999673
+  minimumAfterBuyWei: 0
+  minimumRoundEndWei: 7546151015845134
+  swapCount: 32
+  swapExecutionGasLocal: 5892831
+  claimGasLocal: 150559
+
+[PASS] testSeed004Float004EarnsAndClaimsHistoricalBridgePrincipal() (gas: 45218713)
+Logs:
+  tokenDeploymentGasLocal: 725263
+  hookDeploymentGasLocal: 6412849
+  custodyDeploymentGasLocal: 666212
+  graphWiringGasLocal: 188756
+  seedGasLocal: 582652
+  initialCapitalWei: 80000000000000000
+  seedLockedWei: 39999999999999657
+  initialTradingFloatWei: 40000000000000000
+  grossExecutedWei: 462884963385856451
+  earnedProcessWei: 11572124084646411
+  feeLiabilitiesWei: 13886548901575692
+  traderRemainingWei: 26113451098424294
+  poolRemainingWei: 39999999999999671
+  minimumAfterBuyWei: 0
+  minimumRoundEndWei: 26113451098424294
+  swapCount: 14
+  swapExecutionGasLocal: 2715276
+  claimGasLocal: 150559
+
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 81.22ms (158.58ms CPU time)
+
+Ran 1 test suite in 86.92ms (81.22ms CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)
+2026-09-08T10:19:03.146490Z  WARN evm::traces: failed to flush signature cache err=failed to create file "/Users/kerim/.foundry/cache/signatures": Operation not permitted (os error 1)

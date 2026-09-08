@@ -1,0 +1,25 @@
+{
+  "baselineCommit": "79eca8b1c322ea9fe2a151731678a447ae5339f8",
+  "forgeVersion": "forge Version: 1.7.1\nCommit SHA: 4072e48705af9d93e3c0f6e29e93b5e9a40caed8\nBuild Timestamp: 2026-05-08T07:54:31.470926000Z (1778226871)\nBuild Profile: dist",
+  "profile": "launch",
+  "solc": "0.8.26",
+  "evmVersion": "cancun",
+  "optimizerRuns": 1000,
+  "dependencyExport": "Source-only export from sibling eth-contracts-20260908; every .git entry excluded. No Git database copied.",
+  "rootGitlinks": [
+    "160000 commit 1eda9f0c0243e2fdc0cbe0d665200ffa8c2ba53a\tpackages/contracts/lib/liquidity-launcher",
+    "160000 commit a747318fcce114f56a3a21b8bcec83663a61208b\tpackages/contracts/lib/uerc20-factory",
+    "160000 commit 46c6834698c48bc4a463a86d8420f4eb1d7f3b75\tpackages/contracts/lib/v4-core",
+    "160000 commit dce236d4e2057422d0791d9a973a58765eb46f65\tpackages/contracts/lib/v4-periphery"
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/HookemonHook.sol": "c96b17a0e535ec97ed6e37cb8589b8262f4e6fe4aa2c7040dc2d1e7acdd8d0fa",
+    "packages/contracts/src/launch/HKMNToken.sol": "18107aab7fb2a13db52d5b53ddef5a9cee57ee30aab7141fb197bd84f20f61ea",
+    "packages/contracts/src/bindings/RobinhoodBindings.sol": "e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18",
+    "packages/contracts/src/accounting/FeeAccounting.sol": "e8ea8d1ead71f4273f5fdb08f27a02b5e9120fd11cf3de4d5258a747a5795347",
+    "packages/contracts/lib/v4-core/src/PoolManager.sol": "3b6ab111dadf613e3cfd617e4b1c6ab75b5445cd15cbe52d7c6207fc02449717",
+    "packages/contracts/lib/v4-periphery/src/PositionManager.sol": "2e3c0043654fea263377c5e09c31344946751c8b8ace60580f5090385d3b4428",
+    "packages/contracts/lib/v4-periphery/lib/permit2/src/Permit2.sol": "a19dd81d4edafe3bba0178abfc9063886c2981b4711a4cbbf3fac19370defc9a",
+    "packages/contracts/test/native/NativeFundingFeasibility.t.sol": "340f0781f7be91ee56bd249bc4f7dfa4a5ddd3cc7613550e8c7799a590fa806a"
+  }
+}
