@@ -84,11 +84,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "578375942fd3a857ca0e6b6ac9bd999ef0dfd5a2d219c258369eb9fc6c3fd420",
+      "sha256": "ac3bf936d22eea50627b2224eae57a24ed02aa00701a7fd89bed741ff8532971",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "578375942fd3a857ca0e6b6ac9bd999ef0dfd5a2d219c258369eb9fc6c3fd420"
+          "sha256": "ac3bf936d22eea50627b2224eae57a24ed02aa00701a7fd89bed741ff8532971"
         },
         {
           "path": "scripts/lib/util.mjs",
