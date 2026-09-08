@@ -1489,22 +1489,22 @@ test('compose refuses an uncapped relay-roundtrip rehearsal before opening durab
       proceedsAccount: '11111111111111111111111111111111',
     },
   };
-  for (const rehearsalCapUsdg of [undefined, '0']) {
+  for (const rehearsalCapMicroUsd of [undefined, '0']) {
     await assert.rejects(
       () => compose({
         ...config,
         execution: {
-          profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'fake', enforceProfile: true, rehearsalCapUsdg,
+          profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'fake', enforceProfile: true, rehearsalCapMicroUsd,
         },
       }),
-      /relay-roundtrip rehearsal requires a positive explicit rehearsalCapUsdg/,
+      /relay-roundtrip rehearsal requires a positive explicit rehearsalCapMicroUsd/,
     );
   }
   await assert.rejects(
     () => compose({
       ...config,
       execution: {
-        profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'fake', enforceProfile: true, rehearsalCapUsdg: '30',
+        profile: 'rehearsal', networkProfile: 'mainnet', providerMode: 'fake', enforceProfile: true, rehearsalCapMicroUsd: '30',
       },
     }),
     MoneyConfigurationRejected,
