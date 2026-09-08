@@ -1199,8 +1199,8 @@ function regularRepositoryFileHash(root, relativePath, label, errors) {
 
 // These data-bearing controls are covered by the protected verifier's own pin.
 const NATIVE_CLEANROOM_CONTROL_DIGESTS = Object.freeze({
-  'scripts/check-cleanroom.mjs': '92256e07ab61c431a604b456d1b2b42ce647fd1ec4ff32e5f56edc4d5b12d6fc',
-  'scripts/native-cleanroom-recognition.json': '1caffc5114c6545b9819353a6d28a7c37067f9688a73b51a6fb9b6cbeea931f0',
+  'scripts/check-cleanroom.mjs': '1c1943d469964e932d91f32eda08a08ec905a7f331b78b56744c9e33e390f520',
+  'scripts/native-cleanroom-recognition.json': '86363267d658bf570376146ad900eb8ac69275e0db071b4e54f4898a82a903d9',
 });
 
 export function verifyNativeCleanroomIntegrity(root, errors = []) {

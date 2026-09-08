@@ -7830,7 +7830,7 @@
       ]
     },
     "scripts/tests/native-runtime-observer.test.mjs": {
-      "sha256": "57dd751b7791271185b3d1b8191ea7f349e10d76a4c73b12e60084aea5eafa13",
+      "sha256": "07a84e5e5efe13915da2059643d439946bd0a8365a551ad45897b9b8cd9c0542",
       "matches": [
         {
           "rule": "historical-architecture",

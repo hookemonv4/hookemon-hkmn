@@ -214,9 +214,9 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
   need((await rpc('genesis', 'eth_getBlockByNumber', ['0x0', false]))?.hash === GENESIS, 'GENESIS_MISMATCH', 'unexpected genesis');
   const captureFirst = checkpointMode === 'capture-then-finalize';
   const checkpoint = blockIdentity(await rpc(captureFirst ? 'capture-head' : 'finalized', 'eth_getBlockByNumber', [captureFirst ? 'latest' : 'finalized', false]));
-  // The numeric tag is fixed once; every state call uses the same captured block.
+  // The block hash is fixed once; every state call uses the same canonical block.
   // No observation capability is issued until this exact canonical block is finalized.
-  const ref = captureFirst ? checkpoint.number : { blockHash: checkpoint.hash, requireCanonical: true };
+  const ref = { blockHash: checkpoint.hash, requireCanonical: true };
   const contracts = [];
   for (const role of Object.keys(ROLES).sort()) {
     const expected = ROLES[role];
@@ -275,7 +275,7 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
     evidenceBytes[abiPath] = encode(completeAbi);
     evidenceBytes[observationPath] = encode({ role, address: expected.address, blockNumber: BigInt(checkpoint.number).toString(), blockHash: checkpoint.hash,
       ...(role === 'permitAuthority' ? { abiSource: 'safe-deployments singleton via canonical SafeProxy 1.4.1', proxyArtifactSource: SAFE_PROXY_ARTIFACT, proxyArtifactPath: 'responses/abi-safe-proxy.json' } : {}),
-      runtimeKeccak256: expected.runtimeCodeHash, codeResponsePath: `responses/${role}-code.json`, finalitySource: captureFirst ? 'responses/finalized-recheck.json' : 'responses/finalized.json', binding: captureFirst ? 'fixed numeric block with canonical recheck after finalization' : 'EIP-1898 requireCanonical' });
+      runtimeKeccak256: expected.runtimeCodeHash, codeResponsePath: `responses/${role}-code.json`, finalitySource: captureFirst ? 'responses/finalized-recheck.json' : 'responses/finalized.json', binding: 'EIP-1898 requireCanonical' });
     contracts.push({ role, address: expected.address, codePath, abiPath, observationPath, blockNumber: BigInt(checkpoint.number).toString(), blockHash: checkpoint.hash });
   }
   if (captureFirst) {
