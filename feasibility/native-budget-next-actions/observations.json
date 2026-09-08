@@ -1,0 +1,23 @@
+{
+  "relay-outbound": {
+    "url": "https://api.relay.link/quote/v2",
+    "observedAt": "2026-09-08T12:14:21.260894+00:00",
+    "httpStatus": 200,
+    "sha256": "7036ba30243b970b1c8cbdbc8ddd29998e439f6dbf3dd2f8299336a61d81cd15",
+    "purpose": "Read-only quote or public RPC observation, never provider creation/preflight/signing"
+  },
+  "relay-return-scenario": {
+    "url": "https://api.relay.link/quote/v2",
+    "observedAt": "2026-09-08T12:14:21.428559+00:00",
+    "httpStatus": 200,
+    "sha256": "84dcd9dd9952cc8c5a9dee0582f5a08acc41d4c2e6f51d3db43f52a592115245",
+    "purpose": "Read-only quote or public RPC observation, never provider creation/preflight/signing"
+  },
+  "evm-network": {
+    "url": "https://rpc.mainnet.chain.robinhood.com",
+    "observedAt": "2026-09-08T12:14:21.141485+00:00",
+    "httpStatus": 200,
+    "sha256": "42f620da6399dc4f5503661a5b914f7d4bdfaab47ddd70d004b17c1c22abc03b",
+    "purpose": "Read-only quote or public RPC observation, never provider creation/preflight/signing"
+  }
+}
