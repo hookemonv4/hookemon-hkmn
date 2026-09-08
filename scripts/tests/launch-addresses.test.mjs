@@ -13,6 +13,7 @@ import {
   computeCreate2Address,
   deriveProgrammableEffectiveSalt,
   encodeConstructorConfig,
+  encodeNativeConstructorConfig,
   mineHookAddress,
   mineProgrammableSalt,
   mineSalt,
@@ -29,6 +30,7 @@ import {
   buildAddressManifest,
   verifyAddressManifest,
 } from '../launch/build-address-manifest.mjs';
+import { deriveNativePriceCandidate } from '../programmable/lib/phase3-release.mjs';
 import { isEip55Address, toEip55Address } from '../programmable/lib/eip55.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
 
@@ -89,7 +91,7 @@ function fixtureHookConfig(input, token) {
     manager: input.roles.manager,
     positionManager: input.roles.positionManager,
     permit2: input.roles.permit2,
-    usdg: input.usdg,
+    ...(input.quoteCurrency ? { quoteCurrency: input.quoteCurrency } : { usdg: input.usdg }),
     hkmn: token,
     tickSpacing: input.pool.tickSpacing,
     programmable: input.roles.programmable,
@@ -100,8 +102,13 @@ function fixtureHookConfig(input, token) {
     expectedDecimals: input.hookConstructorConfig.expectedDecimals,
     bindingDigest: input.hookConstructorConfig.bindingDigest,
     runtimeDigest: input.hookConstructorConfig.runtimeDigest,
-    processClaimLimit6h: input.hookConstructorConfig.processClaimLimit6h,
-    processClaimLimitMax: input.hookConstructorConfig.processClaimLimitMax,
+    ...(input.quoteCurrency ? {
+      processClaimLimit6hWei: input.hookConstructorConfig.processClaimLimit6hWei,
+      processClaimLimitMaxWei: input.hookConstructorConfig.processClaimLimitMaxWei,
+    } : {
+      processClaimLimit6h: input.hookConstructorConfig.processClaimLimit6h,
+      processClaimLimitMax: input.hookConstructorConfig.processClaimLimitMax,
+    }),
     processClaimMaxCount: input.hookConstructorConfig.processClaimMaxCount,
     operationsRotationDelay: input.hookConstructorConfig.operationsRotationDelay,
   };
@@ -125,7 +132,7 @@ function selectFixturePriceCandidate(input) {
   const candidates = Object.entries(fixturePriceCandidates(input)).map(([id, candidate]) => {
     const tokenConstructorArguments = [
       addressWord(input.chain.factory),
-      addressWord(input.usdg),
+      addressWord(input.quoteCurrency ?? input.usdg),
       uintWord(input.hookConstructorConfig.expectedDecimals),
       uintWord(candidate.sqrtPriceX96),
     ].join('');
@@ -133,7 +140,7 @@ function selectFixturePriceCandidate(input) {
     const token = toEip55Address(computeCreate2Address(input.chain.factory, tokenEffectiveSalt, tokenInitCodeHash));
     return { id, sqrtPriceX96: candidate.sqrtPriceX96, token };
   });
-  if (candidates.length === 1 && candidates[0].id === 'scalar') return candidates[0];
+  if (candidates.length === 1 && ['scalar', 'nativeCurrency0'].includes(candidates[0].id)) return candidates[0];
   const selected = candidates.filter(({ id, token }) => (
     id === 'usdgCurrency0' ? BigInt(token) > BigInt(input.usdg) : BigInt(token) < BigInt(input.usdg)
   ));
@@ -159,7 +166,7 @@ function setCanonicalInitializerCalldata(input) {
   const token = selectedPrice.token;
 
   const hookInitCodeHash = keccakHex(
-    `${HOOK_CREATION_BYTECODE}${encodeConstructorConfig(fixtureHookConfig(input, token)).slice(2)}`,
+    `${HOOK_CREATION_BYTECODE}${(input.quoteCurrency ? encodeNativeConstructorConfig : encodeConstructorConfig)(fixtureHookConfig(input, token)).slice(2)}`,
   );
   const minedHook = mineProgrammableSalt({
     chainId: input.chain.chainId,
@@ -258,7 +265,7 @@ function hookConstructorComponents() {
   ];
 }
 
-function makeFixture() {
+function makeFixture({ native = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'hookemon-launch-addresses-'));
   const tokenArtifactPath = resolve(directory, 'token.json');
   const hookArtifactPath = resolve(directory, 'hook.json');
@@ -414,6 +421,31 @@ function makeFixture() {
       },
     },
   };
+  if (native) {
+    const input = fixture.input;
+    input.schemaVersion = 'hookemon.phase3.launch-inputs.v2';
+    input.quoteCurrency = '0x0000000000000000000000000000000000000000';
+    delete input.usdg;
+    input.pool.seedMaximumWei = '40000000000000000';
+    input.pool.hkmnAtomic = '1000000000000000000000000000';
+    const candidate = deriveNativePriceCandidate({ nativeWei: input.pool.seedMaximumWei, hkmnAtomic: input.pool.hkmnAtomic });
+    input.pool.priceCandidates = { nativeCurrency0: { sqrtPriceX96: candidate.sqrtPriceX96 } };
+    input.hookConstructorConfig.quoteCurrency = { ref: 'quoteCurrency' };
+    delete input.hookConstructorConfig.usdg;
+    input.hookConstructorConfig.processClaimLimit6hWei = '10000000000000000';
+    input.hookConstructorConfig.processClaimLimitMaxWei = '20000000000000000';
+    delete input.hookConstructorConfig.processClaimLimit6h;
+    delete input.hookConstructorConfig.processClaimLimitMax;
+    input.targets.token.constructorArguments[1] = { ref: 'quoteCurrency' };
+    const tokenArtifact = JSON.parse(readFileSync(tokenArtifactPath));
+    tokenArtifact.abi[0].inputs.forEach((entry, i) => { entry.name = ['issuanceAuthority_', 'expectedQuoteCurrency_', 'decimals_', 'launchSqrtPriceX96_'][i]; });
+    writeJson(tokenArtifactPath, tokenArtifact);
+    const hookArtifact = JSON.parse(readFileSync(hookArtifactPath));
+    for (const entry of hookArtifact.abi[0].inputs[0].components) {
+      entry.name = ({ usdg: 'quoteCurrency', processClaimLimit6h: 'processClaimLimit6hWei', processClaimLimitMax: 'processClaimLimitMaxWei' })[entry.name] ?? entry.name;
+    }
+    writeJson(hookArtifactPath, hookArtifact);
+  }
   setCanonicalInitializerCalldata(fixture.input);
   return fixture;
 }
@@ -1116,4 +1148,35 @@ test('ships a strict manifest schema and a visibly non-production input example'
   );
   assert.equal(example.exampleOnly, true);
   assert.match(JSON.stringify(example), /PLACEHOLDER/);
+});
+
+
+test('native version derives a single zero-quote graph from explicit wei and complete stock', () => {
+  const fixture = makeFixture({ native: true });
+  try {
+    const result = deriveAddresses({ launchInputs: fixture.input, inputDirectory: fixture.directory });
+    assert.equal(result.schemaVersion, 'hookemon.phase3.derived-addresses.v2');
+    assert.equal(result.pool.currency0, fixture.input.quoteCurrency);
+    assert.equal(result.pool.currency1, result.targets.token.address);
+    assert.equal(result.pool.selectedOrdering, 'nativeCurrency0');
+    assert.equal(result.pool.priceCandidate.sqrtPriceX96, '12527072418752396559322253362376889');
+    assert.equal(verifyDerivedAddresses({ launchInputs: fixture.input, derived: result, inputDirectory: fixture.directory }), true);
+  } finally { rmSync(fixture.directory, { recursive: true, force: true }); }
+});
+
+test('native version refuses historical quote, implicit limits and unbound seed price', () => {
+  const fixture = makeFixture({ native: true });
+  try {
+    for (const change of [
+      input => { input.quoteCurrency = USDG; },
+      input => { input.usdg = USDG; },
+      input => { input.hookConstructorConfig.processClaimLimit6hWei = '0'; },
+      input => { input.hookConstructorConfig.processClaimLimit6h = '1000000'; },
+      input => { input.pool.seedMaximumWei = '40000000000000001'; },
+      input => { input.pool.hkmnAtomic = '999999999999999999999999999'; },
+    ]) {
+      const input = structuredClone(fixture.input); change(input);
+      assert.throws(() => deriveAddresses({ launchInputs: input, inputDirectory: fixture.directory }));
+    }
+  } finally { rmSync(fixture.directory, { recursive: true, force: true }); }
 });

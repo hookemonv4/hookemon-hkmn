@@ -20,10 +20,12 @@ import {
   REQUIRED_HOOK_PERMISSION_MASK,
   computeCreate2Address,
   encodeConstructorConfig,
+  encodeNativeConstructorConfig,
   mineProgrammableSalt,
   deriveProgrammableEffectiveSalt,
   satisfiesMask,
 } from '../mine-hook-address.mjs';
+import { deriveNativePriceCandidate } from '../programmable/lib/phase3-release.mjs';
 import { keccak256 } from '../../packages/contracts/tooling/payout/canonical-merkle-sum.mjs';
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -769,11 +771,12 @@ function validatePriceCandidate(value, id, label) {
 }
 
 function validateLaunchInputs(value) {
+  const native = value?.schemaVersion === 'hookemon.phase3.launch-inputs.v2';
   expectExactKeys(value, [
-    'schemaVersion', 'chain', 'graphAuthorization', 'compilerProfile', 'usdg', 'roles', 'pool',
+    'schemaVersion', 'chain', 'graphAuthorization', 'compilerProfile', native ? 'quoteCurrency' : 'usdg', 'roles', 'pool',
     'hookConstructorConfig', 'targets',
   ], 'launchInputs');
-  if (value.schemaVersion !== 'hookemon.phase3.launch-inputs.v1') fail('launchInputs.schemaVersion is unsupported');
+  if (!native && value.schemaVersion !== 'hookemon.phase3.launch-inputs.v1') fail('launchInputs.schemaVersion is unsupported');
   expectExactKeys(value.chain, ['chainId', 'factory', 'authorizedLauncher', 'routeNamespace', 'routeNonce'], 'chain');
   if (normalizeDecimal(value.chain.chainId, 'chain.chainId', { positive: true }) !== '4663') fail('chain.chainId must be 4663');
   const factory = normalizeAddress(value.chain.factory, 'chain.factory');
@@ -790,8 +793,9 @@ function validateLaunchInputs(value) {
     totalValue: normalizeNativeValue(value.graphAuthorization.totalValue, 'graphAuthorization.totalValue'),
   };
   validateCompilerProfile(value.compilerProfile);
-  const usdg = normalizeAddress(value.usdg, 'usdg');
-  if (usdg !== USDG) fail('usdg does not match the pinned chain-4663 asset');
+  const quoteKey = native ? 'quoteCurrency' : 'usdg';
+  const quote = normalizeAddress(value[quoteKey], quoteKey);
+  if (quote !== (native ? '0x0000000000000000000000000000000000000000' : USDG)) fail(`${quoteKey} does not match the versioned chain-4663 asset`);
   const roleNames = ['manager', 'positionManager', 'permit2', 'programmable', 'treasury', 'operations', 'launchAuthority', 'issuanceAuthority'];
   expectExactKeys(value.roles, roleNames, 'roles');
   const roles = Object.fromEntries(roleNames.map((name) => [
@@ -804,14 +808,21 @@ function validateLaunchInputs(value) {
   if (roles.launchAuthority === factory) {
     fail('roles.launchAuthority must differ from chain.factory');
   }
-  expectExactKeys(value.pool, ['fee', 'tickSpacing', 'priceCandidates'], 'pool');
+  expectExactKeys(value.pool, native ? ['fee', 'tickSpacing', 'priceCandidates', 'seedMaximumWei', 'hkmnAtomic'] : ['fee', 'tickSpacing', 'priceCandidates'], 'pool');
   if (value.pool.fee !== 0) fail('pool.fee must be zero');
   asSafeInteger(value.pool.tickSpacing, 'pool.tickSpacing', { minimum: 1, maximum: 32_767 });
-  expectExactKeys(value.pool.priceCandidates, PRICE_CANDIDATE_IDS, 'pool.priceCandidates');
-  const priceCandidates = Object.fromEntries(PRICE_CANDIDATE_IDS.map((id) => [
-    id,
-    validatePriceCandidate(value.pool.priceCandidates[id], id, `pool.priceCandidates.${id}`),
-  ]));
+  const ids = native ? ['nativeCurrency0'] : PRICE_CANDIDATE_IDS;
+  expectExactKeys(value.pool.priceCandidates, ids, 'pool.priceCandidates');
+  let priceCandidates;
+  if (native) {
+    if (value.pool.hkmnAtomic !== '1000000000000000000000000000') fail('pool.hkmnAtomic must bind the complete HKMN stock');
+    const candidate = deriveNativePriceCandidate({ nativeWei: value.pool.seedMaximumWei, hkmnAtomic: value.pool.hkmnAtomic });
+    expectExactKeys(value.pool.priceCandidates.nativeCurrency0, ['sqrtPriceX96'], 'pool.priceCandidates.nativeCurrency0');
+    if (value.pool.priceCandidates.nativeCurrency0.sqrtPriceX96 !== candidate.sqrtPriceX96) fail('native price does not bind the explicit seed maximum and complete stock');
+    priceCandidates = { nativeCurrency0: { sqrtPriceX96: candidate.sqrtPriceX96 } };
+  } else {
+    priceCandidates = Object.fromEntries(ids.map(id => [id, validatePriceCandidate(value.pool.priceCandidates[id], id, `pool.priceCandidates.${id}`)]));
+  }
   expectObject(value.hookConstructorConfig, 'hookConstructorConfig');
   if (value.hookConstructorConfig.expectedDecimals !== 18) {
     fail('hookConstructorConfig.expectedDecimals must be 18 for HKMNToken');
@@ -853,9 +864,10 @@ function validateLaunchInputs(value) {
       routeNonce: value.chain.routeNonce.toLowerCase(),
     },
     graphAuthorization,
-    usdg,
+    [quoteKey]: quote,
     roles,
     pool: {
+      ...(native ? { seedMaximumWei: value.pool.seedMaximumWei, hkmnAtomic: value.pool.hkmnAtomic } : {}),
       fee: value.pool.fee,
       tickSpacing: value.pool.tickSpacing,
       priceCandidates,
@@ -965,7 +977,10 @@ function deriveFixedTarget({ targetName, target, artifact, constructorArguments,
 }
 
 function deriveHookTarget({ target, artifact, config, inputs }) {
-  const constructorArguments = encodeConstructorConfig(config).toLowerCase();
+  const constructorArguments = (inputs.schemaVersion.endsWith('.v2') ? encodeNativeConstructorConfig(config) : encodeConstructorConfig(config)).toLowerCase();
+  if (inputs.schemaVersion.endsWith('.v2') && encodeConstructorArguments(artifact.artifact, [config], 'native hook artifact').toLowerCase() !== constructorArguments) {
+    fail('native hook artifact constructor ABI does not match the selected configuration');
+  }
   const expectedByArtifact = encodeConstructorArguments(artifact.artifact, [config], 'hook artifact').toLowerCase();
   if (constructorArguments !== expectedByArtifact) fail('hook artifact constructor ABI does not match ConstructorConfig');
   const initCode = concatHex([artifact.creationBytecode, constructorArguments], 'hook.initCode');
@@ -1017,9 +1032,9 @@ function deriveHookTarget({ target, artifact, config, inputs }) {
 }
 
 function derivePool(tokenAddress, hookAddress, inputs, priceCandidate) {
-  const tokenFirst = BigInt(tokenAddress) < BigInt(inputs.usdg);
-  const currency0 = tokenFirst ? tokenAddress : inputs.usdg;
-  const currency1 = tokenFirst ? inputs.usdg : tokenAddress;
+  const tokenFirst = BigInt(tokenAddress) < BigInt((inputs.quoteCurrency ?? inputs.usdg));
+  const currency0 = tokenFirst ? tokenAddress : (inputs.quoteCurrency ?? inputs.usdg);
+  const currency1 = tokenFirst ? (inputs.quoteCurrency ?? inputs.usdg) : tokenAddress;
   const poolKeyEncoded = `0x${[
     wordFromAddress(currency0, 'pool.currency0'),
     wordFromAddress(currency1, 'pool.currency1'),
@@ -1223,17 +1238,21 @@ function verifyArtifactCompiler(targetName, artifact, inputs) {
 }
 
 function requireHookConfig(config, inputs, tokenAddress) {
+  const native = inputs.schemaVersion.endsWith('.v2');
+  const quoteKey = native ? 'quoteCurrency' : 'usdg';
+  const limitKey = native ? 'processClaimLimit6hWei' : 'processClaimLimit6h';
+  const maximumKey = native ? 'processClaimLimitMaxWei' : 'processClaimLimitMax';
   const expectedKeys = [
-    'manager', 'positionManager', 'permit2', 'usdg', 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations',
-    'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'processClaimLimit6h',
-    'processClaimLimitMax', 'processClaimMaxCount', 'operationsRotationDelay',
+    'manager', 'positionManager', 'permit2', quoteKey, 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations',
+    'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', limitKey,
+    maximumKey, 'processClaimMaxCount', 'operationsRotationDelay',
   ];
   expectExactKeys(config, expectedKeys, 'hookConstructorConfig');
   const expectedAddresses = {
     manager: inputs.roles.manager,
     positionManager: inputs.roles.positionManager,
     permit2: inputs.roles.permit2,
-    usdg: inputs.usdg,
+    [quoteKey]: inputs[quoteKey],
     hkmn: tokenAddress,
     programmable: inputs.roles.programmable,
     treasury: inputs.roles.treasury,
@@ -1253,11 +1272,11 @@ function requireHookConfig(config, inputs, tokenAddress) {
   asSafeInteger(config.expectedDecimals, 'hookConstructorConfig.expectedDecimals', { minimum: 0, maximum: 255 });
   normalizeBytes32(config.bindingDigest, 'hookConstructorConfig.bindingDigest', { nonzero: true });
   normalizeBytes32(config.runtimeDigest, 'hookConstructorConfig.runtimeDigest', { nonzero: true });
-  normalizeDecimal(String(config.processClaimLimit6h), 'hookConstructorConfig.processClaimLimit6h');
-  normalizeDecimal(String(config.processClaimLimitMax), 'hookConstructorConfig.processClaimLimitMax');
+  normalizeUint256(native ? config[limitKey] : String(config[limitKey]), `hookConstructorConfig.${limitKey}`, { positive: native });
+  normalizeUint256(native ? config[maximumKey] : String(config[maximumKey]), `hookConstructorConfig.${maximumKey}`, { positive: native });
   normalizeDecimal(String(config.processClaimMaxCount), 'hookConstructorConfig.processClaimMaxCount', { positive: true });
   normalizeDecimal(String(config.operationsRotationDelay), 'hookConstructorConfig.operationsRotationDelay', { positive: true });
-  if (BigInt(config.processClaimLimit6h) > BigInt(config.processClaimLimitMax)) {
+  if (BigInt(config[limitKey]) > BigInt(config[maximumKey])) {
     fail('hookConstructorConfig.processClaimLimit6h exceeds its maximum');
   }
   return {
@@ -1284,10 +1303,10 @@ function requireConstructorShape(artifact, expectedInputs, label) {
   }
 }
 
-function requireTokenConstructorTemplate(target) {
+function requireTokenConstructorTemplate(target, inputs) {
   const expected = [
     { ref: 'chain.factory' },
-    { ref: 'usdg' },
+    { ref: inputs.schemaVersion.endsWith('.v2') ? 'quoteCurrency' : 'usdg' },
     18,
     { ref: TOKEN_PRICE_REFERENCE },
   ];
@@ -1299,14 +1318,14 @@ function requireTokenConstructorTemplate(target) {
 function requireTokenConstructorArguments(target, artifact, constructorArguments, inputs, sqrtPriceX96) {
   if (target.contractName !== 'HKMNToken') fail('targets.token.contractName must be HKMNToken');
   requireConstructorShape(artifact.artifact, [
-    { name: 'issuanceAuthority', type: 'address' },
-    { name: 'expectedUsdg', type: 'address' },
-    { name: 'decimals', type: 'uint8' },
-    { name: 'launchSqrtPriceX96', type: 'uint160' },
+    { name: inputs.schemaVersion.endsWith('.v2') ? 'issuanceAuthority_' : 'issuanceAuthority', type: 'address' },
+    { name: inputs.schemaVersion.endsWith('.v2') ? 'expectedQuoteCurrency_' : 'expectedUsdg', type: 'address' },
+    { name: inputs.schemaVersion.endsWith('.v2') ? 'decimals_' : 'decimals', type: 'uint8' },
+    { name: inputs.schemaVersion.endsWith('.v2') ? 'launchSqrtPriceX96_' : 'launchSqrtPriceX96', type: 'uint160' },
   ], 'token artifact');
   const expected = encodeConstructorArguments(artifact.artifact, [
     inputs.chain.factory,
-    inputs.usdg,
+    (inputs.quoteCurrency ?? inputs.usdg),
     inputs.hookConstructorConfig.expectedDecimals,
     sqrtPriceX96,
   ], 'token artifact').toLowerCase();
@@ -1317,8 +1336,8 @@ function requireTokenConstructorArguments(target, artifact, constructorArguments
 
 function deriveTokenFromPriceCandidates(inputs, artifact) {
   const target = inputs.targets.token;
-  requireTokenConstructorTemplate(target);
-  const candidates = PRICE_CANDIDATE_IDS.map((id) => {
+  requireTokenConstructorTemplate(target, inputs);
+  const candidates = (inputs.schemaVersion.endsWith('.v2') ? ['nativeCurrency0'] : PRICE_CANDIDATE_IDS).map((id) => {
     const priceCandidate = { id, ...inputs.pool.priceCandidates[id] };
     const candidateContext = structuredClone(inputs);
     candidateContext.pool.selectedPriceCandidate = priceCandidate;
@@ -1341,7 +1360,7 @@ function deriveTokenFromPriceCandidates(inputs, artifact) {
       constructorArguments,
       inputs,
     });
-    const tokenIsCurrency0 = BigInt(token.address) < BigInt(inputs.usdg);
+    const tokenIsCurrency0 = BigInt(token.address) < BigInt((inputs.quoteCurrency ?? inputs.usdg));
     return {
       priceCandidate,
       token,
@@ -1473,7 +1492,7 @@ export function deriveAddresses({
     targets: TARGET_NAMES.map((name) => targets[name]),
   });
   return {
-    schemaVersion: 'hookemon.phase3.derived-addresses.v1',
+    schemaVersion: inputs.schemaVersion.endsWith('.v2') ? 'hookemon.phase3.derived-addresses.v2' : 'hookemon.phase3.derived-addresses.v1',
     chain: inputs.chain,
     compilerProfileDigest: sha256CanonicalJson(inputs.compilerProfile),
     launchInputsDigest: sha256CanonicalJson(inputs),

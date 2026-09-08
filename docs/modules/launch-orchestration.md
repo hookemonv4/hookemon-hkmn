@@ -59,3 +59,6 @@ FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/con
 - OPEN FACT: the source-bundle coverage declaration lacks an attestation evidence file and selected metadata image. Add both paths and regenerate the package; the verified alternative keeps source preflight unavailable.
 - Keep `PROVIDER_API_KEY_PENDING`, `OWNER_WALLET_FUNDING_PENDING`, and `BUILDER_IDENTITY_PENDING` as their separate preflight or operational inputs. None changes the allocation or creates signing authority.
 - If a materialized address ordering does not select one approved price tuple, rebuild from the frozen inputs and reject the candidate rather than forcing an ordering.
+
+
+Native address derivation accepts `hookemon.phase3.launch-inputs.v2`, with a zero `quoteCurrency`, one `nativeCurrency0` price candidate, explicit positive wei claim limits, and the full HKMN stock. The candidate is recomputed from `seedMaximumWei` and `hkmnAtomic`; historical price constants do not authorize native execution. The selected token constructor and hook ABI bind their native field names and exact encoded arguments. Historical v1 inputs retain their separate USDG interpretation for evidence verification.

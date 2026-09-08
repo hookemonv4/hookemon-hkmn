@@ -188,6 +188,22 @@ export function encodeConstructorConfig(config) {
   return `0x${words.join('')}`;
 }
 
+// Native constructor values retain the exact Solidity field order. Historical callers use
+// encodeConstructorConfig; they cannot supply a native quote without this explicit interface.
+export function encodeNativeConstructorConfig(config) {
+  invariant(config && typeof config === 'object', 'native constructor config is required');
+  invariant(!Object.hasOwn(config, 'usdg') && !Object.hasOwn(config, 'processClaimLimit6h')
+    && !Object.hasOwn(config, 'processClaimLimitMax'), 'historical constructor fields cannot execute a native launch');
+  invariant(addressWord(config.quoteCurrency) === '0'.repeat(64), 'native quoteCurrency must be zero');
+  for (const name of ['processClaimLimit6hWei', 'processClaimLimitMaxWei']) {
+    invariant(typeof config[name] === 'string' && /^[1-9][0-9]*$/.test(config[name]), `${name} must be an explicit positive wei integer`);
+  }
+  invariant(BigInt(config.processClaimLimit6hWei) <= BigInt(config.processClaimLimitMaxWei), 'native claim limit exceeds maximum');
+  const { quoteCurrency, processClaimLimit6hWei, processClaimLimitMaxWei, ...shared } = config;
+  return encodeConstructorConfig({ ...shared, usdg: quoteCurrency,
+    processClaimLimit6h: processClaimLimit6hWei, processClaimLimitMax: processClaimLimitMaxWei });
+}
+
 export function readHookCreationBytecode({
   contractsRoot,
   forgeBinary = 'forge',
