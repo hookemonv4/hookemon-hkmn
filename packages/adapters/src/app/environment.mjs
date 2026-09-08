@@ -994,7 +994,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   if (standingAuthorityPaths.some(path => path === null) && standingAuthorityPaths.some(path => path !== null)) {
     fail('HOOKEMON_STANDING_AUTHORITY_PATH, HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH, and HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH must be set together');
   }
-  const nativePaymentBindingPath = readAbsolutePath(env, 'HOOKEMON_NATIVE_PAYMENT_BINDING_PATH');
+  const nativePaymentBindingPath = readAbsolutePath(env, 'HOOKEMON_NATIVE_PAYMENT_BINDING_PATH', { required: false });
   const relayQuoteValidityMsRaw = readString(env, 'HOOKEMON_RELAY_QUOTE_VALIDITY_MS', { defaultValue: null });
   const relayQuoteValidityMs = relayQuoteValidityMsRaw === null ? null : Number(relayQuoteValidityMsRaw);
   if (relayQuoteValidityMs !== null && (!Number.isSafeInteger(relayQuoteValidityMs) || relayQuoteValidityMs <= 0)) fail('HOOKEMON_RELAY_QUOTE_VALIDITY_MS must be explicit positive milliseconds');
