@@ -5,7 +5,7 @@ import { envelope, sha256 } from './native-issuance-commitments.mjs';
 import { buildNativeSourceBundle } from './native-source-bundle.mjs';
 import { assertObservedNativeRuntime } from './native-runtime-observer.mjs';
 
-const REQUIREMENTS_SHA256 = '0xcf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d';
+const REQUIREMENTS_SHA256 = '0xb0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3';
 // Official solc 0.8.26 macosx-amd64 distribution, independently captured by the coordinator.
 // https://binaries.soliditylang.org/macosx-amd64/list.json
 const COMPILER_SHA256 = '0x0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9';
@@ -13,7 +13,7 @@ const KEYS = new Set(['root', 'compilerPath', 'standardInputPath', 'sourceRoot',
 
 function requirementsBytes(root) {
   // The collector has already checked every root component; this fixed file is separate from
-  // the provider bundle. Its actual bytes must match the independently frozen revision 72.
+  // the provider bundle. Its actual bytes must match the independently frozen revision 73.
   const directory = resolve(root, 'specs');
   const path = resolve(directory, 'requirements.json');
   const parent = lstatSync(directory), file = lstatSync(path);
@@ -25,7 +25,7 @@ function requirementsBytes(root) {
     const opened = fstatSync(fd);
     if (!opened.isFile() || opened.dev !== file.dev || opened.ino !== file.ino) throw new TypeError('native commitment inputs: requirements file rebound');
     const bytes = readFileSync(fd);
-    if (sha256(bytes) !== REQUIREMENTS_SHA256) throw new TypeError('native commitment inputs: frozen revision-72 requirements mismatch');
+    if (sha256(bytes) !== REQUIREMENTS_SHA256) throw new TypeError('native commitment inputs: frozen revision-73 requirements mismatch');
     return bytes;
   } finally { closeSync(fd); }
 }

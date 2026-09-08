@@ -1,0 +1,16 @@
+{
+  "schema": "hookemon.owner-collector-core-approval.v1",
+  "authority": "OWNER",
+  "approvalToken": "OWNER APPROVED",
+  "receiptId": "r-00653",
+  "ownerStatement": "Ja 73 freigeben brauchst du sonst now as von mir?",
+  "requirementsRevision": 73,
+  "requirementsSha256": "b0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3",
+  "baseRequirementsRevision": 72,
+  "scope": "Implement the separately identified six-instruction Collector Core buyback profile while retaining legacy profiles, canonical validation, independently approved live bindings and original-message recovery.",
+  "exclusions": [
+    "No signature, broadcast or sale authorization from this spec approval.",
+    "No live anchor or control-pin approval implied.",
+    "No network, fee or Treasury/Operations role change."
+  ]
+}

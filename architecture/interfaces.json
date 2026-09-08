@@ -1,8 +1,8 @@
 {
   "schemaVersion": "hookemon.interfaces.v1",
-  "source": "Owner-approved native ETH implementation with revision-72 issuance commitment definitions; feasibility remains provisional",
+  "source": "Owner-approved native ETH implementation and revision-73 Collector Core buyback profile; feasibility remains provisional",
   "productPhase": 3,
-  "requirementsRevision": 72,
+  "requirementsRevision": 73,
   "architectureRevision": 11,
   "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
   "bindingManifest": "release/phase3/deployment-manifest.json",
@@ -823,8 +823,8 @@
   },
   "nativeMigration": {
     "status": "INTEGRATED_PENDING_REQUIRED_CI_AND_RELEASE_AUTHORITY",
-    "requirementsRevision": 72,
-    "requirementsSha256": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d",
+    "requirementsRevision": 73,
+    "requirementsSha256": "b0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3",
     "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
     "historicalBaselineCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
     "launchEligible": false,

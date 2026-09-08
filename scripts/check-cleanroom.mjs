@@ -57,13 +57,13 @@ const REGEX_RULES = [
 ];
 
 // Review-bound exact bytes only. Manifest edits require a new checker/control review.
-const NATIVE_RECOGNITION_SHA256 = 'e3462633be8673c66390eb48c3e7480a1cea57f714ac746592426d5831974c66';
+const NATIVE_RECOGNITION_SHA256 = '24149c2f0e2104bb1bc228f36760fd5749573ab07f8b9e3f5c2a830451c04942';
 const nativeRecognitionBytes = readFileSync(new URL('./native-cleanroom-recognition.json', import.meta.url));
 if (hash('sha256', nativeRecognitionBytes) !== NATIVE_RECOGNITION_SHA256) {
   throw new Error('native clean-room recognition manifest integrity mismatch');
 }
 const nativeRecognition = JSON.parse(nativeRecognitionBytes);
-if (nativeRecognition.schema !== 'hookemon.cleanroom-recognition.v1' || nativeRecognition.requirementsRevision !== 72) {
+if (nativeRecognition.schema !== 'hookemon.cleanroom-recognition.v1' || nativeRecognition.requirementsRevision !== 73) {
   throw new Error('native clean-room recognition manifest revision mismatch');
 }
 

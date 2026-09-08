@@ -17,7 +17,8 @@ import {
 } from '../../signing/transaction-policy.mjs';
 import { collectorPolicyForStage } from '../../signing/collector-policy-loader.mjs';
 import {
-  COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX,
+  collectorBuybackProgramId,
+  isCollectorCoreBuybackBinding,
   createCollectorBuybackPolicy,
 } from '../../signing/collector-buyback-policy.mjs';
 import { resolveCollectorProductionBinding } from '../../signing/collector-production-binding.mjs';
@@ -147,15 +148,16 @@ export function buildCollectorBuybackRequest({ config, mint }) {
   return Object.freeze(request);
 }
 
-function trustedSolanaDecodeOptions({ adapters, config }) {
-  if (typeof config?.solana?.blockhashContextResolver !== 'function') {
+function trustedSolanaDecodeOptions({ adapters, config, coreProfile = false }) {
+  const resolver = coreProfile ? config?.solana?.originalBlockhashContextResolver : config?.solana?.blockhashContextResolver;
+  if (typeof resolver !== 'function') {
     throw new Error('buyback requires a trusted Solana blockhashContextResolver');
   }
   return Object.freeze({
     family: 'solana',
     chainId: config.solana.chainId,
     lookupTableResolver: config.solana.lookupTableResolver,
-    blockhashContextResolver: config.solana.blockhashContextResolver,
+    blockhashContextResolver: resolver,
     currentBlockHeightResolver: async () => readBlockHeight(adapters.solana.client),
   });
 }
@@ -224,7 +226,7 @@ async function holdPack(cycleRepository, config, context, packIndex, memo, mint,
 }
 
 function decodedBindsBuyback({ decoded, owner, mint, buyback, proceedsAccount = null }) {
-  const hasOwner = decoded.feePayer === owner && decoded.requiredSigners.includes(owner);
+  const hasOwner = decoded.requiredSigners.includes(owner) && (buyback.coreProfile ? decoded.requiredSigners[1] === owner : decoded.feePayer === owner);
   const hasProgram = decoded.programIds.includes(buyback.collectorProgramId);
   const hasRecipient = decoded.destination === buyback.collectorRecipient
     || decoded.instructions.some(instruction => instruction.accounts.some(account => account.address === buyback.collectorRecipient));
@@ -249,10 +251,11 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
   const productionBinding = productionBindingInput === null ? null : createCollectorBuybackPolicy(productionBindingInput);
   const buyback = productionBinding === null ? configuredBuyback(config) : {
     policy: productionBinding,
-    collectorProgramId: productionBindingInput.binding.instructions[COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX].programId,
+    collectorProgramId: collectorBuybackProgramId(productionBindingInput.binding),
+    coreProfile: isCollectorCoreBuybackBinding(productionBindingInput.binding),
     collectorRecipient: productionBindingInput.binding.collectorRecipient,
   };
-  const decodeOptions = trustedSolanaDecodeOptions({ adapters, config });
+  const decodeOptions = trustedSolanaDecodeOptions({ adapters, config, coreProfile: buyback.coreProfile === true });
   const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction });
   if (!decoded.blockhash || !(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
     throw new Error('buyback provider transaction blockhash is not valid before signing');
@@ -283,6 +286,7 @@ async function decodeAndSign({ transaction, mint, adapters, config, money, signe
       },
     },
     policy: buyback.policy,
+    solanaOperatorAddress: buyback.coreProfile ? config.accounts.solana : undefined,
     decodeOptions,
     broadcast: async signed => {
       if (!(await readBlockhashValidity(adapters.solana.client, decoded.blockhash))) {
@@ -484,6 +488,9 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
       stage: 'buyback', memo: pack.memo, mint: pack.mint, reason: 'resolved buyback binding proceeds asset does not match the configured settlement asset',
     });
   }
+  if (isCollectorCoreBuybackBinding(resolvedBinding?.binding) && typeof config.solana.originalBlockhashContextResolver !== 'function') {
+    throw new Error('Core buyback requires an original blockhash resolver before provider mutation');
+  }
   // From here on, a thrown error is provider-ambiguous: the mutation may or may not have landed
   // server-side. This pack is marked "unknown", not held — reconciliation resolves it from
   // durable provider state using its own already-known memo, holding only past its deadline.
@@ -504,8 +511,18 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
     // context is read fresh here, per pack, like purchase.mjs's own per-pack blockhash read.
     let productionBindingInput = null;
     if (resolvedBinding !== null) {
-      const latest = await readUsableLatestBlockhash(adapters.solana.client);
-      const currentHeight = await readBlockHeight(adapters.solana.client);
+      let blockhashContext;
+      const coreProfile = isCollectorCoreBuybackBinding(resolvedBinding.binding);
+      if (coreProfile) {
+        if (typeof config.solana.originalBlockhashContextResolver !== 'function') throw new Error('Core buyback requires an original blockhash resolver');
+        const observed = await decodeProviderTransaction({ ...trustedSolanaDecodeOptions({ adapters, config, coreProfile: true }), transaction: built.serializedTransaction });
+        if (observed.deadline?.type !== 'rpc-blockhash-validity' || observed.deadline.valid !== true) throw new Error('Core buyback original blockhash is invalid');
+        blockhashContext = { ...observed.deadline, blockhash: observed.blockhash };
+      } else {
+        const latest = await readUsableLatestBlockhash(adapters.solana.client);
+        const currentHeight = await readBlockHeight(adapters.solana.client);
+        blockhashContext = { blockhash: latest.blockhash, lastValidBlockHeight: String(latest.lastValidBlockHeight), currentBlockHeight: currentHeight.toString() };
+      }
       productionBindingInput = {
         binding: resolvedBinding.binding,
         expectedDigest: resolvedBinding.expectedDigest,
@@ -514,16 +531,13 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
           proceedsDestination: prepared.settlementAccount,
           openedAssetMint: pack.mint,
           currentOwner: observedOwner,
+          ...(coreProfile ? { memoValue: pack.memo } : {}),
           quoteAtomic: quote.amountAtomic,
           minimumAtomic: quote.amountAtomic,
           refundAtomic: refundAmount.amountAtomic,
           requestDigest: digest({ schema: 'hookemon.collector-buyback-request.v1', cycleId: context.cycleId, memo: pack.memo }),
         },
-        blockhashContext: Object.freeze({
-          blockhash: latest.blockhash,
-          lastValidBlockHeight: String(latest.lastValidBlockHeight),
-          currentBlockHeight: currentHeight.toString(),
-        }),
+        blockhashContext: Object.freeze(blockhashContext),
       };
     }
     const { signer, signed } = await decodeAndSign({

@@ -135,3 +135,5 @@ mint, amount, extra instruction, expiry, fee payer, lookup-table resolution, and
 - Correct a rejected money configuration at the environment boundary. Do not restore removed
   defaults or use the legacy native-cap projection in place of EVM gas-price/native-reserve or
   Solana priority-fee/lamport-reserve controls.
+
+Collector Core buyback uses the separately identified six-instruction profile. The provider pays fees and signs slot zero; Operations signs slot one as the finalized asset owner. Exact Core TransferV1 bytes, collection, recipient, canonical USDC ATA, persisted proceeds and memo are bound before signing. The original blockhash rule and minimum observation slot are included in the recoverable approval digest.

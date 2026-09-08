@@ -386,3 +386,105 @@ test('refuses a candidate transaction carrying an extra instruction', async () =
   const decoded = await decodeCandidate(buildCandidateTransaction({ extraInstruction: true }));
   assert.throws(() => evaluate(policy, decoded), TransactionPolicyError);
 });
+
+// Public historical reference; mock validity below is test-only, never current RPC evidence.
+const coreReference = JSON.parse((await import('node:fs')).readFileSync(new URL('../fixtures/collector-core-buyback-public.json', import.meta.url), 'utf8'));
+const coreProgram='CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
+const ataProgram='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+const usdc='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const coreMemo='cc-a4ef0bdc-e309-4ba8-aa9e-867f949f0659';
+const entry=(role,isSigner=false,isWritable=false)=>({role,isSigner,isWritable});
+const template=(kind,programId,accounts=[],extra={})=>({kind,programId,accounts,computeUnitLimit:null,priorityFeeCapAtomic:null,discriminatorHex:null,...extra});
+const coreBinding={schema:COLLECTOR_BUYBACK_BINDING_SCHEMA,version:1,provider:'collector-crypt',chainId:'solana-mainnet',format:'legacy',addressLookupTables:[],profile:'core-transfer-v1',
+ proceeds:{source:'D9CEogjHA6CpS12F8St9zpSco7pQKJB5uR1RqDsuzQZk',mint:usdc,decimals:6},
+ collectorAuthority:'GachaNgyXTU3zFogQ8Z5jR2BLXs8215X2AtEH18VxJq3',collectorRecipient:'riftWhN8A3gmqsZSNh728z7bZPqNPP5eKep77nCY4Zj',collection:'CCryptUfeFSZ3Fgc9FLeKrhLVAP67FSqi1GuVoj9CRac',
+ instructions:[
+  template('compute-budget-set-unit-limit',COMPUTE_BUDGET_PROGRAM_ID,[],{computeUnitLimit:250000}),
+  template('unknown',coreProgram,[entry('opened-asset-mint',false,true),entry('collection'),entry('collector-authority',true,true),entry('operator-owner',true),entry('collector-recipient'),entry('core-program'),entry('core-program')],{discriminatorHex:'0e00'}),
+  template('compute-budget-set-unit-price',COMPUTE_BUDGET_PROGRAM_ID,[],{priorityFeeCapAtomic:'10000'}),
+  template('unknown',ataProgram,[entry('collector-authority',true,true),entry('proceeds-destination',false,true),entry('operator-owner',true),entry('proceeds-mint'),entry('system-program'),entry('token-program')],{discriminatorHex:'01'}),
+  template('spl-transfer-checked',TOKEN_PROGRAM_ID,[entry('proceeds-source',false,true),entry('proceeds-mint'),entry('proceeds-destination',false,true),entry('collector-authority',true,true)]),
+  template('unknown','MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
+ ]};
+function coreFacts(){return {operatorFeePayer:'FVWiwDoc3Dthm9X7SVshTkRYr78V4doAz79VRJfdeWMq',currentOwner:'FVWiwDoc3Dthm9X7SVshTkRYr78V4doAz79VRJfdeWMq',openedAssetMint:'7Jhmf2Rs12aQdcHiVb5DBaWgAx9QF3ypYLtDcEjPZQCQ',proceedsDestination:'GED2f7TkujBkQRzpQdqSjPserYqWby1xuJiU2wxpie5a',quoteAtomic:'51150000',minimumAtomic:'51150000',refundAtomic:'51150000',memoValue:coreMemo,requestDigest:digest({testOnly:'public-reference'})};}
+const coreContext={type:'rpc-blockhash-validity',blockhash:'3qaFXCLkZkyMkbXSgQWKJYrDsdcESXosw5QzZGHKq2mw',valid:true,observedSlot:String(coreReference.slot)};
+function corePolicy(binding=coreBinding,facts=coreFacts(),blockhashContext=coreContext){return createCollectorBuybackPolicy({binding,expectedDigest:digest(binding),cycleFacts:facts,blockhashContext});}
+const coreDecodeOptions={family:'solana',chainId:'solana-mainnet',blockhashContextResolver:async blockhash=>({type:'rpc-blockhash-validity',blockhash,valid:true,observedSlot:coreContext.observedSlot}),currentBlockHeightResolver:async()=>1n};
+async function decodeCore(transaction){return decodeProviderTransaction({...coreDecodeOptions,transaction});}
+
+test('Core policy accepts the signature-authenticated historical six-instruction structure',async()=>{
+ const tx=Transaction.from(Buffer.from(coreReference.serializedTransaction,'base64'));
+ assert.equal(tx.verifySignatures(),true);
+ const decoded=await decodeCore(coreReference.serializedTransaction);
+ assert.equal(decoded.feePayer,coreBinding.collectorAuthority);
+ assert.deepEqual(decoded.requiredSigners,[coreBinding.collectorAuthority,coreFacts().currentOwner]);
+ assert.doesNotThrow(()=>evaluate(corePolicy(),decoded));
+});
+test('Core policy refuses changed accounts, flags, bytes, order, amounts and extra instructions',async()=>{
+ const mutations=[
+  tx=>{tx.feePayer=operator.publicKey;},
+  ...[0,1,2,3,4,5,6].map(i=>tx=>{tx.instructions[1].keys[i].pubkey=Keypair.generate().publicKey;}),
+  tx=>{tx.instructions[1].keys[3].isWritable=true;},
+  tx=>{tx.instructions[1].data=Buffer.from('0e01','hex');},
+  tx=>{tx.instructions[3].data=Buffer.from([0]);},
+  tx=>{tx.instructions[4].data.writeBigUInt64LE(51149999n,1);},
+  tx=>{tx.instructions[4].keys[2].pubkey=operator.publicKey;},
+  tx=>{tx.instructions[4].keys[0].pubkey=operator.publicKey;},
+  tx=>{tx.instructions[5].data=Buffer.from(coreMemo+':open');},
+  tx=>{[tx.instructions[0],tx.instructions[2]]=[tx.instructions[2],tx.instructions[0]];},
+  tx=>{tx.add(ComputeBudgetProgram.setComputeUnitLimit({units:250000}));},
+ ];
+ for(const mutate of mutations){
+  const tx=Transaction.from(Buffer.from(coreReference.serializedTransaction,'base64'));mutate(tx);tx.signatures=[];
+  const bytes=tx.serialize({requireAllSignatures:false,verifySignatures:false}).toString('base64');
+  await assert.rejects(async()=>evaluate(corePolicy(),await decodeCore(bytes)));
+ }
+});
+test('Core authority refuses malformed binding, noncanonical ATA, changed owner and false validity',()=>{
+ for(const mutate of [b=>{b.profile='other';},b=>{b.collection=undefined;},b=>{b.instructions[1].discriminatorHex='0e01';},b=>{b.instructions[1].accounts[3].isWritable=true;},b=>{b.proceeds.mint=operator.publicKey.toBase58();}]){
+  const binding=structuredClone(coreBinding);mutate(binding);assert.throws(()=>corePolicy(binding));
+ }
+ for(const mutate of [f=>{f.proceedsDestination=operator.publicKey.toBase58();},f=>{f.currentOwner=operator.publicKey.toBase58();},f=>{f.minimumAtomic='51150001';},f=>{f.memoValue=coreMemo+':buyback';}]){
+  const facts=coreFacts();mutate(facts);assert.throws(()=>corePolicy(coreBinding,facts));
+ }
+ assert.throws(()=>corePolicy(coreBinding,coreFacts(),{...coreContext,valid:false}));
+});
+
+const {wrapTransactionPolicySignerClient,OPERATOR_SOLANA_ROLE}=await import('../../src/signing/signer-client.mjs');
+const {captureSolanaCoSignerSignatures,expectedBroadcastIdentifier}=await import('../../src/signing/transaction-policy.mjs');
+function syntheticCoreSigning(){
+ const binding=structuredClone(coreBinding),facts=coreFacts();
+ const oldProvider=binding.collectorAuthority,oldOwner=facts.currentOwner,oldAta=facts.proceedsDestination;
+ binding.collectorAuthority=authority.publicKey.toBase58();facts.operatorFeePayer=operator.publicKey.toBase58();facts.currentOwner=facts.operatorFeePayer;
+ facts.proceedsDestination=PublicKey.findProgramAddressSync([operator.publicKey.toBuffer(),new PublicKey(TOKEN_PROGRAM_ID).toBuffer(),new PublicKey(usdc).toBuffer()],new PublicKey(ataProgram))[0].toBase58();
+ const replacements=new Map([[oldProvider,binding.collectorAuthority],[oldOwner,facts.currentOwner],[oldAta,facts.proceedsDestination]]);
+ const tx=Transaction.from(Buffer.from(coreReference.serializedTransaction,'base64'));tx.signatures=[];tx.feePayer=authority.publicKey;
+ for(const ix of tx.instructions)for(const key of ix.keys)if(replacements.has(key.pubkey.toBase58()))key.pubkey=new PublicKey(replacements.get(key.pubkey.toBase58()));
+ tx.partialSign(authority);
+ return {binding,facts,tx,policy:corePolicy(binding,facts),bytes:tx.serialize({requireAllSignatures:false}).toString('base64')};
+}
+test('Core provider-first signature is verified before Operations and preserved through recovery',async()=>{
+ const f=syntheticCoreSigning();let signs=0,broadcasts=0,context={...coreContext};
+ assert.equal(captureSolanaCoSignerSignatures(f.bytes,1).length,1);
+ assert.throws(()=>captureSolanaCoSignerSignatures(f.bytes),/signature slot 1 is missing/);
+ const options={policy:f.policy,solanaOperatorAddress:operator.publicKey.toBase58(),decodeOptions:{...coreDecodeOptions,blockhashContextResolver:async()=>context},
+  client:{role:OPERATOR_SOLANA_ROLE,async sign(bytes){signs++;const tx=Transaction.from(Buffer.from(bytes,'base64'));tx.partialSign(operator);return {signedTxBase64:tx.serialize().toString('base64')};}},
+  broadcast:async signed=>{broadcasts++;return {signature:expectedBroadcastIdentifier(signed,'solana')};}};
+ const wrapper=wrapTransactionPolicySignerClient(options),signed=await wrapper.sign(f.bytes),approval=wrapper.readApprovalContext(signed);
+ const resumed=wrapTransactionPolicySignerClient(options);await resumed.recoverApproval(signed,approval);
+ assert.equal(signs,1);await resumed.broadcast(signed);assert.equal(broadcasts,1);assert.equal(signs,1);
+ const stale=wrapTransactionPolicySignerClient(options);context={...coreContext,valid:false};await assert.rejects(()=>stale.recoverApproval(signed,approval));
+ context={...coreContext,observedSlot:String(BigInt(coreContext.observedSlot)-1n)};
+ const weakened=wrapTransactionPolicySignerClient({...options,policy:corePolicy(f.binding,f.facts,context)});
+ await assert.rejects(()=>weakened.recoverApproval(signed,approval),/recovery context does not match/);
+});
+test('Core missing or corrupt provider signature refuses before the Operations signer',async()=>{
+ for(const corrupt of [false,true]){
+  const f=syntheticCoreSigning();let signs=0;
+  if(corrupt)f.tx.signatures[0].signature[0]^=1;else f.tx.signatures[0].signature=null;
+  const wrapper=wrapTransactionPolicySignerClient({policy:f.policy,solanaOperatorAddress:operator.publicKey.toBase58(),decodeOptions:coreDecodeOptions,
+   client:{role:OPERATOR_SOLANA_ROLE,async sign(){signs++;throw new Error('must not sign');}},broadcast:async()=>{throw new Error('must not broadcast');}});
+  const bytes=f.tx.serialize({requireAllSignatures:false,verifySignatures:false}).toString('base64');
+  await assert.rejects(()=>wrapper.sign(bytes),/signature slot 0/);assert.equal(signs,0);
+ }
+});

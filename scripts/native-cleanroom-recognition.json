@@ -1,43 +1,46 @@
 {
   "schema": "hookemon.cleanroom-recognition.v1",
-  "requirementsRevision": 72,
+  "requirementsRevision": 73,
   "sourceRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
   "auditPath": "docs/evidence/native-cleanroom-audit-20260908/findings.json",
   "auditSha256": "187ec57183501df3c733129603255c8b87bb63f274679acd4413cc7416dabd8c",
   "scope": "Exact reviewed bytes only; native economic terms, incidental full identifiers and unchanged official evidence. No runtime authority or privacy-rule exemption.",
   "files": {
     "architecture/interfaces.json": {
-      "sha256": "b54b50a0cd96d1db48b73eca23dd67d03c73c6a787d594cd6e6d68b7eac253d5",
+      "sha256": "5f4a03c0c5f5a47e6b1076a97b89d1c6a24ceff01fe158fb7cc50117e52cf332",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 41322,
+          "offset": 41320,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 41322,
+          "tokenStart": 41320,
           "tokenLength": 11,
           "tokenSha256": "67c3da52dac923f8e13d12d8ec89604cc901c8888ce886a014e73d546625dc16",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "architecture/interfaces.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 41408,
+          "offset": 41406,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 41408,
+          "tokenStart": 41406,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "architecture/interfaces.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 46057,
+          "offset": 46055,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 46057,
+          "tokenStart": 46055,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "architecture/interfaces.json"
         }
       ]
     },
@@ -6317,7 +6320,7 @@
       ]
     },
     "specs/requirements.json": {
-      "sha256": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d",
+      "sha256": "b0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3",
       "matches": [
         {
           "rule": "historical-architecture",
@@ -6327,7 +6330,8 @@
           "tokenStart": 7025,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
@@ -6337,7 +6341,8 @@
           "tokenStart": 8255,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
@@ -6347,27 +6352,30 @@
           "tokenStart": 50450,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 107888,
+          "offset": 109853,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 107888,
+          "tokenStart": 109853,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         },
         {
           "rule": "historical-architecture",
-          "offset": 111834,
+          "offset": 113799,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 111834,
+          "tokenStart": 113799,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-71-or-retained-provider-source",
+          "file": "specs/requirements.json"
         }
       ]
     },
@@ -7229,7 +7237,7 @@
       ]
     },
     "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
-      "sha256": "030884d597c9ca6d0730ffcd83b64076ff008d0ceb524125befadb8e7b7c4ee6",
+      "sha256": "680167c25e323e8e48ae31b010ff0aeeef8fb88621d907255d6e35a2f981194b",
       "matches": [
         {
           "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",
@@ -7841,6 +7849,109 @@
           "tokenLength": 182640,
           "tokenSha256": "d2d7d716c6bd1ec66d660cc9b4d86a924f71d441121bb77f91db850d0f14fd91",
           "basis": "incidental-token-in-checksummed-compressed-public-runtime-and-ABI-test-fixture"
+        }
+      ]
+    },
+    "docs/modules/transaction-policy.md": {
+      "sha256": "b8d6903074385f59ebc503cfacd6ca16fce85721bfcddd1c56b4785f5166dfdb",
+      "matches": [
+        {
+          "file": "docs/modules/transaction-policy.md",
+          "rule": "historical-architecture",
+          "offset": 9697,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 9697,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        }
+      ]
+    },
+    "packages/adapters/src/signing/collector-buyback-policy.mjs": {
+      "sha256": "a75455cb96d4c0b79ddcc3425ad63cb3fc38b8be43f152d00fe001b0b9c91d69",
+      "matches": [
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 22093,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 22093,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 23877,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 23877,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 23959,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 23959,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+          "rule": "historical-architecture",
+          "offset": 25936,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 25936,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        }
+      ]
+    },
+    "packages/adapters/test/signing/collector-buyback-policy.test.mjs": {
+      "sha256": "cc73c81a2c0d8ba066295701a69e59c12a2a813717e99a9963a22f8927a1d875",
+      "matches": [
+        {
+          "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 16352,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 16352,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 16965,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 16965,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
+        },
+        {
+          "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 22608,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 22608,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "approved-revision-73-collector-settlement-and-retained-native-interface"
         }
       ]
     }

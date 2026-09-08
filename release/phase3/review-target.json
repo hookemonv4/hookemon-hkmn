@@ -909,10 +909,10 @@
       "sha256": "33afd567022c9617dab23a751fe33ff48aed07a56205d58488cd014f9330b8e5"
     },
     {
-      "bytes": 2323,
+      "bytes": 2673,
       "kind": "package:EVIDENCE.md",
       "path": "release/phase3/EVIDENCE.md",
-      "sha256": "a0bc4915b840b80ca8bc72429e0694c37777c47cc466e2229a32b5101b0957e9"
+      "sha256": "8ed5208603d9a8444bf78f7d158cacc085f7c6171d48a0c5fa02f970dd398b9b"
     },
     {
       "bytes": 1780,
@@ -1083,10 +1083,10 @@
       "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
     },
     {
-      "bytes": 121635,
+      "bytes": 123600,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d"
+      "sha256": "b0f2f2a0a6dcce44a08940d70be107988800c58b950ae1dcc660d32de62329c3"
     }
   ],
   "importResolutions": [
@@ -2388,7 +2388,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:f1a59e2061a88875e912373859d7156af17d465c1eaafee049058bfbf19953cd",
+  "reviewTargetHash": "sha256:dd7bf59bf72ca6ef8fce67377c5718d032735917d5b86a9ffc8176b1451de680",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"

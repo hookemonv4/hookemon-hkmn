@@ -2051,3 +2051,20 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
   assert.equal(cycleRepository.held.length, 1);
   assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '35000000');
 });
+
+for(const absentBinding of [false,true])test(`Core buyback stage ${absentBinding?'refuses missing authority before mutation':'reaches Operations second-slot signing through the production registry'}`,async()=>{
+ const {syntheticCoreBuyback}=await import('../fixtures/collector-core-buyback.mjs');
+ const memo='cc-12345678-1234-1234-1234-123456789abc';
+ const candidate=syntheticCoreBuyback({operator:OPERATOR_KEYPAIR,asset:CARD_ASSET,amountAtomic:'85',memo});
+ const config=offlineBoundaryConfig(matchingBuybackRegistry(candidate.binding));
+ config.solana.originalBlockhashContextResolver=async blockhash=>({type:'rpc-blockhash-validity',blockhash,valid:true,observedSlot:'500'});
+ if(absentBinding)config.collectorCrypt.productionBindingRegistry=loadCollectorProductionBindingRegistry({...matchingBuybackRegistry(candidate.binding),entries:[]});
+ const cycleRepository=repository({stages:{'epic-gate':{status:'COMPLETE',evidence:{packs:[sellDecisionPack({memo})]}},open:{status:'COMPLETE',evidence:{packs:[openedPack({memo,assetKind:'mpl-core'})]}}}});
+ const rpc=rpcClient({tokenAccount:tokenAccountResponse({mint:SETTLEMENT_ASSET}),cardOwner:OPERATOR});
+ const quote={...settlementAsset(),amountAtomic:'85'};let providerCalls=0,signCalls=0;
+ const execute=()=>mutateBuyback({liveMode:true,config,cycleRepository,context:{cycleId:CYCLE_ID,assertLease:async()=>{}},preflightAuthority:TEST_PROFILE_MUTATION_AUTHORITY,
+  adapters:{solana:{client:rpc},collectorCrypt:{async getBuybackAvailable(){return {available:true,amount:quote};},async buyback(){providerCalls++;return {memo,refundAmount:quote,serializedTransaction:candidate.serializedTransaction};},async submitTransaction(){throw new Error('test stops at signer');}}},
+  signerClient:{solana:{async sign(bytes){signCalls++;const tx=Transaction.from(Buffer.from(bytes,'base64'));assert.equal(tx.signatures[1].publicKey.toBase58(),OPERATOR);assert.equal(tx.verifySignatures(false),true);throw new Error('deliberate test stop before signing');}}}});
+ if(absentBinding)await assert.rejects(execute);else {const result=await execute();assert.equal(result.packs[0].decision,'unknown');}
+ assert.equal(providerCalls,absentBinding?0:1);assert.equal(signCalls,absentBinding?0:1);
+});
