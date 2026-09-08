@@ -10,6 +10,7 @@ export const NATIVE_PAYMENT_PROOF_SCHEMA = 'hookemon.native-payment-proof.v1';
 const capabilities = new WeakMap();
 const gasCapabilities = new WeakMap();
 const releaseBindings = new WeakSet();
+const testBindings = new WeakSet();
 const CLAIM_ABI = parseAbi([
   'function claimProcess(bytes32 cycleId, uint256 amountWei, address destination)',
   'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountWei, address indexed destination, uint256 timestamp, uint256 capWei, uint256 usedAfterWei)',
@@ -134,7 +135,12 @@ export function createTestNativePaymentBinding(value, authority) {
   need(binding.schema === 'hookemon.native-payment-binding.v1' && binding.chainId === '4663', 'invalid synthetic binding');
   function freeze(item) { if (item && typeof item === 'object') { Object.values(item).forEach(freeze); Object.freeze(item); } return item; }
   releaseBindings.add(binding);
+  testBindings.add(binding);
   return freeze(binding);
+}
+
+export function isTestNativePaymentBinding(value, authority) {
+  return authority === createTestProfileMutationAuthority() && testBindings.has(value);
 }
 
 /** A successful router cleanup event is authority only under a release-pinned runtime and source decoder. */

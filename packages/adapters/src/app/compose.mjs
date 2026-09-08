@@ -1,4 +1,4 @@
-import { requireNativePaymentBinding } from '../native-payment-proof.mjs';
+import { requireNativePaymentBinding, isTestNativePaymentBinding } from '../native-payment-proof.mjs';
 // The production composition root: wires the real scheduler (packages/runner/src/scheduler), the
 // real automation service (packages/runner/src/automation/automated-cycle-service.mjs), the durable
 // cycle repository and on-disk lease store (this directory), and the real provider adapters
@@ -1232,7 +1232,8 @@ export async function compose(config) {
   }
 
   if (resolved.execution?.profile === 'production' && resolved.execution?.dryRun !== true) {
-    resolved.nativePaymentBinding = requireNativePaymentBinding(resolved.nativePaymentBindingPath);
+    resolved.nativePaymentBinding = isTestNativePaymentBinding(config.nativePaymentBinding, config.preflightAuthority)
+      ? config.nativePaymentBinding : requireNativePaymentBinding(resolved.nativePaymentBindingPath);
     if (resolved.nativePaymentBinding.hook.address.toLowerCase() !== resolved.contracts.hook?.toLowerCase()) {
       throw new Error('native payment release binding names a different hook');
     }
@@ -1485,7 +1486,7 @@ export async function compose(config) {
     if (!result || !Array.isArray(result.drift) || typeof result.ok !== 'boolean') {
       throw new Error('native principal canary returned an invalid result');
     }
-    const heldDrift = result.drift.filter(item => item?.code === 'NATIVE_PRINCIPAL_IDENTITY_DRIFT' || item?.code === 'NATIVE_BALANCE_INSUFFICIENT');
+    const heldDrift = result.drift.filter(item => item?.code === 'NATIVE_PRINCIPAL_IDENTITY_DRIFT' || item?.code === 'NATIVE_BALANCE_INSUFFICIENT' || item?.code === 'NATIVE_PRINCIPAL_UNVERIFIED');
     if (heldDrift.length > 0) {
       assertLease();
       const active = await cycleRepository.readActiveCycle();
