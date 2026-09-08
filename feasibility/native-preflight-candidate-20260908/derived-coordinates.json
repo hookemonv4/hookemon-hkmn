@@ -1,0 +1,84 @@
+{
+  "status": "PROPOSED_UNAPPROVED_READ_ONLY",
+  "routeNamespace": "0xfc62e43731b5fb748b92c6550c8a46ccf6f526fe678fcdb1ce45e382d1901f4f",
+  "nonce": "0xcd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b",
+  "sourceDescriptor": {
+    "schemaVersion": "2.0.0",
+    "kind": "deterministic-source-bundle",
+    "controllerWallet": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "sourceLineageNonce": "1",
+    "sourceBundleDigest": "0x397b5d98a7a942a7f323e83548f08ba65a3879563ebb797ba5d3955ffe435deb",
+    "bundleContentSha256": "sha256:0751f2425e7f00a609f2632c6b9fcd18686e3db4c8b9c3a9b1b9291935a64d30",
+    "publicOriginCommitment": "0x6e58102a205f0b3ccfed71d9ef1fe7d22a6bc98ddfc18dac7b59aa806c383866"
+  },
+  "predictions": [
+    {
+      "targetId": "token",
+      "targetIdHash": "0xc8ab73f3a45b12119090a894967a4bc49ad24242a6024b1ce08c6a376c4e1549",
+      "effectiveSalt": "0xd01f0340d648783beba54888f328b30728eb41304df1fa64ee7df36137fb5a48",
+      "initCodeHash": "0xcb2bf89f64c68dee554ab3ef55cd147fb8ebf20dac5de56da16cae6fc3f9616e",
+      "applicantSalt": "0x0101010101010101010101010101010101010101010101010101010101010101",
+      "predictedAddress": "0x357D13937522240562cd46FD9ec1445aFe4408af"
+    },
+    {
+      "targetId": "custody",
+      "targetIdHash": "0xccd81e07119e829d9ddca60a1f36418adfb108cff26a20d39ef661dc2d264144",
+      "effectiveSalt": "0x167e123cf46adab22a18bd208d5e919a2893ed970391e186cc2fb0fc834a370f",
+      "initCodeHash": "0x9da8fd235654fb007fd174e72e9eac6ff78bfdc4ee26e63608d457ebb1edae8f",
+      "applicantSalt": "0x0202020202020202020202020202020202020202020202020202020202020202",
+      "predictedAddress": "0xF84900b25512AA7EBbFd6280afF53F099DA15E07"
+    }
+  ],
+  "runtimeEvidence": [
+    {
+      "targetId": "token",
+      "artifactSha256": "d8674b134236f56b3aefa4152b4ab920aaf472d8685a596595084965aa0819af",
+      "runtimeCodeHash": "0x29cfbd941df775f99cdc0725ba57a7a93f9743e43de9de628513ae7bc459bd90",
+      "immutableBindings": [
+        {
+          "immutableId": "11290",
+          "abiType": "uint8",
+          "literal": "18"
+        },
+        {
+          "immutableId": "11292",
+          "abiType": "uint256",
+          "literal": "1000000000000000000000000000"
+        },
+        {
+          "immutableId": "11294",
+          "abiType": "address",
+          "literal": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd"
+        },
+        {
+          "immutableId": "11296",
+          "abiType": "address",
+          "literal": "0x0000000000000000000000000000000000000000"
+        },
+        {
+          "immutableId": "11298",
+          "abiType": "uint160",
+          "literal": "12527072418752396559322253362376889"
+        }
+      ]
+    },
+    {
+      "targetId": "custody",
+      "artifactSha256": "f7ae50ab539a48335f42024826a13e28c0543da534f924a99241ef3bd1386857",
+      "runtimeCodeHash": "0x697742306802baff3a7380fcecea2266ba518e4f994bea87986f5606eec7299b",
+      "immutableBindings": [
+        {
+          "immutableId": "10893",
+          "abiType": "address",
+          "literal": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd"
+        },
+        {
+          "immutableId": "10895",
+          "abiType": "address",
+          "literal": "0x58daec3116aae6D93017bAAea7749052E8a04fA7"
+        }
+      ]
+    }
+  ],
+  "hookConstructorArgumentsStatus": "Incomplete: bindingDigest/runtimeDigest lack verified native preimage; hook permission salt/address remain unresolved."
+}

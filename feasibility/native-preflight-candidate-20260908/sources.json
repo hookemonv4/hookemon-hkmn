@@ -1,0 +1,26 @@
+{
+  "baseCommit": "8d8b3d622b60ea2e82360ca94fcdd5f9fe55fe55",
+  "officialCliUrl": "https://github.com/programmablehq/PROGRAMMABLE/releases/download/programmable-launch-v4.1.0/programmable-launch-4.1.0.tgz",
+  "officialCliTarballSha256": "9d7d26a74b0b4aaa3b3d8acddc80f821cbd79511ee1ada6acc7b935aeb21cac5",
+  "sha256": {
+    "feasibility/native-preflight-materialization/proposed-create-request.json": "0d5e05eb03fc673a271d648916c92cfad513a47a54dff9de752408b3af10ec19",
+    "feasibility/native-preflight-materialization/sources.json": "fe3ddce71b10c29a351527b64d50f56660db8bb876876d6e186c2f486657c2ee",
+    "feasibility/native-provider-admission/create-schema.json": "c4d23b0f3bd232b209d6566ac804348720b81432a2978728a10cc4317895c404",
+    "feasibility/native-funding/results.json": "2c83a5b0a18a1aaaa4ea7c00efd0be82284d511e0a72f6c5a3f34bb2a86de268",
+    "feasibility/native-test-capital-20260908/calculation.json": "3f57510ae12951f7979094e079647d1e0f8c6c11d053d66e7049062a3da651ed",
+    "release/phase3/launch-inputs.json": "24adf01f863cbb83e7795acd36a6f74bcf53c6a58c27d36dd40df3d6905a2eec",
+    "scripts/programmable/lib/phase3-release.mjs": "ff211abe633099710a628c037a4caab43e417fcf794313a7aab62264e3b1ba81",
+    "scripts/programmable/lib/seed-intent.mjs": "24c991081da2896f9cddda7daea39bc61779cab177867f7f5784976811cdfccd",
+    "scripts/launch/derive-addresses.mjs": "33d03c7c8d8c1c7af2d828fe65829d2c0222d3a640d4f3902c2b490641c66b08",
+    "packages/contracts/src/launch/HookemonIssuance.sol": "25232ae1f730dd447547f11876603d3913e3a65df84a3793754653d0823ab2fb",
+    "feasibility/native-preflight-candidate-20260908/README.md": "d59c3f138746fcd2c06d8801f1dff0aa89f1fe223698d4ad5e5e59651af0fe49",
+    "feasibility/native-preflight-candidate-20260908/materialize.mjs": "77ae463f7f7c0ac7a7e9cdaebc825b9ba0264a393da8cb96dfa1d119531d2f2a",
+    "feasibility/native-preflight-candidate-20260908/proposed-create-request.json": "408fee062bfc7b46cd4a9814ef4a376113811803ef8457b3db46f59d20a9cea0",
+    "feasibility/native-preflight-candidate-20260908/validation.json": "5015801de3edac1ce32ff537cb630b2710263b03fa5b3e7afcb9dd56fb0487a5",
+    "feasibility/native-preflight-candidate-20260908/scenario.json": "90d4f18304ce7d1abd2731463032b6af609b39361e3e33939fdb2c3761625b38",
+    "feasibility/native-preflight-candidate-20260908/derived-coordinates.json": "4103c4a8ed68f943e8df30728659f16458774ac417524b4fe473b8301d648fdc",
+    "feasibility/native-preflight-candidate-20260908/hook-constructor-fields.json": "f8ae63bb2bc1d80cc52367762a41df79bd41bf187feb4c63918ad46652cf19fa",
+    "feasibility/native-preflight-candidate-20260908/gas-inventory.json": "e1beeea43fba10e4176d50258113b1c32dff0f31dacf4ed2fa58bb99d03731f2",
+    "feasibility/native-preflight-candidate-20260908/check.mjs": "b84f6bbabce9032ba9d28a6d7d9600e9ff5f01ce79957280c21e4722b6845d1b"
+  }
+}

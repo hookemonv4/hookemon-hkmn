@@ -1,0 +1,54 @@
+{
+  "scope": "Conditional gas inventory; actual pinned archive route measurement replaces local token/hook/custody deployment plus graph wiring, never added on top. This is not an all-in cost or a measurement of the proposed new-address candidate.",
+  "ciRun": "34220664894",
+  "ciJob": "102042800504",
+  "ciLogSha256": "54d36ee3449a57c47430ac5c9ccd31d6df3c25804798f54f5021315e00181f66",
+  "ciEvidence": [
+    {
+      "line": 538,
+      "text": "2026-09-08T11:27:15.7555818Z   provider route callee gas: 9619449"
+    },
+    {
+      "line": 539,
+      "text": "2026-09-08T11:27:15.7556289Z   provider route calldata bytes: 49700"
+    },
+    {
+      "line": 540,
+      "text": "2026-09-08T11:27:15.7556984Z   provider route calldata gas: 658292"
+    },
+    {
+      "line": 541,
+      "text": "2026-09-08T11:27:15.7557510Z   provider route intrinsic transaction gas: 679292"
+    },
+    {
+      "line": 542,
+      "text": "2026-09-08T11:27:15.7558089Z   provider route aggregate transaction gas: 10298741"
+    },
+    {
+      "line": 543,
+      "text": "2026-09-08T11:27:15.7558631Z   provider route documented margin: 1000000"
+    },
+    {
+      "line": 544,
+      "text": "2026-09-08T11:27:15.7559200Z   provider route remaining genesis envelope gas: 18701259"
+    }
+  ],
+  "fundingScenario": "testSeed004Float002EarnsAndClaimsHistoricalBridgePrincipal",
+  "localFundingGas": "14619122",
+  "replacedDeploymentAndWiringGas": "7993080",
+  "replacementArchiveRouteGas": "10298741",
+  "remainingLocalSeedSwapClaimGas": "6626042",
+  "combinedMeasuredGasScenario": "16924783",
+  "routeMarginGas": "1000000",
+  "marginPaidGas": false,
+  "separateSwapIntrinsicLowerBound": "672000",
+  "allInBudgetProven": false,
+  "unknownCosts": [
+    "Candidate-specific deployment route gas and calldata intrinsic gas",
+    "Native acquisition bridge/spread",
+    "Outbound/return/payout EVM gas and possible token approval gas",
+    "Actual Solana pack/open/buyback fees and lamport funding",
+    "Buyback proceeds and card outcome",
+    "Current gas prices and transaction-specific limits"
+  ]
+}
