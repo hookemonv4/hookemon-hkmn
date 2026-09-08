@@ -92,44 +92,37 @@ function onchainCycleIdFor(cycleId) {
   return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
 }
 
-function parsedAdmissionRelayQuote({ requestId, orderId, amountAtomic, purchaseAtomic, deadlineUnixSeconds = 2_000_000_000 }) {
-  const origin = { chainId: 4663, address: ADMISSION_USDG, decimals: 6, amount: amountAtomic };
+async function parsedAdmissionRelayQuote({ requestId, orderId, amountAtomic, purchaseAtomic, deadlineUnixSeconds = 2_000_000_000 }) {
+  const origin = { chainId: 4663, address: `0x${'0'.repeat(40)}`, decimals: 18, amount: amountAtomic };
   const destination = { chainId: 792703809, address: ADMISSION_SETTLEMENT_MINT, decimals: 6, amount: purchaseAtomic, minimumAmount: purchaseAtomic };
   const raw = {
     requestId,
     details: {
       sender: ADMISSION_EVM,
       recipient: ADMISSION_SOLANA,
-      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount, amountUsd: '2.000000' },
       currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
     },
     protocol: { v2: { orderId, orderData: {
-      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount }, refunds: [{ chainId: 'robinhood', currency: origin.address, recipient: ADMISSION_EVM, deadline: deadlineUnixSeconds }] }],
       output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient: ADMISSION_SOLANA, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
     } } },
     steps: [],
   };
-  const quote = {
-    direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender: ADMISSION_EVM, recipient: ADMISSION_SOLANA,
-    deadlineUnixSeconds, origin, destination, stepCount: raw.steps.length, raw,
-  };
-  return {
-    ...quote,
-    quoteDigest: digest({
-      schema: 'hookemon.relay-quote.v1', direction: quote.direction, tradeType: quote.tradeType,
-      requestId: quote.requestId, orderId: quote.orderId, sender: quote.sender, recipient: quote.recipient,
-      deadlineUnixSeconds: quote.deadlineUnixSeconds, origin: quote.origin, destination: quote.destination, raw: quote.raw,
-    }),
-  };
+  const nowMs = Math.min(deadlineUnixSeconds * 1000 - 1000, 2_000_000_001_000);
+  const client = createRelayClient({ now: () => nowMs, quoteValidityMs: 60000,
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(raw) }) });
+  return client.quote({ direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', amount: purchaseAtomic,
+    user: ADMISSION_EVM, recipient: ADMISSION_SOLANA, skipRouteCheck: true });
 }
 
 /** A finalized hook process-liability evidence record covering exactly `ceilingAtomic`. */
 function admissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
   return {
-    schema: 'hookemon.process-liability-evidence.v1',
+    schema: 'hookemon.process-liability-evidence.v2',
     chainId: '4663',
-    assetId: ADMISSION_USDG,
-    decimals: 6,
+    assetId: 'native',
+    decimals: 18,
     hook: `0x${'7'.repeat(40)}`,
     cycleId,
     onchainCycleId: onchainCycleIdFor(cycleId),
@@ -142,7 +135,7 @@ function admissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
     processClaimCycleUsed: false,
     activeProcessClaimLimit: ceilingAtomic,
     totalLiability: ceilingAtomic,
-    hookUsdgBalance: ceilingAtomic,
+    hookNativeBalance: ceilingAtomic,
     isSolvent: true,
     operations: ADMISSION_EVM,
     ceilingAtomic,
@@ -150,15 +143,15 @@ function admissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
 }
 
 /** A complete, self-consistent quantity-1 admission, carrying finalized process liability evidence. */
-function admissionWithEvidence(cycleId, {
+async function admissionWithEvidence(cycleId, {
   amountAtomic = '1000000', purchaseAtomic = '500000', salt = cycleId, unitOrderByte = '1', aggregateOrderByte = '2', deadlineUnixSeconds = 2_000_000_000,
 } = {}) {
-  const unitRelayQuote = parsedAdmissionRelayQuote({ requestId: `req-unit-${salt}`, orderId: `0x${unitOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic, deadlineUnixSeconds });
-  const relayQuote = parsedAdmissionRelayQuote({ requestId: `req-aggregate-${salt}`, orderId: `0x${aggregateOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic, deadlineUnixSeconds });
-  const asset = (address) => ({ chainId: '4663', assetId: address, decimals: 6 });
+  const unitRelayQuote = await parsedAdmissionRelayQuote({ requestId: `req-unit-${salt}`, orderId: `0x${unitOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic, deadlineUnixSeconds });
+  const relayQuote = await parsedAdmissionRelayQuote({ requestId: `req-aggregate-${salt}`, orderId: `0x${aggregateOrderByte.repeat(64)}`, amountAtomic, purchaseAtomic, deadlineUnixSeconds });
+  const asset = () => ({ chainId: '4663', assetId: 'native', decimals: 18 });
   const settlementAsset = (address) => ({ chainId: '792703809', assetId: address, decimals: 6 });
   return {
-    schema: 'hookemon.policy-admission.v2',
+    schema: 'hookemon.policy-admission.v3',
     cycleId,
     packId: 'base-pack',
     quantity: 1,
@@ -179,6 +172,8 @@ function admissionWithEvidence(cycleId, {
       quoteDigest: relayQuote.quoteDigest, deadlineUnixSeconds: relayQuote.deadlineUnixSeconds,
       sender: ADMISSION_EVM, recipient: ADMISSION_SOLANA, destinationAmount: purchaseAtomic, destinationMinimumAmount: purchaseAtomic,
     },
+    unitFundingUsd: createQuoteUsdValuation({ quote: unitRelayQuote, side: 'origin', amount: { ...asset(), amountAtomic }, rounding: 'up', nowMs: Math.min(deadlineUnixSeconds * 1000 - 1000, 2_000_000_001_000) }),
+    aggregateFundingUsd: createQuoteUsdValuation({ quote: relayQuote, side: 'origin', amount: { ...asset(), amountAtomic }, rounding: 'up', nowMs: Math.min(deadlineUnixSeconds * 1000 - 1000, 2_000_000_001_000) }),
     processLiabilityEvidence: admissionProcessLiabilityEvidence(cycleId, amountAtomic),
   };
 }
@@ -4449,11 +4444,13 @@ function outboundQuoteExpiryEvidence(cycleId, admission, overrides = {}) {
 
 async function openCycleWithAdmission(t, { cycleId = 'cycle-quote-refresh', now = () => OUTBOUND_QUOTE_REFRESH_NOW_MS, ...admissionOverrides } = {}) {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory, now);
-  const admission = admissionWithEvidence(cycleId, admissionOverrides);
+  let creating = true;
+  const repository = await CycleRepository.open(directory, () => creating ? Math.min((admissionOverrides.deadlineUnixSeconds ?? 2_000_000_000) * 1000 - 1000, 2_000_000_001_000) : now(), { testAuthority: createTestProfileMutationAuthority() });
+  const admission = await admissionWithEvidence(cycleId, admissionOverrides);
   await repository.createCycle({
     releaseAmount: admission.aggregateFundingQuote.amountAtomic, mode: 'production', cycleId, admission,
   });
+  creating = false;
   return { repository, cycleId, admission, directory };
 }
 
@@ -4534,7 +4531,7 @@ test('selectOutboundQuoteRefresh requires an exact REFRESH_REQUIRED predecessor 
   const { repository, cycleId, admission } = await openCycleWithAdmission(t);
   const replacement = { ...admission };
   await assert.rejects(
-    () => repository.selectOutboundQuoteRefresh(cycleId, {
+    async () => repository.selectOutboundQuoteRefresh(cycleId, {
       predecessorExpiryDigest: `sha256:${'0'.repeat(64)}`,
       replacement,
       refreshPolicyDecisionDigest: `sha256:${'1'.repeat(64)}`,
@@ -4548,7 +4545,7 @@ test('selectOutboundQuoteRefresh atomically selects one replacement bound to the
   const evidence = outboundQuoteExpiryEvidence(cycleId, admission);
   const expired = await repository.recordOutboundQuoteExpired(cycleId, evidence);
 
-  const replacement = admissionWithEvidence(cycleId, {
+  const replacement = await admissionWithEvidence(cycleId, {
     salt: `${cycleId}-replacement`, unitOrderByte: '3', aggregateOrderByte: '4', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
   });
   const refreshPolicyDecisionDigest = `sha256:${'2'.repeat(64)}`;
@@ -4568,9 +4565,9 @@ test('selectOutboundQuoteRefresh atomically selects one replacement bound to the
 
   // A second selection is refused: the projection is no longer REFRESH_REQUIRED.
   await assert.rejects(
-    () => repository.selectOutboundQuoteRefresh(cycleId, {
+    async () => repository.selectOutboundQuoteRefresh(cycleId, {
       predecessorExpiryDigest: expired.expiryDigest,
-      replacement: admissionWithEvidence(cycleId, { salt: `${cycleId}-second`, unitOrderByte: '5', aggregateOrderByte: '6' }),
+      replacement: await admissionWithEvidence(cycleId, { salt: `${cycleId}-second`, unitOrderByte: '5', aggregateOrderByte: '6' }),
       refreshPolicyDecisionDigest: `sha256:${'3'.repeat(64)}`,
     }),
     /requires an exact REFRESH_REQUIRED predecessor/,
@@ -4582,9 +4579,9 @@ test('selectOutboundQuoteRefresh refuses a replacement whose source amount is no
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
 
   for (const amountAtomic of ['1000001', '999999']) {
-    const replacement = admissionWithEvidence(cycleId, { amountAtomic, salt: `${cycleId}-${amountAtomic}`, unitOrderByte: '7', aggregateOrderByte: '8' });
+    const replacement = await admissionWithEvidence(cycleId, { amountAtomic, salt: `${cycleId}-${amountAtomic}`, unitOrderByte: '7', aggregateOrderByte: '8' });
     await assert.rejects(
-      () => repository.selectOutboundQuoteRefresh(cycleId, {
+      async () => repository.selectOutboundQuoteRefresh(cycleId, {
         predecessorExpiryDigest: expired.expiryDigest,
         replacement,
         refreshPolicyDecisionDigest: `sha256:${'4'.repeat(64)}`,
@@ -4604,9 +4601,9 @@ test('selectOutboundQuoteRefresh refuses a replacement that changes pack, quanti
   const { repository, cycleId, admission } = await openCycleWithAdmission(t);
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
 
-  const wrongPack = { ...admissionWithEvidence(cycleId, { salt: `${cycleId}-pack`, unitOrderByte: '9', aggregateOrderByte: 'a' }), packId: 'a-different-pack' };
+  const wrongPack = { ...await admissionWithEvidence(cycleId, { salt: `${cycleId}-pack`, unitOrderByte: '9', aggregateOrderByte: 'a' }), packId: 'a-different-pack' };
   await assert.rejects(
-    () => repository.selectOutboundQuoteRefresh(cycleId, {
+    async () => repository.selectOutboundQuoteRefresh(cycleId, {
       predecessorExpiryDigest: expired.expiryDigest, replacement: wrongPack, refreshPolicyDecisionDigest: `sha256:${'5'.repeat(64)}`,
     }),
     /replacement pack\/quantity does not match/,
@@ -4618,9 +4615,9 @@ test('selectOutboundQuoteRefresh refuses once any outbound stage request digest 
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
   await repository.recordStageRequestDigest(cycleId, 'outbound', `sha256:${'b'.repeat(64)}`);
 
-  const replacement = admissionWithEvidence(cycleId, { salt: `${cycleId}-race`, unitOrderByte: 'c', aggregateOrderByte: 'd' });
+  const replacement = await admissionWithEvidence(cycleId, { salt: `${cycleId}-race`, unitOrderByte: 'c', aggregateOrderByte: 'd' });
   await assert.rejects(
-    () => repository.selectOutboundQuoteRefresh(cycleId, {
+    async () => repository.selectOutboundQuoteRefresh(cycleId, {
       predecessorExpiryDigest: expired.expiryDigest, replacement, refreshPolicyDecisionDigest: `sha256:${'6'.repeat(64)}`,
     }),
     /outbound stage request, Relay leg, or chain attempt already exists/,
@@ -4845,9 +4842,9 @@ test('selectOutboundQuoteRefresh refuses a replacement whose deadline is not str
     ['equal', selectedUnixSeconds, 'e', 'f'],
     ['past', selectedUnixSeconds - 1, 'c', 'd'],
   ]) {
-    const replacement = admissionWithEvidence(cycleId, { salt: `${cycleId}-${label}`, unitOrderByte, aggregateOrderByte, deadlineUnixSeconds });
+    const replacement = await admissionWithEvidence(cycleId, { salt: `${cycleId}-${label}`, unitOrderByte, aggregateOrderByte, deadlineUnixSeconds });
     await assert.rejects(
-      () => repository.selectOutboundQuoteRefresh(cycleId, {
+      async () => repository.selectOutboundQuoteRefresh(cycleId, {
         predecessorExpiryDigest: expired.expiryDigest, replacement, refreshPolicyDecisionDigest: `sha256:${'7'.repeat(64)}`,
       }),
       /replacement quote deadlines must be strictly later than the selection time/,
@@ -4855,7 +4852,7 @@ test('selectOutboundQuoteRefresh refuses a replacement whose deadline is not str
     );
   }
 
-  const fresh = admissionWithEvidence(cycleId, {
+  const fresh = await admissionWithEvidence(cycleId, {
     salt: `${cycleId}-fresh`, unitOrderByte: 'a', aggregateOrderByte: '9', deadlineUnixSeconds: selectedUnixSeconds + 1,
   });
   const selected = await repository.selectOutboundQuoteRefresh(cycleId, {
@@ -4867,12 +4864,12 @@ test('selectOutboundQuoteRefresh refuses a replacement whose deadline is not str
 test('selectOutboundQuoteRefresh checks the lease fence before any validation and commits nothing on failure', async t => {
   const { repository, cycleId, admission } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-fence-immediate' });
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
-  const replacement = admissionWithEvidence(cycleId, {
+  const replacement = await admissionWithEvidence(cycleId, {
     salt: `${cycleId}-fence`, unitOrderByte: '5', aggregateOrderByte: '6', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
   });
 
   await assert.rejects(
-    () => repository.selectOutboundQuoteRefresh(cycleId, {
+    async () => repository.selectOutboundQuoteRefresh(cycleId, {
       predecessorExpiryDigest: expired.expiryDigest,
       replacement,
       refreshPolicyDecisionDigest: `sha256:${'a'.repeat(64)}`,
@@ -4888,7 +4885,7 @@ test('selectOutboundQuoteRefresh checks the lease fence before any validation an
 test('selectOutboundQuoteRefresh refuses a selection whose lease is fenced out at the atomic append boundary', async t => {
   const { repository, cycleId, admission } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-fence-race' });
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
-  const replacement = admissionWithEvidence(cycleId, {
+  const replacement = await admissionWithEvidence(cycleId, {
     salt: `${cycleId}-fence-race`, unitOrderByte: '7', aggregateOrderByte: '8', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
   });
 
@@ -4900,7 +4897,7 @@ test('selectOutboundQuoteRefresh refuses a selection whose lease is fenced out a
   };
 
   await assert.rejects(
-    () => repository.selectOutboundQuoteRefresh(cycleId, {
+    async () => repository.selectOutboundQuoteRefresh(cycleId, {
       predecessorExpiryDigest: expired.expiryDigest, replacement, refreshPolicyDecisionDigest: `sha256:${'b'.repeat(64)}`, assertLease,
     }),
     /lease fenced: renewed by another owner/,
@@ -4941,7 +4938,7 @@ test('a stored outbound quote refresh selection recorded after an outbound chain
     stage: 'outbound', attempt: preparedChainAttempt(cycleId, 'outbound', `sha256:${'c'.repeat(64)}`),
   });
 
-  const replacement = admissionWithEvidence(cycleId, {
+  const replacement = await admissionWithEvidence(cycleId, {
     salt: `${cycleId}-tamper`, unitOrderByte: '3', aggregateOrderByte: '4', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
   });
   await injectRawJournalEntry(directory, cycleId, 'outbound-quote-refresh-selected', {
@@ -4964,7 +4961,7 @@ test('a stored outbound quote refresh selection naming a replacement with the wr
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
 
   const wrongPack = {
-    ...admissionWithEvidence(cycleId, {
+    ...await admissionWithEvidence(cycleId, {
       salt: `${cycleId}-wrong-pack`, unitOrderByte: '5', aggregateOrderByte: '6', deadlineUnixSeconds: OUTBOUND_QUOTE_REPLACEMENT_DEADLINE,
     }),
     packId: 'a-different-pack',
@@ -4988,7 +4985,7 @@ test('a stored outbound quote refresh selection naming an already-expired replac
   const { repository, cycleId, admission, directory } = await openCycleWithAdmission(t, { cycleId: 'cycle-quote-refresh-tamper-stale' });
   const expired = await repository.recordOutboundQuoteExpired(cycleId, outboundQuoteExpiryEvidence(cycleId, admission));
 
-  const staleReplacement = admissionWithEvidence(cycleId, {
+  const staleReplacement = await admissionWithEvidence(cycleId, {
     salt: `${cycleId}-stale`, unitOrderByte: '1', aggregateOrderByte: '2', deadlineUnixSeconds: Math.floor(OUTBOUND_QUOTE_REFRESH_NOW_MS / 1000),
   });
   await injectRawJournalEntry(directory, cycleId, 'outbound-quote-refresh-selected', {
