@@ -91,6 +91,20 @@ inspection through the same authority boundary.
 
 ## Operational commands
 
+The owner page lists the authenticated `/operator/api/packs` catalog with checkboxes, select-all,
+clear and save controls. Saved `allowedPackIds` are sorted, unique and written through the existing
+revision-checked `update-configuration` authority command. Saving does not start a cycle or buy a
+pack. Empty selection permits no packs. Previously selected codes absent from the current catalog
+remain visible until explicitly deselected. An unavailable catalog disables saving without hiding
+the rest of the dashboard. Provider names are rendered as text. Confirmation follows authoritative
+configuration readback; uncertain requests retain their identity for reconciliation.
+
+The selection is an allowlist, not a rotation schedule. The composed runner currently obtains its
+active pack code from its startup configuration. Connecting this page to that composition uses its
+existing dashboard listener, operator authority and Collector catalog; a standalone dashboard has
+no production authority or catalog. Adding packs remains subject to the authority's safety-telemetry
+checks. No local fallback may claim that a production configuration was saved.
+
 Start the composed service with `node packages/adapters/bin/hookemon-runner.mjs run`, then open
 `http://127.0.0.1:8787` unless `HOOKEMON_DASHBOARD_PORT` selects another port. The browser
 credential is `HOOKEMON_DASHBOARD_PROXY_CREDENTIAL`. Run the dashboard tests with Node 24, then run
