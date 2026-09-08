@@ -1,0 +1,12 @@
+{
+  "sourceCommit": "07f32246d3acb89f7df0ad552388cdcc1d5bf383",
+  "responsePath": "docs/evidence/native-provider-20260908/relay-outbound-response.json",
+  "responseSha256": "7b1b5a871f7db31b8ad708df47cdbdde73ba9c0905d25c55d69f96c90af03176",
+  "capturedAt": "2026-09-08T08:22:02.045535+00:00",
+  "usage": "Expired historical scenario only; neither current valuation authority nor an executable quote.",
+  "processPrincipalWei": "10243579001330370",
+  "displayedInputMicroUsd": "25327249",
+  "exactOutputUsdcAtoms": "25000000",
+  "priceInterpretation": "Scenario ratio from displayed input USD divided by native input amount; not an ETH acquisition quote or USD/USDC parity assumption.",
+  "baselineCommit": "79eca8b1c322ea9fe2a151731678a447ae5339f8"
+}
