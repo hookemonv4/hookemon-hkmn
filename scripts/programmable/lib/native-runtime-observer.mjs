@@ -92,8 +92,7 @@ const SAFE_READS = {
         "to": "0xeD617CE7f82e2AB589aDeFFD319D1D872Bc8De06",
         "data": "0xaffed0e0"
       }
-    ],
-    "expected": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ]
   },
   "safeModules": {
     "method": "eth_call",
@@ -125,6 +124,12 @@ const SAFE_IMPLEMENTATIONS = [
   ['singleton', '0x41675c099f32341bf84bfc5382af534df5c7461a', '0x1fe2df852ba3299d6534ef416eefa406e56ced995bca886ab7a553e6d0c5e1c4'],
   ['fallback', '0xfd0732dc9e303f09fcef3a7388ad10a83459ec99', '0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9'],
 ];
+// Trust begins at module initialization: the host must supply its native fetch then.
+// Capturing it prevents later global replacement; arbitrary pre-import/runtime compromise
+// is outside this boundary. The selected HTTPS RPC remains a trusted state observer.
+const liveFetch = globalThis.fetch.bind(globalThis);
+const SAFE_PROXY_ARTIFACT = 'https://unpkg.com/@safe-global/safe-contracts@1.4.1/build/artifacts/contracts/proxies/SafeProxy.sol/SafeProxy.json';
+const SAFE_PROXY_SHA = 'b05eaeaf7278097e52a9e9b38410de2a812c23fa3622373473e73eaa19646ecd';
 const snapshots = new WeakMap();
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = (code, message) => { throw new Error(`${code}: ${message}`); };
@@ -177,7 +182,7 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
     const requestBytes = encode({ url, method: payload ? 'POST' : 'GET', ...(payload ? { body: payload } : {}) });
     evidenceBytes[`requests/${name}.json`] = requestBytes;
     const startedAt = new Date().toISOString();
-    const response = await globalThis.fetch(url, { method: payload ? 'POST' : 'GET', redirect: 'error',
+    const response = await liveFetch(url, { method: payload ? 'POST' : 'GET', redirect: 'error',
       signal: AbortSignal.timeout(15000), ...(payload ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } : {}) });
     need(!response.redirected && (!response.url || new URL(response.url).origin === new URL(url).origin), 'REDIRECT_REFUSED', 'source origin changed');
     need(response.body && Number(response.headers.get('content-length') ?? 0) <= 2_500_000, 'RESPONSE_TOO_LARGE', 'response exceeds limit');
@@ -216,11 +221,21 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
       const policy = caps.chainDeployment?.permitAuthoritySourceProvenance?.configurationEvidence;
       need(policy?.singleton?.address?.toLowerCase() === SAFE_IMPLEMENTATIONS[0][1]
         && policy.fallbackHandler?.toLowerCase() === SAFE_IMPLEMENTATIONS[1][1]
-        && policy.guard === null && policy.threshold === 1 && policy.nonce === '0'
+        && policy.guard === null && policy.threshold === 1
         && same(policy.owners?.map(x => x.toLowerCase()), ['0x032b1c7b96793717f0bd2f11eb86cd10cdefc4a3', '0x2bb333d48dfaf1596d9036671d2e43168994249e'])
         && same(policy.modules, []), 'SAFE_POLICY_DRIFT', 'published Safe policy changed');
-      for (const [name, read] of Object.entries(SAFE_READS)) need(
-        await rpc(name, read.method, [...read.params, ref]) === read.expected, 'SAFE_POLICY_DRIFT', name);
+      // Official Safe npm release, gitHead bf943f80fec5ac647159d26161446ac5d716a294.
+      // This artifact supplies deployedBytecode directly; no creation-code inference.
+      const proxy = await request('abi-safe-proxy', SAFE_PROXY_ARTIFACT);
+      need(sha(evidenceBytes['responses/abi-safe-proxy.json']) === SAFE_PROXY_SHA
+        && proxy.contractName === 'SafeProxy' && proxy.sourceName === 'contracts/proxies/SafeProxy.sol',
+      'SAFE_PROXY_SOURCE_DRIFT', 'canonical Safe 1.4.1 proxy artifact changed');
+      need(hexBytes(proxy.deployedBytecode).equals(code), 'SAFE_PROXY_RUNTIME_MISMATCH', 'canonical Safe proxy required before delegated policy reads');
+      for (const [name, read] of Object.entries(SAFE_READS)) {
+        const observed = await rpc(name, read.method, [...read.params, ref]);
+        need(name === 'safeNonce' ? /^0x[0-9a-fA-F]{64}$/.test(observed) : observed === read.expected,
+          'SAFE_POLICY_DRIFT', name);
+      }
       const source = await request('abi-safe', SAFE_ABI);
       need(sha(evidenceBytes['responses/abi-safe.json']) === SAFE_ABI_SHA, 'SAFE_SOURCE_DRIFT', 'pinned Safe ABI bytes changed');
       completeAbi = abi(source.abi, role);
@@ -238,7 +253,7 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
     } else {
       const source = await request(`abi-${role}`, `https://sourcify.dev/server/v2/contract/4663/${expected.address}?fields=abi,runtimeBytecode.onchainBytecode,deployment,proxyResolution,compilation`);
       need(source?.chainId === '4663' && source.address?.toLowerCase() === expected.address
-        && source.runtimeMatch === 'match' && source.match === 'match' && source.proxyResolution?.isProxy === false,
+        && ['match', 'exact_match'].includes(source.runtimeMatch) && ['match', 'exact_match'].includes(source.match) && source.proxyResolution?.isProxy === false,
       'ABI_CORRESPONDENCE_UNAVAILABLE', `${role} verified non-proxy source unavailable`);
       need(hexBytes(source.runtimeBytecode?.onchainBytecode).equals(code), 'ABI_RUNTIME_MISMATCH', role);
       completeAbi = abi(source.abi, role);
@@ -247,6 +262,7 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
     evidenceBytes[codePath] = code;
     evidenceBytes[abiPath] = encode(completeAbi);
     evidenceBytes[observationPath] = encode({ role, address: expected.address, blockNumber: BigInt(checkpoint.number).toString(), blockHash: checkpoint.hash,
+      ...(role === 'permitAuthority' ? { abiSource: 'safe-deployments singleton via canonical SafeProxy 1.4.1', proxyArtifactSource: SAFE_PROXY_ARTIFACT, proxyArtifactPath: 'responses/abi-safe-proxy.json' } : {}),
       runtimeKeccak256: expected.runtimeCodeHash, codeResponsePath: `responses/${role}-code.json`, finalitySource: 'responses/finalized.json', binding: 'EIP-1898 requireCanonical' });
     contracts.push({ role, address: expected.address, codePath, abiPath, observationPath, blockNumber: BigInt(checkpoint.number).toString(), blockHash: checkpoint.hash });
   }
