@@ -1109,7 +1109,7 @@ function outboundRelayRoute(state, leg) {
   }
   const sourceCurrency = leg.schema === 'hookemon.relay-leg.v2' && leg.sourceChainId === '4663'
     && leg.sourceAssetId === 'native' && leg.sourceDecimals === 18
-    ? '0x0000000000000000000000000000000000000000'
+    ? 'native'
     : assertEvmAddress(leg.sourceAssetId, 'relay settlement source asset');
   if (intent.requestId !== leg.relayRequestId
     || String(intent.originChainId) !== leg.sourceChainId
