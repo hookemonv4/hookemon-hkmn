@@ -15,9 +15,9 @@ test('action builder exposes no route payload extraction helper', () => {
 
 function moneyConfiguration() {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: {
         chainId: '792703809',
         assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -25,14 +25,14 @@ function moneyConfiguration() {
       },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '2' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
       solanaReceive: {
         chainId: '792703809',
         assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         decimals: 6,
         amountAtomic: '3',
       },
-      returnUsdg: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2000000000' },
@@ -74,7 +74,7 @@ const INPUT = {
   validity: VALIDITY,
 };
 
-test('leg actions use MoneyConfigurationV1 amounts and require explicit validity evidence', () => {
+test('leg actions use MoneyConfigurationV2 amounts and require explicit validity evidence', () => {
   const outbound = buildOutboundAction(INPUT);
   const purchase = buildPurchaseAction(INPUT);
   const buyback = buildBuybackAction({
@@ -98,8 +98,16 @@ test('leg actions use MoneyConfigurationV1 amounts and require explicit validity
 
   assert.throws(
     () => buildOutboundAction({ ...INPUT, config: { ...CONFIG, moneyConfiguration: null } }),
-    /MoneyConfigurationV1/,
+    /MoneyConfigurationV2/,
   );
   const { validity, ...withoutValidity } = INPUT;
   assert.throws(() => buildOutboundAction(withoutValidity), /explicit validity evidence/);
 });
+
+for (const [field, value] of [['chainId', '1'], ['assetId', '0x1111111111111111111111111111111111111111'], ['decimals', 6]]) {
+  test(`native action refuses wrong ${field}`, () => {
+    const money = moneyConfiguration();
+    money.assets.eth[field] = value;
+    assert.throws(() => buildOutboundAction({ ...INPUT, config: { ...CONFIG, moneyConfiguration: money } }), /MoneyConfigurationV2/);
+  });
+}

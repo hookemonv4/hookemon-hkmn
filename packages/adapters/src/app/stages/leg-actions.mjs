@@ -13,18 +13,18 @@ import { assertMoneyConfiguration } from '../../../../runner/src/cycle/money-sch
 import { buildProductionAction } from './action-builder.mjs';
 
 function requireMoneyConfiguration(config) {
-  if (!config?.moneyConfiguration) throw new Error('leg actions require MoneyConfigurationV1');
+  if (!config?.moneyConfiguration) throw new Error('leg actions require MoneyConfigurationV2');
   let money;
   try {
     money = assertMoneyConfiguration(config.moneyConfiguration, 'leg action money configuration');
   } catch (error) {
-    throw new Error(`leg actions require MoneyConfigurationV1: ${error.message}`);
+    throw new Error(`leg actions require MoneyConfigurationV2: ${error.message}`);
   }
-  if (money.assets.usdg.chainId !== '4663') {
-    throw new Error('leg actions require MoneyConfigurationV1 for the configured EVM chain');
+  if (money.assets.eth.chainId !== '4663') {
+    throw new Error('leg actions require MoneyConfigurationV2 for the configured EVM chain');
   }
   if (money.assets.solanaStablecoin.assetId !== CIRCLE_USD_MINT || money.assets.solanaStablecoin.decimals !== 6) {
-    throw new Error('leg actions require MoneyConfigurationV1 for the configured Solana stablecoin');
+    throw new Error('leg actions require MoneyConfigurationV2 for the configured Solana stablecoin');
   }
   return money;
 }
@@ -47,7 +47,7 @@ function configuredPackBinding(config, money) {
   const wallet = config.accounts.solana;
   const refundTokenAccount = policyCircleUsdAccountFor(config, money);
   return {
-    sourceChainId: Number(money.assets.usdg.chainId),
+    sourceChainId: Number(money.assets.eth.chainId),
     executionCluster: 'mainnet-beta',
     circleDollarMint: money.assets.solanaStablecoin.assetId,
     circleDollarDecimals: money.assets.solanaStablecoin.decimals,
@@ -88,7 +88,7 @@ export function buildOutboundAction({ cycleId, preflightDigest, custody, config,
     nativeGasAmount: money.evm.nativeReserve.amountAtomic,
     feePayer: feePayer ?? config.accounts.evm,
     sourceAccount: custody.returnAccount,
-    inputAsset: 'USDG',
+    inputAsset: money.assets.eth.assetId,
     outputAsset: money.assets.solanaStablecoin.assetId,
     mint: money.assets.solanaStablecoin.assetId,
     tokenAccount: custody.returnAccount,
@@ -155,12 +155,12 @@ export function buildReturnAction({ cycleId, preflightDigest, custody, config, p
     custody,
     binding,
     principalAmount,
-    minimumReceive: money.minimums.returnUsdg.amountAtomic,
+    minimumReceive: money.minimums.returnEth.amountAtomic,
     nativeGasAmount: money.solana.lamportReserve.amountAtomic,
     feePayer: feePayer ?? binding.executionWallet,
     sourceAccount: binding.refundTokenAccount,
     inputAsset: money.assets.solanaStablecoin.assetId,
-    outputAsset: 'USDG',
+    outputAsset: money.assets.eth.assetId,
     mint: money.assets.solanaStablecoin.assetId,
     tokenAccount: binding.refundTokenAccount,
     destination: custody.returnAccount,

@@ -383,3 +383,5 @@ Collector-only CLI initialization, preflight and run obtain an exact USDC origin
 The composition resolves one clock and passes it to custody valuation, policy and durable services. An omitted clock uses wall time; an injected clock remains authoritative for that composition. Native custody requires a fresh authenticated quote under this same clock. Expired quotes leave exposure unvalued, while held purchase cost remains frozen.
 
 Return preparation samples the resolved clock after the quote response for USD valuation. The original request timestamp remains an attribution coordinate and never extends the producer quote validity window. Supplementary return preparation applies the same post-response freshness requirement.
+
+Leg action builders require MoneyConfigurationV2 and the exact Robinhood native asset identity. Outbound input and return output use the internal native asset identifier, while Collector purchase and buyback retain their configured Solana settlement asset. Return floors use `minimums.returnEth`; gas reserves remain separate from principal. Historical money configurations cannot construct new actions.
