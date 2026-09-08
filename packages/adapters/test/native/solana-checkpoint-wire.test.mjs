@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {Keypair,Transaction} from '@solana/web3.js';
+import {buildRelayLegacyTransaction,deriveAssociatedTokenAddress} from '../../src/solana-rpc.mjs';
+import {CycleRepository} from '../../src/app/cycle-repository.mjs';
+import {assertChainTransactionAttempt} from '../../../runner/src/cycle/money-schemas.mjs';
+const base={schema:'hookemon.chain-transaction-attempt.v1',cycleId:'fixture',stage:'return',state:'SIGNED',requestDigest:`sha256:${'1'.repeat(64)}`,nonce:null,blockhash:'11111111111111111111111111111111',hash:'fixture',rawBytes:null};
+test('signed ten-account Relay deposit persists wire above 512 characters through reopen',async t=>{
+ const raw=JSON.parse(readFileSync(new URL('../../../../docs/evidence/native-relay-source-instruction-20260908/relay-return-scenario-response.json',import.meta.url)));
+ const plan=structuredClone(raw.steps[0].items[0].data),key=Keypair.fromSeed(new Uint8Array(32).fill(1)),sender=key.publicKey.toBase58();
+ plan.instructions[0].keys[1].pubkey=sender;plan.instructions[0].keys[2].pubkey=sender;plan.instructions[0].keys[5].pubkey=deriveAssociatedTokenAddress(sender,plan.instructions[0].keys[4].pubkey).toBase58();
+ const tx=Transaction.from(Buffer.from(buildRelayLegacyTransaction({feePayer:sender,recentBlockhash:base.blockhash,instructionPlan:plan}),'base64'));tx.sign(key);const rawBytes=tx.serialize().toString('base64');assert(rawBytes.length>512);assert(Buffer.from(rawBytes,'base64').length<=1232);
+ const dir=await mkdtemp(join(tmpdir(),'solana-wire-'));t.after(()=>rm(dir,{recursive:true,force:true}));const repo=await CycleRepository.open(dir);const {cycleId}=await repo.createCycle({releaseAmount:'1',mode:'production'});const prepared={...base,cycleId,state:'PREPARED',rawBytes:null,nonce:null,blockhash:null,hash:null};await repo.prepareChainTransactionAttempt(cycleId,'return',prepared);await repo.recordSignedTransaction(cycleId,'return',base.requestDigest,{rawBytes,nonce:null,blockhash:base.blockhash,hash:'fixture'});const reopened=await CycleRepository.open(dir);assert.equal((await reopened.readChainTransactionAttempt(cycleId,'return',base.requestDigest)).attempt.rawBytes,rawBytes);
+});
+for(const [name,rawBytes] of [['oversized',Buffer.alloc(1233).toString('base64')],['whitespace',Buffer.alloc(10).toString('base64')+'\n'],['missing padding','YQ'],['invalid','%%%']])test(`Solana checkpoint rejects ${name} wire`,()=>assert.throws(()=>assertChainTransactionAttempt({...base,rawBytes}),/canonical Solana/));
+test('EVM material retains existing 512-character cap and unrelated strings stay bounded',()=>{assert.throws(()=>assertChainTransactionAttempt({...base,nonce:'1',blockhash:null,rawBytes:'0x'+'11'.repeat(256)}));assert.throws(()=>assertChainTransactionAttempt({...base,rawBytes:'YQ==',hash:'a'.repeat(513)}));});
