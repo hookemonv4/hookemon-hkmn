@@ -1,0 +1,11 @@
+{
+  "id": "r-00649",
+  "at": "2026-09-08T04:59:41.065Z",
+  "type": "autonomy-grant",
+  "phase": "build",
+  "result": null,
+  "data": {},
+  "inputHashes": {
+    "decisions/autonomy/2026-09-08-eth-execution.md": "5b88d727dd7a00e7951ab3d5509cf4e35b6e63af27ac382b0d3aefe596a93210"
+  }
+}
