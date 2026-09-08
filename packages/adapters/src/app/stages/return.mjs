@@ -1,3 +1,4 @@
+import { assertNativeReturnInstruction } from '../../signing/native-return-policy.mjs';
 import { createRelayNativePaymentProof, readReleaseBoundRelaySourceDebit } from '../../native-payment-proof.mjs';
 import {
   DIRECTIONS,
@@ -9,6 +10,7 @@ import {
 import {
   buildRelayLegacyTransaction,
   readBlockHeight,
+  readCurrentRelaySourceRuntime,
   readSolBalance,
   readUsableLatestBlockhash,
   signedSolanaTransactionSignature,
@@ -300,8 +302,8 @@ export function assertReturnQuote(quote, config, money = null) {
 
 /**
  * Relay's recorded Solana return shape contains instructions and ALT addresses, not a serialized
- * transaction. Preserve exactly that shape and fail before signing until the provider supplies a
- * documented serializable transaction plus a read-only ALT resolver.
+ * transaction. Preserve the full keys and metadata; bounded legacy compilation is permitted only
+ * when every key is explicit. The signer independently checks the release-bound deposit grammar.
  */
 export function extractRelaySolanaInstructionPlan({ steps, requestId }) {
   if (!Array.isArray(steps) || steps.length !== 1) throw new Error('return Relay quote must contain exactly one recorded Solana transaction step');
@@ -813,7 +815,7 @@ function requireReturnMutationAuthority(preflightAuthority) {
   return requireLiveMutationAuthority();
 }
 
-export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return', recoveryRepository, context }) {
+export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return', recoveryRepository, context, nativePaymentBinding }) {
   if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function'
     || (typeof signerClient.solana.broadcast !== 'function' && typeof signerClient.solana.broadcastApproved !== 'function')) {
     throw new Error('return requires an Operations Solana signer with sign and broadcast capabilities');
@@ -826,11 +828,10 @@ export async function createReturnPolicySigner({ signerClient, client, configure
     || decoded.addressLookupTables.length !== 0
     || decoded.feePayer !== configured.solana
     || !decoded.requiredSigners.includes(configured.solana)
-    || !sameAmount(decoded.amount, request.inputAmount)
-    || decoded.mint !== request.inputAmount.assetId
     || decoded.blockhash !== blockhash) {
     throw new Error('return decoded Solana transaction does not match the frozen Relay instruction plan and cycle proceeds');
   }
+  const sourceRuntime = assertNativeReturnInstruction({ binding: nativePaymentBinding, request, configured, transaction, blockhash });
   assertReturnPriorityFeeCap(decoded, money);
   const policy = createTransactionPolicy({
     policy: createCanonicalTransactionPolicy({ decoded, stage, requestDigest }),
@@ -879,6 +880,8 @@ export async function createReturnPolicySigner({ signerClient, client, configure
     async sign() {
       quoteUsable();
       requireReturnMutationAuthority(preflightAuthority);
+      await readCurrentRelaySourceRuntime(client, sourceRuntime);
+      quoteUsable();
       return policySigner.sign({
         transaction,
         transactionPolicy: policy,
@@ -890,6 +893,8 @@ export async function createReturnPolicySigner({ signerClient, client, configure
     async broadcast(signed) {
       quoteUsable();
       requireReturnMutationAuthority(preflightAuthority);
+      await readCurrentRelaySourceRuntime(client, sourceRuntime);
+      quoteUsable();
       return policySigner.broadcast(signed);
     },
   });
@@ -1056,6 +1061,7 @@ export async function mutateReturn({
       instructionPlan: request.solanaInstructionPlan,
     });
     const approved = await createReturnPolicySigner({
+      nativePaymentBinding: config.nativePaymentBinding,
       signerClient,
       client,
       configured,
@@ -1126,6 +1132,7 @@ export async function mutateReturn({
       );
     }
     const approved = await createReturnPolicySigner({
+      nativePaymentBinding: config.nativePaymentBinding,
       signerClient,
       client,
       configured,

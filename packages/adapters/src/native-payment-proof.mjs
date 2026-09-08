@@ -143,7 +143,7 @@ export function isTestNativePaymentBinding(value, authority) {
   return authority === createTestProfileMutationAuthority() && testBindings.has(value);
 }
 
-function relaySourceRuntimeBinding(binding) {
+export function relaySourceRuntimeBinding(binding) {
   need(releaseBindings.has(binding), 'Relay source runtime binding is not release authenticated');
   const runtime = binding.relay?.sourceRuntime;
   need(runtime?.schema === 'hookemon.solana-upgradeable-runtime.v1'
