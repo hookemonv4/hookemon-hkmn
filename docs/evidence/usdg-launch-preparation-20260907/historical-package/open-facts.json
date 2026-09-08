@@ -1,0 +1,40 @@
+{
+  "facts": [
+    {
+      "id": "usdg-route",
+      "missing": "Unchanged public packer defaults to native/token; no documented USDG override",
+      "resolve": "Exact provider instruction or published USDG admission/packer route with context/release binding.",
+      "alternative": "Keep frozen USDG economics; do not substitute Native20 or inventory V3."
+    },
+    {
+      "id": "source-identity",
+      "missing": "Documented sourceLineageNonce/publicOriginCommitment convention",
+      "resolve": "Provider identifies real lineage allocation and commitment preimage.",
+      "alternative": "Retain public source commit and deterministic source inventory; no fabricated commitments."
+    },
+    {
+      "id": "capital-selection",
+      "missing": "Owner-approved seed within actual all-in 250 USD ceiling",
+      "resolve": "Price acquisition and complete costs, then confirm seed/test capital.",
+      "alternative": "Keep historical 240 and local 100+50 candidates distinct."
+    },
+    {
+      "id": "claim-count",
+      "missing": "Affirmative owner approval for processClaimMaxCount 24",
+      "resolve": "Owner confirms count before constructor finalization.",
+      "alternative": "No finalized constructor."
+    },
+    {
+      "id": "bot-collector",
+      "missing": "Current bot CI/integration and live Collector acceptance",
+      "resolve": "Original task supplies current acceptance and runtime binding.",
+      "alternative": "Retain local evidence with explicit simulation scope."
+    },
+    {
+      "id": "deployment-bindings",
+      "missing": "Exact salts, source locators, constructor commitment preimages, addresses and runtime materialization",
+      "resolve": "Complete the documented USDG V2 derivation after source identity and seed/count decisions; use constructor-bindings.json for exact ABI fields and compiler offsets.",
+      "alternative": "All recorded constructor inputs and initializer selectors are prepared; unresolved values remain null."
+    }
+  ]
+}

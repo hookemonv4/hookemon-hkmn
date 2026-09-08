@@ -1,0 +1,33 @@
+{
+  "allInBoundProven": false,
+  "ceilingUsd": 250,
+  "spendAuthorized": false,
+  "measuredLocalGas": {
+    "usdgApproval": 57916,
+    "permit2Approval": 47602,
+    "seed": 664385,
+    "swaps": 8381525,
+    "processClaim": 220539,
+    "total": 9371967
+  },
+  "measurementScope": "36 successful local receipts from separate fixtures; no mainnet launch gas estimate",
+  "historicalPriceScenario": {
+    "weiPerGas": "423574000",
+    "nativeWei": "3969721550058000",
+    "liveQuote": false
+  },
+  "candidateCapitalUsdg": 150,
+  "recycledClaimUsdg": "25.298644",
+  "claimIsAdditionalCapital": false,
+  "budgetCondition": "150*p + E*q + C <= 250, where p is actual USD/USDG acquisition price, E is all native ETH costs, q is actual USD/ETH price and C is remaining distinct dollar costs; adjust 150 if seed changes.",
+  "unpriced": [
+    "USDG acquisition and slippage",
+    "Provider graph deployment",
+    "Arbitrum poster/L1 fees",
+    "Bridge approvals/deposit and return",
+    "Solana funding",
+    "Collector buy/buyback fees",
+    "Final holder payout"
+  ],
+  "knownLimitation": "Historical 240 USDG seed is not replaced by the local 100+50 candidate; no USDG/USD parity assumed."
+}

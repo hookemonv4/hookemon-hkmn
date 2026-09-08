@@ -1,0 +1,103 @@
+{
+  "runId": 34145215818,
+  "jobId": 101816257404,
+  "jobName": "phase3-bytecode",
+  "headSha": "8ba97f098ca7c3f4761f6752815bc77e055cca56",
+  "conclusion": "success",
+  "completedAt": "2026-09-07T16:55:59Z",
+  "steps": [
+    {
+      "name": "Set up job",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Run actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Install pinned Node (phase3-bytecode)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Install pinned Foundry (phase3-bytecode)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Verify control dependency pins",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Initialize pinned top-level contract dependencies",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Initialize pinned contract dependency closure",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Initialize pinned launch dependencies",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Initialize pinned launch dependency closure",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Verify Phase 3 bytecode binding manifest membership",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Verify Phase 3 bytecode binding",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Post Run actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "Complete job",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "jobsResponseSha256": "sha256:854aa95c48683911e67a44e99695bca6c7b17570439e4bd4185a99cb823d02d3",
+  "sourceComparison": {
+    "base": "9b5161749dbbf50a92c4b17e96e3f2102deb9898",
+    "head": "8ba97f098ca7c3f4761f6752815bc77e055cca56",
+    "unchangedPaths": [
+      "packages/contracts",
+      "release/phase3",
+      "scripts/tests/phase3-bytecode-binding.test.mjs",
+      ".github/workflows"
+    ],
+    "method": "git diff --name-only yielded no paths; contracts subtree includes pinned dependency gitlinks"
+  },
+  "scope": "phase3-bytecode job only; not an assertion that all CI checks passed",
+  "logStatus": "verified",
+  "logPath": "ci-phase3-bytecode-101816257404.log",
+  "logSha256": "sha256:0ed88d5c5df6d73b741caf143cee791affcd1570d2c06ad4e5a1a6882192ef69",
+  "testResult": {
+    "tests": 4,
+    "passed": 4,
+    "failed": 0,
+    "names": [
+      "Phase 3 release evidence binds the pinned compiler artifacts",
+      "Phase 3 keeps one portable Standard JSON evidence record",
+      "the committed Phase 3 inputs materialize the pinned compiler evidence exactly",
+      "the release rebuild rejects a compiled artifact whose compilation target differs from deployment evidence"
+    ]
+  },
+  "lookup": "Resolve the recorded runId and jobId in the current repository."
+}

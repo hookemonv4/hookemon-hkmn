@@ -1,0 +1,263 @@
+{
+  "schema": "hookemon-historical-package-archive-v1",
+  "status": "HISTORICAL_USDG_ONLY",
+  "sourceCommit": "e142bfa101f87c80b121e9c558b2a681f9ee07dd",
+  "cleanupCommit": "34fc4006e3f05a60d6a3cd9fc8383b445330aa62",
+  "sourcePrefix": "release/launch-preparation-20260907/",
+  "authority": "No native ETH launch, deployment, signing, broadcast, or ledger completion authority.",
+  "files": [
+    {
+      "sourcePath": "release/launch-preparation-20260907/README.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/README.md",
+      "sourceBlob": "b1f2ee643aa7c668350a54a652647e40c76ed61e",
+      "byteLength": 5644,
+      "sha256": "fc35697d21bae9c4bd30f0c81078e0c4c217e854b69152b54eec8316fc755aca",
+      "cleanupBlob": "b1f2ee643aa7c668350a54a652647e40c76ed61e",
+      "cleanupSha256": "fc35697d21bae9c4bd30f0c81078e0c4c217e854b69152b54eec8316fc755aca",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/constructor-bindings.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/constructor-bindings.json",
+      "sourceBlob": "c0f4437aa208fbcaf3fa5fabd2277561ff5d3a0d",
+      "byteLength": 25370,
+      "sha256": "e3d46b995666a9133ea4f9702c3362218cc0bfc9e9f549612d77741c53d3ad31",
+      "cleanupBlob": "c0f4437aa208fbcaf3fa5fabd2277561ff5d3a0d",
+      "cleanupSha256": "e3d46b995666a9133ea4f9702c3362218cc0bfc9e9f549612d77741c53d3ad31",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/costs.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/costs.json",
+      "sourceBlob": "9afbbb27cb1134f4eae105f72ca7bb3f89c72fe7",
+      "byteLength": 1185,
+      "sha256": "58fe99b21fcdb365761c8753ecf310a1704eeff869071827794760f3dd99baa5",
+      "cleanupBlob": "9afbbb27cb1134f4eae105f72ca7bb3f89c72fe7",
+      "cleanupSha256": "58fe99b21fcdb365761c8753ecf310a1704eeff869071827794760f3dd99baa5",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/authenticated-lists.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/authenticated-lists.json",
+      "sourceBlob": "5a0b4d91b1cc8afab4a607611c435c4baa593a5f",
+      "byteLength": 708,
+      "sha256": "fc5d5dcbc261d51427c4fa299922d61e3fce0f55e73603a4e6d300bb7dcaeba6",
+      "cleanupBlob": "5a0b4d91b1cc8afab4a607611c435c4baa593a5f",
+      "cleanupSha256": "fc5d5dcbc261d51427c4fa299922d61e3fce0f55e73603a4e6d300bb7dcaeba6",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/chain-observation.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/chain-observation.json",
+      "sourceBlob": "757f6d86057e24b98b5cf7d990b2c24b99a3f5e8",
+      "byteLength": 172130,
+      "sha256": "7e6b8b9f1d822828472968141c1d811ebf783157b0c28aeb16449b5960a00f5f",
+      "cleanupBlob": "757f6d86057e24b98b5cf7d990b2c24b99a3f5e8",
+      "cleanupSha256": "7e6b8b9f1d822828472968141c1d811ebf783157b0c28aeb16449b5960a00f5f",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/ci-bytecode-evidence.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/ci-bytecode-evidence.json",
+      "sourceBlob": "6af45ce7afa1e255e0466e484f7cb102e1946707",
+      "byteLength": 3184,
+      "sha256": "c587203d4659cc2fa7c5005a10279c1476c65918afee282b7b6b7f4b8de00595",
+      "cleanupBlob": "6af45ce7afa1e255e0466e484f7cb102e1946707",
+      "cleanupSha256": "c587203d4659cc2fa7c5005a10279c1476c65918afee282b7b6b7f4b8de00595",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/historical-route-review.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/historical-route-review.md",
+      "sourceBlob": "49c9da1756d743a6281b8f62867da1cafbe3e207",
+      "byteLength": 5016,
+      "sha256": "3923382c1d8fe83ee03d3b979c94427c99bf6afe12c0a017269f646617b23745",
+      "cleanupBlob": "49c9da1756d743a6281b8f62867da1cafbe3e207",
+      "cleanupSha256": "3923382c1d8fe83ee03d3b979c94427c99bf6afe12c0a017269f646617b23745",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/measured-cost-positions.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/measured-cost-positions.md",
+      "sourceBlob": "eb37f36dcc2ee17cbe241cde9cbedbae8e98f0e6",
+      "byteLength": 1318,
+      "sha256": "512373bd231048cf149214c812a30fe9d8fc82dbdbe22e91fbe1de1b4d1452bc",
+      "cleanupBlob": "eb37f36dcc2ee17cbe241cde9cbedbae8e98f0e6",
+      "cleanupSha256": "512373bd231048cf149214c812a30fe9d8fc82dbdbe22e91fbe1de1b4d1452bc",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/metadata-review.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/metadata-review.md",
+      "sourceBlob": "474d441a3aa02b6d3646a18414ef07d565e703c7",
+      "byteLength": 4810,
+      "sha256": "76878227fb81d2ab99dd029c669577a0b406704b10e894407dde8231bf2b8f9a",
+      "cleanupBlob": "474d441a3aa02b6d3646a18414ef07d565e703c7",
+      "cleanupSha256": "76878227fb81d2ab99dd029c669577a0b406704b10e894407dde8231bf2b8f9a",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/normalization.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/normalization.json",
+      "sourceBlob": "e3090222adad780c542b0e1bfbe1850852f98050",
+      "byteLength": 1971,
+      "sha256": "da9006fa21128e90d2a037eea5981fe2ba974d000a487e99ed02f473a4e1582c",
+      "cleanupBlob": "7081fb2b714a8aa52621d18f7ece9b19e74e1a37",
+      "cleanupSha256": "f08946951c6f4249e8ab63384bbc416ce4ce3ef1d19ef79b0706f4183277e106",
+      "matchesCleanup": false
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/provider-capabilities-current.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/provider-capabilities-current.json",
+      "sourceBlob": "b76bb5c68af493f6bd235ef6c77e69770b75150d",
+      "byteLength": 3661,
+      "sha256": "0288272f79cac74f04217f6723dcf902c6a7bce0f424b2840b01e44caf2683f7",
+      "cleanupBlob": "b76bb5c68af493f6bd235ef6c77e69770b75150d",
+      "cleanupSha256": "0288272f79cac74f04217f6723dcf902c6a7bce0f424b2840b01e44caf2683f7",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/provider-capabilities-resume.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/provider-capabilities-resume.json",
+      "sourceBlob": "b87c0ad54ea24f5df1550995fcd94bc23c8093d0",
+      "byteLength": 20107,
+      "sha256": "28d0baae6d5c82f56d6f8b2e18c48f68db06ad2acfe95cf59db8a96e6744f2a5",
+      "cleanupBlob": "7113882f538deeb2395fe829d4d81f4f4c73c040",
+      "cleanupSha256": "94aa0ca7c0cdcfe0fd71f802614e91629177e0e1e24aac6cf6b545cfdb74361c",
+      "matchesCleanup": false
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/provider-capabilities.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/provider-capabilities.json",
+      "sourceBlob": "b76bb5c68af493f6bd235ef6c77e69770b75150d",
+      "byteLength": 3661,
+      "sha256": "0288272f79cac74f04217f6723dcf902c6a7bce0f424b2840b01e44caf2683f7",
+      "cleanupBlob": "b76bb5c68af493f6bd235ef6c77e69770b75150d",
+      "cleanupSha256": "0288272f79cac74f04217f6723dcf902c6a7bce0f424b2840b01e44caf2683f7",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/provider-guide.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/provider-guide.md",
+      "sourceBlob": "098e117bce631f55ec5ec911744fa3bc1142d69b",
+      "byteLength": 35033,
+      "sha256": "1e5ea4e8f57dc05092cabcc30e6b96023512a34c08af4254918a1430ce1fde79",
+      "cleanupBlob": "098e117bce631f55ec5ec911744fa3bc1142d69b",
+      "cleanupSha256": "1e5ea4e8f57dc05092cabcc30e6b96023512a34c08af4254918a1430ce1fde79",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/evidence/source-attestation-review.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/evidence/source-attestation-review.md",
+      "sourceBlob": "49816c49d4a9980b3c1dacbaa43b2d64e940cb92",
+      "byteLength": 2606,
+      "sha256": "8077f9a8271ed7267683b1945deba4eab4c58140ae887194b0848208810f7482",
+      "cleanupBlob": "49816c49d4a9980b3c1dacbaa43b2d64e940cb92",
+      "cleanupSha256": "8077f9a8271ed7267683b1945deba4eab4c58140ae887194b0848208810f7482",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/finalization.md",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/finalization.md",
+      "sourceBlob": "ab10703903659bc9963e6b69a1d3a1bbf22ec6a0",
+      "byteLength": 5118,
+      "sha256": "1f8481206bcdaa7b78c67dcf1bf3dad57723d19950dea9cfe056b0c39c2b4fdf",
+      "cleanupBlob": "ab10703903659bc9963e6b69a1d3a1bbf22ec6a0",
+      "cleanupSha256": "1f8481206bcdaa7b78c67dcf1bf3dad57723d19950dea9cfe056b0c39c2b4fdf",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/integrity.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/integrity.json",
+      "sourceBlob": "ce644dc2c07e1c34535278fe230de48222c3c54d",
+      "byteLength": 3901,
+      "sha256": "81dab084a807505b298ba0a6b4fdebf138153a88bfbb3957d874091ef888160a",
+      "cleanupBlob": "665dc44c56a1d4e39058e8a80536c59473f69b77",
+      "cleanupSha256": "ea47c92069b1b4d685700e6e8f9b60f71b21d04842d691fa1775409487f8f061",
+      "matchesCleanup": false
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/open-facts.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/open-facts.json",
+      "sourceBlob": "52137339697521b6101bdb49466630ee99d6a978",
+      "byteLength": 1992,
+      "sha256": "ef12e3ea04c3fc06e7aa065db1a5853456a959ccc88b290ba8dd130c1d7e05d6",
+      "cleanupBlob": "52137339697521b6101bdb49466630ee99d6a978",
+      "cleanupSha256": "ef12e3ea04c3fc06e7aa065db1a5853456a959ccc88b290ba8dd130c1d7e05d6",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/parameters.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/parameters.json",
+      "sourceBlob": "c5dcc29d4a1c1c2c952baf9a873ad4491768a9d3",
+      "byteLength": 8353,
+      "sha256": "f68ba49e5803b0def28a520a722f174f0cdc3d0233c2b1ea4a766ab272b05d28",
+      "cleanupBlob": "c5dcc29d4a1c1c2c952baf9a873ad4491768a9d3",
+      "cleanupSha256": "f68ba49e5803b0def28a520a722f174f0cdc3d0233c2b1ea4a766ab272b05d28",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/projectMetadata.candidate.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/projectMetadata.candidate.json",
+      "sourceBlob": "fb56f9aa1481637b03111cc7d1e119226c36702f",
+      "byteLength": 1508,
+      "sha256": "07b6017433166a1753ebd2422d020666d2a2f8f8965490305fa039b280d09d24",
+      "cleanupBlob": "fb56f9aa1481637b03111cc7d1e119226c36702f",
+      "cleanupSha256": "07b6017433166a1753ebd2422d020666d2a2f8f8965490305fa039b280d09d24",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/projectMetadataImageArtifact.candidate.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/projectMetadataImageArtifact.candidate.json",
+      "sourceBlob": "adfa91ad1f8551ee019c216a67ab644a2b97eb5f",
+      "byteLength": 455,
+      "sha256": "4f99bfd8bed043d15cb31f0188d50ae7c575f8b8f203db6ed55a0b7001e8dbdc",
+      "cleanupBlob": "adfa91ad1f8551ee019c216a67ab644a2b97eb5f",
+      "cleanupSha256": "4f99bfd8bed043d15cb31f0188d50ae7c575f8b8f203db6ed55a0b7001e8dbdc",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/public-tags.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/public-tags.json",
+      "sourceBlob": "1f9eec7b93d94403c208f948d4616403a6a6ca1f",
+      "byteLength": 394,
+      "sha256": "aba7405584c0993c578640dcea2781d5f167309822f840f4138dcf64bf2ec3cd",
+      "cleanupBlob": "1f9eec7b93d94403c208f948d4616403a6a6ca1f",
+      "cleanupSha256": "aba7405584c0993c578640dcea2781d5f167309822f840f4138dcf64bf2ec3cd",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/unsigned-transactions.preview.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/unsigned-transactions.preview.json",
+      "sourceBlob": "75afc2b21857b0e67564ff724c27a202be0f8c76",
+      "byteLength": 3372,
+      "sha256": "800daa1284d86aa94b545bc29637f8f0dc19f9e5785d787eb67114df0e395b58",
+      "cleanupBlob": "75afc2b21857b0e67564ff724c27a202be0f8c76",
+      "cleanupSha256": "800daa1284d86aa94b545bc29637f8f0dc19f9e5785d787eb67114df0e395b58",
+      "matchesCleanup": true
+    },
+    {
+      "sourcePath": "release/launch-preparation-20260907/verification.json",
+      "archivePath": "docs/evidence/usdg-launch-preparation-20260907/historical-package/verification.json",
+      "sourceBlob": "93c929ae57e0235384801bb3c2c9909ebf41702f",
+      "byteLength": 1072,
+      "sha256": "ff5dbfadf77a44edd47cafd7c52d151e653560a542f1a06f9d640fa04b975d3c",
+      "cleanupBlob": "93c929ae57e0235384801bb3c2c9909ebf41702f",
+      "cleanupSha256": "ff5dbfadf77a44edd47cafd7c52d151e653560a542f1a06f9d640fa04b975d3c",
+      "matchesCleanup": true
+    }
+  ],
+  "cleanupDeltaPaths": [
+    "release/launch-preparation-20260907/evidence/normalization.json",
+    "release/launch-preparation-20260907/evidence/provider-capabilities-resume.json",
+    "release/launch-preparation-20260907/integrity.json"
+  ],
+  "verification": {
+    "sourceBytesMatched": 24,
+    "integrityEntriesMatched": 23,
+    "integrityUnlistedFiles": [
+      "integrity.json"
+    ],
+    "internalReferences": "Preserved verbatim; repository-relative and historical external references retain their original scope and are not rewritten to archive paths."
+  }
+}
