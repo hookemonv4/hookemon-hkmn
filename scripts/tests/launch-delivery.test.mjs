@@ -23,7 +23,7 @@ function fixture(t) {
   put('.env', 'PROGRAMMABLE_API_KEY=must-never-enter-a-snapshot\n');
   const git = args => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
   git(['init', '-q']); git(['add', 'release', 'scripts', 'packages']);
-  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture.invalid', 'commit', '-qm', 'fixture']);
   return { base, root, output, put, settings, assemble: () => assembleLaunchDelivery({ sourceRoot: root, outputDirectory: output }) };
 }
 
