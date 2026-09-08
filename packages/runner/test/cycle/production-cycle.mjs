@@ -46,7 +46,7 @@ const purchaseDestination = 'ProductionPurchaseDest1';
 const feePayer = 'ProductionFeePayer1';
 const collectorSigner = policyAccount; // the same wallet signs its own Collector open execution
 
-export function productionMoneyConfiguration(overrides = {}) {
+export function historicalProductionMoneyConfiguration(overrides = {}) {
   const configuration = {
     schema: 'hookemon.money-configuration.v1',
     assets: {
@@ -70,6 +70,30 @@ export function productionMoneyConfiguration(overrides = {}) {
   return {
     ...configuration,
     ...overrides,
+    assets: { ...configuration.assets, ...(overrides.assets ?? {}) },
+    minimums: { ...configuration.minimums, ...(overrides.minimums ?? {}) },
+    evm: { ...configuration.evm, ...(overrides.evm ?? {}) },
+    solana: { ...configuration.solana, ...(overrides.solana ?? {}) },
+  };
+}
+
+/** Synthetic native configuration; amounts are wei, not a rescaled historical fixture. */
+export function productionMoneyConfiguration(overrides = {}) {
+  const historical = historicalProductionMoneyConfiguration();
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
+  const configuration = {
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin: historical.assets.solanaStablecoin },
+    minimums: {
+      robinhoodReceive: { ...eth, amountAtomic: '19' },
+      solanaReceive: historical.minimums.solanaReceive,
+      returnEth: { ...eth, amountAtomic: '0' },
+    },
+    evm: historical.evm,
+    solana: historical.solana,
+  };
+  return {
+    ...configuration, ...overrides,
     assets: { ...configuration.assets, ...(overrides.assets ?? {}) },
     minimums: { ...configuration.minimums, ...(overrides.minimums ?? {}) },
     evm: { ...configuration.evm, ...(overrides.evm ?? {}) },

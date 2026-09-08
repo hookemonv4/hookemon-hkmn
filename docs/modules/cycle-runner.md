@@ -186,3 +186,5 @@ requires separately typed gas reserve and spent gas. A return hold clears the pe
 without creating payout principal; an exact attributed return credits and clears atomically.
 
 Native rehearsal sessions and stage evidence use v2. Session caps are microUSD, source principal is native wei, and simulated Solana settlement requires an explicit USDC atomic amount. Historical v1 sessions remain readable with their original units and cannot resume native execution.
+
+The production evidence profile requires native `MoneyConfigurationV2`. Test configuration defaults use that schema; historical USDG fixtures remain explicit through `historicalProductionMoneyConfiguration` and the read-only historical validator.
