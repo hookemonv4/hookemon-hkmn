@@ -355,7 +355,28 @@ Native return reconciliation requires a release-authenticated `hookemon.native-p
 object. Its Relay route identifies the exact router runtime and source instruction decoder. A null
 route cannot issue a payment proof. The source reader verifies the persisted Solana transaction's
 signatures, fee payer, finalized token debit, and byte-for-byte finalized RPC transaction. The
-pinned decoder binds its program, discriminator, amount and order. A return payment requires one
+pinned decoder binds its program, discriminator, amount and order. `readReleaseBoundRelaySourceDebit`
+also requires the release route's `sourceRuntime` (`hookemon.solana-upgradeable-runtime.v1`):
+program ID, ProgramData address, upgradeable loader owner and normalized runtime SHA-256. Its
+program ID must match the instruction decoder. The reader obtains both accounts in one finalized
+`getMultipleAccounts` response with `minContextSlot` set to source finality. It checks the response
+context, loader ownership, executable flags, Program-to-ProgramData association and loader layout.
+The runtime hash covers ELF bytes after the 45-byte ProgramData metadata, with trailing zero
+padding removed, as in the retained [runtime verification evidence](../evidence/native-relay-runtime-build-20260908/verify.py).
+The [retained loader source](../evidence/native-relay-source-instruction-20260908/upgradeable-loader.rs)
+defines these account layouts.
+
+The recorded last deployment must precede the source slot. A later or same-slot deployment refuses,
+even if the observed hash matches; an account read cannot establish instruction ordering within
+that slot. A finalized observation at or after the source slot, with an earlier deployment, proves
+the runtime's stable interval for that transaction. Every ordinary or supplementary return reads
+this evidence anew. Missing accounts, stale context or a changed runtime leave the return
+unsettled; recovery requires a trusted finalized observation proving that interval, never a new
+quote or a latest-only runtime hash. The opaque source capability retains the exact release runtime
+binding identity; cloned configuration or proof JSON cannot authorize a native payment. Focused
+coverage runs with `node --test packages/adapters/test/native/source-runtime-proof.test.mjs`.
+
+A return payment requires one
 successful native `FundsMovement` cleanup with that order as metadata, the configured recipient,
 and the matching historical router code hash. The destination receipt and canonical checkpoint
 are independently finalized. The repository reserves the destination transaction hash across all

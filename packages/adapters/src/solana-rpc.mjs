@@ -554,6 +554,53 @@ export function isProcessRpcRelaySourceDebit(value, expected = {}) {
   return !!facts && Object.entries(expected).every(([key, wanted]) => facts[key] === wanted);
 }
 
+const UPGRADEABLE_LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
+
+/** Loader layout: retained upgradeable-loader.rs; hash normalization: solana-verify evidence. */
+async function readRelaySourceRuntime(client, binding, finality) {
+  invariant(binding?.schema === 'hookemon.solana-upgradeable-runtime.v1'
+    && binding.loaderOwner === UPGRADEABLE_LOADER
+    && /^[a-f0-9]{64}$/.test(binding.normalizedRuntimeSha256), SolanaAdapterError, 'Relay source runtime binding is required');
+  assertPublicKey(binding.programId, 'Relay source program');
+  assertPublicKey(binding.programDataAddress, 'Relay source ProgramData');
+  const sourceSlot = BigInt(finality.height);
+  invariant(sourceSlot <= BigInt(Number.MAX_SAFE_INTEGER), SolanaAdapterError, 'Relay source slot exceeds RPC precision');
+  // Both accounts come from one finalized bank. minContextSlot alone is not historical proof:
+  // the loader deployment slot must precede the source slot, excluding even same-slot upgrades.
+  const observation = await rpc(client, 'getMultipleAccounts', [[binding.programId, binding.programDataAddress], {
+    commitment: 'finalized', encoding: 'base64', minContextSlot: Number(sourceSlot),
+  }]);
+  invariant(Number.isSafeInteger(observation?.context?.slot) && BigInt(observation.context.slot) >= sourceSlot
+    && Array.isArray(observation.value) && observation.value.length === 2,
+  SolanaAdapterError, 'Relay source runtime observation is stale or invalid');
+  const [program, programData] = observation.value;
+  const decode = (account, executable) => {
+    invariant(account?.owner === UPGRADEABLE_LOADER && account.executable === executable
+      && Array.isArray(account.data) && account.data.length === 2 && account.data[1] === 'base64'
+      && typeof account.data[0] === 'string', SolanaAdapterError, 'Relay source loader account identity is invalid');
+    const bytes = Buffer.from(account.data[0], 'base64');
+    invariant(bytes.toString('base64') === account.data[0], SolanaAdapterError, 'Relay source loader bytes are not canonical base64');
+    return bytes;
+  };
+  const programBytes = decode(program, true), dataBytes = decode(programData, false);
+  invariant(programBytes.length === 36 && programBytes.readUInt32LE(0) === 2
+    && new PublicKey(programBytes.subarray(4)).toBase58() === binding.programDataAddress,
+  SolanaAdapterError, 'Relay source ProgramData association mismatch');
+  invariant(dataBytes.length > 45 && dataBytes.readUInt32LE(0) === 3 && [0, 1].includes(dataBytes[12]),
+    SolanaAdapterError, 'Relay source ProgramData loader layout is invalid');
+  const deploymentSlot = dataBytes.readBigUInt64LE(4);
+  invariant(deploymentSlot < sourceSlot, SolanaAdapterError, 'Relay source runtime was deployed at or after the source slot');
+  const runtime = dataBytes.subarray(45);
+  invariant(runtime.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])), SolanaAdapterError, 'Relay source runtime is not ELF');
+  let end = runtime.length;
+  while (end > 0 && runtime[end - 1] === 0) end -= 1;
+  const normalizedRuntimeSha256 = createHash('sha256').update(runtime.subarray(0, end)).digest('hex');
+  invariant(normalizedRuntimeSha256 === binding.normalizedRuntimeSha256, SolanaAdapterError, 'Relay source runtime hash mismatch');
+  return Object.freeze({ schema: 'hookemon.solana-source-runtime-observation.v1', programId: binding.programId,
+    programDataAddress: binding.programDataAddress, loaderOwner: UPGRADEABLE_LOADER, normalizedRuntimeSha256,
+    sourceSlot: sourceSlot.toString(), observationSlot: String(observation.context.slot), deploymentSlot: deploymentSlot.toString() });
+}
+
 /** Proves one exact finalized source debit before a Relay leg can be settled. */
 export async function readFinalizedRelaySourceDebit(client, {
   signature,
@@ -561,6 +608,7 @@ export async function readFinalizedRelaySourceDebit(client, {
   mint,
   amountAtomic,
   signedTransactionBase64 = null,
+  runtimeBinding = null,
 }) {
   invariant(typeof signature === 'string' && signature.length > 0, SolanaAdapterError, 'Relay source signature is required');
   assertPublicKey(owner, 'Relay source owner');
@@ -594,8 +642,10 @@ export async function readFinalizedRelaySourceDebit(client, {
     };
     Object.freeze(signedIdentity.instructions);
   }
-  const proof = Object.freeze({ transactionHash: signature, owner, mint, debitedAmountAtomic: amountAtomic, finality, ...signedIdentity });
-  if (signedTransactionBase64 !== null) relaySourceCapabilities.set(proof, proof);
+  const sourceRuntime = signedTransactionBase64 === null ? null : await readRelaySourceRuntime(client, runtimeBinding, finality);
+  const proof = Object.freeze({ transactionHash: signature, owner, mint, debitedAmountAtomic: amountAtomic, finality, ...signedIdentity,
+    ...(sourceRuntime === null ? {} : { sourceRuntime }) });
+  if (signedTransactionBase64 !== null) relaySourceCapabilities.set(proof, { ...proof, runtimeBinding });
   return proof;
 }
 

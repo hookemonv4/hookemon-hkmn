@@ -1,4 +1,4 @@
-import { isProcessRpcRelaySourceDebit } from './solana-rpc.mjs';
+import { isProcessRpcRelaySourceDebit, readFinalizedRelaySourceDebit } from './solana-rpc.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createTestProfileMutationAuthority, requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
@@ -143,6 +143,21 @@ export function isTestNativePaymentBinding(value, authority) {
   return authority === createTestProfileMutationAuthority() && testBindings.has(value);
 }
 
+function relaySourceRuntimeBinding(binding) {
+  need(releaseBindings.has(binding), 'Relay source runtime binding is not release authenticated');
+  const runtime = binding.relay?.sourceRuntime;
+  need(runtime?.schema === 'hookemon.solana-upgradeable-runtime.v1'
+    && runtime.programId === binding.relay?.sourceInstruction?.programId,
+  'Relay source runtime and instruction program binding mismatch');
+  return runtime;
+}
+
+/** The source runtime identity originates only in release-branded configuration. */
+export async function readReleaseBoundRelaySourceDebit({ client, binding, ...expected }) {
+  const runtimeBinding = relaySourceRuntimeBinding(binding);
+  return readFinalizedRelaySourceDebit(client, { ...expected, runtimeBinding });
+}
+
 /** A successful router cleanup event is authority only under a release-pinned runtime and source decoder. */
 export async function createRelayNativePaymentProof({ client, binding, sourceProof, signedSourceTransaction, expected }) {
   need(releaseBindings.has(binding), 'Relay route binding is not authenticated by this release');
@@ -153,7 +168,7 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
   const orderId = hash(intent.orderId);
   if (intent.kind === 'relay-return') {
   need(isProcessRpcRelaySourceDebit(sourceProof, { transactionHash: intent.sourceTransactionHash, owner: intent.sourceOwner,
-    mint: intent.sourceMint, debitedAmountAtomic: intent.sourceAmountAtomic }), 'Relay source lacks finalized persisted-byte provenance');
+    mint: intent.sourceMint, debitedAmountAtomic: intent.sourceAmountAtomic, runtimeBinding: relaySourceRuntimeBinding(binding) }), 'Relay source lacks finalized persisted-byte provenance');
   const grammar = route.sourceInstruction;
   need(grammar && typeof grammar.programId === 'string' && /^[a-f0-9]+$/.test(grammar.discriminatorHex)
     && grammar.discriminatorHex.length % 2 === 0, 'Relay source instruction decoder is unverified');

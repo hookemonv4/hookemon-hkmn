@@ -1,3 +1,4 @@
+import { readReleaseBoundRelaySourceDebit } from '../../native-payment-proof.mjs';
 import { createQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../../relay-client.mjs';
 import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
@@ -5,7 +6,6 @@ import { assertQuoteUsable, DIRECTIONS, RELAY_CONSTANTS } from '../../relay-clie
 import {
   buildRelayLegacyTransaction,
   readBlockHeight,
-  readFinalizedRelaySourceDebit,
   readUsableLatestBlockhash,
   signedSolanaTransactionSignature,
 } from '../../solana-rpc.mjs';
@@ -338,7 +338,7 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
     : signedSolanaTransactionSignature(attempt.rawSignedBytes);
   let source;
   try {
-    source = await readFinalizedRelaySourceDebit(adapters.solana.client, {
+    source = await readReleaseBoundRelaySourceDebit({ client: adapters.solana.client, binding: config.nativePaymentBinding,
       signature: sourceTransactionHash,
       owner: configured.solana,
       mint: attempt.inputAmount.assetId,
