@@ -1,3 +1,4 @@
+import { collectorOnlyPackUsdCost } from '../src/app/compose.mjs';
 // Read-only admission for the one-pack Collector-only rehearsal. It intentionally has no
 // provider mutation or signer capability: the caller must complete this plan before `run` can
 // construct a transaction-capable signer.
@@ -188,6 +189,7 @@ export async function runCollectorOnlyPreflight({
   assertCollectorOnlyRehearsalPolicy(policyConfiguration, {
     packCode: plan.packCode,
     packPriceAtomic: plan.spend.amountAtomic,
+    packCostMicroUsd: collectorOnlyPackUsdCost(config),
   });
   assertTrustedExecutionBundle(config);
 

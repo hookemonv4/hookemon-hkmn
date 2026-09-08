@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+import { createRelayClient, createQuoteUsdValuation } from '../src/relay-client.mjs';
 import { collectorOnlyPackUsdCost } from '../src/app/compose.mjs';
 // Production entrypoint: one command that starts (or single-steps) the autonomous cycle loop against
 // real configuration read from the environment (never from a file inside this repository — see
@@ -330,6 +332,8 @@ function compositionInput({
     robinhood: env.robinhood,
     solana: env.solana,
     relay: env.relay,
+    relayQuoteValidityMs: env.relayQuoteValidityMs,
+    ...(env.now ? { now: env.now } : {}),
     collectorCrypt: env.collectorCrypt,
     ...(env.collectorProductionBindingRegistry === undefined ? {} : { collectorProductionBindingRegistry: env.collectorProductionBindingRegistry }),
     // Forwarded so `../signing/collector-production-binding.mjs`'s offline execution boundary
@@ -451,10 +455,11 @@ async function buildComposition({
   operatorAuditLogPath = undefined,
   constructSigner = true,
   dryRun = false,
+  environmentConfig = null,
 } = {}) {
   if (typeof dryRun !== 'boolean') throw new Error('buildComposition dryRun must be a boolean');
   if (dryRun && profile !== 'production') throw new Error('buildComposition dryRun requires the production profile');
-  const env = await applySyntheticIsolatedChildSetup(readEnvironment(process.env, { profile, dryRun }));
+  const env = await priceCollectorOnlyConfig(await applySyntheticIsolatedChildSetup(environmentConfig ?? readEnvironment(process.env, { profile, dryRun })));
   const statePath = resolveStatePath(env, statePathOverride);
   const dashboard = withDashboard ? await readDashboardConfig() : null;
   const { compose } = await import('../src/app/compose.mjs');
@@ -572,8 +577,8 @@ async function runDryRun(composition, emitJson = writeJson) {
 }
 
 /** This owner-facing admission path deliberately constructs neither a scheduler nor a signer. */
-async function runCollectorOnlyPreflight({ statePathOverride, environment = process.env } = {}) {
-  const environmentConfig = readEnvironment(environment, { profile: 'rehearsal' });
+async function runCollectorOnlyPreflight({ statePathOverride, environment = process.env, environmentConfig: suppliedConfig = null } = {}) {
+  const environmentConfig = await priceCollectorOnlyConfig(suppliedConfig ?? readEnvironment(environment, { profile: 'rehearsal' }));
   const bundle = await loadCollectorPolicyBundle();
   const env = attachCollectorPolicyBundle(environmentConfig, bundle);
   assertCollectorPolicyBundleRuntimeReady(bundle);
@@ -595,13 +600,40 @@ async function runCollectorOnlyPreflight({ statePathOverride, environment = proc
   });
 }
 
+/** Fetches pricing only. The public release role is a quote coordinate, never live authority. */
+export async function priceCollectorOnlyConfig(env, { fetchImpl = globalThis.fetch, now = env.now ?? Date.now } = {}) {
+  if (env.execution?.providerMode !== 'live' || env.rehearsal?.mode !== 'collector-only') return env;
+  if (env.collectorCrypt?.packFundingUsd) {
+    collectorOnlyPackUsdCost(env);
+    return env;
+  }
+  if (!Number.isSafeInteger(env.relayQuoteValidityMs) || env.relayQuoteValidityMs <= 0) {
+    throw new Error('Collector USD pricing requires explicit HOOKEMON_RELAY_QUOTE_VALIDITY_MS');
+  }
+  const release = JSON.parse(await readFile(new URL('../../../release/phase3/launch-inputs.json', import.meta.url), 'utf8'));
+  const recipient = release.roles?.operations;
+  if (typeof recipient !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) throw new Error('Collector USD quote requires the public Operations release role');
+  const price = env.collectorCrypt?.packPrice;
+  if (!price || price.decimals !== 6 || price.assetId !== 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') throw new Error('Collector USD quote requires exact USDC identity');
+  const amount = { chainId: '792703809', assetId: price.assetId, decimals: price.decimals, amountAtomic: price.amountAtomic };
+  const relay = createRelayClient({ baseUrl: env.relay.baseUrl, quoteValidityMs: env.relayQuoteValidityMs, fetchImpl, now });
+  const quote = await relay.quoteReturnBridge({ user: env.accounts.solana, recipient, amount: amount.amountAtomic,
+    originCurrency: amount.assetId, skipRouteCheck: true });
+  const packFundingUsd = createQuoteUsdValuation({ quote, side: 'origin', amount, rounding: 'up', nowMs: now() });
+  const priced = { ...env, now, collectorCrypt: { ...env.collectorCrypt, packFundingUsd } };
+  collectorOnlyPackUsdCost(priced);
+  return priced;
+}
+
 /** Creates the sealed first-use policy only when the dedicated rehearsal state does not exist. */
 export async function initializeCollectorOnlyPolicy({
   statePathOverride,
   environment = process.env,
   readEnvironmentFn = readEnvironment,
+  fetchImpl = globalThis.fetch,
+  now,
 } = {}) {
-  const env = readEnvironmentFn(environment, { profile: 'rehearsal' });
+  const env = await priceCollectorOnlyConfig(readEnvironmentFn(environment, { profile: 'rehearsal' }), { fetchImpl, ...(now ? { now } : {}) });
   assertRehearsalProfile({ env, collectorOnly: true, relayRoundtrip: false });
   const packPriceAtomic = env.collectorCrypt?.packPrice?.amountAtomic;
   const packCostMicroUsd = collectorOnlyPackUsdCost(env);
@@ -807,12 +839,13 @@ export async function runRehearsal({ statePathOverride, cycles, capMicroUsd, col
   readEnvironmentFn = readEnvironment,
   runCollectorOnlyPreflightFn = runCollectorOnlyPreflight,
   buildCompositionFn = buildComposition,
+  fetchImpl = globalThis.fetch,
 } = {}) {
-  const env = readEnvironmentFn(environment, { profile: 'rehearsal' });
+  const env = await priceCollectorOnlyConfig(readEnvironmentFn(environment, { profile: 'rehearsal' }), { fetchImpl });
   assertRehearsalProfile({ env, collectorOnly, relayRoundtrip });
   const liveCollectorOnly = assertLiveCollectorOnlyRunOptions({ env, cycles, capMicroUsd, restartInject });
   if (liveCollectorOnly) {
-    await runCollectorOnlyPreflightFn({ statePathOverride, environment });
+    await runCollectorOnlyPreflightFn({ statePathOverride, environment, environmentConfig: env });
   }
   const statePath = resolveStatePath(env, statePathOverride);
   const sessionPath = restartInject ? environment[REHEARSAL_SESSION_PATH_ENV] ?? null : null;
@@ -826,6 +859,7 @@ export async function runRehearsal({ statePathOverride, cycles, capMicroUsd, col
       ? async () => { throw new RehearsalRestartInjectedError(); }
       : null;
     const composition = await buildCompositionFn({
+      environmentConfig: env,
       statePathOverride,
       withDashboard: false,
       profile: 'rehearsal',
