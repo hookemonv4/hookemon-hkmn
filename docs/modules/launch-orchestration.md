@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Launch Orchestration prepares the native ETH/HKMN market and its permanent liquidity position. The three-target Programmable graph and the later payable seed are separate transactions. Local derivation, draft validation and package verification neither approve a launch nor sign or broadcast it.
+Launch Orchestration prepares the native ETH and HKMN market and its permanent liquidity position. The three-target Programmable graph and the later payable seed are separate transactions. Local derivation, draft validation and package verification neither approve a launch nor sign or broadcast it.
 
 ## Public interface
 

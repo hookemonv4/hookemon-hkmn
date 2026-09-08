@@ -23,7 +23,7 @@ The 0.04 ETH seed and 0.02 ETH recycled float in `feasibility/native-funding/` a
 
 1. Finish the approved source and runtime commitments, reproduce all three deployed addresses and immutable runtime code, and bind the exact source revision, compiler, roles, PoolKey and provider graph. Hashing a supplied runtime record alone does not authenticate it.
 2. Produce the complete provider request using verified official packing rules. Obtain exact-request admission of the separate native seed and inclusive fee model. Current public provider terms describe a different fee and funded-launch model; retain that difference until a concrete response resolves it.
-3. Select explicit native seed and claim limits in the review candidate. After funding, measure available ETH, Solana USDC and SOL independently. Obtain fresh quotes, minimum pack requirements, transaction simulations, gas/rent reserves and deadlines for the next action. Complete-process affordability is not a prerequisite; the next action must still fit its own reviewed amount and reserve.
+3. Select explicit native seed and claim limits in the review candidate. After funding, measure available ETH, Solana USD Coin and SOL independently. Obtain fresh quotes, minimum pack requirements, transaction simulations, gas/rent reserves and deadlines for the next action. Complete-process affordability is not a prerequisite; the next action must still fit its own reviewed amount and reserve.
 4. Present each unsigned transaction with chain, sender, recipient, calldata digest, native value, token approvals, maximum fees, expected state change and expiry. Missing fields remain unset. A preflight response never authorizes a signature or a create request.
 
 ## Launch and first cycle
@@ -37,13 +37,13 @@ The 0.04 ETH seed and 0.02 ETH recycled float in `feasibility/native-funding/` a
 | Collector purchase and reveal | Eligible pack, original instructions, payer, accounts and fees match the approved policy; actual card results are recorded. | Do not replace an ambiguous purchase or substitute a new transaction for an expired original. |
 | Sale or held-card path | Record actual buyback acceptance and proceeds, or durable held custody under the defined policy. | A random held card is not fabricated into a sale and does not prove the complete cash return path. |
 | Return and payout | Finalized return is attributed once; eligibility snapshot, recipient amounts, reserves and confirmed transfers reconcile. | Retry only through durable authorized recovery. Never re-sign or double-pay to escape an uncertain state. |
-| Close cycle | Every external effect has a reconciled receipt; remaining ETH, USDC, SOL and cards are accounted for. | No second cycle while the first has unresolved effects or an unexplained balance difference. |
+| Close cycle | Every external effect has a reconciled receipt; remaining ETH, USD Coin, SOL and cards are accounted for. | No second cycle while the first has unresolved effects or an unexplained balance difference. |
 
 The second cycle uses fresh observations and a new audited cycle identity. It starts only after the first closes and the next action has enough funds and gas. If the first cycle exposes a defect, preserve its journal and transaction identifiers, fix the cause, run the affected regression and review, then resume only through the supported recovery path. Do not reset custody state to make a retry appear new.
 
 ## Evidence and cost record
 
-Retain the source revision, package digest, chain/block observations, redacted provider responses, unsigned intent hashes, transaction IDs, actual balance deltas, fees, rent, acquired cards, sale proceeds, recipient transfers and stop reason. Track EUR contributions separately from ETH, USDC and SOL units. Recycled turnover and bridge principal are not additional capital contributions. Permanent liquidity is committed capital, and unrealized card value is not spendable balance.
+Retain the source revision, package digest, chain/block observations, redacted provider responses, unsigned intent hashes, transaction IDs, actual balance deltas, fees, rent, acquired cards, sale proceeds, recipient transfers and stop reason. Track EUR contributions separately from ETH, USD Coin and SOL units. Recycled turnover and bridge principal are not additional capital contributions. Permanent liquidity is committed capital, and unrealized card value is not spendable balance.
 
 Compare actual costs after the first cycle, then after the optional second cycle. Report any further funding needed from observed balances and the next concrete action. Keep `allInBudgetProven` false until a separate complete cost calculation establishes it.
 

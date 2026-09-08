@@ -7,7 +7,7 @@
     "id": "hookemon-phase-three",
     "name": "Hookemon",
     "summary": "A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.",
-    "userOutcome": "A reviewed graph and separate payable seed establish the canonical ETH/HKMN pool with permanent liquidity custody.",
+    "userOutcome": "A reviewed graph and separate payable seed establish the canonical ETH and HKMN pool with permanent liquidity custody.",
     "category": "custom-hook-project",
     "whyV4": "Uniswap v4 callbacks and return deltas let the canonical hook collect its non-additive fee inside the authenticated pool lifecycle instead of adding a separate transfer tax."
   },
@@ -188,7 +188,7 @@
     "trading": {
       "applicable": true,
       "actor": "Authenticated PoolManager callback",
-      "valueFlow": "Each canonical ETH/HKMN swap follows its specified gross native fee quadrant.",
+      "valueFlow": "Each canonical ETH and HKMN swap follows its specified gross native fee quadrant.",
       "custody": "The PoolManager handles swap settlement while the hook records only fee liability.",
       "failure": "An invalid PoolKey, currency mapping or delta reverts the entire swap without persistent accounting.",
       "event": "Swap and hook fee-accounting events.",
@@ -337,7 +337,7 @@
     "base": "BaseHook",
     "upgradeable": false,
     "sharedAcrossPools": false,
-    "poolNamespace": "One canonical ETH/HKMN PoolKey on chain 4663.",
+    "poolNamespace": "One canonical ETH and HKMN PoolKey on chain 4663.",
     "poolAdmission": {
       "enforcement": "The hook authenticates the configured PoolManager and the one resolved canonical PoolKey.",
       "factoryOrRegistry": "The graphFactory creates the hook; the final PoolKey is recorded only after CREATE2 address derivation.",

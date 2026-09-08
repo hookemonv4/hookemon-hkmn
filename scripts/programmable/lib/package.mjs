@@ -468,15 +468,15 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     Object.assign(quote, { id: 'native', origin: 'native-eth', address: null, decimals: 18,
       decimalsSource: 'native-eth-protocol', supplyPolicy: 'native', initialSupply: null, behaviors: ['standard'], controls: [] });
     normalized.model.summary = 'A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.';
-    normalized.model.userOutcome = 'A reviewed graph and separate payable seed establish the canonical ETH/HKMN pool with permanent liquidity custody.';
+    normalized.model.userOutcome = 'A reviewed graph and separate payable seed establish the canonical ETH and HKMN pool with permanent liquidity custody.';
     liquidityFormation.valueFlow = 'The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.';
     initialTransaction.custody = 'The seed caller supplies ETH; the hook refunds only msg.value minus exact PositionManager debt to the specified payer.';
-    normalized.launchLifecycle.trading.valueFlow = 'Each canonical ETH/HKMN swap follows its specified gross native fee quadrant.';
+    normalized.launchLifecycle.trading.valueFlow = 'Each canonical ETH and HKMN swap follows its specified gross native fee quadrant.';
     normalized.launchLifecycle.feesAndClaims.custody = 'The hook holds native liabilities until successful payment to the authorized beneficiary destination.';
     normalized.pool.currency0 = 'native';
     normalized.pool.orderingRule = 'Native ETH uses zero Currency and is always currency0; HKMN is currency1.';
     normalized.integration.permit2 = 'Only HKMN approvals from the hook to Permit2 and PositionManager participate in seed settlement; the caller supplies native ETH through msg.value.';
-    normalized.hook.poolNamespace = 'One canonical ETH/HKMN PoolKey on chain 4663.';
+    normalized.hook.poolNamespace = 'One canonical ETH and HKMN PoolKey on chain 4663.';
     normalized.hook.callbackPolicies[2].necessity = 'Collect the native unspecified-currency fee delta after the swap and finalize liabilities.';
     normalized.hook.feeMechanism.chargedCurrency = 'Gross native ETH quote-side volume, accounted in wei.';
     const quadrants = normalized.hook.feeMechanism.swapQuadrants;

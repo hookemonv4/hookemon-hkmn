@@ -1041,10 +1041,10 @@
       "sha256": "09ceba70dcb3771554a1299b201e2e375fe34c78e584b53377347878caac0fbf"
     },
     {
-      "bytes": 6830,
+      "bytes": 6842,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-plan.md",
-      "sha256": "4bfea105cc4b84de292e625fcdd980184d70c651527f4040c3c1457b360a7c83"
+      "sha256": "5134fa0a3bc6c395589ff7011991baeeb274bc9f15c2ecfacb6f49d710e0f75b"
     },
     {
       "bytes": 425379,
@@ -1065,10 +1065,10 @@
       "sha256": "3d871507b28ae58379a8b12fe79dfb65e8c223b02ae658fe48334c20927bae88"
     },
     {
-      "bytes": 77464,
+      "bytes": 77476,
       "kind": "package:submission.json",
       "path": "release/phase3/submission.json",
-      "sha256": "4075631500a9f2c95ead0650fe6daa0bf0b42010b5d4c0f78c18a64a030427c0"
+      "sha256": "c639e1bb06197390548023b4c51504ede424ac72250ec3f6bc1fd4bcb35595f5"
     },
     {
       "bytes": 3619,
@@ -2388,8 +2388,8 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:f5859ea91ee83688aa5f6eb3ea2f0c3f32fe953374ad5aec52eb005a1b800646",
+  "reviewTargetHash": "sha256:c3842901c16a93768b431ae82a9b254a499cb00b71dfdd4d980467e9b798e8ee",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
-  "submissionHash": "sha256:d5bcf43bd404e53d05dddf86a5c08947ab645717f03fa871d82969eb0b0a0c85"
+  "submissionHash": "sha256:570acdbcd46df5060ece63e03f01a251b25d4b40c28d9382224c716def3d0d08"
 }
