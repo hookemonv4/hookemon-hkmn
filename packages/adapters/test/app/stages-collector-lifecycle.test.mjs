@@ -583,7 +583,7 @@ test('preparePurchaseRequest defaults to a single pack and reads the expected pe
   const collectorCrypt = { async getMachines() { return { machines: [{ code: 'pokemon_50', contains: '01' }] }; } };
   assert.deepEqual(
     await preparePurchaseRequest({ adapters: { collectorCrypt }, config: baseConfig({ pack: { code: 'pokemon_50' } }) }),
-    { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, packType: 'pokemon_50', expectedCardCountPerPack: 1 },
+    { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 1, generation: { endpoint: 'generatePack', turbo: false }, packType: 'pokemon_50', expectedCardCountPerPack: 1 },
   );
 });
 

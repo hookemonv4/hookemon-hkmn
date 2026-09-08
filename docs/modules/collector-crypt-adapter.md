@@ -63,3 +63,9 @@ node --test --test-timeout=120000 test/collector-crypt.test.mjs
 - On a mutation timeout or lost response, do not call the same endpoint again. The only narrow exception is the open-stage memo-bound retry described above. Query the memo-bound status endpoint for the affected operation and inspect persisted chain evidence from the stage journal. For buyback, use `getBuybackCheck({ memo })`; do not treat a later availability quote as proof of the original sale.
 - If a response validator fails, update it only after a current authenticated provider example or documentation establishes the new field shape. Do not relax validation to accept an unknown economic value.
 - Documentation excerpts and their URLs are recorded in `packages/adapters/test/fixtures/collector-crypt/docs-evidence-2026-09-04.json`. The unresolved Solana insured-value unit remains an OPEN FACT and is reconciled at the epic gate rather than inferred by this client.
+
+## First-cycle single-pack generation
+
+A newly prepared one-pack purchase binds `generation: { endpoint: "generatePack", turbo: false }` in the durable stage request. The purchase stage calls the existing single-pack transport and records its returned memo in the ordinary batch journal. Binding admission still precedes provider generation; decoding, signature validation, original-blockhash checks and recovery use the same policy path. Unknown modes, a quantity other than one, or a missing bound transport refuse before generation.
+
+Older durable requests without `generation` retain their batch endpoint. Recovery never converts an unresolved batch into a single-pack request. The current bulk adapter envelope has not been admitted against the current provider API; first-cycle readiness requires exactly one pack. The official [Collector API](https://docs.collectorcrypt.com/gacha/api) documents the single-pack request and response. This endpoint selection grants no live binding, signature or spend authority.

@@ -335,6 +335,7 @@ export async function preparePurchaseRequest({ adapters, config, cycleRepository
     operation: 'purchase',
     playerAddress,
     quantity,
+    ...(quantity === 1 ? { generation: { endpoint: 'generatePack', turbo: false } } : {}),
     ...(bounds === null ? {} : bounds),
   };
   if (typeof packType !== 'string' || packType.length === 0) return request;
@@ -418,6 +419,17 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
   let legacyPolicy = null;
   let admittedUnitAmountAtomic = null;
   if (batch === null) {
+    // New single-pack requests bind the endpoint and mode in the durable stage request.
+    // An older request without this field retains its original batch semantics.
+    const generation = prepared.generation;
+    if (generation !== undefined && (!plainObject(generation)
+      || Object.keys(generation).sort().join(',') !== 'endpoint,turbo'
+      || generation.endpoint !== 'generatePack' || generation.turbo !== false || quantity !== 1)) {
+      throw new Error('purchase generation must bind one non-turbo generatePack request');
+    }
+    if (generation !== undefined && typeof adapters.collectorCrypt.generatePack !== 'function') {
+      throw new Error('purchase requires the bound generatePack transport');
+    }
     requireCollectorOnlyMutationAuthority(config, preflightAuthority);
 
     // Canonical typed-money validation of the immutable admitted per-pack amount, and proof its
@@ -481,11 +493,17 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       playerAddress: prepared.playerAddress,
     });
 
-    const generated = await adapters.collectorCrypt.generateYoloPacks({
-      playerAddress: prepared.playerAddress,
-      quantity,
-      ...(prepared.packType ? { packType: prepared.packType } : {}),
-    });
+    const generated = generation === undefined
+      ? await adapters.collectorCrypt.generateYoloPacks({
+        playerAddress: prepared.playerAddress,
+        quantity,
+        ...(prepared.packType ? { packType: prepared.packType } : {}),
+      })
+      : { packs: [await adapters.collectorCrypt.generatePack({
+        playerAddress: prepared.playerAddress,
+        turbo: false,
+        ...(prepared.packType ? { packType: prepared.packType } : {}),
+      })] };
     unsignedTransactionsByMemo = new Map(generated.packs.map(pack => [pack.memo, pack.transaction]));
     const packs = generated.packs.map((pack, packIndex) => ({
       packIndex,
