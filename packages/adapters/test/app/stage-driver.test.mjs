@@ -1,3 +1,4 @@
+import { isProcessQuoteUsdValuation } from '../../src/relay-client.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -4456,4 +4457,37 @@ test('supplementary payout completion validates terminal identity without dispat
   refreshed = initial;
   loseLease = true;
   await assert.rejects(() => run(initial), /completion lease lost/);
+});
+
+test('return preparation preserves producer valuation identity without granting it to JSON', async () => {
+  const admission = await nativeProducedAdmissionFixture(CYCLE_ID);
+  const original = admission.aggregateFundingUsd;
+  for (const [valuation, authenticated] of [[original, true], [JSON.parse(JSON.stringify(original)), false]]) {
+    const cycleRepository = writeAheadRepository();
+    const prepared = { provider: 'relay', destinationUsd: valuation };
+    let observed;
+    const driver = createStageDriver({
+      liveMode: true,
+      adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+      signerClient: null, config: baseConfig(), cycleRepository,
+      ...fixtureStageDriverOptions,
+      stageHandlers: { return: {
+        async probe() { return {}; },
+        async prepareRequest() { return prepared; },
+        async mutate({ request }) {
+          observed = request;
+          assert.equal(isProcessQuoteUsdValuation(request.destinationUsd), authenticated);
+          assert(Object.isFrozen(request));
+          return { observed: true };
+        },
+        async reconcileLive() { return null; },
+      } },
+    });
+    await driver.execute({ cycleId: CYCLE_ID, stage: 'return', intent: { journalHead: 'head-1' },
+      assertMutationAllowed: async () => {} });
+    if (authenticated) assert.equal(observed.destinationUsd, original);
+    else assert.notEqual(observed.destinationUsd, original);
+    assert.equal((await cycleRepository.readOperationalStageAttempt(CYCLE_ID, 'return')).attempt.requestDigest,
+      digest({ schema: 'hookemon.operational-stage-request.v1', cycleId: CYCLE_ID, stage: 'return', request: prepared }));
+  }
 });

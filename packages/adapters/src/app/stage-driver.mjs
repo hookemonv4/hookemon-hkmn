@@ -1,3 +1,4 @@
+import { isProcessQuoteUsdValuation } from '../relay-client.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
 import { isStandingAuthorityProvider } from '../../../runner/src/cycle/authorization-provider.mjs';
@@ -361,6 +362,14 @@ function assertPreparedRequest(value, stage) {
   const request = toEvidenceValue(value);
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
     throw new Error(`stage-driver: handler "${stage}" prepareRequest must return a canonical object`);
+  }
+  // Preserve only the authenticated, immutable producer value. Its canonical
+  // bytes still participate in the prepared request digest; JSON cannot mint it.
+  if (stage === 'return' && isProcessQuoteUsdValuation(value.destinationUsd)) {
+    if (digest(request.destinationUsd) !== digest(value.destinationUsd)) {
+      throw new Error('stage-driver: canonical return valuation differs from its producer');
+    }
+    request.destinationUsd = value.destinationUsd;
   }
   return freezeRequest(request);
 }
