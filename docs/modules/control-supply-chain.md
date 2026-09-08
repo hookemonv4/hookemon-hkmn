@@ -96,3 +96,5 @@ node --test scripts/tests/*.test.mjs
 - For a release-readiness refusal, repair the current review bundle or receipt chain instead of editing `state.json`; projections do not authorize release.
 
 The protected dependency verifier pins the native clean-room scanner and its exact recognition manifest as regular repository files. Changing either requires changing the protected verifier digest. Recognition is limited to reviewed file bytes, offsets, rules and token hashes; local identity and home paths remain rejected.
+
+Gitleaks recognizes reviewed public native evidence digests only when the exact file path, JSON field and digest match. Negative controls require detection of a different field, an unknown digest in a recognized file, and a recognized digest at a different path. The rules use the [Gitleaks 8.30.1 AND and regex-target semantics](https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md#configuration).

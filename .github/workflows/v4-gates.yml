@@ -169,7 +169,7 @@ jobs:
           gitleaks_url='https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz'
           gitleaks_archive_sha256='551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
           gitleaks_executable_sha256='88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509'
-          gitleaks_config_sha256='959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2'
+          gitleaks_config_sha256='17cff1b01ddbf5003b9dd202c9b534878c659b8935c23d9f0c2023ea0f68d10a'
           gitleaks_archive="${RUNNER_TEMP}/gitleaks_${gitleaks_version}_linux_x64.tar.gz"
           gitleaks_root="${RUNNER_TEMP}/gitleaks-${gitleaks_version}"
           gitleaks_executable="${gitleaks_root}/gitleaks"
@@ -222,6 +222,14 @@ jobs:
             'dH7mQ2vR9xK4pT8c' 'N6wB1yL5fJ0sA3zE' \
             'cb857a0bfcb6322cd73f4959a3905d23' '3762f1dada3b7ca31e17df08fecb516c' \
             > "${negative_dir}/receipts/r-99999.json"
+          mkdir -p "${negative_dir}/scripts"
+          printf '{\n  "service_token": "%s%s",\n  "tokenSha256": "%s%s"\n}\n' \
+            'dH7mQ2vR9xK4pT8c' 'N6wB1yL5fJ0sA3zE' \
+            'cb857a0bfcb6322cd73f4959a3905d23' '3762f1dada3b7ca31e17df08fecb516c' \
+            > "${negative_dir}/scripts/native-cleanroom-recognition.json"
+          printf '{\n  "tokenSha256": "%s%s"\n}\n' \
+            '03b7ebd191f71b5ad691e900ccc095fe6d' '1a008028447047450cfcc951910d89' \
+            > "${negative_dir}/scripts/unapproved-context.json"
           set +e
           gitleaks dir --no-banner --redact --ignore-gitleaks-allow \
             --config .gitleaks.toml --gitleaks-ignore-path "$empty_ignore" \
@@ -232,7 +240,7 @@ jobs:
             echo "Gitleaks synthetic negative control failed" >&2
             exit 1
           fi
-          node -e 'const fs = require("node:fs"); const findings = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const tokenCoreFinding = findings.some(finding => finding.RuleID === "generic-api-key" && finding.File.endsWith("/receipts/r-99999.json") && finding.StartLine === 3); if (!findings.some(finding => finding.RuleID === "github-pat") || !tokenCoreFinding) process.exit(1)' "$negative_report"
+          node -e 'const fs = require("node:fs"); const findings = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const tokenCoreFinding = findings.some(finding => finding.RuleID === "generic-api-key" && finding.File.endsWith("/receipts/r-99999.json") && finding.StartLine === 3); const nativeControls = [["/scripts/native-cleanroom-recognition.json", 2], ["/scripts/native-cleanroom-recognition.json", 3], ["/scripts/unapproved-context.json", 2]].every(([path, line]) => findings.some(finding => finding.RuleID === "generic-api-key" && finding.File.endsWith(path) && finding.StartLine === line)); if (!findings.some(finding => finding.RuleID === "github-pat") || !tokenCoreFinding || !nativeControls) process.exit(1)' "$negative_report"
 
           tracked_tree="$(mktemp -d "${RUNNER_TEMP}/gitleaks-tree.XXXXXX")"
           git archive HEAD | tar -x -C "$tracked_tree"
