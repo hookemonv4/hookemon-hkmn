@@ -1,3 +1,4 @@
+import { createTestNativePaymentBinding, isReleaseNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 import { isProcessQuoteUsdValuation } from '../../src/relay-client.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -4491,3 +4492,185 @@ test('return preparation preserves producer valuation identity without granting 
       digest({ schema: 'hookemon.operational-stage-request.v1', cycleId: CYCLE_ID, stage: 'return', request: prepared }));
   }
 });
+
+test('supplementary reconciliation preserves authenticated native payment binding', async () => {
+  const authenticatedBinding = createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663' }, createTestProfileMutationAuthority());
+  const nativePaymentBinding = authenticatedBinding;
+  const position = {
+    positionId: `held:${'a'.repeat(64)}`,
+    cycleId: CYCLE_ID,
+    packId: 'base-pack',
+    memo: 'memo-supplementary-blockhash',
+    mint: 'mint-supplementary-blockhash',
+    cardRef: 'mint-supplementary-blockhash',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'1'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  let settlement = {
+    positionId: position.positionId,
+    cycleId: CYCLE_ID,
+    manifestId: `${CYCLE_ID}:supplementary:9`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  const repository = fakeCycleRepository();
+  repository.readSupplementarySettlement = async () => structuredClone(settlement);
+  repository.advanceSupplementarySettlement = async (positionId, input) => {
+    settlement = { ...settlement, state: input.nextState };
+    return structuredClone(settlement);
+  };
+
+  let resolverCalls = 0;
+  let observedBlockhash = null;
+  const resolver = async blockhash => {
+    resolverCalls += 1;
+    observedBlockhash = blockhash;
+    return { blockhash, lastValidBlockHeight: '4242' };
+  };
+  let receivedConfig = null;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig({ nativePaymentBinding, solana: { chainId: 'solana-mainnet', blockhashContextResolver: resolver } }),
+    cycleRepository: repository,
+    supplementaryAdapters: Object.freeze({}),
+    supplementarySignerClient: Object.freeze({}),
+    productionSupplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        mutation: 'buyback',
+        async reconcile({ config, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
+          receivedConfig = config;
+          return injectedRepository.advanceSupplementarySettlement(position.positionId, {
+            expectedState: receivedSettlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'2'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+
+  const result = await driver.runSupplementarySettlement({
+    position,
+    settlement,
+    nowMs: 1_001,
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {},
+  });
+
+  assert.equal(isReleaseNativePaymentBinding(receivedConfig.nativePaymentBinding), true);
+  assert.deepEqual(receivedConfig.nativePaymentBinding, nativePaymentBinding);
+  assert.equal(Object.isFrozen(receivedConfig.nativePaymentBinding), true);
+  assert.equal(result.status, 'ADVANCED');
+  assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
+  assert.equal(Object.isFrozen(receivedConfig), true);
+  assert.equal(Object.isFrozen(receivedConfig.solana), true);
+  assert.equal(receivedConfig.solana.chainId, 'solana-mainnet');
+  assert.equal(typeof receivedConfig.solana.blockhashContextResolver, 'function');
+  assert.deepEqual(
+    await receivedConfig.solana.blockhashContextResolver('observed-blockhash-xyz'),
+    { blockhash: 'observed-blockhash-xyz', lastValidBlockHeight: '4242' },
+  );
+  assert.equal(resolverCalls, 1);
+  assert.equal(observedBlockhash, 'observed-blockhash-xyz');
+});
+
+
+test('supplementary reconciliation rejects a serialized binding capability', async () => {
+  const authenticatedBinding = createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663' }, createTestProfileMutationAuthority());
+  const nativePaymentBinding = structuredClone(authenticatedBinding);
+  const position = {
+    positionId: `held:${'a'.repeat(64)}`,
+    cycleId: CYCLE_ID,
+    packId: 'base-pack',
+    memo: 'memo-supplementary-blockhash',
+    mint: 'mint-supplementary-blockhash',
+    cardRef: 'mint-supplementary-blockhash',
+    costMicroUsdg: '25',
+    insuredValue: null,
+    reason: 'EPIC_THRESHOLD',
+    terminalState: 'HELD_OWNER_DECISION',
+    evidenceDigest: `sha256:${'1'.repeat(64)}`,
+    openedAtMs: 1_000,
+    ownerDecision: { choice: 'sell' },
+    resolution: null,
+  };
+  let settlement = {
+    positionId: position.positionId,
+    cycleId: CYCLE_ID,
+    manifestId: `${CYCLE_ID}:supplementary:9`,
+    state: 'PREPARED',
+    positionEvidenceDigest: position.evidenceDigest,
+  };
+  const repository = fakeCycleRepository();
+  repository.readSupplementarySettlement = async () => structuredClone(settlement);
+  repository.advanceSupplementarySettlement = async (positionId, input) => {
+    settlement = { ...settlement, state: input.nextState };
+    return structuredClone(settlement);
+  };
+
+  let resolverCalls = 0;
+  let observedBlockhash = null;
+  const resolver = async blockhash => {
+    resolverCalls += 1;
+    observedBlockhash = blockhash;
+    return { blockhash, lastValidBlockHeight: '4242' };
+  };
+  let receivedConfig = null;
+  const driver = createStageDriver({
+    liveMode: true,
+    adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null,
+    config: baseConfig({ nativePaymentBinding, solana: { chainId: 'solana-mainnet', blockhashContextResolver: resolver } }),
+    cycleRepository: repository,
+    supplementaryAdapters: Object.freeze({}),
+    supplementarySignerClient: Object.freeze({}),
+    productionSupplementaryStageHandlers: {
+      PREPARED: {
+        stage: 'supplementary-buyback',
+        mutation: 'buyback',
+        async reconcile({ config, cycleRepository: injectedRepository, settlement: receivedSettlement }) {
+          receivedConfig = config;
+          return injectedRepository.advanceSupplementarySettlement(position.positionId, {
+            expectedState: receivedSettlement.state,
+            nextState: 'BUYBACK_SENT_UNKNOWN',
+            evidence: { requestDigest: `sha256:${'2'.repeat(64)}` },
+          });
+        },
+      },
+    },
+  });
+
+  const result = await driver.runSupplementarySettlement({
+    position,
+    settlement,
+    nowMs: 1_001,
+    fencingToken: '11111111-1111-4111-8111-111111111111',
+    assertLease() {},
+  });
+
+  assert.equal(isReleaseNativePaymentBinding(receivedConfig.nativePaymentBinding), false);
+  assert.deepEqual(receivedConfig.nativePaymentBinding, nativePaymentBinding);
+  assert.equal(Object.isFrozen(receivedConfig.nativePaymentBinding), true);
+  assert.equal(result.status, 'ADVANCED');
+  assert.equal(result.state, 'BUYBACK_SENT_UNKNOWN');
+  assert.equal(Object.isFrozen(receivedConfig), true);
+  assert.equal(Object.isFrozen(receivedConfig.solana), true);
+  assert.equal(receivedConfig.solana.chainId, 'solana-mainnet');
+  assert.equal(typeof receivedConfig.solana.blockhashContextResolver, 'function');
+  assert.deepEqual(
+    await receivedConfig.solana.blockhashContextResolver('observed-blockhash-xyz'),
+    { blockhash: 'observed-blockhash-xyz', lastValidBlockHeight: '4242' },
+  );
+  assert.equal(resolverCalls, 1);
+  assert.equal(observedBlockhash, 'observed-blockhash-xyz');
+});
+

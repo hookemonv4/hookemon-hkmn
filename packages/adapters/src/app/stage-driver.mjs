@@ -1,3 +1,4 @@
+import { isReleaseNativePaymentBinding } from '../native-payment-proof.mjs';
 import { isProcessQuoteUsdValuation } from '../relay-client.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { createPreparedProviderMutationAttempt } from '../../../runner/src/cycle/money-schemas.mjs';
@@ -700,8 +701,18 @@ function frozenCanonicalValue(value) {
 /** Canonicalizes supplementary data while retaining the existing process-local resolver and
  * isolated signer setup references. The setup's private brand is still checked by the production
  * binding boundary; retaining a caller's unbranded lookalike never authenticates it. */
-function frozenSupplementaryReconcileConfig(config) {
+function frozenReconciliationConfig(config) {
   const canonical = frozenCanonicalValue(config);
+  const binding = config?.nativePaymentBinding;
+  if (!isReleaseNativePaymentBinding(binding)) return canonical;
+  if (digest(binding) !== digest(canonical.nativePaymentBinding)) {
+    throw new TypeError('native payment binding differs from canonical configuration');
+  }
+  return Object.freeze({ ...canonical, nativePaymentBinding: binding });
+}
+
+function frozenSupplementaryReconcileConfig(config) {
+  const canonical = frozenReconciliationConfig(config);
   const resolver = config?.solana?.blockhashContextResolver;
   const isolatedChildSetup = config?.signer?.keychain?.isolatedChildSetup;
   return Object.freeze({
@@ -1027,7 +1038,7 @@ function chainReconciliationRepository(cycleRepository, assertLease) {
 function chainReconciliationInput(context, config, reconciliationAdapters, cycleRepository) {
   return Object.freeze({
     adapters: createLeaseFencedCapability(reconciliationAdapters, context.assertLease, () => {}),
-    config: frozenCanonicalValue(config),
+    config: frozenReconciliationConfig(config),
     cycleRepository: chainReconciliationRepository(cycleRepository, context.assertLease),
     context: frozenCanonicalValue({
       cycleId: context.cycleId,
