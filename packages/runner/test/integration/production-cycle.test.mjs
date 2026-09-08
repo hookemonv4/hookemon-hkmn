@@ -33,7 +33,7 @@ import { deriveClosedProceedsBasis } from '../../src/distribution/reconcile.mjs'
 import {
   buildAndSignStepAuthorization,
   buildProductionFrozenControl,
-  createProductionTestFixture,
+  createHistoricalProductionTestFixture,
   executeCompleteProductionCycle,
   productionCycleAction,
   productionCyclePreflight,
@@ -73,7 +73,7 @@ async function temporaryDurableStore(t) {
 function payoutId(seed) { return `0x${seed.repeat(64)}`; }
 
 async function driveToPayoutReady(cycleId, cycleStore) {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const runner = new CycleRunner(cycleId, [], { cycleStore, evidenceProfile: fixture.evidenceProfile });
   const { returnReceiptDigest } = executeCompleteProductionCycle(fixture, runner, cycleId);
   runner.deriveClosedCycle();
@@ -123,7 +123,7 @@ test('production-profile CycleRunner accepts a DurableCycleStore and recovers co
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-production-recover-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const cycleId = `0x${'f'.repeat(64)}`;
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const store = await DurableCycleStore.open(directory);
   const runner = new CycleRunner(cycleId, [], { cycleStore: store, evidenceProfile: fixture.evidenceProfile });
   executeCompleteProductionCycle(fixture, runner, cycleId);
@@ -143,7 +143,7 @@ test('production-profile CycleRunner refuses an expired standing authority befor
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-production-expired-recover-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   // The authority is intentionally outside the current wall-clock validity window.
-  const fixture = createProductionTestFixture({
+  const fixture = createHistoricalProductionTestFixture({
     standingAuthorityIssuedAt: '2020-01-01T00:00:00.000Z',
     standingAuthorityExpiresAt: '2020-06-01T00:00:00.000Z',
   });
@@ -164,7 +164,7 @@ test('production-profile CycleRunner refuses an expired standing authority befor
 
 test('rejects a production provider receipt the injected chain observer never confirmed', () => {
   const cycleId = `0x${'1'.repeat(64)}`;
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const runner = new CycleRunner(cycleId, [], { cycleStore: new FixtureCycleStore(), evidenceProfile: fixture.evidenceProfile });
   const preflight = productionCyclePreflight(cycleId, fixture);
   runner.recordReleasedCyclePreflight(preflight);
@@ -186,7 +186,7 @@ test('rejects a production provider receipt the injected chain observer never co
 
 test('rejects a production provider receipt whose claimed amounts do not match the injected observer confirmation', () => {
   const cycleId = `0x${'2'.repeat(64)}`;
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const outbound = productionCycleAction('outbound', cycleId, 'sha256:' + '7'.repeat(64));
   const relation = {
     sourceAccount: outbound.sourceAccount, destinationAccount: outbound.destination, inputAsset: outbound.inputAsset, outputAsset: outbound.outputAsset,
@@ -213,7 +213,7 @@ test('rejects a production provider receipt whose claimed amounts do not match t
 test('rejects reusing a standing-authority step-authorization nonce', async t => {
   const cycleId = `0x${'3'.repeat(64)}`;
   const cycleStore = await temporaryDurableStore(t);
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const runner = new CycleRunner(cycleId, [], { cycleStore, evidenceProfile: fixture.evidenceProfile });
   const preflight = productionCyclePreflight(cycleId, fixture);
   runner.recordReleasedCyclePreflight(preflight);
@@ -248,7 +248,7 @@ test('rejects reusing a standing-authority step-authorization nonce', async t =>
 test('rejects fixture-profile evidence when the runner was constructed with the production evidence profile', async t => {
   const cycleId = `0x${'4'.repeat(64)}`;
   const cycleStore = await temporaryDurableStore(t);
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const runner = new CycleRunner(cycleId, [], { cycleStore, evidenceProfile: fixture.evidenceProfile });
   const preflight = fixtureCyclePreflight(cycleId);
   // A fixture-schema preflight, signed with the fixture owner key, must be rejected outright by a
@@ -257,7 +257,7 @@ test('rejects fixture-profile evidence when the runner was constructed with the 
 });
 
 test('rejects a production-profile CycleRunner constructed with a plain object cycle store (interface check, not instanceof)', () => {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   assert.throws(
     () => new CycleRunner(`0x${'5'.repeat(64)}`, [], { cycleStore: {}, evidenceProfile: fixture.evidenceProfile }),
     /cycle store.*required/,
@@ -265,7 +265,7 @@ test('rejects a production-profile CycleRunner constructed with a plain object c
 });
 
 test('a production-profile CycleRunner accepts the in-memory FixtureCycleStore too (same interface, faster tests)', () => {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const runner = new CycleRunner(`0x${'6'.repeat(64)}`, [], { cycleStore: new FixtureCycleStore(), evidenceProfile: fixture.evidenceProfile });
   assert.equal(runner.state.stage, 'prepared');
 });
@@ -282,7 +282,7 @@ test('a production-profile CycleRunner bound to a production frozen cycle contro
   const cycleId = `0x${'9'.repeat(64)}`;
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-production-frozen-control-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const { control, plan } = buildProductionFrozenControl(cycleId, fixture);
   assert.equal(control.escrowObservation.schema, 'hookemon.production-cycle-escrow-observation.v1');
   assert.equal(plan.bindingManifestDigest, control.plan.bindingManifestDigest);
@@ -307,7 +307,7 @@ test('a production-profile CycleRunner bound to a production frozen cycle contro
 });
 
 test('a production-profile CycleRunner rejects binding a frozen control whose escrow observation carries a mismatched block hash', () => {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   assert.throws(
     () => buildProductionFrozenControl(`0x${'e'.repeat(64)}`, fixture, { escrowObservationOverrides: { blockHash: `sha256:${'f'.repeat(64)}` } }),
     /does not match the injected chain observer confirmation/i,
@@ -315,7 +315,7 @@ test('a production-profile CycleRunner rejects binding a frozen control whose es
 });
 
 test('a production-profile CycleRunner rejects binding a frozen control whose escrow observation claims the wrong escrow address', () => {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   assert.throws(
     () => buildProductionFrozenControl(`0x${'d'.repeat(64)}`, fixture, { escrowObservationOverrides: { returnAccount: '0x0000000000000000000000000000000000009999' } }),
     /cycle return escrow differs from authenticated computeCycleEscrow output/i,
@@ -323,7 +323,7 @@ test('a production-profile CycleRunner rejects binding a frozen control whose es
 });
 
 test('a production-profile CycleRunner rejects binding a frozen control whose escrow observation reports an amount below the frozen minimum Robinhood receive', () => {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   assert.throws(
     () => buildProductionFrozenControl(`0x${'0'.repeat(63)}1`, fixture, { usdgBalance: '5' }),
     /below the frozen minimum/i,

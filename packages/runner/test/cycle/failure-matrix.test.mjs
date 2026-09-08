@@ -8,6 +8,7 @@ import {
   CHAIN_TRANSACTION_ATTEMPT_STATES,
   CYCLE_TERMINAL_STATES,
   PROVIDER_MUTATION_ATTEMPT_STATES,
+  RELAY_LEG_STATES,
 } from '../../src/cycle/money-schemas.mjs';
 import { listSuite } from '../../../../scripts/test-manifest.mjs';
 
@@ -67,7 +68,7 @@ const EXPECTED_OUTCOMES = new Map([
   ['Relay leg:partial-finalized-delta', outcome('HELD_RELAY_PARTIAL', 'owner-decision', 'WP07', 'FINALIZED')],
   ['Relay leg:refund-finalized-delta', outcome('HELD_RELAY_REFUND', 'owner-decision', 'WP07', 'FINALIZED')],
   ['Relay leg:late-finalized-delta', outcome('HELD_RELAY_LATE', 'owner-decision', 'WP07', 'FINALIZED')],
-  ['Relay leg:wrong-asset-finalized-delta', outcome('HELD_RELAY_WRONG_ASSET', 'owner-decision', 'WP07', 'FINALIZED')],
+  ['Relay leg:wrong-asset-finalized-delta', outcome(null, 'owner-decision', 'WP07', 'RECORDED')],
   ['Transaction policy:wrong-asset', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP08a', 'NOT_SENT')],
   ['Transaction policy:wrong-recipient', outcome('HELD_DATA_UNVERIFIED', 'owner-decision', 'WP08a', 'NOT_SENT')],
   ['Relay quote:expired-quote', outcome(null, 'retry', 'WP07')],
@@ -121,10 +122,10 @@ const RECOVERY_TUPLE_CITATIONS = new Map([
     test: 'packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a late return receipt as HELD_RELAY_LATE after reopen',
   }],
   ['Relay leg:wrong-asset-finalized-delta', {
-    expectedTerminalState: 'HELD_RELAY_WRONG_ASSET',
-    expectedAttemptState: 'FINALIZED',
+    expectedTerminalState: null,
+    expectedAttemptState: 'RECORDED',
     expectedNextStage: 'owner-decision',
-    test: 'packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a wrong-token or wrong-recipient return receipt as HELD_RELAY_WRONG_ASSET after reopen',
+    test: 'packages/adapters/test/app/cycle-repository.test.mjs — native return refuses a wrong-token or wrong-recipient receipt before settlement after reopen',
   }],
   ['Standing authority:replay-after-expiry', {
     expectedTerminalState: null,
@@ -160,6 +161,7 @@ test('failure matrix names every WP13 contract cell exactly once against the fro
       || frozenProvider.states.includes(cell.expectedAttemptState)
       || frozenChain.states.includes(cell.expectedAttemptState)
       || CHAIN_TRANSACTION_ATTEMPT_STATES.includes(cell.expectedAttemptState)
+      || (cell.system === 'Relay leg' && RELAY_LEG_STATES.includes(cell.expectedAttemptState))
       || PAYOUT_RECIPIENT_ATTEMPT_STATES.has(cell.expectedAttemptState),
     );
     assert.equal(typeof cell.owningWp, 'string');

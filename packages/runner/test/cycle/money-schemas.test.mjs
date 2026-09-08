@@ -600,30 +600,36 @@ function moneyConfiguration(overrides = {}) {
 }
 
 test('money configuration is explicit typed amounts; a literal 1 or a missing cap is a configuration error', () => {
-  const configuration = moneyConfiguration();
+  const historical = moneyConfiguration();
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
+  const configuration = { ...historical, schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin: historical.assets.solanaStablecoin },
+    minimums: { robinhoodReceive: { ...eth, amountAtomic: '19' }, solanaReceive: historical.minimums.solanaReceive, returnEth: { ...eth, amountAtomic: '0' } },
+  };
+  const nativeConfiguration = overrides => ({ ...configuration, ...overrides });
   assert.deepEqual(assertMoneyConfiguration(configuration), configuration);
   assert.throws(
-    () => assertMoneyConfiguration(moneyConfiguration({ minimums: { ...configuration.minimums, returnUsdg: { ...configuration.minimums.returnUsdg, amountAtomic: '1' } } })),
+    () => assertMoneyConfiguration(nativeConfiguration({ minimums: { ...configuration.minimums, returnEth: { ...configuration.minimums.returnEth, amountAtomic: '1' } } })),
     /placeholder/,
   );
   assert.throws(
-    () => assertMoneyConfiguration(moneyConfiguration({ minimums: { ...configuration.minimums, returnUsdg: { ...configuration.minimums.returnUsdg, amountAtomic: '2' } } })),
-    /returnUsdg.*zero/,
+    () => assertMoneyConfiguration(nativeConfiguration({ minimums: { ...configuration.minimums, returnEth: { ...configuration.minimums.returnEth, amountAtomic: '2' } } })),
+    /returnEth.*zero/,
   );
   assert.throws(
-    () => assertMoneyConfiguration(moneyConfiguration({ evm: { perTransactionGasPriceCap: configuration.evm.perTransactionGasPriceCap } })),
+    () => assertMoneyConfiguration(nativeConfiguration({ evm: { perTransactionGasPriceCap: configuration.evm.perTransactionGasPriceCap } })),
     /nativeReserve/,
   );
   assert.throws(
-    () => assertMoneyConfiguration(moneyConfiguration({ solana: { ...configuration.solana, priorityFeeCap: { ...configuration.solana.priorityFeeCap, amountAtomic: '1' } } })),
+    () => assertMoneyConfiguration(nativeConfiguration({ solana: { ...configuration.solana, priorityFeeCap: { ...configuration.solana.priorityFeeCap, amountAtomic: '1' } } })),
     /placeholder/,
   );
   assert.throws(
-    () => assertMoneyConfiguration(moneyConfiguration({ minimums: { ...configuration.minimums, solanaReceive: { ...configuration.minimums.solanaReceive, assetId: 'different-solana-stablecoin-mint' } } })),
+    () => assertMoneyConfiguration(nativeConfiguration({ minimums: { ...configuration.minimums, solanaReceive: { ...configuration.minimums.solanaReceive, assetId: 'different-solana-stablecoin-mint' } } })),
     /solanaReceive/,
   );
   assert.throws(
-    () => assertMoneyConfiguration(moneyConfiguration({ evm: { ...configuration.evm, nativeReserve: { ...configuration.evm.nativeReserve, chainId: '1' } } })),
+    () => assertMoneyConfiguration(nativeConfiguration({ evm: { ...configuration.evm, nativeReserve: { ...configuration.evm.nativeReserve, chainId: '1' } } })),
     /nativeReserve/,
   );
 });

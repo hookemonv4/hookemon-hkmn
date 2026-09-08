@@ -47,7 +47,7 @@ import {
 } from './decoder.mjs';
 import { assertVerifiedProductionBlockhashValidity } from './blockhash-validity.mjs';
 import { assertVerifiedProductionExecutionAccounting } from './execution-accounting.mjs';
-import { assertMoneyConfiguration } from './money-schemas.mjs';
+import { assertHistoricalMoneyConfiguration, assertMoneyConfiguration } from './money-schemas.mjs';
 import {
   createTestProfileMutationAuthority,
   verifyProductionCyclePreflight,
@@ -80,7 +80,12 @@ export function createTestProductionEvidenceProfile(deps = {}) {
   return createEvidenceProfile(deps, createTestProfileMutationAuthority());
 }
 
-function createEvidenceProfile(deps, preflightAuthority) {
+/** Retained v1 read-only simulation; never the native production factory. */
+export function createHistoricalTestProductionEvidenceProfile(deps = {}) {
+  return createEvidenceProfile(deps, createTestProfileMutationAuthority(), true);
+}
+
+function createEvidenceProfile(deps, preflightAuthority, historicalRead = false) {
   const { observers, signerRegistry, standingAuthorityProvider, programIds, purchaseDestination } = deps;
   if (!observers?.solana || typeof observers.solana.confirmTransaction !== 'function') throw new Error('production evidence profile requires an injected Solana chain observer');
   if (!observers?.evm || typeof observers.evm.confirmTransaction !== 'function') throw new Error('production evidence profile requires an injected Robinhood (EVM) chain observer');
@@ -91,9 +96,12 @@ function createEvidenceProfile(deps, preflightAuthority) {
   assertConfiguredIdentifier(purchaseDestination, 'purchaseDestination');
   let moneyConfiguration;
   try {
-    moneyConfiguration = assertMoneyConfiguration(deps.moneyConfiguration, 'production evidence profile money configuration');
+    const historicalTest = historicalRead && preflightAuthority === createTestProfileMutationAuthority();
+    moneyConfiguration = (historicalTest ? assertHistoricalMoneyConfiguration : assertMoneyConfiguration)(
+      deps.moneyConfiguration, 'production evidence profile money configuration',
+    );
   } catch (error) {
-    throw new Error(`production evidence profile requires MoneyConfigurationV2: ${error.message}`);
+    throw new Error(`production evidence profile requires ${historicalRead ? 'historical MoneyConfigurationV1' : 'MoneyConfigurationV2'}: ${error.message}`);
   }
 
   const receiptDeps = { observers, programIds };

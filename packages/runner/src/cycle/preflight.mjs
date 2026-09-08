@@ -2,7 +2,7 @@ import { createPublicKey, verify as verifySignature } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { canonicalJson, digest } from './journal.mjs';
-import { assertMoneyConfiguration } from './money-schemas.mjs';
+import { assertHistoricalMoneyConfiguration } from './money-schemas.mjs';
 import { assertDigest, assertPlainObject } from './schemas.mjs';
 import { validateCycleCustody } from './bindings.mjs';
 
@@ -286,10 +286,11 @@ export function verifyProductionCycleRelease(value, deps = {}) {
   return structuredClone(release);
 }
 
+// The v1 vault preflight is retained read-only evidence. Native execution uses a distinct path.
 function requireProductionMoneyConfiguration(value, label) {
   let money;
   try {
-    money = assertMoneyConfiguration(value, label);
+    money = assertHistoricalMoneyConfiguration(value, label);
   } catch (error) {
     throw new Error(`${label} must be a valid MoneyConfigurationV1: ${error.message}`);
   }

@@ -12,6 +12,8 @@ import { AutomatedCycleService } from '../../src/automation/automated-cycle-serv
 import { createPolicyEngine, deriveCyclePolicyDigest } from '../../src/automation/policy-engine.mjs';
 import { createDefaultOperatorConfiguration } from '../../src/config/state-schema.mjs';
 
+import { createNativeAdmissionFixture, reauthenticateNativeAdmissionFixture, verifyFixtureQuoteUsdValuation } from '../cycle/native-admission-fixture.mjs';
+
 class MemoryLeaseStore {
   version = 0;
   lease = null;
@@ -31,13 +33,14 @@ class MemoryCycleRepository {
   created = [];
   completed = [];
 
-  async readActiveCycle() { return this.active; }
-  async createCycle({ releaseAmount, mode }) {
+  nextCycleId() { return `cycle-${this.next}`; }
+  async readActiveCycle() { return this.active && { ...this.active, admission: reauthenticateNativeAdmissionFixture(this.active.admission) }; }
+  async createCycle({ releaseAmount, mode, admission }) {
     if (this.active !== null) throw new Error('active cycle exists');
-    this.active = { cycleId: `cycle-${this.next++}`, releaseAmount, mode };
+    this.active = { cycleId: `cycle-${this.next++}`, releaseAmount, mode, admission };
     this.created.push(this.active.cycleId);
     this.stages.set(this.active.cycleId, new Map());
-    return structuredClone(this.active);
+    return this.readActiveCycle();
   }
   async readStage(cycleId, stage) { return structuredClone(this.stages.get(cycleId)?.get(stage) ?? { status: 'PENDING' }); }
   async prepareStage(cycleId, stage) {
@@ -59,23 +62,25 @@ class MemoryCycleRepository {
   }
 }
 
-// packPriceUsdg mirrors the verified public catalog's pokemon_25 pack (H-funding-observations.md).
+// Synthetic native principal values; USD purchase cost is separately bound by the fixture quote.
 const readyBudget = () => ({
-  availableProcessUsdg: '30000000',
-  packPriceUsdg: '25000000',
-  outboundCapUsdg: '1000000',
-  returnCapUsdg: '1000000',
-  operatingMarginUsdg: '3000000',
+  availableProcessWei: '30000000',
+  packPriceWei: '25000000',
+  outboundCapWei: '1000000',
+  returnCapWei: '1000000',
+  operatingMarginWei: '3000000',
   activeCycleId: null,
 });
 
-function zeroCustody() {
+function zeroCustody(cycle) {
+  const cost = cycle?.admission?.aggregateFundingUsd.amountMicroUsd ?? '0';
   return {
-    realizedLossMicroUsdg: '0',
-    atRiskMicroUsdg: '0',
-    outstandingMicroUsdg: '0',
+    realizedLossMicroUsd: '0',
+    atRiskMicroUsd: cost,
+    outstandingMicroUsd: cost,
+    cycleExposureMicroUsd: cycle ? { [cycle.cycleId]: cost } : {},
     heldAssets: false,
-    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+    heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -89,12 +94,12 @@ function launchConfiguration(overrides = {}) {
     allowedPackIds: ['base-pack'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '30000000',
-    maxCycleBudgetMicroUsdg: '30000000',
-    max24HourBudgetMicroUsdg: '100000000',
-    perCycleCapMicroUsdg: '30000000',
-    lossCapMicroUsdg: '100000000',
-    maxOutstandingCustodyMicroUsdg: '100000000',
+    maxUnitPriceMicroUsd: '30000000',
+    maxCycleBudgetMicroUsd: '30000000',
+    max24HourBudgetMicroUsd: '100000000',
+    perCycleCapMicroUsd: '30000000',
+    lossCapMicroUsd: '100000000',
+    maxOutstandingCustodyMicroUsd: '100000000',
     maxCyclesPerDay: 10,
     manualApprovalCycles: 1,
     intervalMinutes: 20,
@@ -102,12 +107,13 @@ function launchConfiguration(overrides = {}) {
   };
 }
 
-function policyEngineFixture(configuration) {
+function policyEngineFixture(configuration, cycles) {
   let current = configuration;
   const engine = createPolicyEngine({
     now: () => 1_000,
+    verifyQuoteUsdValuation: verifyFixtureQuoteUsdValuation,
     readConfiguration: async () => current,
-    readCustody: async () => zeroCustody(),
+    readCustody: async () => zeroCustody(await cycles.readActiveCycle()),
     mutateConfiguration: async mutation => {
       const outcome = await mutation(current);
       current = outcome.configuration;
@@ -126,6 +132,7 @@ function buildWorker({ leaseStore, cycles, policyEngine, crashStage = null }) {
     now: () => 1_000,
     leaseStore,
     budgetReader: { read: async () => readyBudget() },
+    admissionPlanner: { plan: async ({ cycleId, packId }) => createNativeAdmissionFixture({ cycleId, packId }) },
     cycleRepository: cycles,
     runnerFactory: cycleId => ({ cycleId }),
     stageDriver: {
@@ -154,7 +161,7 @@ function buildWorker({ leaseStore, cycles, policyEngine, crashStage = null }) {
 test('a one-time launch-readiness approval unlocks standing automation: only the first cycle needs it, every later cycle proceeds on its own', async () => {
   const leaseStore = new MemoryLeaseStore();
   const cycles = new MemoryCycleRepository();
-  const { engine } = policyEngineFixture(launchConfiguration({ manualApprovalCycles: 1 }));
+  const { engine } = policyEngineFixture(launchConfiguration({ manualApprovalCycles: 1 }), cycles);
   const worker = buildWorker({ leaseStore, cycles, policyEngine: engine });
 
   const configuration = { paused: false, liveMode: true, executionPaused: false, killSwitch: false, intervalMinutes: 20 };
@@ -172,8 +179,10 @@ test('a one-time launch-readiness approval unlocks standing automation: only the
       pendingDelayMs() { return [...pending.values()][0].delayMs; },
     };
   })();
+  const tickEvents = [];
   const scheduler = createScheduler({
     statePath: '/state.json',
+    onTick: event => tickEvents.push(event),
     readState: async () => ({ configuration }),
     buildWorker: () => worker,
     schedule: clock.schedule,
@@ -188,12 +197,15 @@ test('a one-time launch-readiness approval unlocks standing automation: only the
   assert.deepEqual(cycles.created, ['cycle-1']);
   assert.equal(clock.pendingDelayMs(), RECONCILE_RETRY_MS);
   assert.equal(scheduler.getView().pendingReason, 'TICK_FAILED');
+  assert.equal(tickEvents.at(-1).error.reason, 'MANUAL_APPROVAL_REQUIRED');
 
   // The owner makes the one-time decision: approve cycle-1's exact policy digest.
   const cycleDigest = deriveCyclePolicyDigest({
     configuration: launchConfiguration({ manualApprovalCycles: 1 }),
     cycleId: 'cycle-1',
-    releaseAmountMicroUsdg: '30000000',
+    releaseAmountWei: '30000000',
+    releaseCostMicroUsd: '25000000',
+    admission: cycles.active.admission,
     packId: 'base-pack',
     liveMode: true,
   });
@@ -202,7 +214,7 @@ test('a one-time launch-readiness approval unlocks standing automation: only the
   // Tick 2: cycle-1 resumes and completes with no further approval.
   clock.fire();
   await scheduler.settled();
-  assert.deepEqual(cycles.completed, ['cycle-1']);
+  assert.deepEqual(cycles.completed, ['cycle-1'], JSON.stringify(scheduler.getView()));
   assert.equal(clock.pendingDelayMs(), 20 * 60_000, 'a completed cycle returns to the ordinary interval cadence');
 
   // Ticks 3 and 4: cycle-2 and cycle-3 are each opened and completed automatically. Nobody records a
@@ -219,7 +231,7 @@ test('a one-time launch-readiness approval unlocks standing automation: only the
 test('an already-open cycle reconciles on the bounded retry, never waiting the full new-cycle interval, and a paused scheduler still advances it', async () => {
   const leaseStore = new MemoryLeaseStore();
   const cycles = new MemoryCycleRepository();
-  const { engine } = policyEngineFixture(launchConfiguration({ manualApprovalCycles: 0 }));
+  const { engine } = policyEngineFixture(launchConfiguration({ manualApprovalCycles: 0 }), cycles);
   const worker = buildWorker({ leaseStore, cycles, policyEngine: engine, crashStage: 'purchase' });
 
   const configuration = { paused: false, liveMode: true, executionPaused: false, killSwitch: false, intervalMinutes: 20 };
@@ -237,8 +249,10 @@ test('an already-open cycle reconciles on the bounded retry, never waiting the f
       pendingDelayMs() { return [...pending.values()][0].delayMs; },
     };
   })();
+  const tickEvents = [];
   const scheduler = createScheduler({
     statePath: '/state.json',
+    onTick: event => tickEvents.push(event),
     readState: async () => ({ configuration }),
     buildWorker: () => worker,
     schedule: clock.schedule,
@@ -255,5 +269,18 @@ test('an already-open cycle reconciles on the bounded retry, never waiting the f
   configuration.paused = true;
   clock.fire();
   await scheduler.settled();
-  assert.deepEqual(cycles.completed, ['cycle-1']);
+  assert.deepEqual(cycles.completed, ['cycle-1'], JSON.stringify(scheduler.getView()));
+});
+
+
+test('native integration quote capabilities reject JSON copies and mismatched persisted cost on recovery', () => {
+  const admission = createNativeAdmissionFixture({ cycleId: 'capability-recovery' });
+  assert.notEqual(admission.aggregateFundingQuote.amountAtomic, admission.aggregateFundingUsd.amountMicroUsd);
+  assert.equal(verifyFixtureQuoteUsdValuation(admission.aggregateFundingUsd), true);
+  const persisted = structuredClone(admission);
+  assert.equal(verifyFixtureQuoteUsdValuation(persisted.aggregateFundingUsd), false);
+  const recovered = reauthenticateNativeAdmissionFixture(persisted);
+  assert.equal(verifyFixtureQuoteUsdValuation(recovered.aggregateFundingUsd), true);
+  persisted.aggregateFundingUsd.amountMicroUsd = '24000000';
+  assert.throws(() => reauthenticateNativeAdmissionFixture(persisted));
 });

@@ -112,7 +112,7 @@ attempt is created.
   authenticated terminal Relay pointer, source and destination finality from this process, the
   exact USDG Transfer to Operations, a timestamp inside the settlement window, and globally unique
   source and destination hashes. Other finalized transfer observations enter their named hold.
-- `MoneyConfigurationV1` is the authoritative frozen input for money preflight and signer paths.
+- `MoneyConfigurationV1` describes retained read-only vault preflight evidence. Native signer paths require `MoneyConfigurationV2`.
   Its return minimum must be exactly zero. Claim checks both EIP-1559 fee fields and the post-fee
   native reserve; return, purchase, and buyback check the configured Solana asset, priority-fee cap,
   and post-fee lamport reserve before signing.
@@ -187,4 +187,4 @@ without creating payout principal; an exact attributed return credits and clears
 
 Native rehearsal sessions and stage evidence use v2. Session caps are microUSD, source principal is native wei, and simulated Solana settlement requires an explicit USDC atomic amount. Historical v1 sessions remain readable with their original units and cannot resume native execution.
 
-The production evidence profile requires native `MoneyConfigurationV2`. Test configuration defaults use that schema; historical USDG fixtures remain explicit through `historicalProductionMoneyConfiguration` and the read-only historical validator.
+The production evidence profile requires native `MoneyConfigurationV2`. Test configuration defaults use that schema; historical USDG fixtures use the separate `createHistoricalTestProductionEvidenceProfile` / `createHistoricalProductionTestFixture` simulation entry points and the read-only historical validator. The native production and default test factories reject historical configuration; retained v1 preflight rejects native configuration rather than reinterpreting its units. Historical simulation authority does not enable retained custody mutations. Native recovery tests obtain quote valuation capabilities from an independent fixture source after journal reads; serialized values alone grant no valuation authority.

@@ -48,11 +48,11 @@ class MemoryCycleRepository {
 }
 
 const budget = Object.freeze({
-  availableProcessUsdg: '55000000',
-  packPriceUsdg: '50000000',
-  outboundCapUsdg: '1000000',
-  returnCapUsdg: '1000000',
-  operatingMarginUsdg: '3000000',
+  availableProcessWei: '55000000',
+  packPriceWei: '50000000',
+  outboundCapWei: '1000000',
+  returnCapWei: '1000000',
+  operatingMarginWei: '3000000',
   activeCycleId: null,
 });
 
@@ -62,9 +62,9 @@ function configuration(overrides = {}) {
     allowedPackIds: [],
     requestedOrders: 0,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '0',
-    maxCycleBudgetMicroUsdg: '0',
-    max24HourBudgetMicroUsdg: '0',
+    maxUnitPriceMicroUsd: '0',
+    maxCycleBudgetMicroUsd: '0',
+    max24HourBudgetMicroUsd: '0',
     paused: false,
     liveMode: false,
     ...overrides,

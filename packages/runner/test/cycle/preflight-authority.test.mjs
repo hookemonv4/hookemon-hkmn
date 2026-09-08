@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createProductionTestFixture, productionCyclePreflight } from './production-cycle.mjs';
+import { createHistoricalProductionTestFixture, createProductionTestFixture, historicalProductionMoneyConfiguration, productionMoneyConfiguration, productionCyclePreflight } from './production-cycle.mjs';
 
 const preflightUrl = new URL('../../src/cycle/preflight.mjs', import.meta.url);
 const evidenceProfileUrl = new URL('../../src/cycle/evidence-profile.mjs', import.meta.url);
@@ -54,15 +54,15 @@ test('production evidence profiles remain read-only while the test factory suppl
   );
 });
 
-test('production evidence profile refuses an absent authoritative MoneyConfigurationV1', () => {
+test('production evidence profile refuses an absent historical MoneyConfigurationV1', () => {
   assert.throws(
-    () => createProductionTestFixture({ moneyConfiguration: null }),
+    () => createHistoricalProductionTestFixture({ moneyConfiguration: null }),
     /MoneyConfigurationV1/,
   );
 });
 
 test('production preflight rejects a scalar projection that diverges from MoneyConfigurationV1', () => {
-  const fixture = createProductionTestFixture();
+  const fixture = createHistoricalProductionTestFixture();
   const projected = fixture.evidenceProfile.preflight.verify(
     productionCyclePreflight(`0x${'7'.repeat(64)}`, fixture),
   );
@@ -74,4 +74,16 @@ test('production preflight rejects a scalar projection that diverges from MoneyC
     () => fixture.evidenceProfile.preflight.verify(forged),
     /does not match the MoneyConfigurationV1 projection/,
   );
+});
+
+test('retained read-only preflight refuses native configuration while its historical fixture verifies', () => {
+  const native = createProductionTestFixture();
+  assert.equal(native.moneyConfiguration.schema, 'hookemon.money-configuration.v2');
+  assert.throws(() => native.evidenceProfile.preflight.verify(productionCyclePreflight(`0x${'8'.repeat(64)}`, native)), /MoneyConfigurationV1.*schema/);
+  assert.throws(() => createProductionTestFixture({ moneyConfiguration: historicalProductionMoneyConfiguration() }), /MoneyConfigurationV2/);
+  assert.throws(() => createHistoricalProductionTestFixture({ moneyConfiguration: productionMoneyConfiguration() }), /historical MoneyConfigurationV1/);
+  const historical = createHistoricalProductionTestFixture();
+  const value = historical.evidenceProfile.preflight.verify(productionCyclePreflight(`0x${'9'.repeat(64)}`, historical));
+  assert.equal(value.moneyConfiguration.schema, 'hookemon.money-configuration.v1');
+  assert.equal(value.minimumReceives.return, '0');
 });

@@ -12,7 +12,7 @@ import {
   standingAuthorityDocumentDigest,
   stepAuthorizationIntentDigest,
 } from '../../src/cycle/authorization-provider.mjs';
-import { createTestProductionEvidenceProfile } from '../../src/cycle/evidence-profile.mjs';
+import { createHistoricalTestProductionEvidenceProfile, createTestProductionEvidenceProfile } from '../../src/cycle/evidence-profile.mjs';
 import { canonicalJson, digest } from '../../src/cycle/journal.mjs';
 import {
   productionCollectorOpenExecutionDigest,
@@ -177,7 +177,11 @@ export function buildAndSignStepAuthorization(fixture, { cycleId, actionKind, au
 // standing authority's own validity window is deliberately already in the past relative to the real
 // wall clock — see production-cycle.test.mjs's replay-after-expiry regression test — without disturbing
 // every other call site's default 2026-2099 window.
-export function createProductionTestFixture({ standingAuthorityIssuedAt, standingAuthorityExpiresAt, moneyConfiguration = productionMoneyConfiguration() } = {}) {
+export function createProductionTestFixture(options = {}) {
+  return createTestFixture(options, createTestProductionEvidenceProfile);
+}
+
+function createTestFixture({ standingAuthorityIssuedAt, standingAuthorityExpiresAt, moneyConfiguration = productionMoneyConfiguration() }, profileFactory) {
   const solanaObserver = createFakeSolanaObserver();
   const evmObserver = createFakeEvmObserver();
   const allowedDestinations = [policyAccount, purchaseDestination, productionBinding.refundTokenAccount, returnAccount];
@@ -191,7 +195,7 @@ export function createProductionTestFixture({ standingAuthorityIssuedAt, standin
     ownerPublicKey: ownerKeys.publicKey,
     policyPublicKey: policyKeys.publicKey,
   });
-  const evidenceProfile = createTestProductionEvidenceProfile({
+  const evidenceProfile = profileFactory({
     observers: { solana: solanaObserver, evm: evmObserver },
     signerRegistry,
     standingAuthorityProvider,
@@ -201,6 +205,11 @@ export function createProductionTestFixture({ standingAuthorityIssuedAt, standin
     purchaseDestination,
   });
   return { solanaObserver, evmObserver, standingAuthority, standingAuthorityProvider, moneyConfiguration, evidenceProfile };
+}
+
+/** Explicit retained-vault simulation; the shared default remains native. */
+export function createHistoricalProductionTestFixture(options = {}) {
+  return createTestFixture({ moneyConfiguration: historicalProductionMoneyConfiguration(), ...options }, createHistoricalTestProductionEvidenceProfile);
 }
 
 function stepAuth(fixture, cycleId, actionKind, authorizationKind, subjectDigest, destination, pack, spendAmount) {

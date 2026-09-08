@@ -11,6 +11,34 @@ import { createDefaultOperatorConfiguration } from '../../src/config/state-schem
 import { collectRehearsalEvidence, writeRehearsalEvidence } from '../../src/cycle/rehearsal-evidence.mjs';
 import { createRehearsalStageDriver, RehearsalRestartInjectedError } from '../../src/cycle/rehearsal-stage-driver.mjs';
 
+import { productionMoneyConfiguration } from './production-cycle.mjs';
+import { createNativeAdmissionFixture, reauthenticateNativeAdmissionFixture } from './native-admission-fixture.mjs';
+
+import { createRelayClient, createQuoteUsdValuation, isProcessQuoteUsdValuation } from '../../../adapters/src/relay-client.mjs';
+import { createTestProfileMutationAuthority } from '../../src/cycle/preflight.mjs';
+
+async function planNativeRehearsalAdmission({ cycleId, packId }) {
+  const admission = createNativeAdmissionFixture({ cycleId, packId, fundingWei: '30', costMicroUsd: '25', purchaseAtoms: '25' });
+  for (const [quoteField, identityField, usdField, amountField] of [
+    ['unitRelayQuote', 'unitRelay', 'unitFundingUsd', 'unitFundingQuote'],
+    ['relayQuote', 'relay', 'aggregateFundingUsd', 'aggregateFundingQuote'],
+  ]) {
+    const raw = structuredClone(admission[quoteField].raw);
+    raw.details.currencyIn.amountUsd = '0.000025';
+    raw.protocol.v2.orderData.inputs[0].refunds = [{ chainId: 'robinhood', currency: raw.details.currencyIn.currency.address,
+      recipient: raw.details.sender, deadline: raw.protocol.v2.orderData.output.deadline }];
+    const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
+      fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(raw) }) });
+    const quote = await client.quoteOutboundBridge({ amount: '25', user: raw.details.sender, recipient: raw.details.recipient,
+      tradeType: 'EXACT_OUTPUT', skipRouteCheck: true });
+    admission[quoteField] = quote;
+    admission[identityField].quoteDigest = quote.quoteDigest;
+    admission[usdField] = createQuoteUsdValuation({ quote, side: 'origin', amount: admission[amountField], rounding: 'up', nowMs: 1_000 });
+  }
+  admission.quoteDigest = admission.relayQuote.quoteDigest;
+  return admission;
+}
+
 class MemoryLeaseStore {
   #version = 0;
   #lease = null;
@@ -39,31 +67,31 @@ function rehearsalConfiguration() {
     allowedPackIds: ['collector-25'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '30',
-    maxCycleBudgetMicroUsdg: '30',
-    max24HourBudgetMicroUsdg: '60',
-    perCycleCapMicroUsdg: '30',
-    lossCapMicroUsdg: '60',
-    maxOutstandingCustodyMicroUsdg: '60',
+    maxUnitPriceMicroUsd: '30',
+    maxCycleBudgetMicroUsd: '30',
+    max24HourBudgetMicroUsd: '60',
+    perCycleCapMicroUsd: '30',
+    lossCapMicroUsd: '60',
+    maxOutstandingCustodyMicroUsd: '60',
     maxCyclesPerDay: 2,
     manualApprovalCycles: 2,
   };
 }
 
-function createRehearsalPolicy(configuration) {
+function createRehearsalPolicy(configuration, repository) {
   let current = configuration;
   const policyEngine = createPolicyEngine({
     now: () => 1_000,
+    verifyQuoteUsdValuation: isProcessQuoteUsdValuation,
     readConfiguration: async () => current,
-    readCustody: async () => ({
-      realizedLossMicroUsdg: '0',
-      atRiskMicroUsdg: '0',
-      outstandingMicroUsdg: '0',
-      heldAssets: false,
-      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
-      unattributed: false,
-      unvaluedExposure: false,
-    }),
+    readCustody: async () => {
+      const cycle = await repository.readActiveCycle();
+      const cost = cycle?.admission?.aggregateFundingUsd.amountMicroUsd ?? '0';
+      return { realizedLossMicroUsd: '0', atRiskMicroUsd: cost, outstandingMicroUsd: cost,
+        cycleExposureMicroUsd: cycle ? { [cycle.cycleId]: cost } : {},
+        heldAssets: false, heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
+        unattributed: false, unvaluedExposure: false };
+    },
     mutateConfiguration: async mutation => {
       const outcome = await mutation(current);
       current = outcome.configuration;
@@ -78,9 +106,9 @@ function createService({ repository, leaseStore, policyEngine, effects }) {
     cycleRepository: repository,
     config: {
       chainId: 4663,
-      contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+      moneyConfiguration: productionMoneyConfiguration(),
       relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-      rehearsal: { mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+      rehearsal: { mode: 'collector-only', settlementAmountAtomic: '25', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
       execution: { providerMode: 'fake' },
     },
     providers: {
@@ -97,15 +125,16 @@ function createService({ repository, leaseStore, policyEngine, effects }) {
     leaseStore,
     budgetReader: {
       read: async () => ({
-        availableProcessUsdg: '30',
-        packPriceUsdg: '30',
-        outboundCapUsdg: '0',
-        returnCapUsdg: '0',
-        operatingMarginUsdg: '0',
+        availableProcessWei: '30',
+        packPriceWei: '30',
+        outboundCapWei: '0',
+        returnCapWei: '0',
+        operatingMarginWei: '0',
         activeCycleId: null,
       }),
     },
     cycleRepository: repository,
+    admissionPlanner: { plan: planNativeRehearsalAdmission },
     runnerFactory: cycleId => ({ cycleId }),
     stageDriver,
     feeSettlementObserver: { observe: async cycleId => ({ cycleId, status: 'PENDING_BENEFICIARY_CLAIMS' }) },
@@ -113,16 +142,26 @@ function createService({ repository, leaseStore, policyEngine, effects }) {
     mode: 'rehearsal',
     providerMode: 'fake',
     packId: 'collector-25',
-    policyCapUsdg: '30',
+    policyCapMicroUsd: '30',
     policyEngine,
   });
 }
 
 test('two capped collector-only rehearsal cycles recover after every fake effect and write invariant evidence', async t => {
   const stateDir = await temporaryDirectory(t);
-  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000, { testAuthority: createTestProfileMutationAuthority() });
+  const rawCreateCycle = repository.createCycle.bind(repository);
+  repository.createCycle = async input => {
+    const cycle = await rawCreateCycle(input);
+    return { ...cycle, admission: reauthenticateNativeAdmissionFixture(cycle.admission) };
+  };
+  const rawReadActiveCycle = repository.readActiveCycle.bind(repository);
+  repository.readActiveCycle = async () => {
+    const cycle = await rawReadActiveCycle();
+    return cycle && { ...cycle, admission: reauthenticateNativeAdmissionFixture(cycle.admission) };
+  };
   const leaseStore = new MemoryLeaseStore();
-  const policy = createRehearsalPolicy(rehearsalConfiguration());
+  const policy = createRehearsalPolicy(rehearsalConfiguration(), repository);
   const effects = [];
   const completed = [];
 
@@ -143,14 +182,16 @@ test('two capped collector-only rehearsal cycles recover after every fake effect
         const cycleDigest = deriveCyclePolicyDigest({
           configuration,
           cycleId: active.cycleId,
-          releaseAmountMicroUsdg: active.releaseAmount,
+          releaseAmountWei: active.releaseAmount,
+          releaseCostMicroUsd: active.admission.aggregateFundingUsd.amountMicroUsd,
+          admission: active.admission,
           packId: 'collector-25',
           liveMode: false,
           mode: 'rehearsal',
         });
         await policy.policyEngine.recordManualApproval({ cycleDigest, cycleId: active.cycleId, approvedAtMs: 1_000 });
       } else {
-        assert.ok(error instanceof RehearsalRestartInjectedError);
+        assert.ok(error instanceof RehearsalRestartInjectedError, error.stack);
       }
     }
   }
