@@ -1,7 +1,7 @@
 // All identities, compiler bytes and economics below are synthetic, non-launch-authoritative.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonical, deriveProposal, envelope, sha256 } from '../../decisions/native-hook-commitments-proposal/commitments.mjs';
+import { canonical, deriveNativeIssuanceCommitments, envelope, sha256 } from '../programmable/lib/native-issuance-commitments.mjs';
 const h=`0x${'11'.repeat(32)}`, a=`0x${'22'.repeat(20)}`;
 function fixture() {
  const sourceBytes={'Hook.sol':Buffer.from('contract Synthetic {}'),'compiler':Buffer.from('synthetic compiler, not executable'),'input.json':Buffer.from(JSON.stringify({language:'Solidity',sources:{'Hook.sol':{content:'contract Synthetic {}'}},settings:{optimizer:{enabled:true,runs:200}}}))};
@@ -15,29 +15,29 @@ test('canonical envelope matches independent Python hashlib vector',()=>{
  assert.equal(canonical({z:'1',a:'x'}),'{"a":"x","z":"1"}');
  assert.equal(envelope('SYNTHETIC_TEST_V1',{z:'1',a:'x'}),'0xfc5b98071f41fe0c87ab08a3d5377e932774b9752bff8a98f61ee894df843cc2');
 });
-test('synthetic proposal is reproducible and domain separated',()=>{
- const f=fixture(), result=deriveProposal(f);
- assert.deepEqual(result,deriveProposal(f));
+test('synthetic commitments are reproducible and domain separated',()=>{
+ const f=fixture(), result=deriveNativeIssuanceCommitments(f);
+ assert.deepEqual(result,deriveNativeIssuanceCommitments(f));
  assert.notEqual(result.bindingDigest,result.runtimeDigest);
  assert.notEqual(envelope('A',f.runtime),envelope('B',f.runtime));
 });
 test('constructor self-reference and unrecognized field refuse',()=>{
  for(const field of ['hookAddress','hookSalt','hookInitCodeHash','hookRuntimeHash','poolId','finalReleaseHash']) {
-  const f=fixture(); f.binding[field]=h; assert.throws(()=>deriveProposal(f),/unexpected fields/);
+  const f=fixture(); f.binding[field]=h; assert.throws(()=>deriveNativeIssuanceCommitments(f),/unexpected fields/);
  }
 });
 test('bytes, source closure, runtime identity and stale commitment mutations refuse',()=>{
- let f=fixture();f.sourceBytes['Hook.sol'][0]^=1;assert.throws(()=>deriveProposal(f),/hash mismatch/);
- f=fixture();f.sourceBytes.extra=Buffer.from('extra');assert.throws(()=>deriveProposal(f),/closure bytes/);
- f=fixture();f.runtime.chainId='1';assert.throws(()=>deriveProposal(f),/identity mismatch/);
- f=fixture();f.runtime.providerVersion='changed';assert.throws(()=>deriveProposal(f),/commitment mismatch/);
- f=fixture();delete f.evidenceBytes['code.bin'];assert.throws(()=>deriveProposal(f),/closure bytes/);
+ let f=fixture();f.sourceBytes['Hook.sol'][0]^=1;assert.throws(()=>deriveNativeIssuanceCommitments(f),/hash mismatch/);
+ f=fixture();f.sourceBytes.extra=Buffer.from('extra');assert.throws(()=>deriveNativeIssuanceCommitments(f),/closure bytes/);
+ f=fixture();f.runtime.chainId='1';assert.throws(()=>deriveNativeIssuanceCommitments(f),/identity mismatch/);
+ f=fixture();f.runtime.providerVersion='changed';assert.throws(()=>deriveNativeIssuanceCommitments(f),/commitment mismatch/);
+ f=fixture();delete f.evidenceBytes['code.bin'];assert.throws(()=>deriveNativeIssuanceCommitments(f),/closure bytes/);
 });
 test('every direct role and economic change changes the binding commitment',()=>{
  for(const group of ['roles','economics']) for(const key of Object.keys(fixture().binding[group])) {
-  const f=fixture(), before=deriveProposal(f).bindingDigest;
+  const f=fixture(), before=deriveNativeIssuanceCommitments(f).bindingDigest;
   f.binding[group][key]=group==='roles'?`0x${'33'.repeat(20)}`:['name','symbol','quoteAsset'].includes(key)?'changed':String(BigInt(f.binding[group][key])+1n);
-  assert.notEqual(deriveProposal(f).bindingDigest,before,key);
+  assert.notEqual(deriveNativeIssuanceCommitments(f).bindingDigest,before,key);
  }
 });
 test('unsafe canonical types refuse',()=>{
