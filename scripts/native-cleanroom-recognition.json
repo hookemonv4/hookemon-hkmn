@@ -1140,7 +1140,7 @@
       ]
     },
     "docs/modules/policy-engine.md": {
-      "sha256": "0003c04ceb07df3cc1825ca25161fad245266991cf97bfb747af838a4158d13c",
+      "sha256": "7f9aa62990152bf143310ac71bddadcb1b4df830d833c62a31de04d37389f6df",
       "matches": [
         {
           "rule": "historical-architecture",
@@ -5775,7 +5775,7 @@
       ]
     },
     "packages/adapters/bin/hookemon-runner.mjs": {
-      "sha256": "9ff7348a8be7b16cf78823cb46a9455a763dc565887586124ca8c67d2113ca7f",
+      "sha256": "81e508fdb37517765d4e1f5920c80d885e8e04139e1996812fe12d91439843c9",
       "matches": [
         {
           "rule": "historical-architecture",
@@ -5789,60 +5789,60 @@
         },
         {
           "rule": "historical-architecture",
-          "offset": 27887,
+          "offset": 27947,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 27870,
+          "tokenStart": 27930,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 28653,
+          "offset": 28713,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 28653,
+          "tokenStart": 28713,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 29326,
+          "offset": 29386,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 29309,
+          "tokenStart": 29369,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 29992,
+          "offset": 30052,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 29975,
+          "tokenStart": 30035,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 36424,
+          "offset": 36484,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 36407,
+          "tokenStart": 36467,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 38785,
+          "offset": 38845,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 38768,
+          "tokenStart": 38828,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
