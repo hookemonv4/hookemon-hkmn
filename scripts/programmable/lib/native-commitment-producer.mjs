@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { collectNativeBuildClosure } from './native-build-closure.mjs';
 import { envelope, sha256 } from './native-issuance-commitments.mjs';
 import { assertObservedNativeRuntime } from './native-runtime-observer.mjs';
-import { sourceBundleContentSha256, sourceBundleDigest } from './source-bundle.mjs';
 
 const REQUIREMENTS_SHA256 = '0xcf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d';
 // Official solc 0.8.26 macosx-amd64 distribution, independently captured by the coordinator.
@@ -38,7 +37,9 @@ function requirementsBytes(root) {
  * Every declared provider-bundle byte is verified and excluded outputs are refused; completeness
  * of that declared inventory and global dependency acyclicity remain producer-policy obligations.
  * No route namespace, nonce, independent deployment values, bindingDigest or readiness is accepted
- * or returned. The next stage must apply the retained checksum-verified official provider coordinate derivation and token/
+ * or returned. Provider bundle digests are also omitted: the official CLI hashes canonical
+ * bundle content including file bytes, which differs from the repository manifest hash.
+ * The next stage must apply the retained checksum-verified official provider coordinate derivation and token/
  * custody artifacts reproduced from this exact compiler/input before committing their identities.
  */
 export function prepareNativeCommitmentInputs(options) {
@@ -60,7 +61,6 @@ export function prepareNativeCommitmentInputs(options) {
   return {
     sourceClosure, sourceBytes, requirementsBytes: requirements, requirementsSha256: REQUIREMENTS_SHA256,
     observedRuntime, runtimeAuthorityDigest,
-    sourceBundleDigest: sourceBundleDigest(sourceBundleManifest),
-    bundleContentSha256: sourceBundleContentSha256(sourceBundleManifest),
+    sourceBundleManifest,
   };
 }

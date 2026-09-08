@@ -23,3 +23,11 @@ test('refuses caller-provided independent coordinates and compiler approval over
     assert.throws(() => prepareNativeCommitmentInputs({ observedRuntime: diskObservation(), ...extra }), /unsupported input or acceptance claim/);
   }
 });
+
+test('refuses caller-supplied provider bundle digests in place of verified manifest bytes', () => {
+  for (const field of ['sourceBundleDigest', 'sourceBundleContentSha256']) {
+    assert.throws(() => prepareNativeCommitmentInputs({
+      observedRuntime: diskObservation(), [field]: `0x${'5'.repeat(64)}`,
+    }), /unsupported input or acceptance claim/);
+  }
+});
