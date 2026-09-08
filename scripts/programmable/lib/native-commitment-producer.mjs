@@ -36,6 +36,8 @@ function requirementsBytes(root) {
  * standard-input bytes are collected as supplied, without asserting optimizer/profile approval.
  * Every declared provider-bundle byte is verified and excluded outputs are refused; completeness
  * of that declared inventory and global dependency acyclicity remain producer-policy obligations.
+ * Exclusions are caller declarations, not a frozen output policy; this preparation cannot
+ * establish anti-self-reference. The materializer must pin its output set before use.
  * No route namespace, nonce, independent deployment values, bindingDigest or readiness is accepted
  * or returned. Provider bundle digests are also omitted: the official CLI hashes canonical
  * bundle content including file bytes, which differs from the repository manifest hash.

@@ -1,0 +1,33 @@
+{
+  "schema": "hookemon.owner-native-commitment-approval.v1",
+  "authority": "OWNER",
+  "approvalToken": "OWNER APPROVED",
+  "ownerStatement": "Ja, Definitionen und native Pr\u00e4zisierung \u00fcbernehmen",
+  "approvedScope": [
+    "Adopt the proposed domain-separated native issuance prebinding and runtime-authority commitment definitions in the next requirements revision.",
+    "Clarify REQ-provider-binding-2 for the already approved native ETH architecture.",
+    "Implement active release production and verification against these definitions."
+  ],
+  "exclusions": [
+    "No fee or ownership change.",
+    "No invented provider authority or runtime evidence.",
+    "No signature, broadcast, deployment or spending approval.",
+    "No control-pin approval implied."
+  ],
+  "baseCommit": "0313278b6c4db25ec16fec063d7f2edf4d52d8cd",
+  "baseRequirementsRevision": 71,
+  "proposals": {
+    "decisions/native-hook-commitments-proposal/requirements.patch": "d910d32bc5c4e6a6f665016c50654014a86dbc4e582bd1fa981a1da92d339884",
+    "decisions/native-hook-commitments-proposal/native-binding-requirement.patch": "3b3f3f3f4783140f16eed9790e80e9d2e5735fad757a9d82056120009c68689b",
+    "decisions/native-hook-commitments-proposal/architecture-proposal.json": "f036f689a16f527be0aeb2fa0232a4e59d9dfeb3472cb08402d21f9e8462253f",
+    "decisions/native-hook-commitments-proposal/commitments.mjs": "a46332732776dbe49e9aa7a6363173348cb0ad6d90f292d4efa4ba0d7a734f31"
+  },
+  "receiptId": "r-00650",
+  "requirementsRevision": 72,
+  "requirementsSha256": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d",
+  "additionalOwnerDecision": {
+    "receiptId": "r-00652",
+    "recordPath": "decisions/owner-approvals/mainnet-test-priority-20260908.json",
+    "scope": "Replace the old USD 250 test envelope with planned EUR 250 contribution and deferred complete-process costing, preserving per-action limits and transaction authority."
+  }
+}

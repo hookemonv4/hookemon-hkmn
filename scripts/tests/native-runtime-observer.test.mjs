@@ -102,7 +102,7 @@ test('observer rejects credential-bearing or insecure RPC URLs before fetching',
   let fetched = false; const original = globalThis.fetch;
   globalThis.fetch = async () => { fetched = true; throw new Error('unexpected network'); };
   t.after(() => { globalThis.fetch = original; });
-  for (const rpcUrl of ['http://example.org', 'https://owner:secret@example.org', 'https://example.org?apiKey=secret']) await assert.rejects(observeNativeRuntimeAuthority({ rpcUrl }), /INVALID_URL/);
+  for (const rpcUrl of ['http://example.org', 'https://owner:secret@localhost', 'https://example.org?apiKey=secret']) await assert.rejects(observeNativeRuntimeAuthority({ rpcUrl }), /INVALID_URL/);
   assert.equal(fetched, false);
 });
 

@@ -6,7 +6,11 @@ const equal = (actual, expected, label) => {
   if (actual !== expected) throw new Error(`native release identity mismatch: ${label}`);
 };
 
-/** Read-only local consistency check. Neither supplied evidence nor this result grants authority. */
+/**
+ * Read-only local consistency check. Neither supplied evidence nor this result grants authority.
+ * Use explicit target artifactPath keys matching the committed closure and an inputDirectory
+ * rooted at those paths. The complete producer must also bind deploymentManifestPath.
+ */
 export function verifyNativeReleaseIdentities({ commitments, derived, ...derivation }) {
   const { launchInputs } = derivation;
   equal(launchInputs?.schemaVersion, 'hookemon.phase3.launch-inputs.v2', 'native launch schema');

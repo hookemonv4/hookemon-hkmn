@@ -1,40 +1,40 @@
 {
   "schema": "hookemon.cleanroom-recognition.v1",
-  "requirementsRevision": 71,
+  "requirementsRevision": 72,
   "sourceRevision": "19d9d8bfae0a55c7fd8091ffb42d7c9845ca6074",
   "auditPath": "docs/evidence/native-cleanroom-audit-20260908/findings.json",
   "auditSha256": "187ec57183501df3c733129603255c8b87bb63f274679acd4413cc7416dabd8c",
   "scope": "Exact reviewed bytes only; native economic terms, incidental full identifiers and unchanged official evidence. No runtime authority or privacy-rule exemption.",
   "files": {
     "architecture/interfaces.json": {
-      "sha256": "65db2344cd7307897a2d8910d5d33f75b9e256573159a41864ebbdd0416099bc",
+      "sha256": "b54b50a0cd96d1db48b73eca23dd67d03c73c6a787d594cd6e6d68b7eac253d5",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 41301,
+          "offset": 41322,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 41301,
+          "tokenStart": 41322,
           "tokenLength": 11,
           "tokenSha256": "67c3da52dac923f8e13d12d8ec89604cc901c8888ce886a014e73d546625dc16",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 41387,
+          "offset": 41408,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 41387,
+          "tokenStart": 41408,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 46036,
+          "offset": 46057,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 46036,
+          "tokenStart": 46057,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
@@ -6317,54 +6317,54 @@
       ]
     },
     "specs/requirements.json": {
-      "sha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
+      "sha256": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d",
       "matches": [
         {
           "rule": "historical-architecture",
-          "offset": 5619,
+          "offset": 7025,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 5619,
+          "tokenStart": 7025,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 6849,
+          "offset": 8255,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 6849,
+          "tokenStart": 8255,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 49044,
+          "offset": 50450,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 49044,
+          "tokenStart": 50450,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 106482,
+          "offset": 107888,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 106482,
+          "tokenStart": 107888,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
           "rule": "historical-architecture",
-          "offset": 110055,
+          "offset": 111834,
           "length": 8,
           "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 110055,
+          "tokenStart": 111834,
           "tokenLength": 8,
           "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
           "basis": "reviewed-native-71-or-retained-provider-source"
@@ -7811,6 +7811,36 @@
           "tokenLength": 4,
           "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
           "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        }
+      ]
+    },
+    "scripts/programmable/lib/native-build-closure.mjs": {
+      "sha256": "ca98e639e9b01d13847e91b5076fd971e7fcb5326e5ddc40d6f3201a1e2fdd7d",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 6171,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 6152,
+          "tokenLength": 90,
+          "tokenSha256": "fc994d470487c63d9eb7e7d52711eff66ce29c5bdc61f14ebe0b00052d1e82ab",
+          "basis": "exact-official-solidity-0.8.26-source-reviewed-by-independent-Devin"
+        }
+      ]
+    },
+    "scripts/tests/native-runtime-observer.test.mjs": {
+      "sha256": "7eba178c0aecbbbbd78b9e27dfc783022d3833051fd2b7af60b57ff9750446f8",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 114309,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 653,
+          "tokenLength": 182640,
+          "tokenSha256": "d2d7d716c6bd1ec66d660cc9b4d86a924f71d441121bb77f91db850d0f14fd91",
+          "basis": "incidental-token-in-checksummed-compressed-public-runtime-and-ABI-test-fixture"
         }
       ]
     }
