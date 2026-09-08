@@ -7,6 +7,7 @@ import {
 } from './gates.mjs';
 import { PHASE_SET } from './phases.mjs';
 import { validateCompletionCommit } from './ledger.mjs';
+import { validateProjectedOperationalAcceptance } from './task-binding-recovery.mjs';
 
 export const REQ_KINDS = ['functional', 'performance', 'reliability', 'security', 'operational', 'compatibility', 'migration'];
 const FILE = ['specs', 'requirements.json'];
@@ -48,14 +49,14 @@ export function traceCheck(root) {
   const projection = readTaskProjection(root);
   const gaps = [...projection.gaps];
   const tasks = projection.tasks;
-  const activeTasks = tasks.filter(task => task.status !== 'deferred');
+  const activeTasks = tasks.filter(task => task.status !== 'deferred' && !task.operationalAcceptance);
   const receipts = listReceipts(root);
   const requirements = listRequirements(root);
   const requirementIds = new Set(requirements.map(requirement => requirement.id));
 
   for (const task of tasks) {
     if (task.reqs.length === 0) {
-      if (task.status !== 'deferred') gaps.push(`${task.id}: active task needs at least one known requirement`);
+      if (task.status !== 'deferred' && !task.operationalAcceptance) gaps.push(`${task.id}: active task needs at least one known requirement`);
     }
     for (const requirementId of task.reqs) {
       if (!requirementIds.has(requirementId)) {
@@ -116,6 +117,10 @@ function readTaskProjection(root) {
         problems.push(`${task.status} task must not have commitSha`);
       }
       const deferralFields = ['deferApproval', 'deferDescriptor', 'deferPrestateFingerprint'];
+      if (Object.hasOwn(task, 'operationalAcceptance')) {
+        try { validateProjectedOperationalAcceptance(root, task); }
+        catch (error) { problems.push(`operational acceptance invalid: ${error.message}`); }
+      }
       if (task.status === 'deferred') {
         for (const field of deferralFields) {
           if (typeof task[field] !== 'string' || !task[field]) {
@@ -166,6 +171,11 @@ function isValidTaskEvidence(root, receipt, task) {
       || receipt.data?.requirementsHash !== requirements.hash
       || !Object.hasOwn(receipt.inputHashes, REQUIREMENTS_INPUT)) return false;
   if (!Object.keys(receipt.inputHashes).some(input => input !== REQUIREMENTS_INPUT)) return false;
+  if (task.operationalAcceptance) {
+    const authorityInputs = validateProjectedOperationalAcceptance(root, task);
+    if (authorityInputs.some(input => !Object.hasOwn(receipt.inputHashes, input))) return false;
+    if (!Object.keys(receipt.inputHashes).some(input => input !== REQUIREMENTS_INPUT && !authorityInputs.includes(input))) return false;
+  }
   return !isStale(root, receipt);
 }
 
@@ -182,6 +192,7 @@ export function taskFingerprint(task) {
     deferApproval: task.deferApproval,
     deferDescriptor: task.deferDescriptor,
     deferPrestateFingerprint: task.deferPrestateFingerprint,
+    operationalAcceptance: task.operationalAcceptance,
   };
   return sha256(Buffer.from(JSON.stringify(canonical)));
 }
@@ -206,7 +217,7 @@ export function taskEvidenceContext(root, taskId, requestedCommit = null) {
       requirementsRevision: requirements.revision,
       requirementsHash: requirements.hash,
     },
-    inputs: [REQUIREMENTS_INPUT],
+    inputs: [REQUIREMENTS_INPUT, ...(task.operationalAcceptance ? validateProjectedOperationalAcceptance(root, task) : [])],
   };
 }
 
