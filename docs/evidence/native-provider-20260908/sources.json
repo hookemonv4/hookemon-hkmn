@@ -1,0 +1,58 @@
+[
+  {
+    "file": "programmable-capabilities.json",
+    "url": "https://api.programmable.market/v4/chains/4663/capabilities",
+    "at": "2026-09-08T08:19:40.109574+00:00",
+    "sha256": "7569a5332f1e9a4a5eb07e7757d9beb0d7d24dd6892b32283691bc7aca94b731",
+    "bytes": 37040
+  },
+  {
+    "file": "programmable-discovery.json",
+    "url": "https://programmable.market/.well-known/programmable.json",
+    "at": "2026-09-08T08:19:40.238110+00:00",
+    "sha256": "bd63db1d503824cc3c303063a5c15ad3edaef7c639148eb4184ba848a42a88f9",
+    "bytes": 40558
+  },
+  {
+    "file": "programmable-openapi.json",
+    "url": "https://programmable.market/openapi/custom-launch-v4.1.json",
+    "at": "2026-09-08T08:19:40.572178+00:00",
+    "sha256": "d44a77fd2d7f6d14d60b837fedd45349083b47bc93c5b29de2612274407928df",
+    "bytes": 4045687
+  },
+  {
+    "file": "programmable-create-schema.json",
+    "url": "https://programmable.market/schemas/custom-launch/v4.1/create-request.json",
+    "at": "2026-09-08T08:19:40.690984+00:00",
+    "sha256": "c4d23b0f3bd232b209d6566ac804348720b81432a2978728a10cc4317895c404",
+    "bytes": 180599
+  },
+  {
+    "file": "programmable-guide.md",
+    "url": "https://programmable.market/developers/custom-launch-api-v1.md",
+    "at": "2026-09-08T08:19:40.788030+00:00",
+    "sha256": "be14b6979bb5d7caa57f8b88821b913c4ee7f2b95d78d6573256e757fb24999a",
+    "bytes": 54235
+  },
+  {
+    "file": "relay-openapi.json",
+    "url": "https://api.relay.link/documentation/json",
+    "at": "2026-09-08T08:19:41.731184+00:00",
+    "sha256": "74c853cf2ca9d51d3e2fa1c6a4b9865a527690bdc0af2d3fdac6ca0169e02390",
+    "bytes": 339559
+  },
+  {
+    "file": "relay-chains.json",
+    "url": "https://api.relay.link/chains",
+    "at": "2026-09-08T08:19:41.803359+00:00",
+    "sha256": "e78d963166e06e9091419828ba1838730d3a778b51902526be51882b50777d32",
+    "bytes": 151964
+  },
+  {
+    "file": "collector-machines.json",
+    "url": "https://gacha.collectorcrypt.com/api/machines",
+    "at": "2026-09-08T08:19:42.046899+00:00",
+    "sha256": "e9420ac8b1145e5bbdec6990fde458bb7b94ca9c9395667fdff3415d849cff5e",
+    "bytes": 56177
+  }
+]

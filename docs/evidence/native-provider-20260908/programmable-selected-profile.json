@@ -1,0 +1,160 @@
+{
+  "capabilities": {
+    "serverTime": "2026-09-08T08:19:40.101Z",
+    "chain": {
+      "id": "4663",
+      "caip2": "eip155:4663",
+      "name": "Robinhood Chain Mainnet"
+    },
+    "profile": {
+      "schemaVersion": "programmable.custom-launch-profile-ref.v4",
+      "structuralProfileId": "programmable.custom-launch.robinhood-mainnet.v1",
+      "businessProfileId": "robinhood-production-launch",
+      "admissionDescriptorDigest": "sha256:b09611360e284641873fdb2914b4282e0545e32ea587b278fcd11f4db9a4e7f5",
+      "admissionPolicyDigest": "sha256:47801f57e2365f89eb7397a2df10d697bd1f756ec01536b9b34755e89809da04",
+      "admissionBindingDigest": "sha256:5b2486f35fcd44bd476cafd5bfb5a12decf05a756ba237ca191928f5414c721e",
+      "admissionSchemaDigest": "sha256:6a8194a3b5d8b6432a95ec04da3cd86091ad64c93c0531125caf00ecb919c8cf",
+      "profileRevision": 2,
+      "profileVersion": "4.1.0",
+      "profileDigest": "sha256:b0fca91264a49d358ed1a9eec2a679b59a48d716b71475bef583c2545e1ee502"
+    },
+    "funding": {
+      "modes": [
+        "wallet-transaction-value"
+      ]
+    },
+    "readiness": {
+      "status": "ready",
+      "reasonCodes": []
+    }
+  },
+  "discovery": {
+    "status": "live",
+    "publicWrites": true,
+    "publicAuthorization": true,
+    "releaseReady": true,
+    "platformFeePolicy": {
+      "required": true,
+      "status": "required-exact-native-fee-kernel",
+      "appliesTo": "new-robinhood-v4.1-api-custom-launches-only",
+      "changesExistingLaunches": false,
+      "changesEthereumLaunches": false,
+      "rateBps": 20,
+      "ratePpm": 2000,
+      "ratePercent": "0.20%",
+      "recipient": "0xD88539d3c4C460136a733A3Fd60cf6BF269079da",
+      "basis": "gross-native-leg-once-per-successful-swap",
+      "feeCurrency": "native-ETH",
+      "accountingMode": "pool-manager-native-claims",
+      "rounding": "ceil-per-trade",
+      "accrual": "pool-manager-native-claims",
+      "claimMechanism": "permissionless-fixed-recipient",
+      "enforcement": "exact-kernel-proof-required-before-wallet-handoff",
+      "claimScope": "exact-verified-kernel-and-stamped-poolkey-only",
+      "separateFromCreatorAndLpFees": true,
+      "childRuntimeObservation": "required-after-deployment",
+      "transfersToTreasuryImmediatelyPerTrade": false,
+      "canonicalOnchainEnforcementProven": false,
+      "guaranteedRevenue": false,
+      "feeBehaviorClaim": false,
+      "universalFeeBehaviorClaim": false
+    },
+    "fundingPlan": {
+      "required": true,
+      "schemaVersion": "programmable.robinhood-funding-plan.v1",
+      "schemaUrl": "https://programmable.market/schemas/custom-launch/v4.1/funding-plan.json",
+      "capitalSourceChoices": [
+        "buyer-funded",
+        "creator-funded",
+        "hybrid",
+        "custom"
+      ],
+      "pricingModelChoices": [
+        "concentrated-liquidity",
+        "custom-curve",
+        "auction",
+        "custom"
+      ],
+      "allocationFields": [
+        "initialLiquidityWei",
+        "initialBuyWei",
+        "reserveWei",
+        "otherLaunchValueWei"
+      ],
+      "allocationSum": "equals-funding.valueWei-without-double-counting",
+      "budgets": [
+        "maxLaunchValueWei",
+        "maxGasCostWei"
+      ],
+      "gasAdditionalToLaunchValue": true,
+      "buildOnlyCreatesPermits": false,
+      "declarationsProveLiquidityOrSolvency": false
+    },
+    "initialBuy": {
+      "required": true,
+      "minimumUsd": "1",
+      "assessmentTime": "permit-authorization",
+      "assessmentBase": "gross-native-initial-buy-at-admission",
+      "feeTreatment": "included-in-initial-buy",
+      "gasTreatment": "additional-not-included-in-initial-buy",
+      "execution": "atomic-full-native-input-and-minimum-token-output",
+      "recipient": "launch-wallet",
+      "minimumTokensOutRequired": true,
+      "quotePath": "/v4/chains/4663/initial-buy-quote",
+      "quoteAuthentication": "none",
+      "quoteSchemaUrl": "https://programmable.market/schemas/custom-launch/v4.1/initial-buy-quote.json",
+      "reviewSchemaUrl": "https://programmable.market/schemas/custom-launch/v4.1/initial-buy-review.json",
+      "referenceChainId": 1,
+      "executionChainId": 4663,
+      "referenceFeed": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+      "referenceDecimals": 8,
+      "maximumQuoteAgeSeconds": 60,
+      "staleFallback": false,
+      "walletExecutionUsdValueGuaranteed": false,
+      "firstTradeIndexingGuaranteed": false,
+      "budgetIncreaseWithoutUserApproval": false
+    },
+    "cli": {
+      "sourceCandidateVersion": "4.1.0",
+      "sourceCandidate": false,
+      "released": true,
+      "installable": true,
+      "release": {
+        "repository": "programmablehq/PROGRAMMABLE",
+        "tag": "programmable-launch-v4.1.0",
+        "version": "4.1.0",
+        "source": {
+          "commitSha": "b17e40b9ff20bb16feb857bf77451b0a590e7105",
+          "ref": "refs/heads/production",
+          "treeSha": "373bceebe355e4f26eb8ffb265bff91630224ab6"
+        },
+        "assets": [
+          {
+            "name": "programmable-launch-4.1.0.cdx.json",
+            "sha256": "sha256:8382eb1fc17c45ea744806409528c8509bcb01b676f39848b8f060934450bcf7"
+          },
+          {
+            "name": "programmable-launch-4.1.0.release.json",
+            "sha256": "sha256:8bbfb2864db15e3657a5cff0139b00a9aa950aaff248dcf515a3ed7ca9998460"
+          },
+          {
+            "name": "programmable-launch-4.1.0.tgz",
+            "sha256": "sha256:9d7d26a74b0b4aaa3b3d8acddc80f821cbd79511ee1ada6acc7b935aeb21cac5"
+          },
+          {
+            "name": "programmable-launch-4.1.0.tgz.sha256",
+            "sha256": "sha256:7074478e3f73da0f3db84114717046e60a71e259e867ef5416d33ef651dfc0a8"
+          }
+        ],
+        "releaseUrl": "https://github.com/programmablehq/PROGRAMMABLE/releases/tag/programmable-launch-v4.1.0",
+        "tarballUrl": "https://github.com/programmablehq/PROGRAMMABLE/releases/download/programmable-launch-v4.1.0/programmable-launch-4.1.0.tgz",
+        "checksumUrl": "https://github.com/programmablehq/PROGRAMMABLE/releases/download/programmable-launch-v4.1.0/programmable-launch-4.1.0.tgz.sha256"
+      },
+      "liveEthereumVersion": "3.3.9",
+      "signsWalletTransactions": false,
+      "broadcastsWalletTransactions": false
+    },
+    "createRequestSchemaUrl": "https://programmable.market/schemas/custom-launch/v4.1/create-request.json",
+    "openApiUrl": "https://programmable.market/openapi/custom-launch-v4.1.json"
+  }
+}
