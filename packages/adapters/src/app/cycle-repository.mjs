@@ -5058,7 +5058,7 @@ export class CycleRepository {
     }
     if (location.state.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native supplementary settlement refuses historical cycle resume');
     const current = location.state.supplementarySettlements.get(positionId);
-    let nativeReturnReservation = null;
+    let nativeReturnReservations = [];
     if (input.nextState === 'RETURN_BROADCAST') {
       const stage = `supplementary-${digest({ schema: 'hookemon.supplementary-return-stage.v1', positionId }).slice(7, 55)}`;
       const source = await this.#store.readPagedPayoutState(location.cycleId, stage);
@@ -5078,10 +5078,12 @@ export class CycleRepository {
         throw new Error('native supplementary return differs from its original position source and destination');
       }
       supplementaryNativeReturnCustody(location.state, proof.observedAmountAtomic);
-      nativeReturnReservation = {
-        key: relayTransactionReservationKey('4663', proof.destinationTxHash),
-        value: { cycleId: location.cycleId, relayRequestId: source.relayRequestId, positionId, transactionHash: proof.destinationTxHash },
-      };
+      const owner = { cycleId: location.cycleId, relayRequestId: source.relayRequestId, positionId };
+      nativeReturnReservations = [
+        { key: relayTransactionReservationKey('4663', proof.destinationTxHash), value: { ...owner, transactionHash: proof.destinationTxHash } },
+        { key: relayTransactionReservationKey('792703809', proof.sourceTxHash), value: { ...owner, transactionHash: proof.sourceTxHash } },
+        { key: `relay-order:${payment.orderId.toLowerCase()}`, value: { ...owner, orderId: payment.orderId.toLowerCase() } },
+      ];
     }
 
     const returnBoundary = input.nextState === 'RETURN_BROADCAST'
@@ -5151,7 +5153,7 @@ export class CycleRepository {
         evidence,
         ...(returnBoundary === null ? {} : { payoutSource }),
       }, {
-        globalKeyReservations: nativeReturnReservation === null ? [] : [nativeReturnReservation],
+        globalKeyReservations: nativeReturnReservations,
         assertState: state => {
           const latest = state.supplementarySettlements.get(positionId) ?? null;
           if (latest === null || canonicalJson(latest) !== canonicalJson(current)) {

@@ -63,6 +63,10 @@ test('held native positions retain USD cost without principal and consume an att
   assert.equal(ledger.heldAssets, '0');
   assert.deepEqual(ledger.gasPayments, []);
   assert.equal(ledger.gasReserve.amountAtomic, '200');
+  const secondDestination = `0x${'77'.repeat(32)}`;
+  fixture.expected.transactionHash = secondDestination;
+  fixture.receipt.transactionHash = secondDestination;
+  fixture.receipt.logs[0].transactionHash = secondDestination;
   const duplicate = await boundaryFor(repository, second, two, fixture);
   await assert.rejects(repository.advanceSupplementarySettlement(second.positionId, { expectedState: 'BUYBACK_SENT_UNKNOWN', nextState: 'RETURN_BROADCAST', evidence: duplicate }));
 });
