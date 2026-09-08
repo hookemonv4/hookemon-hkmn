@@ -1,0 +1,29 @@
+[
+  {
+    "name": "collector-catalog",
+    "url": "https://gacha.collectorcrypt.com/api/gachas/all",
+    "at": "2026-09-08T11:04:33.605587+00:00",
+    "httpStatus": "200",
+    "exitCode": 0,
+    "stderr": "",
+    "sha256": "55566d13b2b731b092e56cfa6f7210b4dafc9c1d6eef14d3810b0055e6ade913"
+  },
+  {
+    "name": "collector-status",
+    "url": "https://gacha.collectorcrypt.com/api/status",
+    "at": "2026-09-08T11:04:33.605735+00:00",
+    "httpStatus": "200",
+    "exitCode": 0,
+    "stderr": "",
+    "sha256": "4d17ea9deca201259d3d074ea99309a77d6e52d708e0a792a7b1e41a6ea67efb"
+  },
+  {
+    "name": "collector-machines",
+    "url": "https://gacha.collectorcrypt.com/api/machines",
+    "at": "2026-09-08T11:04:33.607272+00:00",
+    "httpStatus": "200",
+    "exitCode": 0,
+    "stderr": "",
+    "sha256": "35c27d62e275d7f9606fb226ad64f333920010d8c61ec37155f3b6d1854ef1cb"
+  }
+]
