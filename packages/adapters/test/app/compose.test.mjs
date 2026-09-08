@@ -19,7 +19,7 @@ import { acquireLease } from '../../../runner/src/automation/exclusive-lease.mjs
 import { createEmptyOperatorState, mutateOperatorState, readOperatorState } from '../../../runner/src/operator/state-file.mjs';
 import { applyOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
-import { relayQuoteDigest } from '../../src/relay-client.mjs';
+import { createRelayClient, createQuoteUsdValuation, relayQuoteDigest } from '../../src/relay-client.mjs';
 import { createRequestListener } from '../../../dashboard/src/server.mjs';
 import { appendAuditEntry, readAllAuditEntries } from '../../../dashboard/src/auth/audit-log.mjs';
 import { buildQuoteRefreshPlanner, compose as composeRoot, createTrustedSolanaBlockhashContextResolver } from '../../src/app/compose.mjs';
@@ -40,6 +40,8 @@ import {
   createSolanaRpcClient,
   deriveAssociatedTokenAddress,
 } from '../../src/solana-rpc.mjs';
+import { createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
+import { keccak256 } from 'viem';
 import { MoneyConfigurationRejected } from '../../src/app/environment.mjs';
 import { deriveOnchainCycleId } from '../../src/app/stages/action-builder.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
@@ -64,10 +66,10 @@ function testProcessLiabilityReader(amountAtomic = '1000000') {
   return {
     async read({ cycleId }) {
       return {
-        schema: 'hookemon.process-liability-evidence.v1',
+        schema: 'hookemon.process-liability-evidence.v2',
         chainId: '4663',
-        assetId: FULL_USDG,
-        decimals: 6,
+        assetId: FULL_ETH,
+        decimals: 18,
         hook: FULL_HOOK,
         cycleId,
         onchainCycleId: deriveOnchainCycleId(cycleId),
@@ -80,7 +82,7 @@ function testProcessLiabilityReader(amountAtomic = '1000000') {
         processClaimCycleUsed: false,
         activeProcessClaimLimit: amountAtomic,
         totalLiability: amountAtomic,
-        hookUsdgBalance: amountAtomic,
+        hookNativeBalance: amountAtomic,
         isSolvent: true,
         operations: FULL_EVM_ACCOUNT.toLowerCase(),
         ceilingAtomic: amountAtomic,
@@ -90,18 +92,18 @@ function testProcessLiabilityReader(amountAtomic = '1000000') {
 }
 
 const SUFFICIENT_BUDGET = Object.freeze({
-  availableProcessUsdg: '10',
-  packPriceUsdg: '1',
-  outboundCapUsdg: '0',
-  returnCapUsdg: '0',
-  operatingMarginUsdg: '0',
+  availableProcessWei: '10',
+  packPriceWei: '1',
+  outboundCapWei: '0',
+  returnCapWei: '0',
+  operatingMarginWei: '0',
 });
 
 function productionMoneyConfiguration() {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: '0x0000000000000000000000000000000000000001', decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: {
         chainId: '792703809',
         assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -109,14 +111,14 @@ function productionMoneyConfiguration() {
       },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: '0x0000000000000000000000000000000000000001', decimals: 6, amountAtomic: '0' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       solanaReceive: {
         chainId: '792703809',
         assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
         decimals: 6,
         amountAtomic: '0',
       },
-      returnUsdg: { chainId: '4663', assetId: '0x0000000000000000000000000000000000000001', decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2000000000' },
@@ -159,9 +161,26 @@ function collectorOnlyMoneyConfiguration() {
   };
 }
 
+// Exact fetched 25-USDC quote valued at USD 21; the fixture deliberately assumes no parity.
+async function collectorPackFundingUsd(operator) {
+  const zero = `0x${'0'.repeat(40)}`;
+  const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      const raw = { requestId: 'collector-usd-cost', details: { sender: operator, recipient: PRODUCTION_ADMISSION_EVM,
+        currencyIn: { currency: { chainId: 792703809, address: CIRCLE_USD_MINT, decimals: 6 }, amount: request.amount, amountUsd: '21' },
+        currencyOut: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: '8000000000000000', minimumAmount: '8000000000000000' } },
+        protocol: { v2: { orderId: `0x${'4'.repeat(64)}`, orderData: {
+          inputs: [{ payment: { chainId: 'solana', currency: CIRCLE_USD_MINT, amount: request.amount }, refunds: [{ chainId: 'solana', currency: CIRCLE_USD_MINT, recipient: operator, deadline: 2_000_000_000 }] }],
+          output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [], payments: [{ recipient: PRODUCTION_ADMISSION_EVM, currency: zero, expectedAmount: '8000000000000000', minimumAmount: '8000000000000000' }] }
+        } } }, steps: [] };
+      return { ok: true, status: 200, text: async () => JSON.stringify(raw) };
+    } });
+  const quote = await client.quoteReturnBridge({ user: operator, recipient: PRODUCTION_ADMISSION_EVM, amount: '25000000', tradeType: 'EXACT_INPUT', skipRouteCheck: true });
+  return createQuoteUsdValuation({ quote, side: 'origin', amount: { chainId: '792703809', assetId: CIRCLE_USD_MINT, decimals: 6, amountAtomic: '25000000' }, rounding: 'up', nowMs: 1_000 });
+}
+
 const OBSERVABILITY_PINS = Object.freeze({
-  usdgProxy: '0x0000000000000000000000000000000000000001',
-  usdgImplementation: '0x0000000000000000000000000000000000000002',
   poolManager: '0x0000000000000000000000000000000000000003',
   positionManager: '0x0000000000000000000000000000000000000004',
   router: '0x0000000000000000000000000000000000000005',
@@ -177,8 +196,8 @@ function liveObservabilityConfig(requiredSignerRoles = ['evm', 'solana']) {
   return {
     canaries: {
       chainId: 4663,
+      nativePrincipal: { chainId: '4663', assetId: 'native', decimals: 18 },
       contracts: {
-        usdg: { proxy: pin(OBSERVABILITY_PINS.usdgProxy), implementation: pin(OBSERVABILITY_PINS.usdgImplementation), decimals: 6 },
         poolManager: pin(OBSERVABILITY_PINS.poolManager),
         positionManager: pin(OBSERVABILITY_PINS.positionManager),
         router: pin(OBSERVABILITY_PINS.router),
@@ -228,12 +247,14 @@ async function seedCycle(stateDir, {
   // production identity by default.
   admission = null,
   operations = null,
+  releaseCostMicroUsd = '1',
 }) {
-  const cycleRepository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
+  const cycleRepository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000, { testAuthority: createTestProfileMutationAuthority() });
   const reservedCycleId = admission === null ? null : cycleRepository.nextCycleId();
-  const resolvedAdmission = typeof admission === 'function' ? admission(reservedCycleId) : admission;
+  const resolvedAdmission = typeof admission === 'function' ? await admission(reservedCycleId) : admission;
   const cycle = await cycleRepository.createCycle({
     releaseAmount,
+    releaseCostMicroUsd,
     mode,
     ...(providerMode === null ? {} : { providerMode }),
     ...(reservedCycleId === null ? {} : { cycleId: reservedCycleId }),
@@ -249,7 +270,7 @@ async function seedCycle(stateDir, {
   for (const { stage, packs } of packBatchRequests) {
     await cycleRepository.recordPackBatchRequest(cycle.cycleId, stage, packs);
   }
-  return cycle;
+  return { ...cycle, releaseCostMicroUsd, ...(resolvedAdmission === null ? {} : { admission: resolvedAdmission }) };
 }
 
 function baseConfigurationPatch(overrides = {}) {
@@ -258,9 +279,9 @@ function baseConfigurationPatch(overrides = {}) {
     allowedPackIds: [],
     requestedOrders: 0,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '0',
-    maxCycleBudgetMicroUsdg: '0',
-    max24HourBudgetMicroUsdg: '0',
+    maxUnitPriceMicroUsd: '0',
+    maxCycleBudgetMicroUsd: '0',
+    max24HourBudgetMicroUsd: '0',
     paused: false,
     liveMode: false,
     ...overrides,
@@ -272,22 +293,22 @@ function livePolicyPatch(packId) {
     liveMode: true,
     allowedPackIds: [packId],
     requestedOrders: 1,
-    maxUnitPriceMicroUsdg: '10',
-    maxCycleBudgetMicroUsdg: '10',
-    max24HourBudgetMicroUsdg: '10',
+    maxUnitPriceMicroUsd: '10',
+    maxCycleBudgetMicroUsd: '10',
+    max24HourBudgetMicroUsd: '10',
     maxCyclesPerDay: 1,
-    lossCapMicroUsdg: '20',
-    maxOutstandingCustodyMicroUsdg: '20',
+    lossCapMicroUsd: '20',
+    maxOutstandingCustodyMicroUsd: '20',
   };
 }
 
 function collectorOnlyLivePolicyPatch() {
   return {
     ...livePolicyPatch('collector-25'),
-    maxUnitPriceMicroUsdg: '25000000',
-    maxCycleBudgetMicroUsdg: '25000000',
-    max24HourBudgetMicroUsdg: '25000000',
-    perCycleCapMicroUsdg: '25000000',
+    maxUnitPriceMicroUsd: '21000000',
+    maxCycleBudgetMicroUsd: '21000000',
+    max24HourBudgetMicroUsd: '21000000',
+    perCycleCapMicroUsd: '21000000',
     manualApprovalCycles: 1,
   };
 }
@@ -369,6 +390,13 @@ function minimalInjectedAdapters() {
 // Composition tests use fake transports. Supply the startup identity independently so every
 // existing fixture stays deterministic while production composition still probes real RPCs.
 function compose(config) {
+  if (config.execution?.profile === 'production') {
+    const hook = config.contracts?.hook ?? `0x${'8'.repeat(40)}`;
+    const authority = config.preflightAuthority ?? createTestProfileMutationAuthority();
+    config = { ...config, contracts: { ...config.contracts, hook }, preflightAuthority: authority,
+      nativePaymentBinding: createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1',
+        chainId: '4663', hook: { address: hook, runtimeHash: keccak256('0x6000') }, relay: null }, authority) };
+  }
   return composeRoot(Object.hasOwn(config, 'networkIdentity')
     ? config
     : { ...config, networkIdentity: networkIdentity() });
@@ -402,6 +430,7 @@ test('compose starts a live collector-only rehearsal with only Solana identity a
   const composition = await compose({
     stateDir,
     statePath,
+    now: () => 1_000,
     workerOwner: 'test-worker',
     leaseTtlMs: 30_000,
     solana: { rpcUrl: 'https://solana.example.test', chainId: 'solana-mainnet' },
@@ -410,15 +439,16 @@ test('compose starts a live collector-only rehearsal with only Solana identity a
       apiKey: 'fixture-api-key',
       settlementAsset: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS },
       packPrice: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS, amountAtomic: '25000000' },
+      packFundingUsd: await collectorPackFundingUsd(operator),
     },
     accounts: { evm: null, solana: operator },
     pack: { code: 'collector-25' },
     budget: {
-      availableProcessUsdg: '25000000',
-      packPriceUsdg: '25000000',
-      outboundCapUsdg: '0',
-      returnCapUsdg: '0',
-      operatingMarginUsdg: '0',
+      availableProcessWei: '25000000',
+      packPriceWei: '25000000',
+      outboundCapWei: '0',
+      returnCapWei: '0',
+      operatingMarginWei: '0',
     },
     moneyConfiguration: collectorOnlyMoneyConfiguration(),
     rehearsal: {
@@ -505,24 +535,22 @@ test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase target
     accounts: { evm: evmAccount, solana: solanaAccount },
     moneyConfiguration: productionMoneyConfiguration(),
   };
-  const adapters = {
-    relay: {
-      async quoteOutboundBridge(request) {
-        requests.push(request);
-        const isUnit = requests.length === 1;
-        return {
-          requestId: isUnit ? 'relay-unit-refresh' : 'relay-aggregate-refresh',
-          orderId: `0x${(isUnit ? '1' : '2').repeat(64)}`,
-          deadlineUnixSeconds: 5_000_000,
-          sender: evmAccount,
-          recipient: solanaAccount,
-          origin: { amount: isUnit ? '10000000' : '20000000' },
-          destination: { amount: request.amount, minimumAmount: request.amount },
-          quoteDigest: `sha256:${(isUnit ? 'a' : 'b').repeat(64)}`,
-        };
-      },
-    },
-  };
+  config.now = () => 1_000;
+  const quotes = [];
+  const client = createRelayClient({ now: config.now, quoteValidityMs: 60_000,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      const isUnit = requests.length === 1;
+      const quote = pinnedAdmissionRelayQuote({ requestId: isUnit ? 'relay-unit-refresh' : 'relay-aggregate-refresh',
+        orderId: `0x${(isUnit ? '1' : '2').repeat(64)}`, fundingAtomic: isUnit ? '10000000' : '20000000', purchaseAtomic: request.amount });
+      return { ok: true, status: 200, text: async () => JSON.stringify(quote.raw) };
+    } });
+  const adapters = { relay: { async quoteOutboundBridge(request) {
+    requests.push(request);
+    const quote = await client.quoteOutboundBridge({ ...request, skipRouteCheck: true });
+    quotes.push(quote);
+    return quote;
+  } } };
   const admission = {
     quantity: 2,
     unitPurchase: {
@@ -531,7 +559,7 @@ test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase target
     aggregatePurchase: {
       chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: '10000000',
     },
-    processLiabilityEvidence: { schema: 'hookemon.process-liability-evidence.v1', marker: 'original-evidence' },
+    processLiabilityEvidence: { schema: 'hookemon.process-liability-evidence.v2', marker: 'original-evidence' },
   };
   const planner = buildQuoteRefreshPlanner({ config, adapters });
   const replacement = await planner.plan({
@@ -550,7 +578,7 @@ test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase target
     amount: '5000000',
   });
   assert.deepEqual(requests[1], { ...requests[0], amount: '10000000' });
-  assert.equal(replacement.schema, 'hookemon.policy-admission.v2');
+  assert.equal(replacement.schema, 'hookemon.policy-admission.v3');
   assert.equal(replacement.cycleId, 'cycle-refresh-plan');
   assert.equal(replacement.packId, 'base-pack');
   assert.equal(replacement.quantity, 2);
@@ -561,7 +589,7 @@ test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase target
   assert.equal(replacement.aggregateFundingQuote.amountAtomic, '20000000');
   assert.equal(replacement.relay.requestId, 'relay-aggregate-refresh');
   assert.equal(replacement.unitRelay.requestId, 'relay-unit-refresh');
-  assert.equal(replacement.quoteDigest, `sha256:${'b'.repeat(64)}`);
+  assert.equal(replacement.quoteDigest, quotes[1].quoteDigest);
 });
 
 test('buildQuoteRefreshPlanner refuses to plan without repository-owned finalized claim/custody evidence bound to this exact cycle', async () => {
@@ -653,8 +681,8 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
   // amount below -- `collectorOnlyLivePolicyPatch`'s base `livePolicyPatch` caps them at a token '20'.
   await writeOperatorState(statePath, {
     ...collectorOnlyLivePolicyPatch(),
-    lossCapMicroUsdg: '25000000',
-    maxOutstandingCustodyMicroUsdg: '25000000',
+    lossCapMicroUsd: '25000000',
+    maxOutstandingCustodyMicroUsd: '25000000',
   });
   const cycle = await seedCycle(stateDir, {
     releaseAmount: '25000000',
@@ -680,11 +708,9 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
       baseUrl: 'https://example.invalid',
       settlementAsset: asset,
       packPrice: { ...asset, amountAtomic: '25000000' },
+      packFundingUsd: await collectorPackFundingUsd(operator),
     },
-    // A collector-only rehearsal has no EVM leg, but the policy engine's custody projection still
-    // needs a typed EVM USDG valuation asset to report a valued (not `UNVALUED_CUSTODY`-refused)
-    // custody state -- the same placeholder pin `productionMoneyConfiguration` uses elsewhere here.
-    contracts: { vault: null, hook: null, usdg: '0x0000000000000000000000000000000000000001', usdgDecimals: 6 },
+    contracts: { vault: null, hook: null },
     accounts: { evm: null, solana: operator },
     pack: { code: 'collector-25' },
     signer: {
@@ -747,26 +773,27 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
   const cycleDigest = deriveCyclePolicyDigest({
     configuration: approvedConfiguration,
     cycleId: cycle.cycleId,
-    releaseAmountMicroUsdg: cycle.releaseAmount,
+    releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: '21000000',
     packId: 'collector-25',
     liveMode: true,
     mode: 'rehearsal',
   });
   await composition.policyEngine.recordManualApproval({ cycleDigest, cycleId: cycle.cycleId, approvedAtMs: 999 });
 
-  // The predecessor stages above are seeded directly into the repository (this test isolates
-  // purchase), but the policy engine's own claim-process ledger entry is not a byproduct of that --
-  // it is what lets the purchase boundary find `existingCycle(...)` instead of refusing
-  // CYCLE_POLICY_MISSING before purchase's own handler ever runs.
+  // Completed historical stages cannot substitute for a native admission. Even a
+  // separately valued cost and matching manual approval must leave new risk refused.
   const admission = await composition.policyEngine.admit({
     boundary: 'claim-process',
     cycleId: cycle.cycleId,
-    releaseAmountMicroUsdg: cycle.releaseAmount,
+    releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: '21000000',
     packId: 'collector-25',
     liveMode: true,
     mode: 'rehearsal',
   });
-  assert.equal(admission.allowed, true);
+  assert.equal(admission.allowed, false, JSON.stringify(admission));
+  assert.equal(admission.reason, 'USD_VALUATION_UNVERIFIED', JSON.stringify(admission));
 
   const error = await composition.service.recoverActiveCycle({ liveMode: true, mode: 'rehearsal' }).then(
     () => null,
@@ -775,56 +802,48 @@ async function composedCollectorOnlyPurchaseAttempt(t, { latestBlockhash, transa
   return { error, calls, composition, cycle };
 }
 
-// compose-resolver-diagnosis.md: Collector-only rehearsal cannot carry the durable
-// `hookemon.policy-admission.v2` admission purchase.mjs now requires (purchase.mjs:420-421) --
-// CycleRepository replay always re-validates a durable admission against the fixed production
-// settlement route (chain id 792703809, policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY),
-// unconditionally, on every read; this rehearsal's own money configuration and native Solana
-// signer identity are independently pinned to the `solana-mainnet` Collector namespace
-// (solana-money-controls.mjs, collector-only-authorization.mjs). No admission can satisfy both
-// at once. This is an honest, current-boundary regression test for that unsupported combination,
-// not a resolver test -- closing it needs a separate, explicitly scoped sealed Collector-only
-// purchase binding (compose-resolver-diagnosis.md's "If the owner requires this specific
-// rehearsal mode operational again"), not a fixture change here.
+// Historical admission-free rehearsal rows remain readable but cannot acquire native
+// purchase authority. An explicit USD cost and manual approval do not supply the missing
+// bound admission or authorize any provider call.
 test('a live collector-only rehearsal purchase remains unsupported under the durable-admission requirement: it refuses before any provider or signer call', async t => {
   const { error, calls } = await composedCollectorOnlyPurchaseAttempt(t, {
     latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
     transactionBlockhash: 'SysvarC1ock11111111111111111111111111111111',
   });
 
-  assert.match(error?.message ?? '', /purchase mutation requires the admitted unitPurchase amount/);
+  assert.match(error?.message ?? '', /policy releaseCostMicroUsd must be positive for a money boundary/);
   assert.equal(calls.generateYoloPacks, 0);
   assert.equal(calls.sign, 0);
   assert.equal(calls.submitTransaction, 0);
 });
 
 // The recorded production Operations identity and canonical policy-engine routes
-// (packages/runner/src/automation/policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY / USDG_ROUTE /
+// (packages/runner/src/automation/policy-engine.mjs's PRODUCTION_ADMISSION_IDENTITY / ETH_ROUTE /
 // COLLECTOR_SETTLEMENT_ROUTE). CycleRepository replay re-validates every durable admission against
 // exactly these, regardless of what identity built it, so a durable admission meant to survive
 // being read back has no choice but to use them verbatim -- never a namespace alias, never
 // `createTestOnlyAdmissionIdentity` (which replay ignores entirely).
 const PRODUCTION_ADMISSION_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
 const PRODUCTION_ADMISSION_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
-const PRODUCTION_ADMISSION_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const PRODUCTION_ADMISSION_ETH = 'native';
 const PRODUCTION_ADMISSION_SETTLEMENT_MINT = CIRCLE_USD_MINT;
 const PRODUCTION_ADMISSION_ROUTES = Object.freeze({
   evm: PRODUCTION_ADMISSION_EVM,
   solana: PRODUCTION_ADMISSION_SOLANA,
-  fundingRoute: Object.freeze({ chainId: '4663', assetId: PRODUCTION_ADMISSION_USDG, decimals: 6 }),
+  fundingRoute: Object.freeze({ chainId: '4663', assetId: PRODUCTION_ADMISSION_ETH, decimals: 18 }),
   settlementRoute: Object.freeze({ chainId: '792703809', assetId: PRODUCTION_ADMISSION_SETTLEMENT_MINT, decimals: 6 }),
 });
 
 function productionPurchaseMoneyConfiguration() {
   const configuration = productionMoneyConfiguration();
-  const usdg = { ...configuration.assets.usdg, assetId: PRODUCTION_ADMISSION_USDG };
+  const eth = { ...configuration.assets.eth, assetId: PRODUCTION_ADMISSION_ETH };
   return {
     ...configuration,
-    assets: { ...configuration.assets, usdg },
+    assets: { ...configuration.assets, eth },
     minimums: {
       ...configuration.minimums,
-      robinhoodReceive: { ...configuration.minimums.robinhoodReceive, assetId: PRODUCTION_ADMISSION_USDG },
-      returnUsdg: { ...configuration.minimums.returnUsdg, assetId: PRODUCTION_ADMISSION_USDG },
+      robinhoodReceive: { ...configuration.minimums.robinhoodReceive, assetId: PRODUCTION_ADMISSION_ETH },
+      returnEth: { ...configuration.minimums.returnEth, assetId: PRODUCTION_ADMISSION_ETH },
     },
   };
 }
@@ -835,7 +854,7 @@ function productionPurchaseMoneyConfiguration() {
  * recomputed from this same evidence, never trusted as supplied. */
 function pinnedAdmissionRelayQuote({ requestId, orderId, fundingAtomic, purchaseAtomic, deadlineUnixSeconds = 2_000_000_000 }) {
   const routes = PRODUCTION_ADMISSION_ROUTES;
-  const origin = { chainId: 4663, address: routes.fundingRoute.assetId, decimals: 6, amount: fundingAtomic };
+  const origin = { chainId: 4663, address: `0x${'0'.repeat(40)}`, decimals: 18, amount: fundingAtomic };
   const destination = {
     chainId: 792703809, address: routes.settlementRoute.assetId, decimals: 6, amount: purchaseAtomic, minimumAmount: purchaseAtomic,
   };
@@ -844,11 +863,11 @@ function pinnedAdmissionRelayQuote({ requestId, orderId, fundingAtomic, purchase
     details: {
       sender: routes.evm,
       recipient: routes.solana,
-      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount, amountUsd: '0.000007' },
       currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
     },
     protocol: { v2: { orderId, orderData: {
-      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount }, refunds: [{ chainId: 'robinhood', currency: origin.address, recipient: routes.evm, deadline: deadlineUnixSeconds }] }],
       output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient: routes.solana, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
     } } },
     steps: [],
@@ -873,7 +892,7 @@ function pinnedAdmissionRelayQuote({ requestId, orderId, fundingAtomic, purchase
 function pinnedAdmissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
   const routes = PRODUCTION_ADMISSION_ROUTES;
   return {
-    schema: 'hookemon.process-liability-evidence.v1',
+    schema: 'hookemon.process-liability-evidence.v2',
     chainId: routes.fundingRoute.chainId,
     assetId: routes.fundingRoute.assetId,
     decimals: routes.fundingRoute.decimals,
@@ -889,7 +908,7 @@ function pinnedAdmissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
     processClaimCycleUsed: false,
     activeProcessClaimLimit: ceilingAtomic,
     totalLiability: ceilingAtomic,
-    hookUsdgBalance: ceilingAtomic,
+    hookNativeBalance: ceilingAtomic,
     isSolvent: true,
     operations: routes.evm,
     ceilingAtomic,
@@ -899,12 +918,20 @@ function pinnedAdmissionProcessLiabilityEvidence(cycleId, ceilingAtomic) {
 /** A complete, self-consistent quantity-1 `hookemon.policy-admission.v2` admission, denominated
  * exactly in the fixed production routes CycleRepository replay validates every durable admission
  * against -- independently authored, never derived from a candidate provider transaction. */
-function pinnedProductionPurchaseAdmission({ cycleId, packId, amountAtomic }) {
-  const unitRelayQuote = pinnedAdmissionRelayQuote({ requestId: `req-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: amountAtomic });
-  const relayQuote = pinnedAdmissionRelayQuote({ requestId: `req-aggregate-${cycleId}`, orderId: `0x${'2'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: amountAtomic });
+async function pinnedProductionPurchaseAdmission({ cycleId, packId, amountAtomic }) {
+  const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      const quote = pinnedAdmissionRelayQuote({ requestId: `req-${request.amount}-${cycleId}`, orderId: `0x${'1'.repeat(64)}`, fundingAtomic: amountAtomic, purchaseAtomic: request.amount });
+      return { ok: true, status: 200, text: async () => JSON.stringify(quote.raw) };
+    } });
+  const request = { user: PRODUCTION_ADMISSION_EVM, recipient: PRODUCTION_ADMISSION_SOLANA,
+    destinationCurrency: CIRCLE_USD_MINT, tradeType: 'EXACT_OUTPUT', amount: amountAtomic, skipRouteCheck: true };
+  const unitRelayQuote = await client.quoteOutboundBridge(request);
+  const relayQuote = await client.quoteOutboundBridge(request);
   const routes = PRODUCTION_ADMISSION_ROUTES;
   return {
-    schema: 'hookemon.policy-admission.v2',
+    schema: 'hookemon.policy-admission.v3',
     cycleId,
     packId,
     quantity: 1,
@@ -913,6 +940,8 @@ function pinnedProductionPurchaseAdmission({ cycleId, packId, amountAtomic }) {
     aggregatePurchase: { ...routes.settlementRoute, amountAtomic },
     unitFundingQuote: { ...routes.fundingRoute, amountAtomic },
     aggregateFundingQuote: { ...routes.fundingRoute, amountAtomic },
+    unitFundingUsd: createQuoteUsdValuation({ quote: unitRelayQuote, side: 'origin', amount: { ...routes.fundingRoute, amountAtomic }, rounding: 'up', nowMs: 1_000 }),
+    aggregateFundingUsd: createQuoteUsdValuation({ quote: relayQuote, side: 'origin', amount: { ...routes.fundingRoute, amountAtomic }, rounding: 'up', nowMs: 1_000 }),
     unitRelay: {
       tradeType: 'EXACT_OUTPUT', requestId: unitRelayQuote.requestId, orderId: unitRelayQuote.orderId,
       quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds: unitRelayQuote.deadlineUnixSeconds,
@@ -960,14 +989,14 @@ function pinnedPurchaseTransactionPolicy() {
  * production compose fixtures in this file use (`throwingAdapters`, `liveObservabilityConfig`,
  * `createTestProfileMutationAuthority`). Predecessor stages are seeded directly into the repository
  * so this isolates purchase, exactly as `composedCollectorOnlyPurchaseAttempt` does above. */
-async function composedProductionPurchaseAttempt(t, { latestBlockhash, transactionBlockhash, invalidFromCall = null }) {
+async function composedProductionPurchaseAttempt(t, { latestBlockhash, transactionBlockhash, invalidFromCall = null, purchasePolicy = pinnedPurchaseTransactionPolicy() }) {
   const operator = PRODUCTION_ADMISSION_SOLANA;
   const asset = { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS };
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
-  // `livePolicyPatch`'s caps (maxUnitPriceMicroUsdg/maxCycleBudgetMicroUsdg/max24HourBudgetMicroUsdg:
-  // '10', lossCapMicroUsdg/maxOutstandingCustodyMicroUsdg: '20') are used unchanged: the admission
-  // below is denominated at the same '10' atomic units, so no override is needed.
+  // `livePolicyPatch`'s caps (maxUnitPriceMicroUsd/maxCycleBudgetMicroUsd/max24HourBudgetMicroUsd:
+  // '10', lossCapMicroUsd/maxOutstandingCustodyMicroUsd: '20') are used unchanged: the admission
+  // below commits 10 wei separately from its quoted 7 microdollar cost, within those caps.
   await writeOperatorState(statePath, livePolicyPatch('base-pack'));
   const amountAtomic = '10';
   const cycle = await seedCycle(stateDir, {
@@ -979,6 +1008,7 @@ async function composedProductionPurchaseAttempt(t, { latestBlockhash, transacti
       { stage: 'claim-process' },
       { stage: 'outbound' },
     ],
+    releaseCostMicroUsd: '7',
     admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic }),
   });
 
@@ -995,20 +1025,22 @@ async function composedProductionPurchaseAttempt(t, { latestBlockhash, transacti
       baseUrl: 'https://example.invalid',
       settlementAsset: asset,
       packPrice: { ...asset, amountAtomic },
-      purchase: { policy: pinnedPurchaseTransactionPolicy() },
+      purchase: { policy: purchasePolicy },
     },
-    contracts: { vault: null, hook: null, usdg: PRODUCTION_ADMISSION_USDG, usdgDecimals: 6 },
+    execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
+    contracts: { vault: null, hook: null, eth: PRODUCTION_ADMISSION_ETH, ethDecimals: 18 },
     accounts: { evm: PRODUCTION_ADMISSION_EVM, solana: operator },
     pack: { code: 'base-pack' },
     moneyConfiguration: productionPurchaseMoneyConfiguration(),
     execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
     preflightAuthority: createTestProfileMutationAuthority(),
+    nativePaymentBinding: createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663', hook: { address: `0x${'8'.repeat(40)}`, runtimeHash: keccak256('0x6000') }, relay: null }, createTestProfileMutationAuthority()),
     observability: liveObservabilityConfig(['solana']),
     observabilityDeps: {
       ...liveObservabilityDeps(),
       readers: {
-        async readUsdgPaused() { return false; },
-        async readUsdgFrozen() { return false; },
+        async readNativePrincipalIdentity() { return { chainId: '4663', assetId: 'native', decimals: 18 }; },
+        async readNativeBalance(reserve) { return { ...reserve, amountAtomic: '1000000000000000000' }; },
       },
     },
     adapters: {
@@ -1064,7 +1096,8 @@ async function composedProductionPurchaseAttempt(t, { latestBlockhash, transacti
   const admission = await composition.policyEngine.admit({
     boundary: 'claim-process',
     cycleId: cycle.cycleId,
-    releaseAmountMicroUsdg: cycle.releaseAmount,
+    releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: cycle.releaseCostMicroUsd,
     packId: 'base-pack',
     liveMode: true,
     mode: 'production',
@@ -1133,7 +1166,7 @@ test('a composed production purchase advances past the trusted resolver on a val
   assert.equal(calls.submitTransaction, 0);
 });
 
-test('compose refuses a production profile without MoneyConfigurationV1 before opening durable state', async t => {
+test('compose refuses a production profile without MoneyConfigurationV2 before opening durable state', async t => {
   const stateDir = await tempStateDir(t);
   await assert.rejects(
     () => compose({
@@ -1277,7 +1310,7 @@ test('compose constructs archive evidence from a distinct configured archive RPC
 test('production composition persists an already-authorized standing-authority decision before its guarded signing boundary', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
-  const authorityFixture = createProductionTestFixture();
+  const authorityFixture = createProductionTestFixture({ moneyConfiguration: productionMoneyConfiguration() });
   const packCode = authorityFixture.standingAuthority.allowedPacks[0];
   await writeOperatorState(statePath, livePolicyPatch(packCode));
 
@@ -1303,9 +1336,13 @@ test('production composition persists an already-authorized standing-authority d
     },
   }]));
 
+  const seeded = await seedCycle(stateDir, { releaseAmount: '1', releaseCostMicroUsd: '7', providerMode: 'live',
+    admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: packCode, amountAtomic: '1' }),
+    completedStages: [{ stage: 'eligibility-snapshot' }, { stage: 'claim-process' }] });
   const composition = await compose({
     stateDir,
     statePath,
+    now: () => 1_000,
     workerOwner: 'test-worker',
     leaseTtlMs: 30_000,
     robinhood: { rpcUrl: 'https://example.invalid' },
@@ -1315,8 +1352,8 @@ test('production composition persists an already-authorized standing-authority d
     pack: { code: packCode },
     budget: SUFFICIENT_BUDGET,
     contracts: {
-      usdg: productionMoneyConfiguration().assets.usdg.assetId,
-      usdgDecimals: 6,
+      eth: productionMoneyConfiguration().assets.eth.assetId,
+      ethDecimals: 18,
     },
     moneyConfiguration: productionMoneyConfiguration(),
     execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
@@ -1335,8 +1372,8 @@ test('production composition persists an already-authorized standing-authority d
     observabilityDeps: {
       ...liveObservabilityDeps(),
       readers: {
-        async readUsdgPaused() { return false; },
-        async readUsdgFrozen() { return false; },
+        async readNativePrincipalIdentity() { return { chainId: '4663', assetId: 'native', decimals: 18 }; },
+        async readNativeBalance(reserve) { return { ...reserve, amountAtomic: '1000000000000000000' }; },
       },
     },
     preflightAuthority: createTestProfileMutationAuthority(),
@@ -1364,7 +1401,9 @@ test('production composition persists an already-authorized standing-authority d
   });
   t.after(() => composition.shutdown());
 
-  const outcome = await composition.service.runOnce({ liveMode: true });
+  const allowed = await composition.policyEngine.admit({ boundary: 'claim-process', cycleId: seeded.cycleId, packId: packCode, releaseAmountWei: '1', releaseCostMicroUsd: '7', admission: seeded.admission, liveMode: true, mode: 'production' });
+  assert.equal(allowed.allowed, true);
+  const outcome = await composition.service.recoverActiveCycle({ liveMode: true });
   assert.equal(outcome.status, 'COMPLETE');
   assert.equal(signCalls, 1, 'the test signer is reached only after authority persistence');
   assert.notEqual(issuedAuthorization, null);
@@ -1407,8 +1446,8 @@ test('a production-profile fake dry run reaches return and payout without a sign
     pack: { code: 'dry-run-pack' },
     budget: SUFFICIENT_BUDGET,
     contracts: {
-      usdg: productionMoneyConfiguration().assets.usdg.assetId,
-      usdgDecimals: 6,
+      eth: productionMoneyConfiguration().assets.eth.assetId,
+      ethDecimals: 18,
     },
     moneyConfiguration: productionMoneyConfiguration(),
     execution: {
@@ -1614,12 +1653,12 @@ test('compose reads the persisted kill switch before it creates a live cycle', a
     liveMode: true,
     allowedPackIds: ['base-pack'],
     requestedOrders: 1,
-    maxUnitPriceMicroUsdg: '1',
-    maxCycleBudgetMicroUsdg: '1',
-    max24HourBudgetMicroUsdg: '1',
+    maxUnitPriceMicroUsd: '1',
+    maxCycleBudgetMicroUsd: '1',
+    max24HourBudgetMicroUsd: '1',
     maxCyclesPerDay: 1,
-    lossCapMicroUsdg: '1',
-    maxOutstandingCustodyMicroUsdg: '1',
+    lossCapMicroUsd: '1',
+    maxOutstandingCustodyMicroUsd: '1',
     killSwitch: true,
   });
   const composition = await compose({
@@ -1693,7 +1732,7 @@ test('compose refuses a live service call when the configured observability pref
   assert.equal(await composition.cycleRepository.readActiveCycle(), null);
 });
 
-async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
+async function createNativeStatusCanaryFixture(t, { wrongIdentity, insufficientBalance }) {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
   await writeOperatorState(statePath, livePolicyPatch('base-pack'));
@@ -1701,6 +1740,8 @@ async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
     releaseAmount: '1',
     mode: 'production',
     providerMode: 'live',
+    releaseCostMicroUsd: '7',
+    admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic: '1' }),
     completedStages: [
       { stage: 'eligibility-snapshot' },
       { stage: 'claim-process' },
@@ -1708,17 +1749,18 @@ async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
   });
   const calls = { mutate: 0, sign: 0, broadcast: 0 };
   const stageHandlers = Object.fromEntries(AUTOMATED_CYCLE_STAGES.map(stage => [stage, {
-    async probe() { throw new Error(`${stage} probe must not run after a USDG status failure`); },
+    async probe() { throw new Error(`${stage} probe must not run after a native principal failure`); },
     async prepareRequest() { return { stage, request: 'status-canary-test' }; },
     async mutate() {
       calls.mutate += 1;
-      throw new Error(`${stage} mutation must not run after a USDG status failure`);
+      throw new Error(`${stage} mutation must not run after a native principal failure`);
     },
     async reconcileLive() { return null; },
   }]));
   const composition = await compose({
     stateDir,
     statePath,
+    now: () => 1_000,
     workerOwner: 'test-worker',
     leaseTtlMs: 30_000,
     robinhood: { rpcUrl: 'https://example.invalid', archiveRpcUrl: 'https://archive.example.invalid' },
@@ -1728,8 +1770,8 @@ async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
     pack: { code: 'base-pack' },
     budget: SUFFICIENT_BUDGET,
     contracts: {
-      usdg: productionMoneyConfiguration().assets.usdg.assetId,
-      usdgDecimals: 6,
+      eth: productionMoneyConfiguration().assets.eth.assetId,
+      ethDecimals: 18,
     },
     moneyConfiguration: productionMoneyConfiguration(),
     execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
@@ -1750,8 +1792,8 @@ async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
     observabilityDeps: {
       ...liveObservabilityDeps(),
       readers: {
-        async readUsdgPaused() { return paused; },
-        async readUsdgFrozen() { return frozen; },
+        async readNativePrincipalIdentity() { return { chainId: '4663', assetId: wrongIdentity ? 'wrong-native' : 'native', decimals: 18 }; },
+        async readNativeBalance(reserve) { return { ...reserve, amountAtomic: insufficientBalance ? '1' : '100' }; },
       },
     },
     stageHandlers,
@@ -1760,7 +1802,9 @@ async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
   const admission = await composition.policyEngine.admit({
     boundary: 'claim-process',
     cycleId: cycle.cycleId,
-    releaseAmountMicroUsdg: cycle.releaseAmount,
+    releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: cycle.releaseCostMicroUsd,
+    admission: cycle.admission,
     packId: 'base-pack',
     liveMode: true,
     mode: 'production',
@@ -1770,15 +1814,15 @@ async function createUsdgStatusCanaryFixture(t, { paused, frozen }) {
   return { calls, composition, cycle, stateDir };
 }
 
-test('holds an active cycle on a paused USDG status canary before any signing boundary', async t => {
-  const { calls, composition, cycle, stateDir } = await createUsdgStatusCanaryFixture(t, {
-    paused: true,
-    frozen: false,
+test('holds an active cycle on a wrong native principal identity before any signing boundary', async t => {
+  const { calls, composition, cycle, stateDir } = await createNativeStatusCanaryFixture(t, {
+    wrongIdentity: true,
+    insufficientBalance: false,
   });
 
   await assert.rejects(
     () => composition.service.recoverActiveCycle({ liveMode: true }),
-    /USDG status canary failed: USDG_PAUSED/,
+    /native principal canary failed: NATIVE_PRINCIPAL_UNVERIFIED/,
   );
   assert.deepEqual(calls, { mutate: 0, sign: 0, broadcast: 0 });
 
@@ -1786,13 +1830,13 @@ test('holds an active cycle on a paused USDG status canary before any signing bo
   const description = await reopened.describeCycle(cycle.cycleId);
   assert.equal(description.terminalState, 'HELD_UNAVAILABLE');
   assert.deepEqual(description.terminalEvidence, {
-    schema: 'hookemon.usdg-status-canary-hold.v1',
+    schema: 'hookemon.native-status-canary-hold.v1',
     stage: 'outbound',
     drift: [{
-      code: 'USDG_PAUSED',
-      target: 'USDG pause state',
-      expected: false,
-      observed: true,
+      code: 'NATIVE_PRINCIPAL_UNVERIFIED',
+      target: 'native principal',
+      expected: '4663/native/18 balance covering principal and gas',
+      observed: null,
     }],
   });
   assert.equal((await reopened.readStage(cycle.cycleId, 'outbound')).status, 'PENDING');
@@ -1803,15 +1847,15 @@ test('holds an active cycle on a paused USDG status canary before any signing bo
   );
 });
 
-test('holds an active cycle on a frozen USDG status canary before any signing boundary', async t => {
-  const { calls, composition, cycle, stateDir } = await createUsdgStatusCanaryFixture(t, {
-    paused: false,
-    frozen: true,
+test('holds an active cycle on insufficient native principal plus gas before any signing boundary', async t => {
+  const { calls, composition, cycle, stateDir } = await createNativeStatusCanaryFixture(t, {
+    wrongIdentity: false,
+    insufficientBalance: true,
   });
 
   await assert.rejects(
     () => composition.service.recoverActiveCycle({ liveMode: true }),
-    /USDG status canary failed: USDG_FROZEN/,
+    /native principal canary failed: NATIVE_PRINCIPAL_UNVERIFIED/,
   );
   assert.deepEqual(calls, { mutate: 0, sign: 0, broadcast: 0 });
 
@@ -1819,13 +1863,13 @@ test('holds an active cycle on a frozen USDG status canary before any signing bo
   const description = await reopened.describeCycle(cycle.cycleId);
   assert.equal(description.terminalState, 'HELD_UNAVAILABLE');
   assert.deepEqual(description.terminalEvidence, {
-    schema: 'hookemon.usdg-status-canary-hold.v1',
+    schema: 'hookemon.native-status-canary-hold.v1',
     stage: 'outbound',
     drift: [{
-      code: 'USDG_FROZEN',
-      target: 'USDG freeze state',
-      expected: false,
-      observed: true,
+      code: 'NATIVE_PRINCIPAL_UNVERIFIED',
+      target: 'native principal',
+      expected: '4663/native/18 balance covering principal and gas',
+      observed: null,
     }],
   });
   assert.equal((await reopened.readStage(cycle.cycleId, 'outbound')).status, 'PENDING');
@@ -1836,9 +1880,9 @@ test('holds an active cycle on a frozen USDG status canary before any signing bo
   );
 });
 
-test('does not create or hold a cycle before an active cycle reaches the USDG status boundary', async t => {
+test('does not create or hold a cycle before an active cycle reaches the native principal boundary', async t => {
   const stateDir = await tempStateDir(t);
-  let pausedReads = 0;
+  let identityReads = 0;
   const composition = await compose({
     stateDir,
     statePath: join(stateDir, 'operator-state.json'),
@@ -1851,8 +1895,8 @@ test('does not create or hold a cycle before an active cycle reaches the USDG st
     pack: { code: 'base-pack' },
     budget: SUFFICIENT_BUDGET,
     contracts: {
-      usdg: productionMoneyConfiguration().assets.usdg.assetId,
-      usdgDecimals: 6,
+      eth: productionMoneyConfiguration().assets.eth.assetId,
+      ethDecimals: 18,
     },
     moneyConfiguration: productionMoneyConfiguration(),
     execution: { profile: 'production', networkProfile: 'mainnet', providerMode: 'live', enforceProfile: true },
@@ -1865,8 +1909,7 @@ test('does not create or hold a cycle before an active cycle reaches the USDG st
     observabilityDeps: {
       ...liveObservabilityDeps(),
       readers: {
-        async readUsdgPaused() { pausedReads += 1; return true; },
-        async readUsdgFrozen() { return false; },
+        async readNativePrincipalIdentity() { identityReads += 1; return { chainId: '1', assetId: 'native', decimals: 18 }; },
       },
     },
   });
@@ -1876,9 +1919,9 @@ test('does not create or hold a cycle before an active cycle reaches the USDG st
     status: 'WAITING_FOR_PROCESS_BUDGET',
     cycleId: null,
     stage: null,
-    requiredProcessUsdg: '1',
+    requiredProcessWei: '1',
   });
-  assert.equal(pausedReads, 0);
+  assert.equal(identityReads, 0);
   assert.equal(await composition.cycleRepository.readActiveCycle(), null);
 });
 
@@ -2160,116 +2203,14 @@ test('crash between stages: a second, independently-composed process resumes the
   assert.deepEqual(snapshotAfterResume, snapshotAfterCrash, 'the durably-completed snapshot evidence is unchanged by the resume');
 });
 
-test('liveMode true: the composed service freezes purchase before any legacy provider call', async t => {
-  const stateDir = await tempStateDir(t);
-  const statePath = join(stateDir, 'operator-state.json');
-  await writeOperatorState(statePath, livePolicyPatch('base-pack'));
-
-  const calls = { generatePack: 0, submitTransaction: 0, openPack: 0 };
-  const adapters = {
-    collectorCrypt: {
-      // The configured pack must exist in the catalog: purchase derives its per-pack card count
-      // from it, and admission prices from its exact catalog price.
-      async getMachines() { return { machines: [{ code: 'base-pack', price: '0.000005', contains: 1 }] }; },
-      async getStatus() { return { machineStatus: 'ok', gachas: [] }; },
-      async generatePack({ playerAddress }) {
-        calls.generatePack += 1;
-        assert.equal(playerAddress, 'PLAYER11111111111111111111111111111111111');
-        return { memo: 'memo-live-1', transaction: 'dW5zaWduZWQ=' };
-      },
-      async submitTransaction({ signedTransaction }) {
-        calls.submitTransaction += 1;
-        assert.equal(signedTransaction, 'signed:dW5zaWduZWQ=');
-        return { success: true, signature: 'sig-live-1', confirmationStatus: 'confirmed' };
-      },
-      async openPack({ memo }) {
-        calls.openPack += 1;
-        assert.equal(memo, 'memo-live-1');
-        // No `transactionSignature` field: this variant records mint: null (open.mjs never
-        // guesses), which is exactly what makes buyback unreachable next, honestly.
-        return { success: true };
-      },
-      getPackStatus: () => { throw new Error('getPackStatus unused in this test'); },
-      getBuybackAvailable: () => { throw new Error('getBuybackAvailable must never be reached: open recorded no mint'); },
-      buyback: () => { throw new Error('buyback must never be reached: open recorded no mint'); },
-    },
-    relay: {
-      quoteOutboundBridge: () => { throw new Error('unused: funding/outbound are already completed by the seed below'); },
-      quoteReturnBridge: () => { throw new Error('unused: return refuses before ever quoting'); },
-      simulateExecution: () => { throw new Error('unused in this test'); },
-      prepareExecution: () => { throw new Error('unused in this test'); },
-    },
-    robinhood: { client: { async readContract() { return { requirementsRevision: 0n, chainId: 4663n }; } } },
-    solana: { client: {} },
-  };
-  const signerClient = {
-    solana: {
-      probe: async () => ({ ready: true }),
-      async sign(txBase64) { return { signedTxBase64: `signed:${txBase64}` }; },
-    },
-  };
-  const cycle = await seedCycle(stateDir, {
-    releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg,
-    completedStages: [
-      { stage: 'eligibility-snapshot' },
-      { stage: 'claim-process' },
-      { stage: 'outbound' },
-    ],
+test('liveMode true: native purchase refuses a missing pinned transaction policy before any provider call', async t => {
+  const { error, calls } = await composedProductionPurchaseAttempt(t, {
+    latestBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+    transactionBlockhash: 'SysvarC1ock11111111111111111111111111111111',
+    purchasePolicy: null,
   });
-
-  const composition = await compose({
-    stateDir,
-    statePath,
-    workerOwner: 'test-worker',
-    leaseTtlMs: 30_000,
-    robinhood: { rpcUrl: 'https://example.invalid' },
-    solana: { rpcUrl: 'https://example.invalid' },
-    relay: { baseUrl: 'https://example.invalid' },
-    collectorCrypt: { baseUrl: 'https://example.invalid' },
-    contracts: { vault: null, hook: null, usdg: FULL_USDG, usdgDecimals: 6 },
-    accounts: { evm: null, solana: 'PLAYER11111111111111111111111111111111111' },
-    pack: { code: 'base-pack' },
-    budget: SUFFICIENT_BUDGET,
-    adapters,
-    signerClient,
-    observability: liveObservabilityConfig(['solana']),
-    observabilityDeps: liveObservabilityDeps(),
-    now: () => 1_000,
-  });
-
-  // Completed predecessor evidence is seeded before composition so this test isolates the real
-  // purchase/open path. The production service normally reaches these records only after their live
-  // integrations exist.
-  const admission = await composition.policyEngine.admit({
-    boundary: 'claim-process',
-    cycleId: cycle.cycleId,
-    releaseAmountMicroUsdg: cycle.releaseAmount,
-    packId: 'base-pack',
-    liveMode: true,
-  });
-  assert.equal(admission.allowed, true);
-
-  // Purchase now prepares a real request against the wired-in collector-crypt catalog (stage-driver
-  // "Collector-capable" preparation) and reaches the live mutation-authority gate next, which fails
-  // closed independently of Collector wiring: architecture/interfaces.json is still
-  // PROVISIONAL_PHASE3_PENDING_FEASIBILITY, not the FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING
-  // status requireLiveMutationAuthority() requires for every live mutating stage.
-  await assert.rejects(
-    () => composition.service.recoverActiveCycle({ liveMode: true }),
-    /active frozen interface authority is invalid/,
-    'purchase must stay closed while the build-contract interface authority remains provisional',
-  );
-
-  assert.equal(calls.generatePack, 0, 'purchase must not call collector-crypt before the interface authority is frozen');
-  assert.equal(calls.submitTransaction, 0, 'purchase must not sign or submit before the interface authority is frozen');
-  assert.equal(calls.openPack, 0, 'open must stay unreachable before purchase reconciles');
-
-  const purchase = await composition.cycleRepository.readStage(cycle.cycleId, 'purchase');
-  assert.equal(purchase.status, 'PENDING');
-  // The real request prepares and persists first, then the live mutation-authority gate refuses as
-  // a pre-call failure: the driver records that refusal by returning the attempt to NOT_SENT rather
-  // than leaving it PREPARED as if a provider call were still pending.
-  assert.equal((await composition.cycleRepository.readOperationalStageAttempt(cycle.cycleId, 'purchase')).attempt.state, 'NOT_SENT');
+  assert.match(error?.message ?? '', /Collector purchase requires a pinned transaction policy/);
+  assert.deepEqual(calls, { generateYoloPacks: 0, sign: 0, submitTransaction: 0 });
 });
 
 test('liveMode true: the remaining pending operational integration refuses through the composed service loop', async t => {
@@ -2282,7 +2223,9 @@ test('liveMode true: the remaining pending operational integration refuses throu
     const statePath = join(stateDir, 'operator-state.json');
     await writeOperatorState(statePath, livePolicyPatch('base-pack'));
     const cycle = await seedCycle(stateDir, {
-      releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg,
+      releaseAmount: SUFFICIENT_BUDGET.packPriceWei,
+    releaseCostMicroUsd: '7',
+    admission: cycleId => pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic: SUFFICIENT_BUDGET.packPriceWei }),
       completedStages: predecessors.map(predecessor => ({ stage: predecessor })),
     });
 
@@ -2295,9 +2238,11 @@ test('liveMode true: the remaining pending operational integration refuses throu
       solana: { rpcUrl: 'https://example.invalid' },
       relay: { baseUrl: 'https://example.invalid' },
       collectorCrypt: { baseUrl: 'https://example.invalid' },
-      contracts: { vault: null, hook: null, usdg: FULL_USDG, usdgDecimals: 6 },
+      contracts: { vault: null, hook: null, eth: FULL_ETH, ethDecimals: 18 },
       pack: { code: 'base-pack' },
       budget: SUFFICIENT_BUDGET,
+    moneyConfiguration: productionMoneyConfiguration(),
+    preflightAuthority: createTestProfileMutationAuthority(),
       adapters: throwingAdapters(),
       signerClient: throwingSignerClient(),
       observability: liveObservabilityConfig(),
@@ -2312,7 +2257,9 @@ test('liveMode true: the remaining pending operational integration refuses throu
       const admission = await composition.policyEngine.admit({
         boundary: 'claim-process',
         cycleId: cycle.cycleId,
-        releaseAmountMicroUsdg: cycle.releaseAmount,
+        releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: cycle.releaseCostMicroUsd,
+    admission: cycle.admission,
         packId: 'base-pack',
         liveMode: true,
       });
@@ -2642,8 +2589,9 @@ test('operator resume-cycle recovers a supplementary settlement after its comple
   const statePath = join(stateDir, 'operator-state.json');
   await writeOperatorState(statePath);
 
-  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000);
-  const cycle = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(join(stateDir, 'cycles'), () => 1_000, { testAuthority: createTestProfileMutationAuthority() });
+  const cycleId = repository.nextCycleId();
+  const cycle = await repository.createCycle({ cycleId, releaseAmount: '1', releaseCostMicroUsd: '7', mode: 'production', admission: await pinnedProductionPurchaseAdmission({ cycleId, packId: 'base-pack', amountAtomic: '1' }) });
   for (const stage of AUTOMATED_CYCLE_STAGES) {
     await repository.prepareStage(cycle.cycleId, stage);
     await repository.completeStage(cycle.cycleId, stage, { stage, finalized: true });
@@ -2653,8 +2601,8 @@ test('operator resume-cycle recovers a supplementary settlement after its comple
     memo: 'memo-resume-supplementary',
     mint: 'mint-resume-supplementary',
     cardRef: 'mint-resume-supplementary',
-    costMicroUsdg: '1',
-    valueMicroUsdg: '1',
+    costMicroUsd: '7',
+    valueMicroUsd: '7',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -2739,7 +2687,7 @@ test('dashboard composed in-process: ctx.readAccounting is wired to the real cyc
     statePath,
     stateDir,
     cycleSeed: {
-      releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg,
+      releaseAmount: SUFFICIENT_BUDGET.packPriceWei,
       completedStages: [
         { stage: 'eligibility-snapshot' },
         { stage: 'claim-process' },
@@ -2749,13 +2697,13 @@ test('dashboard composed in-process: ctx.readAccounting is wired to the real cyc
     },
   });
 
-  // The seeded cycle has 'purchase' durably COMPLETE, exactly the fact accounting-projection.mjs
-  // uses to attribute the cycle's own release amount as real spend.
+  // This admission-free historical journal preserves its legacy projection on read.
+  // Native admissions are tested separately and never reinterpret this field as ETH.
   const cycle = server.seededCycle;
   assert.notEqual(cycle, null);
 
   const accounting = await server.composition.dashboard.ctx.readAccounting(cycle.cycleId);
-  assert.equal(accounting.packSpendMicroUsdg, SUFFICIENT_BUDGET.packPriceUsdg);
+  assert.equal(accounting.packSpendMicroUsdg, SUFFICIENT_BUDGET.packPriceWei);
   assert.equal(accounting.holderRewardsStatus, 'not-started');
 
   // And the exact same object shape reaches the public HTTP contract's validator untouched — proven
@@ -2780,7 +2728,7 @@ test('dashboard composed in-process: ctx.listRecentWinners derives real deduplic
     statePath,
     stateDir,
     cycleSeed: {
-      releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg,
+      releaseAmount: SUFFICIENT_BUDGET.packPriceWei,
       completedStages: [
         { stage: 'eligibility-snapshot' },
         { stage: 'claim-process' },
@@ -2822,7 +2770,7 @@ test('dashboard composed in-process: ctx.listRecentWinners returns no cards when
   const server = await buildComposedDashboard(t, {
     statePath,
     stateDir,
-    cycleSeed: { releaseAmount: SUFFICIENT_BUDGET.packPriceUsdg, completedStages: [{ stage: 'eligibility-snapshot' }] },
+    cycleSeed: { releaseAmount: SUFFICIENT_BUDGET.packPriceWei, completedStages: [{ stage: 'eligibility-snapshot' }] },
   });
 
   assert.deepEqual(await server.composition.dashboard.ctx.listRecentWinners({ limit: 10 }), []);
@@ -2883,7 +2831,7 @@ const FULL_HOOK = `0x${'b'.repeat(40)}`;
 // production enforces rather than against a weakened check. Same pair as the policy engine's pins,
 // RobinhoodBindings.sol and the recorded owner inputs.
 const FULL_EVM_ACCOUNT = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
-const FULL_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const FULL_ETH = 'native';
 const FULL_HKMN = `0x${'f'.repeat(40)}`;
 const FULL_RETURN_ESCROW = `0x${'d'.repeat(40)}`;
 const FULL_SOLANA_ACCOUNT = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
@@ -2897,14 +2845,14 @@ const FULL_ESCROW_BALANCE = 24_000_000n;
 
 function fullMoneyConfiguration() {
   const configuration = productionMoneyConfiguration();
-  const usdg = { ...configuration.assets.usdg, assetId: FULL_USDG };
+  const eth = { ...configuration.assets.eth, assetId: FULL_ETH };
   return {
     ...configuration,
-    assets: { ...configuration.assets, usdg },
+    assets: { ...configuration.assets, eth },
     minimums: {
       ...configuration.minimums,
-      robinhoodReceive: { ...configuration.minimums.robinhoodReceive, assetId: FULL_USDG },
-      returnUsdg: { ...configuration.minimums.returnUsdg, assetId: FULL_USDG },
+      robinhoodReceive: { ...configuration.minimums.robinhoodReceive, assetId: FULL_ETH },
+      returnEth: { ...configuration.minimums.returnEth, assetId: FULL_ETH },
     },
   };
 }
@@ -3080,7 +3028,7 @@ function fullCollectorCryptClient() {
 }
 
 function fullRelayClient() {
-  return {
+  const backend = {
     async quoteOutboundBridge({ amount, user, recipient }) {
       // Parser-shaped, because the admission planner persists the returned QuoteResult verbatim and
       // the policy engine re-derives its digest from exactly these fields. Distinct per target: the
@@ -3093,7 +3041,7 @@ function fullRelayClient() {
         sender: user,
         recipient,
         deadlineUnixSeconds: 2_000_000_000,
-        origin: { chainId: 4663, address: FULL_USDG, symbol: 'USDG', decimals: 6, amount, amountFormatted: null, minimumAmount: null },
+        origin: { chainId: 4663, address: `0x${'0'.repeat(40)}`, symbol: 'ETH', decimals: 18, amount, amountFormatted: null, minimumAmount: null },
         destination: { chainId: 792703809, address: FULL_SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6, amount, amountFormatted: null, minimumAmount: amount },
         stepCount: 1,
         raw: {
@@ -3102,7 +3050,7 @@ function fullRelayClient() {
           details: {
             sender: user,
             recipient,
-            currencyIn: { currency: { chainId: 4663, address: FULL_USDG, symbol: 'USDG', decimals: 6 }, amount },
+            currencyIn: { currency: { chainId: 4663, address: `0x${'0'.repeat(40)}`, symbol: 'ETH', decimals: 18 }, amount, amountUsd: '0.000005' },
             currencyOut: { currency: { chainId: 792703809, address: FULL_SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 }, amount, minimumAmount: amount },
           },
           protocol: {
@@ -3116,8 +3064,8 @@ function fullRelayClient() {
                   payments: [{ recipient, currency: FULL_SOLANA_MINT, expectedAmount: amount, minimumAmount: amount }],
                 },
                 inputs: [{
-                  payment: { chainId: 'robinhood', currency: FULL_USDG, amount },
-                  refunds: [{ chainId: 'robinhood', currency: FULL_USDG, recipient: user, deadline: 2_000_000_000 }],
+                  payment: { chainId: 'robinhood', currency: `0x${'0'.repeat(40)}`, amount },
+                  refunds: [{ chainId: 'robinhood', currency: `0x${'0'.repeat(40)}`, recipient: user, deadline: 2_000_000_000 }],
                 }],
               },
             },
@@ -3135,6 +3083,10 @@ function fullRelayClient() {
       return { intentDigest: quote.requestId, steps: quote.raw.steps };
     },
   };
+  const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,
+    fetchImpl: async (_url, options) => { const parsed = await backend.quoteOutboundBridge(JSON.parse(options.body));
+      return { ok: true, status: 200, text: async () => JSON.stringify(parsed.raw) }; } });
+  return { ...backend, quoteOutboundBridge: request => client.quoteOutboundBridge({ ...request, skipRouteCheck: true }) };
 }
 
 test('liveMode true fails closed before claim signing when canonical nonce reads are unavailable', async t => {
@@ -3168,7 +3120,7 @@ test('liveMode true fails closed before claim signing when canonical nonce reads
     solana: { rpcUrl: 'https://example.invalid' },
     relay: { baseUrl: 'https://example.invalid' },
     collectorCrypt: { baseUrl: 'https://example.invalid' },
-    contracts: { vault: FULL_VAULT, hook: FULL_HOOK, usdg: FULL_USDG, usdgDecimals: 6 },
+    contracts: { vault: FULL_VAULT, hook: FULL_HOOK, eth: FULL_ETH, ethDecimals: 18 },
     accounts: { evm: FULL_EVM_ACCOUNT, solana: FULL_SOLANA_ACCOUNT },
     pack: { code: 'collector-nova' },
     hkmn: { address: FULL_HKMN, deployBlock: 0n, decimals: 18 },
