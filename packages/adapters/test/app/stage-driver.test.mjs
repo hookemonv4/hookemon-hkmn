@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { keccak256, parseTransaction, TransactionReceiptNotFoundError } from 'viem';
+import { encodeFunctionData, parseAbi, keccak256, parseTransaction, TransactionReceiptNotFoundError } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
@@ -22,27 +22,31 @@ import {
 import { AUTOMATED_CYCLE_STAGES } from '../../../runner/src/automation/automated-cycle-service.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import {
+  CUSTODY_LEDGER_BUCKETS,
   createPreparedChainTransactionAttempt,
   createPreparedProviderMutationAttempt,
   createRecordedRelayLeg,
 } from '../../../runner/src/cycle/money-schemas.mjs';
-import { createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
-import { createHistoricalErc20EvidenceClient, ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
-import { RelayQuoteExpiredError } from '../../src/relay-client.mjs';
+import { createNativePayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
+import { createHistoricalErc20EvidenceClient } from '../../src/robinhood-rpc.mjs';
+import { createRelayClient, RelayQuoteExpiredError } from '../../src/relay-client.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import { KeychainSignOnlyTimeoutError, createKeychainSignerClient } from '../../src/signing/keychain-signer.mjs';
 import { TransactionPolicyError } from '../../src/signing/transaction-policy.mjs';
 import { buildAndSignStepAuthorization, createProductionTestFixture } from '../../../runner/test/cycle/production-cycle.mjs';
+import { nativeAdmissionFixture, nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 
 const CYCLE_ID = 'cycle-test-1';
 const fixtureStageDriverOptions = Object.freeze({ preflightAuthority: createTestProfileMutationAuthority() });
 
-async function durableCycle(t) {
+async function durableCycle(t, { amountWei = '1' } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-stage-driver-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const repository = await CycleRepository.open(directory);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
+  const cycleId = 'cycle-stage-driver-durable';
+  const admission = await nativeProducedAdmissionFixture(cycleId, { amountWei, nowMs: Date.now() });
+  await repository.createCycle({ cycleId, releaseAmount: amountWei, mode: 'production', admission });
   return { directory, repository, cycleId };
 }
 
@@ -127,15 +131,15 @@ function baseConfig(overrides = {}) {
 }
 
 function claimMoneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+  const native = { chainId: '4663', assetId: 'native', decimals: 18 };
   const solanaStablecoin = { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 };
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth: native, solanaStablecoin },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...native, amountAtomic: '0' },
       solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...native, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -164,7 +168,7 @@ function claimHookLiabilityArchive({ operations }) {
   const values = {
     processLiability: covers, remainingProcessClaimCapacity: covers, processClaimsPaused: false,
     processClaimCycleUsed: false, activeProcessClaimLimit: covers, totalLiability: covers,
-    hookUsdgBalance: covers, isSolvent: true,
+    hookEthBalance: covers, isSolvent: true,
   };
   const readContractClient = {
     async readContract({ functionName }) {
@@ -815,22 +819,20 @@ test('probeOutbound honestly reports null quote amounts when the injected adapte
 });
 
 test('built-in outbound reconciliation completes a real CycleRepository stage from durable settlement evidence', async t => {
-  const { repository, cycleId } = await durableCycle(t);
-  // A real, signable test keypair -- not the file's usual placeholder dead-address literal --
-  // because the outbound stage now recovers the prerequisite approval's signer from its own raw
-  // bytes (packages/adapters/src/app/stages/outbound.mjs, assertOutboundApprovalAttemptRole) and
-  // that recovered address must equal the configured Operations account.
+  const { repository, cycleId } = await durableCycle(t, { amountWei: '25' });
+  // Public synthetic key signs the exact native deposit bytes consumed by reconciliation.
   const operationsAccount = privateKeyToAccount(`0x${'6'.repeat(64)}`);
   const operations = operationsAccount.address.toLowerCase();
   const depository = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
-  const sourceAsset = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+  const sourceAsset = 'native';
   const solanaOwner = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
   const solanaMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
   const sourceAmount = '25';
   const destinationAmount = '24';
-  const sourceHash = `0x${'a'.repeat(64)}`;
+  const sourceData = encodeFunctionData({ abi: parseAbi(['function depositNative(address depositor, bytes32 id)']), functionName: 'depositNative', args: [operations, `0x${'2'.repeat(64)}`] });
+  const sourceRawBytes = await operationsAccount.signTransaction({ chainId: 4663, to: depository, value: 25n, data: sourceData, nonce: 9, gas: 60000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n });
+  const sourceHash = keccak256(sourceRawBytes);
   const requestDigest = `sha256:${'b'.repeat(64)}`;
-  const approvalRequestDigest = `sha256:${'7'.repeat(64)}`;
   const fencingToken = '11111111-1111-4111-8111-111111111111';
   const relayRequestId = 'relay-driver-settlement';
 
@@ -844,7 +846,7 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
     direction: 'outbound',
     relayRequestId,
     quoteDigest: `sha256:${'c'.repeat(64)}`,
-    source: { chainId: '4663', assetId: sourceAsset, decimals: 6, amountAtomic: sourceAmount },
+    source: { chainId: '4663', assetId: sourceAsset, decimals: 18, amountAtomic: sourceAmount },
     destination: { chainId: '792703809', assetId: solanaMint, decimals: 6, amountAtomic: destinationAmount },
   }));
   await repository.reserveWalletNonce(cycleId, {
@@ -858,7 +860,7 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
   // (OUTBOUND_RELAY_INTENT_FIELDS, cycle-repository.mjs) binding this intent to the quote it was
   // admitted under.
   const relayIntent = {
-    schema: 'hookemon.relay-intent.v1',
+    schema: 'hookemon.relay-intent.v2',
     requestId: relayRequestId,
     orderId: `0x${'2'.repeat(64)}`,
     direction: 'OUTBOUND',
@@ -866,8 +868,8 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
     quoteDigest: `sha256:${'9'.repeat(64)}`,
     originChainId: 4663,
     destinationChainId: 792703809,
-    originAssetId: sourceAsset,
-    originDecimals: 6,
+    originAssetId: '0x0000000000000000000000000000000000000000',
+    originDecimals: 18,
     destinationAssetId: solanaMint,
     destinationDecimals: 6,
     originAmount: sourceAmount,
@@ -879,52 +881,6 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
   };
   const relayRoute = { sourceSender: operations, sourceRecipient: depository, destinationOwner: solanaOwner };
 
-  // The canonical two-step Relay envelope's prerequisite: a real, offline-signed USDG
-  // `approve(depository, sourceAmount)` from the Operations account, at the nonce immediately
-  // preceding the deposit's own nonce 9 -- never placeholder `0x00` bytes, since
-  // `assertOutboundApprovalAttemptRole` now decodes and recovers the signer from these bytes
-  // before the stage may complete, whether or not this attempt is already FINALIZED.
-  const approvalNonce = 8;
-  const approvalRawBytes = await operationsAccount.signTransaction({
-    chainId: 4663,
-    to: sourceAsset,
-    data: `0x095ea7b3${depository.toLowerCase().replace(/^0x/, '').padStart(64, '0')}${BigInt(sourceAmount).toString(16).padStart(64, '0')}`,
-    value: 0n,
-    nonce: approvalNonce,
-    gas: 60000n,
-    maxFeePerGas: 2n,
-    maxPriorityFeePerGas: 1n,
-  });
-  const approvalHash = keccak256(approvalRawBytes);
-  await repository.prepareChainTransactionAttempt(cycleId, 'outbound', createPreparedChainTransactionAttempt({
-    cycleId,
-    stage: 'outbound',
-    requestDigest: approvalRequestDigest,
-  }));
-  await repository.recordSignedTransactionWithRecoveryContext(
-    cycleId,
-    'outbound',
-    approvalRequestDigest,
-    { rawBytes: approvalRawBytes, nonce: String(approvalNonce), blockhash: null, hash: approvalHash },
-    {
-      stage: 'outbound',
-      recipient: null,
-      requestDigest: approvalRequestDigest,
-      policyDigest: `sha256:${'2'.repeat(64)}`,
-      approvalDigest: `sha256:${'3'.repeat(64)}`,
-      fencingToken,
-      fencingTokenDigest: `sha256:${'4'.repeat(64)}`,
-      approvedSemanticsDigest: `sha256:${'5'.repeat(64)}`,
-      rawSignedBytesHash: approvalHash,
-      signedMessageDigest: `sha256:${'6'.repeat(64)}`,
-      relayQuoteDeadlineUnixSeconds: '1700000200',
-      relayIntent,
-      relayRoute,
-    },
-    null,
-  );
-  await repository.recordBroadcast(cycleId, 'outbound', approvalRequestDigest, { transactionHash: approvalHash });
-
   await repository.prepareChainTransactionAttempt(cycleId, 'outbound', createPreparedChainTransactionAttempt({
     cycleId,
     stage: 'outbound',
@@ -934,7 +890,7 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
     cycleId,
     'outbound',
     requestDigest,
-    { rawBytes: '0x1234', nonce: '9', blockhash: null, hash: sourceHash },
+    { rawBytes: sourceRawBytes, nonce: '9', blockhash: null, hash: sourceHash },
     {
       stage: 'outbound',
       recipient: null,
@@ -956,46 +912,28 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
 
   const receiptBlockHash = `0x${'2'.repeat(64)}`;
   const parentBlockHash = `0x${'3'.repeat(64)}`;
-  const approvalReceiptBlockHash = `0x${'6'.repeat(64)}`;
   const sourceClient = {
+    async getChainId() { return 4663; },
+    async getTransaction() { return { hash: sourceHash, from: operations, to: depository, value: 25n, input: sourceData, nonce: 9, blockNumber: 100n, blockHash: receiptBlockHash }; },
     async getTransactionReceipt({ hash }) {
-      if (hash === approvalHash) {
-        return {
-          transactionHash: approvalHash,
-          blockNumber: 98n,
-          blockHash: approvalReceiptBlockHash,
-          status: 'success',
-          logs: [],
-        };
-      }
       assert.equal(hash, sourceHash);
       return {
         transactionHash: sourceHash,
         blockNumber: 100n,
         blockHash: receiptBlockHash,
         status: 'success',
-        logs: [{
-          address: sourceAsset,
-          topics: [
-            ERC20_TRANSFER_TOPIC,
-            `0x${'0'.repeat(24)}${operations.slice(2)}`,
-            `0x${'0'.repeat(24)}${depository.slice(2)}`,
-          ],
-          data: `0x${BigInt(sourceAmount).toString(16).padStart(64, '0')}`,
-          logIndex: 0n,
-        }],
+        logs: [], gasUsed: 21000n, effectiveGasPrice: 1n,
       };
     },
     async getBlock({ blockTag, blockNumber }) {
-      if (blockTag === 'finalized') return { number: 101n, hash: `0x${'4'.repeat(64)}`, timestamp: 1_700_000_090n };
+      if (blockTag === 'finalized' || blockNumber === 101n) return { number: 101n, hash: `0x${'4'.repeat(64)}`, timestamp: 1_700_000_090n };
       if (blockNumber === 100n) return { number: 100n, hash: receiptBlockHash, parentHash: parentBlockHash, timestamp: 1_700_000_080n };
       if (blockNumber === 99n) return { number: 99n, hash: parentBlockHash, parentHash: `0x${'5'.repeat(64)}`, timestamp: 1_700_000_070n };
-      if (blockNumber === 98n) return { number: 98n, hash: approvalReceiptBlockHash, timestamp: 1_700_000_060n };
       throw new Error('unexpected outbound source block read');
     },
   };
   const historicalEvidenceClient = {
-    async readErc20BalanceAtBlock({ account, blockNumber, blockHash }) {
+    async readNativeBalanceAtBlock({ account, blockNumber, blockHash }) {
       const source = account.toLowerCase() === operations;
       const value = source
         ? (blockNumber === 99n ? 100n : 100n - BigInt(sourceAmount))
@@ -1038,6 +976,11 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
       throw new Error(`unexpected Solana RPC ${request.method}`);
     },
   });
+  const nativeAsset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  await repository.recordCustodyLedger(cycleId, { schema: 'hookemon.custody-ledger.v3', cycleId, ...nativeAsset,
+    ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(key => [key, '0'])), claimed: sourceAmount,
+    verifiedCurrentBalance: null, expectedCycleAsset: null, gasReserve: { ...nativeAsset, amountAtomic: '30000' },
+    gasSpent: { ...nativeAsset, amountAtomic: '0' }, gasPayments: [] });
   let leaseChecks = 0;
   const context = {
     cycleId,
@@ -1059,19 +1002,21 @@ test('built-in outbound reconciliation completes a real CycleRepository stage fr
   });
 
   const evidence = await driver.reconcile(context);
-  assert.equal(evidence.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(evidence.schema, 'hookemon.outbound-relay-settlement-evidence.v2');
   assert.equal(evidence.relayLeg.state, 'SETTLED');
   await driver.commit({ ...context, evidence });
   await repository.completeStage(cycleId, 'outbound', evidence);
   assert.equal((await repository.readStage(cycleId, 'outbound')).status, 'COMPLETE');
   assert.equal((await repository.readChainTransactionAttempt(cycleId, 'outbound', requestDigest)).attempt.state, 'FINALIZED');
-  // The canonical two-step envelope's prerequisite reaches FINALIZED independently, from its own
-  // signed bytes and receipt -- proving the deposit's finality was never substituted for it.
-  assert.equal((await repository.readChainTransactionAttempt(cycleId, 'outbound', approvalRequestDigest)).attempt.state, 'FINALIZED');
+  assert.equal((await repository.describeCycle(cycleId)).chainAttempts.size, 1, 'native outbound has one payable deposit and no ERC20 approval');
   assert.ok(leaseChecks > 0, 'the reconciliation facade fences durable reads and writes with the active lease');
 
   const replay = await driver.reconcile(context);
   assert.deepEqual(replay, evidence, 'a SETTLED replay returns canonical durable evidence without another settlement');
+  const nativeLedger = (await repository.describeCycle(cycleId)).custodyLedgers.get('4663\u0000native');
+  assert.equal(nativeLedger.bridgeOut, sourceAmount);
+  assert.equal(nativeLedger.gasSpent.amountAtomic, '21000');
+  assert.equal(nativeLedger.gasPayments.length, 1);
 });
 
 test('a provider response stays unresolved until an integration supplies independent reconciliation evidence', async () => {
@@ -1358,7 +1303,6 @@ test('claim-process writes a chain attempt before signing and broadcasts only it
     contracts: {
       vault: null,
       hook: `0x${'1'.repeat(40)}`,
-      usdg: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
     },
     accounts: { evm: account.address, solana: null },
     nativeGasCaps: { robinhood: '100', solana: '1' },
@@ -1475,7 +1419,6 @@ test('claim-process reconciliation records a visible signed transaction after it
     contracts: {
       vault: null,
       hook: `0x${'1'.repeat(40)}`,
-      usdg: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
     },
     accounts: { evm: account.address, solana: null },
     nativeGasCaps: { robinhood: '100', solana: '1' },
@@ -1549,7 +1492,7 @@ test('claim-process refuses a legacy sent-unknown provider attempt before creati
     adapters: { collectorCrypt: null, relay: null, robinhood: { client: null }, solana: { client: null } },
     signerClient: throwingSigner(),
     config: baseConfig({
-      contracts: { vault: null, hook: `0x${'1'.repeat(40)}`, usdg: '0x5fc5360d0400a0fd4f2af552add042d716f1d168' },
+      contracts: { vault: null, hook: `0x${'1'.repeat(40)}` },
       accounts: { evm: `0x${'2'.repeat(40)}`, solana: null },
     }),
     cycleRepository,
@@ -1659,7 +1602,7 @@ function writeAheadRepository() {
     custodyLedgers,
     async readStage() { return { status: 'PENDING' }; },
     async readClaimPreconditions() { return { heldAssets: false, unattributed: false, unresolvedObligations: false }; },
-    async describeCycle() { return { releaseAmount: '1', chainAttempts: new Map(chainAttempts), custodyLedgers: new Map(custodyLedgers) }; },
+    async describeCycle() { return { releaseAmount: '1', admission: { ...nativeAdmissionFixture(CYCLE_ID, { amountWei: '1' }), packId: undefined }, chainAttempts: new Map(chainAttempts), custodyLedgers: new Map(custodyLedgers) }; },
     async readStageAttempt(cycleId, stage) {
       const record = attempts.get(keyFor(cycleId, stage));
       return record?.responseEvidence ?? null;
@@ -2204,7 +2147,7 @@ test('persists NOT_SENT before an injected capability and retries the same reque
   assert.equal(effects, 0);
   assert.equal((await repository.readOperationalStageAttempt(cycleId, 'purchase')).attempt.state, 'NOT_SENT');
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'purchase')).attempt.state, 'NOT_SENT');
   const retryDriver = createStageDriver({
     liveMode: true,
@@ -2286,7 +2229,7 @@ test('keeps a keychain interaction denial retryable with redacted OS text before
   assert.equal(keychainCalls, 1);
   assert.equal(broadcasts, 0);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const cycle = await reopened.describeCycle(cycleId);
   assert.equal(cycle.terminalState, null);
   assert.equal(cycle.terminalEvidence, null);
@@ -2334,7 +2277,7 @@ test('keeps an expired Relay quote retryable before any request or broadcast', a
   assert.equal(requests, 0);
   assert.equal(broadcasts, 0);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
   assert.equal(await reopened.readOperationalStageAttempt(cycleId, 'outbound'), null);
   assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
@@ -2373,7 +2316,7 @@ test('keeps a lost lease retryable before a provider effect and retains a NOT_SE
   );
   assert.equal(effects, 0);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.terminalEvidence, null);
@@ -2417,7 +2360,7 @@ async function assertPolicyRefusalHeldForOwnerDecision(t, message) {
   assert.equal(broadcasts, 0, 'a semantically wrong request must never reach a signature or broadcast');
   // Durable across reopen: a real repository, not an in-memory fixture, so this proves the hold and
   // the NOT_SENT attempt both survive a process restart rather than only living in this instance.
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, 'HELD_DATA_UNVERIFIED');
   assert.deepEqual(state.terminalEvidence, { stage: 'purchase', reason: 'TRANSACTION_POLICY_REFUSED', error: message });
@@ -2480,7 +2423,7 @@ test('keeps an expired return blockhash retryable while retaining a broadcast at
     ReturnRecoveryRequiredError,
   );
   assert.equal(effects, 0);
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
   assert.equal((await reopened.readChainTransactionAttempt(cycleId, 'return', requestDigest)).attempt.state, 'BROADCAST');
   assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
@@ -2568,6 +2511,7 @@ test('production signing refuses a missing standing authority before the raw sig
 
 test('production signing refuses an expired standing authority before it reserves capacity or reaches the raw signer', async () => {
   const fixture = createProductionTestFixture({
+    moneyConfiguration: claimMoneyConfiguration(),
     standingAuthorityIssuedAt: '2000-01-01T00:00:00.000Z',
     standingAuthorityExpiresAt: '2001-01-01T00:00:00.000Z',
   });
@@ -2636,7 +2580,7 @@ test('production signing refuses an expired standing authority before it reserve
 
 test('production signing rejects a policy-signed authorization for a different prepared request before signing or broadcast', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
-  const fixture = createProductionTestFixture();
+  const fixture = createProductionTestFixture({ moneyConfiguration: claimMoneyConfiguration() });
   const authorization = buildAndSignStepAuthorization(fixture, {
     cycleId,
     actionKind: 'outbound',
@@ -2716,7 +2660,7 @@ test('production signing rejects a policy-signed authorization for a different p
   assert.equal(broadcasts, 0);
   assert.equal(decisionWrites, 0);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.standingAuthorityDecisions.size, 0);
@@ -2726,6 +2670,7 @@ test('production signing rejects a policy-signed authorization for a different p
 test('production signing replays a stored authority after expiry with one signer and a reopened reconciliation attempt', async t => {
   const { directory, repository, cycleId } = await durableCycle(t);
   const fixture = createProductionTestFixture({
+    moneyConfiguration: claimMoneyConfiguration(),
     standingAuthorityIssuedAt: '2000-01-01T00:00:00.000Z',
     standingAuthorityExpiresAt: '2001-01-01T00:00:00.000Z',
   });
@@ -2797,7 +2742,7 @@ test('production signing replays a stored authority after expiry with one signer
   assert.equal(signerCalls, 1);
   assert.equal(decisionWrites, 1);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal(state.standingAuthorityDecisions.size, 1);
@@ -2998,7 +2943,7 @@ test('keeps a Collector committed-then-503 attempt SENT_UNKNOWN after reopen unt
   await assert.rejects(() => createDriver(repository).execute(context), /HTTP 503/);
   assert.equal(providerCalls, 1);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'purchase')).attempt.state, 'SENT_UNKNOWN');
@@ -3050,7 +2995,7 @@ test('keeps a Relay lost-response attempt SENT_UNKNOWN after reopen until reconc
   await assert.rejects(() => createDriver(repository).execute(context), /response was lost/);
   assert.equal(relayCalls, 1);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   const state = await reopened.describeCycle(cycleId);
   assert.equal(state.terminalState, null);
   assert.equal((await reopened.readOperationalStageAttempt(cycleId, 'outbound')).attempt.state, 'SENT_UNKNOWN');
@@ -3184,7 +3129,7 @@ test('guards an injected live handler immediately before mutation, signing, and 
     cycleId: CYCLE_ID,
     stage: 'purchase',
     intent: { journalHead: 'head-guard' },
-    releaseAmountMicroUsdg: '5',
+    releaseAmountWei: '5', releaseCostMicroUsd: '7',
     packId: 'base-pack',
     fencingToken: '12345678-1234-4123-8123-123456789abc',
     async assertMutationAllowed(input) {
@@ -3197,7 +3142,7 @@ test('guards an injected live handler immediately before mutation, signing, and 
   assert.deepEqual(guards.map(guard => guard.boundary), ['mutation', 'signature', 'broadcast']);
   for (const guard of guards) {
     assert.equal(guard.cycleId, CYCLE_ID);
-    assert.equal(guard.releaseAmountMicroUsdg, '5');
+    assert.equal(guard.releaseAmountWei, '5');
     assert.equal(guard.packId, 'base-pack');
     assert.equal(guard.stage, 'purchase');
     assert.equal(guard.fencingToken, '12345678-1234-4123-8123-123456789abc');
@@ -3302,7 +3247,7 @@ test('guards direct provider and RPC mutation methods immediately before they ex
     cycleId: CYCLE_ID,
     stage: 'purchase',
     intent: { journalHead: 'head-adapter-guard' },
-    releaseAmountMicroUsdg: '5',
+    releaseAmountWei: '5', releaseCostMicroUsd: '7',
     packId: 'base-pack',
     fencingToken: '12345678-1234-4123-8123-123456789abc',
     async assertMutationAllowed(input) {
@@ -3416,7 +3361,7 @@ test('guards the production Solana RPC transport immediately before sendTransact
     cycleId: CYCLE_ID,
     stage: 'purchase',
     intent: { journalHead: 'head-solana-rpc-guard' },
-    releaseAmountMicroUsdg: '5',
+    releaseAmountWei: '5', releaseCostMicroUsd: '7',
     packId: 'base-pack',
     fencingToken: '12345678-1234-4123-8123-123456789abc',
     async assertMutationAllowed(input) {
@@ -3536,7 +3481,7 @@ test('built-in payout keeps a lost lease retryable before payout preparation or 
     LeaseLostError,
   );
   assert.equal(broadcasts, 0);
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => Date.now(), { testAuthority: createTestProfileMutationAuthority() });
   assert.equal((await reopened.describeCycle(cycleId)).terminalState, null);
   assert.equal(await reopened.readOperationalStageAttempt(cycleId, 'payout'), null);
   assert.equal((await reopened.readActiveCycle()).cycleId, cycleId);
@@ -3548,7 +3493,7 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
   const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
   const operations = account.address.toLowerCase();
   const cycleId = 'cycle-direct-payout-driver';
-  const amount = createUsdgPayoutAmount({ assetId: token, amountAtomic: '9' });
+  const amount = createNativePayoutAmount({ assetId: 'native', amountAtomic: '9' });
   const snapshot = {
     schema: 'hookemon.eligibility-payout-manifest.v1',
     cycleId,
@@ -3583,10 +3528,11 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
   const returnEvidence = {
     finalized: true,
     destinationAccount: operations,
-    destinationAsset: token,
+    destinationAsset: 'native',
     destinationCreditAmount: amount.amountAtomic,
   };
   let broadcastHash = null;
+  let broadcastBytes = null;
   let signCount = 0;
   let broadcastCount = 0;
   const baseSigner = wrapSignerClient({
@@ -3608,6 +3554,7 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
       },
       async broadcast({ signedTx }) {
         broadcastCount += 1;
+        broadcastBytes = signedTx;
         broadcastHash = keccak256(signedTx);
         return { transactionHash: broadcastHash };
       },
@@ -3620,23 +3567,15 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
       blockNumber: 100n,
       blockHash: `0x${'f'.repeat(64)}`,
       status: 'success',
-      logs: [{
-        address: token,
-        topics: [
-          ERC20_TRANSFER_TOPIC,
-          `0x${'0'.repeat(24)}${operations.slice(2)}`,
-          `0x${'0'.repeat(24)}${recipient.slice(2)}`,
-        ],
-        data: `0x${BigInt(amount.amountAtomic).toString(16).padStart(64, '0')}`,
-        logIndex: '0',
-      }],
+      logs: [], gasUsed: 21000n, effectiveGasPrice: 1n,
     };
   };
   const client = {
+    async getChainId() { return 4663; },
     async readContract({ functionName }) { assert.equal(functionName, 'isFrozen'); return false; },
     async getTransactionCount() { return 0n; },
     async getBalance() { return 1_000_000n; },
-    async getTransaction({ hash }) { return hash === broadcastHash ? { hash } : null; },
+    async getTransaction({ hash }) { return hash === broadcastHash ? { ...parseTransaction(broadcastBytes), hash, from: operations, input: parseTransaction(broadcastBytes).data ?? '0x', blockNumber: 100n, blockHash: `0x${'f'.repeat(64)}` } : null; },
     async getTransactionReceipt({ hash }) {
       const value = receipt();
       if (!value || hash !== broadcastHash) throw new TransactionReceiptNotFoundError({ hash });
@@ -3646,15 +3585,13 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
       if (blockNumber === 99n) return { number: 99n, hash: `0x${'e'.repeat(64)}`, timestamp: 99n };
       return { number: 100n, hash: `0x${'f'.repeat(64)}`, parentHash: `0x${'e'.repeat(64)}`, timestamp: 100n };
     },
-    // The same real shape stages-payout.test.mjs's rpc() fixture already proves against
-    // `readCycleAttributableFinalizedAvailableUsdg`: a typed asset amount bound to the configured
-    // USDG identity, ample enough to never itself constrain this test's tiny payout.
+    // Cycle-attributed native principal remains separate from its gas reserve.
     async readCycleAttributableFinalizedAvailable() {
-      return { chainId: '4663', assetId: token, decimals: 6, amountAtomic: '999999999999999999999999' };
+      return { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '999999999999999999999999' };
     },
   };
   const historicalEvidenceClient = {
-    async readErc20BalanceAtBlock({ account: observedAccount, blockNumber, blockHash }) {
+    async readNativeBalanceAtBlock({ account: observedAccount, blockNumber, blockHash }) {
       const isSource = observedAccount.toLowerCase() === operations;
       const value = isSource
         ? (blockNumber === 99n ? 1_000_000n : 1_000_000n - BigInt(amount.amountAtomic))
@@ -3759,9 +3696,9 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
     contracts: { usdg: token, hook: `0x${'3'.repeat(40)}`, vault: `0x${'4'.repeat(40)}` },
     accounts: { evm: operations, operationsTrigger: `0x${'5'.repeat(40)}` },
     moneyConfiguration: {
-      schema: 'hookemon.money-configuration.v1',
+      schema: 'hookemon.money-configuration.v2',
       assets: {
-        usdg: { chainId: '4663', assetId: token, decimals: 6 },
+        eth: { chainId: '4663', assetId: 'native', decimals: 18 },
         solanaStablecoin: {
           chainId: '792703809',
           assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -3769,14 +3706,14 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
         },
       },
       minimums: {
-        robinhoodReceive: { chainId: '4663', assetId: token, decimals: 6, amountAtomic: '0' },
+        robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
         solanaReceive: {
           chainId: '792703809',
           assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
           decimals: 6,
           amountAtomic: '0',
         },
-        returnUsdg: { chainId: '4663', assetId: token, decimals: 6, amountAtomic: '0' },
+        returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       },
       evm: {
         perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -3846,6 +3783,10 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
   assert.equal(releaseCount, 1);
   assert.equal(evidence.recipients[0].state, 'FINALIZED');
   assert.equal(evidence.recipients[0].amount.amountAtomic, amount.amountAtomic);
+  const payment = parseTransaction(broadcastBytes);
+  assert.equal(payment.to.toLowerCase(), recipient);
+  assert.equal(payment.value, 9n);
+  assert.equal(payment.data ?? '0x', '0x');
 });
 
 // ADR-0025 production integration gap: the real built-in RETURN chain handler seam (Solana) -- the
@@ -3860,17 +3801,17 @@ test('the built-in driver derives direct payout policy around a guarded raw sign
 // `signApproved` broker call -- never a broadcast. A companion negative proves the committed
 // WeakMap-by-reference ownership design in keychain-signer.mjs: a plain spread/clone of the real
 // owned client, carried through the exact same stage-driver wrapping, is never recognized as owned.
-function returnSignOnlyMoneyConfiguration(solanaMint, usdgAddress) {
+function returnSignOnlyMoneyConfiguration(solanaMint) {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: usdgAddress, decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: { chainId: '792703809', assetId: solanaMint, decimals: 6 },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: usdgAddress, decimals: 6, amountAtomic: '0' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       solanaReceive: { chainId: '792703809', assetId: solanaMint, decimals: 6, amountAtomic: '0' },
-      returnUsdg: { chainId: '4663', assetId: usdgAddress, decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '100' },
@@ -3978,7 +3919,6 @@ function returnSignOnlyRecoveryFake(attempts) {
 // Return's own custody-v2 writer always obtains a real finalized public/archive/public-recheck
 // observation for a genuinely new leg -- `returnSignOnlyRobinhoodClient` below supplies it once,
 // so these sign-only lease-fencing fixtures no longer run with a null Robinhood client.
-const RETURN_SIGN_ONLY_USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 
 function returnSignOnlyRobinhoodClient() {
   return {
@@ -3988,7 +3928,7 @@ function returnSignOnlyRobinhoodClient() {
       },
     },
     historicalEvidenceClient: {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) {
         return { value: 0n, blockNumber, blockHash };
       },
     },
@@ -4010,6 +3950,7 @@ function returnSignOnlyChainRepository(proceeds, solanaMint) {
       }]]);
       if (evmLedger !== null) custodyLedgers.set(`${evmLedger.chainId} ${evmLedger.assetId}`, evmLedger);
       return {
+        admission: nativeAdmissionFixture('cycle-return-sign-only'),
         custodyLedgers,
         chainAttempts: new Map(attempts),
         relayLegs: relayLeg === null ? new Map() : new Map([[relayLeg.relayRequestId, relayLeg]]),
@@ -4095,10 +4036,10 @@ function returnSignOnlyRelayStub({ quote, execution }) {
   };
 }
 
-function returnSignOnlyFixture() {
+async function returnSignOnlyFixture() {
   const cycleId = 'cycle-return-sign-only';
   const solanaMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-  const usdgAddress = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+  const nativeCurrency = '0x0000000000000000000000000000000000000000';
   const sender = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
   const recipient = '0x000000000000000000000000000000000000dEaD';
   const amountAtomic = '24000000';
@@ -4108,21 +4049,24 @@ function returnSignOnlyFixture() {
     chainId: 4663,
     accounts: { evm: recipient, solana: sender },
     relay: { solanaMint, maxSettlementWindowSeconds: '600' },
-    moneyConfiguration: returnSignOnlyMoneyConfiguration(solanaMint, usdgAddress),
+    moneyConfiguration: returnSignOnlyMoneyConfiguration(solanaMint),
     solana: { chainId: 'solana-mainnet' },
     collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: solanaMint, decimals: 6 } },
   };
-  const quote = {
-    direction: 'RETURN',
-    requestId,
-    origin: { chainId: 792703809, address: solanaMint, decimals: 6, amount: amountAtomic },
-    destination: { chainId: 4663, address: usdgAddress, decimals: 6, amount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic },
-    sender,
-    recipient,
-    deadlineUnixSeconds: 4_102_444_800,
+  const rawQuote = {
+    requestId, details: { sender, recipient,
+      currencyIn: { currency: { chainId: 792703809, address: solanaMint, decimals: 6 }, amount: amountAtomic, amountUsd: '24' },
+      currencyOut: { currency: { chainId: 4663, address: nativeCurrency, decimals: 18 }, amount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic, amountUsd: '23.84375' } },
+    protocol: { v2: { orderId: `0x${'9'.repeat(64)}`, orderData: {
+      inputs: [{ payment: { chainId: 'solana', currency: solanaMint, amount: amountAtomic }, refunds: [{ chainId: 'solana', currency: solanaMint, recipient: sender, deadline: 4_102_444_800 }] }],
+      output: { chainId: 'robinhood', deadline: 4_102_444_800, calls: [], payments: [{ recipient, currency: nativeCurrency, expectedAmount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic }] }
+    } } }, steps: []
   };
+  const quoteClient = createRelayClient({ quoteValidityMs: 60000,
+    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(rawQuote) }) });
+  const quote = await quoteClient.quoteReturnBridge({ user: sender, recipient, amount: amountAtomic, originCurrency: solanaMint, skipRouteCheck: true });
   const intent = {
-    schema: 'hookemon.relay-intent.v1',
+    schema: 'hookemon.relay-intent.v2',
     requestId,
     orderId: `0x${'9'.repeat(64)}`,
     direction: 'RETURN',
@@ -4130,8 +4074,8 @@ function returnSignOnlyFixture() {
     destinationChainId: 4663,
     originAssetId: solanaMint,
     originDecimals: 6,
-    destinationAssetId: usdgAddress,
-    destinationDecimals: 6,
+    destinationAssetId: 'native',
+    destinationDecimals: 18,
     originAmount: amountAtomic,
     quotedDestinationAmount: destinationAmountAtomic,
     quotedDestinationMinimumAmount: destinationAmountAtomic,
@@ -4156,7 +4100,7 @@ function returnSignOnlyFixture() {
   return { cycleId, solanaMint, config, relay, proceeds: amountAtomic };
 }
 test('the real built-in return handler receives a lease-fenced sign-only recovery facade with the complete method surface, and a lost lease refuses before a second Keychain signApproved call', async () => {
-  const { cycleId, solanaMint, config, relay, proceeds } = returnSignOnlyFixture();
+  const { cycleId, solanaMint, config, relay, proceeds } = await returnSignOnlyFixture();
   const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
 
   let brokerCalls = 0;
@@ -4237,7 +4181,7 @@ test('the real built-in return handler receives a lease-fenced sign-only recover
 });
 
 test('a plain clone of the real owned Keychain client is never recognized as owned, so a sign-only timeout is never retried through the durable ledger', async () => {
-  const { solanaMint, config, relay, proceeds } = returnSignOnlyFixture();
+  const { solanaMint, config, relay, proceeds } = await returnSignOnlyFixture();
   const cycleId = 'cycle-return-sign-only-clone';
   const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
 
@@ -4299,7 +4243,7 @@ test('a lease lost while the standing-authority guard await is genuinely suspend
   // Reuses the exact same real owned Keychain client + real built-in return handler + real
   // signOnlyRecoveryRepository facade as the positive sign-only test above -- this test is only
   // about the standing-authority guard's own recheck, not a second huge fixture.
-  const { cycleId, solanaMint, config, relay, proceeds } = returnSignOnlyFixture();
+  const { cycleId, solanaMint, config, relay, proceeds } = await returnSignOnlyFixture();
   const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
   // The only method the real standing-authority provider's own first-use reservation needs beyond
   // the narrow sign-only recovery surface above -- added directly since this is the one test in
@@ -4329,7 +4273,7 @@ test('a lease lost while the standing-authority guard await is genuinely suspend
   // Default-dated (issued 2026-01-01, expires 2099-01-01): genuinely valid right now, so the
   // standing-authority guard's real verification actually runs to completion instead of being
   // refused outright on an expired fixture.
-  const fixture = createProductionTestFixture();
+  const fixture = createProductionTestFixture({ moneyConfiguration: claimMoneyConfiguration() });
 
   // `createStandingAuthoritySigningGuard`'s guard body is exactly two awaits in sequence: first
   // `authority.resolveStepAuthorization(...)` (this hook -- entirely caller-supplied), then

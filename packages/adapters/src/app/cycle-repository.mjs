@@ -1107,9 +1107,13 @@ function outboundRelayRoute(state, leg) {
   if (intent === null || intent === undefined || route === null || route === undefined) {
     throw new Error('relay settlement has no durable persisted outbound route accounts');
   }
+  const sourceCurrency = leg.schema === 'hookemon.relay-leg.v2' && leg.sourceChainId === '4663'
+    && leg.sourceAssetId === 'native' && leg.sourceDecimals === 18
+    ? '0x0000000000000000000000000000000000000000'
+    : assertEvmAddress(leg.sourceAssetId, 'relay settlement source asset');
   if (intent.requestId !== leg.relayRequestId
     || String(intent.originChainId) !== leg.sourceChainId
-    || intent.originAssetId !== assertEvmAddress(leg.sourceAssetId, 'relay settlement source asset')
+    || intent.originAssetId !== sourceCurrency
     || intent.originDecimals !== leg.sourceDecimals
     || intent.originAmount !== leg.sourceAmountAtomic
     || String(intent.destinationChainId) !== leg.destinationChainId
