@@ -490,7 +490,8 @@ export async function mutateSupplementaryPayout({
   const supplementaryStore = createSupplementaryPayoutStore({ cycleRepository, settlement: rawSettlement });
   const payoutStore = directPayoutStoreAdapter(supplementaryStore, request);
   let state = await payoutStore.load();
-  if (state === null || state === undefined) {
+  const initializing = state === null || state === undefined;
+  if (initializing) {
     const plan = request.plan.payoutPlan;
     const operations = plan.returnEvidence.operations;
     const assetId = plan.returnEvidence.assetId;
@@ -509,23 +510,33 @@ export async function mutateSupplementaryPayout({
       assetId,
       firstNonce: String(firstNonce),
     });
-    await payoutStore.persist(state);
   }
-  if (state.recipients.length > 0) {
+  const unresolved = state.recipients.filter(entry => !['FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE'].includes(entry.state));
+  if (unresolved.length > 0) {
     const client = adapters?.robinhood?.client;
-    if (client && typeof client.getBalance === 'function') {
-      const required = BigInt(state.plan.feasibility.requiredNativeAmount.amountAtomic);
-      const observedRaw = await client.getBalance({ address: state.operations });
-      const observed = typeof observedRaw === 'bigint' ? observedRaw : BigInt(observedRaw);
-      const admission = evaluateDirectPayoutNativeGasAdmission({
-        requiredNativeAmount: required.toString(),
-        observedNativeBalance: observed.toString(),
-      });
-      if (admission.outcome !== 'OK') {
-        fail(`supplementary payout native gas balance is below the required feasibility envelope by ${admission.deficit} wei`);
-      }
+    if (!client || typeof client.getBalance !== 'function') {
+      fail('supplementary payout requires getBalance before persisting or advancing recipient state');
+    }
+    const paid = state.recipients.filter(entry => entry.state === 'FINALIZED')
+      .reduce((sum, entry) => sum + BigInt(entry.amount.amountAtomic), 0n);
+    const remainingPrincipal = BigInt(state.distributablePool.amountAtomic) - paid;
+    const remainingGas = BigInt(state.plan.feasibility.measuredTransferGas)
+      * BigInt(state.plan.feasibility.maxGasPriceWei) * BigInt(unresolved.length);
+    const required = remainingPrincipal + remainingGas
+      + BigInt(state.plan.feasibility.nativeReserve.amountAtomic);
+    const observedRaw = await client.getBalance({ address: state.operations });
+    if ((typeof observedRaw !== 'bigint' && typeof observedRaw !== 'string')
+      || !/^(0|[1-9][0-9]*)$/.test(String(observedRaw))) {
+      fail('supplementary payout native balance is invalid');
+    }
+    const admission = evaluateDirectPayoutNativeGasAdmission({
+      requiredNativeAmount: required.toString(), observedNativeBalance: String(observedRaw),
+    });
+    if (admission.outcome !== 'OK') {
+      fail(`supplementary payout native balance does not cover remaining principal plus gas and reserve by ${admission.deficit} wei`);
     }
   }
+  if (initializing) await payoutStore.persist(state);
   while (!isDirectPayoutComplete(state)) {
     const target = state.recipients.find(entry => entry.state !== 'FINALIZED' && entry.state !== 'REFUSED');
     if (!target) fail('supplementary payout has no unresolved recipient before terminal conservation');

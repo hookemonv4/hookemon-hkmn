@@ -16,6 +16,7 @@ import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import { isDirectPayoutComplete } from '../../src/app/stages/payout.mjs';
 import {
   mutateSupplementaryReturn,
+  mutateSupplementaryPayout,
   prepareSupplementaryReturnRequest,
   reconcileSupplementaryReturn,
   SupplementaryMoneyError,
@@ -604,6 +605,15 @@ test('production supplementary payout preserves the return boundary and resumes 
     },
   };
   const client = payoutLifecycleRpc();
+  const balanceChecks = [];
+  client.getBalance = async () => {
+    const recipients = [...records.values()][0]?.recipients ?? [];
+    const finalized = recipients.filter(entry => entry.state === 'FINALIZED');
+    const paid = finalized.reduce((sum, entry) => sum + BigInt(entry.amount.amountAtomic), 0n);
+    const exact = 9n - paid + BigInt(2 - finalized.length) * 250000n + 10n;
+    balanceChecks.push(exact);
+    return exact;
+  };
   const counter = { sign: 0 };
 
   const reconcile = () => createProductionSupplementaryStageHandlers({ assertCanary: async () => {} })[sourceSettlement.state].reconcile({
@@ -620,6 +630,16 @@ test('production supplementary payout preserves the return boundary and resumes 
   client.setNonce('1');
   state = await reconcile();
   assert.equal(state.recipients.find(entry => entry.recipient === RECIPIENT_B).state, 'BROADCAST');
+  // The persisted first payment has signed identity and native finality; corrupting its proof
+  // must refuse before the remaining-balance calculation can subtract that payment.
+  const [storedKey, validStored] = [...records.entries()][0];
+  const forgedStored = structuredClone(validStored);
+  forgedStored.recipients[0].finalizedTransfer.evidenceDigest = `sha256:${'0'.repeat(64)}`;
+  records.set(storedKey, forgedStored);
+  const checksBeforeForgery = balanceChecks.length;
+  await assert.rejects(reconcile, /native proof evidence digest is invalid/);
+  assert.equal(balanceChecks.length, checksBeforeForgery);
+  records.set(storedKey, validStored);
 
   client.finalize(state.recipients[1].txHash, {
     transactionHash: state.recipients[1].txHash, blockNumber: 100n, blockHash: `0x${'9'.repeat(64)}`, status: 'success',
@@ -627,7 +647,9 @@ test('production supplementary payout preserves the return boundary and resumes 
   });
   await assert.rejects(reconcile, /synthetic interruption before completion/);
   assert.equal(sourceSettlement.state, 'PAYOUT_BROADCAST');
+  assert.ok(balanceChecks.includes(250013n), 'resume admits exactly unpaid principal plus one transaction gas and reserve');
   const signedAtCheckpoint = counter.sign;
+  const checksAtCheckpoint = balanceChecks.length;
   const broadcastAtCheckpoint = counter.broadcasts.length;
   const validBoundary = storedBoundary;
   storedBoundary = { ...validBoundary, returnBoundary: { ...durableBoundary, evidenceDigest: `sha256:${'0'.repeat(64)}` } };
@@ -637,6 +659,7 @@ test('production supplementary payout preserves the return boundary and resumes 
   storedBoundary = validBoundary;
   interruptCompletion = false;
   state = await reconcile();
+  assert.equal(balanceChecks.length, checksAtCheckpoint, 'terminal retry performs no fresh spending admission');
   assert.equal(counter.sign, signedAtCheckpoint);
   assert.equal(counter.broadcasts.length, broadcastAtCheckpoint);
 
@@ -723,4 +746,27 @@ for (const supplementary of [false, true]) {
       }
     });
   }
+}
+
+for (const [label, balance] of [['gas-only', 500010n], ['one-wei-short', 500018n], ['missing', null], ['malformed', -1n], ['exact', 500019n]]) {
+  test(`supplementary payout initial native balance ${label} is checked before persistence`, async () => {
+    const cycleId = 'synthetic-supplementary-balance';
+    const identity = settlementIdentity(cycleId);
+    const boundary = payoutReturnBoundary(identity);
+    let persisted = 0, signed = 0;
+    const repository = {
+      async readSupplementarySettlement() { return payoutSettlement(cycleId, 'RETURN_BROADCAST'); },
+      async advanceSupplementarySettlement() { throw new Error('unexpected settlement advance'); },
+      async readPagedPayoutState() { return null; },
+      async persistPagedPayoutState() { persisted += 1; throw new Error('synthetic verified balance persistence boundary'); },
+      async readSupplementarySettlementEvidence() { return boundary; },
+    };
+    const client = { async getTransactionCount() { return 0n; }, ...(balance === null ? {} : { async getBalance() { return balance; } }) };
+    await assert.rejects(mutateSupplementaryPayout({ liveMode: true, config: payoutLifecycleConfig(),
+      adapters: { robinhood: { client } }, signerClient: { evm: { async sign() { signed += 1; } } },
+      cycleRepository: repository, context: { cycleId, positionId: identity.positionId, eligibilityManifest: payoutEligibilityManifest(cycleId), returnBoundary: boundary },
+    }), label === 'exact' ? /synthetic verified balance persistence boundary/ : label === 'missing' ? /requires getBalance/ : label === 'malformed' ? /balance is invalid/ : /remaining principal plus gas and reserve/);
+    assert.equal(persisted, label === 'exact' ? 1 : 0);
+    assert.equal(signed, 0);
+  });
 }
