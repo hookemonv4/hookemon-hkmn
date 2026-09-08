@@ -7,6 +7,7 @@ import {
   formatMicroUsdg,
   usePublicCycle,
 } from "./PublicCycleTracker";
+import { formatNativeAmount } from "../lib/native-accounting.mjs";
 import styles from "./PublicCycleTracker.module.css";
 
 const HERO_CARD_COUNT = 3;
@@ -31,7 +32,7 @@ export default function HeroDashboard() {
       <dl className={styles.heroDashboardMetrics}>
         <div>
           <dt>Rewards paid</dt>
-          <dd>{formatMicroUsdg(community?.metrics.totalRewardsPaidMicroUsdg)}</dd>
+          <dd>{community?.schemaVersion === 9 ? formatNativeAmount((community.metrics as unknown as Record<string, string | null>).totalRewardsPaidWei) : formatMicroUsdg(community?.metrics.totalRewardsPaidMicroUsdg)}</dd>
         </div>
         <div>
           <dt>Packs opened</dt>

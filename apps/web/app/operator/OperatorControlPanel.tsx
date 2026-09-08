@@ -1,5 +1,7 @@
 "use client";
 
+import NativeAccounting from "../NativeAccounting";
+import { nativeValidationSkeleton, requireNativeRound } from "../../lib/native-accounting.mjs";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
@@ -12,7 +14,10 @@ import {
   formatGermanDate,
   formatGermanUsdg,
   germanStatus,
-  parseGermanUsdg,
+  parseGermanUsd,
+  formatGermanUsd,
+  formatGermanEth,
+  assertNativeOperatorConfiguration,
 } from "./operator-locale";
 import type { ActiveCycle, DashboardCard } from "./operator-types";
 import styles from "./operator.module.css";
@@ -32,16 +37,16 @@ type OperatorState = {
   intervalMinutes: number;
   skipNextCycleSequence: number;
   runNowSequence: number;
-  maxUnitPriceMicroUsdg: string | null;
-  maxCycleBudgetMicroUsdg: string | null;
-  max24HourBudgetMicroUsdg: string | null;
+  maxUnitPriceMicroUsd: string | null;
+  maxCycleBudgetMicroUsd: string | null;
+  max24HourBudgetMicroUsd: string | null;
   liveMode: boolean;
   configurationComplete: boolean;
   executionConnected: boolean;
 };
 
 // The Collector Crypt pack catalog is priced in a Solana stablecoin, a different chain and asset
-// from the EVM USDG bridge/spend caps below -- never compared or summed together as if at parity.
+// from the USD valuation caps below -- never compared or summed together as if at parity.
 type Pack = {
   id: string;
   name: string;
@@ -54,9 +59,9 @@ type Bootstrap = {
   state: OperatorState;
   hardCaps: {
     maxBoostersPerCycle: string;
-    maxUnitPriceMicroUsdg: string;
-    maxCycleBudgetMicroUsdg: string;
-    max24HourBudgetMicroUsdg: string;
+    maxUnitPriceMicroUsd: string;
+    maxCycleBudgetMicroUsd: string;
+    max24HourBudgetMicroUsd: string;
   };
   catalog: { status: string; fetchedAtMs: number; packs: Pack[] } | null;
   readiness: { ready: boolean; reasons: string[] };
@@ -66,7 +71,7 @@ type Bootstrap = {
 type DashboardRoundAccounting = PublicRoundAccounting;
 
 type Dashboard = {
-  schemaVersion: 4;
+  schemaVersion: 4 | 7;
   historyComplete: boolean;
   cardHistoryComplete: boolean;
   generatedAt: string;
@@ -187,9 +192,9 @@ type Command =
         allowedPackIds: string[];
         requestedOrders: number;
         maxBoostersPerCycle: number;
-        maxUnitPriceMicroUsdg: string;
-        maxCycleBudgetMicroUsdg: string;
-        max24HourBudgetMicroUsdg: string;
+        maxUnitPriceMicroUsd: string;
+        maxCycleBudgetMicroUsd: string;
+        max24HourBudgetMicroUsd: string;
       };
     };
 
@@ -198,9 +203,9 @@ type FormState = {
   requestedOrders: string;
   maxBoostersPerCycle: string;
   intervalMinutes: string;
-  maxUnitPriceMicroUsdg: string;
-  maxCycleBudgetMicroUsdg: string;
-  max24HourBudgetMicroUsdg: string;
+  maxUnitPriceMicroUsd: string;
+  maxCycleBudgetMicroUsd: string;
+  max24HourBudgetMicroUsd: string;
   note: string;
 };
 
@@ -211,9 +216,9 @@ const EMPTY_FORM: FormState = {
   requestedOrders: "0",
   maxBoostersPerCycle: "1",
   intervalMinutes: "20",
-  maxUnitPriceMicroUsdg: "",
-  maxCycleBudgetMicroUsdg: "",
-  max24HourBudgetMicroUsdg: "",
+  maxUnitPriceMicroUsd: "",
+  maxCycleBudgetMicroUsd: "",
+  max24HourBudgetMicroUsd: "",
   note: "",
 };
 
@@ -258,10 +263,12 @@ export default function OperatorControlPanel() {
       const response = await fetch("/operator/api/bootstrap", { cache: "no-store" });
       const body = await readJson<Bootstrap & { code?: string }>(response);
       if (!response.ok) throw new Error(stableMessage(body.code));
+      assertNativeOperatorConfiguration(body.state, body.hardCaps);
       setBootstrap(body);
       if (replaceForm) setForm(formFromState(body.state));
       setMessage("Private Steuerung ist geladen.");
     } catch (bootstrapError) {
+      setBootstrap(null);
       setError(errorMessage(bootstrapError));
       setMessage("Private Steuerung konnte nicht geladen werden.");
     } finally {
@@ -344,15 +351,15 @@ export default function OperatorControlPanel() {
 
   function saveConfiguration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    let maxUnitPriceMicroUsdg;
-    let maxCycleBudgetMicroUsdg;
-    let max24HourBudgetMicroUsdg;
+    let maxUnitPriceMicroUsd;
+    let maxCycleBudgetMicroUsd;
+    let max24HourBudgetMicroUsd;
     try {
-      maxUnitPriceMicroUsdg = parseGermanUsdg(form.maxUnitPriceMicroUsdg);
-      maxCycleBudgetMicroUsdg = parseGermanUsdg(form.maxCycleBudgetMicroUsdg);
-      max24HourBudgetMicroUsdg = parseGermanUsdg(form.max24HourBudgetMicroUsdg);
+      maxUnitPriceMicroUsd = parseGermanUsd(form.maxUnitPriceMicroUsd);
+      maxCycleBudgetMicroUsd = parseGermanUsd(form.maxCycleBudgetMicroUsd);
+      max24HourBudgetMicroUsd = parseGermanUsd(form.max24HourBudgetMicroUsd);
     } catch {
-      setError("Bitte alle USDG-Grenzen im deutschen Format eingeben, zum Beispiel 12,50.");
+      setError("Bitte alle USD-Grenzen im deutschen Format eingeben, zum Beispiel 12,50.");
       return;
     }
     const maxBoostersPerCycle = Number(form.maxBoostersPerCycle);
@@ -368,9 +375,9 @@ export default function OperatorControlPanel() {
           allowedPackIds: [...form.allowedPackIds].sort(),
           requestedOrders,
           maxBoostersPerCycle,
-          maxUnitPriceMicroUsdg,
-          maxCycleBudgetMicroUsdg,
-          max24HourBudgetMicroUsdg,
+          maxUnitPriceMicroUsd,
+          maxCycleBudgetMicroUsd,
+          max24HourBudgetMicroUsd,
         },
       },
       "Konfiguration wurde gespeichert und protokolliert.",
@@ -522,9 +529,9 @@ export default function OperatorControlPanel() {
                 value={String(dashboard.activeCycle.requestedOrders)}
               />
               <CurrentValue label="Maximale Booster" value={nullableInteger(dashboard.activeCycle.maxBoostersPerCycle)} />
-              <CurrentValue label="Maximaler Packpreis" value={nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
-              <CurrentValue label="Zyklusbudget" value={nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
-              <CurrentValue label="24-Stunden-Budget" value={nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
+              <CurrentValue label="Maximaler Packpreis" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxUnitPriceMicroUsd) : nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
+              <CurrentValue label="Zyklusbudget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxCycleBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
+              <CurrentValue label="24-Stunden-Budget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).max24HourBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
               <CurrentValue label="Bestätigte Karten" value={String(dashboard.activeCycle.revealedCards)} />
             </dl>
             <details className={styles.technicalDetails}>
@@ -563,21 +570,22 @@ export default function OperatorControlPanel() {
             Historische Summen werden noch importiert. Die angezeigten Gesamtwerte sind vorläufig.
           </p>
         ) : null}
+        <NativeAccounting accounting={dashboard?.latestCycle?.roundAccounting} />
         <div className={styles.metricGrid}>
           <Metric
             label="Pool beim letzten Zyklusstart"
             value={dashboard ? formatCycleStartProjectPool(dashboard) : dashboardPlaceholder}
           />
-          <Metric label="Packkäufe" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg) : dashboardPlaceholder} />
-          <Metric label="Bestätigte Buybacks" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg) : dashboardPlaceholder} />
-          <Metric label="Zurück transferiert" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg) : dashboardPlaceholder} />
+          <Metric label="Packkäufe" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalCollectorSpendMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Bestätigte Buybacks" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBuybacksReturnedMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Zurück transferiert" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBridgedBackWei, false) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg)) : dashboardPlaceholder} />
           <Metric label="Letzte tatsächliche Ausschüttung" value={dashboard ? latestActuallyPaid(dashboard) : dashboardPlaceholder} />
           <Metric label="Nächste Gebührenreserve (50 %)" value={dashboard ? latestReserveTarget(dashboard) : dashboardPlaceholder} />
-          <Metric label="Angebotene Betriebskosten" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg) : dashboardPlaceholder} />
+          <Metric label="Angebotene Betriebskosten" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalQuotedOperatingCostsMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg)) : dashboardPlaceholder} />
           <Metric label="Abgeschlossene Zyklen" value={dashboard ? historicalCount(dashboard, dashboard.metrics.completedCycles) : dashboardPlaceholder} />
           <Metric label="Geöffnete Packs" value={dashboard ? historicalCount(dashboard, dashboard.metrics.openedPacks) : dashboardPlaceholder} />
         </div>
-        {dashboard?.latestCycle?.roundAccounting ? (
+        {dashboard?.schemaVersion !== 7 && dashboard?.latestCycle?.roundAccounting ? (
           <div className={styles.accountingGroups} aria-label="Letzte Holder-Rewards-Runde">
             <OperatorAccountingGroup title="Pack-Ergebnis">
               <RoundMetric label="Packausgaben" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.packSpendMicroUsdg, "Noch nicht bestätigt")} />
@@ -714,10 +722,10 @@ export default function OperatorControlPanel() {
             <LimitField
               id="max-unit-price"
               label="Maximaler Packpreis"
-              value={form.maxUnitPriceMicroUsdg}
-              hardCap={bootstrap?.hardCaps.maxUnitPriceMicroUsdg}
+              value={form.maxUnitPriceMicroUsd}
+              hardCap={bootstrap?.hardCaps.maxUnitPriceMicroUsd}
               disabled={controlsDisabled}
-              onChange={(value) => setForm((current) => ({ ...current, maxUnitPriceMicroUsdg: value }))}
+              onChange={(value) => setForm((current) => ({ ...current, maxUnitPriceMicroUsd: value }))}
             />
             <label className={styles.textField} htmlFor="cycle-interval-minutes">
               <span>Zyklusintervall</span>
@@ -741,18 +749,18 @@ export default function OperatorControlPanel() {
             <LimitField
               id="max-cycle-budget"
               label="Zyklusbudget"
-              value={form.maxCycleBudgetMicroUsdg}
-              hardCap={bootstrap?.hardCaps.maxCycleBudgetMicroUsdg}
+              value={form.maxCycleBudgetMicroUsd}
+              hardCap={bootstrap?.hardCaps.maxCycleBudgetMicroUsd}
               disabled={controlsDisabled}
-              onChange={(value) => setForm((current) => ({ ...current, maxCycleBudgetMicroUsdg: value }))}
+              onChange={(value) => setForm((current) => ({ ...current, maxCycleBudgetMicroUsd: value }))}
             />
             <LimitField
               id="max-daily-budget"
               label="24-Stunden-Budget"
-              value={form.max24HourBudgetMicroUsdg}
-              hardCap={bootstrap?.hardCaps.max24HourBudgetMicroUsdg}
+              value={form.max24HourBudgetMicroUsd}
+              hardCap={bootstrap?.hardCaps.max24HourBudgetMicroUsd}
               disabled={controlsDisabled}
-              onChange={(value) => setForm((current) => ({ ...current, max24HourBudgetMicroUsdg: value }))}
+              onChange={(value) => setForm((current) => ({ ...current, max24HourBudgetMicroUsd: value }))}
             />
           </div>
 
@@ -1003,7 +1011,7 @@ function LimitField({
         onChange={(event) => onChange(germanMoneyInput(event.target.value))}
       />
       <small>
-        USDG · Obergrenze {hardCap ? formatMicroUsdg(hardCap) : "wird geladen…"}
+        USD · Obergrenze {hardCap ? formatGermanUsd(hardCap) : "wird geladen…"}
       </small>
     </label>
   );
@@ -1050,9 +1058,9 @@ function formFromState(state: OperatorState): FormState {
     requestedOrders: String(state.requestedOrders ?? 0),
     maxBoostersPerCycle: String(state.maxBoostersPerCycle ?? 1),
     intervalMinutes: String(state.intervalMinutes ?? 20),
-    maxUnitPriceMicroUsdg: germanMoneyFormValue(state.maxUnitPriceMicroUsdg),
-    maxCycleBudgetMicroUsdg: germanMoneyFormValue(state.maxCycleBudgetMicroUsdg),
-    max24HourBudgetMicroUsdg: germanMoneyFormValue(state.max24HourBudgetMicroUsdg),
+    maxUnitPriceMicroUsd: germanMoneyFormValue(state.maxUnitPriceMicroUsd),
+    maxCycleBudgetMicroUsd: germanMoneyFormValue(state.maxCycleBudgetMicroUsd),
+    max24HourBudgetMicroUsd: germanMoneyFormValue(state.max24HourBudgetMicroUsd),
     note: "",
   };
 }
@@ -1079,9 +1087,9 @@ function configurationSnapshotFromForm(form: FormState) {
       requestedOrders: Number(form.requestedOrders),
       maxBoostersPerCycle: Number(form.maxBoostersPerCycle),
       intervalMinutes: Number(form.intervalMinutes),
-      maxUnitPriceMicroUsdg: parseGermanUsdg(form.maxUnitPriceMicroUsdg),
-      maxCycleBudgetMicroUsdg: parseGermanUsdg(form.maxCycleBudgetMicroUsdg),
-      max24HourBudgetMicroUsdg: parseGermanUsdg(form.max24HourBudgetMicroUsdg),
+      maxUnitPriceMicroUsd: parseGermanUsd(form.maxUnitPriceMicroUsd),
+      maxCycleBudgetMicroUsd: parseGermanUsd(form.maxCycleBudgetMicroUsd),
+      max24HourBudgetMicroUsd: parseGermanUsd(form.max24HourBudgetMicroUsd),
     });
   } catch {
     return JSON.stringify({ invalid: true, form });
@@ -1094,9 +1102,9 @@ function configurationSnapshotFromState(state: OperatorState) {
     requestedOrders: state.requestedOrders,
     maxBoostersPerCycle: state.maxBoostersPerCycle,
     intervalMinutes: state.intervalMinutes,
-    maxUnitPriceMicroUsdg: state.maxUnitPriceMicroUsdg,
-    maxCycleBudgetMicroUsdg: state.maxCycleBudgetMicroUsdg,
-    max24HourBudgetMicroUsdg: state.max24HourBudgetMicroUsdg,
+    maxUnitPriceMicroUsd: state.maxUnitPriceMicroUsd,
+    maxCycleBudgetMicroUsd: state.maxCycleBudgetMicroUsd,
+    max24HourBudgetMicroUsd: state.max24HourBudgetMicroUsd,
   });
 }
 
@@ -1108,9 +1116,9 @@ function commandConfirmation(question: string, state: OperatorState, unsaved: bo
     "Gespeicherte Konfiguration:",
     `Zugelassene Packs: ${packs}`,
     `Angefragte Boosterzahl: ${state.requestedOrders}`,
-    `Maximaler Packpreis: ${nullableMoney(state.maxUnitPriceMicroUsdg)}`,
-    `Zyklusbudget: ${nullableMoney(state.maxCycleBudgetMicroUsdg)}`,
-    `24-Stunden-Budget: ${nullableMoney(state.max24HourBudgetMicroUsdg)}`,
+    `Maximaler Packpreis: ${nullableUsd(state.maxUnitPriceMicroUsd)}`,
+    `Zyklusbudget: ${nullableUsd(state.maxCycleBudgetMicroUsd)}`,
+    `24-Stunden-Budget: ${nullableUsd(state.max24HourBudgetMicroUsd)}`,
     `Zyklusintervall: ${state.intervalMinutes} Minuten`,
     ...(unsaved ? ["", "Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet."] : []),
   ].join("\n");
@@ -1170,6 +1178,7 @@ function latestActuallyPaid(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
+  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.paidHolderRewardsWei);
   if (accounting) {
     return pendingMicroUsdg(
       accounting.paidHolderRewardsMicroUsdg,
@@ -1183,6 +1192,7 @@ function latestReserveTarget(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
+  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.feeReserveTargetWei);
   return accounting
     ? pendingMicroUsdg(
       accounting.feeReserveTargetMicroUsdg,
@@ -1225,6 +1235,11 @@ function nullableInteger(value: number | null) {
 
 function formatCycleStartProjectPool(dashboard: Dashboard | null) {
   if (!dashboard) return "Nicht beobachtet";
+  if (dashboard.schemaVersion === 7) {
+    const value = (dashboard.metrics as unknown as Record<string, unknown>).cycleStartProjectPoolWei;
+    return typeof value === "string" && dashboard.cycleStartProjectPoolObservedAt
+      ? `${nativeOperatorAmount(value)} · Stand ${formatDate(dashboard.cycleStartProjectPoolObservedAt)}` : "Nicht beobachtet";
+  }
   const pool = decodeCycleStartProjectPool(
     dashboard.metrics.cycleStartProjectPoolMicroUsdg,
     dashboard.cycleStartProjectPoolObservedAt,
@@ -1307,6 +1322,18 @@ function downloadCommunityCard(dashboard: Dashboard) {
 
 function decodeDashboard(value: unknown): Dashboard {
   const raw = dashboardRecord(value);
+  if (raw.schemaVersion === 7) {
+    const latest = raw.latestCycle as Record<string, unknown> | null;
+    requireNativeRound(latest?.roundAccounting ?? null);
+    const skeleton = nativeValidationSkeleton(raw) as Record<string, unknown>;
+    skeleton.schemaVersion = 6;
+    const metrics = skeleton.metrics as Record<string, unknown>;
+    for (const key of Object.keys(metrics)) {
+      if (key.endsWith("MicroUsdg") && key !== "cycleStartProjectPoolMicroUsdg") metrics[key] = "0";
+    }
+    decodeDashboard(skeleton);
+    return structuredClone(raw) as unknown as Dashboard;
+  }
   if (
     raw.schemaVersion !== 1 &&
     raw.schemaVersion !== 2 &&
@@ -1692,4 +1719,13 @@ function responseCode(value: unknown): string | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const code = (value as Record<string, unknown>).code;
   return typeof code === "string" ? code : undefined;
+}
+
+function nullableUsd(value: string | null) {
+  return value === null ? "Noch nicht bestätigt" : formatGermanUsd(value);
+}
+
+function nativeOperatorAmount(value: unknown, usd = false) {
+  if (typeof value !== "string") return "Noch nicht bestätigt";
+  return usd ? formatGermanUsd(value) : formatGermanEth(value);
 }

@@ -5,11 +5,11 @@ import { assertPayoutManifestUnchanged } from './payout.mjs';
 const HELD_POSITION_ID = /^held:[0-9a-f]{64}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const SETTLEMENT_STATES = new Set(['PREPARED', 'BUYBACK_SENT_UNKNOWN', 'RETURN_BROADCAST', 'PAYOUT_BROADCAST', 'COMPLETE']);
-const STATE_SCHEMA = 'hookemon.supplementary-payout-state.v1';
-const SOURCE_SCHEMA = 'hookemon.supplementary-payout-source.v1';
-const RETURN_BOUNDARY_SCHEMA = 'hookemon.supplementary-return-boundary.v1';
-const FINALIZED_RETURN_SCHEMA = 'hookemon.supplementary-finalized-return.v1';
-const SETTLEMENT_EVIDENCE_SCHEMA = 'hookemon.supplementary-settlement-evidence.v1';
+const STATE_SCHEMA = 'hookemon.supplementary-payout-state.v2';
+const SOURCE_SCHEMA = 'hookemon.supplementary-payout-source.v2';
+const RETURN_BOUNDARY_SCHEMA = 'hookemon.supplementary-return-boundary.v2';
+const FINALIZED_RETURN_SCHEMA = 'hookemon.supplementary-finalized-return.v2';
+const SETTLEMENT_EVIDENCE_SCHEMA = 'hookemon.supplementary-settlement-evidence.v2';
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const ATOMIC = /^(?:0|[1-9][0-9]*)$/;
 
@@ -84,6 +84,8 @@ export function assertSettlement(value) {
   });
 }
 
+function assertNativeAsset(value) { if (value !== 'native') fail('supplementary payout asset must be native'); return value; }
+
 function assertAddress(value, label) {
   if (typeof value !== 'string' || !ADDRESS.test(value) || value !== value.toLowerCase()) {
     fail(`${label} is invalid`);
@@ -93,9 +95,9 @@ function assertAddress(value, label) {
 
 function assertAmount(value, expectedAssetId, label) {
   exactObject(value, ['chainId', 'assetId', 'decimals', 'amountAtomic'], label);
-  if (value.chainId !== 4663 || value.assetId !== expectedAssetId || value.decimals !== 6
+  if (value.chainId !== '4663' || value.assetId !== expectedAssetId || value.decimals !== 18
     || typeof value.amountAtomic !== 'string' || !ATOMIC.test(value.amountAtomic)) {
-    fail(`${label} does not identify the bound USDG amount`);
+    fail(`${label} does not identify the bound native ETH amount`);
   }
   return Object.freeze(structuredClone(value));
 }
@@ -125,15 +127,15 @@ function assertPayoutSource(value, settlement, label = 'supplementary payout sou
     || value.cycleId !== settlement.cycleId || value.manifestId !== settlement.manifestId) {
     fail(`${label} does not bind its supplementary settlement`);
   }
-  exactObject(value.returnBinding, ['operations', 'usdgAddress', 'evidenceDigest'], `${label} returnBinding`);
+  exactObject(value.returnBinding, ['operations', 'assetId', 'evidenceDigest'], `${label} returnBinding`);
   const returnBinding = Object.freeze({
     operations: assertAddress(value.returnBinding.operations, `${label} Operations address`),
-    usdgAddress: assertAddress(value.returnBinding.usdgAddress, `${label} USDG address`),
+    assetId: assertNativeAsset(value.returnBinding.assetId),
     evidenceDigest: value.returnBinding.evidenceDigest,
   });
   if (!DIGEST.test(returnBinding.evidenceDigest)) fail(`${label} return evidence digest is invalid`);
-  const finalizedReturn = assertAmount(value.finalizedReturn, returnBinding.usdgAddress, `${label} finalized return`);
-  const previousDust = assertAmount(value.previousDust, returnBinding.usdgAddress, `${label} previous dust`);
+  const finalizedReturn = assertAmount(value.finalizedReturn, returnBinding.assetId, `${label} finalized return`);
+  const previousDust = assertAmount(value.previousDust, returnBinding.assetId, `${label} previous dust`);
   const previousDustSource = assertDustSource(value.previousDustSource, settlement, `${label} previous dust source`);
   if ((previousDust.amountAtomic === '0') !== (previousDustSource === null)) {
     fail(`${label} previous dust provenance is invalid`);
@@ -163,7 +165,7 @@ export function assertReturnBoundaryEvidence(value, settlement, label) {
     'cycleId',
     'manifestId',
     'operations',
-    'usdgAddress',
+    'assetId',
     'amountAtomic',
     'finalityEvidence',
   ], `${label} finalized return evidence`);
@@ -172,7 +174,7 @@ export function assertReturnBoundaryEvidence(value, settlement, label) {
     fail(`${label} finalized return evidence does not bind its supplementary settlement`);
   }
   const operations = assertAddress(finalized.operations, `${label} finalized return Operations address`);
-  const usdgAddress = assertAddress(finalized.usdgAddress, `${label} finalized return USDG address`);
+  const assetId = assertNativeAsset(finalized.assetId);
   if (typeof finalized.amountAtomic !== 'string' || !ATOMIC.test(finalized.amountAtomic)) {
     fail(`${label} finalized return amount is invalid`);
   }
@@ -186,7 +188,7 @@ export function assertReturnBoundaryEvidence(value, settlement, label) {
     cycleId: settlement.cycleId,
     manifestId: settlement.manifestId,
     operations,
-    usdgAddress,
+    assetId,
     amountAtomic: finalized.amountAtomic,
     finalityEvidence: finalized.finalityEvidence,
   }));
@@ -197,16 +199,16 @@ export function assertReturnBoundaryEvidence(value, settlement, label) {
     manifestId: settlement.manifestId,
     finalizedReturnEvidence,
     finalizedReturn: Object.freeze({
-      chainId: 4663,
-      assetId: usdgAddress,
-      decimals: 6,
+      chainId: '4663',
+      assetId: assetId,
+      decimals: 18,
       amountAtomic: finalized.amountAtomic,
     }),
     returnBinding: Object.freeze({
       operations,
-      usdgAddress,
+      assetId,
       evidenceDigest: digest({
-        schema: 'hookemon.supplementary-finalized-return-binding.v1',
+        schema: 'hookemon.supplementary-finalized-return-binding.v2',
         positionId: settlement.positionId,
         cycleId: settlement.cycleId,
         manifestId: settlement.manifestId,
@@ -294,7 +296,7 @@ function assertRequest(value) {
     'supplementaryPlanDigest',
     'plan',
   ], 'supplementary payout request');
-  if (value.schema !== 'hookemon.supplementary-payout-request.v1') fail('supplementary payout request schema is invalid');
+  if (value.schema !== 'hookemon.supplementary-payout-request.v2') fail('supplementary payout request schema is invalid');
   const settlement = assertSettlement({
     positionId: value.positionId,
     cycleId: value.cycleId,
@@ -305,7 +307,7 @@ function assertRequest(value) {
     payoutSourceDigest: value.payoutSourceDigest,
   });
   if (!value.plan || typeof value.plan !== 'object' || Array.isArray(value.plan)
-    || value.plan.schema !== 'hookemon.supplementary-direct-payout-plan.v1'
+    || value.plan.schema !== 'hookemon.supplementary-direct-payout-plan.v2'
     || value.plan.cycleId !== settlement.cycleId
     || value.plan.manifestId !== settlement.manifestId
     || value.plan.supplementaryIndex !== settlement.supplementaryIndex
@@ -455,7 +457,7 @@ export function prepareSupplementaryPayoutRequest(value) {
     fail('supplementary payout plan does not match the durable return boundary');
   }
   return assertRequest({
-    schema: 'hookemon.supplementary-payout-request.v1',
+    schema: 'hookemon.supplementary-payout-request.v2',
     positionId: normalizedSettlement.positionId,
     cycleId: normalizedSettlement.cycleId,
     manifestId: normalizedSettlement.manifestId,

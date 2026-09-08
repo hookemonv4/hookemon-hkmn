@@ -1,3 +1,4 @@
+import { nativeUnknownFields } from '../contracts/native-accounting.mjs';
 // Maps terminal cycle facts supplied by the repository-backed operator authority onto the website's
 // public community-dashboard contract (contracts/public-community-snapshot.mjs, schemaVersion 8).
 // Lifetime aggregate amounts have no durable accounting-index producer anywhere in this codebase, so
@@ -81,8 +82,11 @@ export async function buildPublicCommunitySnapshot({
   const profile = readDashboardProfile(profileId);
   const { latest: latestTerminal, historyComplete } = selectLatestTerminalCycle(repositoryCycles);
 
+  const latestCycle = latestTerminal ? await buildLatestCycle(latestTerminal, readAccounting) : null;
+  const native = latestCycle?.roundAccounting?.schema === 'hookemon.native-round-accounting.v1';
+  if (native) { delete latestCycle.paidMicroUsdg; latestCycle.paidWei = latestCycle.roundAccounting.paidHolderRewardsWei; }
   const snapshot = {
-    schemaVersion: 8,
+    schemaVersion: native ? 9 : 8,
     profile: profile.id,
     badge: profile.badge,
     network: profile.network,
@@ -91,8 +95,8 @@ export async function buildPublicCommunitySnapshot({
     nextCycleAt,
     delayed: false,
     poolObservedAt: null,
-    metrics: { ...UNKNOWN_METRICS, completedCycles, skippedCycles, openedPacks },
-    latestCycle: latestTerminal ? await buildLatestCycle(latestTerminal, readAccounting) : null,
+    metrics: { ...(native ? nativeUnknownFields(UNKNOWN_METRICS) : UNKNOWN_METRICS), completedCycles, skippedCycles, openedPacks },
+    latestCycle,
     cards: Array.isArray(recentWinners) ? recentWinners.slice(0, MAX_CARDS) : [],
     heldPositionCount: heldPositions.length,
     heldPositions,

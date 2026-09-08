@@ -33,6 +33,7 @@ import {
   createReturnPolicySigner,
   extractRelaySolanaInstructionPlan,
   readReturnLegDestinationProof,
+  isProcessRpcReturnLegDestinationProof,
   returnPolicyRecoveryContext,
   returnRecoveryContext,
   typedAmount,
@@ -46,7 +47,7 @@ const ATOMIC = /^(?:0|[1-9][0-9]*)$/;
 // per-transaction replay protection comes from requestDigest (position-scoped, embedded in the
 // policy), not from this label, so reusing it is safe, not merely convenient.
 const RETURN_STAGE = 'return';
-const RETURN_ATTEMPT_SCHEMA = 'hookemon.supplementary-return-attempt.v1';
+const RETURN_ATTEMPT_SCHEMA = 'hookemon.supplementary-return-attempt.v2';
 
 export class SupplementaryMoneyError extends Error {}
 
@@ -104,7 +105,7 @@ export function prepareSupplementaryReturnRequest({ settlement, confirmedSale, c
     fail('supplementary confirmed sale proceeds amountAtomic is invalid');
   }
   return Object.freeze({
-    schema: 'hookemon.supplementary-return-request.v1',
+    schema: 'hookemon.supplementary-return-request.v2',
     positionId: normalizedSettlement.positionId,
     cycleId: normalizedSettlement.cycleId,
     manifestId: normalizedSettlement.manifestId,
@@ -178,7 +179,7 @@ export async function mutateSupplementaryReturn({
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
   const requestDigest = canonicalDigest({
-    schema: 'hookemon.supplementary-return-request-digest.v1',
+    schema: 'hookemon.supplementary-return-request-digest.v2',
     positionId: request.positionId,
     cycleId: request.cycleId,
     manifestId: request.manifestId,
@@ -336,6 +337,7 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
       owner: configured.solana,
       mint: attempt.inputAmount.assetId,
       amountAtomic: attempt.inputAmount.amountAtomic,
+      signedTransactionBase64: attempt.rawSignedBytes,
     });
   } catch {
     return null;
@@ -349,22 +351,23 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
     proof = await readReturnLegDestinationProof({
       client: adapters.robinhood.client,
       pointer,
-      leg: { relayRequestId: attempt.relayRequestId, sourceTxHash: sourceTransactionHash },
-      sourceFinality: source.finality,
+      leg: { schema: 'hookemon.relay-leg.v2', relayRequestId: attempt.relayRequestId, sourceTxHash: sourceTransactionHash,
+        sourceAssetId: attempt.inputAmount.assetId, sourceAmountAtomic: attempt.inputAmount.amountAtomic,
+        destinationAssetId: 'native', destinationDecimals: 18, returnAttribution: { intent: attempt.intent } },
+      sourceProof: source,
+      nativePaymentBinding: config.nativePaymentBinding,
     });
   } catch {
     return null;
   }
   if (proof === null) return null;
-  const usdgAddress = config?.contracts?.usdg;
-  if (typeof usdgAddress !== 'string' || !EVM_ADDRESS.test(usdgAddress.toLowerCase())) {
-    fail('supplementary return reconciliation requires a configured USDG address');
-  }
-  const expectedToken = usdgAddress.toLowerCase();
+  const assetId = config?.moneyConfiguration?.assets?.eth?.assetId;
+  if (assetId !== 'native') fail('supplementary return requires native ETH');
+  const expectedToken = 'native';
   const expectedRecipient = configured.evm.toLowerCase();
   if (proof.observedToken?.toLowerCase() !== expectedToken
     || proof.observedRecipient?.toLowerCase() !== expectedRecipient) {
-    fail('supplementary return destination proof does not credit configured Operations USDG');
+    fail('supplementary return destination proof does not credit configured Operations native ETH');
   }
   if (BigInt(proof.observedAmountAtomic) < BigInt(attempt.destinationAmount.amountAtomic)) {
     fail('supplementary return destination proof is below the durable Relay quote minimum');
@@ -383,7 +386,7 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
     settlement,
     finalizedReturnEvidence: {
       operations: configured.evm,
-      usdgAddress: usdgAddress.toLowerCase(),
+      assetId: assetId.toLowerCase(),
       amountAtomic: proof.observedAmountAtomic,
       finalityEvidence: proof,
     },
@@ -393,7 +396,7 @@ export async function reconcileSupplementaryReturn({ adapters, config, cycleRepo
 /**
  * Durably records a proven return boundary and advances the settlement to `RETURN_BROADCAST`.
  * `finalizedReturnEvidence` must already carry a real, independently verifiable EVM destination
- * proof for the bridged USDG credit -- this function only binds and persists it, it does not
+ * proof for the bridged native ETH credit -- this function only binds and persists it, it does not
  * originate or verify the cross-chain transfer itself. Idempotent: replaying the identical
  * evidence for a settlement already at `RETURN_BROADCAST` is a no-op (enforced by
  * `cycleRepository.advanceSupplementarySettlement`).
@@ -405,6 +408,15 @@ export async function recordSupplementaryReturnBroadcast({ cycleRepository, sett
   }
   if (!finalizedReturnEvidence || typeof finalizedReturnEvidence !== 'object' || Array.isArray(finalizedReturnEvidence)) {
     fail('supplementary return requires finalized return evidence');
+  }
+  const attempt = await cycleRepository.readPagedPayoutState(normalizedSettlement.cycleId, supplementaryReturnStageId(normalizedSettlement.positionId));
+  const proof = finalizedReturnEvidence.finalityEvidence;
+  if (!attempt || !isProcessRpcReturnLegDestinationProof(proof, {
+    relayRequestId: attempt.relayRequestId,
+    sourceTxHash: attempt.sourceTransactionHash ?? signedSolanaTransactionSignature(attempt.rawSignedBytes),
+  }) || proof.nativePaymentProof?.amountWei !== finalizedReturnEvidence.amountAtomic
+    || proof.nativePaymentProof?.recipient !== finalizedReturnEvidence.operations?.toLowerCase()) {
+    fail('supplementary return requires the current authenticated native payment proof for its persisted attempt');
   }
   const evidence = {
     schema: SUPPLEMENTARY_RETURN_BOUNDARY_SCHEMA,
@@ -473,7 +485,7 @@ export async function mutateSupplementaryPayout({
   if (state === null || state === undefined) {
     const plan = request.plan.payoutPlan;
     const operations = plan.returnEvidence.operations;
-    const usdgAddress = plan.returnEvidence.usdgAddress;
+    const assetId = plan.returnEvidence.assetId;
     const firstNonce = plan.payableRecipientCount === 0
       ? '0'
       : await (async () => {
@@ -486,7 +498,7 @@ export async function mutateSupplementaryPayout({
     state = createDirectPayoutState({
       plan,
       operations,
-      usdgAddress,
+      assetId,
       firstNonce: String(firstNonce),
     });
     await payoutStore.persist(state);
@@ -527,13 +539,13 @@ export async function mutateSupplementaryPayout({
     await cycleRepository.advanceSupplementarySettlement(settlement.positionId, {
       expectedState: 'RETURN_BROADCAST',
       nextState: 'PAYOUT_BROADCAST',
-      evidence: { schema: 'hookemon.supplementary-payout-broadcast-evidence.v1', planDigest: state.planDigest },
+      evidence: { schema: 'hookemon.supplementary-payout-broadcast-evidence.v2', planDigest: state.planDigest },
     });
   }
   await cycleRepository.advanceSupplementarySettlement(settlement.positionId, {
     expectedState: 'PAYOUT_BROADCAST',
     nextState: 'COMPLETE',
-    evidence: { schema: 'hookemon.supplementary-payout-complete-evidence.v1', planDigest: state.planDigest },
+    evidence: { schema: 'hookemon.supplementary-payout-complete-evidence.v2', planDigest: state.planDigest },
   });
   return state;
 }

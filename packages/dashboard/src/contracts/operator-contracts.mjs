@@ -1,3 +1,4 @@
+import { nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
 // Clean-room re-implementation of the private /operator/api/* contracts (readSet:
 // apps/web/app/operator/OperatorControlPanel.tsx, operator-types.ts and the coordinator's own
 // "CONTRACT FACTS extracted from the website source" note on this package's work order). These
@@ -39,13 +40,13 @@ const DECISION_ENVELOPE_KEYS = new Set(['requestId', 'expectedVersion', 'command
 const DECISION_ENVELOPE_REQUIRED = ['requestId', 'expectedVersion', 'command'];
 const UPDATE_CONFIGURATION_KEYS = new Set([
   'intervalMinutes', 'allowedPackIds', 'requestedOrders', 'maxBoostersPerCycle',
-  'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg', 'liveMode',
-  'maxCyclesPerDay', 'perCycleCapMicroUsdg', 'lossCapMicroUsdg', 'maxOutstandingCustodyMicroUsdg',
+  'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd', 'liveMode',
+  'maxCyclesPerDay', 'perCycleCapMicroUsd', 'lossCapMicroUsd', 'maxOutstandingCustodyMicroUsd',
   'manualApprovalCycles',
 ]);
 const runnerCycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/;
 const packCodePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
-const microUsdgPattern = /^(0|[1-9][0-9]*)$/;
+const microUsdPattern = /^(0|[1-9][0-9]*)$/;
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const cycleDigestPattern = /^sha256:[0-9a-f]{64}$/;
 const commandAliases = Object.freeze({
@@ -135,11 +136,11 @@ function readConfigurationPatch(value) {
     patch.maxBoostersPerCycle = source.maxBoostersPerCycle;
   }
   for (const key of [
-    'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg',
-    'perCycleCapMicroUsdg', 'lossCapMicroUsdg', 'maxOutstandingCustodyMicroUsdg',
+    'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd',
+    'perCycleCapMicroUsd', 'lossCapMicroUsd', 'maxOutstandingCustodyMicroUsd',
   ]) {
     if (Object.hasOwn(source, key)) {
-      if (typeof source[key] !== 'string' || !microUsdgPattern.test(source[key])) invalid();
+      if (typeof source[key] !== 'string' || !microUsdPattern.test(source[key])) invalid();
       patch[key] = source[key];
     }
   }
@@ -168,12 +169,12 @@ const BOOTSTRAP_KEYS = new Set([
 ]);
 const IDENTITY_KEYS = new Set(['subject', 'email', 'role']);
 const OPERATOR_STATE_KEYS = new Set([
-  'version', 'desiredStatus', 'mode', 'communityPackIds', 'manualPackOrders', 'maxBoostersPerCycle',
+  'version', 'desiredStatus', 'allowedPackIds', 'requestedOrders', 'intervalMinutes', 'manualPackOrders', 'maxBoostersPerCycle',
   'rewardRecipientLimit', 'cycleIntervalMinutes', 'skipNextCycleSequence', 'runNowSequence',
-  'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg',
+  'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd',
   'configurationComplete', 'executionConnected', 'liveMode',
 ]);
-const HARD_CAPS_KEYS = new Set(['maxBoostersPerCycle', 'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg']);
+const HARD_CAPS_KEYS = new Set(['maxBoostersPerCycle', 'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd']);
 const READINESS_KEYS = new Set(['ready', 'reasons']);
 
 export function assertBootstrap(value) {
@@ -306,6 +307,18 @@ const DASHBOARD_LATEST_CYCLE_KEYS = new Set([
  * exclusive gain/loss pair, etc.) live in the public contract ports this dashboard shares data with
  * (contracts/public-cycle-status.mjs) and are not duplicated here. */
 export function assertDashboardResponse(value) {
+  if (value?.schemaVersion === 7) {
+    requireNativeRound(value.latestCycle?.roundAccounting ?? null);
+    const skeleton = nativeValidationSkeleton(value);
+    skeleton.schemaVersion = 6;
+    // Historical private aggregates were non-nullable; these zeroes exist only in shape validation.
+    for (const key of Object.keys(skeleton.metrics ?? {})) {
+      if (key.endsWith('MicroUsdg') && key !== 'cycleStartProjectPoolMicroUsdg') skeleton.metrics[key] = '0';
+    }
+    assertDashboardResponse(skeleton);
+    return value;
+  }
+
   const source = requiredRecord(value, invalid);
   if (![1, 2, 3, 4, 5, 6].includes(source.schemaVersion)) invalid();
   const dashboardKeys = source.schemaVersion === 6 ? DASHBOARD_V6_KEYS : DASHBOARD_KEYS;

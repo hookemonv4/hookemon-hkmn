@@ -43,21 +43,16 @@ The hero uses a two-line shared-cycle heading and the supplied transparent Robin
 - `apps/web/lib/public-dashboard-view.ts`: `resolveDashboardEnvironment`, `buildPublicCycleProcess`,
   `formatPublicMicroUsdg`, `latestDashboardCards`, `hasLatestPayoutFacts` — pure client-side
   presentation derived from the two contracts above, no network or backend access of its own.
-- Private operator console: `apps/web/app/operator/OperatorControlPanel.tsx` and
-  `apps/web/worker/operator-proxy.ts` proxy `/operator/api/*` to `OPERATOR_CONTROL_SERVICE_URL` with
-  the shared `x-hookemon-proxy-credential`. **Known gap:** the console's own configuration form still
-  speaks the legacy operator-control vocabulary (`mode`, `communityPackIds`, `manualPackOrders`,
-  `rewardRecipientLimit`, `skipNextCycleSequence`, `runNowSequence`), which does not match this
-  repository's actual `/operator/api/decisions` command shape
-  (`packages/dashboard/src/contracts/operator-contracts.mjs`'s `DECISION_TYPES`:
-  `activate`/`pause`/`run-cycle-now`/`skip-next-cycle`/`update-configuration`/`restart-request`/
-  `reconcile-request`, and `state-schema.mjs`'s `intervalMinutes`/`allowedPackIds`/`requestedOrders`/
-  `maxBoostersPerCycle`/the three `max*MicroUsdg` caps/`paused`/`liveMode`). WP-18 only re-homed the
-  site, updated its network/money vocabulary, and cross-checked the two **public** contracts against
-  this repository's fixtures (`apps/web/tests/dashboard-fixture-cross-check.test.mjs`); reconciling
-  the operator console's decision shape to this repository's actual operator API is unstarted and
-  needs its own work package before the private console is wired to a live `packages/dashboard`
-  deployment.
+- Private operator console: `apps/web/app/operator/OperatorControlPanel.tsx` uses the authenticated
+  `/operator/api/*` proxy. Configuration commands carry `allowedPackIds`, `requestedOrders`,
+  `maxBoostersPerCycle`, `intervalMinutes` and `maxUnitPriceMicroUsd`, `maxCycleBudgetMicroUsd`,
+  `max24HourBudgetMicroUsd`. These limits are USD valuations, bounded by 55, 165 and 495 USD.
+  Collector catalog prices remain Solana USDC. A bootstrap with historical `MicroUsdg` controls
+  cannot enable commands; a failed refresh clears the previous bootstrap.
+- `operator-locale.ts` formats native ETH from integer wei with bigint arithmetic and USD controls
+  from integer micro-USD. Historical USDG formatters and dashboard decoders retain their original
+  units. Native public accounting requires a distinct producer schema before its values can be
+  displayed; historical scalars are never relabeled as ETH or USD.
 
 ## Invariants
 
@@ -155,3 +150,15 @@ The hero uses a two-line shared-cycle heading and the supplied transparent Robin
 The landing gallery presents one graded individual card for each of Mew, Mewtwo, Charizard, Blastoise, Venusaur and Pikachu. `config/collector-showcase.json` records the provider snapshot, full catalog coverage and selection rules. Selection uses the highest provider insured value per species across the listed packs, excluding sealed products; insured value is not a sale price. Each upright card has the same framed presentation, its certificate and provider record, and an estimated buyback tied to the named pack rate. Rarity colors are pack-relative: Epic is purple and Uncommon is green. Other verified pack memberships appear in card details. Refresh the snapshot and gallery together after repeating the catalog scan; never infer pack membership from value alone.
 
 Lugia remains the full-width chase card above the six iconic species. Buyback cash-out estimates use Collector Crypt pack rates; different verified rates appear as a cash range, not a guaranteed offer.
+
+## Native display boundary
+
+The served comic page and its `dashboard.mjs` accept cycle-status v7 and community v9 while retaining
+historical readers. ETH displays preserve all 18 decimal places, and recipient averages round down
+to one wei. Historical USDG values retain their six-decimal label. The standalone
+`comic-production/native-accounting.mjs` and React-side parser match the backend contract byte for
+byte. Existing comic layout, artwork and audio stay on their current paths.
+
+The React dashboard exposes the same native round through `NativeAccounting.tsx`; USD valuations
+and Collector settlement assets retain distinct labels. Native executable operator controls use
+micro-USD limits, and unavailable or historical bootstrap data clears the command authority state.
