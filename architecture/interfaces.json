@@ -822,7 +822,7 @@
     "productionBlocker": "HKMN_ADDRESS_AND_RUNTIME"
   },
   "nativeMigration": {
-    "status": "PROPOSED_PENDING_COORDINATOR_INTEGRATION",
+    "status": "INTEGRATED_PENDING_REQUIRED_CI_AND_RELEASE_AUTHORITY",
     "requirementsRevision": 71,
     "requirementsSha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
     "proposalCommit": "31b7935514ebf85da805677128e2555eecc7fef5",
@@ -876,7 +876,9 @@
       "debtSources": {
         "v4-core": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
         "v4-periphery": "dce236d4e2057422d0791d9a973a58765eb46f65"
-      }
+      },
+      "externalIntent": "Native address inputs and frozen seed package bind payer, full-range ticks, exact candidate and relative deadline. No immutable seedIntentDigest field exists in the eighteen-word hook constructor.",
+      "draftValidation": "Solidity draft validation proves full-stock debt feasibility within the native maximum. Deterministic funding-to-price selection and pre-signing equality belong to the package verifier."
     },
     "schemas": {
       "money-configuration": "hookemon.money-configuration.v2",
@@ -895,9 +897,15 @@
       "direct-payout-state": "hookemon.direct-payout-state.v2",
       "direct-payout-result": "hookemon.direct-payout-result.v2",
       "native-payment-proof": "hookemon.native-payment-proof.v1",
-      "quote-usd-valuation": "hookemon.quote-usd-valuation.v1"
+      "quote-usd-valuation": "hookemon.quote-usd-valuation.v1",
+      "native-admission-provenance": "hookemon.native-admission-provenance.v1",
+      "return-leg-attribution-context": "hookemon.return-leg-attribution-context.v2",
+      "release-launch-inputs": "hookemon.phase3.release-launch-inputs.v2",
+      "address-manifest": "hookemon.phase3.address-manifest.v2",
+      "graph-draft": "hookemon.phase3.graph-draft.v2",
+      "native-frozen-seed-policy": "hookemon.native-frozen-seed-policy.v1"
     },
-    "history": "Keep old readers; native execution rejects USDG fields, old money versions and old digests; no automatic journal/signature/receipt migration. Final nested wrapper inventory belongs to bot integration.",
+    "history": "Historical readers retain original versions, units and digests. Native execution requires current native schemas and authenticated evidence; no automatic journal, signature, receipt or approval migration.",
     "configuration": {
       "assets.usdg": "assets.eth",
       "minimums.returnUsdg": "minimums.returnEth",
@@ -912,12 +920,15 @@
       "maxHeldCount": 10,
       "maxHeldValueMicroUsd": "5000000000",
       "valuation": "exact fetched quote amountUsd bound to request/quote digest, chain/currency/atomic amount and expiry; costs up, proceeds down; freeze cost basis at commitment",
-      "missingValuation": "refuse new risk; allow observation and authorized recovery"
+      "missingValuation": "refuse new risk; allow observation and authorized recovery",
+      "provenance": "Original quote producer capability at first commitment; exact request, raw response, rounding, amount and admitted authority persist in the trusted journal. Restart reauthenticates the original binding and expiry; hashes alone are not provider attestations.",
+      "realizedLoss": "Frozen admission cost minus exact timely finalized downward-rounded return proceeds, including supplementary returns; later ETH valuation never rewrites completed loss."
     },
     "custody": {
       "expectedCycleAsset": "singular TypedAmount or null; preserve once-only obligations",
       "gasReserve": "separate native TypedAmount",
-      "gasSpent": "separate native TypedAmount; never claimed principal, proceeds or entitlement"
+      "gasSpent": "separate native TypedAmount; never claimed principal, proceeds or entitlement",
+      "gasPayments": "Append-only unique transactionHash and amountWei entries; their sum equals gasSpent; successful and reverted native attempts book gas without creating principal."
     },
     "nativePaymentProof": {
       "producer": "adapter-only authenticated RPC/release evidence; reauthenticate persisted proof after restart",
@@ -949,7 +960,8 @@
         "synthetic Transfer",
         "SolverNativeTransfer alone",
         "cleanupNativeViaCall by analogy"
-      ]
+      ],
+      "globalReservation": "Normal and supplementary Relay source and destination transactions share the same chain-qualified global identity registry; order identity and credit commit atomically."
     },
     "legacyFamily": "Frozen and excluded; preserve shared FeeAccounting ERC20 transfer seam and historical embedded HKMNToken; no WETH fallback",
     "nativePaymentBindingSha256": null,
