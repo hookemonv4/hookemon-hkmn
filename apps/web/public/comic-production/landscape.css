@@ -1,0 +1,128 @@
+/* Public landing page only; other routes retain their existing appearance. */
+body.public-landscape { isolation:isolate; }
+.public-background { position:fixed; inset:0; z-index:-1; pointer-events:none; background:#18275d; }
+.public-landscape .hero,.public-landscape .scene-sticky { background:transparent; }
+.public-landscape .hero-landscape,.public-landscape .scene-landscape,.public-landscape .hero::before,.public-landscape .scene-wash { display:none; }
+.hero .hero-layout { grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:auto auto; gap:24px 48px; min-height:0; padding-block:40px 24px; }
+.hero .hero-title-wrap { grid-column:1 / -1; text-align:center; justify-self:center; width:min(100%,760px); }
+.hero .hero-title-wrap h1 { margin:0; font-size:52px; }
+.hero .hero-title-wrap .robinhood-name { justify-content:center; }
+.hero .hero-title-wrap .robinhood-wordmark { width:100%; max-width:700px; }
+.hero .hero-copy { --hero-text-gap:28px; width:100%; max-width:470px; justify-self:center; align-self:center; }
+.hero .hero-copy .hero-description { margin-top:0; font-size:18px; line-height:1.6; }
+.hero .holder-share-callout strong { font-size:24px; line-height:1.35; }
+.hero .hero-art { width:100%; height:380px; min-height:0; margin:0; justify-self:center; align-self:center; }
+.hero .hero-art .hero-coin { width:68.6%; max-width:374.5px; left:15.7%; top:6%; }
+.hero .coin-orbit { inset:14%; }
+.hero .coin-shadow { width:45%; left:27.5%; bottom:3%; }
+.hero .hero-bottom { position:relative; bottom:auto; padding-bottom:24px; }
+:is(#machine > .section-heading > div, #machine > .recent-pulls, .loop-intro-box, .story-panel, #cards > .section-heading > div, .economics-layout > div:first-child, .faq-intro) {
+ background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:16px; padding:16px 20px; width:fit-content; max-width:100%; min-width:0; height:fit-content; align-self:start; box-sizing:border-box;
+}
+#machine > .recent-pulls { width:100%; }
+.loop-intro-box { margin-inline:auto; }
+.story-panel { align-self:center; }
+#economics { background:transparent; }
+#economics .fee-card { background:rgb(255 253 246 / 60%); }
+.faq-list > details { background:transparent; border:0; }
+.faq-list > details > summary { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:12px; padding:16px; margin-bottom:10px; }
+.story-transcript.shell { width:calc(100% - 40px); max-width:540px; margin:28px auto; border:2px solid #2a75bb; box-shadow:0 0 0 2px #ffcb05,0 0 16px #ffcb0570,0 0 26px #2a75bb40; }
+.story-transcript.shell > summary { min-height:48px; padding:12px 18px; font-size:17px; }
+.story-transcript[open] { max-width:680px; }
+.public-background svg { display:block; width:100%; height:100%; }
+.background-star { transform-origin:0 0; animation:star-spark var(--duration) ease-in-out var(--delay) infinite; }
+@keyframes star-spark { 0%,100% {opacity:.2;transform:scale(.65)} 35% {opacity:.5;transform:scale(.85)} 48% {opacity:1;transform:scale(1.3)} 60% {opacity:.35;transform:scale(.7)} 76% {opacity:.9;transform:scale(1.1)} }
+.sun-light { animation:sun-breathe 9s ease-in-out infinite alternate; }
+.ray-light { transform-origin:820px 603px; animation:ray-breathe 13s ease-in-out -4s infinite alternate; }
+@keyframes sun-breathe { from{opacity:.2} to{opacity:.8} }
+@keyframes ray-breathe { from{opacity:.15;transform:rotate(-.6deg)} to{opacity:.55;transform:rotate(.6deg)} }
+@media(max-width:734px) {
+ .hero .hero-layout { grid-template-columns:minmax(0,1fr); gap:24px; padding-top:28px; }
+ .hero .hero-title-wrap { grid-column:1; }
+ .hero .hero-title-wrap h1 { font-size:28px; }
+ .hero .hero-title-wrap .cycle-line { white-space:normal; }
+ .hero .hero-art { height:280px; max-width:360px; }
+ .hero .hero-copy { max-width:440px; }
+ .hero .hero-copy .hero-description { font-size:16px; }
+ .hero .holder-share-callout strong { font-size:21px; }
+ .hero .hero-bottom { gap:16px; }
+ .loop-intro-box,.story-panel,.faq-intro { padding:12px 14px; }
+ .story-panel h2 { font-size:28px; }
+}
+@media(prefers-reduced-motion:reduce) { .background-star,.sun-light,.ray-light { animation:none;opacity:.5; } }
+
+.hero .hero-title-wrap h1 .plain-heading,
+.hero .hero-title-wrap h1 .cycle-line .hero-on { color:#EB4C8A; }
+.hero .hero-copy { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:16px; padding:20px; box-sizing:border-box; }
+.hero .hero-copy .hero-description { font-weight:800; }
+.hero .hero-copy .holder-share-callout strong { font-weight:900; }
+@media(max-width:734px) { .hero .hero-copy { padding:16px; } }
+
+.story-transcript.shell, .story-transcript.shell > summary { background:rgb(255 253 246 / 60%); }
+.story-transcript.shell:has(> summary) { background:transparent; }
+/* Keep both history panels aligned with the dashboard console. */
+#machine > div.recent-pulls { width:100%; max-width:none; margin-inline:0; justify-self:stretch; }
+#journey .scene-controls { padding:9px; }
+#journey .scene-controls button { font-size:14px; min-height:50px; }
+#journey .scene-controls button > span { font-size:12px; }
+.story-transcript.shell { border-width:4px; box-shadow:0 0 0 3px #ffcb05,0 0 18px #ffcb0570,0 0 28px #2a75bb40; }
+.story-transcript.shell > summary { position:relative; justify-content:center; text-align:center; padding-inline:48px; }
+.story-transcript.shell > summary > span { position:absolute; right:18px; }
+#cards .collectible-card { background:transparent; }
+#cards .iconic-gallery figcaption { background:var(--paper); }
+#cards .card-lugia figcaption { background:var(--navy); height:100%; box-sizing:border-box; }
+#cards .card-lugia .card-display { background:radial-gradient(ellipse at 50% 42%, #fffce2cc 0%, #f9e79ecc 48%, #d9b549cc 100%); }
+#cards .iconic-gallery .card-display { background:radial-gradient(ellipse at center, #fffdf5cc, color-mix(in srgb,var(--rarity-tint) 80%,transparent)); }
+#economics .fee-breakdown > div { font-size:13.2px; padding-block:14.3px; }
+#economics .fee-breakdown dd { font-size:15.4px; }
+.site-footer .footer-page-links { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:12px; padding:14px 18px; }
+@media(max-width:800px) {
+ #journey .scene-controls button { font-size:13px; }
+ #journey .scene-controls button > span { font-size:11px; }
+ #economics .fee-breakdown > div { font-size:11px; }
+ #economics .fee-breakdown dd { font-size:13.2px; }
+}
+@media(max-width:600px) {
+ #journey .scene-controls { padding:5px; }
+ #economics .fee-breakdown > div { font-size:12.1px; }
+ #economics .fee-breakdown dd { font-size:14.3px; }
+}
+
+/* The sun and its rays share one light envelope. */
+.public-background .solar-light { animation:solar-breathe 10s ease-in-out infinite; }
+.public-background .sun-light { animation:none; }
+.public-background .ray-light { transform-origin:820px 603px; animation:solar-drift 10s ease-in-out infinite; }
+.background-point { transform-origin:0 0; animation:point-twinkle var(--duration) ease-in-out var(--delay) infinite; }
+@keyframes solar-drift { 0%,100% { transform:rotate(-1deg); } 50% { transform:rotate(1deg); } }
+@keyframes point-twinkle { 0%,100% { opacity:.15;transform:scale(.7); } 38% { opacity:.45;transform:scale(.9); } 52% { opacity:1;transform:scale(1.55); } 70% { opacity:.3;transform:scale(.8); } }
+@media(prefers-reduced-motion:reduce) {
+ .public-background .solar-light,.public-background .ray-light,.background-point { animation:none; }
+ .public-background .solar-light { opacity:.4; }
+ .background-point { opacity:.65; }
+}
+
+
+
+.water-flow { stroke-dasharray:18 25 6 31; animation:water-current var(--flow-time) linear var(--flow-delay) infinite,water-light 5s ease-in-out var(--flow-delay) infinite; }
+@keyframes water-current { from { stroke-dashoffset:80; } to { stroke-dashoffset:0; } }
+@keyframes water-light { 0%,100% { opacity:.25; } 50% { opacity:.75; } }
+@media(prefers-reduced-motion:reduce) { .water-flow { animation:none; opacity:.25; } }
+
+/* A distinct light pulse supplements the gentle angular movement. */
+.public-background .solar-light { animation:solar-breathe 7s ease-in-out infinite; }
+.public-background .ray-light { animation:solar-drift 14s ease-in-out infinite,ray-radiance 7s ease-in-out infinite; }
+@keyframes solar-breathe { 0%,100% { opacity:.14; } 50% { opacity:1; } }
+@keyframes ray-radiance { 0%,100% { opacity:.12; } 50% { opacity:.8; } }
+@media(prefers-reduced-motion:reduce) {
+ .public-background .solar-light,.public-background .ray-light { animation:none; }
+ .public-background .solar-light { opacity:.4; }
+ .public-background .ray-light { opacity:.5; }
+}
+
+/* One continuous panel keeps expanded text readable without doubling the fill. */
+.faq-list > details[open] { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:12px; padding-bottom:16px; }
+.faq-list > details[open] > summary { background:transparent; border:0; }
+.faq-list > details[open] > p { padding-inline:16px; }
+.story-transcript.shell[open] { background:rgb(255 253 246 / 60%); }
+.story-transcript.shell[open] > summary { background:transparent; }
+#cards .iconic-details[open] { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:10px; padding:12px; }
