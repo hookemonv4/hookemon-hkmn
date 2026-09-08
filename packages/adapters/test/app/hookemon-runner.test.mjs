@@ -30,6 +30,7 @@ import {
   buildManualApprovalHandoff,
   compositionInput,
   initializeCollectorOnlyPolicy,
+  priceCollectorOnlyConfig,
   parseArgv,
   runCli,
   runRehearsal,
@@ -69,7 +70,7 @@ async function pricedCollectorConfig() {
   const client = createRelayClient({ now: () => nowMs, quoteValidityMs: 60000, fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(raw) }) });
   const quote = await client.quoteReturnBridge({ user: sender, recipient, amount: '25000000', skipRouteCheck: true });
   const amount = { chainId: '792703809', assetId: mint, decimals: 6, amountAtomic: '25000000' };
-  return { now: () => nowMs, pack: { code: 'collector-25' }, collectorCrypt: { packPrice: amount,
+  return { rawQuoteForTest: raw, now: () => nowMs, pack: { code: 'collector-25' }, collectorCrypt: { packPrice: amount,
     packFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount, rounding: 'up', nowMs }) } };
 }
 
@@ -619,7 +620,7 @@ test('live collector-only rehearsal completes preflight before starting its cycl
   );
 
   assert.deepEqual(calls, [
-    ['preflight', { statePathOverride: null, environment }],
+    ['preflight', { statePathOverride: null, environment, environmentConfig: liveCollectorOnly }],
     ['cycle-start'],
   ]);
 });
@@ -1578,4 +1579,59 @@ test('hookemon-runner refuses rehearsal-only flags without rehearsal mode', asyn
     execFileAsync(process.execPath, [BIN_PATH, 'run', '--mode', 'production', '--collector-only'], { env: baseEnv(stateDir) }),
     error => /require --mode rehearsal/.test(error.stderr),
   );
+});
+
+
+test('real Collector environment initializes USD policy from HTTP quote without parity or EVM signing identity', async t => {
+  const stateDir = await tempStateDir(t), keyPath = join(stateDir, 'synthetic-provider-key');
+  await writeFile(keyPath, 'PUBLIC_SYNTHETIC_TEST_CREDENTIAL', { mode: 0o600 });
+  const sender = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const environment = {
+    HOOKEMON_STATE_DIR: stateDir, HOOKEMON_CHAIN_ID: '4663',
+    HOOKEMON_SOLANA_RPC_URL: 'https://solana.example.invalid', HOOKEMON_SOLANA_ACCOUNT: sender,
+    HOOKEMON_SIGNER_BACKEND: 'keychain', HOOKEMON_SIGNER_LIVE_MODE: 'true',
+    HOOKEMON_KEYCHAIN_COMMAND: '/tmp/public-test-command-never-invoked', HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
+    HOOKEMON_PACK_CODE: 'collector-25', HOOKEMON_PROVIDER_MODE: 'live', HOOKEMON_REHEARSAL_MODE: 'collector-only',
+    HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm', HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
+    HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: 'G4LdLyzDfq6DGt5Ha5C11WydKa2oJ5uNmkYyhLdsLBHo',
+    HOOKEMON_COLLECTOR_CRYPT_BASE_URL: 'https://collector.example.invalid', HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH: keyPath,
+    HOOKEMON_RELAY_BASE_URL: 'https://relay.example.invalid', HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '60000',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '25000000',
+  };
+  for (const key of ['MIN_ROBINHOOD_RECEIVE','MIN_SOLANA_RECEIVE','MIN_RETURN_ETH','NATIVE_GAS_CAP_ROBINHOOD','NATIVE_GAS_CAP_SOLANA',
+    'EVM_GAS_PRICE_CAP','EVM_NATIVE_RESERVE','SOLANA_PRIORITY_FEE_CAP','SOLANA_LAMPORT_RESERVE','BUDGET_AVAILABLE_PROCESS_WEI',
+    'BUDGET_OUTBOUND_CAP_WEI','BUDGET_RETURN_CAP_WEI','BUDGET_OPERATING_MARGIN_WEI']) environment[`HOOKEMON_${key}`] = '0';
+  const raw = (await pricedCollectorConfig()).rawQuoteForTest;
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    const body = JSON.parse(options.body); requests.push({ url, body });
+    const response = structuredClone(raw);
+    response.details.recipient = body.recipient;
+    response.details.currencyIn.amountUsd = '21.000001';
+    response.protocol.v2.orderData.output.payments[0].recipient = body.recipient;
+    return { ok: true, status: 200, text: async () => JSON.stringify(response) };
+  };
+  const result = await initializeCollectorOnlyPolicy({ environment, fetchImpl, now: () => 1_700_000_000_000 });
+  assert.equal(result.configuration.perCycleCapMicroUsd, '21000001');
+  assert.equal(requests.length, 1);
+  assert.equal(String(requests[0].url), 'https://relay.example.invalid/quote/v2');
+  assert.equal(requests[0].body.amount, '25000000');
+  assert.equal(requests[0].body.originCurrency, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+  assert.equal(requests[0].body.recipient.toLowerCase(), '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384');
+  assert.equal(Object.hasOwn(environment, 'HOOKEMON_EVM_ACCOUNT'), false);
+  await assert.rejects(initializeCollectorOnlyPolicy({ environment: { ...environment, HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '' }, fetchImpl }), /explicit HOOKEMON_RELAY_QUOTE_VALIDITY_MS/);
+  assert.equal(requests.length, 1, 'missing TTL refuses before HTTP');
+  await assert.rejects(runRehearsal({ cycles: 1, capMicroUsd: '21000001', collectorOnly: true, relayRoundtrip: false, restartInject: false }, {
+    environment, fetchImpl,
+    async runCollectorOnlyPreflightFn({ environmentConfig }) {
+      assert.equal(environmentConfig.collectorCrypt.packFundingUsd.amountMicroUsd, '21000001');
+    },
+    async buildCompositionFn({ environmentConfig }) {
+      assert.equal((await priceCollectorOnlyConfig(environmentConfig)).collectorCrypt.packFundingUsd.amountMicroUsd, '21000001');
+      assert.equal(environmentConfig.accounts.evm, null);
+      throw new Error('synthetic stop before signer construction');
+    },
+  }), /synthetic stop before signer construction/);
+  assert.equal(requests.length, 2, 'run fetches once then forwards the same verified quote to preflight and composition');
+
 });

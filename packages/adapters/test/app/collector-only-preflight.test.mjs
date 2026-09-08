@@ -1,3 +1,4 @@
+import { createRelayClient, createQuoteUsdValuation } from '../../src/relay-client.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -14,6 +15,21 @@ const RECIPIENTS = Object.freeze([
 ]);
 const PROCEEDS = deriveAssociatedTokenAddress(OPERATOR, CIRCLE_USD_MINT).toBase58();
 const SPEND = '25000000';
+
+const USD_COST = '21000001';
+const NOW = 1_700_000_000_000;
+const recipient = `0x${'aa'.repeat(20)}`, zero = `0x${'00'.repeat(20)}`;
+const rawQuote = { requestId: 'synthetic-preflight-usd', details: { sender: OPERATOR, recipient,
+  currencyIn: { currency: { chainId: 792703809, address: CIRCLE_USD_MINT, decimals: 6 }, amount: SPEND, amountUsd: '21.000001' },
+  currencyOut: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: '42', minimumAmount: '42', amountUsd: '20' } },
+  protocol: { v2: { orderId: `0x${'44'.repeat(32)}`, orderData: { inputs: [{ payment: { chainId: 'solana', currency: CIRCLE_USD_MINT, amount: SPEND },
+    refunds: [{ chainId: 'solana', currency: CIRCLE_USD_MINT, recipient: OPERATOR, deadline: 2_000_000_000 }] }], output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [],
+    payments: [{ recipient, currency: zero, expectedAmount: '42', minimumAmount: '42' }] } } } }, steps: [] };
+const quote = await createRelayClient({ now: () => NOW, quoteValidityMs: 60000,
+  fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(rawQuote) })
+}).quoteReturnBridge({ user: OPERATOR, recipient, amount: SPEND, skipRouteCheck: true });
+const packFundingUsd = createQuoteUsdValuation({ quote, side: 'origin', rounding: 'up', nowMs: NOW,
+  amount: { chainId: '792703809', assetId: CIRCLE_USD_MINT, decimals: 6, amountAtomic: SPEND } });
 
 function pinnedPolicy(stage) {
   return createTransactionPolicy({
@@ -33,6 +49,7 @@ function pinnedPolicy(stage) {
 
 function config(overrides = {}) {
   return {
+    now: () => NOW,
     execution: { profile: 'rehearsal', providerMode: 'live' },
     accounts: { solana: OPERATOR },
     pack: { code: 'collector-25' },
@@ -48,6 +65,7 @@ function config(overrides = {}) {
       payoutPolicy: pinnedPolicy('payout'),
     },
     collectorCrypt: {
+      packFundingUsd,
       settlementAsset: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS },
       packPrice: { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS, amountAtomic: SPEND },
       purchase: { policy: pinnedPolicy('purchase') },
@@ -78,10 +96,10 @@ function policy(overrides = {}) {
     allowedPackIds: ['collector-25'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: SPEND,
-    maxCycleBudgetMicroUsdg: SPEND,
-    max24HourBudgetMicroUsdg: SPEND,
-    perCycleCapMicroUsdg: SPEND,
+    maxUnitPriceMicroUsd: USD_COST,
+    maxCycleBudgetMicroUsd: USD_COST,
+    max24HourBudgetMicroUsd: USD_COST,
+    perCycleCapMicroUsd: USD_COST,
     maxCyclesPerDay: 1,
     manualApprovalCycles: 1,
     ...overrides,
@@ -191,5 +209,13 @@ test('collector-only preflight refuses a keychain identity that does not match O
     () => runCollectorOnlyPreflight({ config: config(), policyConfiguration: policy(), ...fixture }),
     /did not confirm the configured Operations public key/,
   );
+  assert.deepEqual(fixture.calls, []);
+});
+
+
+test('collector-only preflight refuses JSON valuation without querying providers', async () => {
+  const fixture = dependencies(), configured = config();
+  configured.collectorCrypt.packFundingUsd = structuredClone(packFundingUsd);
+  await assert.rejects(runCollectorOnlyPreflight({ config: configured, policyConfiguration: policy(), ...fixture }), /fresh authenticated exact USDC/);
   assert.deepEqual(fixture.calls, []);
 });
