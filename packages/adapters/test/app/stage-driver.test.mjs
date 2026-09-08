@@ -4674,3 +4674,32 @@ test('supplementary reconciliation rejects a serialized binding capability', asy
   assert.equal(observedBlockhash, 'observed-blockhash-xyz');
 });
 
+
+test('chain preparation retains only the explicit live clock across canonical configuration', async () => {
+  let timestamp = 1_700_000_000_000;
+  const now = () => timestamp;
+  const cycleRepository = writeAheadRepository();
+  const marker = new Error('stop after read-only clock preparation');
+  const driver = createStageDriver({ liveMode: true,
+    adapters: { relay: null, robinhood: { client: null }, solana: { client: null } },
+    signerClient: null, config: baseConfig({ now, effectfulCapability() { throw new Error('must not execute'); } }),
+    cycleRepository, ...fixtureStageDriverOptions,
+    stageHandlers: { return: { chainJournal: true,
+      async probe() { return {}; },
+      async prepareRequest(input) {
+        assert.equal(input.now, now);
+        assert.equal(input.now(), timestamp);
+        assert.notEqual(typeof input.config.now, 'function');
+        assert.notEqual(typeof input.config.effectfulCapability, 'function');
+        await Promise.resolve();
+        timestamp += 7;
+        assert.equal(input.now(), 1_700_000_000_007, 'post-response valuation receives the current clock');
+        throw marker;
+      },
+      async mutate() { throw new Error('must not sign'); },
+      async reconcileLive() { return null; },
+    } },
+  });
+  await assert.rejects(() => driver.execute({ cycleId: CYCLE_ID, stage: 'return',
+    intent: { journalHead: 'clock-preparation' }, assertMutationAllowed: async () => {} }), error => error === marker);
+});

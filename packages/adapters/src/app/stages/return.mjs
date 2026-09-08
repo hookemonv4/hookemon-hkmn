@@ -328,7 +328,7 @@ export function extractRelaySolanaInstructionPlan({ steps, requestId }) {
 }
 
 /** Builds the immutable, attributed return request before a signer can be called. */
-export async function prepareReturnRequest({ adapters, config, cycleRepository, context, nowMs = Date.now() }) {
+export async function prepareReturnRequest({ adapters, config, cycleRepository, context, now = typeof config?.now === 'function' ? config.now : Date.now, nowMs = now() }) {
   if (!adapters?.relay) throw new Error('return requires a configured Relay client');
   if (!Number.isSafeInteger(nowMs) || nowMs < 0) throw new Error('return request creation time must be a non-negative safe integer');
   const configured = assertReturnConfiguration(config);
@@ -355,7 +355,7 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
     originCurrency: configured.solanaMint,
   });
   assertReturnQuote(quote, configured, money);
-  const valuationNowMs = (config.now ?? Date.now)();
+  const valuationNowMs = now();
   assertQuoteUsable({ quote, nowMs: valuationNowMs });
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
   const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: typedAmount(quote.destination), rounding: 'down', nowMs: valuationNowMs });

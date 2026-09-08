@@ -875,6 +875,7 @@ function collectorProductionPreparationInput(context, config, adapters, cycleRep
 function chainPreparationInput(context, config, adapters, cycleRepository) {
   return Object.freeze({
     liveMode: true,
+    now: config.now ?? Date.now,
     adapters: chainPreparationAdapters(adapters, context.assertLease),
     config: frozenCanonicalValue(config),
     cycleRepository: createLeaseFencedReadRepository(cycleRepository, context.assertLease),
