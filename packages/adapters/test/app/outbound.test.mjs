@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { keccak256 } from 'viem';
+import { keccak256, parseTransaction, encodeAbiParameters, encodeEventTopics, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import { createRelayClient, relayQuoteDigest, RelayIntentAuthenticationError, RelayQuoteExpiredError } from '../../src/relay-client.mjs';
+import { createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
-import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import {
@@ -513,7 +513,7 @@ test('createOutboundPolicySigner refuses the provisional authority before either
 
 function outboundIntent() {
   return {
-    schema: 'hookemon.relay-intent.v1',
+    schema: 'hookemon.relay-intent.v2',
     requestId: quoteFixture.requestId,
     orderId: quoteFixture.protocol.v2.orderId,
     direction: 'OUTBOUND',
@@ -521,8 +521,8 @@ function outboundIntent() {
     quoteDigest: admittedQuote().quoteDigest,
     originChainId: 4663,
     destinationChainId: 792703809,
-    originAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-    originDecimals: 6,
+    originAssetId: 'native',
+    originDecimals: 18,
     destinationAssetId: SOLANA_MINT,
     destinationDecimals: 6,
     originAmount: quoteFixture.details.currencyIn.amount,
@@ -554,34 +554,50 @@ function solanaClientWithCredit(amount) {
   });
 }
 
-function addressTopic(address) {
-  return `0x${'0'.repeat(24)}${address.slice(2).toLowerCase()}`;
+const signedNativeDeposits = new Map();
+async function signNativeOutboundSource() {
+  const quote = quoteForOperationsAccount(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT);
+  const plan = quote.steps[0].items[0].data;
+  const rawBytes = await OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.signTransaction({ chainId: 4663, to: plan.to,
+    data: plan.data, value: BigInt(plan.value), nonce: 9, gas: 120000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n });
+  const hash = keccak256(rawBytes);
+  signedNativeDeposits.set(hash, rawBytes);
+  return { rawBytes, hash };
+}
+function nativeCustodyRow() {
+  return { schema: 'hookemon.custody-ledger.v3', cycleId: 'cycle-outbound-reconcile', chainId: '4663', assetId: 'native', decimals: 18,
+    claimed: quoteFixture.details.currencyIn.amount, bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0', returnInput: '0',
+    returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0', heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
+    gasReserve: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '1000000' },
+    gasSpent: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' }, gasPayments: [], verifiedCurrentBalance: null, expectedCycleAsset: null };
+}
+function nativeRefundBinding() {
+  return createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663',
+    relay: { schema: 'hookemon.relay-native-route.v1', emitter: RELAY_DEPOSITORY, runtimeHash: keccak256('0x6000'), metadataEncoding: 'order-id', refundsSupported: true } }, TEST_PREFLIGHT_AUTHORITY);
 }
 
-function finalizedOutboundSourceClient({ amountAtomic, transactionHash }) {
+function finalizedOutboundSourceClient({ transactionHash }) {
   const receiptBlockHash = `0x${'a'.repeat(64)}`;
   const parentBlockHash = `0x${'b'.repeat(64)}`;
   const finalizedBlockHash = `0x${'c'.repeat(64)}`;
-  const amount = BigInt(amountAtomic);
   const receipt = {
     transactionHash,
     blockNumber: 100n,
     blockHash: receiptBlockHash,
     status: 'success',
-    logs: [{
-      address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
-      data: `0x${amount.toString(16).padStart(64, '0')}`,
-      logIndex: 0n,
-    }],
+    logs: [], gasUsed: 100000n, effectiveGasPrice: 2n,
   };
+  const signed = parseTransaction(signedNativeDeposits.get(transactionHash));
   return {
+    async getChainId() { return 4663; },
+    async getCode() { return '0x6000'; },
+    async getTransaction() { return { hash: transactionHash, from: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, to: signed.to, input: signed.data, value: signed.value, nonce: signed.nonce, blockNumber: 100n, blockHash: receiptBlockHash }; },
     async getTransactionReceipt({ hash }) {
       assert.equal(hash, transactionHash);
       return structuredClone(receipt);
     },
     async getBlock({ blockTag, blockNumber }) {
-      if (blockTag === 'finalized') return { number: 101n, hash: finalizedBlockHash, timestamp: 1_700_000_090n };
+      if (blockTag === 'finalized' || blockNumber === 101n) return { number: 101n, hash: finalizedBlockHash, timestamp: 1_700_000_090n };
       if (blockNumber === 100n) return { number: 100n, hash: receiptBlockHash, parentHash: parentBlockHash, timestamp: 1_700_000_080n };
       if (blockNumber === 99n) return { number: 99n, hash: parentBlockHash, parentHash: `0x${'d'.repeat(64)}`, timestamp: 1_700_000_070n };
       throw new Error(`unexpected outbound source block read ${String(blockTag ?? blockNumber)}`);
@@ -589,73 +605,28 @@ function finalizedOutboundSourceClient({ amountAtomic, transactionHash }) {
   };
 }
 
-function finalizedOutboundSourceAndRefundClient({
-  sourceTransactionHash,
-  refundTransactionHash,
-  refundTransfers,
-}) {
-  const sourceReceiptBlockHash = `0x${'a'.repeat(64)}`;
-  const sourceParentBlockHash = `0x${'b'.repeat(64)}`;
-  const refundReceiptBlockHash = `0x${'d'.repeat(64)}`;
-  const finalizedBlockHash = `0x${'c'.repeat(64)}`;
-  const sourceAmount = BigInt(quoteFixture.details.currencyIn.amount);
-  const sourceReceipt = {
-    transactionHash: sourceTransactionHash,
-    blockNumber: 100n,
-    blockHash: sourceReceiptBlockHash,
-    status: 'success',
-    logs: [{
-      address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
-      data: `0x${sourceAmount.toString(16).padStart(64, '0')}`,
-      logIndex: 0n,
-    }],
-  };
-  const refundReceipt = {
-    transactionHash: refundTransactionHash,
-    blockNumber: 102n,
-    blockHash: refundReceiptBlockHash,
-    status: 'success',
-    logs: refundTransfers.map(({
-      token = quoteFixture.details.currencyIn.currency.address,
-      source = RELAY_DEPOSITORY,
-      recipient = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address,
-      amountAtomic,
-    }, index) => ({
-      address: token,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(source), addressTopic(recipient)],
-      data: `0x${BigInt(amountAtomic).toString(16).padStart(64, '0')}`,
-      logIndex: BigInt(index),
-    })),
-  };
-  return {
-    async getTransactionReceipt({ hash }) {
-      if (hash === sourceTransactionHash) return structuredClone(sourceReceipt);
-      if (hash === refundTransactionHash) return structuredClone(refundReceipt);
-      throw new Error(`unexpected transaction receipt ${hash}`);
-    },
-    async getBlock({ blockTag, blockNumber }) {
-      if (blockTag === 'finalized') return { number: 103n, hash: finalizedBlockHash, timestamp: 1_700_000_110n };
-      if (blockNumber === 100n) return { number: 100n, hash: sourceReceiptBlockHash, parentHash: sourceParentBlockHash, timestamp: 1_700_000_080n };
-      if (blockNumber === 99n) return { number: 99n, hash: sourceParentBlockHash, parentHash: `0x${'e'.repeat(64)}`, timestamp: 1_700_000_070n };
-      if (blockNumber === 102n) return { number: 102n, hash: refundReceiptBlockHash, parentHash: `0x${'f'.repeat(64)}`, timestamp: 1_700_000_100n };
-      throw new Error(`unexpected outbound block read ${String(blockTag ?? blockNumber)}`);
+function finalizedOutboundSourceAndRefundClient({ sourceTransactionHash, refundTransactionHash, refundTransfers }) {
+  const source = finalizedOutboundSourceClient({ amountAtomic: quoteFixture.details.currencyIn.amount, transactionHash: sourceTransactionHash });
+  const refundBlockHash = `0x${'d'.repeat(64)}`, finalizedHash = `0x${'c'.repeat(64)}`;
+  const receipt = { transactionHash: refundTransactionHash, blockNumber: 102n, blockHash: refundBlockHash, status: 'success',
+    logs: refundTransfers.map(({ token = '0x0000000000000000000000000000000000000000', source = RELAY_DEPOSITORY,
+      recipient = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, amountAtomic }, index) => ({ address: RELAY_DEPOSITORY,
+      transactionHash: refundTransactionHash, blockHash: refundBlockHash, blockNumber: 102n, logIndex: index,
+      topics: encodeEventTopics({ abi: parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']), eventName: 'FundsMovement' }),
+      data: encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }],
+        [source, recipient, token, BigInt(amountAtomic), quoteFixture.protocol.v2.orderId]) })) };
+  return { ...source,
+    async getTransactionReceipt({ hash }) { return hash === refundTransactionHash ? structuredClone(receipt) : source.getTransactionReceipt({ hash }); },
+    async getBlock(args) {
+      if (args.blockTag === 'finalized' || args.blockNumber === 103n) return { number: 103n, hash: finalizedHash, timestamp: 1700000110n };
+      if (args.blockNumber === 102n) return { number: 102n, hash: refundBlockHash, timestamp: 1700000100n };
+      return source.getBlock(args);
     },
   };
 }
 
-function outboundArchiveEvidence({ amountAtomic, sourceAccount = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) {
-  const amount = BigInt(amountAtomic);
-  return {
-    async readErc20BalanceAtBlock({ account, blockNumber, blockHash }) {
-      assert.equal(typeof blockHash, 'string');
-      const source = account.toLowerCase() === sourceAccount.toLowerCase();
-      const value = source
-        ? (blockNumber === 99n ? 100_000_000n : 100_000_000n - amount)
-        : (blockNumber === 99n ? 5_000_000n : 5_000_000n + amount);
-      return { value, blockNumber, blockHash };
-    },
-  };
+function outboundArchiveEvidence() {
+  return { async readNativeBalanceAtBlock({ blockNumber, blockHash }) { return { value: 1000000000000000000n, blockNumber, blockHash }; } };
 }
 
 function discoveredOutboundDestinationClient({ relayRequestId, mint, amountAtomic }) {
@@ -740,42 +711,23 @@ async function outboundReconciliationRepository({
       stage: 'outbound',
       state: 'BROADCAST',
       requestDigest: `sha256:${'e'.repeat(64)}`,
-      rawBytes: '0x1234',
+      rawBytes: signedNativeDeposits.get(transactionHash),
       nonce: '9',
       blockhash: null,
       hash: transactionHash,
     },
   };
-  // The canonical two-step Relay envelope's other durable attempt: this shared repository is used
-  // by every reconcile test in this file that does not itself exercise prerequisite-role/finality
-  // behavior. It is already FINALIZED, but `reconcileLiveOutbound` still validates a FINALIZED
-  // prerequisite's role from its own durable bytes, so this must be a real, canonically valid
-  // signed USDG approval -- never a placeholder -- for `OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT` (the
-  // Operations account these reconcile tests configure).
-  const canonicalApproval = await signOutboundApproval();
-  const approvalRecord = {
-    attempt: {
-      schema: 'hookemon.chain-transaction-attempt.v1',
-      cycleId: 'cycle-outbound-reconcile',
-      stage: 'outbound',
-      state: 'FINALIZED',
-      requestDigest: `sha256:${'0'.repeat(64)}`,
-      rawBytes: canonicalApproval.rawBytes,
-      nonce: '8',
-      blockhash: null,
-      hash: canonicalApproval.hash,
-    },
-  };
+  let custody = nativeCustodyRow();
   const leg = {
-    schema: 'hookemon.relay-leg.v1',
+    schema: 'hookemon.relay-leg.v2',
     cycleId: 'cycle-outbound-reconcile',
     direction: 'outbound',
     relayRequestId,
     quoteDigest: `sha256:${'f'.repeat(64)}`,
     sourceChainId: '4663',
     sourceTxHash: transactionHash,
-    sourceAssetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
-    sourceDecimals: 6,
+    sourceAssetId: 'native',
+    sourceDecimals: 18,
     sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
     destinationChainId: '792703809',
     destinationTxHash: null,
@@ -799,13 +751,14 @@ async function outboundReconciliationRepository({
     get sourceAttemptState() { return sourceRecord.attempt.state; },
     async describeCycle() {
       return {
+        custodyLedgers: new Map([['4663\u0000native', custody]]),
         relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
         chainAttempts: new Map([
           [`outbound\u0000${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)],
-          [`outbound\u0000${approvalRecord.attempt.requestDigest}`, structuredClone(approvalRecord)],
         ]),
       };
     },
+    async recordCustodyLedger(_cycleId, row) { custody = row; },
     async recordBroadcast() {
       throw new Error('a broadcast attempt must not be rebroadcast during finality reconciliation');
     },
@@ -827,9 +780,9 @@ async function outboundReconciliationRepository({
         terminalState = 'HELD_RELAY_REFUND';
         normalizedSettlement = {
           sourceFinality: {
-            height: sourceProof.receiptBlockNumber.toString(),
-            hash: sourceProof.receiptBlockHash,
-            timestampUnixSeconds: sourceProof.receiptBlockTimestampUnixSeconds,
+            height: sourceProof.blockNumber,
+            hash: sourceProof.blockHash,
+            timestampUnixSeconds: sourceProof.timestampUnixSeconds,
           },
           destinationTxHash: refundProof.refundTxHash,
           destinationFinality: refundProof.refundFinality,
@@ -843,7 +796,7 @@ async function outboundReconciliationRepository({
       } else if (destinationObservation.netDeltaAtomic !== leg.destinationAmountAtomic) {
         terminalState = 'HELD_RELAY_PARTIAL';
       } else {
-        const sourceTimestamp = BigInt(sourceProof.receiptBlockTimestampUnixSeconds);
+        const sourceTimestamp = BigInt(sourceProof.timestampUnixSeconds);
         const destinationTimestamp = BigInt(destinationObservation.finality.timestampUnixSeconds);
         const deadline = BigInt(quoteDeadlineUnixSeconds);
         terminalState = destinationTimestamp >= sourceTimestamp && destinationTimestamp <= deadline
@@ -853,9 +806,9 @@ async function outboundReconciliationRepository({
       if (normalizedSettlement === undefined) {
         normalizedSettlement = {
           sourceFinality: {
-            height: sourceProof.receiptBlockNumber.toString(),
-            hash: sourceProof.receiptBlockHash,
-            timestampUnixSeconds: sourceProof.receiptBlockTimestampUnixSeconds,
+            height: sourceProof.blockNumber,
+            hash: sourceProof.blockHash,
+            timestampUnixSeconds: sourceProof.timestampUnixSeconds,
           },
           destinationTxHash: destinationObservation.transactionHash,
           destinationFinality: destinationObservation.finality,
@@ -876,10 +829,9 @@ async function outboundReconciliationRepository({
     },
     async readChainAttemptRecoveryContext(_cycleId, selector) {
       recoverySelectors.push(structuredClone(selector));
-      if (quoteDeadlineUnixSeconds === null && relayIntent === null) return null;
       return {
         ...(quoteDeadlineUnixSeconds === null ? {} : { relayQuoteDeadlineUnixSeconds: quoteDeadlineUnixSeconds }),
-        ...(relayIntent === null ? {} : { relayIntent: structuredClone(relayIntent) }),
+        relayIntent: structuredClone(relayIntent ?? { ...outboundIntent(), requestId: relayRequestId }),
       };
     },
     async releaseWalletNonce(cycleId, reservation) {
@@ -889,7 +841,7 @@ async function outboundReconciliationRepository({
 }
 
 test('reconcileLiveOutbound records own-RPC source finality and classifies only observed destination mismatches', async () => {
-  const sourceTransactionHash = `0x${'9'.repeat(64)}`;
+  const sourceTransactionHash = (await signNativeOutboundSource()).hash;
   const relayRequestId = 'relay-outbound-reconcile';
   const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
   const cases = [
@@ -937,7 +889,8 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
+        nativePaymentBinding: nativeRefundBinding(),
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -976,7 +929,7 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
 });
 
 test('reconcileLiveOutbound holds a request-bound origin refund credit observed through Robinhood RPC', async () => {
-  const sourceTransactionHash = `0x${'6'.repeat(64)}`;
+  const sourceTransactionHash = (await signNativeOutboundSource()).hash;
   const refundTransactionHash = `0x${'5'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
   const refundAmountAtomic = '24500000';
@@ -1000,6 +953,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
       relay: originRefundRelayClient(refundTransactionHash),
     },
     config: {
+      nativePaymentBinding: nativeRefundBinding(),
       accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
@@ -1017,8 +971,12 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
   assert.equal(settlement.terminalState, 'HELD_RELAY_REFUND');
   assert.equal(settlement.destinationTxHash, refundTransactionHash);
   assert.equal(settlement.netDeltaAtomic, refundAmountAtomic);
-  assert.deepEqual(settlement.refundProof, {
-    schema: 'hookemon.outbound-relay-origin-refund-proof.v1',
+  const { nativePaymentProof, ...refundIdentity } = settlement.refundProof;
+  assert.equal(nativePaymentProof.kind, 'relay-refund');
+  assert.equal(nativePaymentProof.amountWei, refundAmountAtomic);
+  assert.deepEqual(refundIdentity, {
+    schema: 'hookemon.outbound-relay-origin-refund-proof.v2',
+    sourceDepository: RELAY_DEPOSITORY.toLowerCase(),
     relayRequestId,
     terminalStatus: { status: 'REFUND', refundTxHash: refundTransactionHash },
     sourceTxHash: sourceTransactionHash,
@@ -1034,7 +992,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
       timestampUnixSeconds: '1700000100',
     },
     transferCount: 1,
-    observedToken: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
+    observedToken: 'native',
     observedSource: RELAY_DEPOSITORY.toLowerCase(),
     observedRecipient: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address.toLowerCase(),
     observedAmountAtomic: refundAmountAtomic,
@@ -1042,7 +1000,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
 });
 
 test('reconcileLiveOutbound rejects an origin refund credit that was not sent by the durable Relay depository', async () => {
-  const sourceTransactionHash = `0x${'2'.repeat(64)}`;
+  const sourceTransactionHash = (await signNativeOutboundSource()).hash;
   const refundTransactionHash = `0x${'1'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
   const cycleRepository = await outboundReconciliationRepository({
@@ -1066,6 +1024,7 @@ test('reconcileLiveOutbound rejects an origin refund credit that was not sent by
       relay: originRefundRelayClient(refundTransactionHash),
     },
     config: {
+      nativePaymentBinding: nativeRefundBinding(),
       accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
@@ -1082,7 +1041,7 @@ test('reconcileLiveOutbound rejects an origin refund credit that was not sent by
 });
 
 test('reconcileLiveOutbound does not treat a Solana debit as a refund without one exact origin credit', async () => {
-  const sourceTransactionHash = `0x${'4'.repeat(64)}`;
+  const sourceTransactionHash = (await signNativeOutboundSource()).hash;
   const refundTransactionHash = `0x${'3'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
   const cycleRepository = await outboundReconciliationRepository({
@@ -1112,6 +1071,7 @@ test('reconcileLiveOutbound does not treat a Solana debit as a refund without on
       solana: { client: destination.client },
     },
     config: {
+      nativePaymentBinding: nativeRefundBinding(),
       accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
@@ -1129,7 +1089,7 @@ test('reconcileLiveOutbound does not treat a Solana debit as a refund without on
 });
 
 test('reconcileLiveOutbound settles an exact credit only inside its signed-attempt deadline and records late credits durably', async () => {
-  const sourceTransactionHash = `0x${'8'.repeat(64)}`;
+  const sourceTransactionHash = (await signNativeOutboundSource()).hash;
   const relayRequestId = 'relay-outbound-reconcile-window';
   const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
   const cases = [
@@ -1163,7 +1123,8 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
+        nativePaymentBinding: nativeRefundBinding(),
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -1176,17 +1137,17 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
     assert.equal(cycleRepository.settlements.length, 1, fixtureCase.name);
     assert.equal(cycleRepository.settlements[0].terminalState, fixtureCase.terminalState, fixtureCase.name);
     if (fixtureCase.terminalState === 'SETTLED') {
-      assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v1', fixtureCase.name);
+      assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v2', fixtureCase.name);
       assert.equal(result.relayLeg.state, 'SETTLED', fixtureCase.name);
     } else {
       assert.equal(result, null, fixtureCase.name);
     }
-    assert.deepEqual(cycleRepository.recoverySelectors, [{
+    assert.deepEqual(cycleRepository.recoverySelectors, Array.from({ length: 2 }, () => ({
       stage: 'outbound',
       recipient: null,
       requestDigest: `sha256:${'e'.repeat(64)}`,
       rawSignedBytesHash: sourceTransactionHash,
-    }], fixtureCase.name);
+    })), fixtureCase.name);
 
     const replay = await reconcileLiveOutbound({
       adapters: {
@@ -1200,7 +1161,8 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
+        nativePaymentBinding: nativeRefundBinding(),
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -1216,7 +1178,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
       `${fixtureCase.name} restart releases only the same durable fence`,
     );
     if (fixtureCase.terminalState === 'SETTLED') {
-      assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v1', `${fixtureCase.name} restart`);
+      assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v2', `${fixtureCase.name} restart`);
       assert.equal(replay.relayLeg.state, 'SETTLED', `${fixtureCase.name} restart`);
     } else {
       assert.equal(replay, null, `${fixtureCase.name} restart`);
@@ -1225,7 +1187,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
 });
 
 test('reconcileLiveOutbound retains the wallet nonce reservation while source finality is unresolved', async () => {
-  const sourceTransactionHash = `0x${'7'.repeat(64)}`;
+  const sourceTransactionHash = (await signNativeOutboundSource()).hash;
   const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId: 'relay-outbound-unfinalized',
@@ -1258,6 +1220,7 @@ test('reconcileLiveOutbound retains the wallet nonce reservation while source fi
       }).client },
     },
     config: {
+      nativePaymentBinding: nativeRefundBinding(),
       accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
@@ -1320,18 +1283,14 @@ function outboundApproveCalldata(spender, amountAtomic) {
   return `${ERC20_APPROVE_SELECTOR}${abiAddressWord(spender)}${abiAmountWord(amountAtomic)}`;
 }
 
-/**
- * A real, offline-signed EVM transaction for the exact USDG `approve` call the outbound leg's
- * prerequisite must be -- never a placeholder. Defaults to the canonical role (Operations signer,
- * Relay depository spender, the leg's own source amount, zero value, nonce 8 immediately preceding
- * the deposit's durable nonce 9); overrides let a case deviate along exactly one dimension.
- */
+// Historical USDG approvals are signed offline only to prove that no approval, valid or
+// malformed, can enter the active native one-deposit envelope.
 async function signOutboundApproval({
   signer = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT,
   spender = RELAY_DEPOSITORY,
   amountAtomic = quoteFixture.details.currencyIn.amount,
   nonce = 8,
-  to = quoteFixture.details.currencyIn.currency.address,
+  to = '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
   value = 0n,
 } = {}) {
   const rawBytes = await signer.signTransaction({
@@ -1382,7 +1341,7 @@ function outboundApprovalRepository({
       stage: 'outbound',
       state: sourceState,
       requestDigest: SOURCE_REQUEST_DIGEST,
-      rawBytes: '0x1234',
+      rawBytes: signedNativeDeposits.get(sourceHash),
       nonce: sourceNonce,
       blockhash: null,
       hash: sourceHash,
@@ -1392,15 +1351,15 @@ function outboundApprovalRepository({
     attempt: { schema: 'hookemon.chain-transaction-attempt.v1', cycleId, stage: 'outbound', blockhash: null, ...fields },
   }));
   const leg = {
-    schema: 'hookemon.relay-leg.v1',
+    schema: 'hookemon.relay-leg.v2',
     cycleId,
     direction: 'outbound',
     relayRequestId,
     quoteDigest: `sha256:${'f'.repeat(64)}`,
     sourceChainId: '4663',
     sourceTxHash: sourceHash,
-    sourceAssetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
-    sourceDecimals: 6,
+    sourceAssetId: 'native',
+    sourceDecimals: 18,
     sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
     destinationChainId: '792703809',
     destinationTxHash: null,
@@ -1428,8 +1387,8 @@ function outboundApprovalRepository({
       return {
         relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
         chainAttempts: new Map([
-          [`outbound ${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)],
-          ...extra.map(entry => [`outbound ${entry.attempt.requestDigest}`, structuredClone(entry)]),
+          [`outbound\0${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)],
+          ...extra.map(entry => [`outbound\0${entry.attempt.requestDigest}`, structuredClone(entry)]),
         ]),
       };
     },
@@ -1479,65 +1438,6 @@ function outboundApprovalRepository({
   };
 }
 
-/**
- * One Robinhood RPC client answering for both outbound EVM transactions on their own hashes: the
- * deposit (source, same finalized-and-successful shape as `finalizedOutboundSourceClient`) and the
- * approval (prerequisite), independently parameterized so a test can make only the approval's own
- * receipt missing, reverted, or non-canonical without touching the deposit's evidence at all.
- */
-function outboundApprovalEvmClient({
-  sourceTransactionHash,
-  sourceAmountAtomic,
-  approvalHash,
-  approvalIncluded = true,
-  approvalStatus = 'success',
-  approvalBlockNumber = 90n,
-  approvalBlockHash = `0x${'7'.repeat(64)}`,
-  approvalCanonicalBlockHash = approvalBlockHash,
-}) {
-  const sourceReceiptBlockHash = `0x${'a'.repeat(64)}`;
-  const sourceParentBlockHash = `0x${'b'.repeat(64)}`;
-  const finalizedBlockHash = `0x${'c'.repeat(64)}`;
-  const amount = BigInt(sourceAmountAtomic);
-  const sourceReceipt = {
-    transactionHash: sourceTransactionHash,
-    blockNumber: 100n,
-    blockHash: sourceReceiptBlockHash,
-    status: 'success',
-    logs: [{
-      address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
-      data: `0x${amount.toString(16).padStart(64, '0')}`,
-      logIndex: 0n,
-    }],
-  };
-  const approvalReceipt = approvalIncluded
-    ? {
-      transactionHash: approvalHash, blockNumber: approvalBlockNumber, blockHash: approvalBlockHash, status: approvalStatus, logs: [],
-    }
-    : {
-      transactionHash: approvalHash, blockNumber: null, blockHash: null, status: null, logs: [],
-    };
-  const calls = [];
-  return {
-    calls,
-    async getTransactionReceipt({ hash }) {
-      calls.push(`receipt:${hash}`);
-      if (hash === sourceTransactionHash) return structuredClone(sourceReceipt);
-      if (hash === approvalHash) return structuredClone(approvalReceipt);
-      throw new Error(`unexpected transaction receipt ${hash}`);
-    },
-    async getBlock({ blockTag, blockNumber }) {
-      calls.push(`block:${blockTag ?? blockNumber}`);
-      if (blockTag === 'finalized') return { number: 101n, hash: finalizedBlockHash, timestamp: 1_700_000_090n };
-      if (blockNumber === 100n) return { number: 100n, hash: sourceReceiptBlockHash, parentHash: sourceParentBlockHash, timestamp: 1_700_000_080n };
-      if (blockNumber === 99n) return { number: 99n, hash: sourceParentBlockHash, parentHash: `0x${'d'.repeat(64)}`, timestamp: 1_700_000_070n };
-      if (blockNumber === approvalBlockNumber) return { number: approvalBlockNumber, hash: approvalCanonicalBlockHash, timestamp: 1_700_000_060n };
-      throw new Error(`unexpected outbound block read ${String(blockTag ?? blockNumber)}`);
-    },
-  };
-}
-
 function outboundApprovalTestConfig() {
   return {
     accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
@@ -1545,14 +1445,14 @@ function outboundApprovalTestConfig() {
   };
 }
 
-test('reconcileLiveOutbound fails closed unless the durable outbound attempt set is exactly the canonical two-step envelope', async () => {
-  const sourceHash = `0x${'6'.repeat(64)}`;
+test('reconcileLiveOutbound fails closed unless the durable outbound attempt set is exactly the canonical native one-step envelope', async () => {
+  const sourceHash = (await signNativeOutboundSource()).hash;
   const relayRequestId = 'relay-outbound-approval-membership';
   const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
   const amountAtomic = quoteFixture.details.currencyIn.amount;
 
   const cases = [
-    { name: 'no prerequisite attempt', build: async () => [] },
+    { name: 'legacy approval added to the native deposit', build: async () => { const approval = await signOutboundApproval(); return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: approval.hash, nonce: '8', state: 'BROADCAST', rawBytes: approval.rawBytes }]; } },
     {
       name: 'two prerequisite attempts',
       build: async () => {
@@ -1648,11 +1548,11 @@ test('reconcileLiveOutbound fails closed unless the durable outbound attempt set
 });
 
 test('reconcileLiveOutbound refuses an already-FINALIZED prerequisite whose durable role is invalid, even with the leg already SETTLED', async () => {
-  const sourceHash = `0x${'6'.repeat(64)}`;
+  const sourceHash = (await signNativeOutboundSource()).hash;
   const relayRequestId = 'relay-outbound-approval-finalized-invalid';
   const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
-  // Wrong spender: a durable FINALIZED attempt's role is still checked from its own bytes, never
-  // trusted merely because an earlier run marked it finalized.
+  // An extra historical approval remains forbidden even when both it and the native leg
+  // were marked finalized by an earlier run.
   const wrong = await signOutboundApproval({ spender: OUTBOUND_APPROVAL_OTHER_ACCOUNT.address });
   const cycleRepository = outboundApprovalRepository({
     relayRequestId,
@@ -1683,118 +1583,57 @@ test('reconcileLiveOutbound refuses an already-FINALIZED prerequisite whose dura
   assert.deepEqual(cycleRepository.settlements, []);
 });
 
-test('reconcileLiveOutbound reconciles a durably SETTLED leg whose approval attempt is still BROADCAST, without re-settling', async () => {
-  const sourceHash = `0x${'6'.repeat(64)}`;
-  const relayRequestId = 'relay-outbound-approval-restart';
-  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
-  const approval = await signOutboundApproval();
+test('reconcileLiveOutbound reuses a durably SETTLED native leg without RPC or repeated finality', async () => {
+  const sourceHash = (await signNativeOutboundSource()).hash;
   const cycleRepository = outboundApprovalRepository({
-    relayRequestId,
-    destinationAmountAtomic,
-    sourceHash,
-    sourceState: 'FINALIZED',
-    legState: 'SETTLED',
-    legOverrides: {
-      destinationTxHash: 'relay-destination-observation',
+    relayRequestId: 'native-settled-restart', destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
+    sourceHash, sourceState: 'FINALIZED', legState: 'SETTLED',
+    legOverrides: { destinationTxHash: 'relay-destination-observation',
       finalizedAtDestination: { height: '88', hash: `0x${'c'.repeat(64)}`, timestampUnixSeconds: '1700000100' },
-      netDeltaAtomic: destinationAmountAtomic,
-    },
-    attempts: [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: approval.hash, nonce: '8', state: 'BROADCAST', rawBytes: approval.rawBytes }],
+      netDeltaAtomic: quoteFixture.details.currencyOut.amount },
   });
-  const client = outboundApprovalEvmClient({
-    sourceTransactionHash: sourceHash,
-    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
-    approvalHash: approval.hash,
-  });
-  const config = outboundApprovalTestConfig();
-
-  const result = await reconcileLiveOutbound({
-    adapters: {
-      robinhood: { client, historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount, sourceAccount: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) },
-      solana: { client: throwingSolanaClient() },
-    },
-    config,
-    cycleRepository,
-    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
-  });
-
-  assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
-  assert.equal(result.relayLeg.state, 'SETTLED');
-  assert.equal(cycleRepository.attemptStates[APPROVAL_REQUEST_DIGEST], 'FINALIZED');
-  assert.equal(cycleRepository.finalityCalls.length, 1);
-  assert.equal(cycleRepository.finalityCalls[0].requestDigest, APPROVAL_REQUEST_DIGEST);
-  assert.equal(client.calls.includes(`receipt:${approval.hash}`), true);
-  // The leg was already durably SETTLED: no new settlement may be recorded, and (proven by the
-  // throwing Solana client above) destination evidence is never re-inspected.
-  assert.deepEqual(cycleRepository.settlements, []);
-
-  const replay = await reconcileLiveOutbound({
-    adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
-    config,
-    cycleRepository,
-    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
-  });
-  assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
-  assert.equal(replay.relayLeg.state, 'SETTLED');
-  assert.equal(cycleRepository.finalityCalls.length, 1);
-  assert.deepEqual(cycleRepository.settlements, []);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await reconcileLiveOutbound({
+      adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
+      config: outboundApprovalTestConfig(), cycleRepository,
+      context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+    });
+    assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v2');
+    assert.equal(result.relayLeg.state, 'SETTLED');
+    assert.deepEqual(cycleRepository.finalityCalls, []);
+    assert.deepEqual(cycleRepository.settlements, []);
+  }
 });
 
-test('reconcileLiveOutbound independently finalizes the approval and deposit before settling, and is restart-idempotent', async () => {
-  const sourceHash = `0x${'6'.repeat(64)}`;
-  const relayRequestId = 'relay-outbound-approval-success';
-  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
-  const approval = await signOutboundApproval();
-  const cycleRepository = outboundApprovalRepository({
-    relayRequestId,
-    destinationAmountAtomic,
-    sourceHash,
-    attempts: [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: approval.hash, nonce: '8', state: 'BROADCAST', rawBytes: approval.rawBytes }],
-  });
-  const destination = discoveredOutboundDestinationClient({ relayRequestId, mint: SOLANA_MINT, amountAtomic: destinationAmountAtomic });
-  const client = outboundApprovalEvmClient({
-    sourceTransactionHash: sourceHash,
-    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
-    approvalHash: approval.hash,
-  });
+test('reconcileLiveOutbound finalizes one native deposit and accounts principal and gas once after restart', async () => {
+  const sourceHash = (await signNativeOutboundSource()).hash;
+  const relayRequestId = 'native-deposit-restart';
+  const cycleRepository = await outboundReconciliationRepository({ transactionHash: sourceHash, relayRequestId,
+    destinationAmountAtomic: quoteFixture.details.currencyOut.amount, quoteDeadlineUnixSeconds: '1700000200' });
+  const destination = discoveredOutboundDestinationClient({ relayRequestId, mint: SOLANA_MINT, amountAtomic: quoteFixture.details.currencyOut.amount });
+  const context = { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' };
   const config = outboundApprovalTestConfig();
-
   const result = await reconcileLiveOutbound({
-    adapters: {
-      robinhood: { client, historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount, sourceAccount: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) },
-      solana: { client: destination.client },
-    },
-    config,
-    cycleRepository,
-    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+    adapters: { robinhood: { client: finalizedOutboundSourceClient({ transactionHash: sourceHash, amountAtomic: quoteFixture.details.currencyIn.amount }),
+      historicalEvidenceClient: outboundArchiveEvidence() }, solana: { client: destination.client } },
+    config, cycleRepository, context,
   });
-
-  assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
   assert.equal(result.relayLeg.state, 'SETTLED');
-  assert.equal(cycleRepository.attemptStates[APPROVAL_REQUEST_DIGEST], 'FINALIZED');
   assert.equal(cycleRepository.sourceAttemptState, 'FINALIZED');
-  assert.equal(cycleRepository.finalityCalls.length, 2);
-  const approvalFinality = cycleRepository.finalityCalls.find(entry => entry.requestDigest === APPROVAL_REQUEST_DIGEST);
-  assert.equal(approvalFinality.evidence.transactionHash, approval.hash.toLowerCase());
-  assert.deepEqual(approvalFinality.evidence.finalizedAt, { height: '90', hash: `0x${'7'.repeat(64)}`, timestampUnixSeconds: '1700000060' });
+  assert.equal(cycleRepository.finalities.length, 1);
   assert.equal(cycleRepository.settlements.length, 1);
-  assert.equal(cycleRepository.settlements[0].terminalState, 'SETTLED');
-  assert.equal(client.calls.includes(`receipt:${approval.hash}`), true);
-  assert.equal(client.calls.includes(`receipt:${sourceHash}`), true);
-
-  // Restart: the durable repository already reflects FINALIZED/SETTLED. No EVM or Solana read of
-  // any kind -- not even a re-check of the already-proven approval -- may happen, and nothing is
-  // recorded or settled a second time.
+  const before = (await cycleRepository.describeCycle()).custodyLedgers.get('4663\0native');
+  assert.equal(before.bridgeOut, quoteFixture.details.currencyIn.amount);
+  assert.equal(before.gasSpent.amountAtomic, '200000');
+  assert.deepEqual(before.gasPayments, [{ transactionHash: sourceHash, amountWei: '200000' }]);
   const replay = await reconcileLiveOutbound({
     adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
-    config,
-    cycleRepository,
-    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+    config, cycleRepository, context,
   });
-  assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
   assert.equal(replay.relayLeg.state, 'SETTLED');
-  assert.equal(cycleRepository.finalityCalls.length, 2);
+  assert.equal(cycleRepository.finalities.length, 1);
   assert.equal(cycleRepository.settlements.length, 1);
+  assert.deepEqual((await cycleRepository.describeCycle()).custodyLedgers.get('4663\0native'), before);
 });
 
 function moneyConfiguration({ solanaMint = SOLANA_MINT } = {}) {
@@ -1827,7 +1666,7 @@ function quoteForOperationsAccount(account) {
   quote.details.sender = address;
   quote.protocol.v2.orderData.inputs[0].refunds[0].recipient = address;
   for (const step of quote.steps) step.items[0].data.from = address;
-  const deposit = quote.steps[1].items[0].data;
+  const deposit = quote.steps[0].items[0].data;
   deposit.data = `${deposit.data.slice(0, 10)}${encoded}${deposit.data.slice(74)}`;
   return quote;
 }
@@ -1925,6 +1764,8 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
       role: 'operator-evm',
       async sign({ transaction }) {
         signCalls += 1;
+        assert.equal(cycleRepository.relayLeg.state, 'RECORDED');
+        assert.equal(cycleRepository.relayLeg.sourceTxHash, null);
         const { from, ...unsigned } = transaction;
         return {
           signedTx: await account.signTransaction({
@@ -1955,7 +1796,7 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
       client: {
         async getChainId() { return 4663; },
         async getTransactionCount() { return 7n; },
-        async getBalance() { return 10_000_000_000_000_000n; },
+        async getBalance() { return 1_000_000_000_000_000_000n; },
       },
     },
   };
@@ -1969,7 +1810,7 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
     /broadcast interrupted after durable signature/,
   );
   assert.equal(signCalls, 1);
-  assert.equal(cycleRepository.relayLeg.state, 'RECORDED');
+  assert.equal(cycleRepository.relayLeg.state, 'SOURCE_SIGNED');
   assert.equal([...cycleRepository.attempts.values()][0].attempt.state, 'SIGNED');
   const persisted = [...cycleRepository.attempts.values()][0].attempt.rawBytes;
 
@@ -1978,13 +1819,13 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
     preflightAuthority: TEST_PREFLIGHT_AUTHORITY,
     now: () => (quote.protocol.v2.orderData.output.deadline * 1000) - 1,
   });
-  assert.equal(signCalls, 2);
-  assert.equal(broadcastCalls, 3);
+  assert.equal(signCalls, 1);
+  assert.equal(broadcastCalls, 2);
   assert.equal(firstRawBytes, persisted);
-  assert.equal(cycleRepository.relayLeg.sourceTxHash, keccak256([...cycleRepository.attempts.values()][1].attempt.rawBytes));
+  assert.equal(cycleRepository.relayLeg.sourceTxHash, keccak256([...cycleRepository.attempts.values()][0].attempt.rawBytes));
   assert.deepEqual(
     cycleRepository.recoveryContexts.map(recovery => recovery.relayQuoteDeadlineUnixSeconds),
-    [String(quote.protocol.v2.orderData.output.deadline), String(quote.protocol.v2.orderData.output.deadline)],
+    [String(quote.protocol.v2.orderData.output.deadline)],
   );
   assert.equal(cycleRepository.reservations.some(([kind]) => kind === 'reserve'), true);
 });
