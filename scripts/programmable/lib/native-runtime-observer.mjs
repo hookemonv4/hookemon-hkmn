@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { keccak256Hex } from './keccak.mjs';
+import { reproduceNativeUniversalRouter } from './native-universal-router-reproduction.mjs';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // Published chain descriptor and Safe policy captured 2026-09-08; no caller-selectable identities.
 const ROLES = {
@@ -172,7 +174,8 @@ function abi(value, role) {
   return value;
 }
 /** Read-only external runtime observation; never establishes provider admission or wallet authority. */
-export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.mainnet.chain.robinhood.com' } = {}) {
+export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.mainnet.chain.robinhood.com', checkpointMode = 'finalized', compilerPath } = {}) {
+  need(['finalized', 'capture-then-finalize'].includes(checkpointMode), 'INVALID_CHECKPOINT_MODE', 'unsupported observation mode');
   const endpoint = httpsUrl(rpcUrl);
   need(!new URL(endpoint).search, 'INVALID_URL', 'RPC query credentials are not accepted');
   const evidenceBytes = Object.create(null);
@@ -209,7 +212,10 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
     && published[role]?.runtimeCodeHash === expected.runtimeCodeHash, 'DESCRIPTOR_DRIFT', `${role} changed`);
   need(await rpc('chain-id', 'eth_chainId', []) === '0x1237', 'CHAIN_MISMATCH', 'expected 4663');
   need((await rpc('genesis', 'eth_getBlockByNumber', ['0x0', false]))?.hash === GENESIS, 'GENESIS_MISMATCH', 'unexpected genesis');
-  const checkpoint = blockIdentity(await rpc('finalized', 'eth_getBlockByNumber', ['finalized', false]));
+  const captureFirst = checkpointMode === 'capture-then-finalize';
+  const checkpoint = blockIdentity(await rpc(captureFirst ? 'capture-head' : 'finalized', 'eth_getBlockByNumber', [captureFirst ? 'latest' : 'finalized', false]));
+  // The block hash is fixed once; every state call uses the same canonical block.
+  // No observation capability is issued until this exact canonical block is finalized.
   const ref = { blockHash: checkpoint.hash, requireCanonical: true };
   const contracts = [];
   for (const role of Object.keys(ROLES).sort()) {
@@ -241,7 +247,15 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
       completeAbi = abi(source.abi, role);
       const fallback = await request('abi-safe-fallback', FALLBACK_ABI);
       need(sha(evidenceBytes['responses/abi-safe-fallback.json']) === 'e5375ff461bf0976f99d2ff80e39208c996ac53073c3871afbfa25d4e93d20d6', 'SAFE_SOURCE_DRIFT', 'pinned fallback ABI bytes changed');
-      abi(fallback.abi, 'safe fallback');
+      const fallbackAbi = abi(fallback.abi, 'safe fallback');
+      evidenceBytes['abi/permitAuthority-fallback.json'] = encode(fallbackAbi);
+      const abiType = input => input.type.startsWith('tuple') ? `(${input.components.map(abiType).join(',')})${input.type.slice(5)}` : input.type;
+      const abiKey = item => `${item.type}:${item.name ?? ''}:${(item.inputs ?? []).map(abiType).join(',')}`;
+      const abiKeys = new Set(completeAbi.map(abiKey));
+      completeAbi = [...completeAbi, ...fallbackAbi.filter(item => {
+        if (item.type === 'constructor' || abiKeys.has(abiKey(item))) return false;
+        abiKeys.add(abiKey(item)); return true;
+      })];
       for (const [label, address, expectedHash] of SAFE_IMPLEMENTATIONS) {
         const sourceArtifact = label === 'singleton' ? source : fallback;
         need(sourceArtifact.version === '1.4.1' && sourceArtifact.deployments?.canonical?.address?.toLowerCase() === address
@@ -250,6 +264,17 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
         need(keccak256Hex(implementationCode) === expectedHash, 'SAFE_RUNTIME_DRIFT', label);
         evidenceBytes[`code/safe-${label}.bin`] = implementationCode;
       }
+    } else if (role === 'universalRouter' && compilerPath !== undefined) {
+      const reproduced = reproduceNativeUniversalRouter({ compilerPath, observedCode: code });
+      completeAbi = abi(reproduced.abi, role);
+      evidenceBytes['source/universal-router-input.json'] = reproduced.input;
+      evidenceBytes['source/universal-router-constructor.json'] = reproduced.constructorBytes;
+      evidenceBytes['source/universal-router-output.json'] = reproduced.outputBytes;
+      evidenceBytes['observations/universal-router-compiler.json'] = encode({
+        compilerSha256: '0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9',
+        inputSha256: sha(reproduced.input), outputSha256: sha(reproduced.outputBytes),
+        source: 'closed official source compilation with independently derived constructor immutables',
+      });
     } else {
       const source = await request(`abi-${role}`, `https://sourcify.dev/server/v2/contract/4663/${expected.address}?fields=abi,runtimeBytecode.onchainBytecode,deployment,proxyResolution,compilation`);
       need(source?.chainId === '4663' && source.address?.toLowerCase() === expected.address
@@ -262,15 +287,25 @@ export async function observeNativeRuntimeAuthority({ rpcUrl = 'https://rpc.main
     evidenceBytes[codePath] = code;
     evidenceBytes[abiPath] = encode(completeAbi);
     evidenceBytes[observationPath] = encode({ role, address: expected.address, blockNumber: BigInt(checkpoint.number).toString(), blockHash: checkpoint.hash,
-      ...(role === 'permitAuthority' ? { abiSource: 'safe-deployments singleton via canonical SafeProxy 1.4.1', proxyArtifactSource: SAFE_PROXY_ARTIFACT, proxyArtifactPath: 'responses/abi-safe-proxy.json' } : {}),
-      runtimeKeccak256: expected.runtimeCodeHash, codeResponsePath: `responses/${role}-code.json`, finalitySource: 'responses/finalized.json', binding: 'EIP-1898 requireCanonical' });
+      ...(role === 'permitAuthority' ? { abiSource: 'safe-deployments singleton via canonical SafeProxy 1.4.1', proxyArtifactSource: SAFE_PROXY_ARTIFACT, proxyArtifactPath: 'responses/abi-safe-proxy.json', fallbackAbiPath: 'abi/permitAuthority-fallback.json' } : {}),
+      runtimeKeccak256: expected.runtimeCodeHash, codeResponsePath: `responses/${role}-code.json`, finalitySource: captureFirst ? 'responses/finalized-recheck.json' : 'responses/finalized.json', binding: 'EIP-1898 requireCanonical' });
     contracts.push({ role, address: expected.address, codePath, abiPath, observationPath, blockNumber: BigInt(checkpoint.number).toString(), blockHash: checkpoint.hash });
+  }
+  if (captureFirst) {
+    const deadline = Date.now() + 40 * 60_000;
+    let attempt = 0;
+    for (;;) {
+      const finalized = blockIdentity(await rpc(`finality-wait-${attempt++}`, 'eth_getBlockByNumber', ['finalized', false]));
+      if (BigInt(finalized.number) >= BigInt(checkpoint.number)) break;
+      need(Date.now() < deadline, 'UNFINALIZED_CHECKPOINT', 'captured block did not finalize within the bounded observation window');
+      await delay(30_000);
+    }
   }
   const recheck = blockIdentity(await rpc('checkpoint-recheck', 'eth_getBlockByNumber', [checkpoint.number, false]));
   need(same(recheck, checkpoint), 'CHECKPOINT_CHANGED', 'canonical checkpoint changed');
   const finalizedAgain = blockIdentity(await rpc('finalized-recheck', 'eth_getBlockByNumber', ['finalized', false]));
   need(BigInt(finalizedAgain.number) >= BigInt(checkpoint.number), 'UNFINALIZED_CHECKPOINT', 'finalized height regressed');
-  if (finalizedAgain.number === checkpoint.number) need(finalizedAgain.hash === checkpoint.hash, 'CHECKPOINT_CHANGED', 'finalized hash changed');
+  if (BigInt(finalizedAgain.number) === BigInt(checkpoint.number)) need(finalizedAgain.hash === checkpoint.hash, 'CHECKPOINT_CHANGED', 'finalized hash changed');
   const runtime = freeze({ schema: 'hookemon.native-issuance-runtime-authority.v1', chainId: '4663', genesisHash: GENESIS,
     providerProtocol: 'programmable.custom-launch.v4', providerVersion: '4.1.0', contracts,
     evidenceFiles: Object.keys(evidenceBytes).sort().map(path => ({ path, sha256: `0x${sha(evidenceBytes[path])}` })) });

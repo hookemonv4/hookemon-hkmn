@@ -1,0 +1,101 @@
+{
+  "schema": "hookemon.universal-router-source-reproduction.v1",
+  "result": "MATCH",
+  "scope": "Exact byte-for-byte runtime reproduction from closed official sources and independently declared constructor values; latest observation, not finalized runtime authority",
+  "sourceCommit": "999d561c3ad58fb5cab91b602911f3c75591a9c7",
+  "peripheryCommit": "3231810e39b8c4d569b9d66907fa4ef8cd2cec22",
+  "coreCommit": "59d3ecf53afa9264a16bba0e38f4c5d2231f80bc",
+  "compilerSha256": "0ff016aef2396b12d1fc65429d8ea6cf53c2ee4b041bb8925644615ee1c30ab9",
+  "closedInputSha256": "402c71cee3e1205b59ed168fed5f0e76b95146e6a8c6a708d36f729baea4480a",
+  "closedOutputSha256": "29f7981ec9e032e8103d3903420d31be8921f6d0c643620bd8cee82d5b29ce7e",
+  "sourceFiles": 110,
+  "runtimeBytes": 24546,
+  "runtimeKeccak256": "0xbe8e8191bb42d843c2e948a5a55772eaab864ce01e54dcd47c9d089170b302d5",
+  "independentImmutables": [
+    {
+      "name": "SPOKE_POOL",
+      "slots": 3,
+      "value": "0x000000000000000000000000d29c85f15df544ba632c9e25829fd29d767d7978"
+    },
+    {
+      "name": "V3_POSITION_MANAGER",
+      "slots": 3,
+      "value": "0x00000000000000000000000073991a25c818bf1f1128deaab1492d45638de0d3"
+    },
+    {
+      "name": "V4_POSITION_MANAGER",
+      "slots": 2,
+      "value": "0x00000000000000000000000058daec3116aae6d93017baaea7749052e8a04fa7"
+    },
+    {
+      "name": "WETH9",
+      "slots": 3,
+      "value": "0x0000000000000000000000000bd7d308f8e1639fab988df18a8011f41eacad73"
+    },
+    {
+      "name": "PERMIT2",
+      "slots": 3,
+      "value": "0x000000000000000000000000000000000022d473030f116ddee9f6b43ac78ba3"
+    },
+    {
+      "name": "UNISWAP_V2_FACTORY",
+      "slots": 3,
+      "value": "0x0000000000000000000000008bceaa40b9acdfaedf85adf4ff01f5ad6517937f"
+    },
+    {
+      "name": "UNISWAP_V2_PAIR_INIT_CODE_HASH",
+      "slots": 3,
+      "value": "0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f"
+    },
+    {
+      "name": "UNISWAP_V3_FACTORY",
+      "slots": 1,
+      "value": "0x0000000000000000000000001f7d7550b1b028f7571e69a784071f0205fd2efa"
+    },
+    {
+      "name": "UNISWAP_V3_POOL_INIT_CODE_HASH",
+      "slots": 1,
+      "value": "0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54"
+    },
+    {
+      "name": "poolManager",
+      "slots": 11,
+      "value": "0x0000000000000000000000008366a39cc670b4001a1121b8f6a443a643e40951"
+    },
+    {
+      "name": "_cachedDomainSeparator",
+      "slots": 1,
+      "value": "0x26d9cf1eb1d13924a7699560365dc51340482adddb1d1a069eb1c3b0d228097c"
+    },
+    {
+      "name": "_cachedChainId",
+      "slots": 1,
+      "value": "0x0000000000000000000000000000000000000000000000000000000000001237"
+    },
+    {
+      "name": "_cachedThis",
+      "slots": 1,
+      "value": "0x00000000000000000000000006afba43fd06227fa663b0daecf536f6eaa6bf99"
+    },
+    {
+      "name": "_hashedName",
+      "slots": 1,
+      "value": "0xa11b775f1048ec545859d88137f90763cf7eee88ee2eace12b317c4eb4f76c80"
+    },
+    {
+      "name": "_hashedVersion",
+      "slots": 1,
+      "value": "0xad7c5bef027816a800da1736444fb58a807ef4c9603b7848673f7e3a68eb14a5"
+    },
+    {
+      "name": "_name",
+      "slots": 1,
+      "value": "0x556e6976657273616c526f75746572000000000000000000000000000000000f"
+    },
+    {
+      "name": "_version",
+      "slots": 1,
+      "value": "0x3200000000000000000000000000000000000000000000000000000000000001"
+    }
+  ]
+}

@@ -47,7 +47,7 @@ async function withFetch(t, change = () => {}) {
       });
     }
     const response = { url, request, value, raw, status, blockIndex };
-    change(response);
+    await change(response);
     return new Response(response.raw ?? JSON.stringify(response.value), { status: response.status, headers: { 'Content-Type': 'application/json' } });
   };
   t.after(() => { globalThis.fetch = original; });
@@ -138,4 +138,51 @@ test('observer retains import-time transport after global replacement', async t 
   const result = await observeNativeRuntimeAuthority();
   assert.equal(assertObservedNativeRuntime(result), result);
   assert.throws(() => assertProductionObservation(result), /UNOBSERVED_RUNTIME/);
+});
+
+
+test('captured hash checkpoint receives no capability until its finality and canonical recheck', async t => {
+  let release, entered, resolved = false;
+  const pending = new Promise(resolve => { release = resolve; });
+  const atFinality = new Promise(resolve => { entered = resolve; });
+  const calls = await withFetch(t, async response => {
+    if (response.request?.params?.[0] === 'finalized') { entered(); await pending; }
+  });
+  const running = observeNativeRuntimeAuthority({ checkpointMode: 'capture-then-finalize' }).then(value => { resolved = true; return value; });
+  await atFinality;
+  assert.equal(resolved, false);
+  release();
+  const result = await running;
+  assert.equal(assertObservedNativeRuntime(result), result);
+  assert.equal(calls.filter(call => call.request?.params?.[0] === 'latest').length, 1);
+  assert.equal(calls.filter(call => call.request?.method === 'eth_getCode').length, 11);
+  assert.ok(result.runtime.contracts.every(contract => contract.blockHash === BLOCK.hash));
+  assert.throws(() => assertProductionObservation(result), /UNOBSERVED_RUNTIME/);
+});
+
+test('captured hash checkpoint refuses a reorg even after finality advances', async t => {
+  await withFetch(t, response => {
+    if (response.request?.params?.[0] === 'finalized') response.value.result.number = '0x65';
+    if (response.request?.method === 'eth_getBlockByNumber' && response.request.params[0] === BLOCK.number) response.value.result.hash = `0x${'cd'.repeat(32)}`;
+  });
+  await assert.rejects(observeNativeRuntimeAuthority({ checkpointMode: 'capture-then-finalize' }), /CHECKPOINT_CHANGED/);
+});
+
+test('unsupported capture mode refuses without network activity', async t => {
+  const calls = await withFetch(t);
+  await assert.rejects(observeNativeRuntimeAuthority({ checkpointMode: 'latest-only' }), /INVALID_CHECKPOINT_MODE/);
+  assert.equal(calls.length, 0);
+});
+
+
+test('permit authority includes the verified fallback signature interface', async t => {
+  await withFetch(t);
+  const observed = await observeNativeRuntimeAuthority();
+  const role = observed.runtime.contracts.find(contract => contract.role === 'permitAuthority');
+  const combined = JSON.parse(observed.evidenceBytes[role.abiPath]);
+  const details = JSON.parse(observed.evidenceBytes[role.observationPath]);
+  const fallback = JSON.parse(observed.evidenceBytes[details.fallbackAbiPath]);
+  assert.ok(fallback.some(item => item.type === 'function' && item.name === 'isValidSignature'));
+  assert.ok(combined.some(item => item.type === 'function' && item.name === 'isValidSignature'));
+  assert.equal(combined.filter(item => item.type === 'constructor').length, 1);
 });
