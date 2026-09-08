@@ -3,7 +3,7 @@ import { sha256Bytes } from './canonical-json.mjs';
 import { deriveNativeIssuanceCommitments } from './native-issuance-commitments.mjs';
 
 const equal = (actual, expected, label) => {
-  if (actual !== expected) throw new Error(`native release identity mismatch: ${label}`);
+  if (expected === undefined || actual !== expected) throw new Error(`native release identity mismatch: ${label}`);
 };
 
 /**
@@ -12,7 +12,7 @@ const equal = (actual, expected, label) => {
  * rooted at those paths. The complete producer must also bind deploymentManifestPath.
  */
 export function verifyNativeReleaseIdentities({ commitments, derived, ...derivation }) {
-  const { launchInputs } = derivation;
+  const launchInputs = structuredClone(derivation.launchInputs);
   equal(launchInputs?.schemaVersion, 'hookemon.phase3.launch-inputs.v2', 'native launch schema');
   equal(derived?.schemaVersion, 'hookemon.phase3.derived-addresses.v2', 'native derived schema');
   const hashes = deriveNativeIssuanceCommitments(commitments);
@@ -23,7 +23,7 @@ export function verifyNativeReleaseIdentities({ commitments, derived, ...derivat
   // Recompute every constructor, salt, address, immutable patch, PoolKey and graph call from
   // the actual artifact files. A caller's stored derived object is only a comparison target.
   const recomputed = structuredClone(derived);
-  verifyDerivedAddresses({ ...derivation, derived: recomputed });
+  verifyDerivedAddresses({ ...derivation, launchInputs, derived: recomputed });
   for (const [role, address] of Object.entries(binding.roles)) {
     equal(address, launchInputs.roles[role === 'poolManager' ? 'manager' : role]?.toLowerCase(), `role ${role}`);
   }
@@ -44,7 +44,7 @@ export function verifyNativeReleaseIdentities({ commitments, derived, ...derivat
   }
   for (const [name, target] of Object.entries(recomputed.targets)) {
     const bytes = commitments.sourceBytes[target.artifactPath];
-    if (!Buffer.isBuffer(bytes)) throw new Error(`native release artifact missing from committed closure: ${name}`);
+    if (!Object.hasOwn(commitments.sourceBytes, target.artifactPath) || !Buffer.isBuffer(bytes)) throw new Error(`native release artifact missing from committed closure: ${name}`);
     equal(sha256Bytes(bytes), target.artifactDigest, `${name} artifact bytes`);
   }
   return { bindingDigest: hashes.bindingDigest, runtimeDigest: hashes.runtimeDigest, derived: recomputed };

@@ -2,13 +2,14 @@
 import { createHash } from 'node:crypto';
 export const sha256 = (bytes) => `0x${createHash('sha256').update(bytes).digest('hex')}`;
 const fail = (message) => { throw new Error(message); };
+const sameKeys = (actual, expected) => actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 const exact = (value, keys) => {
   if (!value || Object.getPrototypeOf(value) !== Object.prototype ||
-      Object.keys(value).sort().join('|') !== [...keys].sort().join('|')) fail('unexpected fields');
+      !sameKeys(Object.keys(value).sort(), [...keys].sort())) fail('unexpected fields');
 };
-const hash = (v) => { if (!/^0x[0-9a-f]{64}$/.test(v)) fail('invalid hash'); };
-const address = (v) => { if (!/^0x[0-9a-f]{40}$/.test(v)) fail('invalid address'); };
-const uint = (v) => { if (!/^(0|[1-9][0-9]*)$/.test(v)) fail('invalid unsigned decimal'); };
+const hash = (v) => { if (typeof v !== 'string' || !/^0x[0-9a-f]{64}$/.test(v)) fail('invalid hash'); };
+const address = (v) => { if (typeof v !== 'string' || !/^0x[0-9a-f]{40}$/.test(v)) fail('invalid address'); };
+const uint = (v) => { if (typeof v !== 'string' || !/^(0|[1-9][0-9]*)$/.test(v)) fail('invalid unsigned decimal'); };
 const text = (v) => { if (typeof v !== 'string' || !/^[\x20-\x7e]+$/.test(v)) fail('invalid ASCII text'); };
 export function canonical(value) {
   if (value === null || typeof value === 'boolean') return JSON.stringify(value);
@@ -24,8 +25,8 @@ export function envelope(domain, document) {
 function verifyFiles(files, bytes) {
   if (!Array.isArray(files) || !files.length) fail('empty closure');
   const names = files.map(f => f.path);
-  if (new Set(names).size !== names.length || names.join('|') !== [...names].sort().join('|')) fail('unordered closure');
-  if (Object.keys(bytes).sort().join('|') !== names.join('|')) fail('closure bytes differ');
+  if (new Set(names).size !== names.length || !sameKeys(names, [...names].sort())) fail('unordered closure');
+  if (!sameKeys(Object.keys(bytes).sort(), names)) fail('closure bytes differ');
   for (const f of files) {
     exact(f, ['path', 'sha256']); hash(f.sha256);
     if (!/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(f.path) || f.path.split('/').some(p => p === '.' || p === '..')) fail('invalid path');
@@ -59,7 +60,7 @@ export function deriveNativeIssuanceCommitments({ binding, runtime, sourceBytes,
   verifyFiles(runtime.evidenceFiles,evidenceBytes);
   if (!Array.isArray(runtime.contracts) || !runtime.contracts.length) fail('empty runtime authorities');
   const ids=runtime.contracts.map(c=>c.role);
-  if (new Set(ids).size!==ids.length || ids.join('|')!==[...ids].sort().join('|')) fail('unordered authorities');
+  if (new Set(ids).size!==ids.length || !sameKeys(ids,[...ids].sort())) fail('unordered authorities');
   for (const c of runtime.contracts) {
     exact(c,['role','address','codePath','abiPath','observationPath','blockNumber','blockHash']);
     text(c.role); address(c.address); uint(c.blockNumber); hash(c.blockHash);

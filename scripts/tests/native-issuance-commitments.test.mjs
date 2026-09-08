@@ -43,3 +43,26 @@ test('every direct role and economic change changes the binding commitment',()=>
 test('unsafe canonical types refuse',()=>{
  for(const v of [1,NaN,undefined,new Date(),{x:'line\nbreak'}])assert.throws(()=>canonical(v));
 });
+
+test('merged field names cannot replace required commitment fields',()=>{
+ for (const [group, first, second] of [
+  ['roles','permit2','poolManager'],
+  ['economics','processClaimLimit6hWei','processClaimLimitMaxWei'],
+  ['independentDeployment','custodyEffectiveSalt','custodyInitCodeHash'],
+ ]) {
+  const f=fixture(), object=f.binding[group];
+  object[`${first}|${second}`]=object[first]; delete object[first]; delete object[second];
+  assert.throws(()=>deriveNativeIssuanceCommitments(f),/unexpected fields/);
+ }
+});
+test('hash address and decimal validators reject coercible arrays',()=>{
+ for(const mutate of [
+  f=>{f.binding.requirementsSha256=[h];},
+  f=>{f.binding.roles.operations=[a];},
+  f=>{f.binding.economics.totalSupplyAtomic=['1'];},
+  f=>{f.runtime.contracts[0].blockNumber=['1'];},
+ ]) {
+  const f=fixture(); mutate(f);
+  assert.throws(()=>deriveNativeIssuanceCommitments(f),/invalid (hash|address|unsigned decimal)/);
+ }
+});

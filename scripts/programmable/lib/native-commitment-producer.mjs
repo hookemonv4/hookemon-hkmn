@@ -50,12 +50,14 @@ export function prepareNativeCommitmentInputs(options) {
     || Object.values(Object.getOwnPropertyDescriptors(options)).some(descriptor => descriptor.get || descriptor.set)) {
     throw new TypeError('native commitment inputs: unsupported input or acceptance claim');
   }
+  options = { ...options };
+  const excludedOutputPaths = structuredClone(options.excludedOutputPaths);
   const observedRuntime = assertObservedNativeRuntime(options.observedRuntime);
   const sourceBundleManifest = structuredClone(options.sourceBundleManifest);
   const { sourceClosure, sourceBytes } = collectNativeBuildClosure({
     root: options.root, compilerPath: options.compilerPath, compilerSha256: COMPILER_SHA256,
     standardInputPath: options.standardInputPath, sourceRoot: options.sourceRoot === undefined ? '.' : options.sourceRoot,
-    sourceBundleManifest, excludedOutputPaths: options.excludedOutputPaths,
+    sourceBundleManifest, excludedOutputPaths,
   });
   const requirements = requirementsBytes(options.root);
   // Recheck the private observation after the filesystem work; no caller-supplied digest replaces it.
