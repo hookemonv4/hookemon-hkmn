@@ -53,3 +53,18 @@ test("formats timestamps and every operator code family in German", () => {
   for (const [code, label] of expected) assert.equal(germanStatus(code), label, code);
   assert.equal(germanStatus("future-code"), "Unbekannter Status");
 });
+
+test("keeps USD controls, exact ETH principal and historical USDG distinct", async () => {
+  const { parseGermanUsd, formatGermanUsd, formatGermanEth, assertNativeOperatorConfiguration } = await import("../app/operator/operator-locale.ts");
+  assert.equal(parseGermanUsd("55,000001"), "55000001");
+  assert.equal(formatGermanUsd("55000000"), "55,00 USD");
+  assert.equal(formatGermanEth("1"), "0,000000000000000001 ETH");
+  assert.equal(formatGermanEth("123456789012345678901234567890"), "123.456.789.012,34567890123456789 ETH");
+  assert.equal(formatGermanUsdg("1"), "0,000001 USDG");
+  const limits = { maxUnitPriceMicroUsd: "55000000", maxCycleBudgetMicroUsd: "165000000", max24HourBudgetMicroUsd: "495000000" };
+  assert.doesNotThrow(() => assertNativeOperatorConfiguration(limits, limits));
+  for (const bad of [{ maxUnitPriceMicroUsdg: "55000000" }, { ...limits, maxUnitPriceMicroUsdg: "1" }, { ...limits, maxUnitPriceMicroUsd: "55000001" }, { ...limits, maxCycleBudgetMicroUsd: 165000000 }]) {
+    assert.throws(() => assertNativeOperatorConfiguration(bad, limits), /OPERATOR_CONFIGURATION_INVALID/);
+  }
+  for (const bad of ["1e18", "1.2", "01", "-0"]) assert.throws(() => formatGermanEth(bad));
+});

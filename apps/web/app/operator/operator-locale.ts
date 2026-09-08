@@ -163,3 +163,45 @@ export function germanStatus(code: string | null | undefined): string {
     ? GERMAN_STATUS_LABELS[code]
     : "Unbekannter Status";
 }
+
+export function parseGermanUsd(value: string): string {
+  const match = GERMAN_USDG_PATTERN.exec(value);
+  if (!match) throw new Error("USD_BETRAG_UNGUELTIG");
+  return (BigInt(match[1]) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0"))).toString();
+}
+
+export function formatGermanUsd(value: string): string {
+  return formatAtomic(value, 6, "USD");
+}
+
+export function formatGermanEth(amountWei: string): string {
+  return formatAtomic(amountWei, 18, "ETH");
+}
+
+function formatAtomic(value: string, decimals: number, unit: string): string {
+  if (!SIGNED_MONEY_PATTERN.test(value) || value === "-0") throw new Error(`${unit}_WERT_UNGUELTIG`);
+  const negative = value.startsWith("-");
+  const amount = BigInt(negative ? value.slice(1) : value);
+  const scale = 10n ** BigInt(decimals);
+  const whole = new Intl.NumberFormat("de-DE").format(amount / scale);
+  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "").padEnd(2, "0");
+  return `${negative ? "−" : ""}${whole},${fraction} ${unit}`;
+}
+
+// A historical configuration can be inspected in history, but cannot enable native commands.
+export function assertNativeOperatorConfiguration(state: unknown, hardCaps: unknown): void {
+  const caps = ["maxUnitPriceMicroUsd", "maxCycleBudgetMicroUsd", "max24HourBudgetMicroUsd"] as const;
+  const rails = [55_000_000n, 165_000_000n, 495_000_000n];
+  for (const [record, nullable] of [[state, true], [hardCaps, false]] as const) {
+    if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("OPERATOR_CONFIGURATION_INVALID");
+    const fields = record as Record<string, unknown>;
+    if (Object.keys(fields).some((key) => key.endsWith("MicroUsdg"))) throw new Error("OPERATOR_CONFIGURATION_INVALID");
+    for (const [index, key] of caps.entries()) {
+      const value = fields[key];
+      if (nullable && value === null) continue;
+      if (typeof value !== "string" || !CANONICAL_MONEY_PATTERN.test(value) || BigInt(value) > rails[index]) {
+        throw new Error("OPERATOR_CONFIGURATION_INVALID");
+      }
+    }
+  }
+}

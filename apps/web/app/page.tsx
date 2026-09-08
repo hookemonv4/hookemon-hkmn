@@ -18,7 +18,7 @@ const journeySteps = [
     id: "swap",
     number: "01",
     title: "Swap on EVM",
-    copy: "The protocol design routes HOOKEMON / USDG swaps through one immutable Uniswap v4 hook.",
+    copy: "The protocol design routes HOOKEMON / ETH swaps through one immutable Uniswap v4 hook.",
     bubble: "Every swap starts the machine.",
     meta: "EVM · V4",
   },
@@ -34,9 +34,9 @@ const journeySteps = [
     id: "bridge",
     number: "03",
     title: "Bridge to Solana",
-    copy: "Collected USDG moves in bounded batches instead of paying for a bridge on every trade.",
+    copy: "Collected ETH moves in bounded batches instead of paying for a bridge on every trade.",
     bubble: "We batch the trip to Solana.",
-    meta: "USDG · Bridge",
+    meta: "ETH · Bridge",
   },
   {
     number: "04",
@@ -58,8 +58,8 @@ const journeySteps = [
     id: "pay",
     number: "06",
     title: "Pay holders automatically",
-    copy: "Returned Solana proceeds bridge home as USDG, and the operator sponsors proportional payouts to eligible time-weighted holders.",
-    bubble: "No claim. USDG comes to you.",
+    copy: "Returned Solana proceeds bridge home as ETH, and the operator sponsors proportional payouts to eligible time-weighted holders.",
+    bubble: "No claim. ETH comes to you.",
     meta: "AUTO · TOP 200",
   },
 ] satisfies JourneyStep[];
@@ -68,7 +68,7 @@ const stats = [
   ["3.0%", "Hook fee"],
   ["Top 200", "Time-weighted"],
   ["20 min", "Accounting cycle"],
-  ["No claim", "Automatic USDG"],
+  ["No claim", "Automatic ETH"],
 ];
 
 export default function Home() {
@@ -134,7 +134,7 @@ export default function Home() {
           </h1>
           <p className="hero-lede">
             Hookemon uses EVM swap fees to open Collector Crypt Pok&eacute;mon Gacha packs and
-            automatically routes instant buyback proceeds to eligible holders as USDG.
+            automatically routes instant buyback proceeds to eligible holders as ETH.
           </p>
           <div className="hero-manifesto" aria-label="Hookemon promise">
             <span>SWAPS RIP PACKS.</span>
@@ -284,7 +284,7 @@ export default function Home() {
             <h2>Your wallet receives. You do nothing</h2>
             <p>
               Hookemon closes accounting every 20 minutes, ranks direct holders by time-weighted
-              balance, and accrues returned USDG proportionally. The operator pays eligible wallets
+              balance, and accrues returned ETH proportionally. The operator pays eligible wallets
               in sponsored batches.
             </p>
             <ul>
@@ -305,7 +305,7 @@ export default function Home() {
             </div>
             <div className="wallet-balance">
               <span>AUTOMATIC REWARD</span>
-              <strong>+12.84 USDG</strong>
+              <strong>ETH rewards</strong>
             </div>
             <div className="wallet-status-row">
               <span className="check-mark" aria-hidden="true" />
