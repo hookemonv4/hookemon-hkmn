@@ -150,3 +150,15 @@ The hero uses a two-line shared-cycle heading and the supplied transparent Robin
 The landing gallery presents one graded individual card for each of Mew, Mewtwo, Charizard, Blastoise, Venusaur and Pikachu. `config/collector-showcase.json` records the provider snapshot, full catalog coverage and selection rules. Selection uses the highest provider insured value per species across the listed packs, excluding sealed products; insured value is not a sale price. Each upright card has the same framed presentation, its certificate and provider record, and an estimated buyback tied to the named pack rate. Rarity colors are pack-relative: Epic is purple and Uncommon is green. Other verified pack memberships appear in card details. Refresh the snapshot and gallery together after repeating the catalog scan; never infer pack membership from value alone.
 
 Lugia remains the full-width chase card above the six iconic species. Buyback cash-out estimates use Collector Crypt pack rates; different verified rates appear as a cash range, not a guaranteed offer.
+
+## Native display boundary
+
+The served comic page and its `dashboard.mjs` accept cycle-status v7 and community v9 while retaining
+historical readers. ETH displays preserve all 18 decimal places, and recipient averages round down
+to one wei. Historical USDG values retain their six-decimal label. The standalone
+`comic-production/native-accounting.mjs` and React-side parser match the backend contract byte for
+byte. Existing comic layout, artwork and audio stay on their current paths.
+
+The React dashboard exposes the same native round through `NativeAccounting.tsx`; USD valuations
+and Collector settlement assets retain distinct labels. Native executable operator controls use
+micro-USD limits, and unavailable or historical bootstrap data clears the command authority state.

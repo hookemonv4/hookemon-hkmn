@@ -119,3 +119,28 @@ audit log if its projection is missing or stale.
   exception as `UNCERTAIN` rather than infer that no effect occurred.
 
 The bootstrap hard-cap projection exposes only its four published pack-spend fields. Additional runner custody limits remain enforced by the operator authority and do not change the dashboard response schema.
+
+## Native money boundary
+
+Cycle status v7, community snapshots v9 and the private dashboard v7 carry native accounting.
+`native-accounting.mjs` validates integer wei separately from micro-USD valuation fields and rejects
+historical `MicroUsdg` keys in native money surfaces. A validation-only historical skeleton checks
+unchanged layout and metadata fields with amount-presence sentinels; native scalars are never
+copied into historical money output. Existing public versions through cycle v6 and community v8
+retain their original readers. The standalone website parser copies are byte-parity tested.
+
+`hookemon.native-round-accounting.v1` identifies native round records. Release, outbound bridge
+and return amounts carry the explicit 4663/native/18 identity; Collector debit and proceeds retain
+their Solana asset identity. Physical balances, reserves and payout liabilities use `Wei`; economic
+valuations use `MicroUsd` and remain null without corresponding evidence. A funding quote does
+not establish actual pack spend. Lifetime monetary totals remain null without an accounting index.
+
+Operator bootstrap and configuration decisions use USD caps with `MicroUsd` names. Historical
+USDG configuration keys fail validation before a command reaches the runner. Native public payout
+projection requires a trusted native asset and Operations identity, a native v2 result, validated
+recipient proofs and full paid/liability/dust conservation; terminal lifecycle status alone does
+not establish payment. Native cycle history retains the status-and-timestamp-only v1 contract.
+
+Focused verification: `node --experimental-strip-types --test apps/web/tests/native-accounting.test.mjs`
+exercises projection, both public parser boundaries, the served comic dashboard, exact wei averages
+and parser parity. Historical contract and dashboard presentation tests exercise the old readers.

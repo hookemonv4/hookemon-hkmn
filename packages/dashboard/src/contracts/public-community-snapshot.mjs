@@ -1,3 +1,4 @@
+import { nativeValidationSkeleton, requireNativeRound } from './native-accounting.mjs';
 // Clean-room re-implementation of GET /public/api/community-dashboard's contract (readSet:
 // apps/web/lib/public-community-snapshot.ts on the legacy codex/mainnet-cycle-canary branch,
 // `normalizePublicCommunitySnapshot`/schemaVersion 7). This service only ever emits schemaVersion 8;
@@ -105,6 +106,14 @@ const MAX_TRANSACTIONS = 24;
 const POOL_FRESHNESS_MS = 90_000;
 
 export function normalizePublicCommunitySnapshot(value, expectedProfile) {
+  if (value?.schemaVersion === 9) {
+    const round = value.latestCycle?.roundAccounting ?? null;
+    requireNativeRound(round);
+    const skeleton = nativeValidationSkeleton(value);
+    skeleton.schemaVersion = 8;
+    normalizePublicCommunitySnapshot(skeleton, expectedProfile);
+    return structuredClone(value);
+  }
   try {
     const source = requiredRecord(value, invalid);
     const snapshotKeys = source.schemaVersion === 8

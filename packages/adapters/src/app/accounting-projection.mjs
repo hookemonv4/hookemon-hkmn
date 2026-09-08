@@ -41,8 +41,10 @@ import { isProcessQuoteUsdValuation } from '../relay-client.mjs';
 // `collectorPurchaseDebit`/`collectorBuybackProceeds`). Neither may be relabeled as the other's
 // asset or subtracted against it — see `outboundBridgeFee`'s and `projectCycleAccounting`'s own
 // comments for the two concrete anti-patterns this module previously had and no longer has.
-import { USDG_PAYOUT_CHAIN_ID, USDG_PAYOUT_DECIMALS } from '../../../runner/src/distribution/payout-plan.mjs';
-import { assertFinalizedPayoutTransferEvidence, DirectPayoutError } from './stages/payout.mjs';
+const USDG_PAYOUT_CHAIN_ID = 4663;
+const USDG_PAYOUT_DECIMALS = 6; // Historical v1 proof identity, never native execution.
+import * as payoutReaders from './stages/payout.mjs';
+const { DirectPayoutError } = payoutReaders;
 
 const ACCOUNTING_STAGES = Object.freeze(['funding', 'outbound', 'purchase', 'buyback', 'return', 'distribution', 'payout']);
 
@@ -294,13 +296,16 @@ function finalizedRecipientAmount(recipient, expectedAsset, operationsAddress) {
   const recipientAmount = publicAmount(recipient.amount);
   if (recipientAmount === null || !sameAsset(recipientAmount, expectedAsset)) return null;
   try {
-    assertFinalizedPayoutTransferEvidence({
+    const readProof = expectedAsset.decimals === 18
+      ? payoutReaders.assertFinalizedPayoutTransferEvidence
+      : payoutReaders.assertHistoricalFinalizedPayoutTransferEvidence ?? payoutReaders.assertFinalizedPayoutTransferEvidence;
+    readProof({
       transactionHash: recipient.transactionHash,
       finalizedTransfer: recipient.finalizedTransfer,
       operations: operationsAddress,
       recipient: recipient.recipient,
       amount: {
-        chainId: USDG_PAYOUT_CHAIN_ID,
+        chainId: expectedAsset.chainId,
         assetId: expectedAsset.assetId,
         decimals: expectedAsset.decimals,
         amountAtomic: recipientAmount.units,
@@ -424,6 +429,105 @@ function projectPayoutEvidence(payoutStage, cycleId, trustedPayoutContext) {
   });
 }
 
+function projectNativePayoutEvidence(payoutStage, cycleId, trustedPayoutContext) {
+  const allNull = Object.freeze({
+    plannedHolderRewardsWei: null,
+    paidHolderRewardsWei: null,
+    payoutLiabilityWei: null,
+    payoutDustWei: null,
+    paidHolderRewardsRecipientCount: null,
+    holderRewardsPaidOut: false,
+  });
+  if (!isCompleteStage(payoutStage)) return allNull;
+  const evidence = payoutStage.evidence;
+  if (
+    !evidence || evidence.schema !== 'hookemon.direct-payout-result.v2' || evidence.cycleId !== cycleId
+    || !Array.isArray(evidence.recipients) || !Array.isArray(evidence.quarantine)
+  ) {
+    return allNull;
+  }
+
+  const configured = trustedPayoutContext?.nativeAsset;
+  if (String(configured?.chainId) !== '4663' || configured?.assetId !== 'native' || configured?.decimals !== 18) return allNull;
+  const expectedUsdgAssetId = 'native';
+  const operationsAddress = trustedPayoutContext?.operationsAddress;
+  if (typeof expectedUsdgAssetId !== 'string' || expectedUsdgAssetId.length === 0
+    || typeof operationsAddress !== 'string' || operationsAddress.length === 0) {
+    return allNull;
+  }
+  const expectedAsset = Object.freeze({
+    chainId: EXPECTED_USDG_CHAIN_ID,
+    assetId: expectedUsdgAssetId,
+    decimals: 18,
+  });
+
+  const distributablePool = publicAmount(evidence.distributablePool);
+  const totalAllocated = publicAmount(evidence.totalAllocated);
+  const dust = publicAmount(evidence.dust);
+  if (distributablePool === null || totalAllocated === null || dust === null) return allNull;
+  if (!sameAsset(distributablePool, expectedAsset) || !sameAsset(totalAllocated, expectedAsset) || !sameAsset(dust, expectedAsset)) {
+    return allNull;
+  }
+  // Plan-level conservation (assertPlan's own invariant): totalAllocated + dust == distributablePool.
+  if (BigInt(totalAllocated.units) + BigInt(dust.units) !== BigInt(distributablePool.units)) return allNull;
+
+  let paidAtomic = 0n;
+  let recipientCount = 0;
+  const nonPaidRecipients = [];
+  const seenRecipients = new Set();
+  const seenTransactions = new Set();
+  for (const recipient of evidence.recipients) {
+    const recipientKey = typeof recipient?.recipient === 'string' ? recipient.recipient.toLowerCase() : null;
+    if (recipientKey === null || seenRecipients.has(recipientKey)) return allNull;
+    seenRecipients.add(recipientKey);
+    if (recipient.state === 'FINALIZED') {
+      const transactionKey = typeof recipient.transactionHash === 'string' ? recipient.transactionHash.toLowerCase() : null;
+      if (transactionKey === null || seenTransactions.has(transactionKey)) return allNull;
+      seenTransactions.add(transactionKey);
+    }
+    if (!recipient || typeof recipient !== 'object') return allNull;
+    const finalized = finalizedRecipientAmount(recipient, expectedAsset, operationsAddress);
+    if (finalized !== null) {
+      paidAtomic += BigInt(finalized.units);
+      recipientCount += 1;
+      continue;
+    }
+    if (!NON_PAID_RECIPIENT_STATES.has(recipient.state)) return allNull;
+    const amount = publicAmount(recipient.amount);
+    if (amount === null || !sameAsset(amount, expectedAsset)) return allNull;
+    nonPaidRecipients.push({ recipient: recipient.recipient, units: amount.units });
+  }
+
+  // Quarantine must pair exactly one-to-one with non-paid recipients — the same invariant
+  // finalizeDirectPayoutResult itself enforces before ever writing this evidence.
+  if (evidence.quarantine.length !== nonPaidRecipients.length) return allNull;
+  const remainingNonPaid = [...nonPaidRecipients];
+  let liabilityAtomic = 0n;
+  for (const liability of evidence.quarantine) {
+    const amount = publicAmount(liability?.amount);
+    if (amount === null || !sameAsset(amount, distributablePool)) return allNull;
+    const matchIndex = remainingNonPaid.findIndex(
+      entry => entry.recipient === liability?.recipient && entry.units === amount.units,
+    );
+    if (matchIndex === -1) return allNull;
+    remainingNonPaid.splice(matchIndex, 1);
+    liabilityAtomic += BigInt(amount.units);
+  }
+
+  // Full conservation (isDirectPayoutComplete's own invariant): paid + quarantined + dust ==
+  // distributablePool.
+  if (paidAtomic + liabilityAtomic + BigInt(dust.units) !== BigInt(distributablePool.units)) return allNull;
+
+  return Object.freeze({
+    plannedHolderRewardsWei: totalAllocated.units,
+    paidHolderRewardsWei: paidAtomic.toString(),
+    payoutLiabilityWei: liabilityAtomic.toString(),
+    payoutDustWei: dust.units,
+    paidHolderRewardsRecipientCount: recipientCount,
+    holderRewardsPaidOut: liabilityAtomic === 0n && paidAtomic === BigInt(totalAllocated.units),
+  });
+}
+
 /** Workflow-state label derived from real evidence, never from the payout stage's `COMPLETE` status
  * alone — `COMPLETE` only proves recipient conservation was reached, which can include quarantined
  * (`REFUSED`/`NONCE_INTERFERENCE`) recipients that were never actually paid. `payoutEvidence` is
@@ -482,6 +586,9 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
     ...ACCOUNTING_STAGES.map(stage => cycleRepository.readStage(cycleId, stage)),
   ]);
   const [funding, outbound, purchase, buyback, returnStage, distribution, payout] = stages;
+  if (description?.admission?.schema === 'hookemon.policy-admission.v3') {
+    return projectNativeCycleAccounting(description, stages, cycleId, trustedPayoutContext);
+  }
   void funding; // read for symmetry/future use; funding carries no accounting amount today.
   void outbound; // no same-asset bridge-fee evidence exists yet — see outboundBridgeFee's own header.
 
@@ -562,6 +669,41 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
     payoutDustMicroUsdg: payoutEvidence.payoutDustMicroUsdg,
     paidHolderRewardsRecipientCount: payoutEvidence.paidHolderRewardsRecipientCount,
     holderRewardsStatus: rewardStatus(distribution, payout, payoutEvidence),
+    distributionStatus: distributionStatus(returnStage, distribution, payout),
+  });
+}
+
+// Native records never enter the historical six-decimal projection above.
+function projectNativeCycleAccounting(description, stages, cycleId, trustedPayoutContext) {
+  const [, , purchase, buyback, returnStage, distribution, payout] = stages;
+  const native = value => {
+    const amount = publicAmount(value);
+    return amount?.chainId === '4663' && amount.assetId === 'native' && amount.decimals === 18 ? amount : null;
+  };
+  const outbound = settledRelayLeg(description.relayLegs, 'outbound');
+  const inbound = settledRelayLeg(description.relayLegs, 'return');
+  const payoutEvidence = projectNativePayoutEvidence(payout, cycleId, trustedPayoutContext);
+  const releaseAmount = native({ chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: description.releaseAmount });
+  return Object.freeze({
+    schema: 'hookemon.native-round-accounting.v1',
+    releaseAmount,
+    outboundBridgeDebit: outbound?.schema === 'hookemon.relay-leg.v2' ? native({ chainId: outbound.sourceChainId, assetId: outbound.sourceAssetId, decimals: outbound.sourceDecimals, amountAtomic: outbound.sourceAmountAtomic }) : null,
+    inboundBridgeProceeds: inbound?.schema === 'hookemon.relay-leg.v2' ? native({ chainId: inbound.destinationChainId, assetId: inbound.destinationAssetId, decimals: inbound.destinationDecimals, amountAtomic: inbound.destinationAmountAtomic }) : null,
+    collectorPurchaseDebit: purchaseDebit(purchase),
+    collectorBuybackProceeds: buybackProceeds(buyback, purchase),
+    // Funding quotes describe funding, not actual per-card purchase costs or proceeds.
+    packSpendMicroUsd: null, buybackMicroUsd: null, packGainMicroUsd: null, packLossMicroUsd: null,
+    quotedCosts: Object.freeze({ outboundBridgeMicroUsd: null, inboundBridgeMicroUsd: null, collectorApiMicroUsd: null, evmNetworkMicroUsd: null, solanaNetworkMicroUsd: null, slippageMicroUsd: null }),
+    protectedCostsMicroUsd: null, confirmedCostsMicroUsd: null, cycleGainMicroUsd: null, cycleLossMicroUsd: null,
+    walletBalanceBeforeWei: null, walletBalanceAfterWei: null,
+    networkFees: Object.freeze({ walletLamportsCharged: null, purchase: null, buyback: null }),
+    feeReserveBeforeWei: null, feeReserveTargetWei: null, feeReserveTopUpWei: null, feeReserveAfterWei: null,
+    plannedHolderRewardsWei: payoutEvidence.plannedHolderRewardsWei,
+    paidHolderRewardsWei: payoutEvidence.paidHolderRewardsWei,
+    payoutLiabilityWei: payoutEvidence.payoutLiabilityWei,
+    payoutDustWei: payoutEvidence.payoutDustWei,
+    paidHolderRewardsRecipientCount: payoutEvidence.paidHolderRewardsRecipientCount,
+    holderRewardsStatus: isCompleteStage(payout) ? payoutEvidence.paidHolderRewardsWei === null ? 'awaiting-verification' : payoutEvidence.holderRewardsPaidOut ? 'paid' : 'paid-with-liabilities' : 'not-started',
     distributionStatus: distributionStatus(returnStage, distribution, payout),
   });
 }

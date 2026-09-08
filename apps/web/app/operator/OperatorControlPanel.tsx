@@ -1,5 +1,7 @@
 "use client";
 
+import NativeAccounting from "../NativeAccounting";
+import { nativeValidationSkeleton, requireNativeRound } from "../../lib/native-accounting.mjs";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
@@ -14,6 +16,7 @@ import {
   germanStatus,
   parseGermanUsd,
   formatGermanUsd,
+  formatGermanEth,
   assertNativeOperatorConfiguration,
 } from "./operator-locale";
 import type { ActiveCycle, DashboardCard } from "./operator-types";
@@ -68,7 +71,7 @@ type Bootstrap = {
 type DashboardRoundAccounting = PublicRoundAccounting;
 
 type Dashboard = {
-  schemaVersion: 4;
+  schemaVersion: 4 | 7;
   historyComplete: boolean;
   cardHistoryComplete: boolean;
   generatedAt: string;
@@ -526,9 +529,9 @@ export default function OperatorControlPanel() {
                 value={String(dashboard.activeCycle.requestedOrders)}
               />
               <CurrentValue label="Maximale Booster" value={nullableInteger(dashboard.activeCycle.maxBoostersPerCycle)} />
-              <CurrentValue label="Maximaler Packpreis" value={nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
-              <CurrentValue label="Zyklusbudget" value={nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
-              <CurrentValue label="24-Stunden-Budget" value={nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
+              <CurrentValue label="Maximaler Packpreis" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxUnitPriceMicroUsd) : nullableMoney(dashboard.activeCycle.maxUnitPriceMicroUsdg)} />
+              <CurrentValue label="Zyklusbudget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).maxCycleBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.maxCycleBudgetMicroUsdg)} />
+              <CurrentValue label="24-Stunden-Budget" value={dashboard.schemaVersion === 7 ? nullableUsd((dashboard.activeCycle as unknown as Record<string, string | null>).max24HourBudgetMicroUsd) : nullableMoney(dashboard.activeCycle.max24HourBudgetMicroUsdg)} />
               <CurrentValue label="Bestätigte Karten" value={String(dashboard.activeCycle.revealedCards)} />
             </dl>
             <details className={styles.technicalDetails}>
@@ -567,21 +570,22 @@ export default function OperatorControlPanel() {
             Historische Summen werden noch importiert. Die angezeigten Gesamtwerte sind vorläufig.
           </p>
         ) : null}
+        <NativeAccounting accounting={dashboard?.latestCycle?.roundAccounting} />
         <div className={styles.metricGrid}>
           <Metric
             label="Pool beim letzten Zyklusstart"
             value={dashboard ? formatCycleStartProjectPool(dashboard) : dashboardPlaceholder}
           />
-          <Metric label="Packkäufe" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg) : dashboardPlaceholder} />
-          <Metric label="Bestätigte Buybacks" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg) : dashboardPlaceholder} />
-          <Metric label="Zurück transferiert" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg) : dashboardPlaceholder} />
+          <Metric label="Packkäufe" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalCollectorSpendMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalCollectorSpendMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Bestätigte Buybacks" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBuybacksReturnedMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBuybacksReturnedMicroUsdg)) : dashboardPlaceholder} />
+          <Metric label="Zurück transferiert" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalBridgedBackWei, false) : historicalMicroUsdg(dashboard, dashboard.metrics.totalBridgedBackMicroUsdg)) : dashboardPlaceholder} />
           <Metric label="Letzte tatsächliche Ausschüttung" value={dashboard ? latestActuallyPaid(dashboard) : dashboardPlaceholder} />
           <Metric label="Nächste Gebührenreserve (50 %)" value={dashboard ? latestReserveTarget(dashboard) : dashboardPlaceholder} />
-          <Metric label="Angebotene Betriebskosten" value={dashboard ? historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg) : dashboardPlaceholder} />
+          <Metric label="Angebotene Betriebskosten" value={dashboard ? (dashboard.schemaVersion === 7 ? nativeOperatorAmount((dashboard.metrics as unknown as Record<string, unknown>).totalQuotedOperatingCostsMicroUsd, true) : historicalMicroUsdg(dashboard, dashboard.metrics.totalQuotedOperatingCostsMicroUsdg)) : dashboardPlaceholder} />
           <Metric label="Abgeschlossene Zyklen" value={dashboard ? historicalCount(dashboard, dashboard.metrics.completedCycles) : dashboardPlaceholder} />
           <Metric label="Geöffnete Packs" value={dashboard ? historicalCount(dashboard, dashboard.metrics.openedPacks) : dashboardPlaceholder} />
         </div>
-        {dashboard?.latestCycle?.roundAccounting ? (
+        {dashboard?.schemaVersion !== 7 && dashboard?.latestCycle?.roundAccounting ? (
           <div className={styles.accountingGroups} aria-label="Letzte Holder-Rewards-Runde">
             <OperatorAccountingGroup title="Pack-Ergebnis">
               <RoundMetric label="Packausgaben" value={pendingMicroUsdg(dashboard.latestCycle.roundAccounting.packSpendMicroUsdg, "Noch nicht bestätigt")} />
@@ -1174,6 +1178,7 @@ function latestActuallyPaid(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
+  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.paidHolderRewardsWei);
   if (accounting) {
     return pendingMicroUsdg(
       accounting.paidHolderRewardsMicroUsdg,
@@ -1187,6 +1192,7 @@ function latestReserveTarget(dashboard: Dashboard | null) {
   if (!dashboard) return "Wird geladen…";
   if (!dashboard.latestCycle) return "Noch keine abgeschlossene Runde";
   const accounting = dashboard.latestCycle.roundAccounting;
+  if (dashboard.schemaVersion === 7) return nativeOperatorAmount((accounting as unknown as Record<string, unknown> | null)?.feeReserveTargetWei);
   return accounting
     ? pendingMicroUsdg(
       accounting.feeReserveTargetMicroUsdg,
@@ -1229,6 +1235,11 @@ function nullableInteger(value: number | null) {
 
 function formatCycleStartProjectPool(dashboard: Dashboard | null) {
   if (!dashboard) return "Nicht beobachtet";
+  if (dashboard.schemaVersion === 7) {
+    const value = (dashboard.metrics as unknown as Record<string, unknown>).cycleStartProjectPoolWei;
+    return typeof value === "string" && dashboard.cycleStartProjectPoolObservedAt
+      ? `${nativeOperatorAmount(value)} · Stand ${formatDate(dashboard.cycleStartProjectPoolObservedAt)}` : "Nicht beobachtet";
+  }
   const pool = decodeCycleStartProjectPool(
     dashboard.metrics.cycleStartProjectPoolMicroUsdg,
     dashboard.cycleStartProjectPoolObservedAt,
@@ -1311,6 +1322,18 @@ function downloadCommunityCard(dashboard: Dashboard) {
 
 function decodeDashboard(value: unknown): Dashboard {
   const raw = dashboardRecord(value);
+  if (raw.schemaVersion === 7) {
+    const latest = raw.latestCycle as Record<string, unknown> | null;
+    requireNativeRound(latest?.roundAccounting ?? null);
+    const skeleton = nativeValidationSkeleton(raw) as Record<string, unknown>;
+    skeleton.schemaVersion = 6;
+    const metrics = skeleton.metrics as Record<string, unknown>;
+    for (const key of Object.keys(metrics)) {
+      if (key.endsWith("MicroUsdg") && key !== "cycleStartProjectPoolMicroUsdg") metrics[key] = "0";
+    }
+    decodeDashboard(skeleton);
+    return structuredClone(raw) as unknown as Dashboard;
+  }
   if (
     raw.schemaVersion !== 1 &&
     raw.schemaVersion !== 2 &&
@@ -1700,4 +1723,9 @@ function responseCode(value: unknown): string | undefined {
 
 function nullableUsd(value: string | null) {
   return value === null ? "Noch nicht bestätigt" : formatGermanUsd(value);
+}
+
+function nativeOperatorAmount(value: unknown, usd = false) {
+  if (typeof value !== "string") return "Noch nicht bestätigt";
+  return usd ? formatGermanUsd(value) : formatGermanEth(value);
 }

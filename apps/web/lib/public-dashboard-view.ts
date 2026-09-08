@@ -171,7 +171,7 @@ export function hasLatestPayoutFacts(
   if (cycle === null || cycle === undefined) return false;
   const paidHolderRewards = cycle.roundAccounting?.paidHolderRewardsMicroUsdg;
   return (paidHolderRewards !== null && paidHolderRewards !== undefined) ||
-    cycle.paidMicroUsdg !== null;
+    cycle.paidMicroUsdg !== null && cycle.paidMicroUsdg !== undefined;
 }
 
 export function latestDashboardCards(
@@ -262,7 +262,7 @@ function isComplete(
   if (id === "budget") return cycle.selectedPackId !== null || cycle.plannedBoosters > 0 || hasComplete(actions);
   if (id === "cards") return cycle.openedBoosters > 0;
   if (id === "holders") {
-    return cycle.paidMicroUsdg !== null ||
+    return cycle.paidMicroUsdg !== null && cycle.paidMicroUsdg !== undefined ||
       /complete|paid|settled/i.test(cycle.rewardStatus ?? "") ||
       hasComplete(actions);
   }

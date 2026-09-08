@@ -67,10 +67,10 @@ test('reads an update-configuration patch without granting pause or kill fields'
     expectedVersion: 3,
     command: {
       type: 'update-configuration',
-      configuration: { intervalMinutes: 30, maxCyclesPerDay: 2, lossCapMicroUsdg: '200' },
+      configuration: { intervalMinutes: 30, maxCyclesPerDay: 2, lossCapMicroUsd: '200' },
     },
   });
-  assert.deepEqual(result.command.configuration, { intervalMinutes: 30, maxCyclesPerDay: 2, lossCapMicroUsdg: '200' });
+  assert.deepEqual(result.command.configuration, { intervalMinutes: 30, maxCyclesPerDay: 2, lossCapMicroUsd: '200' });
   assert.throws(() => readDecisionRequest({
     requestId: 'config-kill', expectedVersion: 3,
     command: { type: 'update-configuration', configuration: { killSwitch: false } },
