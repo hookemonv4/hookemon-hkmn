@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { keccak256 } from 'viem';
@@ -9,7 +9,7 @@ import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { createNativePaymentProof, createNativeTransactionGasProof } from '../../src/native-payment-proof.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { OPERATIONAL_CYCLE_STAGES, CUSTODY_LEDGER_BUCKETS } from '../../../runner/src/cycle/money-schemas.mjs';
-import { digest } from '../../../runner/src/cycle/journal.mjs';
+import { digest, canonicalJson } from '../../../runner/src/cycle/journal.mjs';
 import { nativeProducedAdmissionFixture } from './admission-fixture.mjs';
 const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
 const now = () => 1_700_000_000_000;
@@ -84,4 +84,29 @@ test('a finalized supplementary gas transaction cannot be reassigned to a differ
   await persist(f, candidate);
   await assert.rejects(f.repository.recordSupplementaryPayoutGas(f.cycleId, { planDigest: f.planDigest, proof }), /belongs to another payout/);
   assert.equal((await f.repository.describeCycle(f.cycleId)).custodyLedgers.get('4663\u0000native').gasSpent.amountAtomic, '42000');
+});
+
+for (const mutation of ['plan', 'proof']) test(`reopen refuses a rehashed supplementary gas ${mutation} that differs from its atomic reservation`, async t => {
+  const f = await fixture(t), { proof, candidate } = await payment();
+  await persist(f, candidate);
+  await f.repository.recordSupplementaryPayoutGas(f.cycleId, { planDigest: f.planDigest, proof });
+  const path = join(f.path, 'active', `${encodeURIComponent(f.cycleId)}.json`);
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  const entry = stored.cycle.entries.find(entry => entry.kind === 'supplementary-payout-gas-recorded');
+  assert.ok(entry);
+  if (mutation === 'plan') entry.payload.planDigest = digest('altered-plan');
+  else {
+    entry.payload.proof.gasSpentWei = '42001';
+    const { evidenceDigest, ...facts } = entry.payload.proof;
+    entry.payload.proof.evidenceDigest = digest(facts);
+  }
+  let previous = null;
+  for (const [index, item] of stored.cycle.entries.entries()) {
+    item.digest = digest({ cycleId: f.cycleId, index, previousDigest: previous, kind: item.kind, payload: item.payload });
+    previous = item.digest;
+  }
+  stored.cycle.journalHead = previous;
+  await writeFile(path, `${canonicalJson(stored)}\n`);
+  const reopened = await CycleRepository.open(f.path, now, { testAuthority: createTestProfileMutationAuthority() });
+  await assert.rejects(reopened.describeCycle(f.cycleId), /atomic signed payment reservation/);
 });

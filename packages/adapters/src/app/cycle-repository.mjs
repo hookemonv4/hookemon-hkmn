@@ -1273,6 +1273,11 @@ function returnRelayTerminalState(leg, proof) {
   return 'SETTLED';
 }
 
+function supplementaryGasReservation(cycleId, positionId, manifestId, planDigest, proof) {
+  return { cycleId, positionId, manifestId, planDigest, transactionHash: proof.transactionHash,
+    transactionDigest: proof.transactionDigest, proofEvidenceDigest: proof.evidenceDigest };
+}
+
 function supplementaryGasLedger(previous, proof) {
   const { evidenceDigest, ...facts } = proof ?? {};
   if (!previous || previous.schema !== 'hookemon.custody-ledger.v3'
@@ -3190,7 +3195,7 @@ export class CycleRepository {
     return decisions;
   }
 
-  #replayStored(cycleId, stored, archived) {
+  async #replayStored(cycleId, stored, archived) {
     const stages = new Map();
     const preparedStages = new Map();
     // `attempts`: stage -> { evidence, attemptIndex, failed }. `attemptCounts`: stage -> the
@@ -3909,10 +3914,17 @@ export class CycleRepository {
         heldPositions.set(position.positionId, position);
       } else if (entry.kind === 'supplementary-payout-gas-recorded') {
         const { positionId, manifestId, planDigest, proof } = entry.payload;
+        if (Object.keys(entry.payload).sort().join(',') !== 'manifestId,planDigest,positionId,proof') {
+          throw new Error('stored supplementary gas payload fields are invalid');
+        }
         const settlement = supplementarySettlements.get(positionId);
         if (admission?.schema !== 'hookemon.policy-admission.v3' || !settlement
           || settlement.manifestId !== manifestId || !digestPattern.test(planDigest)) {
           throw new Error('stored supplementary gas does not bind its original position manifest');
+        }
+        const reservation = await this.#store.readGlobalKey(`native-supplementary-gas:${proof?.transactionHash}`);
+        if (!reservation || canonicalJson(reservation) !== canonicalJson(supplementaryGasReservation(cycleId, positionId, manifestId, planDigest, proof))) {
+          throw new Error('stored supplementary gas differs from its atomic signed payment reservation');
         }
         const key = custodyLedgerKey({ chainId: '4663', assetId: 'native' });
         custodyLedgers.set(key, supplementaryGasLedger(custodyLedgers.get(key), proof));
@@ -4132,7 +4144,7 @@ export class CycleRepository {
       throw new Error('cycle-repository append assertLease must be a function or null');
     }
     const stored = this.#store.readCycle(cycleId);
-    const state = this.#replayStored(cycleId, stored, false);
+    const state = await this.#replayStored(cycleId, stored, false);
     if (operation && state.terminalState) {
       throw new Error(`cycle-repository ${operation}: cycle is terminal as ${state.terminalState}`);
     }
@@ -6826,7 +6838,7 @@ export class CycleRepository {
     }
     if (!matched) throw new Error('supplementary payout gas requires its persisted signed recipient payment');
     const reservationKey = `native-supplementary-gas:${proof.transactionHash}`;
-    const owner = { cycleId, positionId: matched.positionId, planDigest, transactionHash: proof.transactionHash };
+    const owner = supplementaryGasReservation(cycleId, matched.positionId, matched.manifestId, planDigest, proof);
     const existing = await this.#store.readGlobalKey(reservationKey);
     if (existing && canonicalJson(existing) !== canonicalJson(owner)) throw new Error('supplementary gas transaction belongs to another payout');
     if (previous.gasPayments.some(item => item.transactionHash === proof.transactionHash)) {
