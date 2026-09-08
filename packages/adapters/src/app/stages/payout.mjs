@@ -1321,8 +1321,13 @@ function finalizingAttempt(attempt, candidate, finalizedTransfer) {
 }
 
 async function persistPayoutGas(cycleRepository, state, proof) {
-  if (typeof cycleRepository?.recordCustodyLedger !== 'function') return;
+  if (typeof cycleRepository?.describeCycle !== 'function') return;
   const cycle = await cycleRepository.describeCycle(state.cycleId);
+  if (cycle.terminalState === 'COMPLETED' || typeof cycleRepository.recordCustodyLedger !== 'function') {
+    if (typeof cycleRepository.recordSupplementaryPayoutGas !== 'function') fail('supplementary payout gas requires its authenticated repository writer');
+    await cycleRepository.recordSupplementaryPayoutGas(state.cycleId, { planDigest: state.planDigest, proof });
+    return;
+  }
   const ledger = cycle.custodyLedgers.get('4663' + String.fromCharCode(0) + 'native');
   if (!ledger) fail('native payout gas requires its existing custody ledger');
   await cycleRepository.recordCustodyLedger(state.cycleId, { ...ledger, ...applyNativeCustodyGasPayment(ledger, proof) });

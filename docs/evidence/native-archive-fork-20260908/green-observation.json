@@ -1,0 +1,31 @@
+{
+  "schema": "hookemon.native-archive-observation.v1",
+  "source": {
+    "runUrl": "https://github.com/hookemonv4/hookemon-hkmn/actions/runs/34224406420",
+    "jobId": 102054965897,
+    "head": "0f3440ad963da609e868a104b6d792603e9dee48",
+    "logSha256": "66d8fc808cb9330c8a3307ac611921cda66ff702019d4b78ffac16a16b0d7695",
+    "observedAt": "2026-09-08T12:09:43Z"
+  },
+  "result": {
+    "passed": 15,
+    "failed": 0,
+    "skipped": 0
+  },
+  "syntheticProviderGraph": {
+    "tokenRuntimeCodeHash": "0x9a382167c9d16ee53d22783791a11451bc24efd8333559f8041fa874e3c15293",
+    "custodyRuntimeCodeHash": "0x0d63637b005fc544332b142fa4debae3af6e3bc14dc7493a718b2154a70dfb87",
+    "hookRuntimeCodeHash": "0xc96768319bc6771b5df6a3a1923ae34fe6de407eff91f9a716c344840a7ee3e7",
+    "graphDeploymentHash": "0xbd821208a6075fea1ee2144d9513c1619a9e92a070fabcd3ed264e891ca45926"
+  },
+  "routeGas": {
+    "calleeGas": 9619449,
+    "calldataBytes": 49700,
+    "calldataGas": 658292,
+    "intrinsicGas": 679292,
+    "aggregateGas": 10298741,
+    "documentedMargin": 1000000,
+    "remainingGenesisEnvelopeGas": 18701259
+  },
+  "scope": "Pinned archive fork with synthetic provider graph. The margin is not consumed gas. These results do not establish approval of a production graph, a funded wallet transaction, or a complete USD 250 test budget."
+}

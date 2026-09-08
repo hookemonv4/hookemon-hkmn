@@ -1,3 +1,4 @@
+import { producedReturnSigningFixture } from '../native/return-signing-fixture.mjs';
 import { prepareReturnRequest } from '../../src/app/stages/return.mjs';
 import { createRelayClient } from '../../src/relay-client.mjs';
 import { createProductionSupplementaryStageHandlers } from '../../src/app/compose.mjs';
@@ -140,6 +141,8 @@ function returnSolanaClient(blockhash, state = { blockHeight: 10, balance: 10_00
     fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body);
       const resultByMethod = {
+        getSlot: 11,
+        getMultipleAccounts: state.observation,
         getBalance: { context: { slot: 9 }, value: state.balance ?? 10_000 },
         getLatestBlockhash: { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 100 } },
         isBlockhashValid: { context: { slot: 10 }, value: true },
@@ -270,14 +273,12 @@ test('mutateSupplementaryReturn signs durably before broadcast, resumes after a 
   const operatorAddress = operator.publicKey.toBase58();
   const config = returnConfig(operatorAddress);
   const repository = fakeRepository();
-  const requestId = 'relay-supplementary-return-1';
-  const instructionPlan = splTransferCheckedPlan({
-    owner: operatorAddress,
-    source: source.publicKey.toBase58(),
-    destination: destination.publicKey.toBase58(),
-    amountAtomic: '17',
-  });
-  const rpcState = { blockHeight: 10 };
+  let requestId;
+  const native = await producedReturnSigningFixture({ sender: operatorAddress, recipient: config.accounts.evm, blockhash, cycleId: repository.cycleId });
+  requestId = native.request.intent.relayRequestId;
+  config.nativePaymentBinding = native.nativePaymentBinding;
+  const instructionPlan = native.request.solanaInstructionPlan;
+  const rpcState = { blockHeight: 10, observation: native.observation };
   const solanaClient = returnSolanaClient(blockhash, rpcState);
   let signCalls = 0;
   let broadcastCalls = 0;
@@ -307,7 +308,7 @@ test('mutateSupplementaryReturn signs durably before broadcast, resumes after a 
   };
   const adapters = {
     solana: { client: solanaClient },
-    relay: fakeRelayAdapter({ requestId, instructionPlan }),
+    relay: { ...native.relay, quoteReturnBridge: input => native.relay.quoteReturnBridge({ ...input, skipRouteCheck: true }) },
   };
   const context = { cycleId: repository.cycleId, positionId: POSITION_ID, fencingToken: '22222222-2222-4222-8222-222222222222' };
 
@@ -694,14 +695,14 @@ test('production supplementary return composition preserves the supplied authori
     const operator = Keypair.generate();
     const owner = operator.publicKey.toBase58();
     const repository = fakeRepository();
-    const instructionPlan = splTransferCheckedPlan({ owner, source: Keypair.generate().publicKey.toBase58(), destination: Keypair.generate().publicKey.toBase58(), amountAtomic: '17' });
+    const native = await producedReturnSigningFixture({ sender: owner, recipient: returnConfig(owner).accounts.evm, cycleId: repository.cycleId });
     let signs = 0;
     let canaries = 0;
     const handler = createProductionSupplementaryStageHandlers({ async assertCanary() { canaries += 1; } }).BUYBACK_SENT_UNKNOWN;
     await assert.rejects(() => handler.reconcile({
-      adapters: { solana: { client: returnSolanaClient('11111111111111111111111111111111', { blockHeight: 10 }) }, relay: fakeRelayAdapter({ requestId: 'relay-authority', instructionPlan }) },
+      adapters: { solana: { client: returnSolanaClient('11111111111111111111111111111111', { blockHeight: 10, observation: native.observation }) }, relay: { ...native.relay, quoteReturnBridge: input => native.relay.quoteReturnBridge({ ...input, skipRouteCheck: true }) } },
       signerClient: { solana: { role: 'operator-solana', async sign() { signs += 1; throw new Error('sign boundary reached'); }, async broadcast() { throw new Error('must not broadcast'); } } },
-      config: returnConfig(owner), cycleRepository: repository,
+      config: { ...returnConfig(owner), nativePaymentBinding: native.nativePaymentBinding }, cycleRepository: repository,
       position: { positionId: POSITION_ID }, context: { cycleId: repository.cycleId, positionId: POSITION_ID, fencingToken: '22222222-2222-4222-8222-222222222222' }, preflightAuthority,
     }), preflightAuthority === createTestProfileMutationAuthority() ? /sign boundary reached/ : /authority/);
     assert.equal(canaries, 1);

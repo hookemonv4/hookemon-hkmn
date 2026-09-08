@@ -215,6 +215,7 @@ const SIGN_ONLY_RECOVERY_REPOSITORY_METHODS = Object.freeze([
 ]);
 const SIGN_ONLY_RECOVERY_STAGES = new Set(['outbound', 'return']);
 const SUPPLEMENTARY_SETTLEMENT_REPOSITORY_METHODS = Object.freeze([
+  'recordSupplementaryPayoutGas',
   ...RECONCILIATION_REPOSITORY_METHODS,
   'readHeldPosition',
   'readSupplementarySettlement',

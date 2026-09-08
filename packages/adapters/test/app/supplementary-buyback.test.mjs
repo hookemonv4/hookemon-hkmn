@@ -103,14 +103,14 @@ function signTransaction(transactionBase64) {
 }
 
 function collectorMoneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin: settlementAsset() },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin: settlementAsset() },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...eth, amountAtomic: '0' },
       solanaReceive: { ...settlementAsset(), amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...eth, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -160,8 +160,8 @@ function heldPosition(overrides = {}) {
     memo: MEMO,
     mint: CARD_ASSET,
     cardRef: CARD_ASSET,
-    costMicroUsdg: '25',
-    valueMicroUsdg: '25',
+    costMicroUsd: '25',
+    valueMicroUsd: '25',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',

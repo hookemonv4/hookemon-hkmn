@@ -1,6 +1,6 @@
 // Pre-spend failure-matrix: literal loader/composition/child-signer protocol proofs for two
 // failures that must be caught before any claim/purchase money effect -- a Collector catalog
-// outage, and a USDG freeze introduced after a healthy startup observation.
+// outage, and a native balance shortage introduced after a healthy startup observation.
 //
 // Base: coherent integration ccb55a4fb11282f807884c4c8236a065853a6fc7. This is the first pre-spend
 // slice of the plan's full crash matrix (Section I); it does not claim post-signature/broadcast,
@@ -109,15 +109,16 @@ test(
 );
 
 test(
-  'I-usdg-freeze literal observability canary observes healthy then frozen and refuses every mutation from the flip onward, across restart',
+  'I-native-balance literal observability canary observes healthy then insufficient and refuses every mutation from the flip onward, across restart',
   { timeout: (FREEZE_DEADLINE_MS * 2) + 60000 },
   async t => {
     const directory = await mkdtemp(join(tmpdir(), 'hookemon-failure-freeze-'));
     t.after(() => rm(directory, { recursive: true, force: true }));
     let operationsEvm = `0x${'0'.repeat(40)}`;
     let operationsSolana = null;
+    let nativeBalanceReads = 0;
     const fixture = await fixtureServer(t, directory, () => operationsEvm, () => operationsSolana, {
-      freezeAfterFirstRead: true,
+      nativePrincipalBarrier: async () => ++nativeBalanceReads > 1,
     });
     const { root, binPath, signer, env } = await bootIsolatedRun(t, directory, fixture);
     operationsEvm = signer.evmAccount;
@@ -140,16 +141,16 @@ test(
     });
 
     assert.ok(
-      fixture.calls.usdgFrozenObservations.length >= 2,
-      `the real USDG freeze reader must be observed at least twice (healthy, then frozen); observations=${JSON.stringify(fixture.calls.usdgFrozenObservations)}; run=${JSON.stringify(run)}`,
+      fixture.calls.nativePrincipalShortageObservations.length >= 2,
+      `the real native balance shortage reader must be observed at least twice (healthy, then frozen); observations=${JSON.stringify(fixture.calls.nativePrincipalShortageObservations)}; run=${JSON.stringify(run)}`,
     );
     assert.equal(
-      fixture.calls.usdgFrozenObservations[0], false,
-      `the first observation across the whole run must be the healthy startup read; observations=${JSON.stringify(fixture.calls.usdgFrozenObservations)}`,
+      fixture.calls.nativePrincipalShortageObservations[0], false,
+      `the first observation across the whole run must be the healthy startup read; observations=${JSON.stringify(fixture.calls.nativePrincipalShortageObservations)}`,
     );
     assert.ok(
-      fixture.calls.usdgFrozenObservations.slice(1).every(observed => observed === true),
-      `every observation after the first must be frozen, with no reversion back to healthy; observations=${JSON.stringify(fixture.calls.usdgFrozenObservations)}`,
+      fixture.calls.nativePrincipalShortageObservations.slice(1).every(observed => observed === true),
+      `every observation after the first must be insufficient, with no reversion back to healthy; observations=${JSON.stringify(fixture.calls.nativePrincipalShortageObservations)}`,
     );
 
     const invocations = await readSignerInvocations(signer);
@@ -167,7 +168,7 @@ test(
     const cycle = await repository.describeCycle(cycleIds[0]);
     assert.equal(cycle.terminalState, 'HELD_UNAVAILABLE', `the cycle must be truthfully held once the freeze is observed, not silently stuck or falsely completed; ${await diagnostics(repository)}`);
     const heldCodes = cycle.terminalEvidence?.drift?.map(item => item.code) ?? [];
-    assert.ok(heldCodes.includes('USDG_FROZEN'), `the durable hold evidence must name the real USDG_FROZEN drift; ${await diagnostics(repository)}`);
+    assert.ok(heldCodes.includes('NATIVE_PRINCIPAL_UNVERIFIED'), `the durable hold evidence must name the real NATIVE_PRINCIPAL_UNVERIFIED drift; ${await diagnostics(repository)}`);
     // eligibility-snapshot is documented as read-only (a live call returns the same evidence its
     // reconciliation would), so its own completion is not a money effect; every other stage is.
     assert.ok(
