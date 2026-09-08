@@ -49,7 +49,9 @@ import { digest } from '../../runner/src/cycle/journal.mjs';
 const RELAY_BASE_URL = 'https://api.relay.link';
 const ROBINHOOD_CHAIN_ID = 4663;
 const SOLANA_CHAIN_ID = 792703809;
-const USDG_ADDRESS = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const NATIVE_ADDRESS = '0x0000000000000000000000000000000000000000';
+const fetchedQuotes = new WeakMap();
+const usdValuations = new WeakMap();
 // Solana asset identity is the mint address itself, never a ticker string — the mint address is
 // what every equality check below (`addressEquals`) actually compares.
 const CIRCLE_USD_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -63,12 +65,12 @@ export const DIRECTIONS = Object.freeze({ OUTBOUND: 'OUTBOUND', RETURN: 'RETURN'
 
 const ROUTES = Object.freeze({
   [DIRECTIONS.OUTBOUND]: Object.freeze({
-    origin: Object.freeze({ chainId: ROBINHOOD_CHAIN_ID, address: USDG_ADDRESS, symbol: 'USDG' }),
-    destination: Object.freeze({ chainId: SOLANA_CHAIN_ID, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD' }),
+    origin: Object.freeze({ chainId: ROBINHOOD_CHAIN_ID, address: NATIVE_ADDRESS, symbol: 'ETH', decimals: 18 }),
+    destination: Object.freeze({ chainId: SOLANA_CHAIN_ID, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD', decimals: 6 }),
   }),
   [DIRECTIONS.RETURN]: Object.freeze({
-    origin: Object.freeze({ chainId: SOLANA_CHAIN_ID, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD' }),
-    destination: Object.freeze({ chainId: ROBINHOOD_CHAIN_ID, address: USDG_ADDRESS, symbol: 'USDG' }),
+    origin: Object.freeze({ chainId: SOLANA_CHAIN_ID, address: CIRCLE_USD_MINT, symbol: 'CIRCLE_USD', decimals: 6 }),
+    destination: Object.freeze({ chainId: ROBINHOOD_CHAIN_ID, address: NATIVE_ADDRESS, symbol: 'ETH', decimals: 18 }),
   }),
 });
 
@@ -486,13 +488,13 @@ export function parseQuoteResponse(raw, {
   const destination = currencyLegFromDetails(raw?.details?.currencyOut, 'details.currencyOut');
 
   invariant(
-    origin.chainId === route.origin.chainId && addressEquals(origin.address, route.origin.address),
+    origin.chainId === route.origin.chainId && origin.decimals === route.origin.decimals && addressEquals(origin.address, route.origin.address),
     RelayMalformedResponseError,
     `quote response's origin currency does not match the requested ${direction} route`,
     { expected: route.origin, got: origin },
   );
   invariant(
-    destination.chainId === route.destination.chainId && addressEquals(destination.address, route.destination.address),
+    destination.chainId === route.destination.chainId && destination.decimals === route.destination.decimals && addressEquals(destination.address, route.destination.address),
     RelayMalformedResponseError,
     `quote response's destination currency does not match the requested ${direction} route`,
     { expected: route.destination, got: destination },
@@ -773,7 +775,10 @@ export function createRelayClient({
   apiKey = null,
   fetchImpl = defaultFetchImpl,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  quoteValidityMs = null,
+  now = Date.now,
 } = {}) {
+  if (quoteValidityMs !== null) invariant(Number.isSafeInteger(quoteValidityMs) && quoteValidityMs > 0, RelayAdapterError, 'quoteValidityMs must be explicit positive milliseconds');
   // Keyed by requestId (Relay's own intent identifier). Recorded only by prepareExecution, so
   // getIntentStatus/getIntentDetail can never be asked to authenticate a digest this adapter
   // instance did not itself submit.
@@ -805,11 +810,14 @@ export function createRelayClient({
       recipient: recipient ?? user,
       amount,
       tradeType,
+      refundTo: user,
+      explicitDeposit: true,
+      includeProtocolData: true,
       ...(referrer ? { referrer } : {}),
       ...(slippageTolerance ? { slippageTolerance } : {}),
     };
     const raw = await relayRequest({ baseUrl, path: '/quote/v2', method: 'POST', body, fetchImpl, timeoutMs });
-    return parseQuoteResponse(raw, {
+    const parsedQuote = parseQuoteResponse(raw, {
       direction,
       user,
       recipient: body.recipient,
@@ -818,6 +826,13 @@ export function createRelayClient({
       destinationCurrency,
       tradeType,
     });
+    const observedAtMs = now();
+    invariant(Number.isSafeInteger(observedAtMs) && observedAtMs >= 0, RelayAdapterError, 'invalid quote observation clock');
+    fetchedQuotes.set(parsedQuote, Object.freeze({
+      requestDigest: digest(body), rawDigest: digest(raw), observedAtMs,
+      validUntilMs: quoteValidityMs === null ? null : Math.min(observedAtMs + quoteValidityMs, parsedQuote.deadlineUnixSeconds * 1000),
+    }));
+    return parsedQuote;
   }
 
   function quoteOutboundBridge(params) {
@@ -1056,7 +1071,39 @@ export const RELAY_CONSTANTS = Object.freeze({
   RELAY_BASE_URL,
   ROBINHOOD_CHAIN_ID,
   SOLANA_CHAIN_ID,
-  USDG_ADDRESS,
+  NATIVE_ADDRESS,
   CIRCLE_USD_MINT,
   ROUTES,
 });
+
+/** Native USD valuation capability from an exact quote fetched by this adapter instance. */
+export function createQuoteUsdValuation({ quote, side, amount, requestDigest, rounding, nowMs = Date.now() }) {
+  const observed = fetchedQuotes.get(quote);
+  invariant(observed && observed.validUntilMs !== null, RelayAdapterError, 'USD valuation requires a fetched quote and explicit quote validity window');
+  invariant(digest(quote.raw) === observed.rawDigest && relayQuoteDigest(quote) === quote.quoteDigest, RelayAdapterError, 'fetched quote mutated');
+  invariant(Number.isSafeInteger(nowMs) && nowMs >= observed.observedAtMs && nowMs < observed.validUntilMs, RelayQuoteExpiredError, 'USD valuation quote is stale');
+  invariant(requestDigest === undefined || requestDigest === observed.requestDigest, RelayAdapterError, 'USD valuation request mismatch');
+  invariant(side === 'origin' || side === 'destination', RelayAdapterError, 'invalid valuation side');
+  invariant(rounding === 'up' || rounding === 'down', RelayAdapterError, 'explicit valuation rounding is required');
+  const leg = quote[side];
+  const assetId = leg.chainId === ROBINHOOD_CHAIN_ID && leg.address.toLowerCase() === NATIVE_ADDRESS ? 'native' : leg.address;
+  invariant(amount && amount.chainId === String(leg.chainId) && amount.assetId === assetId && amount.decimals === leg.decimals
+    && amount.amountAtomic === leg.amount, RelayAdapterError, 'USD valuation exact amount/asset mismatch');
+  const sourcePath = side === 'origin' ? 'details.currencyIn.amountUsd' : 'details.currencyOut.amountUsd';
+  const rawUsd = quote.raw.details[side === 'origin' ? 'currencyIn' : 'currencyOut'].amountUsd;
+  invariant(typeof rawUsd === 'string' && /^(0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(rawUsd) && rawUsd.length <= 100,
+    RelayAdapterError, 'USD valuation must be a bounded decimal string');
+  const [whole, fraction = ''] = rawUsd.split('.');
+  const micro = BigInt(whole) * 1000000n + BigInt(fraction.slice(0, 6).padEnd(6, '0'))
+    + (rounding === 'up' && /[1-9]/.test(fraction.slice(6)) ? 1n : 0n);
+  const value = Object.freeze({ schema: 'hookemon.quote-usd-valuation.v1', quoteDigest: quote.quoteDigest,
+    requestDigest: observed.requestDigest, quoteRequestId: quote.requestId, sourcePath, amount: Object.freeze({ ...amount }),
+    amountMicroUsd: micro.toString(), rounding, observedAtMs: observed.observedAtMs, validUntilMs: observed.validUntilMs });
+  usdValuations.set(value, value);
+  return value;
+}
+
+export function isProcessQuoteUsdValuation(value, expected = {}) {
+  if (!value || !usdValuations.has(value)) return false;
+  return Object.entries(expected).every(([key, wanted]) => Object.hasOwn(value, key) && digest(value[key]) === digest(wanted));
+}
