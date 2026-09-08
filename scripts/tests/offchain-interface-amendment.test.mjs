@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -15,7 +16,13 @@ function fixture(t) {
   const amendment = read(source, amendmentPath);
   for (const path of [...INTERFACE_FREEZE_INPUTS, 'feasibility/interface-freeze.json', amendmentPath, ...Object.keys(amendment.ownerApprovalHashes)]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
-    copyFileSync(join(source, path), join(root, path));
+    writeFileSync(join(root, path), execFileSync('git', ['show', `b2cb737a298522e3944652e862c4eeab195667d8:${path}`], { cwd: source }));
+  }
+  // This suite proves the retained revision-70 amendment, not the active native interface.
+  // Every input comes from the integrated immutable baseline; assert the amendment subjects as well.
+  for (const path of ['architecture/interfaces.json', 'specs/requirements.json']) {
+    const bytes = readFileSync(join(root, path));
+    assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, amendment.currentInputHashes[path]);
   }
   return root;
 }

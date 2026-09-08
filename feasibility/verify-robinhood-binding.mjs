@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
+import { validateNativeInterfaceBuildBinding } from "./native-interface-build-binding.mjs";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -856,6 +857,9 @@ function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoo
 }
 
 export function validateInterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot }) {
+  if (frozen?.nativeMigration !== undefined) {
+    return validateNativeInterfaceBuildBinding({ projectRoot, frozen, freeze, manifest });
+  }
   if (freeze?.productPhase === 3) {
     return validatePhase3InterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot });
   }
