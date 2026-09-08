@@ -1,0 +1,3 @@
+The first native archive execution passed 12 of 15 tests. All external block and runtime pins matched. The provider graph emitted the native token, custody, hook and graph hashes before its old expected token hash correctly refused the result. Those observed hashes replace the fixture expectations; they do not select a production deployment.
+
+The other two failures came from quote-state snapshots calling an ERC20 balance method at the native zero address. Native snapshots read account balances, retaining the same before/after quote invariants. The Solidity build passes after this correction; the required archive CI must verify the resulting fixture.

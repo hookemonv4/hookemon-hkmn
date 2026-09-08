@@ -198,7 +198,7 @@ jobs:
           }
           fork_pin_scripts_verify_fork_pin_mjs_sha256='3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50'
           fork_pin_scripts_programmable_lib_keccak_mjs_sha256='ce4ea412ddd845b7495fc960f16855a2d5dea62482f224c5dc4cd8aefaede863'
-          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='cf8d8f5fce4d4051a0c2ecd49b2b9eb036315b2ad20178b023d11b2a95894c00'
+          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0'
           verify_regular_git_blob 'scripts/verify-fork-pin.mjs' "$fork_pin_scripts_verify_fork_pin_mjs_sha256"
           verify_regular_git_blob 'scripts/programmable/lib/keccak.mjs' "$fork_pin_scripts_programmable_lib_keccak_mjs_sha256"
           verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"
@@ -300,7 +300,7 @@ jobs:
           }
           fork_pin_scripts_verify_fork_pin_mjs_sha256='3fdd2565969a6f0e49af1fbae974409fa71a48e600cf555d9daee7d23b24db50'
           fork_pin_scripts_programmable_lib_keccak_mjs_sha256='ce4ea412ddd845b7495fc960f16855a2d5dea62482f224c5dc4cd8aefaede863'
-          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='cf8d8f5fce4d4051a0c2ecd49b2b9eb036315b2ad20178b023d11b2a95894c00'
+          fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256='09e7b66de30b493636f5605fbdc7e7dc859f8baabd994f47893c73e22ce9eaf0'
           verify_regular_git_blob 'scripts/verify-fork-pin.mjs' "$fork_pin_scripts_verify_fork_pin_mjs_sha256"
           verify_regular_git_blob 'scripts/programmable/lib/keccak.mjs' "$fork_pin_scripts_programmable_lib_keccak_mjs_sha256"
           verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"

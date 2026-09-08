@@ -296,13 +296,13 @@ contract RobinhoodV4ArchiveForkTest is Test {
     bytes32 private constant PROVIDER_GAS_HOOK_TARGET_ID =
         keccak256("phase-three-gas-hook-target-v1");
     bytes32 private constant PROVIDER_GAS_TOKEN_RUNTIME_CODEHASH =
-        0x2aa20909e57ee56fb5b49a02b96d11572fa4ef677c73b2d42dc19dad4e30454f;
+        0x9a382167c9d16ee53d22783791a11451bc24efd8333559f8041fa874e3c15293;
     bytes32 private constant PROVIDER_GAS_CUSTODY_RUNTIME_CODEHASH =
         0x0d63637b005fc544332b142fa4debae3af6e3bc14dc7493a718b2154a70dfb87;
     bytes32 private constant PROVIDER_GAS_HOOK_RUNTIME_CODEHASH =
-        0x2ca1fa1c1a23730bc06cb37a8bd38e1cc61e62880c84fa6022d7b23d94e79051;
+        0xc96768319bc6771b5df6a3a1923ae34fe6de407eff91f9a716c344840a7ee3e7;
     bytes32 private constant PROVIDER_GAS_GRAPH_DEPLOYMENT_HASH =
-        0xe1b2b55129c74cc24d49d5da4f80d7573bb61b4e43bf1ed653950409d3dda0ef;
+        0xbd821208a6075fea1ee2144d9513c1619a9e92a070fabcd3ed264e891ca45926;
     bytes32 private constant PROVIDER_GAS_ROUTE_NAMESPACE =
         keccak256("phase-three-provider-gas-namespace-v1");
     bytes32 private constant PROVIDER_GAS_ROUTE_NONCE =
@@ -1177,10 +1177,18 @@ contract RobinhoodV4ArchiveForkTest is Test {
         snapshot.lastRawPoolUsdgDelta = target.lastRawPoolUsdgDelta();
         address currency0 = Currency.unwrap(key.currency0);
         address currency1 = Currency.unwrap(key.currency1);
-        snapshot.managerCurrency0 = IArchiveErc20(currency0).balanceOf(address(manager));
-        snapshot.managerCurrency1 = IArchiveErc20(currency1).balanceOf(address(manager));
-        snapshot.hookCurrency0 = IArchiveErc20(currency0).balanceOf(address(target));
-        snapshot.hookCurrency1 = IArchiveErc20(currency1).balanceOf(address(target));
+        snapshot.managerCurrency0 = currency0 == address(0)
+            ? address(manager).balance
+            : IArchiveErc20(currency0).balanceOf(address(manager));
+        snapshot.managerCurrency1 = currency1 == address(0)
+            ? address(manager).balance
+            : IArchiveErc20(currency1).balanceOf(address(manager));
+        snapshot.hookCurrency0 = currency0 == address(0)
+            ? address(target).balance
+            : IArchiveErc20(currency0).balanceOf(address(target));
+        snapshot.hookCurrency1 = currency1 == address(0)
+            ? address(target).balance
+            : IArchiveErc20(currency1).balanceOf(address(target));
     }
 
     function _assertQuoteStateUnchanged(

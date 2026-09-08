@@ -1,0 +1,22 @@
+{
+  "schema": "hookemon.native-archive-observation.v1",
+  "source": {
+    "runUrl": "https://github.com/hookemonv4/hookemon-hkmn/actions/runs/34220010573",
+    "jobId": 102040719389,
+    "head": "5c9344a3b7ec73a45bcbd1365d3cb2d8b53076c9",
+    "logSha256": "f6e4e89576a1ba8cc50d99eeb5f92c8312f39aca73696c81bff385bfa4ba7dd6",
+    "observedAt": "2026-09-08T11:20:26Z"
+  },
+  "result": {
+    "passed": 12,
+    "failed": 3,
+    "skipped": 0
+  },
+  "syntheticProviderGraph": {
+    "tokenRuntimeCodeHash": "0x9a382167c9d16ee53d22783791a11451bc24efd8333559f8041fa874e3c15293",
+    "custodyRuntimeCodeHash": "0x0d63637b005fc544332b142fa4debae3af6e3bc14dc7493a718b2154a70dfb87",
+    "hookRuntimeCodeHash": "0xc96768319bc6771b5df6a3a1923ae34fe6de407eff91f9a716c344840a7ee3e7",
+    "graphDeploymentHash": "0xbd821208a6075fea1ee2144d9513c1619a9e92a070fabcd3ed264e891ca45926"
+  },
+  "scope": "Observed local graph deployed within the pinned archive fork; not an approved production graph, wallet transaction or funding estimate."
+}
