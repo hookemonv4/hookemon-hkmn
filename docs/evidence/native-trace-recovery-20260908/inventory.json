@@ -1761,7 +1761,9 @@
         "commit_sha": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
         "provenance": null
       },
-      "requirementCandidates": [],
+      "requirementCandidates": [
+        "REQ-transaction-policy-1"
+      ],
       "scope": "No approval, binding application or completion acceptance.",
       "completionEvidence": {
         "commit": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
@@ -1775,9 +1777,577 @@
         ],
         "warning": "Carrier commit diff is not automatically the task patch; inspect preserved attempt provenance."
       },
-      "classification": "missing-task-contribution-proof",
-      "rationale": "Recorded completion fc05cf5b27151cad2b61b9f32a79724056a3ee87 changes only gates/init.json and has no attempt provenance linking the named behavioral patch. Related current code exists, but this completion cannot establish which contribution the task completed.",
-      "nextAction": "Coordinator recover the original exact behavioral commit/patch through existing provenance support before proposing any requirement binding. Do not substitute a related current test or carrier ancestor."
+      "classification": "evidenced-product-contribution",
+      "rationale": "The original provider-signed Solana message is retained unchanged. Independent RPC isBlockhashValid observations authenticate its original hash without fabricating lastValidBlockHeight; fresh checks recur before signing/broadcast, expiry refuses before transport, and candidate decode options cannot inject validity.",
+      "nextAction": "Coordinator may prepare a qualified contribution binding citing the reviewed implementation ancestor and preserved integration completion. Keep the recorded completion and attempts unchanged.",
+      "nativeAcceptance": "NO_COMPLETE_NATIVE_REQUIREMENT_OR_LIVE_ACCEPTANCE",
+      "integrationAncestorEvidence": {
+        "implementationCommit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+        "reviewedPr39Baseline": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+        "recordedIntegrationCompletion": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
+        "mainBase": "b2cb737a298522e3944652e862c4eeab195667d8",
+        "verifiedAncestorRelations": [
+          {
+            "ancestor": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+            "descendant": "56f185e07dfafe5533df617ec1dad473ecb63f68"
+          },
+          {
+            "ancestor": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+            "descendant": "fc05cf5b27151cad2b61b9f32a79724056a3ee87"
+          },
+          {
+            "ancestor": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
+            "descendant": "b2cb737a298522e3944652e862c4eeab195667d8"
+          }
+        ],
+        "completionDiffLimit": "fc05cf5b changes only gates/init.json. The behavioral evidence is explicitly attributed to its reviewed ancestors, never its isolated diff.",
+        "taskAttributionSupport": {
+          "coordinatorNotePath": ".session/eth-execution-20260908/COORDINATOR.md",
+          "lines": [
+            55,
+            74
+          ],
+          "fact": "The coordinator note records claiming these named Collector tasks for PR39 integration and their completion after PR39 merged at fc05cf5b."
+        },
+        "attemptProvenance": "Existing attempts are preserved verbatim. No new receipt, patch-equivalence assertion or reconstructed task attempt is introduced."
+      },
+      "reviewedContributionEvidence": [
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "docs/modules/composition-root.md",
+          "blob": "dba313faa785cb7fab8bea8519d95a8851effd0b",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "docs/modules/signing.md",
+          "blob": "16a40652479e8e299558d481630670501715ec28",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "docs/modules/solana-rpc-client.md",
+          "blob": "954849b5863f6aa50682aab5b711610b1cd614ee",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/src/app/compose.mjs",
+          "blob": "bbb14cf7a4553628c1a2ad5e14d58ef7a61a4204",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/src/app/stages/purchase.mjs",
+          "blob": "a75b46c2e1637fc751ab45a28aba02d0bee6d995",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/src/signing/collector-purchase-policy.mjs",
+          "blob": "94076a9eabca37ed5c15231bc2f82791fe7272ad",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/src/signing/signer-client.mjs",
+          "blob": "d9f209676861aef8449cecc7fa0ff0573b3e0ce3",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/src/signing/transaction-policy.mjs",
+          "blob": "885855cfb78ad4f1a376382c986bf900b47a7516",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/src/solana-rpc.mjs",
+          "blob": "cfc1eba1d96835fa9e94d16be0f63a7a5613dfe7",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/test/app/purchase-collector-policy-wiring.test.mjs",
+          "blob": "80576fcf61f6272dba802e4021f1c22fbca83dd4",
+          "testDefinitions": [
+            {
+              "line": 329,
+              "text": "test('N=2: one generation call, two distinct memo-bound policies, exactly two signs and two submits, no other transport', async () => {"
+            },
+            {
+              "line": 381,
+              "text": "test('missing binding/policy: neither a fixture binding nor a legacy policy refuses before generation, sign, or submit', async () => {"
+            },
+            {
+              "line": 401,
+              "text": "test('bad binding digest: a fixture binding whose bytes do not match its expected digest refuses before generation, sign, or submit', async () => {"
+            },
+            {
+              "line": 420,
+              "text": "test('bad binding settlement identity: a fixture binding whose settlement mint disagrees with the configured settlement asset refuses before generation', async () => {"
+            },
+            {
+              "line": 441,
+              "text": "test('unknown fixture wrapper field: a fixture wrapper with an extra key beyond binding/expectedDigest refuses before generation', async () => {"
+            },
+            {
+              "line": 460,
+              "text": "test('wrong unit asset: an admitted unitPurchase whose asset identity disagrees with the configured settlement asset refuses before generation', async () => {"
+            },
+            {
+              "line": 479,
+              "text": "test('wrong unit namespace: an admitted unitPurchase carrying the Relay chain id in this native-namespace execution profile refuses before generation', async () => {"
+            },
+            {
+              "line": 502,
+              "text": "test('wrong unit decimals: an admitted unitPurchase whose decimals disagree with the configured settlement asset refuses before generation', async () => {"
+            },
+            {
+              "line": 521,
+              "text": "test('malformed unit amount: a noncanonical admitted unitPurchase amountAtomic refuses before generation', async () => {"
+            },
+            {
+              "line": 540,
+              "text": "test('provider-callback mutation cannot splice a different binding/digest into an already-validated fixture', async () => {"
+            },
+            {
+              "line": 578,
+              "text": "test('candidate destination mismatch: refuses before sign or submit', async () => {"
+            },
+            {
+              "line": 594,
+              "text": "test('candidate mint mismatch: refuses before sign or submit', async () => {"
+            },
+            {
+              "line": 610,
+              "text": "test('candidate memo cross-mismatch: a pack whose candidate carries a different pack\\'s memo refuses before sign or submit, proving each pack is checked against its own policy', async () => {"
+            },
+            {
+              "line": 629,
+              "text": "test('candidate blockhash mismatch: refuses before sign or submit', async () => {"
+            },
+            {
+              "line": 647,
+              "text": "test('the fixture binding is refused outside the Node test runner even when fully configured, before any generation', async () => {"
+            },
+            {
+              "line": 668,
+              "text": "test('purchase preserves an older provider message with fresh original-hash observations', async () => {"
+            }
+          ]
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/test/signing/collector-original-blockhash.test.mjs",
+          "blob": "b488bf54632428bc8d3031633cde94c752a30161",
+          "testDefinitions": [
+            {
+              "line": 15,
+              "text": "test('checks the original hash directly without replacing it with a newer latest hash', async () => {"
+            },
+            {
+              "line": 22,
+              "text": "test(`original hash rejects ${label}`, async () => {"
+            }
+          ]
+        },
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "path": "packages/adapters/test/signing/collector-purchase-policy.test.mjs",
+          "blob": "035c3fd1790e220df8b9857faa22832d4f9d573d",
+          "testDefinitions": [
+            {
+              "line": 196,
+              "text": "test('accepts a legacy Collector purchase transaction built exactly from the binding and facts', async () => {"
+            },
+            {
+              "line": 204,
+              "text": "test('refuses a factory input that adds a candidate-shaped field beside the trusted inputs', () => {"
+            },
+            {
+              "line": 211,
+              "text": "test('refuses construction with no blockhash context at all', () => {"
+            },
+            {
+              "line": 217,
+              "text": "test('refuses construction with an incomplete durable cycle fact set', () => {"
+            },
+            {
+              "line": 225,
+              "text": "test('refuses a blockhash context whose current height already passed the last valid height', () => {"
+            },
+            {
+              "line": 234,
+              "text": "test('refuses a binding digest that does not match the externally supplied expected digest', () => {"
+            },
+            {
+              "line": 239,
+              "text": "test('refuses a binding with an extra unexpected field', () => {"
+            },
+            {
+              "line": 244,
+              "text": "test('refuses a binding missing a required field', () => {"
+            },
+            {
+              "line": 252,
+              "text": "test('refuses a binding declaring an unknown account role', () => {"
+            },
+            {
+              "line": 260,
+              "text": "test('refuses a binding declaring an invalid Solana public key', () => {"
+            },
+            {
+              "line": 265,
+              "text": "test('refuses a binding declaring an accessor property instead of plain data', () => {"
+            },
+            {
+              "line": 271,
+              "text": "test('refuses a binding declaring the unsupported v0 format', () => {"
+            },
+            {
+              "line": 276,
+              "text": "test('refuses a binding declaring a non-empty address lookup table list', () => {"
+            },
+            {
+              "line": 281,
+              "text": "test('refuses a candidate transaction paying a different settlement destination', async () => {"
+            },
+            {
+              "line": 287,
+              "text": "test('refuses a candidate transaction with a swapped instruction order', async () => {"
+            },
+            {
+              "line": 293,
+              "text": "test('refuses a candidate transaction with a flipped account writable flag', async () => {"
+            },
+            {
+              "line": 299,
+              "text": "test('refuses a candidate transaction signed by a different operator fee payer', async () => {"
+            },
+            {
+              "line": 305,
+              "text": "test('refuses a candidate transaction moving funds from a different source ATA', async () => {"
+            },
+            {
+              "line": 311,
+              "text": "test('refuses a candidate transaction signed by a different provider co-signer', async () => {"
+            },
+            {
+              "line": 317,
+              "text": "test('refuses a candidate transaction using a different settlement mint', async () => {"
+            },
+            {
+              "line": 323,
+              "text": "test('refuses a candidate transaction using the wrong settlement decimals', async () => {"
+            },
+            {
+              "line": 329,
+              "text": "test('refuses a candidate transaction moving a different amount than the durable fact', async () => {"
+            },
+            {
+              "line": 335,
+              "text": "test('refuses a candidate transaction carrying a different memo', async () => {"
+            },
+            {
+              "line": 341,
+              "text": "test('refuses a candidate transaction declaring a different exact compute unit limit', async () => {"
+            },
+            {
+              "line": 347,
+              "text": "test('refuses a candidate transaction whose priority fee exceeds the binding cap', async () => {"
+            },
+            {
+              "line": 353,
+              "text": "test('refuses a candidate transaction using a different blockhash than the trusted context', async () => {"
+            },
+            {
+              "line": 359,
+              "text": "test('refuses a candidate transaction observed after its trusted deadline has expired', async () => {"
+            },
+            {
+              "line": 365,
+              "text": "test('refuses a candidate transaction carrying an extra instruction', async () => {"
+            },
+            {
+              "line": 371,
+              "text": "test('refuses a v0 candidate transaction because the binding only ever authorizes legacy transactions', async () => {"
+            },
+            {
+              "line": 418,
+              "text": "test('accepts the exact generatePack profile with duplicate operator and durable memo suffix', async () => {"
+            },
+            {
+              "line": 431,
+              "text": "test(`generatePack profile rejects changed ${label}`, async () => {"
+            },
+            {
+              "line": 443,
+              "text": "test(`generatePack binding rejects changed ${label} even with a matching digest`, () => {"
+            },
+            {
+              "line": 449,
+              "text": "test('generatePack pre-sign boundary accepts a verified provider signature with an unsigned operator', () => {"
+            },
+            {
+              "line": 456,
+              "text": "test(`generatePack pre-sign boundary rejects a ${mode} provider signature`, () => {"
+            },
+            {
+              "line": 467,
+              "text": "test('purchase binds the original hash to fresh RPC validity without an invented expiry height', async () => {"
+            },
+            {
+              "line": 481,
+              "text": "test(`purchase original validity rejects ${label}`, async () => {"
+            },
+            {
+              "line": 488,
+              "text": "test(`original blockhash recovery with ${mode} observation preserves the unsigned approval boundary`, async () => {"
+            },
+            {
+              "line": 513,
+              "text": "test('original blockhash expiration after approval refuses before transport', async () => {"
+            },
+            {
+              "line": 529,
+              "text": "test('candidate decode options cannot inject an original hash validity observation', async () => {"
+            }
+          ]
+        },
+        {
+          "commit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+          "path": "packages/adapters/test/app/compose.test.mjs",
+          "blob": "c75d030b73a2dd000c1161ee9be7b9be68a91eeb",
+          "testDefinitions": [
+            {
+              "line": 397,
+              "text": "test('compose starts a live collector-only rehearsal with only Solana identity and canaries', async t => {"
+            },
+            {
+              "line": 472,
+              "text": "test('the trusted Solana blockhashContextResolver returns the exact RPC pair on an exact latest-blockhash match', async () => {"
+            },
+            {
+              "line": 482,
+              "text": "test('the trusted Solana blockhashContextResolver refuses a provider blockhash that is not the current latest', async () => {"
+            },
+            {
+              "line": 492,
+              "text": "test('the trusted Solana blockhashContextResolver refuses when the RPC latest blockhash is already unusable', async () => {"
+            },
+            {
+              "line": 500,
+              "text": "test('buildQuoteRefreshPlanner reuses the original pack/quantity/purchase targets/liability evidence and prices only fresh Relay quotes', async () => {"
+            },
+            {
+              "line": 567,
+              "text": "test('buildQuoteRefreshPlanner refuses to plan without repository-owned finalized claim/custody evidence bound to this exact cycle', async () => {"
+            },
+            {
+              "line": 789,
+              "text": "test('a live collector-only rehearsal purchase remains unsupported under the durable-admission requirement: it refuses before any provider or signer call', async t => {"
+            },
+            {
+              "line": 1082,
+              "text": "test('a composed production purchase refuses at the trusted resolver before any signer or submit call, on a stale provider blockhash', async t => {"
+            },
+            {
+              "line": 1098,
+              "text": "test('a composed production purchase refuses at the trusted resolver before any signer or submit call, when RPC marks the original blockhash unusable', async t => {"
+            },
+            {
+              "line": 1118,
+              "text": "test('a composed production purchase advances past the trusted resolver on a valid older blockhash, refusing only at the genuine next pinned-policy boundary', async t => {"
+            },
+            {
+              "line": 1136,
+              "text": "test('compose refuses a production profile without MoneyConfigurationV1 before opening durable state', async t => {"
+            },
+            {
+              "line": 1151,
+              "text": "test('compose requires a distinct archive-capable historical evidence client for production', async t => {"
+            },
+            {
+              "line": 1203,
+              "text": "test('production composition wires its own owned cycle-attributable payout-availability reader over any injected same-named client method', async t => {"
+            },
+            {
+              "line": 1233,
+              "text": "test('compose constructs archive evidence from a distinct configured archive RPC when no explicit client is injected', async t => {"
+            },
+            {
+              "line": 1277,
+              "text": "test('production composition persists an already-authorized standing-authority decision before its guarded signing boundary', async t => {"
+            },
+            {
+              "line": 1381,
+              "text": "test('a production-profile fake dry run reaches return and payout without a signer or provider mutation', async t => {"
+            },
+            {
+              "line": 1441,
+              "text": "test('compose refuses an uncapped relay-roundtrip rehearsal before opening durable state', async t => {"
+            },
+            {
+              "line": 1476,
+              "text": "test('compose fails closed on an injected network identity mismatch before opening durable state', async t => {"
+            },
+            {
+              "line": 1523,
+              "text": "test('compose dashboard identities expose exactly the read-only, secret-free identity fields', async t => {"
+            },
+            {
+              "line": 1549,
+              "text": "assert.equal(Object.keys(identities).some(key => /apiKey|credential|keychain/i.test(key)), false);"
+            },
+            {
+              "line": 1552,
+              "text": "test('compose exposes one repository-backed cycle client instead of a bare runner stub', async t => {"
+            },
+            {
+              "line": 1586,
+              "text": "test('compose keeps cycle repository writers private from callers and dashboard context', async t => {"
+            },
+            {
+              "line": 1610,
+              "text": "test('compose reads the persisted kill switch before it creates a live cycle', async t => {"
+            },
+            {
+              "line": 1649,
+              "text": "test('compose refuses a live service call when the configured observability preflight fails before signing', async t => {"
+            },
+            {
+              "line": 1773,
+              "text": "test('holds an active cycle on a paused USDG status canary before any signing boundary', async t => {"
+            },
+            {
+              "line": 1806,
+              "text": "test('holds an active cycle on a frozen USDG status canary before any signing boundary', async t => {"
+            },
+            {
+              "line": 1839,
+              "text": "test('does not create or hold a cycle before an active cycle reaches the USDG status boundary', async t => {"
+            },
+            {
+              "line": 1885,
+              "text": "test('compose refuses a live service call when observability is not configured', async t => {"
+            },
+            {
+              "line": 1911,
+              "text": "test('compose default profile enforcement refuses a live call without observability', async t => {"
+            },
+            {
+              "line": 1937,
+              "text": "test('explicit production readiness permits an activated automatic policy before signer construction', async t => {"
+            },
+            {
+              "line": 1969,
+              "text": "test('explicit production readiness refuses an RPC that reports a different chain before signer construction', async t => {"
+            },
+            {
+              "line": 2006,
+              "text": "test('compose scheduler refuses a live tick when observability is not configured', async t => {"
+            },
+            {
+              "line": 2036,
+              "text": "test('a full dry-run cycle completes through the real scheduler, service, durable store, and stage driver, and leaves a written journal', async t => {"
+            },
+            {
+              "line": 2064,
+              "text": "test('liveMode false: a full dry-run cycle completes without ever reaching signerClient.sign/broadcast or any adapter mutation', async t => {"
+            },
+            {
+              "line": 2091,
+              "text": "test('crash between stages: a second, independently-composed process resumes the same cycle at the right stage after the first process fails mid-cycle', async t => {"
+            },
+            {
+              "line": 2163,
+              "text": "test('liveMode true: the composed service freezes purchase before any legacy provider call', async t => {"
+            },
+            {
+              "line": 2275,
+              "text": "test('liveMode true: the remaining pending operational integration refuses through the composed service loop', async t => {"
+            },
+            {
+              "line": 2333,
+              "text": "test('the on-disk lease prevents a second runner from acting on the same state directory while the first holds it', async t => {"
+            },
+            {
+              "line": 2363,
+              "text": "test('compose(config) with no config.dashboard composes no dashboard at all', async t => {"
+            },
+            {
+              "line": 2385,
+              "text": "test('compose exposes one audit-bound operator facade for the installed CLI', async t => {"
+            },
+            {
+              "line": 2431,
+              "text": "test('compose respects the listener-free operator audit log override', async t => {"
+            },
+            {
+              "line": 2466,
+              "text": "test('compose rejects a tampered dashboard audit chain before it builds the dashboard context', async t => {"
+            },
+            {
+              "line": 2503,
+              "text": "test('compose(config) exposes config.standingAuthority unchanged, and null when not configured', async t => {"
+            },
+            {
+              "line": 2601,
+              "text": "test('dashboard composed in-process: run-cycle-now over HTTP actually drives the real scheduler through a complete dry-run cycle', async t => {"
+            },
+            {
+              "line": 2624,
+              "text": "test('dashboard composed in-process: restart-request/reconcile-request over HTTP actually reach AutomatedCycleService.recoverActiveCycle', async t => {"
+            },
+            {
+              "line": 2640,
+              "text": "test('operator resume-cycle recovers a supplementary settlement after its completed cycle is no longer active', async t => {"
+            },
+            {
+              "line": 2718,
+              "text": "test('dashboard composed in-process: pause/activate decisions are read fresh by the real scheduler on its next tick', async t => {"
+            },
+            {
+              "line": 2735,
+              "text": "test('dashboard composed in-process: ctx.readAccounting is wired to the real cycleRepository, deriving real per-cycle accounting from the journal rather than a fabricated placeholder', async t => {"
+            },
+            {
+              "line": 2767,
+              "text": "test('dashboard composed in-process: ctx.getSchedulerView is wired to the real scheduler.getView(), never a second timer', async t => {"
+            },
+            {
+              "line": 2776,
+              "text": "test('dashboard composed in-process: ctx.listRecentWinners derives real deduplicated cards from the durable pack-batch ledger, never a fabricated placeholder', async t => {"
+            },
+            {
+              "line": 2819,
+              "text": "test('dashboard composed in-process: ctx.listRecentWinners returns no cards when no pack batch has been requested yet', async t => {"
+            },
+            {
+              "line": 3140,
+              "text": "test('liveMode true fails closed before claim signing when canonical nonce reads are unavailable', async t => {"
+            },
+            {
+              "line": 3217,
+              "text": "test('compose refuses a third Operations EVM identity before creating services', async t => {"
+            }
+          ]
+        }
+      ],
+      "reviewedImplementationPatches": [
+        {
+          "commit": "339de8e0fe9b83e2aeec4c4625a784f565af7d54",
+          "sha256": "32e1d0181ff7787f5ccd75ffb75c768824e76ef4779d205cc1ef1854ba72e534",
+          "command": "git show --format= --no-ext-diff --unified=3 <commit>; exact stdout bytes"
+        },
+        {
+          "commit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+          "sha256": "1c7af0af0679523395923316c325f92b8b840b423732d88ef958e2ec032125bf",
+          "command": "git show --format= --no-ext-diff --unified=3 <commit>; exact stdout bytes"
+        }
+      ],
+      "evidenceLimit": "Read-only exact source/test/doc review and Git ancestry verification, not test execution or whole-requirement acceptance."
     },
     {
       "task": {
@@ -2535,7 +3105,9 @@
         "commit_sha": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
         "provenance": null
       },
-      "requirementCandidates": [],
+      "requirementCandidates": [
+        "REQ-transaction-policy-1"
+      ],
       "scope": "No approval, binding application or completion acceptance.",
       "completionEvidence": {
         "commit": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
@@ -2549,9 +3121,205 @@
         ],
         "warning": "Carrier commit diff is not automatically the task patch; inspect preserved attempt provenance."
       },
-      "classification": "missing-task-contribution-proof",
-      "rationale": "Recorded completion fc05cf5b27151cad2b61b9f32a79724056a3ee87 changes only gates/init.json and has no attempt provenance linking the named behavioral patch. Related current code exists, but this completion cannot establish which contribution the task completed.",
-      "nextAction": "Coordinator recover the original exact behavioral commit/patch through existing provenance support before proposing any requirement binding. Do not substitute a related current test or carrier ancestor."
+      "classification": "evidenced-product-contribution",
+      "rationale": "The independently digest-bound generatePack profile fixes instruction order, duplicate operator account roles/flags, provider co-signer memo with durable :open suffix, exact transfer identity and existing provider signature. Positive exact-shape and negative semantic/shape mutations exercise the canonical evaluator; this does not authorize a live launch or prove current native funding.",
+      "nextAction": "Coordinator may prepare a qualified contribution binding citing the reviewed implementation ancestor and preserved integration completion. Keep the recorded completion and attempts unchanged.",
+      "nativeAcceptance": "NO_COMPLETE_NATIVE_REQUIREMENT_OR_LIVE_ACCEPTANCE",
+      "integrationAncestorEvidence": {
+        "implementationCommit": "581b70302d7d243d221f4c2b2772344391fe2b29",
+        "reviewedPr39Baseline": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+        "recordedIntegrationCompletion": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
+        "mainBase": "b2cb737a298522e3944652e862c4eeab195667d8",
+        "verifiedAncestorRelations": [
+          {
+            "ancestor": "581b70302d7d243d221f4c2b2772344391fe2b29",
+            "descendant": "56f185e07dfafe5533df617ec1dad473ecb63f68"
+          },
+          {
+            "ancestor": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+            "descendant": "fc05cf5b27151cad2b61b9f32a79724056a3ee87"
+          },
+          {
+            "ancestor": "fc05cf5b27151cad2b61b9f32a79724056a3ee87",
+            "descendant": "b2cb737a298522e3944652e862c4eeab195667d8"
+          }
+        ],
+        "completionDiffLimit": "fc05cf5b changes only gates/init.json. The behavioral evidence is explicitly attributed to its reviewed ancestors, never its isolated diff.",
+        "taskAttributionSupport": {
+          "coordinatorNotePath": ".session/eth-execution-20260908/COORDINATOR.md",
+          "lines": [
+            55,
+            74
+          ],
+          "fact": "The coordinator note records claiming these named Collector tasks for PR39 integration and their completion after PR39 merged at fc05cf5b."
+        },
+        "attemptProvenance": "Existing attempts are preserved verbatim. No new receipt, patch-equivalence assertion or reconstructed task attempt is introduced."
+      },
+      "reviewedContributionEvidence": [
+        {
+          "commit": "581b70302d7d243d221f4c2b2772344391fe2b29",
+          "path": "docs/modules/signing.md",
+          "blob": "19338b08833699f3ac960fe5ff9ab77489da6b2d",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "581b70302d7d243d221f4c2b2772344391fe2b29",
+          "path": "packages/adapters/src/signing/collector-purchase-policy.mjs",
+          "blob": "430933352d1a79bfeee364239e046799c67ef890",
+          "sourceOrModuleContract": true
+        },
+        {
+          "commit": "581b70302d7d243d221f4c2b2772344391fe2b29",
+          "path": "packages/adapters/test/signing/collector-purchase-policy.test.mjs",
+          "blob": "c7841e6d2701d65f87a70dc0b5858c483f9ed2fd",
+          "testDefinitions": [
+            {
+              "line": 195,
+              "text": "test('accepts a legacy Collector purchase transaction built exactly from the binding and facts', async () => {"
+            },
+            {
+              "line": 203,
+              "text": "test('refuses a factory input that adds a candidate-shaped field beside the trusted inputs', () => {"
+            },
+            {
+              "line": 210,
+              "text": "test('refuses construction with no blockhash context at all', () => {"
+            },
+            {
+              "line": 216,
+              "text": "test('refuses construction with an incomplete durable cycle fact set', () => {"
+            },
+            {
+              "line": 224,
+              "text": "test('refuses a blockhash context whose current height already passed the last valid height', () => {"
+            },
+            {
+              "line": 233,
+              "text": "test('refuses a binding digest that does not match the externally supplied expected digest', () => {"
+            },
+            {
+              "line": 238,
+              "text": "test('refuses a binding with an extra unexpected field', () => {"
+            },
+            {
+              "line": 243,
+              "text": "test('refuses a binding missing a required field', () => {"
+            },
+            {
+              "line": 251,
+              "text": "test('refuses a binding declaring an unknown account role', () => {"
+            },
+            {
+              "line": 259,
+              "text": "test('refuses a binding declaring an invalid Solana public key', () => {"
+            },
+            {
+              "line": 264,
+              "text": "test('refuses a binding declaring an accessor property instead of plain data', () => {"
+            },
+            {
+              "line": 270,
+              "text": "test('refuses a binding declaring the unsupported v0 format', () => {"
+            },
+            {
+              "line": 275,
+              "text": "test('refuses a binding declaring a non-empty address lookup table list', () => {"
+            },
+            {
+              "line": 280,
+              "text": "test('refuses a candidate transaction paying a different settlement destination', async () => {"
+            },
+            {
+              "line": 286,
+              "text": "test('refuses a candidate transaction with a swapped instruction order', async () => {"
+            },
+            {
+              "line": 292,
+              "text": "test('refuses a candidate transaction with a flipped account writable flag', async () => {"
+            },
+            {
+              "line": 298,
+              "text": "test('refuses a candidate transaction signed by a different operator fee payer', async () => {"
+            },
+            {
+              "line": 304,
+              "text": "test('refuses a candidate transaction moving funds from a different source ATA', async () => {"
+            },
+            {
+              "line": 310,
+              "text": "test('refuses a candidate transaction signed by a different provider co-signer', async () => {"
+            },
+            {
+              "line": 316,
+              "text": "test('refuses a candidate transaction using a different settlement mint', async () => {"
+            },
+            {
+              "line": 322,
+              "text": "test('refuses a candidate transaction using the wrong settlement decimals', async () => {"
+            },
+            {
+              "line": 328,
+              "text": "test('refuses a candidate transaction moving a different amount than the durable fact', async () => {"
+            },
+            {
+              "line": 334,
+              "text": "test('refuses a candidate transaction carrying a different memo', async () => {"
+            },
+            {
+              "line": 340,
+              "text": "test('refuses a candidate transaction declaring a different exact compute unit limit', async () => {"
+            },
+            {
+              "line": 346,
+              "text": "test('refuses a candidate transaction whose priority fee exceeds the binding cap', async () => {"
+            },
+            {
+              "line": 352,
+              "text": "test('refuses a candidate transaction using a different blockhash than the trusted context', async () => {"
+            },
+            {
+              "line": 358,
+              "text": "test('refuses a candidate transaction observed after its trusted deadline has expired', async () => {"
+            },
+            {
+              "line": 364,
+              "text": "test('refuses a candidate transaction carrying an extra instruction', async () => {"
+            },
+            {
+              "line": 370,
+              "text": "test('refuses a v0 candidate transaction because the binding only ever authorizes legacy transactions', async () => {"
+            },
+            {
+              "line": 417,
+              "text": "test('accepts the exact generatePack profile with duplicate operator and durable memo suffix', async () => {"
+            },
+            {
+              "line": 430,
+              "text": "test(`generatePack profile rejects changed ${label}`, async () => {"
+            },
+            {
+              "line": 442,
+              "text": "test(`generatePack binding rejects changed ${label} even with a matching digest`, () => {"
+            },
+            {
+              "line": 448,
+              "text": "test('generatePack pre-sign boundary accepts a verified provider signature with an unsigned operator', () => {"
+            },
+            {
+              "line": 455,
+              "text": "test(`generatePack pre-sign boundary rejects a ${mode} provider signature`, () => {"
+            }
+          ]
+        }
+      ],
+      "reviewedImplementationPatches": [
+        {
+          "commit": "581b70302d7d243d221f4c2b2772344391fe2b29",
+          "sha256": "685951968de791ba41a3f335da5daaafda707f92d5300c2d498abcc2073403be",
+          "command": "git show --format= --no-ext-diff --unified=3 <commit>; exact stdout bytes"
+        }
+      ],
+      "evidenceLimit": "Read-only exact source/test/doc review and Git ancestry verification, not test execution or whole-requirement acceptance."
     },
     {
       "task": {
@@ -14042,9 +14810,8 @@
     }
   ],
   "classificationCounts": {
-    "evidenced-product-contribution": 39,
+    "evidenced-product-contribution": 41,
     "missing-current-completion-support": 6,
-    "missing-task-contribution-proof": 2,
     "operational-or-provenance-authority": 33
   }
 }

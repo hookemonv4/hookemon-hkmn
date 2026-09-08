@@ -1,12 +1,12 @@
 # Native trace recovery proposal
 
-This read-only inventory covers all 80 canonical tasks whose requirement array was empty at capture: 67 completed and 13 ready. It proposes 39 narrow product contributions, distinguishes 33 operational or provenance tasks, identifies six ready product scopes lacking current completion evidence, and finds two completed tasks whose behavioral contribution is not proved by their completion carrier. No task binding, approval, receipt, completion, or generated projection was changed.
+This read-only inventory covers all 80 canonical tasks whose requirement array was empty at capture: 67 completed and 13 ready. It proposes 41 narrow product contributions, distinguishes 33 operational or provenance tasks, identifies six ready product scopes lacking current completion evidence, and qualifies two Collector contributions through their explicitly verified PR39 implementation ancestors rather than their completion carrier diffs. No task binding, approval, receipt, completion, or generated projection was changed.
 
 The baseline is main `b2cb737a298522e3944652e862c4eeab195667d8`, which still contains requirements revision 70. The reference for native scope is the exact revision 71 working-tree snapshot from `eth-interface-20260908`, recorded with its source HEAD and SHA-256 in `inventory.json` and copied as `requirements-71.snapshot.json`. This audit does not promote that snapshot to main or renew its owner authority. `requirement-clauses.json` contains the complete statement and measurement of every proposed requirement ID, not merely matching titles.
 
 ## Apply-order proposal
 
-First resolve the two missing task-to-patch links below and handle the two PR38 rows through their separate unsigned historical archive proposals (`7504f3d2`). For framework, policy, CI, integration, formatting, and owner-evidence tasks, use the existing operational acceptance/provenance path with exact support and prestate. Do not attach `REQ-transaction-policy-1` or a release requirement just to eliminate an empty array.
+Preserve the two Collector integration-ancestor links below and handle the two PR38 rows through their separate unsigned historical archive proposals (`7504f3d2`). For framework, policy, CI, integration, formatting, and owner-evidence tasks, use the existing operational acceptance/provenance path with exact support and prestate. Do not attach `REQ-transaction-policy-1` or a release requirement just to eliminate an empty array.
 
 For product contributions, review the specific invariant and named assertion at its exact commit, then ask the coordinator to prepare the supported binding descriptor against the current canonical prestate. These are partial contributions; a task may support a requirement without satisfying every statement or measurement. Current native closure additionally needs its actual integrated code, current tests and explicit requirement acceptance. No historical USDG test is treated as a native ETH payment, valuation, gas-reserve or full-graph proof.
 
@@ -52,9 +52,16 @@ A ready task has no successful completion attempt in this snapshot. Existing rel
 | `WEB-PR32-INTEGRATION` | Operational / provenance; no invented product ID | Merge conflict resolution must reference exact reviewed branches and CI; not a fabricated product requirement. |
 | `WEB28-CI-REPAIR` | Operational / provenance; no invented product ID | Fixture/navigation assertion repair requires the exact patch and CI evidence; no specific product requirement for gallery anchor formatting. |
 
-## Two concrete contribution-proof gaps
+## Two qualified Collector integration contributions
 
-`BOT-COLLECTOR-ORIGINAL-BLOCKHASH` and `BOT-COLLECTOR-PURCHASE-LIVE-SHAPE` both record completion `fc05cf5b27151cad2b61b9f32a79724056a3ee87`. That commit changes only `gates/init.json`; their attempt rows contain no provenance connecting a behavioral source patch. Current Collector code and tests do not identify which patch these tasks completed. Recover the exact original contribution and its reviewed integration relation through the existing provenance mechanism before preparing requirement mappings. These are gaps in task provenance, not a claim that the product functionality is absent.
+Both tasks intentionally record integration completion `fc05cf5b27151cad2b61b9f32a79724056a3ee87`. Its own diff changes only `gates/init.json`; the product evidence is in reviewed PR39 ancestors. The coordinator note at `.session/eth-execution-20260908/COORDINATOR.md:55` identifies these tasks as the PR39 integration claims, and line 74 records their completion after that merge. Existing task attempts remain unchanged.
+
+| Task | Requirement contribution | Exact implementation and tests |
+| --- | --- | --- |
+| `BOT-COLLECTOR-ORIGINAL-BLOCKHASH` | `REQ-transaction-policy-1`: original message preservation and independently observed blockhash validity before signing/broadcast | `339de8e0fe9b83e2aeec4c4625a784f565af7d54` changes RPC, policy, signer and purchase wiring. `collector-original-blockhash.test.mjs` checks direct original-hash RPC observation; purchase policy tests reject invented expiry, injected validity and expiry before transport. `purchase-collector-policy-wiring.test.mjs` proves unchanged serialized message bytes. `56f185e07dfafe5533df617ec1dad473ecb63f68` aligns the composed positive/negative tests. |
+| `BOT-COLLECTOR-PURCHASE-LIVE-SHAPE` | `REQ-transaction-policy-1`: independently bound exact generatePack semantics and co-signer preservation | `581b70302d7d243d221f4c2b2772344391fe2b29` changes `collector-purchase-policy.mjs` and its tests: exact instruction order, duplicate operator roles/flags, memo suffix and provider signature, with positive exact-profile and negative mutation cases. |
+
+Git ancestry was verified separately for each implementation commit to reviewed PR39 baseline `56f185e07dfafe5533df617ec1dad473ecb63f68`, that baseline to recorded completion `fc05cf5b27151cad2b61b9f32a79724056a3ee87`, and that completion to main `b2cb737a298522e3944652e862c4eeab195667d8`. The inventory records exact source/test/doc blobs and implementation patch hashes. This is qualified requirement support through preserved integration history, not a claim that the completion carrier itself changed those files or an invented attempt-provenance receipt. Neither contribution establishes full native funding, live provider admission, or complete requirement acceptance.
 
 ## Limits and validation
 
