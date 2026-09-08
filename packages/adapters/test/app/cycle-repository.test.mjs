@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { encodeAbiParameters } from 'viem';
+import { encodeAbiParameters, encodeFunctionData, encodeEventTopics, keccak256, parseAbi, parseTransaction } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { createNativePaymentProof, createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 import { createRelayClient, createQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../../src/relay-client.mjs';
 import { setup as nativeRelaySetup } from '../native/relay-native-proof-fixture.mjs';
 import { createHash } from 'node:crypto';
@@ -752,12 +754,12 @@ async function prepareOutboundRelaySettlementAttempt(
   transactionHash,
   deadlineUnixSeconds,
   leg,
-  { relayRoute = outboundRelayRoute() } = {},
+  { relayRoute = outboundRelayRoute(), signedBytes = '0x1234', relayIntent = outboundRelayIntent(leg, deadlineUnixSeconds) } = {},
 ) {
   const requestDigest = `sha256:${'e'.repeat(64)}`;
   await repository.prepareChainTransactionAttempt(cycleId, 'outbound', preparedChainAttempt(cycleId, 'outbound', requestDigest));
   await repository.recordSignedTransaction(cycleId, 'outbound', requestDigest, {
-    rawBytes: '0x1234', nonce: '7', blockhash: null, hash: transactionHash,
+    rawBytes: signedBytes, nonce: '7', blockhash: null, hash: transactionHash,
   });
   await repository.persistChainAttemptRecoveryContext(cycleId, {
     stage: 'outbound',
@@ -771,7 +773,7 @@ async function prepareOutboundRelaySettlementAttempt(
     rawSignedBytesHash: transactionHash,
     signedMessageDigest: `sha256:${'5'.repeat(64)}`,
     relayQuoteDeadlineUnixSeconds: deadlineUnixSeconds,
-    relayIntent: outboundRelayIntent(leg, deadlineUnixSeconds),
+    relayIntent,
     relayRoute,
   });
   return requestDigest;
@@ -3302,73 +3304,50 @@ test('settleRelayLeg holds a process-RPC origin refund credit after reopen witho
   const directory = await tempDirectory(t);
   const repository = await CycleRepository.open(directory);
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const account = privateKeyToAccount(`0x${'01'.repeat(32)}`); // Public fixture key, isolated transport only.
+  const sender = account.address.toLowerCase(), depository = SETTLEMENT_DEPOSITORY.toLowerCase();
+  const orderId = `0x${'c'.repeat(64)}`, runtime = '0x6000';
   const recorded = await repository.recordRelayLeg(cycleId, relayLeg(cycleId, {
-    sourceAssetId: SETTLEMENT_SOURCE_ASSET,
+    schema: 'hookemon.relay-leg.v2', sourceAssetId: 'native', sourceDecimals: 18,
     destinationAssetId: SETTLEMENT_SOLANA_MINT,
   }));
-  const sourceTxHash = `0x${'7'.repeat(64)}`;
-  const requestDigest = await prepareOutboundRelaySettlementAttempt(
-    repository,
-    cycleId,
-    sourceTxHash,
-    '1700000200',
-    recorded,
-  );
+  const data = encodeFunctionData({ abi: parseAbi(['function depositNative(address depositor, bytes32 id)']),
+    functionName: 'depositNative', args: [sender, orderId] });
+  const signedSourceTransaction = await account.signTransaction({ chainId: 4663, type: 'eip1559', nonce: 7,
+    to: depository, data, value: BigInt(recorded.sourceAmountAtomic), gas: 100000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n });
+  const sourceTxHash = keccak256(signedSourceTransaction), sourceHash = `0x${'6'.repeat(64)}`;
+  const sourceFinality = { height: '100', hash: sourceHash, timestampUnixSeconds: '1700000000' };
+  const parsed = parseTransaction(signedSourceTransaction);
+  const sourceClient = { getChainId: async () => 4663,
+    getTransaction: async () => ({ ...parsed, hash: sourceTxHash, from: sender, blockNumber: 100n, blockHash: sourceHash }),
+    getTransactionReceipt: async () => ({ transactionHash: sourceTxHash, blockNumber: 100n, blockHash: sourceHash,
+      status: 'success', gasUsed: 21000n, effectiveGasPrice: 1n, logs: [] }),
+    getBlock: async () => ({ number: 100n, hash: sourceHash, timestamp: 1700000000n }) };
+  const sourceProof = await createNativePaymentProof({ client: sourceClient, signedTransaction: signedSourceTransaction,
+    expected: { kind: 'direct', chainId: '4663', assetId: 'native', decimals: 18, transactionHash: sourceTxHash,
+      source: sender, recipient: depository, amountWei: recorded.sourceAmountAtomic, calldataDigest: keccak256(data), nonce: '7' } });
+  const requestDigest = await prepareOutboundRelaySettlementAttempt(repository, cycleId, sourceTxHash, '1700000200', recorded, {
+    signedBytes: signedSourceTransaction, relayRoute: { sourceSender: sender, sourceRecipient: depository, destinationOwner: SETTLEMENT_SOLANA_OWNER },
+    relayIntent: { ...outboundRelayIntent(recorded, '1700000200'), schema: 'hookemon.relay-intent.v2', originAssetId: `0x${'00'.repeat(20)}`, sender },
+  });
   await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
-  const sourceProof = await finalizedOutboundSourceProof({
-    transactionHash: sourceTxHash,
-    amountAtomic: recorded.sourceAmountAtomic,
-  });
   await repository.recordBroadcast(cycleId, 'outbound', requestDigest, { transactionHash: sourceTxHash });
-  await repository.recordFinality(cycleId, 'outbound', requestDigest, {
-    transactionHash: sourceTxHash,
-    finalizedAtSource: {
-      height: sourceProof.receiptBlockNumber.toString(),
-      hash: sourceProof.receiptBlockHash,
-      timestampUnixSeconds: sourceProof.receiptBlockTimestampUnixSeconds,
-    },
-  });
-
-  const refundTxHash = `0x${'8'.repeat(64)}`;
-  const refundReceiptBlockHash = `0x${'9'.repeat(64)}`;
-  const refundProof = await readOutboundOriginRefundProof({
-    client: {
-      async getTransactionReceipt({ hash }) {
-        assert.equal(hash, refundTxHash);
-        return {
-          transactionHash: refundTxHash,
-          blockNumber: 200n,
-          blockHash: refundReceiptBlockHash,
-          status: 'success',
-          logs: [{
-            address: SETTLEMENT_SOURCE_ASSET,
-            topics: [ERC20_TRANSFER_TOPIC, addressTopic(SETTLEMENT_DEPOSITORY), addressTopic(SETTLEMENT_SOURCE_ACCOUNT)],
-            data: `0x${BigInt(recorded.sourceAmountAtomic).toString(16).padStart(64, '0')}`,
-            logIndex: 0n,
-          }],
-        };
-      },
-      async getBlock({ blockTag, blockNumber }) {
-        if (blockTag === 'finalized') return { number: 201n, hash: `0x${'a'.repeat(64)}`, timestamp: 1_700_000_100n };
-        if (blockNumber === 200n) return { number: 200n, hash: refundReceiptBlockHash, timestamp: 1_700_000_100n };
-        throw new Error('unexpected refund block read');
-      },
-    },
-    pointer: {
-      schema: 'hookemon.relay-terminal-origin-refund-pointer.v1',
-      relayRequestId: recorded.relayRequestId,
-      status: 'REFUND',
-      refundTxHash,
-    },
-    leg: { ...recorded, sourceTxHash },
-    sourceFinality: {
-      height: sourceProof.receiptBlockNumber.toString(),
-      hash: sourceProof.receiptBlockHash,
-      timestampUnixSeconds: sourceProof.receiptBlockTimestampUnixSeconds,
-    },
-    sourceAccount: SETTLEMENT_DEPOSITORY,
-    operationsAccount: SETTLEMENT_SOURCE_ACCOUNT,
-  });
+  await repository.recordFinality(cycleId, 'outbound', requestDigest, { transactionHash: sourceTxHash, finalizedAtSource: sourceFinality });
+  const refundTxHash = `0x${'8'.repeat(64)}`, refundReceiptBlockHash = `0x${'9'.repeat(64)}`;
+  const eventAbi = parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']);
+  const refundClient = { getChainId: async () => 4663, getCode: async () => runtime,
+    getTransactionReceipt: async () => ({ transactionHash: refundTxHash, blockNumber: 200n, blockHash: refundReceiptBlockHash, status: 'success',
+      logs: [{ address: depository, transactionHash: refundTxHash, blockHash: refundReceiptBlockHash, blockNumber: 200n, logIndex: 0,
+        topics: encodeEventTopics({ abi: eventAbi, eventName: 'FundsMovement' }),
+        data: encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }],
+          [depository, sender, `0x${'00'.repeat(20)}`, BigInt(recorded.sourceAmountAtomic), orderId]) }] }),
+    getBlock: async () => ({ number: 200n, hash: refundReceiptBlockHash, timestamp: 1700000100n }) };
+  const nativePaymentBinding = createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663',
+    relay: { schema: 'hookemon.relay-native-route.v1', emitter: depository, runtimeHash: keccak256(runtime), metadataEncoding: 'order-id', refundsSupported: true } }, createTestProfileMutationAuthority());
+  const refundProof = await readOutboundOriginRefundProof({ client: refundClient,
+    pointer: { schema: 'hookemon.relay-terminal-origin-refund-pointer.v1', relayRequestId: recorded.relayRequestId, status: 'REFUND', refundTxHash },
+    leg: { ...recorded, sourceTxHash }, sourceFinality, sourceAccount: depository, operationsAccount: sender,
+    sourceProof, signedSourceTransaction, nativePaymentBinding, orderId });
   assert.notEqual(refundProof, null);
 
   const settled = await repository.settleRelayLeg(cycleId, recorded.relayRequestId, { sourceProof, refundProof });
