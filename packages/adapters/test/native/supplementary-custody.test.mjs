@@ -1,3 +1,5 @@
+import { projectPolicyCustody } from '../../src/app/accounting-projection.mjs';
+import { createRelayClient, createQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../../src/relay-client.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -29,11 +31,27 @@ async function boundaryFor(repository, position, settlement, fixture) {
   const intent = { sender: fixture.expected.sourceOwner, recipient: fixture.expected.recipient, orderId: fixture.expected.orderId };
   const leg = { schema: 'hookemon.relay-leg.v2', relayRequestId: fixture.expected.relayRequestId, sourceTxHash: fixture.expected.sourceTransactionHash,
     sourceAssetId: fixture.expected.sourceMint, sourceAmountAtomic: fixture.expected.sourceAmountAtomic, destinationAssetId: 'native', destinationDecimals: 18, returnAttribution: { intent } };
+  const blockReader = fixture.client.getBlock;
+  fixture.client.getBlock = async () => ({ ...await blockReader(), timestamp: 1_700_000_001n });
   const proof = await readReturnLegDestinationProof({ client: fixture.client, nativePaymentBinding: fixture.binding, sourceProof: fixture.sourceProof, leg,
     pointer: { schema: 'hookemon.relay-terminal-destination-pointer.v1', relayRequestId: leg.relayRequestId, status: 'SUCCESS', destinationTxHash: fixture.expected.transactionHash } });
   const stage = `supplementary-${digest({ schema: 'hookemon.supplementary-return-stage.v1', positionId: position.positionId }).slice(7, 55)}`;
-  await repository.persistPagedPayoutState(position.cycleId, stage, { schema: 'hookemon.supplementary-return-attempt.v2', cycleId: position.cycleId, recipients: [], rawSignedBytes: fixture.encoded,
-    relayRequestId: leg.relayRequestId, intent, destinationAmount: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '42' } });
+  const zero = `0x${'00'.repeat(20)}`, destinationAmount = { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '42' };
+  const raw = { requestId: leg.relayRequestId, details: { sender: intent.sender, recipient: intent.recipient,
+    currencyIn: { currency: { chainId: 792703809, address: leg.sourceAssetId, decimals: 6 }, amount: leg.sourceAmountAtomic, amountUsd: '25' },
+    currencyOut: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: '42', minimumAmount: '42', amountUsd: '20.0000009' } },
+    protocol: { v2: { orderId: intent.orderId, orderData: { inputs: [{ payment: { chainId: 'solana', currency: leg.sourceAssetId, amount: leg.sourceAmountAtomic },
+      refunds: [{ chainId: 'solana', currency: leg.sourceAssetId, recipient: intent.sender, deadline: 2_000_000_000 }] }],
+      output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [], payments: [{ recipient: intent.recipient, currency: zero, expectedAmount: '42', minimumAmount: '42' }] } } } }, steps: [] };
+  const client = createRelayClient({ now: () => 1_700_000_000_000, quoteValidityMs: 60000, fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(raw) }) });
+  const quote = await client.quoteReturnBridge({ user: intent.sender, recipient: intent.recipient, amount: leg.sourceAmountAtomic, skipRouteCheck: true });
+  const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: destinationAmount, rounding: 'down', nowMs: 1_700_000_000_000 });
+  const attempt = { schema: 'hookemon.supplementary-return-attempt.v2', cycleId: position.cycleId, positionId: position.positionId, manifestId: settlement.manifestId,
+    recipients: [], rawSignedBytes: fixture.encoded, relayRequestId: leg.relayRequestId, intent, destinationAmount, destinationUsd,
+    destinationUsdEvidence: { ...readProcessQuoteUsdProvenance(destinationUsd), quote } };
+  await assert.rejects(repository.persistPagedPayoutState(position.cycleId, stage, structuredClone(attempt)), /producer capability/);
+  await repository.persistPagedPayoutState(position.cycleId, stage, attempt);
+  await assert.rejects(repository.persistPagedPayoutState(position.cycleId, stage, { ...attempt, destinationUsd: { ...destinationUsd, amountMicroUsd: '1' } }), /immutable/);
   return { schema: 'hookemon.supplementary-return-boundary.v2', positionId: position.positionId, cycleId: position.cycleId, manifestId: settlement.manifestId,
     finalizedReturnEvidence: { schema: 'hookemon.supplementary-finalized-return.v2', positionId: position.positionId, cycleId: position.cycleId, manifestId: settlement.manifestId,
       operations: fixture.expected.recipient, assetId: 'native', amountAtomic: '42', finalityEvidence: proof } };
@@ -63,6 +81,10 @@ test('held native positions retain USD cost without principal and consume an att
   assert.equal(ledger.heldAssets, '0');
   assert.deepEqual(ledger.gasPayments, []);
   assert.equal(ledger.gasReserve.amountAtomic, '200');
+  assert.equal((await replay.describeCycle(cycleId)).supplementaryRealizedProceedsUsd.get(first.positionId).destinationUsd.amountMicroUsd, '20000000');
+  const custody = await projectPolicyCustody({ cycleRepository: replay, nativeAsset: asset, valueAmountUsd: async () => assert.fail('settled supplementary proceeds stay frozen') });
+  assert.equal(custody.realizedLossMicroUsd, '15000000');
+  assert.equal(custody.heldPositions.valueMicroUsd, '70000000');
   const secondDestination = `0x${'77'.repeat(32)}`;
   fixture.expected.transactionHash = secondDestination;
   fixture.receipt.transactionHash = secondDestination;

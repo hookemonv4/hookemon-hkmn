@@ -1,3 +1,4 @@
+import { createQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../../relay-client.mjs';
 import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
 import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import { assertQuoteUsable, DIRECTIONS, RELAY_CONSTANTS } from '../../relay-client.mjs';
@@ -129,6 +130,8 @@ function returnAttemptEnvelope(base, overrides = {}) {
     relayRequestId: base.relayRequestId,
     inputAmount: base.inputAmount,
     destinationAmount: base.destinationAmount,
+    destinationUsd: base.destinationUsd,
+    destinationUsdEvidence: base.destinationUsdEvidence,
     intent: base.intent,
     solanaInstructionPlan: base.solanaInstructionPlan,
     state: 'PREPARED',
@@ -200,6 +203,7 @@ export async function mutateSupplementaryReturn({
     assertReturnQuote(quote, configured, money);
     assertQuoteUsable({ quote, nowMs: now() });
     const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
+    const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: typedAmount(quote.destination), rounding: 'down', nowMs: now() });
     const solanaInstructionPlan = extractRelaySolanaInstructionPlan({ steps: execution.steps, requestId: quote.requestId });
     attempt = returnAttemptEnvelope({
       positionId: request.positionId,
@@ -209,6 +213,8 @@ export async function mutateSupplementaryReturn({
       relayRequestId: quote.requestId,
       inputAmount: typedAmount(quote.origin),
       destinationAmount: typedAmount(quote.destination),
+      destinationUsd,
+      destinationUsdEvidence: { ...readProcessQuoteUsdProvenance(destinationUsd), quote },
       intent: execution.intent,
       solanaInstructionPlan,
     });

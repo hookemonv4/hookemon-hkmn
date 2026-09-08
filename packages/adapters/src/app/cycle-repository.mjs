@@ -3007,6 +3007,23 @@ function assertCycleClosure(state) {
   }
 }
 
+function supplementaryValuationLeg(source) {
+  return { relayRequestId: source.relayRequestId, returnAttribution: { schema: 'hookemon.return-leg-attribution-context.v2',
+    intent: source.intent, destinationUsd: source.destinationUsd, destinationUsdEvidence: source.destinationUsdEvidence } };
+}
+function supplementaryRealizedProceeds(source, proof) {
+  if (!source?.destinationUsd || !source?.destinationUsdEvidence) return null;
+  validateNativeReturnValuation(supplementaryValuationLeg(source));
+  const usd = source.destinationUsd;
+  const settledAt = Number(proof.destinationFinality.timestampUnixSeconds) * 1000;
+  if (usd.amount?.chainId !== '4663' || usd.amount.assetId !== 'native' || usd.amount.decimals !== 18
+    || usd.amount.amountAtomic !== proof.observedAmountAtomic || usd.rounding !== 'down'
+    || usd.sourcePath !== 'details.currencyOut.amountUsd' || usd.quoteRequestId !== proof.relayRequestId
+    || !Number.isSafeInteger(settledAt) || settledAt < usd.observedAtMs || settledAt >= usd.validUntilMs) return null;
+  return { destinationUsd: structuredClone(usd), destinationUsdEvidence: structuredClone(source.destinationUsdEvidence),
+    relayRequestId: source.relayRequestId, intent: structuredClone(source.intent) };
+}
+
 function validateNativeReturnValuation(leg) {
   const attribution = leg.returnAttribution;
   if (attribution?.schema !== 'hookemon.return-leg-attribution-context.v2') throw new Error('native return requires frozen destination USD provenance');
@@ -3170,6 +3187,7 @@ export class CycleRepository {
     const returnLegLedgerKeys = new Map();
     const supplementarySettlements = new Map();
     const supplementarySettlementEvidence = new Map();
+    const supplementaryRealizedProceedsUsd = new Map();
     const payoutDustRecords = new Map();
     const payoutDustConsumptions = new Map();
     const payoutQuarantines = new Map();
@@ -3202,6 +3220,7 @@ export class CycleRepository {
       returnLegLedgerKeys,
       supplementarySettlements,
       supplementarySettlementEvidence,
+      supplementaryRealizedProceedsUsd,
       payoutDustRecords,
       payoutDustConsumptions,
       payoutQuarantines,
@@ -3746,7 +3765,7 @@ export class CycleRepository {
         heldPositions.set(position.positionId, position);
       } else if (entry.kind === 'supplementary-settlement-advanced') {
         const fields = entry.payload?.nextState === 'RETURN_BROADCAST'
-          ? ['positionId', 'expectedState', 'nextState', 'evidence', 'payoutSource']
+          ? ['positionId', 'expectedState', 'nextState', 'evidence', 'payoutSource', ...(Object.hasOwn(entry.payload, 'realizedProceedsUsd') ? ['realizedProceedsUsd'] : [])]
           : ['positionId', 'expectedState', 'nextState', 'evidence'];
         exactObject(entry.payload, fields, 'stored supplementary settlement advance');
         if (typeof entry.payload.positionId !== 'string' || !heldPositionIdPattern.test(entry.payload.positionId)) {
@@ -3803,6 +3822,12 @@ export class CycleRepository {
           }
         }
         if (returnBoundary !== null && admission?.schema === 'hookemon.policy-admission.v3') {
+          const realized = entry.payload.realizedProceedsUsd ?? null;
+          if (realized !== null) {
+            const expected = supplementaryRealizedProceeds(realized, returnBoundary.finalizedReturnEvidence.finalityEvidence);
+            if (canonicalJson(expected) !== canonicalJson(realized)) throw new Error('stored supplementary realized proceeds do not match payment evidence');
+            supplementaryRealizedProceedsUsd.set(entry.payload.positionId, realized);
+          }
           const ledger = supplementaryNativeReturnCustody({ custodyLedgers }, returnBoundary.finalizedReturnEvidence.amountAtomic);
           custodyLedgers.set(custodyLedgerKey(ledger), ledger);
         }
@@ -4033,6 +4058,7 @@ export class CycleRepository {
       returnLegLedgerKeys,
       supplementarySettlements,
       supplementarySettlementEvidence,
+      supplementaryRealizedProceedsUsd,
       payoutDustRecords,
       payoutDustConsumptions,
       payoutQuarantines,
@@ -5059,6 +5085,7 @@ export class CycleRepository {
     if (location.state.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native supplementary settlement refuses historical cycle resume');
     const current = location.state.supplementarySettlements.get(positionId);
     let nativeReturnReservations = [];
+    let realizedProceedsUsd = null;
     if (input.nextState === 'RETURN_BROADCAST') {
       const stage = `supplementary-${digest({ schema: 'hookemon.supplementary-return-stage.v1', positionId }).slice(7, 55)}`;
       const source = await this.#store.readPagedPayoutState(location.cycleId, stage);
@@ -5078,6 +5105,7 @@ export class CycleRepository {
         throw new Error('native supplementary return differs from its original position source and destination');
       }
       supplementaryNativeReturnCustody(location.state, proof.observedAmountAtomic);
+      realizedProceedsUsd = supplementaryRealizedProceeds(source, proof);
       const owner = { cycleId: location.cycleId, relayRequestId: source.relayRequestId, positionId };
       nativeReturnReservations = [
         { key: relayTransactionReservationKey('4663', proof.destinationTxHash), value: { ...owner, transactionHash: proof.destinationTxHash } },
@@ -5151,7 +5179,7 @@ export class CycleRepository {
         expectedState: input.expectedState,
         nextState: input.nextState,
         evidence,
-        ...(returnBoundary === null ? {} : { payoutSource }),
+        ...(returnBoundary === null ? {} : { payoutSource, realizedProceedsUsd }),
       }, {
         globalKeyReservations: nativeReturnReservations,
         assertState: state => {
@@ -6570,6 +6598,26 @@ export class CycleRepository {
     assertPagedPayoutStage(stage);
     if (!state || typeof state !== 'object' || Array.isArray(state)) {
       throw new Error('cycle-repository paged payout state must be an object');
+    }
+    if (state.schema === 'hookemon.supplementary-return-attempt.v2') {
+      if (state.cycleId !== cycleId || stage !== `supplementary-${digest({ schema: 'hookemon.supplementary-return-stage.v1', positionId: state.positionId }).slice(7, 55)}`) throw new Error('supplementary return must bind its exact position storage identity');
+      const settlement = (await this.#replay(cycleId)).supplementarySettlements.get(state.positionId);
+      if (!settlement || settlement.manifestId !== state.manifestId) throw new Error('supplementary return requires its original position manifest');
+      const previous = await this.#store.readPagedPayoutState(cycleId, stage);
+      if (previous?.rawSignedBytes && previous.rawSignedBytes !== state.rawSignedBytes) throw new Error('supplementary return signed source bytes are immutable');
+      const identityFields = ['positionId', 'cycleId', 'manifestId', 'requestDigest', 'relayRequestId', 'inputAmount', 'destinationAmount', 'intent', 'solanaInstructionPlan', 'destinationUsd', 'destinationUsdEvidence'];
+      if (previous) {
+        if (previous.schema !== state.schema || identityFields.some(key => canonicalJson(previous[key] ?? null) !== canonicalJson(state[key] ?? null))) {
+          throw new Error('supplementary return source, quote, and USD provenance are immutable');
+        }
+      } else {
+        validateNativeReturnValuation(supplementaryValuationLeg(state));
+        if (!isProcessQuoteUsdValuation(state.destinationUsd, { amount: state.destinationAmount, quoteRequestId: state.relayRequestId,
+          sourcePath: 'details.currencyOut.amountUsd', rounding: 'down' })
+          || this.#now() < state.destinationUsd.observedAtMs || this.#now() >= state.destinationUsd.validUntilMs) {
+          throw new Error('supplementary return preparation requires its original fresh USD producer capability');
+        }
+      }
     }
     await this.#store.persistPagedPayoutState(cycleId, stage, structuredClone(state));
     return structuredClone(state);

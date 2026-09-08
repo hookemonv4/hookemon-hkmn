@@ -911,6 +911,11 @@ export async function projectPolicyCustody({ cycleRepository, nativeAsset, value
           proceedsWei += BigInt(leg.netDeltaAtomic);
           proceedsUsd += parsePolicyAtomic(usd.amountMicroUsd, 'frozen realized USD proceeds');
         }
+        for (const realized of description.supplementaryRealizedProceedsUsd?.values?.() ?? []) {
+          const usd = realized.destinationUsd;
+          proceedsWei += parsePolicyAtomic(usd.amount.amountAtomic, 'frozen supplementary native proceeds');
+          proceedsUsd += parsePolicyAtomic(usd.amountMicroUsd, 'frozen supplementary USD proceeds');
+        }
         if (proceedsWei !== returned) valued = false;
         if (valued) {
           const committedCost = claimed === 0n ? 0n : parsePolicyAtomic(cost.amountMicroUsd, 'frozen committed USD cost');
