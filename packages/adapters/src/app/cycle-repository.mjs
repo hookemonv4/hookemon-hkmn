@@ -1,3 +1,4 @@
+import { assertPackPlanSnapshot, createPackPlanSnapshot } from '../../../runner/src/automation/pack-plan-snapshot.mjs';
 import { isProcessQuoteUsdValuation, readProcessQuoteUsdProvenance, relayQuoteDigest, parseQuoteResponse } from '../relay-client.mjs';
 import { requireLiveMutationAuthority, createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createHash } from 'node:crypto';
@@ -3269,6 +3270,7 @@ export class CycleRepository {
     let terminalAtMs = null;
     let releaseAmount = null;
     let admission = null;
+    let packPlanSnapshot = null;
     let nativeAdmissionProvenance = null;
     let mode = null;
     let providerMode = null;
@@ -3285,6 +3287,9 @@ export class CycleRepository {
       }
       if (entry.kind === 'cycle-opened') {
         if (releaseAmount !== null) throw new Error('stored cycle has a second cycle-opened event');
+        if (Object.hasOwn(entry.payload, 'packPlanSnapshot')) {
+          packPlanSnapshot = assertPackPlanSnapshot(entry.payload.packPlanSnapshot, { cycleId });
+        }
         assertReleaseAmount(entry.payload.releaseAmount);
         releaseAmount = entry.payload.releaseAmount;
         if (Object.hasOwn(entry.payload, 'admission')) {
@@ -4086,6 +4091,7 @@ export class CycleRepository {
       dryRun,
       rehearsalSessionId,
       admission,
+      packPlanSnapshot,
       stages,
       preparedStages,
       attempts,
@@ -4210,6 +4216,7 @@ export class CycleRepository {
         continue;
       }
       const profile = {
+        ...(state.packPlanSnapshot === null ? {} : { packPlanSnapshot: state.packPlanSnapshot }),
         ...(state.providerMode === null ? {} : { providerMode: state.providerMode }),
         ...(state.dryRun ? { dryRun: true } : {}),
         ...(state.rehearsalSessionId === null ? {} : { rehearsalSessionId: state.rehearsalSessionId }),
@@ -4254,7 +4261,7 @@ export class CycleRepository {
 
   async createCycle({
     releaseAmount, mode, providerMode = null, dryRun = false, rehearsalSessionId = null,
-    cycleId = null, admission = null, operations = null,
+    cycleId = null, admission = null, operations = null, packPlan,
   }) {
     assertReleaseAmount(releaseAmount);
     assertCycleMode(mode);
@@ -4264,6 +4271,9 @@ export class CycleRepository {
     const active = await this.readActiveCycle();
     if (active) throw new Error('cycle-repository createCycle: a cycle is already active');
     const openedCycleId = cycleId === null ? generateCycleId(this.#now()) : assertReservedCycleId(cycleId);
+    const packPlanSnapshot = packPlan === undefined
+      ? null
+      : createPackPlanSnapshot({ cycleId: openedCycleId, plan: packPlan });
     // The admission rides in `cycle-opened` itself rather than a following event. Replay already
     // refuses a second `cycle-opened`, so one atomic write makes the record immutable for the life
     // of the cycle: there is no window in which a cycle exists whose admission could still be
@@ -4295,12 +4305,14 @@ export class CycleRepository {
       ...(dryRun ? { dryRun: true } : {}),
       ...(rehearsalSessionId === null ? {} : { rehearsalSessionId }),
       ...(admitted === null ? {} : { admission: admitted }),
+      ...(packPlanSnapshot === null ? {} : { packPlanSnapshot }),
       ...(nativeAdmissionProvenance === null ? {} : { nativeAdmissionProvenance }),
       openedAtMs: this.#now(),
     });
     return {
       cycleId: openedCycleId, releaseAmount, mode, providerMode, dryRun, rehearsalSessionId,
       admission: (await this.#replay(openedCycleId)).admission,
+      ...(packPlanSnapshot === null ? {} : { packPlanSnapshot }),
     };
   }
 
