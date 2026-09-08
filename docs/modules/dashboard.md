@@ -170,3 +170,5 @@ not establish payment. Native cycle history retains the status-and-timestamp-onl
 Focused verification: `node --experimental-strip-types --test apps/web/tests/native-accounting.test.mjs`
 exercises projection, both public parser boundaries, the served comic dashboard, exact wei averages
 and parser parity. Historical contract and dashboard presentation tests exercise the old readers.
+
+Pack selection groups use native expandable sections, with Pokémon first, followed by One Piece, Sports, and other packs. Pokémon opens initially; each group orders packs by catalog price and code. Collapsing a section preserves selection.

@@ -35,6 +35,9 @@
     .message { min-height: 24px; margin-top: 12px; color: var(--muted); }
     .meta { display: grid; gap: 4px; margin-top: 8px; }
     button:disabled { opacity: .5; cursor: default; }
+    .pack-group { margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .pack-group summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+    .pack-group .grid { margin-top: 12px; }
     .pack-option { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
     .pack-option input { width: 22px; min-height: 22px; flex-shrink: 0; }
     .control-note { margin-top: 10px; font-size: 14px; }
@@ -69,7 +72,7 @@
       <section aria-labelledby="packsHeading">
         <h2 id="packsHeading">Pack selection</h2>
         <p>Select the packs for your repeating plan. The plan stays selected until you change it. Saving does not buy a pack or start a cycle.</p>
-        <div id="packList" class="grid two"></div>
+        <div id="packList"></div>
         <p id="packSummary" class="control-note" role="status"></p>
         <div class="controls"><button id="selectAllPacksBtn" type="button" disabled>Select all</button><button id="clearPacksBtn" type="button" disabled>Clear selection</button><button id="savePacksBtn" class="approve" type="button" disabled>Save pack selection</button></div>
         <p id="packMessage" class="message" role="status"></p>
@@ -209,12 +212,28 @@
         if (pack && typeof pack.code === 'string' && /^[a-z0-9][a-z0-9_-]{1,63}$/.test(pack.code)) machines.set(pack.code, pack);
       });
       savedPackIds.forEach(function (code) { if (!machines.has(code)) machines.set(code, { code: code, missing: true }); });
-      Array.from(machines.values()).sort(function (a, b) { return a.code.localeCompare(b.code); }).forEach(function (pack) {
+      function category(pack) {
+        var name = (pack.name || '') + ' ' + pack.code;
+        if (/pok[eé]mon|poke|charizard|snorlax/i.test(name)) return 'Pokémon';
+        if (/one.?piece|^onepiece_/i.test(name)) return 'One Piece';
+        if (/sports|basketball|baseball|football|soccer/i.test(name)) return 'Sports';
+        return 'Other packs';
+      }
+      var groups = new Map();
+      ['Pokémon', 'One Piece', 'Sports', 'Other packs'].forEach(function (name) {
+        var packs = Array.from(machines.values()).filter(function (pack) { return category(pack) === name; });
+        if (!packs.length) return;
+        var details = document.createElement('details'); details.className = 'pack-group'; details.open = name === 'Pokémon';
+        var summary = document.createElement('summary'); summary.textContent = name + ' (' + packs.length + ')';
+        var list = document.createElement('div'); list.className = 'grid two';
+        details.append(summary, list); target.appendChild(details); groups.set(name, list);
+      });
+      Array.from(machines.values()).sort(function (a, b) { return Number(a.price || 0) - Number(b.price || 0) || a.code.localeCompare(b.code); }).forEach(function (pack) {
         var label = document.createElement('label'); label.className = 'pack-option';
         var input = document.createElement('input'); input.type = 'checkbox'; input.value = pack.code; input.checked = savedPackIds.includes(pack.code);
         input.addEventListener('change', updatePackSelection); packInputs.push(input);
         var text = document.createElement('span'); text.textContent = (pack.name || pack.shortName || pack.code) + ' · ' + pack.code + (savedPackOrders.find(function (order) { return order.pack === pack.code && order.quantity > 1; }) ? ' · Quantity ' + savedPackOrders.find(function (order) { return order.pack === pack.code; }).quantity : '') + (pack.missing ? ' · Not in current catalog' : '');
-        label.append(input, text); target.appendChild(label);
+        label.append(input, text); groups.get(category(pack)).appendChild(label);
       });
       if (!machines.size) empty(target, packCatalogReady ? 'No packs were returned by the catalog.' : 'Pack catalog is not connected.');
       $('packMessage').textContent = !planAvailable ? 'This service does not expose a saved pack plan. Upgrade the service to edit it.' : (packCatalogReady ? '' : 'Selection cannot be saved until the catalog is available.');
