@@ -460,7 +460,7 @@ test('CI runs the Phase 1 runner proof; delivery-boundary runs only in the launc
   assert.match(launchGateWorkflow, /node scripts\/check-delivery-boundary\.mjs/);
 });
 
-test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the model label', () => {
+test('Gitleaks limits generic-api-key exceptions to reviewed public values and exact digests', () => {
   const allowedReceiptHashes = [
     'fe20fd72714625746bd59c7c1d14341496e2bad92ea36bba924cbe11c2c1d95a',
     '4cc79b69d493302b87044e768688b591fbc8418b538b884f3bc73de22480d1a2',
@@ -470,9 +470,11 @@ test('Gitleaks limits generic-api-key exceptions to known receipt hashes and the
   ];
 
   assert.equal((gitleaksConfig.match(/^\[\[rules\]\]$/gm) ?? []).length, 1);
-  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 15);
+  assert.equal((gitleaksConfig.match(/^\[\[rules\.allowlists\]\]$/gm) ?? []).length, 23);
   assert.equal((gitleaksConfig.match(/^regexTarget = "secret"$/gm) ?? []).length, 8);
-  assert.equal((gitleaksConfig.match(/^regexTarget = "line"$/gm) ?? []).length, 7);
+  assert.equal((gitleaksConfig.match(/^regexTarget = "match"$/gm) ?? []).length, 1);
+  assert.equal((gitleaksConfig.match(/^condition = "AND"$/gm) ?? []).length, 23);
+  assert.equal((gitleaksConfig.match(/^regexTarget = "line"$/gm) ?? []).length, 14);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/fixtures\/collector-crypt\/pack-status\\\.json/);
   assert.match(gitleaksConfig, /packages\/adapters\/test\/robinhood-rpc\\\.test\\\.mjs/);
   assert.match(gitleaksConfig, /docs\/modules\/collector-crypt-adapter\\\.md/);
