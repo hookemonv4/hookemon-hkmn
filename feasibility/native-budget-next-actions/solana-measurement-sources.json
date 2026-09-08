@@ -1,0 +1,44 @@
+[
+  {
+    "name": "solana-blockhash",
+    "method": "getLatestBlockhash",
+    "endpoint": "https://api.mainnet-beta.solana.com",
+    "observedAt": "2026-09-08T12:52:06.311Z",
+    "responseSha256": "a091b98fa6a04e24d5f3faba0a01f98452863bae5737fbd3065285c41a2786e1"
+  },
+  {
+    "name": "solana-return-message-fee",
+    "method": "getFeeForMessage",
+    "endpoint": "https://api.mainnet-beta.solana.com",
+    "observedAt": "2026-09-08T12:52:06.417Z",
+    "responseSha256": "d2efa36d3078a70abd0137f6046ca40dba2c836c7cd3da44f0fa855cd77b13e1"
+  },
+  {
+    "name": "solana-token-account-rent",
+    "method": "getMinimumBalanceForRentExemption",
+    "endpoint": "https://api.mainnet-beta.solana.com",
+    "observedAt": "2026-09-08T12:52:06.497Z",
+    "responseSha256": "40f99dee7e6977c243c857e8df152955ce06796c8ee40e910db17b6ae3e176b9"
+  },
+  {
+    "name": "solana-wallet-balance",
+    "method": "getBalance",
+    "endpoint": "https://api.mainnet-beta.solana.com",
+    "observedAt": "2026-09-08T12:52:06.629Z",
+    "responseSha256": "67d705d65b626932d93162349c716f557d7cd4e6846a10bc20f025a7990ab622"
+  },
+  {
+    "name": "solana-return-accounts",
+    "method": "getMultipleAccounts",
+    "endpoint": "https://api.mainnet-beta.solana.com",
+    "observedAt": "2026-09-08T12:52:06.800Z",
+    "responseSha256": "ff4da282115de46c32ea3ee30058cf745c907068c691d40a68a9060a450ae4b6"
+  },
+  {
+    "name": "solana-recent-priority-fees",
+    "method": "getRecentPrioritizationFees",
+    "endpoint": "https://api.mainnet-beta.solana.com",
+    "observedAt": "2026-09-08T12:52:06.888Z",
+    "responseSha256": "38c7b2a156cabb1c1b29fce8749fbf2102839af808b26ce5b925746a2227f4db"
+  }
+]

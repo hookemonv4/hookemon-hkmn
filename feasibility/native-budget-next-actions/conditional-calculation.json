@@ -1,0 +1,98 @@
+{
+  "status": "CONDITIONAL_NOT_APPROVED",
+  "allInBudgetProven": false,
+  "budgetMicroUsd": "250000000",
+  "baseCapitalWei": "60000000000000000",
+  "replacementMeasuredGas": "16924783",
+  "gasPriceSnapshotWei": "249274000",
+  "replacementGasCostWei": "4218908357542000",
+  "replacementGasCostAtOldMarkMicroUsdCeil": "10461032",
+  "conditionalSubtotalMicroUsd": "161735674",
+  "unmeasuredAllowanceMicroUsd": "88264326",
+  "incomeCreditMicroUsd": "0",
+  "doubleCountingRules": [
+    "Replace local deployment/wiring with archive route gas; do not add route to old total.",
+    "Fee diversion and outbound pack principal are already within initial ETH capital.",
+    "0.415ETH cumulative turnover is recycled .02ETH float, not additional funding.",
+    "Existing SOL marked footprint is counted once; actual acquisition cost remains unknown.",
+    "No future buyback proceeds are credited."
+  ],
+  "snapshotLimit": "Gas price and Relay valuation are retained historical observations. Archive route gas is measured against its pinned fixture, not a transaction estimate for proposed future addresses.",
+  "inputs": {
+    "feasibility/native-test-capital-20260908/calculation.json": "3f57510ae12951f7979094e079647d1e0f8c6c11d053d66e7049062a3da651ed",
+    "feasibility/native-preflight-candidate-20260908/gas-inventory.json": "e1beeea43fba10e4176d50258113b1c32dff0f31dacf4ed2fa58bb99d03731f2",
+    "feasibility/native-budget-next-actions/solana-return-accounts-response.json": "ff4da282115de46c32ea3ee30058cf745c907068c691d40a68a9060a450ae4b6",
+    "feasibility/native-budget-next-actions/outbound-estimate-response.json": "8503b71a0326f549fe4eb10857d572617739429a78b8f8dac919c36a0377aa62",
+    "feasibility/native-budget-next-actions/solana-token-account-rent-response.json": "40f99dee7e6977c243c857e8df152955ce06796c8ee40e910db17b6ae3e176b9",
+    "feasibility/native-budget-next-actions/evm-network-response.json": "42f620da6399dc4f5503661a5b914f7d4bdfaab47ddd70d004b17c1c22abc03b",
+    "feasibility/native-budget-next-actions/solana-return-message-fee-response.json": "d2efa36d3078a70abd0137f6046ca40dba2c836c7cd3da44f0fa855cd77b13e1",
+    "feasibility/native-budget-next-actions/relay-return-scenario-response.json": "84dcd9dd9952cc8c5a9dee0582f5a08acc41d4c2e6f51d3db43f52a592115245",
+    "feasibility/native-budget-next-actions/relay-outbound-response.json": "7036ba30243b970b1c8cbdbc8ddd29998e439f6dbf3dd2f8299336a61d81cd15",
+    "feasibility/native-budget-next-actions/solana-wallet-balance-response.json": "67d705d65b626932d93162349c716f557d7cd4e6846a10bc20f025a7990ab622",
+    "feasibility/native-budget-next-actions/solana-recent-priority-fees-response.json": "38c7b2a156cabb1c1b29fce8749fbf2102839af808b26ce5b925746a2227f4db",
+    "feasibility/native-budget-next-actions/solana-blockhash-response.json": "a091b98fa6a04e24d5f3faba0a01f98452863bae5737fbd3065285c41a2786e1"
+  },
+  "historicalReproductionMicroUsd": "161735674",
+  "refreshedSnapshot": {
+    "sourceObservation": "2026-09-08T12:14:21Z retained quotes/RPC; later finalized Solana observations have individual timestamps",
+    "ethValuationNumeratorMicroUsd": "25341638",
+    "ethValuationDenominatorWei": "10256741228105036",
+    "gasPriceWei": "247272000",
+    "rowsMicroUsdCeil": {
+      "initialEthCapital": "148243799",
+      "combinedMeasuredExecutionGas": "10340067",
+      "swapIntrinsicFloor": "410554",
+      "seedAndClaimIntrinsicFloor": "25660",
+      "outboundQuoteMaxFeeProduct": "28412",
+      "entireExistingSolCapitalFootprint": "2042080"
+    },
+    "conditionalSubtotalMicroUsd": "161090572",
+    "unmeasuredAllowanceMicroUsd": "88909428",
+    "allInBudgetProven": false,
+    "incomeCreditMicroUsd": "0",
+    "gasFloorsAreNotUpperBounds": true
+  },
+  "providerFeeInventory": {
+    "outboundGas": "32971",
+    "outboundMaxFeePerGasWei": "348773600",
+    "outboundMaxFeeProductWei": "11499414365600",
+    "outboundProviderGasEstimateWei": "7673019200000",
+    "outboundPrincipalWei": "10256741228105036",
+    "outboundRelayerWei": "119308632417274",
+    "returnScenarioInputUsdcAtoms": "25000000",
+    "returnScenarioGasEstimateLamports": "304691",
+    "returnRelayerUsdcAtoms": "64634",
+    "returnIncomeCreditMicroUsd": "0",
+    "rule": "Gas estimate and max-fee product are alternatives. Relayer gas/service are components of relayer total; relayer is inside quote principal. Return is a scenario, not buyback income."
+  },
+  "solanaMeasured": {
+    "messageFeeLamports": "5000",
+    "feeSlot": "445342887",
+    "requiredSignatures": "1",
+    "tokenAccountRentLamports": "1855569",
+    "missingAccountAddresses": [
+      "G4LdLyzDfq6DGt5Ha5C11WydKa2oJ5uNmkYyhLdsLBHo"
+    ],
+    "missingAccountCount": "1",
+    "existingWalletLamports": "19920066",
+    "existingWalletSlot": "445342888",
+    "messagePlusOneAccountRentLamports": "1860569",
+    "providerEstimatePlusOneAccountRentLamports": "2160260",
+    "remainingExistingSolAfterProviderEstimateAndRentLamports": "17759806",
+    "additionalSubtotalChargeMicroUsd": "0",
+    "rule": "Fee/rent spend down already counted SOL footprint; never add them again. getFeeForMessage is a fee observation, not simulation or transaction success. Account creation requires the actual selected path."
+  },
+  "freshOutboundFit": {
+    "measuredHistoricalProcessWei": "10378207486795709",
+    "quotedPrincipalWei": "10256741228105036",
+    "headroomWei": "121466258690673",
+    "historicalClaimWei": "10243579001330370",
+    "historicalClaimShortfallWei": "13162226774666",
+    "requiredFreshFirstClaimWei": "10256741228105036",
+    "freshClaimFractionOfMeasuredProcess": "0.9882960271467673330476207548",
+    "proposedUnapprovedClaimLimitWei": "15000000000000000",
+    "headroomBelowProposedClaimLimitWei": "4743258771894964",
+    "freshClaimFractionOfProposedLimit": "0.6837827485403357333333333333",
+    "rule": "Generated process capacity still covers this quote; the already measured historical claim amount does not. A fresh bounded claim/funding scenario must be measured, never assume historical claim pays a changed quote."
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "url": "https://rpc.mainnet.chain.robinhood.com",
+  "method": "eth_estimateGas",
+  "observedAt": "2026-09-08T12:54:37.746215+00:00",
+  "responseSha256": "8503b71a0326f549fe4eb10857d572617739429a78b8f8dac919c36a0377aa62",
+  "exitCode": 0,
+  "purpose": "Read-only estimate for actual captured provider calldata; no transaction submission."
+}
