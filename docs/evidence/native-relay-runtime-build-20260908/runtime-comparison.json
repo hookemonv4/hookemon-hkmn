@@ -1,0 +1,16 @@
+{
+  "programId": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+  "observationSlot": 445319652,
+  "accountLength": 394621,
+  "metadataLength": 45,
+  "runtimeLength": 394576,
+  "trimmedRuntimeLength": 387009,
+  "trailingZeroBytes": 7567,
+  "accountSha256": "e9a2015b0f5f16a8270ba91cce4eadae3f57198ed2bcb8ef43d19b9b07821e18",
+  "runtimeRegionSha256": "93a89aef6dd30e66f4cda6d3dafecddbfe58ecc98e5596dbc832feaf5eed9e91",
+  "solanaVerifyProgramHash": "01fd4b74bfecbbced90084938e458e4cf0373afeb4741402e0ca145ccec256d1",
+  "localExecutableHash": "01fd4b74bfecbbced90084938e458e4cf0373afeb4741402e0ca145ccec256d1",
+  "match": true,
+  "localExecutableLength": 387024,
+  "localExecutableRawSha256": "f8c1dbb74d6175113c9eb8659f5d28b86775b2c39d1f47a0ce51c21f7f5d1e60"
+}

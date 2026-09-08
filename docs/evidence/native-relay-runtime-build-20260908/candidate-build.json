@@ -1,0 +1,24 @@
+{
+  "command": [
+    "docker",
+    "--config",
+    "/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-relay-runtime-build-20260908/.session/relay-runtime/docker-public",
+    "--host",
+    "unix:///Users/kerim/.docker/run/docker.sock",
+    "run",
+    "--rm",
+    "--platform",
+    "linux/amd64",
+    "-v",
+    "/Users/kerim/Documents/ChatGPT/gacha/.worktrees/launch-repair/.worktrees/eth-relay-runtime-build-20260908/.session/relay-runtime/relay-depository-458a64c310a3504aaf37e112af9a8707c9eb11ad/packages/solana-vm:/build",
+    "-w",
+    "/build/programs/relay-depository",
+    "solanafoundation/solana-verifiable-build@sha256:ec2e20e1f80607150a71e4c72adfe64be24347ed0b4fb741c32b34eaf7549a25",
+    "bash",
+    "-c",
+    "rustc --version && solana --version && cargo build-sbf --version && cargo build-sbf -- --config 'registries.crates-io.protocol=\"sparse\"' --locked"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 113.498,
+  "compiled": true
+}
