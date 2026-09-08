@@ -1,7 +1,7 @@
 {
   "schema": "hookemon.cleanroom-recognition.v1",
   "requirementsRevision": 71,
-  "sourceRevision": "a5a747aa",
+  "sourceRevision": "15f6c0aa785589a9dcc4b28aa8deae3c317651bb",
   "auditPath": "docs/evidence/native-cleanroom-audit-20260908/findings.json",
   "auditSha256": "187ec57183501df3c733129603255c8b87bb63f274679acd4413cc7416dabd8c",
   "scope": "Exact reviewed bytes only; native economic terms, incidental full identifiers and unchanged official evidence. No runtime authority or privacy-rule exemption.",
@@ -1082,9 +1082,10 @@
       ]
     },
     "docs/modules/composition-root.md": {
-      "sha256": "d64ac3a5b00c8d759d809d9870c22f0b0434189a19a877dd40d9627364313b34",
+      "sha256": "ffa98387a35ee5e05f58fc3da80d5efa77b0d30202761b380bd67510c8913568",
       "matches": [
         {
+          "file": "docs/modules/composition-root.md",
           "rule": "historical-architecture",
           "offset": 31435,
           "length": 4,
@@ -1095,6 +1096,7 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+          "file": "docs/modules/composition-root.md",
           "rule": "historical-architecture",
           "offset": 32017,
           "length": 4,
@@ -1107,14 +1109,15 @@
       ]
     },
     "docs/modules/cycle-runner.md": {
-      "sha256": "e24327e7d609e2e4967771559fcc6ddfc9566159594b429852fe36c3e9c54ecd",
+      "sha256": "c08cc697ee119e371eee960754b9f4d45fc70553ebb4dafbc06c90f2f71b6d79",
       "matches": [
         {
+          "file": "docs/modules/cycle-runner.md",
           "rule": "historical-architecture",
-          "offset": 13283,
+          "offset": 13318,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 13283,
+          "tokenStart": 13318,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"
@@ -5872,9 +5875,10 @@
       ]
     },
     "packages/adapters/src/app/compose.mjs": {
-      "sha256": "f76bddb5ca4f9e4edabbae05bbeab550aef8e139f9130f3aa02aba1e1451bbe7",
+      "sha256": "2643e4762187a6476425972e7091fa5ff1d9a10e645d244af5ec84060f360293",
       "matches": [
         {
+          "file": "packages/adapters/src/app/compose.mjs",
           "rule": "historical-architecture",
           "offset": 6263,
           "length": 4,
@@ -5885,6 +5889,7 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+          "file": "packages/adapters/src/app/compose.mjs",
           "rule": "historical-architecture",
           "offset": 6869,
           "length": 4,
@@ -5895,21 +5900,23 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+          "file": "packages/adapters/src/app/compose.mjs",
           "rule": "historical-architecture",
-          "offset": 77114,
+          "offset": 77123,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 77097,
+          "tokenStart": 77106,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
         },
         {
+          "file": "packages/adapters/src/app/compose.mjs",
           "rule": "historical-architecture",
-          "offset": 84109,
+          "offset": 84118,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 84092,
+          "tokenStart": 84101,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
@@ -5947,9 +5954,10 @@
       ]
     },
     "packages/adapters/test/app/compose.test.mjs": {
-      "sha256": "b71a45e04bf5ad7dbbdf4af64d2dd601a504df1f8a50dca4ec8bd2319df70230",
+      "sha256": "b1039dedaa711eb112c67c6549ae876a3a87416fc62c3fcafb22851dcb83eb69",
       "matches": [
         {
+          "file": "packages/adapters/test/app/compose.test.mjs",
           "rule": "historical-architecture",
           "offset": 6869,
           "length": 4,
@@ -7190,6 +7198,70 @@
           "basis": "reviewed-native-71-or-retained-provider-source"
         }
       ]
+    },
+    "docs/evidence/native-archive-fork-20260908/observation.json": {
+      "sha256": "065c147e149948ba53f282f2557ca7c2237edccf5f319f8ab33710237f7fae90",
+      "matches": [
+        {
+          "file": "docs/evidence/native-archive-fork-20260908/observation.json",
+          "rule": "historical-repository",
+          "offset": 115,
+          "length": 13,
+          "sha256": "dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1",
+          "tokenStart": 115,
+          "tokenLength": 13,
+          "tokenSha256": "dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1",
+          "basis": "verified-current-repository-ci-observation-url"
+        }
+      ]
+    },
+    "packages/adapters/test/app/multi-pack-recovery.test.mjs": {
+      "sha256": "5f93a9e814c6f0076e53c95bddc5d336855a637b57231d91856011becbcea3a4",
+      "matches": [
+        {
+          "file": "packages/adapters/test/app/multi-pack-recovery.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 15221,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 15221,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-71-or-retained-provider-source"
+        }
+      ]
+    },
+    "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
+      "sha256": "030884d597c9ca6d0730ffcd83b64076ff008d0ceb524125befadb8e7b7c4ee6",
+      "matches": [
+        {
+          "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",
+          "rule": "historical-architecture",
+          "offset": 56706,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 56706,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-71-or-retained-provider-source"
+        }
+      ]
     }
+  },
+  "refresh": {
+    "priorManifestSha256": "e140a71d61108629cbeaaf9fbd273d7e6b190b2cef1361051909d1431495eb7f",
+    "reviewedRevision": "15f6c0aa785589a9dcc4b28aa8deae3c317651bb",
+    "relocatedFiles": [
+      "docs/modules/composition-root.md",
+      "docs/modules/cycle-runner.md",
+      "packages/adapters/src/app/compose.mjs",
+      "packages/adapters/test/app/compose.test.mjs"
+    ],
+    "addedFiles": [
+      "docs/evidence/native-archive-fork-20260908/observation.json",
+      "packages/adapters/test/app/multi-pack-recovery.test.mjs",
+      "packages/adapters/test/app/stages-collector-lifecycle.test.mjs"
+    ],
+    "justification": "Existing full-token/rule multiplicities remain identical in changed files. New contexts are two no-parity settlement-cost tests and one current repository CI run URL. No new private context is recognized."
   }
 }
