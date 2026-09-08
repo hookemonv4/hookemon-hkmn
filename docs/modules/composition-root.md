@@ -373,3 +373,5 @@ The policy valuation verifier accepts fresh Relay producer references or private
 Production native money configuration activates the admission planner and the finalized hook-liability reader through `assets.eth`. Hook native liability and capacity, never Operations wallet balance, bound the two independently fetched funding quotes and their USD producer capabilities.
 
 Synthetic production-shaped tests may inject a native payment binding only through its original test-branded reference and the exact test mutation authority. Cloned bindings and ordinary configuration still require the frozen release file. A native principal evidence failure holds an active cycle before its mutation boundary.
+
+Collector-only readiness requires `collectorCrypt.packFundingUsd`, a fresh producer valuation of the exact Solana USDC pack amount rounded up. Pack atoms are never USD policy limits. Explicit test mutation authority is also passed to the repository so its restored admission references remain usable in isolated production-shaped tests.

@@ -1,3 +1,4 @@
+import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { requireNativePaymentBinding, isTestNativePaymentBinding } from '../native-payment-proof.mjs';
 // The production composition root: wires the real scheduler (packages/runner/src/scheduler), the
 // real automation service (packages/runner/src/automation/automated-cycle-service.mjs), the durable
@@ -111,6 +112,18 @@ function collectorOnlyPackPrice(config) {
     throw new Error('live collector-only rehearsal requires a configured pack and typed positive pack price');
   }
   return amountAtomic;
+}
+
+export function collectorOnlyPackUsdCost(config) {
+  const amountAtomic = collectorOnlyPackPrice(config);
+  const price = config.collectorCrypt.packPrice, valuation = config.collectorCrypt.packFundingUsd;
+  const amount = { chainId: '792703809', assetId: price.assetId, decimals: price.decimals, amountAtomic };
+  const timestamp = (config.now ?? Date.now)();
+  if (!isProcessQuoteUsdValuation(valuation, { amount, rounding: 'up', sourcePath: 'details.currencyIn.amountUsd' })
+    || timestamp < valuation.observedAtMs || timestamp >= valuation.validUntilMs) {
+    throw new Error('collector-only policy requires fresh authenticated exact USDC purchase USD valuation');
+  }
+  return valuation.amountMicroUsd;
 }
 
 async function readPolicyConfiguration(statePath) {
@@ -1364,7 +1377,7 @@ export async function compose(config) {
     });
   }
 
-  const cycleRepository = await CycleRepository.open(join(config.stateDir, 'cycles'), now);
+  const cycleRepository = await CycleRepository.open(join(config.stateDir, 'cycles'), now, { testAuthority: resolved.preflightAuthority === createTestProfileMutationAuthority() ? resolved.preflightAuthority : null });
   assertCycleRepositoryInterface(cycleRepository);
   if (resolved.execution.profile === 'production') {
     // The owned reader closes over this private repository instance and the distinct archive
@@ -1411,6 +1424,7 @@ export async function compose(config) {
     assertCollectorOnlyRehearsalPolicy(configuration, {
       packCode: resolved.pack.code,
       packPriceAtomic: collectorOnlyPackPrice(resolved),
+      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
     });
     return configuration;
   }
@@ -1564,6 +1578,7 @@ export async function compose(config) {
         assertCollectorOnlyRehearsalPolicy(configuration, {
           packCode: resolved.pack.code,
           packPriceAtomic: collectorOnlyPackPrice(resolved),
+      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
         });
       }
     }
