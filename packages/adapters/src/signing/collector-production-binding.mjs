@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 import { assertCollectorPurchaseBindingV1 } from './collector-purchase-policy.mjs';
 import { assertCollectorBuybackBindingV1 } from './collector-buyback-policy.mjs';
+import { assertCollectorLiveBindingEntry as assertLiveEntry } from './collector-live-anchors.mjs';
+
+function assertCollectorLiveBindingEntry(entry, options) {
+  try { return assertLiveEntry(entry, options); } catch (error) { throw new CollectorProductionBindingError(error.message); }
+}
 
 export const COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA = 'hookemon.collector-production-binding-registry.v1';
 export const COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA = 'hookemon.collector-production-binding-entry.v1';
@@ -16,7 +21,7 @@ export const COLLECTOR_PRODUCTION_BINDING_ENTRY_VERSION = 1;
 /** The only authority ever entitled to gate a real operator broadcast. No entry using this
  * identity is approved anywhere in this repository, and none exists that is independently pinned
  * outside the bytes it would gate. Both `loadCollectorProductionBindingRegistry` and
- * `resolveCollectorProductionBinding` refuse this identity unconditionally: a caller cannot supply
+ * `resolveCollectorProductionBinding` require independently authenticated release anchors for this identity: a caller cannot supply
  * live authority beside its own bytes and recompute a matching digest, because that only proves
  * self-consistency, never independent approval. This constant exists so the refusal, and any future
  * separately pinned live-authority mechanism, has a single named identity to refer to -- it grants
@@ -156,10 +161,9 @@ function parseRegistryInput(registryInput) {
  * exactly the way `assertCollectorPurchaseBindingV1`/`assertCollectorBuybackBindingV1` already
  * require from any other caller -- this loader adds no alternate trust path.
  *
- * An entry declaring `COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE` refuses to load at all: proving
+ * An entry declaring `COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE` requires a frozen release anchor: proving
  * that bytes match a digest supplied beside those same bytes is only self-consistency, never
- * independent approval, and no separate live-authority pinning mechanism exists in this codebase to
- * check against instead. `resolveCollectorProductionBinding` refuses that authority unconditionally
+ * independent approval, and only the module-owned authenticated release manifest can establish approval. `resolveCollectorProductionBinding` rechecks that anchor
  * too, so this is not deferred to a resolve-time check a mutated registry object could bypass.
  */
 export function loadCollectorProductionBindingRegistry(registryInput) {
@@ -180,14 +184,12 @@ export function loadCollectorProductionBindingRegistry(registryInput) {
     if (entry.schema !== COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA) fail(`${label}.schema is invalid`);
     if (entry.version !== COLLECTOR_PRODUCTION_BINDING_ENTRY_VERSION) fail(`${label}.version is invalid`);
     if (!REGISTRY_AUTHORITIES.includes(entry.authority)) fail(`${label}.authority is invalid`);
-    // No independently pinned live-authority mechanism exists outside this same JSON payload, so a
+    // An independently pinned release manifest is mandatory: a
     // caller cannot grant itself live authority by choosing bytes, recomputing expectedDigest to
     // match them, and labeling the result "live" -- that only proves internal consistency. Refuse
-    // unconditionally at load time rather than deferring to a resolve-time check that a mutated or
-    // substituted registry object could bypass.
-    if (entry.authority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE) {
-      fail(`${label}.authority "live" is never approved: no independently pinned live entry exists in this codebase`);
-    }
+    // at load time unless the exact release anchor approves it; resolve time repeats that check.
+    const releaseIdentity = entry.authority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE
+      ? assertCollectorLiveBindingEntry(entry) : null;
     if (!REGISTRY_STAGES.includes(entry.stage)) fail(`${label}.stage is invalid`);
     if (entry.chainId !== 'solana-mainnet') fail(`${label}.chainId is invalid`);
     if (entry.provider !== 'collector-crypt') fail(`${label}.provider is invalid`);
@@ -206,6 +208,7 @@ export function loadCollectorProductionBindingRegistry(registryInput) {
       provider: entry.provider,
       expectedDigest: entry.expectedDigest,
       binding,
+      ...(releaseIdentity === null ? {} : { releaseIdentity }),
     });
   });
 
@@ -562,12 +565,18 @@ export function resolveCollectorProductionBinding({ registry, authority, stage, 
   plainObject(registry, 'Collector production binding registry');
   if (!REGISTRY_AUTHORITIES.includes(authority)) fail('Collector production binding authority is invalid');
   if (!REGISTRY_STAGES.includes(stage)) fail('Collector production binding stage is invalid');
-  // Defense-in-depth against `loadCollectorProductionBindingRegistry`'s own load-time refusal: even
+  // Defense-in-depth after the load-time anchor check: even
   // a registry object built or mutated some other way can never resolve live authority through this
-  // function. No separately pinned live-authority mechanism exists to check against instead, so this
-  // is an unconditional refusal, not a placeholder for one.
+  // function without matching the independently authenticated frozen release again.
   if (authority === COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE) {
-    fail('Collector production binding live authority is never approved: no independently pinned live entry exists in this codebase');
+    if (config?.signer?.keychain?.isolatedChildSetup !== undefined) {
+      fail('live authority refuses a synthetic isolated child context');
+    }
+    const entry = registry.entries.find(candidate => candidate.authority === authority && candidate.stage === stage);
+    if (!entry) fail('no live entry is registered for this stage');
+    assertCollectorLiveBindingEntry(entry, { loaded: true });
+    const binding = STAGE_BINDING_VALIDATORS[stage](entry.binding, entry.expectedDigest);
+    return Object.freeze({ binding, expectedDigest: entry.expectedDigest });
   }
   assertCollectorOfflineExecutionBoundary(config);
   const entry = registry.entries.find(candidate => candidate.authority === authority && candidate.stage === stage);

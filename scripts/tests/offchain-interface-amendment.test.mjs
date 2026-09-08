@@ -51,3 +51,27 @@ test('offchain amendment cannot rebind its historical projection anchor', t => {
   change(root, 'feasibility/interface-freeze.json', value => { value.offchainAmendment.sha256 = hash(root, amendmentPath); });
   assert.throws(() => validate(root), /historical projection anchor mismatch/);
 });
+
+test('explicit revision-70 approval preserves historical contract proof', t => {
+  const result = validate(fixture(t));
+  assert.equal(result.requirementsRevision, 65);
+  assert.equal(result.architectureRevision, 9);
+  assert.equal(result.productionReady, false);
+});
+test('revision-69 amendment refuses the earlier paused approval path', t => {
+  const root = fixture(t);
+  change(root, amendmentPath, value => {
+    value.ownerApprovalHashes['decisions/owner-approvals/revision-69-spec-s5-approved.json'] = value.ownerApprovalHashes['decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json'];
+    delete value.ownerApprovalHashes['decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json'];
+  });
+  change(root, 'feasibility/interface-freeze.json', value => { value.offchainAmendment.sha256 = hash(root, amendmentPath); });
+  assert.throws(() => validate(root), /offchain approval paths/);
+});
+test('revision-70 approval must bind the actual current spec even after hash rebinding', t => {
+  const root = fixture(t);
+  const approval = 'decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json';
+  change(root, approval, value => { value.subjectHashes['specs/requirements.json'] = '5b440ee917a60b5626a88f90f6608e1d653b583f1462f5f5aaebba2120b13cae'; });
+  change(root, amendmentPath, value => { value.ownerApprovalHashes[approval] = hash(root, approval); });
+  change(root, 'feasibility/interface-freeze.json', value => { value.offchainAmendment.sha256 = hash(root, amendmentPath); });
+  assert.throws(() => validate(root), /current spec is not owner approved/);
+});

@@ -453,11 +453,11 @@ test('two genuinely separate Node processes reopen the same fixture directory an
   assert.equal(first.command, sharedSetup.command, 'this reopens the exact same on-disk wrapper this file\'s own shared setup already established');
 });
 
-test('readEnvironment refuses HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY set to anything but synthetic-offline', async t => {
+test('readEnvironment refuses HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY set to live without frozen release approval', async t => {
   const stateDir = await tempStateDir(t);
   assert.throws(
     () => readEnvironment(isolatedProductionEnvironment(stateDir, { registryPath: '/tmp/unused.json', overrides: { HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY: 'live' } }), { profile: 'production' }),
-    /no live authority is ever accepted here/,
+    /release authority is not pinned/,
   );
 });
 

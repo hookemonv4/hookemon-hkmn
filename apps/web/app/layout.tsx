@@ -29,10 +29,10 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: "Hookemon",
       images: [
         {
-          url: "/hookemon-banner.jpeg",
-          width: 1500,
-          height: 500,
-          alt: "Hookemon logo in yellow, blue and pink",
+          url: "/hookemon-robinhood-share.png",
+          width: 1270,
+          height: 711,
+          alt: "Hookemon on Robinhood Chain above a mountain landscape",
         },
       ],
     },
@@ -40,7 +40,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title: "Hookemon: The cycle never stops.",
       description: "We open Collector Crypt gacha packs, sell the cards and share the proceeds with HKMN holders.",
-      images: ["/hookemon-banner.jpeg"],
+      images: ["/hookemon-robinhood-share.png"],
     },
   };
 }

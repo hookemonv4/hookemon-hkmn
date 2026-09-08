@@ -245,7 +245,7 @@ test('resolves the synthetic-offline buyback binding under a fully satisfied off
   assert.equal(resolved.binding.schema, COLLECTOR_BUYBACK_BINDING_SCHEMA);
 });
 
-test('refuses live authority resolution unconditionally even against a hand-built registry object', () => {
+test('refuses unapproved live authority resolution even against a hand-built registry object', () => {
   const registry = { schema: COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA, version: 1, entries: [{ authority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE, stage: 'purchase', chainId: 'solana-mainnet', provider: 'collector-crypt', expectedDigest: digest(PURCHASE_BINDING), binding: PURCHASE_BINDING }] };
   assert.throws(
     () => resolveCollectorProductionBinding({ registry, authority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE, stage: 'purchase', config: offlineConfig({ collectorCrypt: { productionBindingAuthority: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE } }) }),
