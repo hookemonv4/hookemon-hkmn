@@ -189,7 +189,14 @@ export function transitionProviderMutationAttempt(value, nextState, evidence = {
 }
 
 function assertChainSigningMaterial(value, label) {
-  assertNonEmptyString(value.rawBytes, `${label} rawBytes`);
+  if (value.blockhash !== null) {
+    const bytes = typeof value.rawBytes === 'string' && value.rawBytes.length <= 1644 ? Buffer.from(value.rawBytes, 'base64') : null;
+    if (!bytes || bytes.length === 0 || bytes.length > 1232 || bytes.toString('base64') !== value.rawBytes) {
+      throw new Error(`${label} rawBytes must be canonical Solana base64 within 1232 wire bytes`);
+    }
+  } else {
+    assertNonEmptyString(value.rawBytes, `${label} rawBytes`);
+  }
   if ((value.nonce === null) === (value.blockhash === null)) throw new Error(`${label} requires exactly one nonce or blockhash`);
   if (value.nonce !== null) assertAtomic(value.nonce, `${label} nonce`);
   if (value.blockhash !== null) assertNonEmptyString(value.blockhash, `${label} blockhash`);
