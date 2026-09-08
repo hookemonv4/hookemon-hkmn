@@ -1390,7 +1390,7 @@ export async function compose(config) {
   const readConfiguration = () => readPolicyConfiguration(resolved.statePath);
   const readCustody = buildPolicyCustodyReader({ config: resolved, cycleRepository, relay: adapters.relay });
   const policyEngine = createPolicyEngine({
-    verifyQuoteUsdValuation: isProcessQuoteUsdValuation,
+    verifyQuoteUsdValuation: (value, expected) => isProcessQuoteUsdValuation(value, expected) || cycleRepository.isDurableQuoteUsdValuation(value, expected),
     now,
     readConfiguration,
     readCustody,

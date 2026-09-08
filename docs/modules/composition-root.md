@@ -367,3 +367,5 @@ positive millisecond input; absence grants no valuation capability. Historical p
 environment names are refused. Public accounting receives the configured Operations address and
 exact `4663/native/18` identity as trusted payout context. Operator USD limits and native principal
 remain separate throughout configuration and projection.
+
+The policy valuation verifier accepts fresh Relay producer references or private references restored by the configured cycle repository under its original admission authority and expiry. Plain persisted valuation objects alone confer no new-risk authority.

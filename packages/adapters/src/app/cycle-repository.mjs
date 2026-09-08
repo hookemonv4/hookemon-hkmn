@@ -1,3 +1,5 @@
+import { isProcessQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../relay-client.mjs';
+import { requireLiveMutationAuthority, createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createHash } from 'node:crypto';
 import { isProcessNativePaymentProof } from '../native-payment-proof.mjs';
 // The durable authority for one operational cycle. `compose.mjs` injects this same instance into
@@ -3005,26 +3007,73 @@ function assertCycleClosure(state) {
   }
 }
 
+function validateNativeAdmissionProvenance(provenance, admission, cycleId) {
+  exactObject(provenance, ['schema', 'cycleId', 'authority', 'admissionDigest', 'unit', 'aggregate'], 'native admission provenance');
+  if (provenance.schema !== 'hookemon.native-admission-provenance.v1' || provenance.cycleId !== cycleId
+    || provenance.admissionDigest !== digest(admission)) throw new Error('native admission provenance differs from its immutable cycle admission');
+  for (const [key, field, quoteField] of [['unit', 'unitFundingUsd', 'unitRelayQuote'], ['aggregate', 'aggregateFundingUsd', 'relayQuote']]) {
+    const evidence = provenance[key], value = admission[field], quote = admission[quoteField];
+    exactObject(evidence, ['request', 'rawDigest', 'valuationDigest'], 'native valuation provenance');
+    if (evidence.valuationDigest !== digest(value) || evidence.rawDigest !== digest(quote.raw)
+      || digest(evidence.request) !== value.requestDigest || quote.quoteDigest !== value.quoteDigest
+      || quote.requestId !== value.quoteRequestId) throw new Error('native valuation provenance request or response mismatch');
+  }
+  return provenance;
+}
+
 export class CycleRepository {
   #store;
   #now;
+  #testAuthority;
+  #durableValuations = new WeakMap();
 
-  constructor(guard, store, now) {
+  constructor(guard, store, now, testAuthority = null) {
     if (guard !== CycleRepository) throw new Error('CycleRepository must be constructed with CycleRepository.open(directory)');
     this.#store = store;
     this.#now = now;
+    this.#testAuthority = testAuthority;
   }
 
   /** @param {string} directory absolute path @param {() => number} [now] */
-  static async open(directory, now = () => Date.now()) {
+  static async open(directory, now = () => Date.now(), { testAuthority = null } = {}) {
+    if (testAuthority !== null && testAuthority !== createTestProfileMutationAuthority()) throw new Error('repository test authority must be the explicit process test profile');
     const persistedRecovery = await readStateDirectoryRecoveryHold(directory);
     if (persistedRecovery !== null) return createStateDirectoryRecoveryRepository(persistedRecovery);
     try {
       const store = await DurableCycleStore.open(directory);
-      return new CycleRepository(CycleRepository, store, now);
+      return new CycleRepository(CycleRepository, store, now, testAuthority);
     } catch (error) {
       if (!(error instanceof StateDirectoryLossError)) throw error;
       return createStateDirectoryRecoveryRepository(await persistStateDirectoryRecoveryHold(error.recovery, now));
+    }
+  }
+
+  #valuationAuthority() {
+    if (this.#testAuthority !== null) return this.#testAuthority;
+    const authority = requireLiveMutationAuthority();
+    if (authority.requirementsRevision !== 71) throw new Error('native valuation requires revision 71 authority');
+    return authority;
+  }
+
+  isDurableQuoteUsdValuation(value, expected = {}) {
+    const record = value && this.#durableValuations.get(value);
+    if (!record) return false;
+    try {
+      return digest(record.authority) === digest(this.#valuationAuthority()) && digest(value) === record.digest
+        && this.#now() >= value.observedAtMs && this.#now() < value.validUntilMs
+        && Object.entries(expected).every(([key, wanted]) => digest(value[key]) === digest(wanted));
+    } catch { return false; }
+  }
+
+  #restoreAdmissionValuations(admission, provenance) {
+    if (!admission || !provenance) return;
+    let authority;
+    try { authority = this.#valuationAuthority(); } catch { return; }
+    if (digest(authority) !== digest(provenance.authority)) return;
+    for (const field of ['unitFundingUsd', 'aggregateFundingUsd']) {
+      const value = admission[field];
+      if (this.#now() < value.observedAtMs || this.#now() >= value.validUntilMs) continue;
+      this.#durableValuations.set(value, { authority, digest: digest(value) });
     }
   }
 
@@ -3153,6 +3202,7 @@ export class CycleRepository {
     let terminalAtMs = null;
     let releaseAmount = null;
     let admission = null;
+    let nativeAdmissionProvenance = null;
     let mode = null;
     let providerMode = null;
     let dryRun = false;
@@ -3176,6 +3226,7 @@ export class CycleRepository {
           // stored admission certify its own accounts and assets, which is exactly the check this
           // is here to perform.
           admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, null, 'stored cycle admission', { historicalRead: true });
+          if (entry.payload.nativeAdmissionProvenance !== undefined) nativeAdmissionProvenance = validateNativeAdmissionProvenance(entry.payload.nativeAdmissionProvenance, admission, cycleId);
         }
         if (Object.hasOwn(entry.payload, 'mode')) {
           mode = assertCycleMode(entry.payload.mode, 'stored cycle mode');
@@ -3936,6 +3987,7 @@ export class CycleRepository {
         terminalAtMs = assertOptionalTerminalAtMs(entry.payload.completedAtMs, 'stored cycle-completed event');
       }
     }
+    this.#restoreAdmissionValuations(admission, nativeAdmissionProvenance);
     return {
       cycleId,
       releaseAmount,
@@ -4131,6 +4183,20 @@ export class CycleRepository {
     if (admitted !== null && admitted.aggregateFundingQuote.amountAtomic !== releaseAmount) {
       throw new Error('cycle-repository createCycle: release amount does not equal the admitted aggregate funding quote');
     }
+    let nativeAdmissionProvenance = null;
+    if (admitted?.schema === 'hookemon.policy-admission.v3') {
+      for (const [field, amount, quote] of [['unitFundingUsd', 'unitFundingQuote', 'unitRelay'], ['aggregateFundingUsd', 'aggregateFundingQuote', 'relay']]) {
+        const value = admission[field];
+        if (!isProcessQuoteUsdValuation(value, { amount: admitted[amount], quoteDigest: admitted[quote].quoteDigest,
+          quoteRequestId: admitted[quote].requestId, sourcePath: 'details.currencyIn.amountUsd', rounding: 'up' })
+          || this.#now() < value.observedAtMs || this.#now() >= value.validUntilMs) {
+          throw new Error('native cycle creation requires fresh original producer valuation capabilities');
+        }
+      }
+      nativeAdmissionProvenance = validateNativeAdmissionProvenance({ schema: 'hookemon.native-admission-provenance.v1', cycleId: openedCycleId,
+        authority: this.#valuationAuthority(), admissionDigest: digest(admitted),
+        unit: readProcessQuoteUsdProvenance(admission.unitFundingUsd), aggregate: readProcessQuoteUsdProvenance(admission.aggregateFundingUsd) }, admitted, openedCycleId);
+    }
     await this.#append(openedCycleId, 'cycle-opened', {
       releaseAmount,
       mode,
@@ -4138,11 +4204,12 @@ export class CycleRepository {
       ...(dryRun ? { dryRun: true } : {}),
       ...(rehearsalSessionId === null ? {} : { rehearsalSessionId }),
       ...(admitted === null ? {} : { admission: admitted }),
+      ...(nativeAdmissionProvenance === null ? {} : { nativeAdmissionProvenance }),
       openedAtMs: this.#now(),
     });
     return {
       cycleId: openedCycleId, releaseAmount, mode, providerMode, dryRun, rehearsalSessionId,
-      admission: admitted,
+      admission: (await this.#replay(openedCycleId)).admission,
     };
   }
 

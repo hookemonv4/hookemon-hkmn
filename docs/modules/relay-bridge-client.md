@@ -374,3 +374,5 @@ matching event data from a different receipt cannot establish inclusion.
 and receipt for gas accounting, including reverts. It never grants native payment authority.
 Gas costs must fit the signed gas and fee bounds and enter custody through the same unique-hash
 accounting helper as successful payments.
+
+`readProcessQuoteUsdProvenance` exposes the retained request and response digest only for an original USD valuation capability. It does not issue capabilities from persisted JSON. Durable reauthentication belongs to the cycle repository.

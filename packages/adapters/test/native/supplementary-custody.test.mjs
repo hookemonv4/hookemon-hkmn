@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { OPERATIONAL_CYCLE_STAGES, CUSTODY_LEDGER_BUCKETS } from '../../../runner/src/cycle/money-schemas.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 import { readReturnLegDestinationProof } from '../../src/app/stages/return.mjs';
-import { nativeAdmissionFixture } from './admission-fixture.mjs';
+import { nativeProducedAdmissionFixture } from './admission-fixture.mjs';
 import { setup } from './relay-native-proof-fixture.mjs';
 async function repositoryFixture(t, id = 'synthetic-supplementary') {
   const path = await mkdtemp(join(tmpdir(), 'native-supplementary-')); t.after(() => rm(path, { recursive: true, force: true }));
-  const repository = await CycleRepository.open(path, () => 1_700_000_000_000);
-  await repository.createCycle({ cycleId: id, releaseAmount: '42', mode: 'production', admission: nativeAdmissionFixture(id) });
+  const repository = await CycleRepository.open(path, () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  await repository.createCycle({ cycleId: id, releaseAmount: '42', mode: 'production', admission: await nativeProducedAdmissionFixture(id) });
   return { repository, path, cycleId: id };
 }
 async function positionFor(repository, cycleId, index = 0) {
@@ -54,7 +55,7 @@ test('held native positions retain USD cost without principal and consume an att
   await assert.rejects(repository.advanceSupplementarySettlement(first.positionId, { expectedState: 'BUYBACK_SENT_UNKNOWN', nextState: 'RETURN_BROADCAST', evidence: structuredClone(evidence) }), /process payment proof/);
   const result = await repository.advanceSupplementarySettlement(first.positionId, { expectedState: 'BUYBACK_SENT_UNKNOWN', nextState: 'RETURN_BROADCAST', evidence });
   assert.equal(result.state, 'RETURN_BROADCAST');
-  const replay = await CycleRepository.open(path, () => 1_700_000_000_000);
+  const replay = await CycleRepository.open(path, () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
   assert.deepEqual(await replay.readSupplementarySettlement(first.positionId), result);
   const ledger = [...(await replay.describeCycle(cycleId)).custodyLedgers.values()][0];
   assert.equal(ledger.returnReceived, '42');

@@ -829,7 +829,7 @@ export function createRelayClient({
     const observedAtMs = now();
     invariant(Number.isSafeInteger(observedAtMs) && observedAtMs >= 0, RelayAdapterError, 'invalid quote observation clock');
     fetchedQuotes.set(parsedQuote, Object.freeze({
-      requestDigest: digest(body), rawDigest: digest(raw), observedAtMs,
+      request: structuredClone(body), requestDigest: digest(body), rawDigest: digest(raw), observedAtMs,
       validUntilMs: quoteValidityMs === null ? null : Math.min(observedAtMs + quoteValidityMs, parsedQuote.deadlineUnixSeconds * 1000),
     }));
     return parsedQuote;
@@ -1099,11 +1099,18 @@ export function createQuoteUsdValuation({ quote, side, amount, requestDigest, ro
   const value = Object.freeze({ schema: 'hookemon.quote-usd-valuation.v1', quoteDigest: quote.quoteDigest,
     requestDigest: observed.requestDigest, quoteRequestId: quote.requestId, sourcePath, amount: Object.freeze({ ...amount }),
     amountMicroUsd: micro.toString(), rounding, observedAtMs: observed.observedAtMs, validUntilMs: observed.validUntilMs });
-  usdValuations.set(value, value);
+  usdValuations.set(value, { value, request: structuredClone(observed.request), rawDigest: observed.rawDigest });
   return value;
 }
 
 export function isProcessQuoteUsdValuation(value, expected = {}) {
   if (!value || !usdValuations.has(value)) return false;
   return Object.entries(expected).every(([key, wanted]) => Object.hasOwn(value, key) && digest(value[key]) === digest(wanted));
+}
+
+/** Read evidence only from a producer capability; this never issues authority from JSON. */
+export function readProcessQuoteUsdProvenance(value) {
+  const evidence = usdValuations.get(value);
+  if (!evidence || digest(evidence.value) !== digest(value)) throw new RelayAdapterError('USD provenance requires the original producer capability');
+  return { request: structuredClone(evidence.request), rawDigest: evidence.rawDigest, valuationDigest: digest(value) };
 }
