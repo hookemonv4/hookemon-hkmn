@@ -12,8 +12,8 @@ Operator configuration v4 uses `MicroUsd` controls and ledgers. Policy admission
 
 ## Invariants
 
-- Funding identity is 4663/native/18. The wire adapters alone use the zero address; Solana settlement retains its configured USDC mint and six decimals.
-- The 55/165/495 USD unit, cycle and trailing-day outer rails remain fixed, with tighter owner caps. USD amounts use canonical integer micro-USD strings and never become transferable amounts. There is no ETH/USD or USDC/USD parity assumption.
+- Funding identity is 4663/native/18. The wire adapters alone use the zero address; Solana settlement retains its configured settlement token mint and six decimals.
+- The 55/165/495 USD unit, cycle and trailing-day outer rails remain fixed, with tighter owner caps. USD amounts use canonical integer micro-USD strings and never become transferable amounts. There is no ETH/USD or settlement token/USD parity assumption.
 - Every new claim and purchase requires producer-authenticated, current, exact-amount cost valuations with upward rounding. Persisted JSON preserves evidence and cost basis but cannot authenticate a new risk decision. Unit and aggregate quotes remain independent.
 - A reservation records the aggregate USD cost once. Retries keep that cost and the original timestamp; the current per-cycle custody exposure offsets only the reserved cost already represented in aggregate risk. Unknown retry exposure refuses admission. Per-cycle exposure cannot exceed total custody.
 - Held positions retain attributed purchase cost. Their outer limits remain ten positions and 5,000 USD; owner controls may tighten both. Insured or market value cannot replace purchase cost.

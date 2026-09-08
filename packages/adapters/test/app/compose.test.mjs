@@ -161,7 +161,7 @@ function collectorOnlyMoneyConfiguration() {
   };
 }
 
-// Exact fetched 25-USDC quote valued at USD 21; the fixture deliberately assumes no parity.
+// Exact fetched 25-settlement token quote valued at USD 21; the fixture deliberately assumes no parity.
 async function collectorPackFundingUsd(operator) {
   const zero = `0x${'0'.repeat(40)}`;
   const client = createRelayClient({ now: () => 1_000, quoteValidityMs: 60_000,

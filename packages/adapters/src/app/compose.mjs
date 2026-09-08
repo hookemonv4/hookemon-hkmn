@@ -115,14 +115,14 @@ function collectorOnlyPackPrice(config) {
   return amountAtomic;
 }
 
-export function collectorOnlyPackUsdCost(config) {
+export function collectorOnlyPackCostMicroUsd(config) {
   const amountAtomic = collectorOnlyPackPrice(config);
   const price = config.collectorCrypt.packPrice, valuation = config.collectorCrypt.packFundingUsd;
   const amount = { chainId: '792703809', assetId: price.assetId, decimals: price.decimals, amountAtomic };
   const timestamp = (config.now ?? Date.now)();
   if (!isProcessQuoteUsdValuation(valuation, { amount, rounding: 'up', sourcePath: 'details.currencyIn.amountUsd' })
     || timestamp < valuation.observedAtMs || timestamp >= valuation.validUntilMs) {
-    throw new Error('collector-only policy requires fresh authenticated exact USDC purchase USD valuation');
+    throw new Error('collector-only policy requires fresh authenticated exact settlement token purchase USD valuation');
   }
   return valuation.amountMicroUsd;
 }
@@ -1491,7 +1491,7 @@ export async function compose(config) {
     assertCollectorOnlyRehearsalPolicy(configuration, {
       packCode: resolved.pack.code,
       packPriceAtomic: collectorOnlyPackPrice(resolved),
-      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
+      packCostMicroUsd: collectorOnlyPackCostMicroUsd(resolved),
     });
     return configuration;
   }
@@ -1645,7 +1645,7 @@ export async function compose(config) {
         assertCollectorOnlyRehearsalPolicy(configuration, {
           packCode: resolved.pack.code,
           packPriceAtomic: collectorOnlyPackPrice(resolved),
-      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
+      packCostMicroUsd: collectorOnlyPackCostMicroUsd(resolved),
         });
       }
     }
