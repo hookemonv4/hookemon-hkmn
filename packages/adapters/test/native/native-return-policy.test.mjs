@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRelayClient } from '../../src/relay-client.mjs';
 import { assertNativeReturnInstruction } from '../../src/signing/native-return-policy.mjs';
 import { createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
@@ -12,7 +13,7 @@ const configured = { solana: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE', evm
 const blockhash = '11111111111111111111111111111111';
 function fixture() {
  const plan = structuredClone(raw.steps[0].items[0].data);
- const request = { solanaInstructionPlan: plan, inputAmount: {chainId:'792703809',assetId:plan.instructions[0].keys[4].pubkey,decimals:6,amountAtomic:'25000000'}, intent:{sender:configured.solana,recipient:configured.evm,originChainId:792703809,destinationChainId:4663,originAssetId:plan.instructions[0].keys[4].pubkey,originDecimals:6,originAmount:'25000000',destinationAssetId:'0x0000000000000000000000000000000000000000',destinationDecimals:18,orderId:`0x${plan.instructions[0].data.slice(32)}`}};
+ const request = { solanaInstructionPlan: plan, inputAmount: {chainId:'792703809',assetId:plan.instructions[0].keys[4].pubkey,decimals:6,amountAtomic:'25000000'}, intent: createRelayClient().prepareExecution({liveMode:true,quote:{direction:'RETURN',tradeType:'EXACT_INPUT',requestId:raw.steps[0].requestId,orderId:`0x${plan.instructions[0].data.slice(32)}`,sender:configured.solana,recipient:configured.evm,deadlineUnixSeconds:2000000000,origin:{chainId:792703809,address:plan.instructions[0].keys[4].pubkey,decimals:6,amount:'25000000'},destination:{chainId:4663,address:'0x0000000000000000000000000000000000000000',decimals:18,amount:'42',minimumAmount:'40'},raw}}).intent};
  const binding = createTestNativePaymentBinding({schema:'hookemon.native-payment-binding.v1',chainId:'4663',relay:{sourceInstruction:grammar,sourceRuntime:{schema:'hookemon.solana-upgradeable-runtime.v1',programId:grammar.programId}}},createTestProfileMutationAuthority());
  const transaction=buildRelayLegacyTransaction({feePayer:configured.solana,recentBlockhash:blockhash,instructionPlan:plan});
  return {binding,request,configured,transaction,blockhash};
@@ -22,8 +23,9 @@ for(const [name,mutate] of [
  ['program',f=>f.request.solanaInstructionPlan.instructions[0].programId=blockhash],
  ['layout',f=>f.request.solanaInstructionPlan.instructions[0].data+='00'],
  ['amount',f=>f.request.solanaInstructionPlan.instructions[0].data=f.request.solanaInstructionPlan.instructions[0].data.slice(0,16)+'0000000000000000'+f.request.solanaInstructionPlan.instructions[0].data.slice(32)],
- ['order',f=>f.request.intent.orderId='0x'+'ab'.repeat(32)],
- ['recipient',f=>f.request.intent.recipient='0x'+'ab'.repeat(20)],
+ ['order',f=>f.request.intent={...f.request.intent,orderId:'0x'+'ab'.repeat(32)}],
+ ['wire native alias',f=>f.request.intent={...f.request.intent,destinationAssetId:'0x0000000000000000000000000000000000000000'}],
+ ['recipient',f=>f.request.intent={...f.request.intent,recipient:'0x'+'ab'.repeat(20)}],
  ['vault account',f=>f.request.solanaInstructionPlan.instructions[0].keys[3].pubkey=configured.solana],
  ['privileges',f=>f.request.solanaInstructionPlan.instructions[0].keys[4].isWritable=true],
  ['extra instruction',f=>f.request.solanaInstructionPlan.instructions.push({programId:blockhash,keys:[],data:'00'})],
