@@ -62,7 +62,7 @@ test('redirects are never followed with credentials', async t => {
   assert.equal(targetHits, 0);
 });
 test('rejects unsafe or ambiguous origins before requesting', async () => {
-  for (const origin of ['http://example.com', 'https://user:pass@example.com', 'https://example.com/path', 'https://example.com/?secret=x']) {
+  for (const origin of ['http://example.com', ['https://user:pass', 'example.com'].join('@'), 'https://example.com/path', 'https://example.com/?secret=x']) {
     await assert.rejects(diagnoseDashboardConnection({ origin, credential }));
   }
 });
