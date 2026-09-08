@@ -42,6 +42,10 @@ creates a local cycle store, signer, or provider effect.
 - `resume`, `manual-approval`, `resume-cycle`, `run-cycle-now`, and exposure-increasing
   configuration changes refuse to act while safety telemetry is unavailable. `pause`, `kill`, and
   read-only `reconcile` remain available for safe-stop and inspection.
+- Pack-plan edits use `configuration.packPlan: { orders: [{ pack, quantity }] }`; the server owns
+  the plan schema and revision. A new pack or increased quantity for any pack increases exposure,
+  even if the total quantity falls. Identical, reduced, or empty plans remain editable without
+  safety telemetry. The allowlist and budget controls remain independent admission constraints.
 - `pause` sets both `paused` and `executionPaused`. `kill` additionally sets `killSwitch`.
   `resume` clears only the two pause fields and never clears a kill switch.
 - A held-owner decision binds cycle ID, held-evidence digest, request ID, expected cycle revision,
