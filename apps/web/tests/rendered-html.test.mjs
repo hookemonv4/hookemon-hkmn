@@ -394,8 +394,8 @@ test("keeps dashboard presentation credential-free and free of partial network f
   assert.match(viewSource, /card\.cardName \?\? "Name pending"/);
   assert.match(html, /Connecting to cycle data/i);
   assert.doesNotMatch(html, /Latest verified payout/i);
-  assert.doesNotMatch(page, /canonical HOOKEMON \/ USDG pool runs/i);
-  assert.match(page, /protocol design routes HOOKEMON \/ USDG swaps through one immutable Uniswap v4 hook/i);
+  assert.doesNotMatch(page, /canonical HOOKEMON \/ ETH pool runs/i);
+  assert.match(page, /protocol design routes HOOKEMON \/ ETH swaps through one immutable Uniswap v4 hook/i);
 });
 
 test("keeps the visible testnet disclosure free of mainnet labeling", async () => {

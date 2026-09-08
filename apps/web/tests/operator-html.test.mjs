@@ -79,7 +79,7 @@ test("keeps operator commands auditable, concurrency-safe and execution-free", a
   assert.doesNotMatch(source, />Cumulative</);
   assert.match(source, /allowedPackIds:\s*\[\.\.\.form\.allowedPackIds\]\.sort\(\)/);
   assert.match(source, /togglePackAllowed\(pack\.id\)/);
-  assert.match(source, /parseGermanUsdg\(form\.maxUnitPriceMicroUsdg\)/);
+  assert.match(source, /parseGermanUsd\(form\.maxUnitPriceMicroUsd\)/);
   assert.match(source, /configurationSnapshotFromForm/);
   assert.match(source, /commandConfirmation/);
   assert.match(source, /Ungespeicherte Änderungen werden für diesen Befehl nicht verwendet/);
