@@ -1,0 +1,35 @@
+{
+  "schema": "hookemon.native-hook-preimage-investigation.v1",
+  "sourceRevision": "248a9bede74081421e6f37d2642705324d99fabb",
+  "status": "OPEN_FACT_NO_VALUES_MATERIALIZED",
+  "repositorySources": {
+    "packages/contracts/src/HookemonHook.sol": "c96b17a0e535ec97ed6e37cb8589b8262f4e6fe4aa2c7040dc2d1e7acdd8d0fa",
+    "packages/contracts/src/launch/HookemonIssuance.sol": "25232ae1f730dd447547f11876603d3913e3a65df84a3793754653d0823ab2fb",
+    "packages/contracts/src/bindings/RobinhoodBindings.sol": "e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18",
+    "scripts/launch/derive-addresses.mjs": "33d03c7c8d8c1c7af2d828fe65829d2c0222d3a640d4f3902c2b490641c66b08",
+    "specs/requirements.json": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425",
+    "architecture/interfaces.json": "65db2344cd7307897a2d8910d5d33f75b9e256573159a41864ebbdd0416099bc",
+    "decisions/native-eth-interface/revision-71.patch": "bd4af750c1ec9fcb939a8bc1165b136738242e731d41fbaa9619bc9523814e91",
+    "feasibility/native-preflight-materialization/sources.json": "fe3ddce71b10c29a351527b64d50f56660db8bb876876d6e186c2f486657c2ee"
+  },
+  "officialCli": {
+    "version": "4.1.0",
+    "url": "https://github.com/programmablehq/PROGRAMMABLE/releases/download/programmable-launch-v4.1.0/programmable-launch-4.1.0.tgz",
+    "archiveSha256": "9d7d26a74b0b4aaa3b3d8acddc80f821cbd79511ee1ada6acc7b935aeb21cac5",
+    "apiClientSha256": "5c53addb015206f453e1708a4ddfdc7ca117c8fed635f81b20447fd3d97f7d43",
+    "searchScope": "src/**/*.mjs",
+    "exactIdentifierSearch": [
+      "bindingDigest",
+      "runtimeDigest",
+      "bindingManifestDigest",
+      "runtimeAuthorityDigest"
+    ],
+    "matches": "Only api-client.mjs exactSourceBinding.bindingDigest: lines 1557 and 1567; unrelated hosted source verification response."
+  },
+  "checks": {
+    "sourceInspection": "completed",
+    "formulaExecution": "not possible: native preimage contract undefined",
+    "providerRequest": "not sent",
+    "approval": "not granted by this artifact"
+  }
+}
