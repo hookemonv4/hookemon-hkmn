@@ -29,10 +29,10 @@ export const SUITES = Object.freeze({
   // app first and requires the Cloudflare Workers loader (`--import
   // ./tests/cloudflare-workers-loader.mjs --experimental-strip-types`), which the other suites'
   // plain invocation does not supply. It gets its own suite so this manifest's coverage check
-  // is satisfied honestly; the gates workflow does not run it directly, because
-  // .github/workflows/web-ci.yml already runs the app's real `npm test` (which builds first)
-  // on every apps/web change, and running the same suite a second way in a second workflow
-  // would be a duplicate, incompatible invocation, not an additional check.
+  // is satisfied honestly; the dedicated web-ci job in v4-gates.yml runs the app's
+  // real `npm test` (which builds first) on every pull request and main push.
+  // The bare Node financial suites must not duplicate that incompatible invocation.
+  // web-ci.yml is a separate manual-only entrypoint for focused web validation.
   web: Object.freeze({ roots: Object.freeze(['apps/web/tests']) }),
 });
 

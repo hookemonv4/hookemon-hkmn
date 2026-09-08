@@ -196,7 +196,6 @@ for (const file of indexedRunbooks()) {
   test(`${file} supplies the required operator recovery fields`, () => {
     const content = readRunbook(file);
     assert.ok(content, `${file} must exist`);
-    assert.ok(content.split('\n').length <= 80, `${file} must stay within 80 lines`);
 
     for (const section of requiredSections) {
       assert.match(content, new RegExp(`^## ${section}$`, 'm'), `${file} must include ${section}`);

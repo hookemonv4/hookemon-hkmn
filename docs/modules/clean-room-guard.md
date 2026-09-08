@@ -21,6 +21,7 @@ The clean-room guard keeps the active repository limited to the approved Hookemo
 - Historical Git identity exceptions match a full commit SHA and an exact rule. They cannot exempt a different commit or rule, and new attribution trailers remain rejected.
 - The approved repository slug remains allowed.
 - Ignored untracked build output is outside the scan; tracked files remain inside it.
+- The required code gate runs the complete repository scan once as a standalone CLI step. Scanner tests exercise fixtures and rejection cases without repeating that repository scan.
 
 ## State transitions
 
