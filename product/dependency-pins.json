@@ -64,7 +64,7 @@
   "controlScripts": {
     "commitIdentityAllowlist": {
       "path": "scripts/check-commit-identity.mjs",
-      "sha256": "9b89ef928d69676f07bea9052d0c5bb2e4c1c151de5dc590d9c7685711316cba",
+      "sha256": "6c2fe1989a16b7a0f1594a4c79b3ef7450c2d17b4d465ccf0b74fd738a1e703a",
       "rule": "This script's HISTORICAL_IDENTITY_EXCEPTIONS map is the commit-identity allowlist. The verifier accepts only its static supported digest, and CI loads this checker from the protected pull-request base or push merge-base before it scans the candidate range. A candidate cannot accept its own checker and pin change."
     },
     "forkPinVerifier": {
@@ -84,11 +84,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a",
+      "sha256": "7984e64bbe1bb472071631ca176ca1cfcf1fcfea8abb92d145d9c287db06f34e",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "20577b51e3644f62f77c2d9bfde16245a752690e74c69a5d5ec67fa0f1ae3d0a"
+          "sha256": "7984e64bbe1bb472071631ca176ca1cfcf1fcfea8abb92d145d9c287db06f34e"
         },
         {
           "path": "scripts/lib/util.mjs",
