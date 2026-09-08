@@ -50,7 +50,7 @@ export function deriveProposal({ binding, runtime, sourceBytes, evidenceBytes })
   for (const v of Object.values(binding.roles)) address(v);
   exact(binding.economics, ['name','symbol','decimals','totalSupplyAtomic','marketAllocationBps','quoteAsset','tickSpacing','lpFee','totalFeeBps','programmableFeeBps','treasuryFeeBps','hookPermissionMask','processClaimLimit6hWei','processClaimLimitMaxWei','processClaimMaxCount','operationsRotationDelay']);
   for (const [k,v] of Object.entries(binding.economics)) ['name','symbol','quoteAsset'].includes(k) ? text(v) : uint(v);
-  exact(binding.independentDeployment, ['graphFactory','tokenInitCodeHash','tokenSalt','custodyInitCodeHash','custodySalt']);
+  exact(binding.independentDeployment, ['graphFactory','tokenInitCodeHash','tokenEffectiveSalt','custodyInitCodeHash','custodyEffectiveSalt']);
   address(binding.independentDeployment.graphFactory);
   for (const [k,v] of Object.entries(binding.independentDeployment)) if (k !== 'graphFactory') hash(v);
   exact(runtime,['schema','chainId','genesisHash','providerProtocol','providerVersion','contracts','evidenceFiles']);
