@@ -7830,7 +7830,7 @@
       ]
     },
     "scripts/tests/native-runtime-observer.test.mjs": {
-      "sha256": "7eba178c0aecbbbbd78b9e27dfc783022d3833051fd2b7af60b57ff9750446f8",
+      "sha256": "57dd751b7791271185b3d1b8191ea7f349e10d76a4c73b12e60084aea5eafa13",
       "matches": [
         {
           "rule": "historical-architecture",
@@ -7841,6 +7841,242 @@
           "tokenLength": 182640,
           "tokenSha256": "d2d7d716c6bd1ec66d660cc9b4d86a924f71d441121bb77f91db850d0f14fd91",
           "basis": "incidental-token-in-checksummed-compressed-public-runtime-and-ABI-test-fixture"
+        }
+      ]
+    },
+    "feasibility/native-universal-router-reproduction/compiler-input.json": {
+      "sha256": "402c71cee3e1205b59ed168fed5f0e76b95146e6a8c6a708d36f729baea4480a",
+      "matches": [
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 283519,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 283519,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 284485,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 284485,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 287117,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 287117,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 299630,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 299630,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 300794,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 300794,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 302205,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 302205,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 324024,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 324024,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 325402,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 325402,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 325433,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 325433,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 328173,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 328173,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 330804,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 330804,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 332262,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 332262,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 335119,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 335119,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 335171,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 335171,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 335491,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 335491,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 336143,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 336143,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 336657,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 336657,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 337052,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 337052,
+          "tokenLength": 8,
+          "tokenSha256": "a13bebeb57e1ea699bd4d2d9ac7e58399644e884b8a8783d96f6d146083f2430",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 338015,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 338015,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 338880,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 338880,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
+        },
+        {
+          "file": "feasibility/native-universal-router-reproduction/compiler-input.json",
+          "rule": "historical-architecture",
+          "offset": 339261,
+          "length": 8,
+          "sha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "tokenStart": 339261,
+          "tokenLength": 8,
+          "tokenSha256": "b60d7bdd334cd3768d43f14a05c7fe7e886ba5bcb77e1064530052fed1a3f145",
+          "basis": "official-router-closed-source-standards-references-and-signature-domain"
         }
       ]
     }

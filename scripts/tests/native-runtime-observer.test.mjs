@@ -12,7 +12,7 @@ let observeNativeRuntimeAuthority, assertObservedNativeRuntime;
 let moduleId = 0;
 const BLOCK = { number: '0x64', hash: `0x${'ab'.repeat(32)}`, timestamp: '0x100' };
 const safeNames = ['safeSingletonSlot', 'safeFallbackHandlerSlot', 'safeGuardSlot', 'safeOwners', 'safeThreshold', 'safeNonce', 'safeModules', 'safeVersion'];
-async function withFetch(t, change = () => {}) {
+async function withFetch(t, change = () => {}, numericCheckpoint = false) {
   const original = globalThis.fetch;
   const calls = []; let safeIndex = 0; let blockIndex = 0;
   globalThis.fetch = async (url, options) => {
@@ -28,7 +28,7 @@ async function withFetch(t, change = () => {}) {
         if (request.params[0] === '0x0') result = { hash: FIXTURE.capabilities.chainDeployment.permit2GenesisProvenance.genesisBlockHash ?? '0xaad15f3d702aaea00caf3e9bb56395efe9127bc3b31b24921abf1eee3409305c' };
         else { result = { ...BLOCK }; blockIndex++; }
       } else {
-        assert.deepEqual(request.params.at(-1), { blockHash: BLOCK.hash, requireCanonical: true });
+        assert.deepEqual(request.params.at(-1), numericCheckpoint ? BLOCK.number : { blockHash: BLOCK.hash, requireCanonical: true });
         if (request.method === 'eth_getCode') result = FIXTURE.codes[request.params[0].toLowerCase()];
         else result = FIXTURE.safeReads[safeNames[safeIndex++]];
       }
@@ -47,7 +47,7 @@ async function withFetch(t, change = () => {}) {
       });
     }
     const response = { url, request, value, raw, status, blockIndex };
-    change(response);
+    await change(response);
     return new Response(response.raw ?? JSON.stringify(response.value), { status: response.status, headers: { 'Content-Type': 'application/json' } });
   };
   t.after(() => { globalThis.fetch = original; });
@@ -138,4 +138,38 @@ test('observer retains import-time transport after global replacement', async t 
   const result = await observeNativeRuntimeAuthority();
   assert.equal(assertObservedNativeRuntime(result), result);
   assert.throws(() => assertProductionObservation(result), /UNOBSERVED_RUNTIME/);
+});
+
+
+test('captured numeric checkpoint receives no capability until its finality and canonical recheck', async t => {
+  let release, entered, resolved = false;
+  const pending = new Promise(resolve => { release = resolve; });
+  const atFinality = new Promise(resolve => { entered = resolve; });
+  const calls = await withFetch(t, async response => {
+    if (response.request?.params?.[0] === 'finalized') { entered(); await pending; }
+  }, true);
+  const running = observeNativeRuntimeAuthority({ checkpointMode: 'capture-then-finalize' }).then(value => { resolved = true; return value; });
+  await atFinality;
+  assert.equal(resolved, false);
+  release();
+  const result = await running;
+  assert.equal(assertObservedNativeRuntime(result), result);
+  assert.equal(calls.filter(call => call.request?.params?.[0] === 'latest').length, 1);
+  assert.equal(calls.filter(call => call.request?.method === 'eth_getCode').length, 11);
+  assert.ok(result.runtime.contracts.every(contract => contract.blockHash === BLOCK.hash));
+  assert.throws(() => assertProductionObservation(result), /UNOBSERVED_RUNTIME/);
+});
+
+test('captured numeric checkpoint refuses a reorg even after finality advances', async t => {
+  await withFetch(t, response => {
+    if (response.request?.params?.[0] === 'finalized') response.value.result.number = '0x65';
+    if (response.request?.method === 'eth_getBlockByNumber' && response.request.params[0] === BLOCK.number) response.value.result.hash = `0x${'cd'.repeat(32)}`;
+  }, true);
+  await assert.rejects(observeNativeRuntimeAuthority({ checkpointMode: 'capture-then-finalize' }), /CHECKPOINT_CHANGED/);
+});
+
+test('unsupported capture mode refuses without network activity', async t => {
+  const calls = await withFetch(t);
+  await assert.rejects(observeNativeRuntimeAuthority({ checkpointMode: 'latest-only' }), /INVALID_CHECKPOINT_MODE/);
+  assert.equal(calls.length, 0);
 });
