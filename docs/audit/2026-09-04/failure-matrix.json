@@ -58,11 +58,11 @@
     {
       "system": "Relay leg",
       "failureClass": "wrong-asset-finalized-delta",
-      "expectedTerminalState": "HELD_RELAY_WRONG_ASSET",
-      "expectedAttemptState": "FINALIZED",
+      "expectedTerminalState": null,
+      "expectedAttemptState": "RECORDED",
       "expectedNextStage": "owner-decision",
       "owningWp": "WP07",
-      "test": "packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a wrong-token or wrong-recipient return receipt as HELD_RELAY_WRONG_ASSET after reopen"
+      "test": "packages/adapters/test/app/cycle-repository.test.mjs — native return refuses a wrong-token or wrong-recipient receipt before settlement after reopen"
     },
     {
       "system": "Transaction policy",

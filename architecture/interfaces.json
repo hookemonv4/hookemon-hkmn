@@ -961,7 +961,18 @@
         "SolverNativeTransfer alone",
         "cleanupNativeViaCall by analogy"
       ],
-      "globalReservation": "Normal and supplementary Relay source and destination transactions share the same chain-qualified global identity registry; order identity and credit commit atomically."
+      "globalReservation": "Normal and supplementary Relay source and destination transactions share the same chain-qualified global identity registry; order identity and credit commit atomically.",
+      "relaySourceRuntime": {
+        "schema": "hookemon.solana-upgradeable-runtime.v1",
+        "bindingFields": [
+          "programId",
+          "programDataAddress",
+          "loaderOwner",
+          "normalizedRuntimeSha256"
+        ],
+        "observation": "Read Program and ProgramData together at finalized contextSlot >= source transaction slot; verify loader, executable flags, association and normalized ELF SHA256. Require deploymentSlot < source transaction slot.",
+        "authority": "Exact private release runtime object identity; persisted or serialized source proofs require fresh RPC authentication."
+      }
     },
     "legacyFamily": "Frozen and excluded; preserve shared FeeAccounting ERC20 transfer seam and historical embedded HKMNToken; no WETH fallback",
     "nativePaymentBindingSha256": null,

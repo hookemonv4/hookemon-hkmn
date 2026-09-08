@@ -2,9 +2,9 @@
 
 ## Detection
 
-Alert when an own-RPC finalized destination delta is attributable to the leg
-but has an asset identity different from the recorded destination asset. Record
-`HELD_RELAY_WRONG_ASSET`.
+Inspect a rejected native return when its destination receipt has the wrong
+asset or recipient. The authenticated payment producer refuses that receipt
+before settlement; the attempt remains `RECORDED` and the journal is unchanged.
 
 ## Safe stop
 
@@ -13,9 +13,9 @@ credit. Preserve the complete `RelayLegV1` and both finalized observations.
 
 ## Runner behavior
 
-Return reconciliation verifies one exact USDG Transfer to Operations from this
-process's finalized destination receipt. A wrong token or recipient persists
-`HELD_RELAY_WRONG_ASSET` before payout custody can be recorded.
+Native return reconciliation requires the release-bound Relay runtime, exact
+order metadata and one successful native payment to Operations. A wrong asset
+or recipient cannot produce authenticated payment evidence or payout custody.
 
 ## Operator recovery
 
@@ -36,7 +36,7 @@ Traceability: L4-M15.
 
 Failure-matrix cells: Relay leg:wrong-asset-finalized-delta
 Owning work package: WP07
-Expected outcome: terminal=HELD_RELAY_WRONG_ASSET; attempt=FINALIZED; next=owner-decision
-Test: packages/adapters/test/app/cycle-repository.test.mjs — settleRelayLeg holds a wrong-token or wrong-recipient return receipt as HELD_RELAY_WRONG_ASSET after reopen
+Expected outcome: terminal=null; attempt=RECORDED; next=owner-decision
+Test: packages/adapters/test/app/cycle-repository.test.mjs — native return refuses a wrong-token or wrong-recipient receipt before settlement after reopen
 Alarm reason/code: OPEN FACT (WP07): no dedicated alarm code is emitted for finalized wrong-asset Relay delta.
 Resume command: none supported; retain both finalized deltas until the owner-decision path is recorded.
