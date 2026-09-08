@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isProcessNativePaymentProof } from '../native-payment-proof.mjs';
 // The durable authority for one operational cycle. `compose.mjs` injects this same instance into
 // the scheduler, CLI service, and in-process dashboard so they observe one append-only journal
@@ -113,10 +114,10 @@ const quarantineReasonPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
 const payoutDustRecordSchema = 'hookemon.payout-dust-record.v1';
 const payoutDustConsumptionSchema = 'hookemon.payout-dust-consumption.v1';
 const payoutQuarantineSchema = 'hookemon.payout-quarantine-reservation.v1';
-const supplementaryPayoutSourceSchema = 'hookemon.supplementary-payout-source.v1';
-const supplementaryReturnBoundarySchema = 'hookemon.supplementary-return-boundary.v1';
-const supplementaryFinalizedReturnSchema = 'hookemon.supplementary-finalized-return.v1';
-const supplementarySettlementEvidenceSchema = 'hookemon.supplementary-settlement-evidence.v1';
+const supplementaryPayoutSourceSchema = 'hookemon.supplementary-payout-source.v2';
+const supplementaryReturnBoundarySchema = 'hookemon.supplementary-return-boundary.v2';
+const supplementaryFinalizedReturnSchema = 'hookemon.supplementary-finalized-return.v2';
+const supplementarySettlementEvidenceSchema = 'hookemon.supplementary-settlement-evidence.v2';
 const evmNonceLockSchema = 'hookemon.evm-nonce-lock.v1';
 const relayAttributionSchema = 'hookemon.relay-attribution.v1';
 const chainAttemptRecoveryContextSchema = 'hookemon.chain-attempt-recovery-context.v1';
@@ -1263,6 +1264,17 @@ function returnRelayTerminalState(leg, proof) {
   return 'SETTLED';
 }
 
+function supplementaryNativeReturnCustody(state, amountAtomic) {
+  const key = custodyLedgerKey({ chainId: '4663', assetId: 'native' });
+  const previous = state.custodyLedgers.get(key);
+  if (previous?.schema !== 'hookemon.custody-ledger.v3') {
+    throw new Error('native supplementary return requires the existing native custody and gas reservation');
+  }
+  const received = BigInt(amountAtomic);
+  if (received <= 0n) throw new Error('native supplementary return amount must be positive');
+  return assertCustodyLedger({ ...previous, returnReceived: (BigInt(previous.returnReceived) + received).toString() });
+}
+
 function returnSettlementCustodyLedger(state, leg) {
   const key = `${leg.destinationChainId}\u0000${leg.destinationAssetId}`;
   // ADR-0026: `key` is the leg's raw destination pair (today's unchanged legacy behavior). A leg
@@ -2160,7 +2172,9 @@ function completedEligibilitySnapshotEvidenceDigest(state, cycleId) {
   return digest(snapshot.evidence);
 }
 
-function assertSupplementaryPayoutSourceAmount(value, label, usdgAddress) {
+function assertNativeAssetId(value, label) { if (value !== 'native') throw new Error(`${label} must be native`); return value; }
+
+function assertSupplementaryPayoutSourceAmountHistorical(value, label, usdgAddress) {
   const amount = assertPayoutAmount(value, label);
   const assetId = assertEvmAddress(amount.assetId, `${label}.assetId`);
   if (amount.chainId !== '4663' || amount.decimals !== 6 || assetId !== usdgAddress) {
@@ -2174,7 +2188,7 @@ function assertSupplementaryPayoutSourceAmount(value, label, usdgAddress) {
   };
 }
 
-function assertSupplementaryReturnBinding(value, label) {
+function assertSupplementaryReturnBindingHistorical(value, label) {
   exactObject(value, ['operations', 'usdgAddress', 'evidenceDigest'], label);
   return {
     operations: assertEvmAddress(value.operations, `${label}.operations`),
@@ -2183,7 +2197,7 @@ function assertSupplementaryReturnBinding(value, label) {
   };
 }
 
-function assertSupplementaryFinalizedReturnEvidence(value, settlement, label) {
+function assertSupplementaryFinalizedReturnEvidenceHistorical(value, settlement, label) {
   exactObject(value, [
     'schema',
     'positionId',
@@ -2194,7 +2208,7 @@ function assertSupplementaryFinalizedReturnEvidence(value, settlement, label) {
     'amountAtomic',
     'finalityEvidence',
   ], label);
-  if (value.schema !== supplementaryFinalizedReturnSchema) throw new Error(`${label}.schema is invalid`);
+  if (value.schema !== 'hookemon.supplementary-finalized-return.v1') throw new Error(`${label}.schema is invalid`);
   if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
     || value.manifestId !== settlement.manifestId) {
     throw new Error(`${label} does not bind its supplementary settlement`);
@@ -2204,7 +2218,7 @@ function assertSupplementaryFinalizedReturnEvidence(value, settlement, label) {
   const amountAtomic = assertHeldPositionAtomic(value.amountAtomic, `${label}.amountAtomic`);
   const finalityEvidence = cloneChainObservationEvidence(value.finalityEvidence, `${label}.finalityEvidence`);
   const normalized = {
-    schema: supplementaryFinalizedReturnSchema,
+    schema: 'hookemon.supplementary-finalized-return.v1',
     positionId: settlement.positionId,
     cycleId: settlement.cycleId,
     manifestId: settlement.manifestId,
@@ -2226,6 +2240,152 @@ function assertSupplementaryFinalizedReturnEvidence(value, settlement, label) {
       usdgAddress,
       evidenceDigest: digest({
         schema: 'hookemon.supplementary-finalized-return-binding.v1',
+        positionId: settlement.positionId,
+        cycleId: settlement.cycleId,
+        manifestId: settlement.manifestId,
+        finalizedReturnEvidence: normalized,
+      }),
+    },
+  };
+}
+
+function assertSupplementaryReturnBoundaryEvidenceHistorical(value, settlement, label) {
+  exactObject(value, ['schema', 'positionId', 'cycleId', 'manifestId', 'finalizedReturnEvidence'], label);
+  if (value.schema !== 'hookemon.supplementary-return-boundary.v1') throw new Error(`${label}.schema is invalid`);
+  if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
+    || value.manifestId !== settlement.manifestId) {
+    throw new Error(`${label} does not bind its supplementary settlement`);
+  }
+  const finalized = assertSupplementaryFinalizedReturnEvidenceHistorical(
+    value.finalizedReturnEvidence,
+    settlement,
+    `${label}.finalizedReturnEvidence`,
+  );
+  return {
+    schema: 'hookemon.supplementary-return-boundary.v1',
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturnEvidence: finalized.evidence,
+    finalizedReturn: finalized.finalizedReturn,
+    returnBinding: finalized.returnBinding,
+  };
+}
+
+function assertSupplementaryPayoutSourceHistorical(value, settlement, label = 'supplementary payout source') {
+  exactObject(value, [
+    'schema',
+    'positionId',
+    'cycleId',
+    'manifestId',
+    'finalizedReturn',
+    'previousDust',
+    'previousDustSource',
+    'returnBinding',
+  ], label);
+  if (value.schema !== 'hookemon.supplementary-payout-source.v1') throw new Error(`${label}.schema is invalid`);
+  if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
+    || value.manifestId !== settlement.manifestId) {
+    throw new Error(`${label} does not bind its supplementary settlement`);
+  }
+  const returnBinding = assertSupplementaryReturnBindingHistorical(value.returnBinding, `${label}.returnBinding`);
+  const finalizedReturn = assertSupplementaryPayoutSourceAmountHistorical(
+    value.finalizedReturn,
+    `${label}.finalizedReturn`,
+    returnBinding.usdgAddress,
+  );
+  const previousDust = assertSupplementaryPayoutSourceAmountHistorical(
+    value.previousDust,
+    `${label}.previousDust`,
+    returnBinding.usdgAddress,
+  );
+  const previousDustSource = value.previousDustSource === null
+    ? null
+    : assertPayoutDustSource(value.previousDustSource, `${label}.previousDustSource`);
+  if ((previousDust.amountAtomic === '0') !== (previousDustSource === null)) {
+    throw new Error(`${label} previous dust provenance is invalid`);
+  }
+  if (previousDustSource !== null && previousDustSource.cycleId !== settlement.cycleId) {
+    throw new Error(`${label} must use the original cycle's normal payout dust source`);
+  }
+  return {
+    schema: 'hookemon.supplementary-payout-source.v1',
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturn,
+    previousDust,
+    previousDustSource,
+    returnBinding,
+  };
+}
+
+function assertSupplementaryPayoutSourceAmount(value, label, expectedAssetId) {
+  const amount = assertPayoutAmount(value, label);
+  const assetId = amount.assetId;
+  if (amount.chainId !== '4663' || amount.decimals !== 18 || assetId !== 'native' || expectedAssetId !== 'native') {
+    throw new Error(`${label} must identify the bound chain 4663 native ETH asset`);
+  }
+  return {
+    chainId: '4663',
+    assetId,
+    decimals: 18,
+    amountAtomic: amount.amountAtomic,
+  };
+}
+
+function assertSupplementaryReturnBinding(value, label) {
+  exactObject(value, ['operations', 'assetId', 'evidenceDigest'], label);
+  return {
+    operations: assertEvmAddress(value.operations, `${label}.operations`),
+    assetId: assertNativeAssetId(value.assetId, `${label}.assetId`),
+    evidenceDigest: assertDigest(value.evidenceDigest, `${label}.evidenceDigest`),
+  };
+}
+
+function assertSupplementaryFinalizedReturnEvidence(value, settlement, label) {
+  exactObject(value, [
+    'schema',
+    'positionId',
+    'cycleId',
+    'manifestId',
+    'operations',
+    'assetId',
+    'amountAtomic',
+    'finalityEvidence',
+  ], label);
+  if (value.schema !== supplementaryFinalizedReturnSchema) throw new Error(`${label}.schema is invalid`);
+  if (value.positionId !== settlement.positionId || value.cycleId !== settlement.cycleId
+    || value.manifestId !== settlement.manifestId) {
+    throw new Error(`${label} does not bind its supplementary settlement`);
+  }
+  const operations = assertEvmAddress(value.operations, `${label}.operations`);
+  const assetId = assertNativeAssetId(value.assetId, `${label}.assetId`);
+  const amountAtomic = assertHeldPositionAtomic(value.amountAtomic, `${label}.amountAtomic`);
+  const finalityEvidence = cloneChainObservationEvidence(value.finalityEvidence, `${label}.finalityEvidence`);
+  const normalized = {
+    schema: supplementaryFinalizedReturnSchema,
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    operations,
+    assetId,
+    amountAtomic,
+    finalityEvidence,
+  };
+  return {
+    evidence: normalized,
+    finalizedReturn: {
+      chainId: '4663',
+      assetId: assetId,
+      decimals: 18,
+      amountAtomic,
+    },
+    returnBinding: {
+      operations,
+      assetId,
+      evidenceDigest: digest({
+        schema: 'hookemon.supplementary-finalized-return-binding.v2',
         positionId: settlement.positionId,
         cycleId: settlement.cycleId,
         manifestId: settlement.manifestId,
@@ -2278,12 +2438,12 @@ function assertSupplementaryPayoutSource(value, settlement, label = 'supplementa
   const finalizedReturn = assertSupplementaryPayoutSourceAmount(
     value.finalizedReturn,
     `${label}.finalizedReturn`,
-    returnBinding.usdgAddress,
+    returnBinding.assetId,
   );
   const previousDust = assertSupplementaryPayoutSourceAmount(
     value.previousDust,
     `${label}.previousDust`,
-    returnBinding.usdgAddress,
+    returnBinding.assetId,
   );
   const previousDustSource = value.previousDustSource === null
     ? null
@@ -2306,9 +2466,9 @@ function assertSupplementaryPayoutSource(value, settlement, label = 'supplementa
   };
 }
 
-function supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label) {
-  return assertSupplementaryPayoutSource({
-    schema: supplementaryPayoutSourceSchema,
+function supplementaryPayoutSourceWithoutDustHistorical(settlement, returnBoundary, label) {
+  return assertSupplementaryPayoutSourceHistorical({
+    schema: 'hookemon.supplementary-payout-source.v1',
     positionId: settlement.positionId,
     cycleId: settlement.cycleId,
     manifestId: settlement.manifestId,
@@ -2324,18 +2484,38 @@ function supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label)
   }, settlement, label);
 }
 
+function supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label) {
+  return assertSupplementaryPayoutSource({
+    schema: supplementaryPayoutSourceSchema,
+    positionId: settlement.positionId,
+    cycleId: settlement.cycleId,
+    manifestId: settlement.manifestId,
+    finalizedReturn: returnBoundary.finalizedReturn,
+    previousDust: {
+      chainId: '4663',
+      assetId: returnBoundary.returnBinding.assetId,
+      decimals: 18,
+      amountAtomic: '0',
+    },
+    previousDustSource: null,
+    returnBinding: returnBoundary.returnBinding,
+  }, settlement, label);
+}
+
 function supplementaryPayoutSourceForReturnBoundary(settlement, returnBoundary, label) {
   // Main-cycle dust is not supplementary proceeds. The generic dust consumer identifies a
   // successor by cycleId and therefore cannot atomically reserve a same-cycle position. Until a
   // position-aware reservation exists, omitting that dust is the only safe outcome.
-  return supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label);
+  return returnBoundary.schema === 'hookemon.supplementary-return-boundary.v1'
+    ? supplementaryPayoutSourceWithoutDustHistorical(settlement, returnBoundary, label)
+    : supplementaryPayoutSourceWithoutDust(settlement, returnBoundary, label);
 }
 
-function supplementarySettlementEvidenceFor(settlement, state, evidence, payoutSource = null, returnBoundary = null) {
+function supplementarySettlementEvidenceFor(settlement, state, evidence, payoutSource = null, returnBoundary = null, evidenceSchema = supplementarySettlementEvidenceSchema) {
   const record = {
     state,
     evidenceDigest: digest({
-      schema: supplementarySettlementEvidenceSchema,
+      schema: evidenceSchema,
       positionId: settlement.positionId,
       manifestId: settlement.manifestId,
       state,
@@ -2359,7 +2539,8 @@ function durableSupplementaryReturnBoundary(settlement, evidenceRecord, label) {
   if (returnBoundary.state !== 'RETURN_BROADCAST') {
     throw new Error(`${label} has an invalid durable return boundary state`);
   }
-  const payoutSource = assertSupplementaryPayoutSource(
+  const payoutSource = (returnBoundary.payoutSource?.schema === 'hookemon.supplementary-payout-source.v1'
+    ? assertSupplementaryPayoutSourceHistorical : assertSupplementaryPayoutSource)(
     returnBoundary.payoutSource,
     settlement,
     `${label} payout source`,
@@ -3514,7 +3695,7 @@ export class CycleRepository {
           throw new Error('stored supplementary settlement transition is invalid');
         }
         const returnBoundary = entry.payload.nextState === 'RETURN_BROADCAST'
-          ? assertSupplementaryReturnBoundaryEvidence(
+          ? (admission?.schema === 'hookemon.policy-admission.v3' ? assertSupplementaryReturnBoundaryEvidence : assertSupplementaryReturnBoundaryEvidenceHistorical)(
             entry.payload.evidence,
             previous,
             'stored supplementary settlement return boundary',
@@ -3539,7 +3720,7 @@ export class CycleRepository {
           : null;
         const payoutSource = returnBoundary === null
           ? (carriedReturnBoundary?.payoutSource ?? null)
-          : assertSupplementaryPayoutSource(
+          : (admission?.schema === 'hookemon.policy-admission.v3' ? assertSupplementaryPayoutSource : assertSupplementaryPayoutSourceHistorical)(
             entry.payload.payoutSource,
             previous,
             'stored supplementary payout source',
@@ -3553,6 +3734,10 @@ export class CycleRepository {
           if (canonicalJson(payoutSource) !== canonicalJson(expectedPayoutSource)) {
             throw new Error('stored supplementary payout source is not derived from the position return boundary');
           }
+        }
+        if (returnBoundary !== null && admission?.schema === 'hookemon.policy-admission.v3') {
+          const ledger = supplementaryNativeReturnCustody({ custodyLedgers }, returnBoundary.finalizedReturnEvidence.amountAtomic);
+          custodyLedgers.set(custodyLedgerKey(ledger), ledger);
         }
         const settlement = assertSupplementarySettlement({
           ...previous,
@@ -3568,6 +3753,7 @@ export class CycleRepository {
             evidence,
             payoutSource,
             carriedReturnBoundary,
+            admission?.schema === 'hookemon.policy-admission.v3' ? supplementarySettlementEvidenceSchema : 'hookemon.supplementary-settlement-evidence.v1',
           ),
         );
       } else if (entry.kind === 'held-position-resolved') {
@@ -4787,7 +4973,34 @@ export class CycleRepository {
     if (location.state.archived) {
       throw new Error('cycle-repository advanceSupplementarySettlement: archived settlement requires recovery');
     }
+    if (location.state.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native supplementary settlement refuses historical cycle resume');
     const current = location.state.supplementarySettlements.get(positionId);
+    let nativeReturnReservation = null;
+    if (input.nextState === 'RETURN_BROADCAST') {
+      const stage = `supplementary-${digest({ schema: 'hookemon.supplementary-return-stage.v1', positionId }).slice(7, 55)}`;
+      const source = await this.#store.readPagedPayoutState(location.cycleId, stage);
+      const proof = input.evidence?.finalizedReturnEvidence?.finalityEvidence;
+      if (!source || source.schema !== 'hookemon.supplementary-return-attempt.v2'
+        || typeof source.rawSignedBytes !== 'string' || !source.intent
+        || !isProcessRpcReturnLegDestinationProof(proof, { relayRequestId: source.relayRequestId })) {
+        throw new Error('native supplementary return requires its persisted source and process payment proof');
+      }
+      const payment = proof.nativePaymentProof;
+      if (payment?.sourceTransactionDigest !== `sha256:${createHash('sha256').update(source.rawSignedBytes).digest('hex')}`
+        || payment.orderId !== source.intent.orderId || payment.recipient !== source.intent.recipient.toLowerCase()
+        || proof.observedAmountAtomic !== source.destinationAmount?.amountAtomic
+        || proof.observedRecipient !== input.evidence.finalizedReturnEvidence.operations.toLowerCase()
+        || proof.observedAmountAtomic !== input.evidence.finalizedReturnEvidence.amountAtomic
+        || input.evidence.finalizedReturnEvidence.assetId !== 'native') {
+        throw new Error('native supplementary return differs from its original position source and destination');
+      }
+      supplementaryNativeReturnCustody(location.state, proof.observedAmountAtomic);
+      nativeReturnReservation = {
+        key: relayTransactionReservationKey('4663', proof.destinationTxHash),
+        value: { cycleId: location.cycleId, relayRequestId: source.relayRequestId, positionId, transactionHash: proof.destinationTxHash },
+      };
+    }
+
     const returnBoundary = input.nextState === 'RETURN_BROADCAST'
       ? assertSupplementaryReturnBoundaryEvidence(
         input.evidence,
@@ -4855,6 +5068,7 @@ export class CycleRepository {
         evidence,
         ...(returnBoundary === null ? {} : { payoutSource }),
       }, {
+        globalKeyReservations: nativeReturnReservation === null ? [] : [nativeReturnReservation],
         assertState: state => {
           const latest = state.supplementarySettlements.get(positionId) ?? null;
           if (latest === null || canonicalJson(latest) !== canonicalJson(current)) {

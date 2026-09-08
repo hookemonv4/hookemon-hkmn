@@ -350,3 +350,5 @@ Native custody records gas costs as append-only `gasPayments` entries containing
 transaction hash and canonical `amountWei`. Their exact sum equals typed `gasSpent`.
 `applyNativeCustodyGasPayment` accepts a process-authenticated payment proof and returns the same
 fields on replay of that hash and cost. A changed cost, removed entry or duplicate hash refuses.
+
+Native supplementary return boundaries require the persisted signed source and a process-authenticated destination payment. A single journal event consumes the destination transaction globally and credits the existing native custody row. The row retains its gas reservation and payment history; a missing native row refuses settlement. Historical v1 supplementary evidence retains its original decoder and cannot resume native execution.
