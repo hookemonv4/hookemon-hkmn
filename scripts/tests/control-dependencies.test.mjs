@@ -269,6 +269,9 @@ function fixture() {
   writeFileSync(join(root, '.github', 'workflows', 'deploy-web.yml'), CANONICAL_DEPLOY_WEB);
   writeFileSync(join(root, 'scripts', 'check-commit-identity.mjs'), COMMIT_IDENTITY_ALLOWLIST_SCRIPT);
   writeFileSync(join(root, 'scripts', 'verify-fork-pin.mjs'), FORK_PIN_VERIFIER_SCRIPT);
+  for (const name of ['check-cleanroom.mjs', 'native-cleanroom-recognition.json']) {
+    cpSync(join(REPO_ROOT, 'scripts', name), join(root, 'scripts', name));
+  }
   cpSync(RELEASE_CLOSURE_BUILDER_ROOT, join(root, 'scripts', 'programmable', 'vendor', 'programmable-v4-hook-builder'), {
     recursive: true,
   });
@@ -2238,4 +2241,25 @@ test('verifies the integrated repository dependency boundary', () => {
   const result = verifyControlDependencies(root);
 
   assert.equal(result.result, 'PASSED', result.errors.join('\n'));
+});
+
+test('native cleanroom controls reject missing, changed and symlinked recognition bytes', () => {
+  const state = fixture();
+  const errors = [];
+  controlDependencies.verifyNativeCleanroomIntegrity(state.root, errors);
+  assert.deepEqual(errors, []);
+  const path = join(state.root, 'scripts/native-cleanroom-recognition.json');
+  const original = readFileSync(path);
+  writeFileSync(path, Buffer.concat([original, Buffer.from(' ')]));
+  const mutated = [];
+  controlDependencies.verifyNativeCleanroomIntegrity(state.root, mutated);
+  assert.match(mutated.join('\n'), /digest mismatch/);
+  unlinkSync(path);
+  const missing = [];
+  controlDependencies.verifyNativeCleanroomIntegrity(state.root, missing);
+  assert.match(missing.join('\n'), /regular repository file/);
+  symlinkSync(join(REPO_ROOT, 'scripts/native-cleanroom-recognition.json'), path);
+  const linked = [];
+  controlDependencies.verifyNativeCleanroomIntegrity(state.root, linked);
+  assert.match(linked.join('\n'), /not a symlink/);
 });

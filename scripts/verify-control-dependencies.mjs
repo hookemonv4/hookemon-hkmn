@@ -1140,6 +1140,20 @@ function regularRepositoryFileHash(root, relativePath, label, errors) {
   }
 }
 
+// These data-bearing controls are covered by the protected verifier's own pin.
+const NATIVE_CLEANROOM_CONTROL_DIGESTS = Object.freeze({
+  'scripts/check-cleanroom.mjs': '2ac7396716305217240f0e2ea4d9436e3ee6f9aa3e11002d69eadee131a6915c',
+  'scripts/native-cleanroom-recognition.json': 'e140a71d61108629cbeaaf9fbd273d7e6b190b2cef1361051909d1431495eb7f',
+});
+
+export function verifyNativeCleanroomIntegrity(root, errors = []) {
+  return Object.entries(NATIVE_CLEANROOM_CONTROL_DIGESTS).map(([path, expectedSha256]) => {
+    const actualSha256 = regularRepositoryFileHash(root, path, 'native clean-room control', errors);
+    if (actualSha256 !== expectedSha256) errors.push(`native clean-room control digest mismatch: ${path}`);
+    return { path, expectedSha256, actualSha256 };
+  });
+}
+
 function verifyCiChangeClassifierIntegrity(root, pins, errors) {
   const pin = pins.controlScripts?.ciChangeClassifier ?? {};
   if (!sameKeys(pin, ['path', 'sha256']) || pin.path !== CI_CHANGE_CLASSIFIER_PATH) {
@@ -2290,6 +2304,7 @@ export function verifyControlDependencies(rootPath, options = {}) {
   const releaseClosureBuilder = verifyReleaseClosureBuilderIntegrity(root, pins, errors);
   const controlDependencyVerifier = verifyControlDependencyVerifierIntegrity(root, pins, errors);
   const ciChangeClassifier = verifyCiChangeClassifierIntegrity(root, pins, errors);
+  verifyNativeCleanroomIntegrity(root, errors);
   const archiveForkProofTest = verifyArchiveForkProofTestIntegrity(root, pins, errors);
   verifyForkPinVerifierWorkflow(forkProofWorkflow, FORK_PROOF_WORKFLOW_PATH, {
     ...pins.controlScripts?.forkPinVerifier,

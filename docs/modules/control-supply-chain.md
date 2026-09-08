@@ -94,3 +94,5 @@ node --test scripts/tests/*.test.mjs
 - A non-fast-forward main update is rejected; restore a forward-only history through a reviewed branch. Land a reviewed pull request onto `main` with an ordinary non-force fast-forward of the exact tested head, never a GitHub-generated merge commit. Restore the ordinary required contexts (`control-gate`, `identity-gate`, `gates`, `fork-proof`) only after an ordinary pull request against the new protected base has passed all four; never fast-forward `main` while a temporary migration context still stands in for one of the ordinary ones.
 - Append replacement evidence when control inputs change, then regenerate the phase gate and state projections.
 - For a release-readiness refusal, repair the current review bundle or receipt chain instead of editing `state.json`; projections do not authorize release.
+
+The protected dependency verifier pins the native clean-room scanner and its exact recognition manifest as regular repository files. Changing either requires changing the protected verifier digest. Recognition is limited to reviewed file bytes, offsets, rules and token hashes; local identity and home paths remain rejected.
