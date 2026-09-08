@@ -14,11 +14,11 @@ export function assertNativeReturnInstruction({ binding, request, configured, tr
   need(amount?.chainId === '792703809' && amount.assetId === CIRCLE_USD_MINT && amount.decimals === 6
     && /^[1-9][0-9]*$/.test(amount.amountAtomic), 'invalid typed source amount');
   const intent = request.intent;
-  need(intent?.sender === configured.solana && intent.recipient?.toLowerCase() === configured.evm.toLowerCase()
+  need(intent?.schema === 'hookemon.relay-intent.v2' && intent.direction === 'RETURN' && intent.sender === configured.solana && intent.recipient?.toLowerCase() === configured.evm.toLowerCase()
     && String(intent.originChainId) === '792703809' && String(intent.destinationChainId) === '4663'
     && intent.originAssetId === amount.assetId && intent.originDecimals === 6
     && String(intent.originAmount) === amount.amountAtomic
-    && intent.destinationAssetId?.toLowerCase() === '0x0000000000000000000000000000000000000000'
+    && intent.destinationAssetId === 'native'
     && intent.destinationDecimals === 18 && /^0x[0-9a-f]{64}$/.test(intent.orderId), 'intent identity mismatch');
   const plan = request.solanaInstructionPlan;
   need(Array.isArray(plan?.instructions) && plan.instructions.length > 0, 'missing frozen plan');
