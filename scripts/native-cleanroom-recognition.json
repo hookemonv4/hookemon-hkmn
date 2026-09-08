@@ -7229,15 +7229,15 @@
       ]
     },
     "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
-      "sha256": "e05a75b0d8d6c706c4ce990fd8084ce8911e3371d3c726b94f810ddc0177406e",
+      "sha256": "1e02c93bc3789e12df04fccefb76bddb943edeb3ccacb9c4ce50461d73fe685d",
       "matches": [
         {
           "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",
           "rule": "historical-architecture",
-          "offset": 56762,
+          "offset": 56720,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 56762,
+          "tokenStart": 56720,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
           "basis": "reviewed-native-71-or-retained-provider-source"

@@ -422,8 +422,7 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
     // New single-pack requests bind the endpoint and mode in the durable stage request.
     // An older request without this field retains its original batch semantics.
     const generation = prepared.generation;
-    if (generation !== undefined && (!plainObject(generation)
-      || Object.keys(generation).sort().join(',') !== 'endpoint,turbo'
+    if (generation !== undefined && (!exactKeysOnly(generation, ['endpoint', 'turbo'])
       || generation.endpoint !== 'generatePack' || generation.turbo !== false || quantity !== 1)) {
       throw new Error('purchase generation must bind one non-turbo generatePack request');
     }
@@ -584,11 +583,14 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
 }
 
 async function reconcilePack({ adapters, config, context, asset, pack, playerAddress, deadlineSinceMs, unitPurchase = null }) {
+  const unresolved = reason => pastDeadline(deadlineSinceMs, config, context)
+    ? { determined: true, outcome: 'anomaly', evidence: { reason, memo: pack.memo } }
+    : { determined: false };
   let packStatus;
   try {
     packStatus = await adapters.collectorCrypt.getPackStatus({ memo: pack.memo });
   } catch {
-    return { determined: false };
+    return unresolved('provider pack status remained unavailable past the reconcile deadline');
   }
   if (packStatus.memo !== pack.memo) {
     return { determined: true, outcome: 'anomaly', evidence: { reason: 'pack status memo did not match', packStatus } };
@@ -597,10 +599,10 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
     if (!pastDeadline(deadlineSinceMs, config, context)) return { determined: false };
     return {
       determined: true,
-      outcome: 'notPurchased',
+      outcome: 'anomaly',
       packIndex: pack.packIndex,
       memo: pack.memo,
-      evidence: { reason: 'no provider purchase evidence before the reconcile deadline' },
+      evidence: { reason: 'missing provider evidence cannot prove that no purchase debit occurred' },
     };
   }
   if (!plainObject(packStatus.pack) || typeof packStatus.pack.transaction_signature !== 'string'
@@ -612,9 +614,9 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
   try {
     signatureStatus = await readFinalizedSignatureStatus(adapters.solana.client, signature);
   } catch {
-    return { determined: false };
+    return unresolved('purchase signature lookup remained unavailable past the reconcile deadline');
   }
-  if (signatureStatus === null) return { determined: false };
+  if (signatureStatus === null) return unresolved('purchase signature remained unfinalized past the reconcile deadline');
   if (signatureStatus.err) {
     return {
       determined: true,
@@ -628,7 +630,7 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
   try {
     entries = await getFinalizedTokenBalanceChanges(adapters.solana.client, signature);
   } catch {
-    return { determined: false };
+    return unresolved('purchase settlement evidence remained unavailable past the reconcile deadline');
   }
   const debits = entries.filter(entry => entry.owner === playerAddress && entry.mint === asset.assetId && BigInt(entry.postAmount) < BigInt(entry.preAmount));
   if (debits.length !== 1) {
