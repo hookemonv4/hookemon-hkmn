@@ -1082,10 +1082,9 @@
       ]
     },
     "docs/modules/composition-root.md": {
-      "sha256": "ffa98387a35ee5e05f58fc3da80d5efa77b0d30202761b380bd67510c8913568",
+      "sha256": "c3018fa2e51db8ae7f43a4f02f31babeb37d52bc12c0de550aae26ba0e06c6d6",
       "matches": [
         {
-          "file": "docs/modules/composition-root.md",
           "rule": "historical-architecture",
           "offset": 31435,
           "length": 4,
@@ -1093,10 +1092,9 @@
           "tokenStart": 31435,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
         },
         {
-          "file": "docs/modules/composition-root.md",
           "rule": "historical-architecture",
           "offset": 32017,
           "length": 4,
@@ -1104,15 +1102,14 @@
           "tokenStart": 32017,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
         }
       ]
     },
     "docs/modules/cycle-runner.md": {
-      "sha256": "c08cc697ee119e371eee960754b9f4d45fc70553ebb4dafbc06c90f2f71b6d79",
+      "sha256": "36167cc0492f54443d70ce5bdb5235650fbe4c6659affa3ed4be19ba247c3bc9",
       "matches": [
         {
-          "file": "docs/modules/cycle-runner.md",
           "rule": "historical-architecture",
           "offset": 13318,
           "length": 4,
@@ -1120,7 +1117,7 @@
           "tokenStart": 13318,
           "tokenLength": 4,
           "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
-          "basis": "reviewed-native-71-or-retained-provider-source"
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
         }
       ]
     },
@@ -7344,6 +7341,61 @@
           "tokenLength": 27,
           "tokenSha256": "07e2f36ec0dae44bc4e8d11b0f2e46a58979ff4b23b0272aab077727a3c615a2",
           "basis": "unchanged-chainDeployment-from-native-preflight-materialization"
+        }
+      ]
+    },
+    "docs/evidence/native-archive-fork-20260908/green-observation.json": {
+      "sha256": "59a860764849fdb869815f68cdc150f443929da68c896749818dcbd233965da2",
+      "matches": [
+        {
+          "rule": "historical-repository",
+          "offset": 115,
+          "length": 13,
+          "sha256": "dd62776781a3875728c94bdb377050c33cdcb697679612c34c2632d4b9b9c2f1",
+          "tokenStart": 85,
+          "tokenLength": 68,
+          "tokenSha256": "66ea9cd4aa60c579ec36bed91c8de5b37970a53f0f544fda9cedbb1655edd595",
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
+        }
+      ]
+    },
+    "packages/adapters/test/app/launch-production-graph.test.mjs": {
+      "sha256": "52ac1f8c2febb874cd7c60b55f79fff807219b420df218084759877cec141359",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 124796,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 124796,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 247537,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 247537,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
+        }
+      ]
+    },
+    "packages/adapters/test/app/return-chain-identity.test.mjs": {
+      "sha256": "27204ab59e35f6d2caed6913bc4b1c83ab5a4547720b55c0ec53845e86ebc79f",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 7289,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 7289,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
         }
       ]
     }
