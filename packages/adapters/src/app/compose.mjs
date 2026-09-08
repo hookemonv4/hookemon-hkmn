@@ -832,14 +832,14 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
  * and an insolvent hook each refuse outright.
  *
  * There is no latest read, no configured literal, and no wallet balance anywhere on this path: an
- * Operations USDG balance is post-claim custody and can include unrelated deposits, so it cannot
+ * Operations native balance is post-claim custody and can include unrelated deposits, so it cannot
  * authorize a new claim.
  */
 export function buildProcessLiabilityReader({ config, adapters }) {
   const publicClient = adapters?.robinhood?.client ?? null;
   const archive = adapters?.robinhood?.historicalEvidenceClient ?? null;
   const hook = config.contracts?.hook ?? null;
-  const fundingAsset = config.moneyConfiguration?.assets?.usdg ?? null;
+  const fundingAsset = config.moneyConfiguration?.assets?.eth ?? null;
   return {
     async read({ cycleId }) {
       if (publicClient === null || hook === null || fundingAsset === null
@@ -1197,7 +1197,7 @@ export async function compose(config) {
     // `bindings/robinhood-chain.json`'s `market.poolKey` resolves; `poolManager` is deliberately
     // absent from this default — like `usdg`, it is always read from that binding file directly,
     // and exists on `config.contracts` only as a test-only override, never operator configuration).
-    contracts: { vault: null, hook: null, usdg: null, usdgDecimals: null, treasury: null, pool: null, poolManager: null },
+    contracts: { vault: null, hook: null, quoteCurrency: null, quoteDecimals: null, treasury: null, pool: null, poolManager: null },
     accounts: { evm: null, solana: null },
     pack: { code: null },
     moneyConfiguration: null,
@@ -1642,7 +1642,7 @@ export async function compose(config) {
       // previous unadmitted path, where decideCycleBudget still uses its configured static sum and
       // outbound still refuses for want of a repository-owned admission.
       ...(liveMode && mode === 'production'
-        && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.usdg
+        && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.eth
         && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
         ? {
           admissionPlanner: buildAdmissionPlanner({

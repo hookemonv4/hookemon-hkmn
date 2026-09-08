@@ -369,3 +369,5 @@ exact `4663/native/18` identity as trusted payout context. Operator USD limits a
 remain separate throughout configuration and projection.
 
 The policy valuation verifier accepts fresh Relay producer references or private references restored by the configured cycle repository under its original admission authority and expiry. Plain persisted valuation objects alone confer no new-risk authority.
+
+Production native money configuration activates the admission planner and the finalized hook-liability reader through `assets.eth`. Hook native liability and capacity, never Operations wallet balance, bound the two independently fetched funding quotes and their USD producer capabilities.
