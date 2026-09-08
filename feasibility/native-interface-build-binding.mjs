@@ -2,14 +2,28 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const approvedRequirementsSha256 = '750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425';
+const implementationScopeRequirementsSha256 = '750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425';
 const historicalFreezeSha256 = 'e5b6fade85bd5ef9c0ae0cefaeffbf23ae7926460f21ccea52debd8484f1818d';
 const scopeSha256 = '3e307c157d987b97223ffadb8b79ebfd079d674ca79b3266430015b8fef6c59f';
+const pinnedSnapshotHashes = Object.freeze({
+  "architecture/interfaces.json": "65db2344cd7307897a2d8910d5d33f75b9e256573159a41864ebbdd0416099bc",
+  "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
+  "decisions/owner-approvals/revision-67-spec-s5-approved.json": "aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b",
+  "decisions/owner-approvals/revision-68-spec-s5-approved.json": "38146dffe3f47df9e5cf62f03e049310bf638ee141052b24c7b1bb97c43fd1a2",
+  "decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json": "e576590ea782085ff791887a7f9dac4ef52f7a68e6066b436ae722d82cc869fb",
+  "decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json": "c5381d6e698ac50a15c65a766f8c6d941dd06f6c34020e25fec5e97632a62061"
+});
 const fail = message => { throw new Error(`native build binding: ${message}`); };
 const assert = (condition, message) => { if (!condition) fail(message); };
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 export const nativeBuildInputs = Object.freeze([
   'architecture/interfaces.json',
+  'architecture/provisional-interfaces.json',
+  'decisions/owner-approvals/revision-67-spec-s5-approved.json',
+  'decisions/owner-approvals/revision-68-spec-s5-approved.json',
+  'decisions/owner-approvals/revision-69-collector-explicit-spec-s5-approved.json',
+  'decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json',
+
   'bindings/robinhood-chain.json',
   'decisions/native-eth-interface/IMPLEMENTATION-SCOPE.md',
   'feasibility/interface-freeze.json',
@@ -32,6 +46,10 @@ function bytes(root, file) {
 // A provisional native build binding replaces neither historical proof nor release admission.
 export function validateNativeInterfaceBuildBinding({ projectRoot, frozen, freeze, manifest }) {
   const record = JSON.parse(bytes(projectRoot, 'feasibility/native-interface-build-binding.json'));
+  assert(JSON.stringify(Object.keys(record).sort()) === JSON.stringify([
+    'schema', 'status', 'requirementsRevision', 'architectureRevision', 'productionReady',
+    'historicalEvidenceScope', 'inputHashes',
+  ].sort()), 'record key set mismatch');
   assert(record.schema === 'hookemon.native-interface-build-binding.v1', 'unsupported record');
   assert(record.status === 'PROVISIONAL_BUILD_ONLY' && record.productionReady === false,
     'record cannot grant production readiness');
@@ -41,11 +59,14 @@ export function validateNativeInterfaceBuildBinding({ projectRoot, frozen, freez
   for (const file of nativeBuildInputs) {
     assert(record.inputHashes[file] === digest(bytes(projectRoot, file)), `input hash mismatch: ${file}`);
   }
-  assert(record.inputHashes['specs/requirements.json'] === approvedRequirementsSha256, 'unapproved requirements');
+  for (const [file, expected] of Object.entries(pinnedSnapshotHashes)) {
+    assert(record.inputHashes[file] === expected, `pinned snapshot changed: ${file}`);
+  }
+  assert(record.inputHashes['specs/requirements.json'] === implementationScopeRequirementsSha256, 'requirements outside implementation scope');
   assert(record.inputHashes['feasibility/interface-freeze.json'] === historicalFreezeSha256,
     'historical freeze changed');
   assert(record.inputHashes['decisions/native-eth-interface/IMPLEMENTATION-SCOPE.md'] === scopeSha256,
-    'native implementation authority changed');
+    'native implementation scope note changed');
   assert(JSON.stringify(frozen) === JSON.stringify(JSON.parse(bytes(projectRoot, 'architecture/interfaces.json'))),
     'supplied interfaces differ from bound bytes');
   assert(JSON.stringify(freeze) === JSON.stringify(JSON.parse(bytes(projectRoot, 'feasibility/interface-freeze.json'))),
@@ -58,7 +79,7 @@ export function validateNativeInterfaceBuildBinding({ projectRoot, frozen, freez
     && frozen.bindingManifestDigest === null && frozen.nativeMigration?.launchEligible === false,
   'provisional boundary changed');
   assert(frozen.nativeMigration.requirementsRevision === 71
-    && frozen.nativeMigration.requirementsSha256 === approvedRequirementsSha256, 'migration requirements mismatch');
+    && frozen.nativeMigration.requirementsSha256 === implementationScopeRequirementsSha256, 'migration requirements mismatch');
   assert(frozen.nativeMigration.nativePaymentBindingSha256 === null, 'runtime authority requires release verification');
   assert(frozen.feeContract.basis === 'GROSS_NATIVE_ETH_QUOTE_VOLUME'
     && JSON.stringify(frozen.feeContract.streams.map(({ name, basisPoints }) => [name, basisPoints]))

@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { nativeBuildInputs, validateNativeInterfaceBuildBinding } from '../../feasibility/native-interface-build-binding.mjs';
+import { validateInterfaceFreeze } from '../../feasibility/verify-robinhood-binding.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(t) {
@@ -39,12 +40,12 @@ test('unrefreshed interface evidence fails closed', t => {
   f.write('architecture/interfaces.json', x); assert.throws(f.run, /input hash mismatch/);
 });
 for (const [name, path, mutate, expected] of [
-  ['different requirements', 'specs/requirements.json', x => { x.revision = 72; }, /unapproved requirements/],
+  ['different requirements', 'specs/requirements.json', x => { x.revision = 72; }, /requirements outside implementation scope/],
   ['rewritten historical freeze', 'feasibility/interface-freeze.json', x => { x.requirementsRevision = 71; }, /historical freeze changed/],
-  ['additional platform fee', 'architecture/interfaces.json', x => { x.feeContract.streams[0].basisPoints = 20; }, /native fee model changed/],
-  ['custody withdrawal authority', 'architecture/interfaces.json', x => { x.launch.positionCustody.withdraw = true; }, /custody authority changed/],
-  ['invented live eligibility', 'architecture/interfaces.json', x => { x.nativeMigration.launchEligible = true; }, /provisional boundary changed/],
-  ['unverified runtime authority', 'architecture/interfaces.json', x => { x.nativeMigration.nativePaymentBindingSha256 = 'a'.repeat(64); }, /runtime authority requires/],
+  ['additional platform fee', 'architecture/interfaces.json', x => { x.feeContract.streams[0].basisPoints = 20; }, /pinned snapshot changed: architecture\/interfaces.json/],
+  ['custody withdrawal authority', 'architecture/interfaces.json', x => { x.launch.positionCustody.withdraw = true; }, /pinned snapshot changed: architecture\/interfaces.json/],
+  ['invented live eligibility', 'architecture/interfaces.json', x => { x.nativeMigration.launchEligible = true; }, /pinned snapshot changed: architecture\/interfaces.json/],
+  ['unverified runtime authority', 'architecture/interfaces.json', x => { x.nativeMigration.nativePaymentBindingSha256 = 'a'.repeat(64); }, /pinned snapshot changed: architecture\/interfaces.json/],
 ]) test(`recomputed document hashes cannot approve ${name}`, t => {
   const f = fixture(t); const x = f.read(path); mutate(x); f.write(path, x); f.rebind(path);
   assert.throws(f.run, expected);
@@ -61,4 +62,32 @@ test('a symlink cannot substitute even identical input bytes', t => {
   const f = fixture(t); const file = join(f.dir, 'architecture/interfaces.json');
   const copy = join(f.dir, 'copy.json'); writeFileSync(copy, readFileSync(file)); rmSync(file); symlinkSync(copy, file);
   assert.throws(f.run, /symlink/);
+});
+
+test('shared gate validator refuses a valid provisional native build', t => {
+  const f = fixture(t);
+  assert.equal(f.run().productionReady, false);
+  assert.throws(() => validateInterfaceFreeze({ projectRoot: f.dir,
+    frozen: f.read('architecture/interfaces.json'), freeze: f.read('feasibility/interface-freeze.json'),
+    provisional: f.read('architecture/provisional-interfaces.json'), manifest: f.read('bindings/robinhood-chain.json'),
+  }), /cannot satisfy an interface freeze gate/);
+});
+test('extra readiness claims cannot enter a build record', t => {
+  const f = fixture(t); const record = f.read('feasibility/native-interface-build-binding.json');
+  record.nativeFeasibilityProven = true;
+  f.write('feasibility/native-interface-build-binding.json', record);
+  assert.throws(f.run, /record key set mismatch/);
+});
+for (const path of ['feasibility/phase3-offchain-interface-amendment.json',
+  'decisions/owner-approvals/revision-70-collector-explicit-spec-s5-approved.json']) {
+  test(`rebound historical bytes are rejected: ${path}`, t => {
+    const f = fixture(t); const data = f.read(path); data.forgedNativeApproval = true;
+    f.write(path, data); f.rebind(path); assert.throws(f.run, /pinned snapshot changed/);
+  });
+}
+test('unreviewed interface fields cannot be rebound into the snapshot', t => {
+  const f = fixture(t); const data = f.read('architecture/interfaces.json');
+  data.processClaims.window.seconds = 1;
+  f.write('architecture/interfaces.json', data); f.rebind('architecture/interfaces.json');
+  assert.throws(f.run, /pinned snapshot changed/);
 });

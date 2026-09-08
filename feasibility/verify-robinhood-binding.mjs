@@ -858,7 +858,7 @@ function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoo
 
 export function validateInterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot }) {
   if (frozen?.nativeMigration !== undefined) {
-    return validateNativeInterfaceBuildBinding({ projectRoot, frozen, freeze, manifest });
+    throw new Error("native provisional build binding cannot satisfy an interface freeze gate");
   }
   if (freeze?.productPhase === 3) {
     return validatePhase3InterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot });
@@ -1614,13 +1614,10 @@ async function main() {
   const freeze = JSON.parse(
     readFileSync(path.join(projectRoot, "feasibility/interface-freeze.json"), "utf8")
   );
-  const interfaceFreeze = validateInterfaceFreeze({
-    freeze,
-    frozen,
-    provisional,
-    manifest,
-    projectRoot
-  });
+  // The offline CLI may inspect a provisional build. Gate callers always use the strict export.
+  const interfaceFreeze = invocation.offline && frozen?.nativeMigration !== undefined
+    ? validateNativeInterfaceBuildBinding({ projectRoot, frozen, freeze, manifest })
+    : validateInterfaceFreeze({ freeze, frozen, provisional, manifest, projectRoot });
   const localProof = validateLocalProof(manifest, projectRoot);
   const { offline } = invocation;
 

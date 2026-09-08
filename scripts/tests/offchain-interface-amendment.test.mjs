@@ -13,7 +13,7 @@ const hash = (root, path) => `sha256:${createHash('sha256').update(readFileSync(
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'offchain-interface-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const amendment = read(source, amendmentPath);
+  const amendment = JSON.parse(execFileSync('git', ['show', `b2cb737a298522e3944652e862c4eeab195667d8:${amendmentPath}`], { cwd: source, encoding: 'utf8' }));
   for (const path of [...INTERFACE_FREEZE_INPUTS, 'feasibility/interface-freeze.json', amendmentPath, ...Object.keys(amendment.ownerApprovalHashes)]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), execFileSync('git', ['show', `b2cb737a298522e3944652e862c4eeab195667d8:${path}`], { cwd: source }));

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import { hashFile, sha256, writeJson } from '../lib/util.mjs';
 import { checkGate, overrideGate } from '../lib/gates.mjs';
 import { overrideSubjectInputs, writeOwnerApproval } from './helpers/owner-approval.mjs';
 import {
+  INTERFACE_FREEZE_INPUTS,
   computeManifestDigest,
   parsePinnedLiquidityLauncherFacts,
   parsePinnedOfficialBindingFacts,
@@ -32,6 +33,7 @@ import {
 } from '../../feasibility/verify-robinhood-binding.mjs';
 
 test('Phase 3 process claims use a strict six-hour window without changing the policy spend ledger', () => {
+  const projectRoot = historicalRoot;
   const requirements = JSON.parse(readFileSync(join(projectRoot, 'specs', 'requirements.json'), 'utf8'));
   const interfaces = JSON.parse(readFileSync(join(projectRoot, 'architecture', 'interfaces.json'), 'utf8'));
   const processClaimRequirement = requirements.requirements.find(
@@ -49,6 +51,7 @@ test('Phase 3 process claims use a strict six-hour window without changing the p
 });
 
 test('canonical market ignores hook data without deriving buyer credit', () => {
+  const projectRoot = historicalRoot;
   const requirements = JSON.parse(readFileSync(join(projectRoot, 'specs', 'requirements.json'), 'utf8'));
   const canonicalMarketRequirement = requirements.requirements.find(
     ({ id }) => id === 'REQ-canonical-market-6',
@@ -61,6 +64,7 @@ test('canonical market ignores hook data without deriving buyer credit', () => {
 });
 
 test('revision 65 carries full-supply canonical allocation and preserves bridge settlement, standing authority, explicit configuration, split launch, and payout durability', () => {
+  const projectRoot = historicalRoot;
   const requirements = JSON.parse(readFileSync(join(projectRoot, 'specs', 'requirements.json'), 'utf8'));
   const interfaces = JSON.parse(readFileSync(join(projectRoot, 'architecture', 'interfaces.json'), 'utf8'));
   const provisional = JSON.parse(readFileSync(join(projectRoot, 'architecture', 'provisional-interfaces.json'), 'utf8'));
@@ -558,6 +562,20 @@ test('Robinhood reproduced artifacts must match the bound release commit and byt
 
 const here = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(here, '../..');
+// Historical freeze assertions retain their immutable revision-70 inputs.
+// Current verifier and generator code are overlaid so compatibility tests exercise this branch.
+const historicalRoot = mkdtempSync(join(tmpdir(), 'v4-historical-requirements-'));
+const historicalArchive = execFileSync('git', ['archive', 'b2cb737a298522e3944652e862c4eeab195667d8',
+  ...INTERFACE_FREEZE_INPUTS, 'feasibility/interface-freeze.json', 'feasibility/phase3-offchain-interface-amendment.json',
+  'decisions/owner-approvals', 'architecture/capability-map.json', 'docs/audit/2026-09-04/failure-matrix.json'],
+  { cwd: projectRoot, maxBuffer: 64 * 1024 * 1024 });
+execFileSync('tar', ['-xf', '-', '-C', historicalRoot], { input: historicalArchive });
+cpSync(join(projectRoot, 'scripts'), join(historicalRoot, 'scripts'), { recursive: true });
+for (const file of ['refresh-interface-freeze.mjs', 'verify-robinhood-binding.mjs', 'native-interface-build-binding.mjs', 'cycle-control-model.mjs']) {
+  cpSync(join(projectRoot, 'feasibility', file), join(historicalRoot, 'feasibility', file));
+}
+test.after(() => rmSync(historicalRoot, { recursive: true, force: true }));
+
 function proj() {
   const root = mkdtempSync(join(tmpdir(), 'v4-'));
   mkdirSync(join(root, 'specs'), { recursive: true });
@@ -1250,6 +1268,7 @@ test('Robinhood binding reconciles pinned deployment registries', () => {
 });
 
 test('interface freeze tracks the provisional Phase 3 architecture while preserving historical evidence', () => {
+  const projectRoot = historicalRoot;
   const manifest = JSON.parse(readFileSync(join(projectRoot, 'bindings', 'robinhood-chain.json'), 'utf8'));
   const frozen = JSON.parse(readFileSync(join(projectRoot, 'architecture', 'interfaces.json'), 'utf8'));
   const provisional = JSON.parse(readFileSync(join(projectRoot, 'architecture', 'provisional-interfaces.json'), 'utf8'));
@@ -1364,6 +1383,7 @@ test('interface freeze tracks the provisional Phase 3 architecture while preserv
 });
 
 test('interface freeze refresh is deterministic and validation rejects tampering', () => {
+  const projectRoot = historicalRoot;
   const generator = join(projectRoot, 'feasibility', 'refresh-interface-freeze.mjs');
   const output = join(projectRoot, 'feasibility', 'interface-freeze.json');
 
