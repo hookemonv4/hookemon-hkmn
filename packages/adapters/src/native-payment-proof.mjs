@@ -139,6 +139,11 @@ export function createTestNativePaymentBinding(value, authority) {
   return freeze(binding);
 }
 
+/** Identifies an immutable binding authenticated in this process; serialized copies carry no authority. */
+export function isReleaseNativePaymentBinding(value) {
+  return releaseBindings.has(value);
+}
+
 export function isTestNativePaymentBinding(value, authority) {
   return authority === createTestProfileMutationAuthority() && testBindings.has(value);
 }
