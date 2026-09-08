@@ -364,3 +364,8 @@ cycles before applying a return credit; a retry preserves that attribution.
 Native outbound finality records principal in `bridgeOut` and execution cost in typed `gasSpent`.
 These are separate amounts. Reconciliation repeats RPC observation and preserves the already
 recorded debit and gas cost. Held cards retain their USD purchase basis outside native custody.
+
+Synthetic proof tests may construct bindings only with the exact test-profile capability.
+Production composition obtains binding authority solely from the frozen release digest. Payment
+logs must carry the expected transaction hash, block hash, block number and unique log index;
+matching event data from a different receipt cannot establish inclusion.

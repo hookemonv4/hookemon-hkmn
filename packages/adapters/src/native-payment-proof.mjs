@@ -1,7 +1,7 @@
 import { isProcessRpcRelaySourceDebit } from './solana-rpc.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
+import { createTestProfileMutationAuthority, requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
 import { decodeEventLog, decodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTransactionAddress } from 'viem';
 import { digest } from '../../runner/src/cycle/journal.mjs';
 import { readFinalizedTransactionReceipt, readBlockByNumber } from './robinhood-rpc.mjs';
@@ -80,7 +80,9 @@ export async function createNativePaymentProof({ client, signedTransaction, expe
       try { decoded = decodeEventLog({ abi: CLAIM_ABI, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
       if (decoded.eventName !== 'ProcessClaimed' || decoded.args.cycleId !== intent.cycleId) continue;
       need(decoded.args.amountWei === BigInt(amountWei) && address(decoded.args.destination) === recipient, 'claim event mismatch');
-      need(log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0, 'invalid claim event inclusion');
+      need(log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0
+        && log.transactionHash === transactionHash && log.blockHash === observed.receiptBlockHash
+        && log.blockNumber === observed.receiptBlockNumber, 'invalid claim event inclusion');
       matches.push(log.logIndex);
     }
     need(matches.length === 1, 'claim requires one unique post-payment event');
@@ -121,6 +123,16 @@ export function requireNativePaymentBinding(path) {
   return freeze(binding);
 }
 
+
+/** Explicit synthetic test authority; production composition only loads release-pinned bytes. */
+export function createTestNativePaymentBinding(value, authority) {
+  need(authority === createTestProfileMutationAuthority(), 'synthetic binding requires the exact test profile capability');
+  const binding = structuredClone(value);
+  need(binding.schema === 'hookemon.native-payment-binding.v1' && binding.chainId === '4663', 'invalid synthetic binding');
+  function freeze(item) { if (item && typeof item === 'object') { Object.values(item).forEach(freeze); Object.freeze(item); } return item; }
+  releaseBindings.add(binding);
+  return freeze(binding);
+}
 
 /** A successful router cleanup event is authority only under a release-pinned runtime and source decoder. */
 export async function createRelayNativePaymentProof({ client, binding, sourceProof, signedSourceTransaction, expected }) {
@@ -177,7 +189,9 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
     if (event.args.metadata.toLowerCase() !== orderId) continue;
     need(event.args.from.toLowerCase() === emitter && event.args.to.toLowerCase() === recipient
       && event.args.currency === '0x0000000000000000000000000000000000000000'
-      && event.args.amount > 0n && log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0,
+      && event.args.amount > 0n && log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0
+      && log.transactionHash === transactionHash && log.blockHash === observed.receiptBlockHash
+      && log.blockNumber === observed.receiptBlockNumber,
     'Relay native payment event conflicts with the attributed order');
     matches.push({ amountWei: event.args.amount.toString(), logIndex: log.logIndex });
   }
