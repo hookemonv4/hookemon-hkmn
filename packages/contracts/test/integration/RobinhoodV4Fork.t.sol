@@ -26,6 +26,7 @@ import { Test } from "../../lib/v4-core/lib/forge-std/src/Test.sol";
 import { Vm } from "../../lib/v4-core/lib/forge-std/src/Vm.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { SqrtPriceMath } from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
@@ -223,7 +224,8 @@ contract RobinhoodV4ForkTest is Test {
         ForkTestToken first = new ForkTestToken();
         ForkTestToken second = new ForkTestToken();
         (token0, token1) = address(first) < address(second) ? (first, second) : (second, first);
-        currency0 = Currency.wrap(address(token0));
+        currency0 = Currency.wrap(address(0));
+        vm.deal(address(this), 1e40);
         currency1 = Currency.wrap(address(token1));
 
         token0.mint(address(this), 10 ** 30);
@@ -253,18 +255,16 @@ contract RobinhoodV4ForkTest is Test {
         );
     }
 
-    /// @notice WP-02 fee-conformance against the real forked PoolManager: all eight swap
-    ///         quadrants (both token orders, both directions, both exact-input/exact-output),
+    /// @notice WP-02 fee-conformance against the real forked PoolManager: all four native swap
+    ///         quadrants (native currency0, both directions, both exact-input/exact-output),
     ///         every swap carrying valid hookData, must conserve the pinned 3% inclusive USDG
     ///         fee split (10bps Programmable / 40bps treasury / 250bps process) under the
     ///         cumulative-remainder accrual, independently re-derived here rather than merely
     ///         checked for self-consistency with the hook's own accounting.
-    function testSwapPathEightQuadrantsWithHookDataConservesPinnedFeeSplit() external {
+    function testSwapPathFourNativeQuadrantsWithHookDataConservesPinnedFeeSplit() external {
         if (address(manager) == address(0)) return; // setUp skipped
         HookemonHook first = _deployHook(currency0);
         _exerciseFourQuadrants(first, currency0, true);
-        HookemonHook second = _deployHook(currency1);
-        _exerciseFourQuadrants(second, currency1, true);
     }
 
     /// @notice Hook data does not affect the finalized fee or liability path.
@@ -273,7 +273,7 @@ contract RobinhoodV4ForkTest is Test {
         HookemonHook hook = _deployHook(currency0);
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-120, 120, 10 ** 24, bytes32(0)), bytes("")
         );
 
@@ -322,7 +322,13 @@ contract RobinhoodV4ForkTest is Test {
             bytes("")
         );
         params[1] = abi.encode(key.currency0, key.currency1);
-        positionManager.modifyLiquidities(abi.encode(actions, params), block.timestamp + 1);
+        positionManager.modifyLiquidities{
+            value: SqrtPriceMath.getAmount0Delta(
+                uint160(1 << 96), TickMath.getSqrtPriceAtTick(120), uint128(1e18), true
+            )
+        }(
+            abi.encode(actions, params), block.timestamp + 1
+        );
 
         assertEq(positionManager.ownerOf(tokenId), address(this));
         assertEq(positionManager.getPositionLiquidity(tokenId), 10 ** 18);
@@ -336,7 +342,7 @@ contract RobinhoodV4ForkTest is Test {
     function _exerciseFourQuadrants(HookemonHook hook, Currency usdg, bool withHookData) private {
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-120, 120, 10 ** 24, bytes32(0)), bytes("")
         );
         _runFourQuadrants(hook, key, usdg, withHookData);
@@ -395,7 +401,7 @@ contract RobinhoodV4ForkTest is Test {
         uint256 managerBefore = _usdgBalance(usdg, address(manager));
         vm.recordLogs();
 
-        BalanceDelta delta = swapRouter.swap(
+        BalanceDelta delta = swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(
                 zeroForOne,
@@ -437,7 +443,7 @@ contract RobinhoodV4ForkTest is Test {
         uint256 managerBefore = _usdgBalance(usdg, address(manager));
         vm.recordLogs();
 
-        BalanceDelta delta = swapRouter.swap(
+        BalanceDelta delta = swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(true, -int256(100_000), TickMath.MIN_SQRT_PRICE + 1),
             PoolSwapTest.TestSettings(false, false),
@@ -514,9 +520,7 @@ contract RobinhoodV4ForkTest is Test {
     }
 
     function _usdgBalance(Currency usdg, address account) private view returns (uint256) {
-        return Currency.unwrap(usdg) == address(token0)
-            ? token0.balanceOf(account)
-            : token1.balanceOf(account);
+        return Currency.unwrap(usdg) == address(0) ? account.balance : token1.balanceOf(account);
     }
 
     /// @dev This is deliberately independent of `lastExecutedUsdg`: raw pool movement comes
@@ -604,8 +608,8 @@ contract RobinhoodV4ForkTest is Test {
                 manager: manager,
                 positionManager: ROBINHOOD_POSITION_MANAGER,
                 permit2: PERMIT2,
-                usdg: usdg,
-                hkmn: usdg == currency0 ? currency1 : currency0,
+                quoteCurrency: usdg,
+                hkmn: currency1,
                 tickSpacing: 60,
                 programmable: PROGRAMMABLE,
                 treasury: TREASURY,
@@ -615,15 +619,13 @@ contract RobinhoodV4ForkTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: BINDING_DIGEST,
                 runtimeDigest: RUNTIME_DIGEST,
-                processClaimLimit6h: 1_000_000,
-                processClaimLimitMax: 2_000_000,
+                processClaimLimit6hWei: 1_000_000,
+                processClaimLimitMaxWei: 2_000_000,
                 processClaimMaxCount: 8,
                 operationsRotationDelay: 3 days
             })
         );
         bytes32 initCodeHash = factory.initCodeHash();
-        uint256 originalChainId = block.chainid;
-        vm.chainId(31_337);
         for (uint256 nonce; nonce < 100_000; ++nonce) {
             bytes32 salt = bytes32(nonce);
             address predicted = vm.computeCreate2Address(salt, initCodeHash, address(factory));
@@ -633,7 +635,6 @@ contract RobinhoodV4ForkTest is Test {
                 break;
             }
         }
-        vm.chainId(originalChainId);
         assertTrue(address(hook) != address(0), "no valid CREATE2 salt found in 100_000 tries");
     }
 
@@ -649,4 +650,5 @@ contract RobinhoodV4ForkTest is Test {
     function _hookData(address recipient) private pure returns (bytes memory) {
         return abi.encode(recipient, uint256(7));
     }
+    receive() external payable { }
 }

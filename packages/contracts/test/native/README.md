@@ -1,30 +1,21 @@
-# Native seed preparation
+# Native contract evidence
 
-These passing fixtures exercise pinned Uniswap managers before the native Hookemon implementation. They do not deploy a native HookemonHook, authorize revision 71, prove the final HKMN supply/allocation or custody graph, or establish provider admission. The test-only token is deliberately identified as a parity fixture.
+`NativeHook.t.sol` exercises the production HookemonHook, the selected standalone 1,000,000,000-HKMN token, real pinned PoolManager/PositionManager/Permit2, and PermanentPositionCustody. Its fixtures use synthetic values and grant no launch funding or provider approval.
 
-Pinned Git sources: v4-core `46c6834698c48bc4a463a86d8420f4eb1d7f3b75`; v4-periphery `dce236d4e2057422d0791d9a973a58765eb46f65`. `Pool.sol` lines 206–235 selects below-range, in-range and above-range liquidity debts from current slot0. `SqrtPriceMath.sol`'s signed positive-liquidity overload rounds the required unsigned amount upward. `DeltaResolver.sol` lines 36–48 settles native debt by `poolManager.settle{value: amount}()` from the PositionManager's balance. `PositionManager.sol` handles MINT_POSITION and SETTLE_PAIR, checks both maxima, and does not isolate this caller's msg.value from pre-existing native balance. The fixture compares the independent unsigned round-up recipe against that actual execution. It uses the pinned precompiled Permit2 helper, not a substitute settlement mock.
+The production cases cover four native swap quadrants, the 999/1000-wei boundary, distinct launch caller and refund recipient, exact native value, both debt maxima, current slot0, forced/pre-existing hook and PositionManager ETH, HKMN allowance cleanup, full allocation, permanent custody, rejecting and reentrant refunds, forwarding and rejecting claim recipients, claim reentry, and partial beneficiary payments. A cheatcode-only balance fault exercises the final solvency guard and confirms liability/cycle/window rollback. That fault deliberately bypasses EVM balance journaling; the separate rejected-payment cases prove ordinary atomic balance rollback.
 
-Seven tests pass, including 64 bounded fuzz runs and nine explicit prices: ticks -887221, -887220, -887219, -60, 0, 60, 887219, 887220 and 887221. They verify exact native/token debts, minted liquidity, sender/manager balances, no stranded PositionManager balance, preservation of unrelated ETH with an exact-debt call, and rollback on underfunding or either maximum being one atomic unit too small.
+`NativeSeedDebtParity.t.sol` independently compares rounded debt with actual pinned PositionManager execution at nine prices and bounded fuzz inputs. Its test token is a debt fixture, not the selected deployment token. The underpaid-manager case proves PositionManager can consume unrelated native balance, making the hook's own exact-funding check necessary. A synthetic release-math vector binds native maximum 40000000000000000, price 12527072418752396559322253362376889 and liquidity 6324555320336758663997 to native debt 39999999999999657, HKMN debt 1e27 and refund 343.
 
-One deliberately successful adversarial case shows that PositionManager can consume one wei of its pre-existing 17 wei when the caller supplies nativeDebt minus one. This is evidence for the Hookemon entrypoint's explicit msg.value check; it is not a passing Hookemon funding guard. Do not add a zero-PositionManager-balance assumption or use SWEEP to hide that case.
+The calculation follows v4-core `46c6834698c48bc4a463a86d8420f4eb1d7f3b75` (`Pool.sol`, `TickMath.sol`, `SqrtPriceMath.sol`) and v4-periphery `dce236d4e2057422d0791d9a973a58765eb46f65` (`PositionManager.sol`, `base/DeltaResolver.sol`). Solidity is 0.8.26 with Cancun. Native seeding sends only calculated debt to MINT_POSITION + SETTLE_PAIR; it does not use SWEEP or infer refunds from aggregate balances.
 
-Executed with Forge 1.7.1, Solidity 0.8.26, Cancun and the existing default optimizer profile:
+Use the existing package configuration and its contextual dependency remappings:
 
 ```sh
 FOUNDRY_SRC=test/native FOUNDRY_TEST=test/native \
-FOUNDRY_OUT=out-native-prep FOUNDRY_CACHE_PATH=cache-native-prep \
-forge test --root packages/contracts \
-  --match-path 'test/native/NativeSeedDebtParity.t.sol' --fuzz-runs 64 -vv
+FOUNDRY_OUT=out-native FOUNDRY_CACHE_PATH=cache-native \
+forge test --root packages/contracts --offline --match-path 'test/native/*.t.sol' -vv
 ```
 
-Result: 7 passed, 0 failed, 0 skipped. The source/test overrides compile only this fixture's dependency graph; they do not modify repository configuration. Dependencies were exported from exact locally available Git objects into this worktree. Foundry attempted its automatic dependency bootstrap because those exports have no `.git` entries; the required graph still compiled and passed. Its isolated uerc20-factory checkout was restored to the exact pinned commit, and no tracked dependency or gitlink changed. For subsequent prepared local runs use offline mode and pre-materialized pinned dependencies. The sandbox's optional signature-cache write warning does not affect these test results. Formatting was applied afterward with the repository contract formatter and checked; no semantic test change followed.
+The related local native regressions live in `test/access/ProcessClaims.t.sol`, `test/integration/HookemonHook.t.sol`, `test/blind/phase3/`, and the selected launch tests. Shared FeeAccounting retains its default historical ERC20 semantics; `test/accounting/`, `test/market/`, and `test/process/ProcessBudget.t.sol` retain those regressions.
 
-## Production change boundary after coordinator go
-
-1. In HookemonHook, CanonicalMarket and selected standalone launch/HKMNToken, bind native currency0 and HKMN currency1; retain supply, allocation, roles, permanent custody, 1000-wei minimum and cumulative 250/40/10 accounting. Do not substitute the historical embedded token in HookemonIssuance.sol.
-2. Make the existing seed entrypoint payable with exact native maximum/value validation. After HKMN-only approvals, read current slot0 and compute debt with the proven rounding recipe. Send only nativeDebt into MINT_POSITION/SETTLE_PAIR; refund exactly msg.value minus nativeDebt to the existing explicit payer. Keep launchAuthority and payer distinct. Preserve allowance cleanup, full allocation and custody verification.
-3. Give the active hook a native transfer seam under the existing money guard. Preserve the default shared FeeAccounting ERC20 adapter semantics for excluded ProcessBudget. Native claims must accept a recipient that forwards ETH, reject a failed value call atomically, and emit ProcessClaimed after payment. Do not impose ending recipient balance growth.
-4. Replace active quote balance/collection adapters and explicit claim-cap units with native wei semantics; leave temporal claim/rotation rules unchanged. No oracle or guessed launch amounts.
-5. Extend these fixtures against the actual native hook: insufficient/excess msg.value; native/HKMN maxima; forced/pre-existing ETH in hook and PositionManager; rejecting refund payer; distinct caller/payer; current-price drift before mint; permanent custody and full HKMN allocation; all four swap forms; claim recipient forwarding, rejection and reentrancy; and liability backing across failures.
-
-The final native hook fixtures must exercise production source, not merely this parity recipe. Existing active contract tests are updated in the assigned lane; excluded vault contracts and their historical semantics stay unchanged. Production code waits for the coordinator's confirmed baseline/interface checkpoint. No live RPC, signature, spending or broadcast belongs to this fixture task.
+Native fork consumers compile against current creationCode and preserve required provider-runtime and graph-output comparisons. Their pinned provider graph/runtime values require coordinator regeneration from actual fork execution before the native release gate can pass. Local native fixtures do not establish that fork evidence, live provider admission, deployment or spending authority.

@@ -16,32 +16,32 @@ the long-lived application Node process. This card covers `REQ-operations-wallet
 
 The Phase 3 hook interface is represented by the typed adapter calldata builder and the frozen ABI.
 
-- `claimProcess(bytes32 cycleId,uint256 amountAtomicUsdg,address destination)` accepts only current Operations, a nonzero permanently unused cycle identifier, a positive amount within liability and capacity, and `destination == msg.sender`. Its immutable active-entry bound is at most 64.
+- `claimProcess(bytes32 cycleId,uint256 amountWei,address destination)` accepts only current Operations, a nonzero permanently unused cycle identifier, a positive amount within liability and capacity, and `destination == msg.sender`. Its immutable active-entry bound is at most 64.
 - `remainingProcessClaimCapacity()` reports currently available capacity, and `activeProcessClaimLimit()` reports the active cap, including a scheduled increase that has reached its activation time.
 - Treasury controls `setProcessClaimLimit(uint256)`, `pauseProcessClaims()`, `unpauseProcessClaims()`, `scheduleOperationsRotation(address)`, and `executeOperationsRotation()` as defined by Role Control.
 - `claimProgrammable(address destination)` and `claimTreasury(address destination)` transfer full liabilities to a nonzero beneficiary-selected destination. Their amount overloads support positive partial claims and record the exact transfer destination.
-- A successful process claim records `cycleId`, amount, destination, timestamp, cap, and used-after amount.
+- A successful process claim records `cycleId`, amountWei, destination, timestamp, capWei, and usedAfterWei only after an exact successful native value call and solvency check. Contract recipients may forward ETH. Rejected calls restore the liability, permanent cycle marker and six-hour usage atomically.
 - `prepareClaimProcessRequest` binds the local cycle ID, its deterministic onchain ID, the exact
-  atomic amount, the configured USDG asset metadata, and the Operations EVM destination. After
+  atomic amount, the configured native ETH asset metadata, and the Operations EVM destination. After
   the durable `PREPARED` transition, the claim path binds a pending EVM nonce, estimated gas,
-  EIP-1559 fee fields, and `MoneyConfigurationV1` before a signer can see a transaction. Both
+  EIP-1559 fee fields, and `MoneyConfigurationV2` before a signer can see a transaction. Both
   EIP-1559 fee fields must not exceed the configured per-transaction gas-price cap, and the native
   balance must cover `gasLimit * maxFeePerGas + nativeReserve`.
   `reconcileLiveClaimProcess` requires a canonical finalized successful receipt with the exact
-  claim event and USDG transfer; a finalized revert is terminal rather than a retry signal.
+  claim event and native ETH transfer; a finalized revert is terminal rather than a retry signal.
 - The claim mutator revalidates the live mutation authority immediately before both signing and
   raw-transaction broadcast. A direct caller cannot use the exported mutation helper to bypass
   that boundary.
-- Outbound validation accepts only the exact USDG approval and configured Relay EVM depository
+- Outbound validation accepts only the exact native value and configured Relay EVM deposit
   call from Operations. A policy signer is refused unless the chain-attempt journal supplies a
   persisted EVM nonce for the approved transaction. Its durable recovery context also retains the
   signed quote deadline and source sender, depository, and destination-owner route tuple, so
   settlement can bind own-RPC proof to those persisted accounts and use the canonical EVM source
   timestamp and finalized Solana block time rather than a live quote.
-- Return reconciliation accepts `ReturnLegDestinationProofV1`: an authenticated terminal Relay
+- Return reconciliation accepts `ReturnLegDestinationProofV2`: an authenticated terminal Relay
   destination pointer plus this process's finalized Solana source observation and Robinhood
-  receipt. It binds return custody before payout only when that receipt shows one exact USDG
-  Transfer to Operations for the quoted amount inside the configured settlement window and the
+  receipt. It binds return custody before payout only when authenticated native payment evidence
+  proves the exact quoted amount reached Operations inside the configured settlement window and the
   source and destination hashes are globally unique. Other finalized transfer observations enter a
   named hold. It accepts only the unchanged runtime proof emitted by that process-RPC observation
   and never uses a wallet-wide balance or Relay status as a substitute.
@@ -66,7 +66,7 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
   its private regular-file inode through that descriptor, then reads those exact bytes. It contains
   no signing key. The resolver returns an intent only for its exact cycle, stage, authorization
   kind, request digest, and signer role.
-- `readEnvironment` builds `MoneyConfigurationV1` from the frozen USDG binding, the configured
+- `readEnvironment` builds `MoneyConfigurationV2` from the frozen native ETH binding, the configured
   Solana mint and decimals, typed minima, and four explicit native-fee controls.
   `validateMoneyConfiguration` rejects a malformed configuration as
   `MoneyConfigurationRejected`; `compose` repeats that validation outside inspection before it
@@ -102,8 +102,8 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
 
 - A claim counts in the active window exactly while `block.timestamp - claimedAt < 21600`; an entry at equality is expired.
 - Active window entries are bounded by immutable `processClaimMaxCount`, hard-capped at 64. Limit
-  decreases and zero take effect immediately; an increase no greater than immutable 500000 USDG
-  `Xmax` activates only after 21600 seconds.
+  decreases and zero take effect immediately; an increase no greater than the explicitly supplied immutable wei maximum
+  `processClaimLimitMax` activates only after 21600 seconds.
 - Limit changes, pauses, and Operations rotation never reset capacity usage, claim history, or used cycle identifiers.
 - Scheduling or executing an emergency Operations rotation auto-pauses claims. Its immutable
   constructor delay is 43200 seconds. Scheduling clears a pending ordinary Operations proposal
@@ -141,18 +141,18 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
   associated Relay leg is awaiting destination attribution. The release cannot reauthorize its
   immutable signed bytes or change the Relay leg's settlement state.
 - An outbound Relay leg signs only the claimed principal for its cycle. A return leg signs only the
-  attributed proceeds delta. Both legs record `RelayLegV1` before the first signature and remain
+  attributed proceeds delta. Both legs record `RelayLegV2` before the first signature and remain
   unsettled until their own RPC observations prove source and destination finality and attribution.
   For an exact outbound credit, this requires the recorded request ID in the destination Solana
   memo, the configured mint and exact atomic amount, and a canonical destination block timestamp
   within the persisted interval from the EVM source timestamp through the signed quote deadline.
   A missing timestamp, memo, or exact credit is not settled.
 - A return proof records the terminal Relay pointer plus one finalized Robinhood receipt. `SETTLED`
-  requires exactly one USDG Transfer to Operations for the quoted destination amount within the
-  persisted settlement window; a partial, late, or wrong token or recipient result enters its named
+  requires authenticated exact native payment to Operations for the quoted destination amount within the
+  persisted settlement window; a partial, late, or wrong asset or recipient result enters its named
   `HELD_RELAY_*` state and cannot fund payout.
 - Every money minimum is a typed `{chainId, assetId, decimals, amountAtomic}` value. The
-  production return minimum is `{chainId: 4663, assetId: USDG, decimals: 6, amountAtomic: 0}`;
+  production return minimum is `{chainId: "4663", assetId: "native", decimals: 18, amountAtomic: "0"}`;
   it intentionally sets no general return minimum, and every nonzero value is a configuration
   error. EVM per-transaction gas-price and native reserve caps plus Solana priority-fee and
   lamport reserve caps are mandatory. Atomic value `1` is a configuration error, never a fallback.
@@ -170,18 +170,18 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
 
 ## State transitions
 
-- A valid process claim atomically debits process liability, transfers USDG to Operations, records the cycle identifier, and consumes active-window capacity.
+- A valid process claim atomically debits process liability, transfers native ETH to Operations, records the cycle identifier, and consumes active-window capacity.
 - Claim adapter state is `PREPARED(requestDigest)` →
   `SIGNED(rawSignedBytesHash, nonceOrBlockhash, txHash)` → `BROADCAST` → `FINALIZED`. The generic
   repository record does not persist the frozen v2 policy, fencing, refusal, or approval-digest
   fields. A restart reconciles the existing claim rather than constructing replacement bytes.
-- When canonical claim evidence proves the exact USDG credit, the stage records or backfills the
+- When canonical claim evidence proves the exact native ETH credit, the stage records or backfills the
   matching `eip155:4663` custody ledger with the exact `claimed` amount before finality. A
   conflicting nonzero claimed amount is refused.
 - The removed degraded-return acceptance route always refuses. It cannot target a legacy custody
   contract or bypass policy, authorization, fencing, and the chain journal.
 - Return reconciliation moves from a finalized source debit and terminal Relay pointer to a
-  `ReturnLegDestinationProofV1` check against the process-RPC destination receipt. An exact proof
+  `ReturnLegDestinationProofV2` check against the process-RPC destination receipt. An exact proof
   settles the leg and records attributed return custody before payout; partial, late, and wrong
   transfer evidence records the matching terminal hold.
 - First use of a standing authority checks wall-clock expiry, then atomically persists
@@ -189,7 +189,7 @@ The Phase 3 hook interface is represented by the typed adapter calldata builder 
   signer. An exact replay reads the same decision, including after authority expiry, without
   reserving again; only an expired first use reaches `REFUSED`.
 - Money configuration moves from explicit environment values through canonical
-  `MoneyConfigurationV1` validation to a frozen composition value. Missing required controls,
+  `MoneyConfigurationV2` validation to a frozen composition value. Missing required controls,
   incorrect asset metadata, an atomic placeholder value, or any nonzero return minimum are rejected
   before adapters or durable state are constructed.
 - `collector-only` rehearsal replaces outbound and return with explicit skip handlers. The fake
@@ -230,7 +230,7 @@ checks are `packages/adapters/test/wallet-cli.test.mjs` and
 ## Recovery pointers
 
 - Pause claims and execution before responding to an Operations-key incident, then use the owner-approved onchain and signer-policy rotation path.
-- Reconcile an unresolved claim from its recorded cycle identifier, transfer delta, cap, used-after value, and any signed or broadcast transaction before retrying. Never create replacement bytes while the earlier request is unresolved.
+- Reconcile an unresolved claim from its recorded cycle identifier, post-payment claim event, cap, used-after value, and any signed or broadcast transaction before retrying. Never create replacement bytes while the earlier request is unresolved.
 - Keep an encrypted whole-Mac backup that includes the login Keychain, or be ready to generate
   replacements and use the approved emergency rotation path. Test recovery against a
   non-production Keychain context using `show`, `probe`, and a public export only.

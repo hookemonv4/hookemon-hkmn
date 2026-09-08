@@ -107,7 +107,7 @@ contract LaunchLegTest is Test, DeployPermit2 {
         LaunchLegToken first = new LaunchLegToken();
         LaunchLegToken second = new LaunchLegToken();
         (token0, token1) = address(first) < address(second) ? (first, second) : (second, first);
-        currency0 = Currency.wrap(address(token0));
+        currency0 = Currency.wrap(address(0));
         currency1 = Currency.wrap(address(token1));
         usdg = currency0;
         hkmn = currency1;
@@ -116,12 +116,8 @@ contract LaunchLegTest is Test, DeployPermit2 {
         custody = new PermanentPositionCustody(address(positionManager), 0);
         custody.configureBindingHook(address(hook));
         token1.mint(address(hook), SEED_MAX);
-        token0.mint(PAYER, SEED_MAX);
-
-        vm.startPrank(PAYER);
-        token0.approve(address(permit2), SEED_MAX);
-        permit2.approve(address(token0), address(hook), SEED_MAX, type(uint48).max);
-        vm.stopPrank();
+        vm.deal(AUTHORITY, 1e40);
+        vm.deal(PAYER, SEED_MAX);
 
         vm.prank(AUTHORITY);
         hook.initializeCanonicalPool(uint160(1 << 96));
@@ -130,14 +126,14 @@ contract LaunchLegTest is Test, DeployPermit2 {
     function testSeedMintsActualPositionCleansAllowancesAndAccountsForResiduals() external {
         HookemonHook.SeedParams memory params = _seedParams(PAYER);
         uint256 nextTokenId = positionManager.nextTokenId();
-        uint256 payerUsdgBefore = token0.balanceOf(PAYER);
+        uint256 payerUsdgBefore = PAYER.balance;
         uint256 hookHkmnBefore = token1.balanceOf(address(hook));
         uint256 treasuryHkmnBefore = token1.balanceOf(TREASURY);
-        uint256 managerUsdgBefore = token0.balanceOf(address(manager));
+        uint256 managerUsdgBefore = address(manager).balance;
         uint256 managerHkmnBefore = token1.balanceOf(address(manager));
 
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(params);
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(params);
 
         assertTrue(hook.canonicalLiquiditySeeded());
         assertEq(hook.canonicalPositionTokenId(), nextTokenId);
@@ -150,18 +146,18 @@ contract LaunchLegTest is Test, DeployPermit2 {
         (PoolKey memory actualKey, PositionInfo info) =
             positionManager.getPoolAndPositionInfo(nextTokenId);
         assertEq(keccak256(abi.encode(actualKey)), keccak256(abi.encode(_canonicalKey())));
-        assertEq(info.tickLower(), -120);
-        assertEq(info.tickUpper(), 120);
+        assertEq(info.tickLower(), -887220);
+        assertEq(info.tickUpper(), 887220);
 
-        uint256 usdgSpent = token0.balanceOf(address(manager)) - managerUsdgBefore;
+        uint256 usdgSpent = address(manager).balance - managerUsdgBefore;
         uint256 hkmnSpent = token1.balanceOf(address(manager)) - managerHkmnBefore;
         uint256 hkmnTransferred = token1.balanceOf(TREASURY) - treasuryHkmnBefore;
         assertGt(usdgSpent, 0);
         assertGt(hkmnSpent, 0);
         assertGt(hkmnTransferred, 0);
-        assertEq(payerUsdgBefore - token0.balanceOf(PAYER), usdgSpent);
+        assertEq(PAYER.balance - payerUsdgBefore, SEED_MAX - usdgSpent);
         assertEq(hookHkmnBefore, hkmnSpent + hkmnTransferred);
-        assertEq(token0.balanceOf(address(hook)), 0);
+        assertEq(address(hook).balance, 0);
         assertEq(token1.balanceOf(address(hook)), 0);
 
         _assertAllowanceZero(PAYER, address(token0), address(hook));
@@ -195,7 +191,7 @@ contract LaunchLegTest is Test, DeployPermit2 {
 
         vm.expectRevert(HookemonHook.SeedPositionMintMismatch.selector);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(_seedParams(PAYER));
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(_seedParams(PAYER));
 
         vm.clearMockedCalls();
         assertFalse(hook.canonicalLiquiditySeeded());
@@ -204,10 +200,10 @@ contract LaunchLegTest is Test, DeployPermit2 {
 
     function testSeedRevertsAndRollsBackWhenResidualTransferFails() external {
         uint256 nextTokenId = positionManager.nextTokenId();
-        uint256 payerUsdgBefore = token0.balanceOf(PAYER);
+        uint256 payerUsdgBefore = PAYER.balance;
         uint256 hookHkmnBefore = token1.balanceOf(address(hook));
         uint256 treasuryHkmnBefore = token1.balanceOf(TREASURY);
-        uint256 managerUsdgBefore = token0.balanceOf(address(manager));
+        uint256 managerUsdgBefore = address(manager).balance;
         uint256 managerHkmnBefore = token1.balanceOf(address(manager));
         bytes4 residualTransferFailure = bytes4(keccak256("SeedResidualTransferFailed()"));
 
@@ -218,82 +214,41 @@ contract LaunchLegTest is Test, DeployPermit2 {
         );
         vm.expectRevert(residualTransferFailure);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(_seedParams(PAYER));
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(_seedParams(PAYER));
         vm.clearMockedCalls();
 
         assertFalse(hook.canonicalLiquiditySeeded());
         assertEq(hook.canonicalPositionTokenId(), 0);
         assertEq(positionManager.nextTokenId(), nextTokenId);
-        assertEq(token0.balanceOf(PAYER), payerUsdgBefore);
-        assertEq(token0.balanceOf(address(hook)), 0);
+        assertEq(PAYER.balance, payerUsdgBefore);
+        assertEq(address(hook).balance, 0);
         assertEq(token1.balanceOf(address(hook)), hookHkmnBefore);
         assertEq(token1.balanceOf(TREASURY), treasuryHkmnBefore);
-        assertEq(token0.balanceOf(address(manager)), managerUsdgBefore);
+        assertEq(address(manager).balance, managerUsdgBefore);
         assertEq(token1.balanceOf(address(manager)), managerHkmnBefore);
     }
 
-    function testSeedMapsMaximumsWhenUsdgIsCurrency1() external {
-        HookemonHook reverseHook = _deployHook(currency1, currency0);
-        PermanentPositionCustody reverseCustody =
-            new PermanentPositionCustody(address(positionManager), 0);
-        reverseCustody.configureBindingHook(address(reverseHook));
-        token0.mint(address(reverseHook), SEED_MAX);
-        token1.mint(PAYER, SEED_MAX);
-
-        vm.startPrank(PAYER);
-        token1.approve(address(permit2), SEED_MAX);
-        permit2.approve(
-            address(token1), address(reverseHook), uint160(SEED_MAX - 1), type(uint48).max
-        );
-        vm.stopPrank();
-
-        vm.prank(AUTHORITY);
-        reverseHook.initializeCanonicalPool(uint160(1 << 96));
-
-        uint256 nextTokenId = positionManager.nextTokenId();
-        uint256 reverseHookHkmnBefore = token0.balanceOf(address(reverseHook));
-        uint256 treasuryHkmnBefore = token0.balanceOf(TREASURY);
-        uint256 managerHkmnBefore = token0.balanceOf(address(manager));
-        HookemonHook.SeedParams memory params = HookemonHook.SeedParams({
-            tickLower: -120,
-            tickUpper: 120,
-            liquidity: SEED_LIQUIDITY,
-            amount0Max: uint128(SEED_MAX),
-            amount1Max: uint128(SEED_MAX - 1),
-            deadline: block.timestamp + 1,
-            payer: PAYER,
-            custody: address(reverseCustody)
-        });
-
-        vm.prank(AUTHORITY);
-        reverseHook.seedCanonicalLiquidity(params);
-
-        assertTrue(reverseHook.canonicalLiquiditySeeded());
-        assertEq(reverseHook.canonicalPositionTokenId(), nextTokenId);
-        assertEq(reverseCustody.positionTokenId(), nextTokenId);
-        uint256 hkmnSpent = token0.balanceOf(address(manager)) - managerHkmnBefore;
-        uint256 hkmnTransferred = token0.balanceOf(TREASURY) - treasuryHkmnBefore;
-        assertGt(hkmnSpent, 0);
-        assertGt(hkmnTransferred, 0);
-        assertEq(reverseHookHkmnBefore, hkmnSpent + hkmnTransferred);
-        assertEq(token0.balanceOf(address(reverseHook)), 0);
-        _assertAllowanceZero(PAYER, address(token1), address(reverseHook));
+    function testSeedRejectsReversedNativeOrdering() external {
+        LaunchLegHookFactory factory = _newHookFactory(currency1, currency0);
+        (bytes32 salt,) = _findHookSalt(factory);
+        vm.expectRevert();
+        factory.deploy(salt);
     }
 
     function testSeedRejectsSecondCall() external {
         HookemonHook.SeedParams memory params = _seedParams(PAYER);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(params);
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(params);
 
         vm.expectRevert(HookemonHook.CanonicalLiquidityAlreadySeeded.selector);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(params);
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(params);
     }
 
     function testSeedRequiresLaunchAuthorityAndPoolInitialization() external {
         vm.expectRevert(HookemonHook.UnauthorizedLaunchAuthority.selector);
         vm.prank(PAYER);
-        hook.seedCanonicalLiquidity(_seedParams(PAYER));
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(_seedParams(PAYER));
 
         HookemonHook uninitializedHook = _deployHook();
         PermanentPositionCustody uninitializedCustody =
@@ -304,7 +259,7 @@ contract LaunchLegTest is Test, DeployPermit2 {
 
         vm.expectRevert(HookemonHook.CanonicalPoolNotInitialized.selector);
         vm.prank(AUTHORITY);
-        uninitializedHook.seedCanonicalLiquidity(params);
+        uninitializedHook.seedCanonicalLiquidity{ value: SEED_MAX }(params);
     }
 
     function testCustodyRejectsAnUnrelatedBindingCaller() external {
@@ -325,7 +280,7 @@ contract LaunchLegTest is Test, DeployPermit2 {
 
         vm.expectRevert(HookemonHook.InvalidSeedCustody.selector);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(params);
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(params);
 
         assertFalse(hook.canonicalLiquiditySeeded());
         assertEq(positionManager.nextTokenId(), 1);
@@ -355,30 +310,27 @@ contract LaunchLegTest is Test, DeployPermit2 {
 
         vm.expectRevert(HookemonHook.InvalidPositionManagerPoolManager.selector);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(_seedParams(PAYER));
+        hook.seedCanonicalLiquidity{ value: SEED_MAX }(_seedParams(PAYER));
 
         assertFalse(hook.canonicalLiquiditySeeded());
         assertEq(positionManager.nextTokenId(), 1);
     }
 
-    function testSeedRejectsMissingExactPayerPermit2AllowanceWithoutMutation() external {
+    function testSeedRejectsMissingExactNativeValueWithoutMutation() external {
         HookemonHook.SeedParams memory params = _seedParams(PAYER);
         uint256 nextTokenId = positionManager.nextTokenId();
-        uint256 payerUsdgBefore = token0.balanceOf(PAYER);
+        uint256 payerUsdgBefore = PAYER.balance;
         uint256 hookHkmnBefore = token1.balanceOf(address(hook));
 
-        vm.prank(PAYER);
-        permit2.approve(address(token0), address(hook), 1, type(uint48).max);
-
-        vm.expectRevert(HookemonHook.PayerPermit2AllowanceInvalid.selector);
+        vm.expectRevert(HookemonHook.SeedFundingMismatch.selector);
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(params);
+        hook.seedCanonicalLiquidity{ value: SEED_MAX - 1 }(params);
 
         assertFalse(hook.canonicalLiquiditySeeded());
         assertEq(positionManager.nextTokenId(), nextTokenId);
-        assertEq(token0.balanceOf(PAYER), payerUsdgBefore);
+        assertEq(PAYER.balance, payerUsdgBefore);
         assertEq(token1.balanceOf(address(hook)), hookHkmnBefore);
-        assertEq(token0.balanceOf(address(hook)), 0);
+        assertEq(address(hook).balance, 0);
     }
 
     function testForeignPoolInitializationRevertsBeforeAndAfterHookDeployment() external {
@@ -415,8 +367,8 @@ contract LaunchLegTest is Test, DeployPermit2 {
 
     function _seedParams(address payer) private view returns (HookemonHook.SeedParams memory) {
         return HookemonHook.SeedParams({
-            tickLower: -120,
-            tickUpper: 120,
+            tickLower: -887220,
+            tickUpper: 887220,
             liquidity: SEED_LIQUIDITY,
             amount0Max: uint128(SEED_MAX),
             amount1Max: uint128(SEED_MAX),
@@ -453,7 +405,7 @@ contract LaunchLegTest is Test, DeployPermit2 {
                 manager: IPoolManager(manager),
                 positionManager: address(positionManager),
                 permit2: address(permit2),
-                usdg: configuredUsdg,
+                quoteCurrency: configuredUsdg,
                 hkmn: configuredHkmn,
                 tickSpacing: 60,
                 programmable: PROGRAMMABLE,
@@ -464,8 +416,8 @@ contract LaunchLegTest is Test, DeployPermit2 {
                 expectedDecimals: 18,
                 bindingDigest: BINDING_DIGEST,
                 runtimeDigest: RUNTIME_DIGEST,
-                processClaimLimit6h: 1_000_000,
-                processClaimLimitMax: 2_000_000,
+                processClaimLimit6hWei: 1_000_000,
+                processClaimLimitMaxWei: 2_000_000,
                 processClaimMaxCount: 8,
                 operationsRotationDelay: 3 days
             })

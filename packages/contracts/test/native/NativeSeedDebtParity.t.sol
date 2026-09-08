@@ -61,6 +61,10 @@ contract NativeSeedDebtParityTest is Test, DeployPermit2 {
     uint160 private price;
 
     function _deployAt(int24 tick) private {
+        _deployAtPrice(TickMath.getSqrtPriceAtTick(tick));
+    }
+
+    function _deployAtPrice(uint160 initialPrice) private {
         manager = new PoolManager(address(this));
         IAllowanceTransfer permit = IAllowanceTransfer(deployPermit2());
         positions = new PositionManager(
@@ -77,7 +81,7 @@ contract NativeSeedDebtParityTest is Test, DeployPermit2 {
         key = PoolKey(
             Currency.wrap(address(0)), Currency.wrap(address(token)), 0, 60, IHooks(address(0))
         );
-        price = TickMath.getSqrtPriceAtTick(tick);
+        price = initialPrice;
         manager.initialize(key, price);
         vm.deal(address(this), FUNDING);
     }
@@ -126,6 +130,21 @@ contract NativeSeedDebtParityTest is Test, DeployPermit2 {
         assertEq(token.balanceOf(address(this)), FUNDING - tokenDebt);
         assertEq(positions.getPositionLiquidity(tokenId), liquidity);
         assertEq(positions.ownerOf(tokenId), address(this));
+    }
+
+    /// @dev Independent JS release candidate, explicitly synthetic and not owner funding.
+    function testReleaseMathVectorSettlesExactStockAndNativeDebt() external {
+        _deployAtPrice(12527072418752396559322253362376889);
+        uint128 liquidity = 6324555320336758663997;
+        (uint256 nativeDebt, uint256 tokenDebt) = _debts(liquidity);
+        assertEq(nativeDebt, 39999999999999657);
+        assertEq(tokenDebt, 1e27);
+        uint256 nativeMax = 40000000000000000;
+        assertEq(nativeMax - nativeDebt, 343);
+        _mint(liquidity, uint128(nativeMax), uint128(tokenDebt), nativeDebt);
+        assertEq(address(manager).balance, nativeDebt);
+        assertEq(token.balanceOf(address(manager)), 1e27);
+        assertEq(address(positions).balance, 0);
     }
 
     function testFullRangeDebtParityAtAndAroundBothBoundaries() external {

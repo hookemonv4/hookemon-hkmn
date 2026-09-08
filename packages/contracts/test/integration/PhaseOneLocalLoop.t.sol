@@ -251,7 +251,7 @@ contract PhaseOneLocalLoopTest {
 
     function _recordAuthenticatedBuy(LocalLoopSettlement subject, LocalLoopUsdg token) private {
         CanonicalMarketCallback market = CanonicalMarketCallback(address(subject));
-        Currency usdg = market.usdg();
+        Currency usdg = market.quoteCurrency();
         Currency hkmnCurrency = market.hkmn();
         bool usdg0 = Currency.unwrap(usdg) < Currency.unwrap(hkmnCurrency);
         PoolKey memory key = PoolKey({

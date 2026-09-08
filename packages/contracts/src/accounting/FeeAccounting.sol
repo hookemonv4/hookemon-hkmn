@@ -219,7 +219,7 @@ abstract contract FeeAccounting {
         totalLiabilityAmount -= amount;
     }
 
-    function _transferExactUsdg(address recipient, uint256 amount) internal {
+    function _transferExactUsdg(address recipient, uint256 amount) internal virtual {
         _requireEnteredMoneyPath();
         if (recipient == address(0) || recipient == address(this) || amount == 0) {
             revert InvalidBeneficiary();
@@ -356,7 +356,7 @@ abstract contract FeeAccounting {
         return balance - totalLiabilityAmount;
     }
 
-    function _requireEnteredMoneyPath() private view {
+    function _requireEnteredMoneyPath() internal view {
         if (!moneyPathEntered) revert MoneyPathReentrancy();
     }
 

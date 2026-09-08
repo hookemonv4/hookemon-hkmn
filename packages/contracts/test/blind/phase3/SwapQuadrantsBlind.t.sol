@@ -10,7 +10,7 @@ pragma solidity 0.8.26;
 // Oracle strategy: on a *freshly deployed* hook the three cumulative-remainder accumulators start
 // at 0, so for the very first swap the fee split must equal floor(gross*bps/10_000) exactly for
 // each of the 10/40/250 bps streams (see FeeAccountingBlind.t.sol for the algebraic proof). This
-// lets us check the split-math wiring for all 8 quadrants without having to reimplement Uniswap
+// lets us check the split-math wiring for all 4 native quadrants without having to reimplement Uniswap
 // v4's tick math to independently predict `gross` itself; the two quadrants where the USDG side is
 // the *specified, exact-input* leg are additionally checked against a fully independent gross
 // oracle (gross == the caller's requested amount, by construction, regardless of pool price).
@@ -103,7 +103,8 @@ contract SwapQuadrantsBlindTest is Test {
         BlindSwapToken first = new BlindSwapToken();
         BlindSwapToken second = new BlindSwapToken();
         (tokenA, tokenB) = address(first) < address(second) ? (first, second) : (second, first);
-        currency0 = Currency.wrap(address(tokenA));
+        currency0 = Currency.wrap(address(0));
+        vm.deal(address(this), 1e40);
         currency1 = Currency.wrap(address(tokenB));
         tokenA.mint(address(this), 10 ** 30);
         tokenB.mint(address(this), 10 ** 30);
@@ -114,11 +115,11 @@ contract SwapQuadrantsBlindTest is Test {
     }
 
     // ---------------------------------------------------------------------
-    // Fee split matches floor(gross*bps/10_000) for all 8 quadrants.
+    // Fee split matches floor(gross*bps/10_000) for all 4 native quadrants.
     // ---------------------------------------------------------------------
 
-    function testAllEightQuadrantsSplitMatchesIndependentFloorFormulaOnFreshHooks() external {
-        for (uint256 order; order < 2; ++order) {
+    function testAllFourQuadrantsSplitMatchesIndependentFloorFormulaOnFreshHooks() external {
+        for (uint256 order; order < 1; ++order) {
             Currency usdgC = order == 0 ? currency0 : currency1;
             for (uint256 direction; direction < 2; ++direction) {
                 for (uint256 exactness; exactness < 2; ++exactness) {
@@ -130,21 +131,16 @@ contract SwapQuadrantsBlindTest is Test {
 
     /// @dev The two USDG-specified, exact-input quadrants have a gross that is fixed by the
     ///      caller (independent of pool price), so we can additionally assert gross itself.
-    function testUsdgSpecifiedExactInputGrossEqualsRequestedAmountBothOrders() external {
+    function testUsdgSpecifiedExactInputGrossEqualsRequestedAmountNativeOrdering() external {
         HookemonHook hookUsdg0 = _deployHook(currency0);
         _seedPool(hookUsdg0, currency0);
         _usdgExactInputSwap(hookUsdg0, currency0, 123_456);
         assertEq(hookUsdg0.lastExecutedUsdg(), 123_456);
-
-        HookemonHook hookUsdg1 = _deployHook(currency1);
-        _seedPool(hookUsdg1, currency1);
-        _usdgExactInputSwap(hookUsdg1, currency1, 654_321);
-        assertEq(hookUsdg1.lastExecutedUsdg(), 654_321);
     }
 
     // ---------------------------------------------------------------------
     // Split vs. unsplit equivalence through the *real* pool (usdg-specified exact-input quadrant,
-    // both token orders) -- an end-to-end counterpart to the pure-ledger property in
+    // native currency0) -- an end-to-end counterpart to the pure-ledger property in
     // FeeAccountingBlind.t.sol.
     // ---------------------------------------------------------------------
 
@@ -156,7 +152,8 @@ contract SwapQuadrantsBlindTest is Test {
     ) external {
         uint256 first = bound(uint256(rawFirst), 1_000, 5_000_000);
         uint256 second = bound(uint256(rawSecond), 1_000, 5_000_000);
-        Currency usdgC = useCurrency1AsUsdg ? currency1 : currency0;
+        Currency usdgC = currency0;
+        useCurrency1AsUsdg;
 
         HookemonHook splitHook = _deployHook(usdgC);
         _seedPool(splitHook, usdgC);
@@ -182,18 +179,15 @@ contract SwapQuadrantsBlindTest is Test {
     // 1000-unit minimum boundary through the real pool.
     // ---------------------------------------------------------------------
 
-    function testFuzz_UsdgSpecifiedExactInputBelowMinimumRevertsBothOrders(uint256 raw) external {
+    function testFuzz_UsdgSpecifiedExactInputBelowMinimumRevertsNativeOrdering(uint256 raw)
+        external
+    {
         uint256 amount = bound(raw, 1, 999);
 
         HookemonHook hook0 = _deployHook(currency0);
         _seedPool(hook0, currency0);
         vm.expectRevert();
         _usdgExactInputSwap(hook0, currency0, amount);
-
-        HookemonHook hook1 = _deployHook(currency1);
-        _seedPool(hook1, currency1);
-        vm.expectRevert();
-        _usdgExactInputSwap(hook1, currency1, amount);
     }
 
     function testExactOutputCannotProduceGrossBelowOneThousand() external {
@@ -205,12 +199,12 @@ contract SwapQuadrantsBlindTest is Test {
         HookemonHook hook = _deployHook(currency0);
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-600, 600, 10 ** 24, bytes32(0)), bytes("")
         );
 
         vm.expectRevert();
-        swapRouter.swap(
+        swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(false, int256(1), TickMath.MAX_SQRT_PRICE - 1),
             PoolSwapTest.TestSettings(false, false),
@@ -226,11 +220,11 @@ contract SwapQuadrantsBlindTest is Test {
         HookemonHook hook = _deployHook(currency0);
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-600, 600, 10 ** 24, bytes32(0)), bytes("")
         );
 
-        swapRouter.swap(
+        swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(false, int256(970), TickMath.MAX_SQRT_PRICE - 1),
             PoolSwapTest.TestSettings(false, false),
@@ -254,12 +248,12 @@ contract SwapQuadrantsBlindTest is Test {
         HookemonHook hook = _deployHook(usdgC);
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-600, 600, 10 ** 24, bytes32(0)), bytes("")
         );
 
         int256 specified = exactInput ? -int256(amount) : int256(amount);
-        swapRouter.swap(
+        swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(
                 zeroForOne,
@@ -284,7 +278,7 @@ contract SwapQuadrantsBlindTest is Test {
     function _usdgExactInputSwap(HookemonHook hook, Currency usdgC, uint256 amount) private {
         PoolKey memory key = _key(hook);
         bool zeroForOne = Currency.unwrap(usdgC) == Currency.unwrap(currency0);
-        swapRouter.swap(
+        swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(
                 zeroForOne,
@@ -299,7 +293,7 @@ contract SwapQuadrantsBlindTest is Test {
     function _seedPool(HookemonHook hook, Currency) private {
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-600, 600, 10 ** 24, bytes32(0)), bytes("")
         );
     }
@@ -329,7 +323,7 @@ contract SwapQuadrantsBlindTest is Test {
             manager: manager,
             positionManager: address(0xB001),
             permit2: address(0xB002),
-            usdg: usdgC,
+            quoteCurrency: usdgC,
             hkmn: Currency.unwrap(usdgC) == Currency.unwrap(currency0) ? currency1 : currency0,
             tickSpacing: 60,
             programmable: PROGRAMMABLE,
@@ -340,8 +334,8 @@ contract SwapQuadrantsBlindTest is Test {
             expectedDecimals: 18,
             bindingDigest: keccak256("blind-swap-binding"),
             runtimeDigest: keccak256("blind-swap-runtime"),
-            processClaimLimit6h: 1_000_000_000_000,
-            processClaimLimitMax: 1_000_000_000_000,
+            processClaimLimit6hWei: 1_000_000_000_000,
+            processClaimLimitMaxWei: 1_000_000_000_000,
             processClaimMaxCount: 8,
             operationsRotationDelay: 3 days
         });
@@ -350,4 +344,5 @@ contract SwapQuadrantsBlindTest is Test {
     function _key(HookemonHook hook) private view returns (PoolKey memory) {
         return PoolKey(currency0, currency1, 0, 60, IHooks(address(hook)));
     }
+    receive() external payable { }
 }

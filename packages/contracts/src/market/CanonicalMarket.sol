@@ -38,7 +38,7 @@ abstract contract CanonicalMarketCallback is IHooks {
     }
 
     IPoolManager public immutable poolManager;
-    Currency public immutable usdg;
+    Currency internal immutable usdg;
     Currency public immutable hkmn;
     int24 public immutable tickSpacing;
     CallbackPhase private callbackPhase;
@@ -53,9 +53,8 @@ abstract contract CanonicalMarketCallback is IHooks {
 
     constructor(IPoolManager m, Currency u, Currency h, int24 t) {
         if (
-            address(m) == address(0) || Currency.unwrap(u) == address(0)
-                || Currency.unwrap(h) == address(0) || Currency.unwrap(u) == Currency.unwrap(h)
-                || t <= 0
+            address(m) == address(0) || Currency.unwrap(h) == address(0)
+                || Currency.unwrap(u) == Currency.unwrap(h) || t <= 0
         ) {
             revert InvalidCanonicalPoolKey();
         }
@@ -63,6 +62,11 @@ abstract contract CanonicalMarketCallback is IHooks {
         usdg = u;
         hkmn = h;
         tickSpacing = t;
+    }
+
+    /// @notice Quote identity; the active Hookemon deployment requires native address zero.
+    function quoteCurrency() public view returns (Currency) {
+        return usdg;
     }
 
     function hookPermissionMask() external pure virtual returns (uint160) {
