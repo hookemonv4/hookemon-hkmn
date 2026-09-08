@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "hookemon.phase3.release-launch-inputs.v1",
+  "schemaVersion": "hookemon.phase3.release-launch-inputs.v2",
   "status": "ADDRESS_DERIVATION_PENDING",
   "ownerInputPath": "decisions/owner-inputs/launch-inputs-owner.json",
   "chain": {
@@ -19,9 +19,9 @@
     "poolManager": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
     "positionManager": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
-    "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
     "launchAuthority": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
-    "issuanceAuthority": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd"
+    "issuanceAuthority": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "quoteCurrency": "0x0000000000000000000000000000000000000000"
   },
   "token": {
     "name": "Hookemon",
@@ -52,7 +52,7 @@
     "sourceCompatibility": {
       "status": "VERIFIED",
       "compiledSupplyAtomic": "1000000000000000000000000000",
-      "reason": "The pinned launch compiler profile confirms the Requirements revision 65 supply baseline: the owner's 2026-09-05 decision allocates the complete supply to the canonical market with zero other allocations. The DRAFT_UNSIGNED baseline records current subject hashes and is not transaction authorization."
+      "reason": "The pinned native launch compilation binds the complete HKMN stock and zero quote currency. It grants no funding or transaction authority."
     }
   },
   "pool": {
@@ -65,9 +65,9 @@
     },
     "quoteAsset": {
       "chainId": "4663",
-      "assetId": "usdg",
-      "decimals": 6,
-      "amountAtomic": "240000000"
+      "assetId": "native",
+      "decimals": 18,
+      "amountAtomic": null
     },
     "baseAsset": {
       "chainId": "4663",
@@ -76,76 +76,11 @@
       "amountAtomic": "1000000000000000000000000000"
     },
     "priceCandidates": {
-      "usdgCurrency0": {
-        "sqrtPriceX96": "161723809515207654588927258648643645224",
-        "liquidity": "489897948556635619",
-        "amount0Max": "240000000",
-        "amount1Max": "1000000000000000000000000000",
-        "consumedHkmn": "1000000000000000000000000000",
-        "swapFeeQuadrants": {
-          "zeroForOneExactInput": {
-            "currency": "currency0",
-            "basis": "gross-input",
-            "collectionPath": "before-swap-return-delta"
-          },
-          "zeroForOneExactOutput": {
-            "currency": "currency0",
-            "basis": "gross-input",
-            "collectionPath": "after-swap-return-delta"
-          },
-          "oneForZeroExactInput": {
-            "currency": "currency0",
-            "basis": "gross-output",
-            "collectionPath": "after-swap-return-delta"
-          },
-          "oneForZeroExactOutput": {
-            "currency": "currency0",
-            "basis": "gross-output",
-            "collectionPath": "before-swap-return-delta"
-          }
-        },
-        "sqrtLowerX96": "4306310044",
-        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
-        "consumedAmount0": "240000000",
-        "consumedAmount1": "1000000000000000000000000000"
-      },
-      "hkmnCurrency0": {
-        "sqrtPriceX96": "38813714284914462669",
-        "liquidity": "489897948572597439",
-        "amount0Max": "1000000000000000000000000000",
-        "amount1Max": "240000000",
-        "consumedHkmn": "1000000000000000000000000000",
-        "swapFeeQuadrants": {
-          "zeroForOneExactInput": {
-            "currency": "currency1",
-            "basis": "gross-output",
-            "collectionPath": "after-swap-return-delta"
-          },
-          "zeroForOneExactOutput": {
-            "currency": "currency1",
-            "basis": "gross-output",
-            "collectionPath": "before-swap-return-delta"
-          },
-          "oneForZeroExactInput": {
-            "currency": "currency1",
-            "basis": "gross-input",
-            "collectionPath": "before-swap-return-delta"
-          },
-          "oneForZeroExactOutput": {
-            "currency": "currency1",
-            "basis": "gross-input",
-            "collectionPath": "after-swap-return-delta"
-          }
-        },
-        "sqrtLowerX96": "4306310044",
-        "sqrtUpperX96": "1457652066949847389969617340386294118487833376468",
-        "consumedAmount0": "1000000000000000000000000000",
-        "consumedAmount1": "240000000"
-      },
+      "nativeCurrency0": null,
       "selection": {
         "status": "OPEN_FACT",
-        "rule": "Compare the resolved HKMN CREATE2 address with the fixed USDG address. The lower address is currency0.",
-        "selectedOrdering": null,
+        "rule": "Native ETH is currency0; derive the price from the explicit native maximum and complete HKMN stock.",
+        "selectedOrdering": "nativeCurrency0",
         "selectedSqrtPriceX96": null,
         "poolKey": null,
         "poolId": null
@@ -160,13 +95,6 @@
       "decimals": 18,
       "amountAtomic": "0"
     },
-    "permit2Allowance": {
-      "owner": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
-      "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
-      "spender": "resolved HookemonHook address",
-      "amountRule": "Exact selected USDG amount0Max or amount1Max; the hook sets and clears its downstream approval during the seed call.",
-      "expiration": null
-    },
     "deadlinePolicy": {
       "kind": "relative",
       "maximumSecondsAfterWalletConfirmation": 900,
@@ -175,7 +103,12 @@
     },
     "refundAndDust": {
       "intendedDestination": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
-      "sourceBehavior": "Unused USDG is returned to the payer. A graph-mode seed requires zero HKMN residual after the position mint; any residual reverts the complete seed, including funding, mint, approvals, and custody binding."
+      "sourceBehavior": "Send only the exact native debt to PositionManager and refund msg.value minus debt to the payer. HKMN Permit2 approvals are cleared. Any graph-mode HKMN residual or rejected native refund reverts the entire seed."
+    },
+    "nativeFunding": {
+      "payer": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+      "amountWei": null,
+      "valueRule": "msg.value == amount0Max"
     }
   },
   "metadata": {
@@ -195,8 +128,9 @@
   },
   "openFacts": [
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
-    "Missing: the CREATE2 HKMN and hook addresses. Resolve: derive them after the provider route and salts are fixed, then select the lower-address currency order and price candidate. Verified alternative: retain both computed orderings and leave PoolKey, PoolId and selection unset.",
     "Missing: owner-selected seed deadline, Permit2 expiration, wallet nonce and gas parameters. Resolve: collect them from Rabby after final preflight and record the signed values. Verified alternative: retain the 900-second deadline ceiling and exact-allowance rule without a transaction payload.",
-    "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only."
+    "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only.",
+    "Missing: the explicit native seed maximum, initial price and wei claim ceilings. Resolve: calculate the complete test with bound liquidity, swap fees, gas, bridge and Collector costs within USD 250, then bind the reviewed choices. Verified alternative: all funding values remain null and no seed can materialize.",
+    "Missing: current provider admission of the unchanged inclusive 10/40/250 basis-point fee model with separate native seed. Resolve: submit the exact native graph to authenticated preflight and retain its admission result. Verified alternative: local native compilation and tests proceed without deployment authority."
   ]
 }

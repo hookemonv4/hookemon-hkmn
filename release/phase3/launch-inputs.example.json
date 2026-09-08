@@ -1,6 +1,6 @@
 {
   "exampleOnly": true,
-  "schemaVersion": "hookemon.phase3.launch-inputs.v1",
+  "schemaVersion": "hookemon.phase3.launch-inputs.v2",
   "chain": {
     "chainId": "4663",
     "factory": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
@@ -19,7 +19,10 @@
   },
   "compilerProfile": {
     "solc": "0.8.26+commit.8a97fa7a",
-    "optimizer": { "enabled": true, "runs": 1000 },
+    "optimizer": {
+      "enabled": true,
+      "runs": 1000
+    },
     "viaIR": false,
     "evmVersion": "cancun",
     "metadata": {
@@ -28,7 +31,6 @@
       "useLiteralContent": false
     }
   },
-  "usdg": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
   "roles": {
     "manager": "0xPLACEHOLDER_MANAGER",
     "positionManager": "0xPLACEHOLDER_POSITION_MANAGER",
@@ -43,19 +45,12 @@
     "fee": 0,
     "tickSpacing": 60,
     "priceCandidates": {
-      "usdgCurrency0": {
-        "sqrtPriceX96": "PLACEHOLDER_USDG_CURRENCY0_SQRT_PRICE_X96",
-        "liquidity": "PLACEHOLDER_USDG_CURRENCY0_LIQUIDITY",
-        "amount0Max": "PLACEHOLDER_USDG_CURRENCY0_AMOUNT0_MAX",
-        "amount1Max": "PLACEHOLDER_USDG_CURRENCY0_AMOUNT1_MAX"
-      },
-      "hkmnCurrency0": {
-        "sqrtPriceX96": "PLACEHOLDER_HKMN_CURRENCY0_SQRT_PRICE_X96",
-        "liquidity": "PLACEHOLDER_HKMN_CURRENCY0_LIQUIDITY",
-        "amount0Max": "PLACEHOLDER_HKMN_CURRENCY0_AMOUNT0_MAX",
-        "amount1Max": "PLACEHOLDER_HKMN_CURRENCY0_AMOUNT1_MAX"
+      "nativeCurrency0": {
+        "sqrtPriceX96": "PLACEHOLDER_NATIVE_SQRT_PRICE_X96"
       }
-    }
+    },
+    "seedMaximumWei": "PLACEHOLDER_NATIVE_SEED_MAXIMUM_WEI",
+    "hkmnAtomic": "1000000000000000000000000000"
   },
   "seedIntent": {
     "payer": "0xPLACEHOLDER_LAUNCH_AUTHORITY",
@@ -64,39 +59,69 @@
     "maxDeadlineSeconds": 900
   },
   "hookConstructorConfig": {
-    "manager": { "ref": "roles.manager" },
-    "positionManager": { "ref": "roles.positionManager" },
-    "permit2": { "ref": "roles.permit2" },
-    "usdg": { "ref": "usdg" },
-    "hkmn": { "ref": "addresses.token" },
-    "tickSpacing": { "ref": "pool.tickSpacing" },
-    "programmable": { "ref": "roles.programmable" },
-    "treasury": { "ref": "roles.treasury" },
-    "operations": { "ref": "roles.operations" },
-    "launchAuthority": { "ref": "roles.launchAuthority" },
-    "issuanceAuthority": { "ref": "roles.issuanceAuthority" },
+    "manager": {
+      "ref": "roles.manager"
+    },
+    "positionManager": {
+      "ref": "roles.positionManager"
+    },
+    "permit2": {
+      "ref": "roles.permit2"
+    },
+    "hkmn": {
+      "ref": "addresses.token"
+    },
+    "tickSpacing": {
+      "ref": "pool.tickSpacing"
+    },
+    "programmable": {
+      "ref": "roles.programmable"
+    },
+    "treasury": {
+      "ref": "roles.treasury"
+    },
+    "operations": {
+      "ref": "roles.operations"
+    },
+    "launchAuthority": {
+      "ref": "roles.launchAuthority"
+    },
+    "issuanceAuthority": {
+      "ref": "roles.issuanceAuthority"
+    },
     "expectedDecimals": 18,
     "bindingDigest": "0xPLACEHOLDER_BINDING_DIGEST",
     "runtimeDigest": "0xPLACEHOLDER_RUNTIME_DIGEST",
-    "seedIntentDigest": { "ref": "seedIntent.digest" },
-    "processClaimLimit6h": "PLACEHOLDER_CLAIM_LIMIT",
-    "processClaimLimitMax": "PLACEHOLDER_CLAIM_LIMIT_MAX",
     "processClaimMaxCount": "PLACEHOLDER_CLAIM_MAX_COUNT",
-    "operationsRotationDelay": "PLACEHOLDER_OPERATIONS_ROTATION_DELAY_SECONDS"
+    "operationsRotationDelay": "PLACEHOLDER_OPERATIONS_ROTATION_DELAY_SECONDS",
+    "quoteCurrency": {
+      "ref": "quoteCurrency"
+    },
+    "processClaimLimit6hWei": "PLACEHOLDER_CLAIM_LIMIT",
+    "processClaimLimitMaxWei": "PLACEHOLDER_CLAIM_LIMIT_MAX"
   },
   "targets": {
     "token": {
       "targetIndex": 0,
       "targetId": "token",
       "targetIdHash": "0xPLACEHOLDER_TOKEN_TARGET_ID_HASH",
-      "applicantSalt": { "mode": "fixed", "value": "0xPLACEHOLDER_TOKEN_APPLICANT_SALT" },
+      "applicantSalt": {
+        "mode": "fixed",
+        "value": "0xPLACEHOLDER_TOKEN_APPLICANT_SALT"
+      },
       "artifactPath": "artifacts/token.json",
       "contractName": "HKMNToken",
       "constructorArguments": [
-        { "ref": "chain.factory" },
-        { "ref": "usdg" },
+        {
+          "ref": "chain.factory"
+        },
+        {
+          "ref": "quoteCurrency"
+        },
         18,
-        { "ref": "pool.selectedPriceCandidate.sqrtPriceX96" }
+        {
+          "ref": "pool.selectedPriceCandidate.sqrtPriceX96"
+        }
       ],
       "initializerCalldata": "0xPLACEHOLDER_TOKEN_ALLOCATE",
       "deploymentValue": {
@@ -117,11 +142,16 @@
       "targetIndex": 1,
       "targetId": "custody",
       "targetIdHash": "0xPLACEHOLDER_CUSTODY_TARGET_ID_HASH",
-      "applicantSalt": { "mode": "fixed", "value": "0xPLACEHOLDER_CUSTODY_APPLICANT_SALT" },
+      "applicantSalt": {
+        "mode": "fixed",
+        "value": "0xPLACEHOLDER_CUSTODY_APPLICANT_SALT"
+      },
       "artifactPath": "artifacts/custody.json",
       "contractName": "PermanentPositionCustody",
       "constructorArguments": [
-        { "ref": "roles.positionManager" },
+        {
+          "ref": "roles.positionManager"
+        },
         0
       ],
       "initializerCalldata": "0xPLACEHOLDER_CUSTODY_CONFIGURE_BINDING_HOOK",
@@ -143,7 +173,11 @@
       "targetIndex": 2,
       "targetId": "hook",
       "targetIdHash": "0xPLACEHOLDER_HOOK_TARGET_ID_HASH",
-      "applicantSalt": { "mode": "mine", "start": "0", "maxAttempts": "200000" },
+      "applicantSalt": {
+        "mode": "mine",
+        "start": "0",
+        "maxAttempts": "200000"
+      },
       "artifactPath": "artifacts/hook.json",
       "contractName": "HookemonHook",
       "initializerCalldata": "0xPLACEHOLDER_HOOK_INITIALIZE_GRAPH_LAUNCH",
@@ -168,5 +202,6 @@
         }
       ]
     }
-  }
+  },
+  "quoteCurrency": "0x0000000000000000000000000000000000000000"
 }

@@ -25,6 +25,7 @@ import { verifyAddressManifest } from '../../launch/build-address-manifest.mjs';
 import {
   artifactHashes,
   derivePriceCandidates,
+  deriveNativePriceCandidate,
   PHASE_THREE_FACTORY,
   PHASE_THREE_SOLC_LONG_VERSION,
   PHASE_THREE_SOLC_VERSION,
@@ -424,7 +425,7 @@ function normalizePhaseThreeSubmissionUnresolved(value) {
   return value;
 }
 
-export function normalizePhaseThreeSubmissionDraft(submission) {
+export function normalizePhaseThreeSubmissionDraft(submission, { native = false } = {}) {
   const normalized = cloneJson(submission);
   const builder = assertObject(normalized.builder, '/submission/builder');
   builder.github = null;
@@ -462,6 +463,65 @@ export function normalizePhaseThreeSubmissionDraft(submission) {
   normalized.unresolved = assertArray(normalized.unresolved, '/submission/unresolved')
     .map((value, index) => normalizePhaseThreeSubmissionUnresolved(assertString(value, `/submission/unresolved/${index}`)))
     .filter((value) => !/TOK-01|destination decision/i.test(value));
+  if (native) {
+    const quote = normalized.assets.find(asset => asset.role === 'quote');
+    Object.assign(quote, { id: 'native', origin: 'native-eth', address: null, decimals: 18,
+      decimalsSource: 'native-eth-protocol', supplyPolicy: 'native', initialSupply: null, behaviors: ['standard'], controls: [] });
+    normalized.model.summary = 'A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.';
+    normalized.model.userOutcome = 'A reviewed graph and separate payable seed establish the canonical ETH/HKMN pool with permanent liquidity custody.';
+    liquidityFormation.valueFlow = 'The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.';
+    initialTransaction.custody = 'The seed caller supplies ETH; the hook refunds only msg.value minus exact PositionManager debt to the specified payer.';
+    normalized.launchLifecycle.trading.valueFlow = 'Each canonical ETH/HKMN swap follows its specified gross native fee quadrant.';
+    normalized.launchLifecycle.feesAndClaims.custody = 'The hook holds native liabilities until successful payment to the authorized beneficiary destination.';
+    normalized.pool.currency0 = 'native';
+    normalized.pool.orderingRule = 'Native ETH uses zero Currency and is always currency0; HKMN is currency1.';
+    normalized.integration.permit2 = 'Only HKMN approvals from the hook to Permit2 and PositionManager participate in seed settlement; the caller supplies native ETH through msg.value.';
+    normalized.hook.poolNamespace = 'One canonical ETH/HKMN PoolKey on chain 4663.';
+    normalized.hook.callbackPolicies[2].necessity = 'Collect the native unspecified-currency fee delta after the swap and finalize liabilities.';
+    normalized.hook.feeMechanism.chargedCurrency = 'Gross native ETH quote-side volume, accounted in wei.';
+    const quadrants = normalized.hook.feeMechanism.swapQuadrants;
+    quadrants.zeroForOneExactInput.formula = 'Collect the inclusive fee on gross ETH input before the AMM leg.';
+    quadrants.zeroForOneExactOutput.formula = 'Collect the fee on required gross ETH input through the after-swap delta.';
+    quadrants.oneForZeroExactInput.formula = 'Collect the fee on gross ETH output through the after-swap delta.';
+    quadrants.oneForZeroExactOutput.formula = 'Collect the gross ETH output fee before the AMM leg, preserving requested net output.';
+    Object.assign(normalized.hook.customAccounting, {
+      backingSource: 'Native fee value taken from authenticated PoolManager settlement backs each liability.',
+      conservationEquation: 'Hook native balance covers unpaid platform, treasury and process liabilities. Forced ETH and fractional remainders grant no claims.',
+      withdrawalOrdering: 'Update liabilities, pay exact native value under the shared lock, then verify solvency; rejected payment reverts all claim state.',
+    });
+    for (const [name, quadrant] of Object.entries(normalized.hook.returnDeltaAccounting.quadrants)) {
+      if (['zeroForOneExactInput', 'oneForZeroExactOutput'].includes(name)) {
+        quadrant.specifiedComponent.formula = 'The native specified fee component is positive on the selected before-swap collection path.';
+        quadrant.specifiedComponent.minimum = 'The integer fee follows independent cumulative stream rounding; gross trades below 1000 wei revert.';
+      }
+    }
+    const afterSwap = normalized.hook.postReturnDeltaAccounting.afterSwap;
+    afterSwap.backingSource = 'Authenticated native settlement funds the independent platform, treasury and process streams.';
+    afterSwap.componentPolicies.unspecified.formula = 'Collect native unspecified fees only for ETH exact-output input or ETH exact-input output.';
+    afterSwap.componentPolicies.unspecified.minimum = 'The integer fee follows cumulative rounding after the 1000 wei gross minimum.';
+    afterSwap.bounds = 'Only the native fee component is positive, bounded by the inclusive 3% gross-volume rule and cumulative remainders.';
+    ownerSeed.asset = 'native and hkmn';
+    ownerSeed.amountRule = 'The explicit reviewed native amount0Max and the complete 1000000000000000000000000000 HKMN amount1Max bound the seed.';
+    ownerSeed.settlement = 'msg.value equals amount0Max. Only HKMN uses Permit2 approval; read current slot0 after approval, pay exact native debt, clear approvals and refund the difference to payer. Any HKMN residual or rejected refund reverts.';
+    const feeFlow = normalized.valueFlows.find(flow => flow.asset === 'usdg');
+    if (feeFlow) { feeFlow.asset = 'native'; feeFlow.settlement = 'Native PoolManager settlement backs all three cumulative liabilities before callback return.'; }
+    const reconstruction = normalized.integration.dataReconstruction.reserveReconstruction;
+    reconstruction.balanceSources[0] = 'Read hook native balance at the same confirmed block as PoolManager state.';
+    reconstruction.liabilitySources[0] = 'Replay fee and successful claim events, then reconcile current native liabilities for the canonical PoolId.';
+    reconstruction.solvencyEquation = 'Confirmed native balance covers unpaid liabilities; forced balance and stream remainders never become beneficiary claims.';
+    for (const surface of normalized.projectSurfaces) {
+      surface.assetRefs = surface.assetRefs.map(id => id === 'usdg' ? 'native' : id);
+      if (surface.profiles?.valueFlow?.summary) surface.profiles.valueFlow.summary = 'Graph allocation and the payable owner seed form permanent liquidity; native fees fund the existing Collector cycle.';
+    }
+    const feeCapability = normalized.projectCapabilities.find(capability => capability.summary?.includes('gross USDG'));
+    if (feeCapability) feeCapability.summary = 'Calculate inclusive cumulative native fees in all four canonical swap quadrants.';
+    normalized.capabilities.externalCalls.targets = normalized.capabilities.externalCalls.targets.filter(target => target !== 'USDG token');
+    normalized.risk.rationales.externalDependencies = 'Provider admission, exact manager runtimes and native Relay source/order proofs remain separately verified release facts.';
+    normalized.disclosures = normalized.disclosures.filter(value => !value.includes('USDG') && !value.includes('240000000') && !value.includes('accepted 10 bps'));
+    normalized.disclosures.push('The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.', 'Native ETH is currency0. Seed and wei claim ceilings remain unset until the complete USD 250 test is costed and reviewed.');
+    normalized.disclosures = [...new Set(normalized.disclosures)];
+    launchGraph.summary = 'The native graph preserves complete HKMN allocation and cumulative 10/40/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.';
+  }
   return normalized;
 }
 
@@ -828,9 +888,9 @@ function validateAddressManifest(value) {
 
 function isPhaseThreeAddressDerivationDraft(launchInputs, addressManifest) {
   return (
-    launchInputs?.schemaVersion === 'hookemon.phase3.release-launch-inputs.v1'
+    ['hookemon.phase3.release-launch-inputs.v1', 'hookemon.phase3.release-launch-inputs.v2'].includes(launchInputs?.schemaVersion)
     && launchInputs?.status === 'ADDRESS_DERIVATION_PENDING'
-    && addressManifest?.schemaVersion === 'hookemon.phase3.address-manifest-draft.v1'
+    && addressManifest?.schemaVersion === `hookemon.phase3.address-manifest-draft.${launchInputs.schemaVersion.endsWith('.v2') ? 'v2' : 'v1'}`
     && addressManifest?.status === 'ADDRESS_DERIVATION_PENDING'
   );
 }
@@ -924,6 +984,7 @@ function validatePhaseThreePriceSelection(priceCandidates, path) {
 }
 
 function phaseThreeOrderingRule(selectedOrdering, selectedSqrtPriceX96) {
+  if (selectedOrdering === 'nativeCurrency0') return `Native ETH is currency0; HKMN is currency1; selectedSqrtPriceX96=${selectedSqrtPriceX96}.`;
   const currencies = selectedOrdering === 'hkmnCurrency0'
     ? 'HKMN is currency0; USDG is currency1.'
     : 'USDG is currency0; HKMN is currency1.';
@@ -946,7 +1007,8 @@ function phaseThreePoolKey({ currency0, currency1, fee, tickSpacing, hooks }) {
 
 function selectionFromMaterializedManifest(launchInputs, materializedManifest) {
   assertObject(materializedManifest, '/materializedManifest');
-  if (materializedManifest.schemaVersion !== 'hookemon.phase3.address-manifest.v1') {
+  const native = launchInputs?.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2';
+  if (materializedManifest.schemaVersion !== `hookemon.phase3.address-manifest.${native ? 'v2' : 'v1'}`) {
     fail('INVALID_VALUE', '/materializedManifest/schemaVersion');
   }
   const preimages = assertObject(materializedManifest.preimages, '/materializedManifest/preimages');
@@ -971,7 +1033,7 @@ function selectionFromMaterializedManifest(launchInputs, materializedManifest) {
   if (selectedOrdering !== pool.priceCandidate.id) {
     fail('INVALID_VALUE', '/materializedManifest/preimages/pool/selectedOrdering');
   }
-  if (!PHASE_THREE_PRICE_CANDIDATE_ORDERINGS.includes(selectedOrdering)) {
+  if (!(native ? ['nativeCurrency0'] : PHASE_THREE_PRICE_CANDIDATE_ORDERINGS).includes(selectedOrdering)) {
     fail('INVALID_VALUE', '/materializedManifest/preimages/pool/priceCandidate/id');
   }
   assertAmount(pool.priceCandidate.sqrtPriceX96, '/materializedManifest/preimages/pool/priceCandidate/sqrtPriceX96');
@@ -990,8 +1052,9 @@ function selectionFromMaterializedManifest(launchInputs, materializedManifest) {
     fail('INVALID_VALUE', '/materializedManifest/preimages/pool');
   }
   if (BigInt(pool.currency0) >= BigInt(pool.currency1)) fail('INVALID_VALUE', '/materializedManifest/preimages/pool/currency0');
-  const usdg = launchInputs.roles?.usdg;
-  assertAddress(usdg, '/launchInputs/roles/usdg');
+  const usdg = native ? launchInputs.roles?.quoteCurrency : launchInputs.roles?.usdg;
+  assertAddress(usdg, native ? '/launchInputs/roles/quoteCurrency' : '/launchInputs/roles/usdg');
+  if (native && usdg !== '0x0000000000000000000000000000000000000000') fail('INVALID_VALUE', '/launchInputs/roles/quoteCurrency');
   const expectedCurrency0 = selectedOrdering === 'hkmnCurrency0' ? token.address : usdg;
   const expectedCurrency1 = selectedOrdering === 'hkmnCurrency0' ? usdg : token.address;
   if (!sameAddress(pool.currency0, expectedCurrency0) || !sameAddress(pool.currency1, expectedCurrency1)) {
@@ -1017,8 +1080,14 @@ export function materializePhaseThreePriceSelection({ launchInputs, submission, 
   const materializedLaunchInputs = cloneJson(launchInputs);
   const materializedSubmission = cloneJson(submission);
   const candidates = assertObject(materializedLaunchInputs?.pool?.priceCandidates, '/launchInputs/pool/priceCandidates');
-  const currentSelection = validatePhaseThreePriceSelection(candidates, '/launchInputs/pool/priceCandidates');
+  const native = materializedLaunchInputs?.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2';
+  const currentSelection = native ? candidates.selection : validatePhaseThreePriceSelection(candidates, '/launchInputs/pool/priceCandidates');
+  if (native && currentSelection?.selectedOrdering !== 'nativeCurrency0') fail('INVALID_VALUE', '/launchInputs/pool/priceCandidates/selection');
   if (currentSelection.status !== 'OPEN_FACT') fail('INVALID_VALUE', '/launchInputs/pool/priceCandidates/selection/status');
+  if (native) {
+    const expected = deriveNativePriceCandidate({ nativeWei: materializedLaunchInputs.pool.quoteAsset.amountAtomic, hkmnAtomic: materializedLaunchInputs.pool.baseAsset.amountAtomic });
+    if (canonicalJson(candidates.nativeCurrency0) !== canonicalJson(expected) || materializedLaunchInputs.seed.nativeFunding.amountWei !== expected.amount0Max) fail('INVALID_VALUE', '/launchInputs/pool/priceCandidates');
+  }
   const selected = selectionFromMaterializedManifest(materializedLaunchInputs, materializedManifest);
   candidates.selection = {
     status: 'DERIVED',
@@ -1030,11 +1099,11 @@ export function materializePhaseThreePriceSelection({ launchInputs, submission, 
   };
 
   const pool = assertObject(materializedSubmission.pool, '/submission/pool');
-  pool.currency0 = selected.selectedOrdering === 'hkmnCurrency0' ? 'hkmn' : 'usdg';
+  pool.currency0 = native ? 'native' : selected.selectedOrdering === 'hkmnCurrency0' ? 'hkmn' : 'usdg';
   pool.currency1 = selected.selectedOrdering === 'hkmnCurrency0' ? 'usdg' : 'hkmn';
   pool.orderingRule = phaseThreeOrderingRule(selected.selectedOrdering, selected.selectedSqrtPriceX96);
   const selectedQuadrants = assertObject(
-    candidates[selected.selectedOrdering].swapFeeQuadrants,
+    native ? Object.fromEntries(['zeroForOneExactInput', 'zeroForOneExactOutput', 'oneForZeroExactInput', 'oneForZeroExactOutput'].map(name => [name, { currency: 'currency0' }])) : candidates[selected.selectedOrdering].swapFeeQuadrants,
     `/launchInputs/pool/priceCandidates/${selected.selectedOrdering}/swapFeeQuadrants`,
   );
   const submissionQuadrants = assertObject(
@@ -1050,7 +1119,9 @@ export function materializePhaseThreePriceSelection({ launchInputs, submission, 
     submissionQuadrant.currency = candidateQuadrant.currency;
   }
   const seed = assertObject(materializedLaunchInputs.seed, '/launchInputs/seed');
-  const allowance = assertObject(seed.permit2Allowance, '/launchInputs/seed/permit2Allowance');
+  const allowance = native
+    ? { owner: assertObject(seed.nativeFunding, '/launchInputs/seed/nativeFunding').payer }
+    : assertObject(seed.permit2Allowance, '/launchInputs/seed/permit2Allowance');
   const deadlinePolicy = assertObject(seed.deadlinePolicy, '/launchInputs/seed/deadlinePolicy');
   const fullRange = assertObject(materializedLaunchInputs.pool.fullRange, '/launchInputs/pool/fullRange');
   const selectedCandidate = assertObject(
@@ -1117,6 +1188,7 @@ export function verifyPhaseThreeMaterializedSeedManifest({
 }
 
 function verifyMaterializedSeedManifestFrozenPolicy(materializedManifest, frozenSeedPolicy) {
+  if (materializedManifest.schemaVersion === 'hookemon.phase3.address-manifest.v2') return verifyNativeFrozenSeedPolicy(materializedManifest, frozenSeedPolicy);
   const inputs = assertObject(
     materializedManifest?.launchInputs,
     '/phaseThreeMaterialization/materializedManifest/launchInputs',
@@ -1237,6 +1309,46 @@ function verifyMaterializedSeedManifestFrozenPolicy(materializedManifest, frozen
   }
 }
 
+function verifyNativeFrozenSeedPolicy(manifest, policy) {
+  const path = '/phaseThreeMaterialization/materializedManifest';
+  if (policy?.schema !== 'hookemon.native-frozen-seed-policy.v1') fail('INVALID_VALUE', path);
+  const inputs = manifest.launchInputs;
+  const same = (a, b) => { if (canonicalJson(a) !== canonicalJson(b)) fail('INVALID_VALUE', path); };
+  same(inputs.chain.chainId, policy.chain.chainId);
+  assertExactAddress(inputs.chain.factory, policy.chain.factory, path);
+  assertExactAddress(inputs.chain.authorizedLauncher, policy.chain.authorizedLauncher, path);
+  same(inputs.graphAuthorization.totalValue.amountAtomic, policy.chain.totalValue);
+  same(policy.chain.totalValue, '0');
+  assertExactAddress(inputs.quoteCurrency, '0x0000000000000000000000000000000000000000', path);
+  assertExactAddress(inputs.quoteCurrency, policy.roles.quoteCurrency, path);
+  for (const field of ['manager', 'positionManager', 'permit2', 'programmable', 'treasury', 'operations', 'launchAuthority', 'issuanceAuthority']) {
+    assertExactAddress(inputs.roles[field], policy.roles[field], path);
+  }
+  same(inputs.pool.fee, policy.pool.fee);
+  same(inputs.pool.tickSpacing, policy.pool.tickSpacing);
+  const candidate = deriveNativePriceCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic });
+  same(inputs.pool.hkmnAtomic, '1000000000000000000000000000');
+  for (const field of ['sqrtPriceX96', 'liquidity', 'amount0Max', 'amount1Max']) same(candidate[field], policy.pool.priceCandidates.nativeCurrency0[field]);
+  for (const field of ['payer', 'tickLower', 'tickUpper', 'maxDeadlineSeconds']) same(inputs.seedIntent[field], policy.seedIntent[field]);
+  const words = constructorWords(manifest, 'hook', 18);
+  for (const [field, index] of [['manager', 0], ['positionManager', 1], ['permit2', 2], ['quoteCurrency', 3], ['programmable', 6], ['treasury', 7], ['operations', 8], ['launchAuthority', 9], ['issuanceAuthority', 10]]) {
+    assertConstructorAddressWord(words[index], policy.roles[field], `native hook ${field}`);
+  }
+  assertConstructorAddressWord(words[4], manifest.preimages.targets.token.address, 'native hook token');
+  for (const [value, index] of [[policy.pool.tickSpacing, 5], [policy.hook.expectedDecimals, 11], [policy.hook.processClaimLimit6hWei, 14], [policy.hook.processClaimLimitMaxWei, 15], [policy.hook.processClaimMaxCount, 16], [policy.hook.operationsRotationDelay, 17]]) {
+    assertConstructorUnsignedWord(words[index], value, 'native hook policy');
+  }
+  const token = constructorWords(manifest, 'token', 4);
+  assertConstructorAddressWord(token[0], policy.roles.issuanceAuthority, 'token issuance authority');
+  assertConstructorAddressWord(token[1], policy.roles.quoteCurrency, 'token native currency');
+  assertConstructorUnsignedWord(token[2], policy.hook.expectedDecimals, 'token decimals');
+  assertConstructorUnsignedWord(token[3], candidate.sqrtPriceX96, 'token seed price');
+  const custody = constructorWords(manifest, 'custody', 2);
+  assertConstructorAddressWord(custody[0], policy.roles.positionManager, 'custody manager');
+  assertConstructorUnsignedWord(custody[1], 0, 'custody token id');
+  for (const id of ['token', 'hook', 'custody']) same(manifest.preimages.targets[id].artifactDigest, policy.artifacts[id]);
+}
+
 function constructorWords(materializedManifest, targetId, expectedWordCount) {
   const constructorArguments = assertHex(
     materializedManifest?.preimages?.targets?.[targetId]?.constructorArguments,
@@ -1262,17 +1374,25 @@ function assertConstructorUnsignedWord(word, expectedValue, label) {
 }
 
 function materializedHookSeedIntentDigest(materializedManifest) {
+  if (materializedManifest.schemaVersion === 'hookemon.phase3.address-manifest.v2') {
+    const inputs = materializedManifest.launchInputs;
+    const candidate = deriveNativePriceCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic });
+    return deriveSeedIntent({ ...candidate, ...inputs.seedIntent }).digest;
+  }
   return `0x${constructorWords(materializedManifest, 'hook', HOOK_CONSTRUCTOR_CONFIG_WORDS)[
     HOOK_SEED_INTENT_DIGEST_WORD
   ]}`.toLowerCase();
 }
 
 function phaseThreeFrozenSeedPolicy(launchInputs, addressManifest) {
+  const native = launchInputs?.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2';
   const roles = assertObject(launchInputs?.roles, '/launchInputs/roles');
   const pool = assertObject(launchInputs?.pool, '/launchInputs/pool');
   const priceCandidates = assertObject(pool.priceCandidates, '/launchInputs/pool/priceCandidates');
   const seed = assertObject(launchInputs?.seed, '/launchInputs/seed');
-  const allowance = assertObject(seed.permit2Allowance, '/launchInputs/seed/permit2Allowance');
+  const allowance = native
+    ? { owner: assertObject(seed.nativeFunding, '/launchInputs/seed/nativeFunding').payer }
+    : assertObject(seed.permit2Allowance, '/launchInputs/seed/permit2Allowance');
   const deadlinePolicy = assertObject(seed.deadlinePolicy, '/launchInputs/seed/deadlinePolicy');
   const fullRange = assertObject(pool.fullRange, '/launchInputs/pool/fullRange');
   const graphFunding = assertObject(seed.graphFunding, '/launchInputs/seed/graphFunding');
@@ -1286,7 +1406,7 @@ function phaseThreeFrozenSeedPolicy(launchInputs, addressManifest) {
     );
     return [targetId, assertHash(target.artifactSha256, `/addressManifest/targets/${targetId}/artifactSha256`)];
   }));
-  const candidates = Object.fromEntries(PHASE_THREE_PRICE_CANDIDATE_ORDERINGS.map((name) => {
+  const candidates = Object.fromEntries((native ? ['nativeCurrency0'] : PHASE_THREE_PRICE_CANDIDATE_ORDERINGS).map((name) => {
     const candidate = assertObject(priceCandidates[name], `/launchInputs/pool/priceCandidates/${name}`);
     return [name, {
       sqrtPriceX96: candidate.sqrtPriceX96,
@@ -1296,6 +1416,7 @@ function phaseThreeFrozenSeedPolicy(launchInputs, addressManifest) {
     }];
   }));
   return {
+    ...(native ? { schema: 'hookemon.native-frozen-seed-policy.v1' } : {}),
     chain: {
       chainId: launchInputs.chain?.chainId,
       factory: launchInputs.chain?.graphFactory,
@@ -1311,7 +1432,7 @@ function phaseThreeFrozenSeedPolicy(launchInputs, addressManifest) {
       operations: roles.operations,
       launchAuthority: roles.launchAuthority,
       issuanceAuthority: roles.issuanceAuthority,
-      usdg: roles.usdg,
+      ...(native ? { quoteCurrency: roles.quoteCurrency } : { usdg: roles.usdg }),
     },
     pool: {
       fee: pool.fee,
@@ -1326,8 +1447,8 @@ function phaseThreeFrozenSeedPolicy(launchInputs, addressManifest) {
     },
     hook: {
       expectedDecimals: hook.expectedDecimals,
-      processClaimLimit6h: hook.processClaimLimit6h,
-      processClaimLimitMax: hook.processClaimLimitMax,
+      ...(native ? { processClaimLimit6hWei: hook.processClaimLimit6hWei, processClaimLimitMaxWei: hook.processClaimLimitMaxWei }
+        : { processClaimLimit6h: hook.processClaimLimit6h, processClaimLimitMax: hook.processClaimLimitMax }),
       processClaimMaxCount: hook.processClaimMaxCount,
       operationsRotationDelay: hook.operationsRotationDelay,
     },
@@ -1413,6 +1534,8 @@ function materializePhaseThreeDraft(options, launchInputs, addressManifest) {
 }
 
 function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest, artifactDirectory) {
+  const native = launchInputs?.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2';
+  const quoteKey = native ? 'quoteCurrency' : 'usdg';
   const launchPath = '/launchInputs';
   const manifestPath = '/addressManifest';
   assertObject(launchInputs, launchPath);
@@ -1434,7 +1557,7 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     fail('INVALID_VALUE', `${launchPath}/chain`);
   }
   assertExactKeys(launchInputs.roles, [
-    'launchWallet', 'treasury', 'operations', 'programmablePlatform', 'poolManager', 'positionManager', 'permit2', 'usdg', 'launchAuthority', 'issuanceAuthority',
+    'launchWallet', 'treasury', 'operations', 'programmablePlatform', 'poolManager', 'positionManager', 'permit2', quoteKey, 'launchAuthority', 'issuanceAuthority',
   ], `${launchPath}/roles`);
   const expectedRoles = {
     launchWallet: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
@@ -1444,7 +1567,7 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     poolManager: '0x8366a39CC670B4001A1121B8F6A443A643e40951',
     positionManager: '0x58daec3116aae6D93017bAAea7749052E8a04fA7',
     permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-    usdg: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',
+    [quoteKey]: native ? '0x0000000000000000000000000000000000000000' : '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',
     launchAuthority: '0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729',
     issuanceAuthority: PHASE_THREE_FACTORY,
   };
@@ -1486,11 +1609,29 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     fail('INVALID_VALUE', `${launchPath}/pool/fullRange`);
   }
   assertPhaseThreeAmount(launchInputs.pool.quoteAsset, `${launchPath}/pool/quoteAsset`, {
-    assetId: 'usdg', decimals: 6, amountAtomic: '240000000',
+    assetId: native ? 'native' : 'usdg', decimals: native ? 18 : 6, amountAtomic: native ? launchInputs.pool.quoteAsset.amountAtomic : '240000000',
   });
   assertPhaseThreeAmount(launchInputs.pool.baseAsset, `${launchPath}/pool/baseAsset`, {
     assetId: 'hkmn', decimals: 18, amountAtomic: '1000000000000000000000000000',
   });
+  if (native) {
+    const path = `${launchPath}/pool/priceCandidates`;
+    assertExactKeys(launchInputs.pool.priceCandidates, ['nativeCurrency0', 'selection'], path);
+    const amount = launchInputs.pool.quoteAsset.amountAtomic;
+    const candidate = launchInputs.pool.priceCandidates.nativeCurrency0;
+    if (amount === null) {
+      if (candidate !== null) fail('INVALID_VALUE', `${path}/nativeCurrency0`);
+    } else {
+      assertString(amount, `${launchPath}/pool/quoteAsset/amountAtomic`, /^[1-9][0-9]*$/);
+      const expected = deriveNativePriceCandidate({ nativeWei: amount, hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic });
+      if (canonicalJson(candidate) !== canonicalJson(expected)) fail('INVALID_VALUE', `${path}/nativeCurrency0`);
+    }
+    const selection = launchInputs.pool.priceCandidates.selection;
+    assertExactKeys(selection, ['status', 'rule', 'selectedOrdering', 'selectedSqrtPriceX96', 'poolKey', 'poolId'], `${path}/selection`);
+    if (selection.status !== 'OPEN_FACT' || selection.selectedOrdering !== 'nativeCurrency0'
+      || selection.selectedSqrtPriceX96 !== null || selection.poolKey !== null || selection.poolId !== null) fail('INVALID_VALUE', `${path}/selection`);
+    assertString(selection.rule, `${path}/selection/rule`);
+  } else {
   assertExactKeys(launchInputs.pool.priceCandidates, ['usdgCurrency0', 'hkmnCurrency0', 'selection'], `${launchPath}/pool/priceCandidates`);
   const derivedCandidates = derivePriceCandidates({
     usdgAtomic: launchInputs.pool.quoteAsset.amountAtomic,
@@ -1533,15 +1674,24 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   }
   validatePhaseThreePriceSelection(launchInputs.pool.priceCandidates, `${launchPath}/pool/priceCandidates`);
 
-  assertExactKeys(launchInputs.seed, ['mode', 'graphFunding', 'permit2Allowance', 'deadlinePolicy', 'refundAndDust'], `${launchPath}/seed`);
+  }
+
+  assertExactKeys(launchInputs.seed, ['mode', 'graphFunding', native ? 'nativeFunding' : 'permit2Allowance', 'deadlinePolicy', 'refundAndDust'], `${launchPath}/seed`);
   if (launchInputs.seed.mode !== 'separate-owner-transaction') fail('INVALID_VALUE', `${launchPath}/seed/mode`);
   assertPhaseThreeAmount(launchInputs.seed.graphFunding, `${launchPath}/seed/graphFunding`, {
     assetId: 'native', decimals: 18, amountAtomic: '0',
   });
+  if (native) {
+    assertExactKeys(launchInputs.seed.nativeFunding, ['payer', 'amountWei', 'valueRule'], `${launchPath}/seed/nativeFunding`);
+    assertExactAddress(launchInputs.seed.nativeFunding.payer, expectedRoles.launchWallet, `${launchPath}/seed/nativeFunding/payer`);
+    if (launchInputs.seed.nativeFunding.amountWei !== launchInputs.pool.quoteAsset.amountAtomic
+      || launchInputs.seed.nativeFunding.valueRule !== 'msg.value == amount0Max') fail('INVALID_VALUE', `${launchPath}/seed/nativeFunding`);
+  } else {
   assertExactKeys(launchInputs.seed.permit2Allowance, ['owner', 'token', 'spender', 'amountRule', 'expiration'], `${launchPath}/seed/permit2Allowance`);
   assertExactAddress(launchInputs.seed.permit2Allowance.owner, expectedRoles.launchWallet, `${launchPath}/seed/permit2Allowance/owner`);
   assertExactAddress(launchInputs.seed.permit2Allowance.token, expectedRoles.usdg, `${launchPath}/seed/permit2Allowance/token`);
   if (launchInputs.seed.permit2Allowance.expiration !== null) fail('INVALID_VALUE', `${launchPath}/seed/permit2Allowance/expiration`);
+  }
   assertExactKeys(launchInputs.seed.deadlinePolicy, ['kind', 'maximumSecondsAfterWalletConfirmation', 'actualDeadline', 'reason'], `${launchPath}/seed/deadlinePolicy`);
   if (launchInputs.seed.deadlinePolicy.kind !== 'relative' || launchInputs.seed.deadlinePolicy.maximumSecondsAfterWalletConfirmation !== 900 || launchInputs.seed.deadlinePolicy.actualDeadline !== null) {
     fail('INVALID_VALUE', `${launchPath}/seed/deadlinePolicy`);
@@ -1597,9 +1747,9 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   assertPhaseThreeTargetBase(token, `${manifestPath}/targets/0`, {
     targetId: 'token', targetIndex: 0, componentKind: 'token', sourcePath: 'packages/contracts/src/launch/HKMNToken.sol', contractName: 'HKMNToken',
   });
-  assertExactKeys(token.constructor, ['issuanceAuthority', 'expectedUsdg', 'decimals', 'launchSqrtPriceX96'], `${manifestPath}/targets/0/constructor`);
+  assertExactKeys(token.constructor, ['issuanceAuthority', native ? 'expectedQuoteCurrency' : 'expectedUsdg', 'decimals', 'launchSqrtPriceX96'], `${manifestPath}/targets/0/constructor`);
   if (token.constructor.issuanceAuthority !== expectedRoles.issuanceAuthority || token.constructor.decimals !== 18 || token.constructor.launchSqrtPriceX96 !== null || token.initializerCalldata !== null) fail('INVALID_VALUE', `${manifestPath}/targets/0`);
-  assertExactAddress(token.constructor.expectedUsdg, expectedRoles.usdg, `${manifestPath}/targets/0/constructor/expectedUsdg`);
+  assertExactAddress(token.constructor[native ? 'expectedQuoteCurrency' : 'expectedUsdg'], expectedRoles[quoteKey], `${manifestPath}/targets/0/constructor/expectedUsdg`);
 
   assertExactKeys(custody, ['targetId', 'targetIndex', 'componentKind', 'sourcePath', 'contractName', 'applicantSalt', 'effectiveSalt', 'address', 'constructor', 'initializerCalldata', 'deploymentValue', 'initializerValue', 'creationBytecodeHash', 'runtimeTemplateCodeHash', 'runtimeCodeHash', 'artifactSha256', 'libraries'], `${manifestPath}/targets/1`);
   assertPhaseThreeTargetBase(custody, `${manifestPath}/targets/1`, {
@@ -1614,12 +1764,12 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
     targetId: 'hook', targetIndex: 2, componentKind: 'hook', sourcePath: 'packages/contracts/src/HookemonHook.sol', contractName: 'HookemonHook',
   });
   if (!sameStringSet(hook.declaredHookPermissions, ['beforeInitialize', 'beforeSwap', 'beforeSwapReturnDelta', 'afterSwap', 'afterSwapReturnDelta']) || hook.permissionMask !== '0x20cc') fail('INVALID_VALUE', `${manifestPath}/targets/2`);
-  assertExactKeys(hook.constructor, ['manager', 'positionManager', 'permit2', 'usdg', 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations', 'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', 'seedIntentDigest', 'processClaimLimit6h', 'processClaimLimitMax', 'processClaimMaxCount', 'operationsRotationDelay'], `${manifestPath}/targets/2/constructor`);
+  assertExactKeys(hook.constructor, ['manager', 'positionManager', 'permit2', quoteKey, 'hkmn', 'tickSpacing', 'programmable', 'treasury', 'operations', 'launchAuthority', 'issuanceAuthority', 'expectedDecimals', 'bindingDigest', 'runtimeDigest', ...(native ? ['processClaimLimit6hWei', 'processClaimLimitMaxWei'] : ['seedIntentDigest', 'processClaimLimit6h', 'processClaimLimitMax']), 'processClaimMaxCount', 'operationsRotationDelay'], `${manifestPath}/targets/2/constructor`);
   const expectedHookConstructorAddresses = {
     manager: expectedRoles.poolManager,
     positionManager: expectedRoles.positionManager,
     permit2: expectedRoles.permit2,
-    usdg: expectedRoles.usdg,
+    [quoteKey]: expectedRoles[quoteKey],
     programmable: expectedRoles.programmablePlatform,
     treasury: expectedRoles.treasury,
     operations: expectedRoles.operations,
@@ -1629,10 +1779,20 @@ function validatePhaseThreeAddressDerivationDraft(launchInputs, addressManifest,
   for (const [field, expected] of Object.entries(expectedHookConstructorAddresses)) assertExactAddress(hook.constructor[field], expected, `${manifestPath}/targets/2/constructor/${field}`);
   if (
     hook.constructor.hkmn !== null || hook.constructor.tickSpacing !== 60
-    || hook.constructor.expectedDecimals !== 18 || hook.constructor.bindingDigest !== null || hook.constructor.runtimeDigest !== null || hook.constructor.seedIntentDigest !== null
-    || hook.constructor.processClaimLimit6h !== '50000000000' || hook.constructor.processClaimLimitMax !== '500000000000'
+    || hook.constructor.expectedDecimals !== 18 || hook.constructor.bindingDigest !== null || hook.constructor.runtimeDigest !== null || (!native && hook.constructor.seedIntentDigest !== null)
+    || (!native && (hook.constructor.processClaimLimit6h !== '50000000000' || hook.constructor.processClaimLimitMax !== '500000000000'))
     || hook.constructor.processClaimMaxCount !== 24 || hook.constructor.operationsRotationDelay !== '43200'
   ) fail('INVALID_VALUE', `${manifestPath}/targets/2/constructor`);
+  if (native) {
+    const initial = hook.constructor.processClaimLimit6hWei;
+    const maximum = hook.constructor.processClaimLimitMaxWei;
+    if ((initial === null) !== (maximum === null)) fail('INVALID_VALUE', `${manifestPath}/targets/2/constructor`);
+    if (initial !== null) {
+      assertString(initial, `${manifestPath}/targets/2/constructor/processClaimLimit6hWei`, /^[1-9][0-9]*$/);
+      assertString(maximum, `${manifestPath}/targets/2/constructor/processClaimLimitMaxWei`, /^[1-9][0-9]*$/);
+      if (BigInt(initial) > BigInt(maximum) || BigInt(maximum) >= 1n << 256n) fail('INVALID_VALUE', `${manifestPath}/targets/2/constructor`);
+    }
+  }
   assertExactKeys(hook.initializer, ['function', 'sqrtPriceX96', 'calldata'], `${manifestPath}/targets/2/initializer`);
   if (hook.initializer.function !== 'initializeGraphLaunch(address,uint160)' || hook.initializer.sqrtPriceX96 !== null || hook.initializer.calldata !== null) fail('INVALID_VALUE', `${manifestPath}/targets/2/initializer`);
 
@@ -1710,7 +1870,7 @@ function assemblePhaseThreeAddressDerivationDraft(
     }
   }
   const graphDraft = {
-    schemaVersion: 'hookemon.phase3.graph-draft.v1',
+    schemaVersion: launchInputs.schemaVersion.endsWith('.v2') ? 'hookemon.phase3.graph-draft.v2' : 'hookemon.phase3.graph-draft.v1',
     status: 'ADDRESS_DERIVATION_PENDING',
     inputDigests,
     chain: {
@@ -1744,7 +1904,9 @@ function assemblePhaseThreeAddressDerivationDraft(
     },
     seed: {
       priceCandidates: cloneJson(launchInputs.pool.priceCandidates),
-      permit2Allowance: cloneJson(launchInputs.seed.permit2Allowance),
+      ...(launchInputs.schemaVersion.endsWith('.v2')
+        ? { nativeFunding: cloneJson(launchInputs.seed.nativeFunding) }
+        : { permit2Allowance: cloneJson(launchInputs.seed.permit2Allowance) }),
       deadlinePolicy: cloneJson(launchInputs.seed.deadlinePolicy),
       refundAndDust: cloneJson(launchInputs.seed.refundAndDust),
       ...(materialization?.seedIntent ? { intent: cloneJson(materialization.seedIntent) } : {}),
@@ -2429,7 +2591,7 @@ export function verifyLaunchPackage(options) {
   const packageManifest = parsePackageJson(actualFiles, 'package-manifest.json');
   if (packageManifest.schemaVersion === 'hookemon.phase3.local-package-manifest.v1') {
     const graphDraft = parsePackageJson(actualFiles, 'graph-draft.json');
-    if (graphDraft.schemaVersion !== 'hookemon.phase3.graph-draft.v1') fail('INVALID_VALUE', '/graph-draft.json/schemaVersion');
+    if (!['hookemon.phase3.graph-draft.v1', 'hookemon.phase3.graph-draft.v2'].includes(graphDraft.schemaVersion)) fail('INVALID_VALUE', '/graph-draft.json/schemaVersion');
     if (graphDraft.status !== 'ADDRESS_DERIVATION_PENDING') fail('INVALID_VALUE', '/graph-draft.json/status');
     compareExpectedFiles(actualFiles, assembled.files);
     const blocking = assembled.unverified.find((entry) => entry.blocking);

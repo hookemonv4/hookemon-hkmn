@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { SqrtPriceMath } from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
+
 /// @notice Draft-only validator for the frozen Phase 3 policy before provider address derivation.
 /// @dev It rejects materialized graph fields. It does not verify CREATE2 outputs or deployed runtime.
 contract PhaseThreeReleasePlan {
-    bytes32 public constant SCHEMA = keccak256("HOOKEMON_PHASE_THREE_RELEASE_DRAFT_V1");
+    bytes32 public constant SCHEMA = keccak256("HOOKEMON_PHASE_THREE_RELEASE_DRAFT_V2");
     bool public constant IS_DRAFT_ONLY = true;
 
     uint256 public constant TARGET_CHAIN_ID = 4663;
@@ -12,37 +15,34 @@ contract PhaseThreeReleasePlan {
     address public constant LAUNCH_ROUTER = 0x34965F2A2ee9254522232C32F02056E92BE0C98a;
     address public constant LAUNCH_WALLET = 0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729;
     address public constant OPERATIONS = 0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384;
-    address public constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
+    address public constant QUOTE_CURRENCY = address(0);
     address public constant POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
     address public constant POSITION_MANAGER = 0x58daec3116aae6D93017bAAea7749052E8a04fA7;
     address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     address public constant PROGRAMMABLE_PLATFORM = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
 
     bytes32 public constant TOKEN_CREATION_CODE_HASH =
-        0xbe3146f7eb5c0a9a287bb927f197c518611fed9e371f5262552856d6b3e52e58;
+        0x2b6254d3bce8fd659c39f778c6e32ced08511a882d1f2fa9476cca2535411c1b;
     bytes32 public constant TOKEN_RUNTIME_TEMPLATE_CODE_HASH =
-        0xc79e26bd2c8c26952c04f1d3749db091f009febd7507b67232b3838bb148f429;
+        0x047ad78929472b4905bffdde04a000ee523e6eeb9987a48afdce7fe05c0efc7f;
     bytes32 public constant TOKEN_ARTIFACT_SHA256 =
-        0x8a134aa16b09ca267055c976d05c5760ccc865c35ab608ceed20248a0e54ac68;
+        0xd8674b134236f56b3aefa4152b4ab920aaf472d8685a596595084965aa0819af;
     bytes32 public constant HOOK_CREATION_CODE_HASH =
-        0x39c3aeecae31c42f7ad707dae7b18ea976687d33f715befbe9941b853e0af8c2;
+        0xd45b609b4e27c780b9c52a65ad86ae4d210b10a1edaeb0c8cf3b59e4689e0b59;
     bytes32 public constant HOOK_RUNTIME_TEMPLATE_CODE_HASH =
-        0x95302da944386ccd8b7fb1b898d128098cce7aef178b318998a7a14c1897a36c;
+        0x6d9ebce6436e27121be1928c42e3765a28857d4804d6f9d2f3d89a80469b91dd;
     bytes32 public constant HOOK_ARTIFACT_SHA256 =
-        0x389f63c267cbb76cd703101fd22d00f1221656cd7ea3adcb082d2719dd41aa66;
+        0x204a6a44991682b316ed86b0ae5d241d3760c4f1f90c8cdbb2a6d4d42ffc39c8;
     bytes32 public constant CUSTODY_CREATION_CODE_HASH =
         0x778625cf6f5b602c891c7d605941d5e3cfc4662624a9407d67e2873cd4d99dd5;
     bytes32 public constant CUSTODY_RUNTIME_TEMPLATE_CODE_HASH =
         0x06f47cecc7026b4d9c5d393c39f8883c7e87c3fdacd30cf6f496ee41c9d4ca0c;
     bytes32 public constant CUSTODY_ARTIFACT_SHA256 =
-        0x08043ea6d688242703d972040bb476b4d5da3ef4a5e9c04db1e0636a1ff86ae5;
+        0xf7ae50ab539a48335f42024826a13e28c0543da534f924a99241ef3bd1386857;
 
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
     uint256 public constant POOL_ALLOCATION = TOTAL_SUPPLY;
     uint256 public constant REMAINDER_CUSTODY_ALLOCATION = 0;
-    uint256 public constant USDG_SEED = 240_000_000;
-    uint128 public constant USDG_CURRENCY0_LIQUIDITY = 489897948556635619;
-    uint128 public constant HKMN_CURRENCY0_LIQUIDITY = 489897948572597439;
     int24 public constant TICK_LOWER = -887220;
     int24 public constant TICK_UPPER = 887220;
     uint24 public constant POOL_FEE = 0;
@@ -51,8 +51,6 @@ contract PhaseThreeReleasePlan {
     uint16 public constant TREASURY_FEE_BPS = 40;
     uint16 public constant PROCESS_FEE_BPS = 250;
 
-    uint160 public constant USDG_CURRENCY0_SQRT_PRICE_X96 = 161723809515207654588927258648643645224;
-    uint160 public constant HKMN_CURRENCY0_SQRT_PRICE_X96 = 38813714284914462669;
 
     struct Draft {
         uint256 chainId;
@@ -61,7 +59,7 @@ contract PhaseThreeReleasePlan {
         address launchWallet;
         address treasury;
         address operations;
-        address usdg;
+        address quoteCurrency;
         address poolManager;
         address positionManager;
         address permit2;
@@ -77,7 +75,7 @@ contract PhaseThreeReleasePlan {
         uint256 totalSupply;
         uint256 poolAllocation;
         uint256 remainderCustodyAllocation;
-        uint256 usdgSeed;
+        uint256 nativeSeedWei;
         uint128 liquidity;
         uint160 sqrtPriceX96;
         uint256 amount0Max;
@@ -111,6 +109,8 @@ contract PhaseThreeReleasePlan {
         return keccak256(abi.encode(SCHEMA, draft));
     }
 
+    /// @notice Checks source and debt feasibility, not a funding-to-price selection or signing authority.
+    /// @dev Deterministic price and external seed intent are verified by the native package tools.
     function validateDraft(Draft calldata draft) external pure returns (bytes32) {
         _validateDraft(draft);
         return draftDigest(draft);
@@ -121,7 +121,7 @@ contract PhaseThreeReleasePlan {
         if (
             draft.graphFactory != GRAPH_FACTORY || draft.router != LAUNCH_ROUTER
                 || draft.launchWallet != LAUNCH_WALLET || draft.treasury != LAUNCH_WALLET
-                || draft.operations != OPERATIONS || draft.usdg != USDG
+                || draft.operations != OPERATIONS || draft.quoteCurrency != QUOTE_CURRENCY
                 || draft.poolManager != POOL_MANAGER || draft.positionManager != POSITION_MANAGER
                 || draft.permit2 != PERMIT2 || draft.programmable != PROGRAMMABLE_PLATFORM
                 || draft.launchAuthority != LAUNCH_WALLET
@@ -134,14 +134,14 @@ contract PhaseThreeReleasePlan {
                 || draft.custodyRuntimeTemplateCodeHash != CUSTODY_RUNTIME_TEMPLATE_CODE_HASH
                 || draft.totalSupply != TOTAL_SUPPLY || draft.poolAllocation != POOL_ALLOCATION
                 || draft.remainderCustodyAllocation != REMAINDER_CUSTODY_ALLOCATION
-                || draft.usdgSeed != USDG_SEED || draft.tickLower != TICK_LOWER
+                || draft.nativeSeedWei == 0 || draft.tickLower != TICK_LOWER
                 || draft.tickUpper != TICK_UPPER || draft.fee != POOL_FEE
                 || draft.tickSpacing != TICK_SPACING
                 || draft.programmableFeeBps != PROGRAMMABLE_FEE_BPS
                 || draft.treasuryFeeBps != TREASURY_FEE_BPS
                 || draft.processFeeBps != PROCESS_FEE_BPS
         ) revert InvalidDraft();
-        if (!_isApprovedSeedTuple(draft)) revert InvalidDraft();
+        if (!_isFeasibleNativeSeedTuple(draft)) revert InvalidDraft();
         if (
             draft.routeNamespace != bytes32(0) || draft.routeNonce != bytes32(0)
                 || draft.topologyHash != bytes32(0) || draft.graphDigest != bytes32(0)
@@ -152,14 +152,16 @@ contract PhaseThreeReleasePlan {
         ) revert InvalidDraft();
     }
 
-    function _isApprovedSeedTuple(Draft calldata draft) private pure returns (bool) {
-        return (draft.sqrtPriceX96 == USDG_CURRENCY0_SQRT_PRICE_X96
-                && draft.liquidity == USDG_CURRENCY0_LIQUIDITY
-                && draft.amount0Max == USDG_SEED
-                && draft.amount1Max == POOL_ALLOCATION)
-            || (draft.sqrtPriceX96 == HKMN_CURRENCY0_SQRT_PRICE_X96
-                && draft.liquidity == HKMN_CURRENCY0_LIQUIDITY
-                && draft.amount0Max == POOL_ALLOCATION
-                && draft.amount1Max == USDG_SEED);
+    function _isFeasibleNativeSeedTuple(Draft calldata draft) private pure returns (bool) {
+        if (draft.nativeSeedWei == 0 || draft.nativeSeedWei > type(uint128).max
+            || draft.amount0Max != draft.nativeSeedWei || draft.amount1Max != POOL_ALLOCATION
+            || draft.liquidity == 0 || draft.liquidity > uint128(type(int128).max)) return false;
+        uint160 lower = TickMath.getSqrtPriceAtTick(TICK_LOWER);
+        uint160 upper = TickMath.getSqrtPriceAtTick(TICK_UPPER);
+        if (draft.sqrtPriceX96 <= lower || draft.sqrtPriceX96 >= upper) return false;
+        return SqrtPriceMath.getAmount0Delta(draft.sqrtPriceX96, upper, draft.liquidity, true)
+            <= draft.nativeSeedWei
+            && SqrtPriceMath.getAmount1Delta(lower, draft.sqrtPriceX96, draft.liquidity, true)
+                == POOL_ALLOCATION;
     }
 }

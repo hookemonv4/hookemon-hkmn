@@ -68,7 +68,7 @@ function buildDigestChain(launchInputs, preimages) {
   const custody = sha256CanonicalJson({ previous: pool, target: preimages.targets.custody });
   const graph = sha256CanonicalJson({ previous: custody, graph: preimages.graph });
   const manifest = sha256CanonicalJson({
-    schemaVersion: 'hookemon.phase3.address-manifest.v1',
+    schemaVersion: launchInputs.schemaVersion.endsWith('.v2') ? 'hookemon.phase3.address-manifest.v2' : 'hookemon.phase3.address-manifest.v1',
     providerSource: { factory: FACTORY_SOURCE, router: ROUTER_SOURCE },
     launchInputs,
     preimages,
@@ -96,7 +96,7 @@ export function buildAddressManifest({ launchInputs, inputDirectory = process.cw
   };
   const frozenInputs = cloneJson(launchInputs);
   const manifest = {
-    schemaVersion: 'hookemon.phase3.address-manifest.v1',
+    schemaVersion: launchInputs.schemaVersion.endsWith('.v2') ? 'hookemon.phase3.address-manifest.v2' : 'hookemon.phase3.address-manifest.v1',
     providerSource: {
       factory: FACTORY_SOURCE,
       router: ROUTER_SOURCE,
@@ -122,7 +122,7 @@ export function verifyAddressManifest({
   } catch (error) {
     fail(error.message);
   }
-  if (manifest.schemaVersion !== 'hookemon.phase3.address-manifest.v1') fail('manifest schema is unsupported');
+  if (manifest.schemaVersion !== (manifest.launchInputs?.schemaVersion.endsWith('.v2') ? 'hookemon.phase3.address-manifest.v2' : 'hookemon.phase3.address-manifest.v1')) fail('manifest schema is unsupported');
   expectObject(manifest.launchInputs, 'manifest.launchInputs');
   if (launchInputs !== undefined && canonicalJson(launchInputs) !== canonicalJson(manifest.launchInputs)) {
     fail('launch inputs mismatch manifest.launchInputs');

@@ -26,6 +26,7 @@ import { parsePhaseThreeReleaseRebuildOptions } from './lib/rebuild-options.mjs'
 import {
   artifactHashes,
   derivePriceCandidates,
+  deriveNativePriceCandidate,
   extractFoundryStandardJsonInput,
   foundryCompilerVersion,
   PHASE_THREE_FACTORY,
@@ -200,6 +201,13 @@ function normalizeAddresses(value) {
 }
 
 function updateLaunchInputs(launchInputs) {
+  const native = launchInputs.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2';
+  if (native) {
+    const maximum = launchInputs.pool.quoteAsset.amountAtomic;
+    launchInputs.pool.priceCandidates.nativeCurrency0 = maximum === null ? null : deriveNativePriceCandidate({ nativeWei: maximum, hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic });
+    launchInputs.token.sourceCompatibility = { status: 'VERIFIED', compiledSupplyAtomic: '1000000000000000000000000000', reason: 'The pinned native launch compilation binds the complete HKMN stock and zero quote currency. It grants no funding or transaction authority.' };
+    return normalizeAddresses(launchInputs);
+  }
   const candidates = derivePriceCandidates({
     usdgAtomic: launchInputs.pool.quoteAsset.amountAtomic,
     hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic,
@@ -230,8 +238,25 @@ function updateLaunchInputs(launchInputs) {
   return normalizeAddresses(launchInputs);
 }
 
-function updateAddressManifest(manifest, records, buildInfo) {
+function updateAddressManifest(manifest, records, buildInfo, launchInputs) {
   manifest = normalizePhaseThreeAddressManifestDraft(manifest);
+  if (launchInputs.schemaVersion.endsWith('.v2')) {
+    manifest.schemaVersion = 'hookemon.phase3.address-manifest-draft.v2';
+    const token = manifest.targets.find(target => target.targetId === 'token');
+    token.constructor.expectedQuoteCurrency = launchInputs.roles.quoteCurrency;
+    delete token.constructor.expectedUsdg;
+    const hook = manifest.targets.find(target => target.targetId === 'hook');
+    hook.constructor.quoteCurrency = launchInputs.roles.quoteCurrency;
+    delete hook.constructor.usdg;
+    delete hook.constructor.seedIntentDigest;
+    delete hook.constructor.processClaimLimit6h;
+    delete hook.constructor.processClaimLimitMax;
+    hook.constructor.processClaimLimit6hWei ??= null;
+    hook.constructor.processClaimLimitMaxWei ??= null;
+    manifest.openFacts = manifest.openFacts.filter(fact => !fact.includes('USDG'));
+    manifest.openFacts = [...new Set([...manifest.openFacts, 'Missing: native seed maximum and explicit wei claim ceilings. Resolve: bind the fully costed reviewed native launch inputs. Verified alternative: no seed or address-bound graph is materialized.'])];
+  }
+
   manifest.deployer.factory = PHASE_THREE_FACTORY;
   manifest.compiler.solc = PHASE_THREE_SOLC_VERSION;
   manifest.compiler.solcLongVersion = PHASE_THREE_SOLC_LONG_VERSION;
@@ -261,7 +286,7 @@ function updateAddressManifest(manifest, records, buildInfo) {
   return normalizeAddresses(manifest);
 }
 
-function updateDeploymentManifest(manifest, hookArtifact) {
+function updateDeploymentManifest(manifest, hookArtifact, tokenArtifact) {
   manifest = normalizePhaseThreeDeploymentManifest(manifest);
   const schema = 'release/phase3/address-manifest.schema.json';
   manifest.addressManifestSchema = schema;
@@ -277,6 +302,7 @@ function updateDeploymentManifest(manifest, hookArtifact) {
     selector: '0xffd7d983',
     arguments: ['hook:address'],
   };
+  token.constructorArgsSchema.items = tokenArtifact.abi.find(entry => entry.type === 'constructor').inputs.map(({ name, type }) => ({ name, type }));
   const custody = manifest.deployed.find((target) => target?.name === 'PermanentPositionCustody');
   if (!custody) throw new Error('deployment manifest PermanentPositionCustody target is missing');
   custody.role = 'graph target 1: permanent position NFT custody';
@@ -295,7 +321,7 @@ function updateDeploymentManifest(manifest, hookArtifact) {
 }
 
 function updateSubmission(submission) {
-  submission = normalizePhaseThreeSubmissionDraft(submission);
+  submission = normalizePhaseThreeSubmissionDraft(submission, { native: readJson(resolve(releaseDirectory, 'launch-inputs.json')).schemaVersion.endsWith('.v2') });
   return normalizeAddresses(submission);
 }
 
@@ -384,10 +410,10 @@ function main() {
     const addressManifestPath = resolve(releaseDirectory, 'address-manifest.json');
     const submissionPath = resolve(releaseDirectory, 'submission.json');
     writeJson(launchInputsPath, updateLaunchInputs(readJson(launchInputsPath)));
-    writeJson(addressManifestPath, updateAddressManifest(readJson(addressManifestPath), compilation.records, buildInfo));
+    writeJson(addressManifestPath, updateAddressManifest(readJson(addressManifestPath), compilation.records, buildInfo, readJson(launchInputsPath)));
     writeJson(
       deploymentManifestPath,
-      updateDeploymentManifest(readJson(deploymentManifestPath), compilation.records.get('hook').artifact),
+      updateDeploymentManifest(readJson(deploymentManifestPath), compilation.records.get('hook').artifact, compilation.records.get('token').artifact),
     );
     writeJson(submissionPath, updateSubmission(readJson(submissionPath)));
     updateReleasePlan(compilation.records, releasePlanPath);

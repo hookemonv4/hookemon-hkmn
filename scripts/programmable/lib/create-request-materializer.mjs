@@ -251,7 +251,7 @@ function resolveTarget(addressManifest, targetId) {
 }
 
 function validateGraphDraft(graphDraft, targets) {
-  if (graphDraft?.schemaVersion !== 'hookemon.phase3.graph-draft.v1') fail('graph draft is unavailable', '/package/graph-draft.json/schemaVersion');
+  if (!['hookemon.phase3.graph-draft.v1', 'hookemon.phase3.graph-draft.v2'].includes(graphDraft?.schemaVersion)) fail('graph draft is unavailable', '/package/graph-draft.json/schemaVersion');
   const graphTargets = graphDraft?.graph?.targets;
   if (!Array.isArray(graphTargets)) fail('graph draft targets are unavailable', '/package/graph-draft.json/graph/targets');
   const targetIds = targets.map(({ target }) => target.targetId);

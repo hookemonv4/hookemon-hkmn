@@ -6,8 +6,8 @@
   "model": {
     "id": "hookemon-phase-three",
     "name": "Hookemon",
-    "summary": "A fixed-supply HKMN launch uses one custom v4 hook to form a canonical USDG market and account for a disclosed gross quote-side fee.",
-    "userOutcome": "The launch owner receives a reviewable, non-authoritative two-transaction handoff proposal for a canonical HKMN and USDG pool with disclosed fee behavior.",
+    "summary": "A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.",
+    "userOutcome": "A reviewed graph and separate payable seed establish the canonical ETH/HKMN pool with permanent liquidity custody.",
     "category": "custom-hook-project",
     "whyV4": "Uniswap v4 callbacks and return deltas let the canonical hook collect its non-additive fee inside the authenticated pool lifecycle instead of adding a separate transfer tax."
   },
@@ -120,13 +120,13 @@
   },
   "assets": [
     {
-      "id": "usdg",
+      "id": "native",
       "role": "quote",
-      "origin": "existing-erc20",
-      "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
-      "decimals": 6,
-      "decimalsSource": "token-contract-observation",
-      "supplyPolicy": "externally-managed",
+      "origin": "native-eth",
+      "address": null,
+      "decimals": 18,
+      "decimalsSource": "native-eth-protocol",
+      "supplyPolicy": "native",
       "initialSupply": null,
       "behaviors": [
         "standard"
@@ -170,7 +170,7 @@
     "liquidityFormation": {
       "applicable": true,
       "actor": "Launch wallet after Permit2 approval",
-      "valueFlow": "Only after provider preimage and preflight facts are resolved, the owner would supply 240000000 USDG atomic units after the graph allocates 1000000000000000000000000000 HKMN atomic units to the resolved hook. No other HKMN allocation exists.",
+      "valueFlow": "The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.",
       "custody": "The permanent custody target receives the initial v4 position after the seed call.",
       "failure": "An expired or non-exact Permit2 allowance, wrong range or failed mint reverts the seed atomically.",
       "event": "Seed and custody binding events.",
@@ -180,7 +180,7 @@
       "applicable": true,
       "actor": "Launch wallet in Rabby",
       "valueFlow": "Only after provider preimage and preflight facts are resolved would the wallet sign the zero-value graph call and, after assertions, the owner seed call. Requirements revision 65 is not transaction authorization for either transaction.",
-      "custody": "The wallet keeps USDG until the seed settlement and receives unused USDG back from the hook.",
+      "custody": "The seed caller supplies ETH; the hook refunds only msg.value minus exact PositionManager debt to the specified payer.",
       "failure": "A graph mismatch stops before the seed; a deployed but unseeded graph is not retried with widened allowances.",
       "event": "Wallet transaction receipts and post-deploy assertions.",
       "notApplicableReason": null
@@ -188,7 +188,7 @@
     "trading": {
       "applicable": true,
       "actor": "Authenticated PoolManager callback",
-      "valueFlow": "Each supported swap executes against the canonical HKMN/USDG pool and applies the quote-side fee path for its quadrant.",
+      "valueFlow": "Each canonical ETH/HKMN swap follows its specified gross native fee quadrant.",
       "custody": "The PoolManager handles swap settlement while the hook records only fee liability.",
       "failure": "An invalid PoolKey, currency mapping or delta reverts the entire swap without persistent accounting.",
       "event": "Swap and hook fee-accounting events.",
@@ -198,7 +198,7 @@
       "applicable": true,
       "actor": "Immutable programmable platform recipient, treasury beneficiary and bounded process claim route",
       "valueFlow": "The hook splits the selected 300 bps gross quote-side fee into 10 bps programmable, 40 bps treasury and 250 bps process liabilities.",
-      "custody": "The hook holds accrued USDG liability until the authorized recipient claims to a selected destination.",
+      "custody": "The hook holds native liabilities until successful payment to the authorized beneficiary destination.",
       "failure": "A failed claim leaves the liability intact and cannot redirect another beneficiary balance.",
       "event": "Liability accrual and claim events.",
       "notApplicableReason": null
@@ -223,9 +223,9 @@
     }
   },
   "pool": {
-    "currency0": "usdg",
+    "currency0": "native",
     "currency1": "hkmn",
-    "orderingRule": "This schema instance validates the USDG-currency0 candidate. release/phase3/launch-inputs.json records all eight order-dependent gross-basis paths; the authoritative address manifest compares the resolved HKMN CREATE2 address with USDG and requires a regenerated submission if HKMN is lower.",
+    "orderingRule": "Native ETH uses zero Currency and is always currency0; HKMN is currency1.",
     "tickSpacing": 60,
     "lpFee": {
       "classification": "lp-fee",
@@ -337,7 +337,7 @@
     "base": "BaseHook",
     "upgradeable": false,
     "sharedAcrossPools": false,
-    "poolNamespace": "One resolved canonical HKMN/USDG PoolKey on chain 4663.",
+    "poolNamespace": "One canonical ETH/HKMN PoolKey on chain 4663.",
     "poolAdmission": {
       "enforcement": "The hook authenticates the configured PoolManager and the one resolved canonical PoolKey.",
       "factoryOrRegistry": "The graphFactory creates the hook; the final PoolKey is recorded only after CREATE2 address derivation.",
@@ -377,7 +377,7 @@
       },
       {
         "callback": "afterSwap",
-        "necessity": "Return the post-swap unspecified-currency delta when USDG is unspecified and finalize the liability update.",
+        "necessity": "Collect the native unspecified-currency fee delta after the swap and finalize liabilities.",
         "allowedReverts": "The callback reverts if the returned delta, settlement or ledger conservation check is invalid.",
         "userExitImpact": "A failed callback reverts the complete swap before settlement and leaves no partial user debit.",
         "noSelfCallImpact": "The hook never initiates same-pool nested swaps, so this callback cannot be bypassed by self-call behavior."
@@ -394,33 +394,33 @@
     "feeMechanism": {
       "used": true,
       "classification": "hook-owned-fee",
-      "chargedCurrency": "Gross USDG quote-side volume in the canonical pool.",
+      "chargedCurrency": "Gross native ETH quote-side volume, accounted in wei.",
       "swapQuadrants": {
         "zeroForOneExactInput": {
           "currency": "currency0",
           "basis": "gross-input",
-          "formula": "Charge the selected inclusive fee from gross USDG input before the AMM leg.",
+          "formula": "Collect the inclusive fee on gross ETH input before the AMM leg.",
           "rounding": "down",
           "maximumHundredthsOfBip": 30000
         },
         "zeroForOneExactOutput": {
           "currency": "currency0",
           "basis": "gross-input",
-          "formula": "Calculate the gross USDG input required for the requested HKMN output, then collect the selected inclusive fee through the after-swap return delta.",
+          "formula": "Collect the fee on required gross ETH input through the after-swap delta.",
           "rounding": "up",
           "maximumHundredthsOfBip": 30000
         },
         "oneForZeroExactInput": {
           "currency": "currency0",
           "basis": "gross-output",
-          "formula": "Collect USDG as unspecified output through the after-swap return delta.",
+          "formula": "Collect the fee on gross ETH output through the after-swap delta.",
           "rounding": "down",
           "maximumHundredthsOfBip": 30000
         },
         "oneForZeroExactOutput": {
           "currency": "currency0",
           "basis": "gross-output",
-          "formula": "Apply the selected inclusive fee to gross USDG output before the AMM leg so the caller receives the requested net output.",
+          "formula": "Collect the gross ETH output fee before the AMM leg, preserving requested net output.",
           "rounding": "up",
           "maximumHundredthsOfBip": 30000
         }
@@ -477,8 +477,8 @@
     },
     "customAccounting": {
       "used": true,
-      "backingSource": "The hook takes the disclosed USDG fee from the authenticated PoolManager settlement path before crediting liabilities.",
-      "conservationEquation": "hook USDG balance equals unpaid programmable liability plus unpaid treasury liability plus unpaid process liability plus explicitly reconciled seed residuals.",
+      "backingSource": "Native fee value taken from authenticated PoolManager settlement backs each liability.",
+      "conservationEquation": "Hook native balance covers unpaid platform, treasury and process liabilities. Forced ETH and fractional remainders grant no claims.",
       "settlement": "Take the positive quote-side component, update PoolId-scoped liabilities, then return the requested delta before hook return.",
       "partialFillBehavior": "Calculate from executed gross quote-side volume only and revert any unsupported partial-fill or invalid final delta.",
       "liabilityNamespace": "canonical PoolId and currency, with programmable and treasury beneficiary ledgers plus one bounded process-liability ledger for current operations",
@@ -490,7 +490,7 @@
       "crossPoolNetting": false,
       "duplicateCurrencyPolicy": "The canonical pool uses distinct currencies and rejects any PoolKey with duplicate or mismatched currency identity.",
       "failureIsolation": "A failed swap or claim reverts its own state transition and cannot debit another pool or beneficiary liability.",
-      "withdrawalOrdering": "Claims update the beneficiary liability before transferring the exact accrued USDG amount."
+      "withdrawalOrdering": "Update liabilities, pay exact native value under the shared lock, then verify solvency; rejected payment reverts all claim state."
     },
     "returnDeltaAccounting": {
       "used": true,
@@ -502,8 +502,8 @@
           "amountSign": "negative-exact-input",
           "specifiedComponent": {
             "mode": "positive-only",
-            "formula": "zeroForOne exact input specified component is positive only when USDG is the affected swap currency; otherwise it is zero.",
-            "minimum": "Zero USDG atomic units when no fee is due; otherwise a positive integer fee after cumulative rounding.",
+            "formula": "The native specified fee component is positive on the selected before-swap collection path.",
+            "minimum": "The integer fee follows independent cumulative stream rounding; gross trades below 1000 wei revert.",
             "maximum": "bounded by the selected 300 bps gross quote-side fee and the executed swap amount",
             "minimumSign": "zero",
             "maximumSign": "positive",
@@ -633,8 +633,8 @@
           "amountSign": "positive-exact-output",
           "specifiedComponent": {
             "mode": "positive-only",
-            "formula": "oneForZero exact output specified component is positive only when USDG is the affected swap currency; otherwise it is zero.",
-            "minimum": "Zero USDG atomic units when no fee is due; otherwise a positive integer fee after cumulative rounding.",
+            "formula": "The native specified fee component is positive on the selected before-swap collection path.",
+            "minimum": "The integer fee follows independent cumulative stream rounding; gross trades below 1000 wei revert.",
             "maximum": "bounded by the selected 300 bps gross quote-side fee and the executed swap amount",
             "minimumSign": "zero",
             "maximumSign": "positive",
@@ -698,13 +698,13 @@
         "returnedDeltaShape": "unspecified-currency-int128",
         "positiveMeaning": "hook-credit-caller-debit",
         "negativeMeaning": "hook-debt-caller-credit",
-        "backingSource": "The hook takes the gross USDG quote-side fee and credits the programmable, treasury and process liability ledgers before returning.",
+        "backingSource": "Authenticated native settlement funds the independent platform, treasury and process streams.",
         "callerDeltaEquation": "protocol-delta-minus-hook-delta",
         "componentPolicies": {
           "unspecified": {
             "mode": "positive-only",
-            "formula": "afterSwap unspecified component is positive only when USDG is the affected swap currency; otherwise it is zero.",
-            "minimum": "Zero USDG atomic units when no fee is due; otherwise a positive integer fee after cumulative rounding.",
+            "formula": "Collect native unspecified fees only for ETH exact-output input or ETH exact-input output.",
+            "minimum": "The integer fee follows cumulative rounding after the 1000 wei gross minimum.",
             "maximum": "bounded by the selected 300 bps gross quote-side fee and the executed swap amount",
             "minimumSign": "zero",
             "maximumSign": "positive",
@@ -743,7 +743,7 @@
           "currency0": null,
           "currency1": null
         },
-        "bounds": "Positive only when USDG is the unspecified currency; otherwise zero. The amount is capped at 30000 hundredths of a bip of executed gross USDG volume.",
+        "bounds": "Only the native fee component is positive, bounded by the inclusive 3% gross-volume rule and cumulative remainders.",
         "rounding": "Use the hook cumulative accounting rule and preserve exact final caller-delta semantics.",
         "slippageOrMinimums": "The route must enforce the user limit on the final caller delta; no separate hook minimum is introduced.",
         "failureRule": "Any mismatch between the post-return delta, settlement and liability ledger reverts the complete swap.",
@@ -838,21 +838,21 @@
     {
       "id": "owner-seed",
       "action": "seed canonical full-range liquidity",
-      "asset": "usdg and hkmn",
+      "asset": "native and hkmn",
       "from": "launch-wallet",
       "to": "resolved canonical hook and custody",
-      "amountRule": "USDG maximum is 240000000 atomic units; HKMN maximum is the selected 1000000000000000000000000000 candidate.",
-      "settlement": "Permit2 transfers the exact USDG allowance to the hook, which forms the permanent custody position, returns unused USDG to the payer, and rejects any graph-mode HKMN residual.",
+      "amountRule": "The explicit reviewed native amount0Max and the complete 1000000000000000000000000000 HKMN amount1Max bound the seed.",
+      "settlement": "msg.value equals amount0Max. Only HKMN uses Permit2 approval; read current slot0 after approval, pay exact native debt, clear approvals and refund the difference to payer. Any HKMN residual or rejected refund reverts.",
       "failure": "An invalid allowance, deadline, range, price, allocation or post-deploy assertion reverts the seed."
     },
     {
       "id": "swap-fee-accrual",
       "action": "collect gross quote-side hook fee",
-      "asset": "usdg",
+      "asset": "native",
       "from": "canonical-pool swap settlement",
       "to": "hook liability ledger",
       "amountRule": "The selected 30000 hundredths-of-bip fee uses the applicable before or after return-delta path and never exceeds the cap.",
-      "settlement": "The hook takes the settled USDG component and credits programmable, treasury and process liabilities before callback return.",
+      "settlement": "Native PoolManager settlement backs all three cumulative liabilities before callback return.",
       "failure": "A sign, currency, PoolKey or settlement mismatch reverts the complete swap atomically."
     }
   ],
@@ -955,7 +955,7 @@
     "partialFills": "The hook calculates from executed amounts and rejects an unsupported final delta before any liability update persists.",
     "slippage": "Caller limits apply to the final caller delta after the hook return delta; the hook does not widen a user limit.",
     "deadline": "The seed deadline is chosen at signing and is no more than 900 seconds after final wallet confirmation.",
-    "permit2": "The owner seed requires an exact Permit2 allowance from the launch wallet to the resolved hook; user swap routing is not declared here.",
+    "permit2": "Only HKMN approvals from the hook to Permit2 and PositionManager participate in seed settlement; the caller supplies native ETH through msg.value.",
     "stateReads": "The hook validates its configured PoolManager and canonical PoolKey on every callback.",
     "events": [
       "Swap",
@@ -1003,11 +1003,11 @@
       "reserveReconstruction": {
         "used": true,
         "balanceSources": [
-          "Read the raw USDG balance held by the resolved hook at the same confirmed block as each PoolManager state read.",
+          "Read hook native balance at the same confirmed block as PoolManager state.",
           "Read attributable PoolManager credit or claim state for the resolved hook and canonical PoolId at that confirmed block."
         ],
         "liabilitySources": [
-          "Replay SwapLiabilitiesAccrued, ProgrammableClaimed, TreasuryClaimed and ProcessClaimed, then confirm readFeeLiabilities(treasury) and processLiability for the resolved PoolId and USDG currency."
+          "Replay fee and successful claim events, then reconcile current native liabilities for the canonical PoolId."
         ],
         "attributionKeys": [
           "chainId",
@@ -1016,7 +1016,7 @@
           "currency",
           "beneficiary"
         ],
-        "solvencyEquation": "For USDG, confirmed hook balance plus attributable PoolManager credit must cover reconstructed programmable, treasury and process liabilities for the same PoolId; the three independent remainders are not beneficiary balances.",
+        "solvencyEquation": "Confirmed native balance covers unpaid liabilities; forced balance and stream remainders never become beneficiary claims.",
         "poolLiquidityTreatment": "excluded-from-hook-reserves",
         "donationAndDustPolicy": "Unattributed donations and rounding dust remain separate from beneficiary liabilities and cannot repair or conceal a reported deficit.",
         "reconciliation": "After every finalized accounting event, compare reconstructed liabilities and attributed balances; suppress reserve reporting and require investigation when the equality does not hold."
@@ -1068,7 +1068,7 @@
         "swap-fee-accrual"
       ],
       "assetRefs": [
-        "usdg",
+        "native",
         "hkmn"
       ],
       "sourcePaths": [
@@ -1115,7 +1115,7 @@
         },
         "valueFlow": {
           "status": "applicable",
-          "summary": "The graph and owner seed form the initial position; swaps collect USDG fee liability through return deltas.",
+          "summary": "Graph allocation and the payable owner seed form permanent liquidity; native fees fund the existing Collector cycle.",
           "controls": [
             "Record every fee liability by PoolId, currency and beneficiary."
           ],
@@ -1435,7 +1435,7 @@
     {
       "id": "quote-side-volume-accounting",
       "kind": "pool-interaction",
-      "summary": "Calculate inclusive fees from gross USDG quote-side volume in all four canonical swap quadrants.",
+      "summary": "Calculate inclusive cumulative native fees in all four canonical swap quadrants.",
       "surfaceIds": [
         "canonical-pool-hook"
       ],
@@ -1496,7 +1496,6 @@
       "used": true,
       "targets": [
         "configured PoolManager",
-        "USDG token",
         "Permit2"
       ],
       "callSites": [
@@ -1737,7 +1736,7 @@
   "capabilityExtensions": [
     {
       "capabilityId": "phase-three-launch-graph",
-      "summary": "Requirements revision 65 records the owner's 2026-09-05 full-pool allocation decision and the accepted 10 bps platform share. Provider preimage fields, salts, and materialized constructor values remain unresolved in the address-derivation-pending three-call graph.",
+      "summary": "The native graph preserves complete HKMN allocation and cumulative 10/40/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.",
       "interactionRefs": [
         "release/phase3/launch-inputs.json",
         "release/phase3/address-manifest.json",
@@ -1845,7 +1844,7 @@
     "rationales": {
       "complexity": "The hook combines canonical pool admission, launch seeding, a custody target and four return-delta swap quadrants.",
       "customMath": "Return-delta accounting and gross quote-side fee rounding require specialist review and four-quadrant invariant tests.",
-      "externalDependencies": "The graph depends on provider route facts, PoolManager, Permit2 and USDG behavior that are not all locally verified.",
+      "externalDependencies": "Provider admission, exact manager runtimes and native Relay source/order proofs remain separately verified release facts.",
       "externalLiquidity": "The initial position is owner-provided liquidity and does not source external liquidity.",
       "valueAtRisk": "The owner seed and all future canonical swaps rely on correct PoolKey, delta and liability accounting.",
       "teamMaturity": "The implementation has not completed a provider-bound preflight, a materialized compiler closure, or independent return-delta review.",
@@ -1868,18 +1867,17 @@
     ]
   },
   "disclosures": [
-    "FEE-01 records the accepted 10 bps platform share confirmed with the owner on 2026-09-04.",
-    "The retained provider material does not establish an ERC-20 Permit2 funding route for the 240 USDG owner seed.",
     "Requirements revision 65 records the owner's 2026-09-05 decision: the complete 1,000,000,000 HKMN supply is allocated to the canonical market, with zero other allocations. The DRAFT_UNSIGNED baseline records subject hashes and is not transaction authorization.",
     "The executable graph requires exactly three ABI-derived calls in token, custody, hook order: token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Provider-supplied encoding must bind their selectors, targets, arguments, and order before graph calldata can exist.",
     "Requirements revision 65 describes separate graph deployment and owner seed transactions; it does not authorize either. Provider preimage fields, graph calldata, and preflight evidence remain required before either transaction is signed.",
     "The checked-in launch profile binds one bare Standard JSON input and the full 0.8.26+commit.8a97fa7a compiler version. It remains template evidence until provider route fields materialize the graph.",
     "The provider route namespace, route nonce, topology, salts and expected CREATE2 addresses are bound only at the address-manifest checkpoint; this proposal contains no signing calldata.",
-    "The resolved HKMN address selects the currency order, PoolKey, PoolId and seed price candidate. If USDG is currency0, before-swap collection is zeroForOne exact input and oneForZero exact output; if USDG is currency1, it is zeroForOne exact output and oneForZero exact input. The package must be rebuilt before wallet handoff.",
     "The source splits the combined 290 bps project policy share into 40 bps treasury and 250 bps process liabilities. The complete HKMN supply is allocated to the canonical market; permanent custody holds only the v4 position.",
     "The quote asset is an external upgradeable dependency. Its current implementation, pause and freeze behavior require provider-bound verification before launch.",
     "The metadata icon and banner bytes, content hashes and immutable publication locations must be supplied before a public metadata artifact is bound.",
-    "The 12-block reconstruction threshold is a conservative proposal policy and needs target-chain finality confirmation before indexer integration."
+    "The 12-block reconstruction threshold is a conservative proposal policy and needs target-chain finality confirmation before indexer integration.",
+    "The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.",
+    "Native ETH is currency0. Seed and wei claim ceilings remain unset until the complete USD 250 test is costed and reviewed."
   ],
   "unresolved": [
     "Provider graph preimage: route namespace, route nonce, topology hash, target-id hashes, and serialized calls for token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96)."

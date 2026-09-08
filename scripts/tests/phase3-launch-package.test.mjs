@@ -106,7 +106,7 @@ function assertClosureAddressesAndTargetOrder(records) {
   assert.equal(example.targets.token.contractName, 'HKMNToken');
   assert.deepEqual(example.targets.token.constructorArguments, [
     { ref: 'chain.factory' },
-    { ref: 'usdg' },
+    { ref: 'quoteCurrency' },
     18,
     { ref: 'pool.selectedPriceCandidate.sqrtPriceX96' },
   ]);
@@ -153,51 +153,20 @@ test('the release draft keeps provider target order and source-bound artifact ev
   assert.equal(PROGRAMMABLE_GRAPH_FACTORY, '0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd');
 });
 
-test('the two seed candidates are independently derived from the owner amounts', () => {
-  const launchInputs = readJson('release/phase3/launch-inputs.json');
-  assert.equal(launchInputs.token.allocation.canonicalPoolBps, 10_000);
-  assert.equal(launchInputs.token.allocation.remainderCustodyBps, 0);
-  assert.equal(launchInputs.token.allocation.canonicalPool.amountAtomic, '1000000000000000000000000000');
-  assert.equal(launchInputs.token.allocation.remainderCustody.amountAtomic, '0');
-  assert.equal(launchInputs.pool.quoteAsset.amountAtomic, '240000000');
-  assert.equal(launchInputs.pool.baseAsset.amountAtomic, '1000000000000000000000000000');
-  assert.equal(Math.abs(launchInputs.pool.fullRange.minimumTick % launchInputs.pool.tickSpacing), 0);
-  assert.equal(Math.abs(launchInputs.pool.fullRange.maximumTick % launchInputs.pool.tickSpacing), 0);
-  const candidates = derivePriceCandidates({
-    usdgAtomic: launchInputs.pool.quoteAsset.amountAtomic,
-    hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic,
-  });
-  for (const name of ['usdgCurrency0', 'hkmnCurrency0']) {
-    const actual = launchInputs.pool.priceCandidates[name];
-    assert.deepEqual(
-      {
-        sqrtPriceX96: actual.sqrtPriceX96,
-        sqrtLowerX96: actual.sqrtLowerX96,
-        sqrtUpperX96: actual.sqrtUpperX96,
-        liquidity: actual.liquidity,
-        amount0Max: actual.amount0Max,
-        amount1Max: actual.amount1Max,
-        consumedAmount0: actual.consumedAmount0,
-        consumedAmount1: actual.consumedAmount1,
-        consumedHkmn: actual.consumedHkmn,
-      },
-      {
-        sqrtPriceX96: candidates[name].sqrtPriceX96,
-        sqrtLowerX96: candidates[name].sqrtLowerX96,
-        sqrtUpperX96: candidates[name].sqrtUpperX96,
-        liquidity: candidates[name].liquidity,
-        amount0Max: candidates[name].amount0Max,
-        amount1Max: candidates[name].amount1Max,
-        consumedAmount0: candidates[name].consumedAmount0,
-        consumedAmount1: candidates[name].consumedAmount1,
-        consumedHkmn: candidates[name].consumedHkmn,
-      },
-    );
-  }
-  for (const candidate of Object.values(candidates)) {
-    assert.equal(candidate.consumedAmount0, candidate.amount0Max);
-    assert.equal(candidate.consumedAmount1, candidate.amount1Max);
-  }
+test('native seed remains explicit and unselected while preserving the complete stock', () => {
+  const inputs = readJson('release/phase3/launch-inputs.json');
+  assert.equal(inputs.token.allocation.canonicalPoolBps, 10_000);
+  assert.equal(inputs.token.allocation.remainderCustodyBps, 0);
+  assert.equal(inputs.pool.baseAsset.amountAtomic, '1000000000000000000000000000');
+  assert.equal(inputs.pool.quoteAsset.assetId, 'native');
+  assert.equal(inputs.pool.quoteAsset.decimals, 18);
+  assert.equal(inputs.pool.quoteAsset.amountAtomic, null);
+  assert.equal(inputs.pool.priceCandidates.nativeCurrency0, null);
+  assert.equal(inputs.pool.priceCandidates.selection.status, 'OPEN_FACT');
+  assert.equal(inputs.pool.priceCandidates.selection.selectedOrdering, 'nativeCurrency0');
+  assert.deepEqual(Object.keys(inputs.pool.priceCandidates), ['nativeCurrency0', 'selection']);
+  assert.equal(inputs.seed.nativeFunding.amountWei, null);
+  assert.equal(inputs.seed.graphFunding.amountAtomic, '0');
 });
 
 test('the independently derived Phase 3 JSON closure uses EIP-55 and provider target order', () => {

@@ -348,6 +348,23 @@ export function runVendoredPackageVerifier(options = {}) {
 }
 
 export function validateSubmissionFeeOrdering(launchInputs, submission) {
+  if (launchInputs?.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2') {
+    const selection = launchInputs.pool?.priceCandidates?.selection;
+    const candidate = launchInputs.pool?.priceCandidates?.nativeCurrency0;
+    if (selection?.selectedOrdering !== 'nativeCurrency0'
+      || submission?.pool?.currency0 !== 'native' || submission?.pool?.currency1 !== 'hkmn') fail('native submission pool order is invalid');
+    if (selection.status === 'OPEN_FACT') {
+      if (selection.selectedSqrtPriceX96 !== null) fail('draft selection must not bind a candidate price');
+    } else if (selection.status !== 'DERIVED' || !candidate || selection.selectedSqrtPriceX96 !== candidate.sqrtPriceX96) {
+      fail('selected candidate price does not match native ordering');
+    }
+    if ((candidate === null) !== (launchInputs.pool.quoteAsset.amountAtomic === null)) fail('native seed amount and candidate must be bound together');
+    for (const name of ['zeroForOneExactInput', 'zeroForOneExactOutput', 'oneForZeroExactInput', 'oneForZeroExactOutput']) {
+      if (submission?.hook?.feeMechanism?.swapQuadrants?.[name]?.currency !== 'currency0') fail(`submission fee currency mismatch in ${name}`);
+    }
+    return;
+  }
+
   const candidates = launchInputs?.pool?.priceCandidates;
   const selection = candidates?.selection;
   const selectedOrdering = selection?.selectedOrdering;

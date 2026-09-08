@@ -789,10 +789,10 @@
       "sha256": "2f106f2f4773b8d7ef8c2364a95074ceb07ec2c80d38a7751e80fdfc9996ec02"
     },
     {
-      "bytes": 13166,
+      "bytes": 8517,
       "kind": "source-entry",
       "path": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
-      "sha256": "21f55639081b2d359167b793e25f9ee7dc06014c13f75fd73cd01f8d487df778"
+      "sha256": "3ef190633f173484c367b493a487b359b79e3e06439010f3d9249e14b6762227"
     },
     {
       "bytes": 2740,
@@ -801,10 +801,10 @@
       "sha256": "d28572c4c8f902741be65be60ff67582916dfced092a3e2f0f0a938de21e29a3"
     },
     {
-      "bytes": 37376,
+      "bytes": 36358,
       "kind": "source-entry",
       "path": "packages/contracts/src/HookemonHook.sol",
-      "sha256": "35489fda757aef2d35392d164101394aef4270592e4d447efcca3c82661f4be1"
+      "sha256": "c96b17a0e535ec97ed6e37cb8589b8262f4e6fe4aa2c7040dc2d1e7acdd8d0fa"
     },
     {
       "bytes": 7907,
@@ -813,10 +813,10 @@
       "sha256": "041efbfa3b26a7db221065dd8ab12373cc83b110601a9729c5762d18dc0bfdf0"
     },
     {
-      "bytes": 15641,
+      "bytes": 15650,
       "kind": "source-entry",
       "path": "packages/contracts/src/accounting/FeeAccounting.sol",
-      "sha256": "dc1fbfa2151ec74887a6e7695c636d970bef034d5598f9f263d69549a6d6a86d"
+      "sha256": "e8ea8d1ead71f4273f5fdb08f27a02b5e9120fd11cf3de4d5258a747a5795347"
     },
     {
       "bytes": 14389,
@@ -825,10 +825,10 @@
       "sha256": "e8e18d027a852627b70bdb6bd10b2df7eb23a1caa664adc968e9cde15b9c8d18"
     },
     {
-      "bytes": 6040,
-      "kind": "solidity-import",
+      "bytes": 6148,
+      "kind": "source-entry",
       "path": "packages/contracts/src/launch/HKMNToken.sol",
-      "sha256": "4266a5dab2984c027b5642f7720735f197e00f271d1e2553351a7e794c2455d7"
+      "sha256": "18107aab7fb2a13db52d5b53ddef5a9cee57ee30aab7141fb197bd84f20f61ea"
     },
     {
       "bytes": 18067,
@@ -837,10 +837,10 @@
       "sha256": "25232ae1f730dd447547f11876603d3913e3a65df84a3793754653d0823ab2fb"
     },
     {
-      "bytes": 12444,
+      "bytes": 12577,
       "kind": "source-entry",
       "path": "packages/contracts/src/market/CanonicalMarket.sol",
-      "sha256": "4be2cddc821c2b9acfc09e510b4faab8ac562fbe4d918275b1435921d079f4bf"
+      "sha256": "5fa04a2e43a2e2ae2c153dc566ee0f4fb7ab4fcb756a1d50e20087db76865970"
     },
     {
       "bytes": 55355,
@@ -855,28 +855,28 @@
       "sha256": "d80b54b93da1c7dd9ffbae4f26449e34e6ffaa1e00c08456b53315cd1f5f0db6"
     },
     {
-      "bytes": 51385,
+      "bytes": 48107,
       "kind": "test-entry",
       "path": "packages/contracts/test/integration/HookemonHook.t.sol",
-      "sha256": "cc112ccc3df82aebd56633c4b2711a73eef7b837e8f572a72f89f971969537f0"
+      "sha256": "23268cd6ed394725ef0e43e5bf65df1a902a6f3912916d762143e279fc19498f"
     },
     {
-      "bytes": 119026,
+      "bytes": 114300,
       "kind": "capability-test:phase-three-launch-graph",
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "sha256": "bb0a05472623238a6f1b618f8c7c58ca1c486dbd4688631dd35b565e98aa2927"
+      "sha256": "cf8d8f5fce4d4051a0c2ecd49b2b9eb036315b2ad20178b023d11b2a95894c00"
     },
     {
-      "bytes": 33954,
+      "bytes": 31790,
       "kind": "test-entry",
       "path": "packages/contracts/test/launch/LaunchComposition.t.sol",
-      "sha256": "dc595c2d773639f5b16d3a10ddb4dd8502f5ecbdc741bc31fb16ca04f70fb36b"
+      "sha256": "2624697f080d0004acce1fcc1459c1b9a9dcf0e07e8dd7167157b195b5441aac"
     },
     {
-      "bytes": 24982,
+      "bytes": 18604,
       "kind": "test-entry",
       "path": "packages/contracts/test/launch/LaunchLeg.t.sol",
-      "sha256": "d294c63b1dd6c97afc8ef1a353c93ca6119a27d31feb78554f01ddd113eb8839"
+      "sha256": "40921c6cfb5e3cdbfea1c66e3eb0a817700efdfdc72de887de34be98dca11480"
     },
     {
       "bytes": 22401,
@@ -885,10 +885,10 @@
       "sha256": "999cad2298575b59415cf51c8d67a4b664e9f34c8f60d08904e0b934de181127"
     },
     {
-      "bytes": 43232,
+      "bytes": 43180,
       "kind": "solidity-import",
       "path": "packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol",
-      "sha256": "96aaef4e73b68d55788772dd445693035dd350b61aa8fe1ed850b4814ee29b8e"
+      "sha256": "78e1ba8212a497b11267cdbf696cca2e3cef2d5c402ddea9de219d74981f8884"
     },
     {
       "bytes": 4730,
@@ -897,16 +897,16 @@
       "sha256": "5c8215c096bb8921e5d4da2186127d69876f65a395d5c154ac892e477b0c809a"
     },
     {
-      "bytes": 21494,
+      "bytes": 7446,
       "kind": "test-entry",
       "path": "packages/contracts/test/release/PhaseThreeReleasePlan.t.sol",
-      "sha256": "58efa8cc0fe6d5b278fd9f329dda7adcb6ee677b6a6f77ac307f265d7d402ebb"
+      "sha256": "38c4db1e76db14c0351e32b1328db26804251951e79eeb1a56cd305903a9a8e2"
     },
     {
-      "bytes": 10731,
+      "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "564427f1019189f1c9be665793b2773a250aa9a02fe39df3787cc3ecf7a834cd"
+      "sha256": "f7227e11ff2474e5726bfdd47c1bd0b97eb5505e7411c00f92266f533bbae802"
     },
     {
       "bytes": 2842,
@@ -933,22 +933,22 @@
       "sha256": "dc4a0f78ec5c3ab7b526a1fb1bb1bb5a3a24717db129353167aa5dbe4f8657a4"
     },
     {
-      "bytes": 13754,
+      "bytes": 42352,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest-draft.schema.json",
-      "sha256": "d007554266ce8e610a29f1f35fdd9d3dad1123a8d385e284408699dc0f92e3b7"
+      "sha256": "1b4d6620a88e8d874ba215b0e0d231e95757c146dbc948a9b5ee034d19ac138a"
     },
     {
-      "bytes": 9667,
+      "bytes": 9839,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/address-manifest.json",
-      "sha256": "ef101ae0fdd10a0bb7f467c8849bc3dc553425f3cece776a535d29fa455e865c"
+      "sha256": "4bdbd422bc46b6f53cecff9c3ffc37df8257400f69e60f595ea2c99cb7b2feba"
     },
     {
-      "bytes": 38884,
+      "bytes": 71953,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/address-manifest.schema.json",
-      "sha256": "21270eed9d21656dc97c6a6bcce039d9da6667996b14cd0fae65710e14c66203"
+      "sha256": "e36803d13d84ad0f3664e7047cc0b2c7dad8a9bb66c9fe8ba8a6f86a483860cd"
     },
     {
       "bytes": 4387,
@@ -957,10 +957,16 @@
       "sha256": "5dda08b88578c39d6dacc51d089b54f5831393dd31c00110b7289aa0b0cc7507"
     },
     {
-      "bytes": 15111,
+      "bytes": 15067,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/admission/provider-documents.json",
-      "sha256": "7bce7699339e9271d356654a2ef4da56bb58d50a106e61e0ebf17a1c0592ac8e"
+      "sha256": "b2de0718d8ef43afcc048bc712e3f44cd74d4582d9c201a6186360c2106e7eb6"
+    },
+    {
+      "bytes": 1760,
+      "kind": "capability-evidence:phase-three-launch-graph",
+      "path": "release/phase3/admission/provider-statement-2026-09-05.json",
+      "sha256": "8bcb626f163519f240a1edc442ebe3964cb214756f32c3ae4d6a563fc93ae92b"
     },
     {
       "bytes": 6102,
@@ -969,28 +975,28 @@
       "sha256": "5c5b3dc39827bbe77af2099a0f86a2a3a45c8888dbfb7ace23228894817bd120"
     },
     {
-      "bytes": 304289,
+      "bytes": 305654,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/custody.json",
-      "sha256": "25efec6d5b2a8ff409dd2545bec928b3dbad73456499923a15d6a6b824a12088"
+      "sha256": "f7ae50ab539a48335f42024826a13e28c0543da534f924a99241ef3bd1386857"
     },
     {
-      "bytes": 1119023,
+      "bytes": 1082000,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/hook.json",
-      "sha256": "ae1ef81a0afaf06affb2fb8b0d850e764e0fe1d432d415cdd4f50bca1b7d4ead"
+      "sha256": "204a6a44991682b316ed86b0ae5d241d3760c4f1f90c8cdbb2a6d4d42ffc39c8"
     },
     {
-      "bytes": 175402,
+      "bytes": 175639,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/token.json",
-      "sha256": "328c8615cfd6ab821114abbe7b3cd3b854434c046664afdc5f72b89a935ee1af"
+      "sha256": "d8674b134236f56b3aefa4152b4ab920aaf472d8685a596595084965aa0819af"
     },
     {
-      "bytes": 222791,
+      "bytes": 253682,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/build-info/launch.json",
-      "sha256": "a7fea459af8868c948058c4f7fe78826f1682a529db48b40f35e0589dba8053e"
+      "sha256": "4dee83f3709307e4f12a95e0876b235242e2016c4b9dcf978b84a06885f6759c"
     },
     {
       "bytes": 16196,
@@ -999,10 +1005,10 @@
       "sha256": "8b6cec4d0dac35c4d7c2588a48fa24427814c14efbe95f3b8a5f6e7df10c95b7"
     },
     {
-      "bytes": 3981,
+      "bytes": 3971,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/deployment-manifest.json",
-      "sha256": "a40d23b194d43284cbaf04301478f33ca78163bf1a6df2275bb86a6760fa783b"
+      "sha256": "859b1173ee8c5bfdf3fbf44d8221eab33bde0e6d8ad796c9779322f72d54de88"
     },
     {
       "bytes": 1705,
@@ -1023,46 +1029,46 @@
       "sha256": "e7b070413282d5f6716c5345eae330f30b4105bc7971e123aafa479e219ef3bf"
     },
     {
-      "bytes": 5734,
+      "bytes": 5617,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/launch-inputs.example.json",
-      "sha256": "3ca525ec54d42f4a314ed0664cfb1000627b26acd9b19d98ba72a2ade797284a"
+      "sha256": "6f500b6b290c32fe827dfcfc56b08051e5c354ca66986910e4d83c768fbd4ff1"
     },
     {
-      "bytes": 8848,
+      "bytes": 6331,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-inputs.json",
-      "sha256": "ab950dfd3307ae85fa444c3e87eb39c0dfe22918a225825595e88fb5e526b887"
+      "sha256": "24adf01f863cbb83e7795acd36a6f74bcf53c6a58c27d36dd40df3d6905a2eec"
     },
     {
-      "bytes": 6818,
+      "bytes": 6805,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-plan.md",
-      "sha256": "ad4be3cdf076e6fea5dea8df11ce4aa7ebc2e2bd9de0cb80c919c0a34f62dadb"
+      "sha256": "aa2f28d4acbbd68d4df4acdbe26e33093473d6034660934016f3a384dd051f0a"
     },
     {
-      "bytes": 384706,
+      "bytes": 425379,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/create-request.json",
-      "sha256": "98c6748f2a328d797da252c86d8166f05c7cd226d7b860a6b7bc8adcbc65cec7"
+      "sha256": "cd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b"
     },
     {
-      "bytes": 13827,
+      "bytes": 11669,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/graph-draft.json",
-      "sha256": "c32c3a438c455b5384adf0e04fe6650bec444b01d15b160ce27dac451d6d7fd7"
+      "sha256": "da53c02ae262c1c4c63fc92add72365dfba5e8731c9d8657d38883add2c02a97"
     },
     {
-      "bytes": 1719,
+      "bytes": 3101,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "30292346f9e28b0ac343e4b05bbefdead09a4b5aad9c4fff9587f9378892ec6d"
+      "sha256": "1fc198aa2c120fe1259ff464937226a9fd52bac002ae6995701fbe4275e70476"
     },
     {
-      "bytes": 78639,
+      "bytes": 77392,
       "kind": "package:submission.json",
       "path": "release/phase3/submission.json",
-      "sha256": "e2447bfb0ffffbd2f81e4b360389047f2ab3634749afc01741c27c0727fb8d23"
+      "sha256": "1d09f33b6231eb6dc8acf9499f2b3d05588215bcb356a7267810f5ac52976a23"
     },
     {
       "bytes": 3619,
@@ -1077,10 +1083,10 @@
       "sha256": "ad9dda427d009b525f081a4f33990d453b0b15e1a43e4746c61f4332acef066e"
     },
     {
-      "bytes": 93193,
+      "bytes": 119856,
       "kind": "specification",
       "path": "specs/requirements.json",
-      "sha256": "927bd0e85c3cce1f9f98ab9d4357e3c6cc621b5bae2c9b0b7c8ccb134c2c7fff"
+      "sha256": "750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425"
     }
   ],
   "importResolutions": [
@@ -1469,6 +1475,22 @@
       "specifier": "@uniswap/v4-core/src/libraries/SafeCast.sol"
     },
     {
+      "importer": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SqrtPriceMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/SqrtPriceMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol"
+    },
+    {
       "importer": "packages/contracts/test/release/PhaseThreePriceOracle.t.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
@@ -1486,6 +1508,14 @@
     },
     {
       "importer": "packages/contracts/lib/v4-periphery/src/interfaces/IStateView.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/StateLibrary.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/StateLibrary.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
       "remappingTarget": "packages/contracts/lib/v4-core/",
@@ -1525,7 +1555,23 @@
       "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
     },
     {
+      "importer": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
       "importer": "packages/contracts/script/release/PhaseThreeTickMathVectors.s.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/libraries/TickMath.sol",
+      "specifier": "@uniswap/v4-core/src/libraries/TickMath.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
       "remappingTarget": "packages/contracts/lib/v4-core/",
@@ -1870,6 +1916,14 @@
     },
     {
       "importer": "packages/contracts/lib/v4-periphery/src/libraries/PositionInfoLibrary.sol",
+      "kind": "solidity-remapped-import",
+      "remappingPrefix": "@uniswap/v4-core/",
+      "remappingTarget": "packages/contracts/lib/v4-core/",
+      "resolvedPath": "packages/contracts/lib/v4-core/src/types/PoolId.sol",
+      "specifier": "@uniswap/v4-core/src/types/PoolId.sol"
+    },
+    {
+      "importer": "packages/contracts/src/HookemonHook.sol",
       "kind": "solidity-remapped-import",
       "remappingPrefix": "@uniswap/v4-core/",
       "remappingTarget": "packages/contracts/lib/v4-core/",
@@ -2334,8 +2388,8 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:27194cb1fbfc4dc519088318f910fa5d70484f581b8ce1e9a7dc68b7d1aa6dfc",
+  "reviewTargetHash": "sha256:6f2140e983b7c0905765b0f7aeec8ad591a9038fc5455e1f9a20ce20af061b35",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
-  "submissionHash": "sha256:b17a3d6e6c261a13f96df287854181e6090f92e6ed0669c661d18edb12ccca9c"
+  "submissionHash": "sha256:06b88af5616a9ea160452d38b1bf6b6a011dd2813c5539bf50b332abbcd5fd16"
 }

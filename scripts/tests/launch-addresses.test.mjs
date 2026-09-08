@@ -30,6 +30,7 @@ import {
   buildAddressManifest,
   verifyAddressManifest,
 } from '../launch/build-address-manifest.mjs';
+import { materializePhaseThreePriceSelection, verifyPhaseThreeMaterializedSeedManifest } from '../programmable/lib/package.mjs';
 import { deriveNativePriceCandidate } from '../programmable/lib/phase3-release.mjs';
 import { isEip55Address, toEip55Address } from '../programmable/lib/eip55.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
@@ -425,6 +426,7 @@ function makeFixture({ native = false } = {}) {
     const input = fixture.input;
     input.schemaVersion = 'hookemon.phase3.launch-inputs.v2';
     input.quoteCurrency = '0x0000000000000000000000000000000000000000';
+    input.seedIntent = { payer: input.roles.launchAuthority, tickLower: -887220, tickUpper: 887220, maxDeadlineSeconds: 900 };
     delete input.usdg;
     input.pool.seedMaximumWei = '40000000000000000';
     input.pool.hkmnAtomic = '1000000000000000000000000000';
@@ -1103,6 +1105,8 @@ test('ships a strict manifest schema and a visibly non-production input example'
   assert.deepEqual(schema.oneOf, [
     { $ref: '#/$defs/materializedManifest' },
     { $ref: '#/$defs/addressDerivationDraft' },
+    { $ref: '#/$defs/nativeMaterializedManifest' },
+    { $ref: '#/$defs/nativeAddressDerivationDraft' },
   ]);
   assert.equal(schema.$defs.materializedManifest.properties.launchInputs.$ref, '#/$defs/launchInputs');
   assert.equal(schema.$defs.addressDerivationDraft.properties.targets.prefixItems[0].properties.targetId.const, 'token');
@@ -1178,5 +1182,58 @@ test('native version refuses historical quote, implicit limits and unbound seed 
       const input = structuredClone(fixture.input); change(input);
       assert.throws(() => deriveAddresses({ launchInputs: input, inputDirectory: fixture.directory }));
     }
+  } finally { rmSync(fixture.directory, { recursive: true, force: true }); }
+});
+
+
+test('native materialized seed binds explicit funding and eighteen-word hook policy without historical approval reuse', () => {
+  const fixture = makeFixture({ native: true });
+  try {
+    const inputs = fixture.input;
+    const manifest = buildAddressManifest({ launchInputs: inputs, inputDirectory: fixture.directory });
+    const candidate = deriveNativePriceCandidate({ nativeWei: inputs.pool.seedMaximumWei, hkmnAtomic: inputs.pool.hkmnAtomic });
+    const release = JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json')));
+    release.roles.quoteCurrency = inputs.quoteCurrency;
+    release.pool.quoteAsset.amountAtomic = candidate.amount0Max;
+    release.pool.priceCandidates.nativeCurrency0 = candidate;
+    release.seed.nativeFunding = { payer: inputs.seedIntent.payer, amountWei: candidate.amount0Max, valueRule: 'msg.value == amount0Max' };
+    const submission = JSON.parse(readFileSync(resolve(root, 'release/phase3/submission.json')));
+    const selected = materializePhaseThreePriceSelection({ launchInputs: release, submission, materializedManifest: manifest });
+    assert.equal(selected.submission.pool.currency0, 'native');
+    assert.equal(selected.submission.pool.currency1, 'hkmn');
+    assert.equal(selected.seedIntent.amount0Max, candidate.amount0Max);
+    assert.equal(selected.seedIntent.liquidity, candidate.liquidity);
+    assert.equal(manifest.preimages.targets.hook.constructorArguments.length, 2 + 18 * 64);
+    const policy = {
+      schema: 'hookemon.native-frozen-seed-policy.v1',
+      chain: { ...inputs.chain, totalValue: '0' },
+      roles: { ...inputs.roles, quoteCurrency: inputs.quoteCurrency },
+      pool: { fee: 0, tickSpacing: 60, priceCandidates: { nativeCurrency0: candidate } },
+      seedIntent: inputs.seedIntent,
+      hook: { expectedDecimals: 18, processClaimLimit6hWei: inputs.hookConstructorConfig.processClaimLimit6hWei,
+        processClaimLimitMaxWei: inputs.hookConstructorConfig.processClaimLimitMaxWei,
+        processClaimMaxCount: inputs.hookConstructorConfig.processClaimMaxCount,
+        operationsRotationDelay: inputs.hookConstructorConfig.operationsRotationDelay },
+      artifacts: Object.fromEntries(['token', 'hook', 'custody'].map(id => [id, manifest.preimages.targets[id].artifactDigest])),
+    };
+    const verify = (frozenSeedPolicy = policy, expectedSeedIntentDigest = selected.seedIntent.digest) => verifyPhaseThreeMaterializedSeedManifest({ materializedManifest: manifest,
+      inputDirectory: fixture.directory, frozenSeedPolicy, expectedSeedIntentDigest });
+    assert.equal(verify(), true);
+    assert.equal(validateJsonSchema(JSON.parse(readFileSync(resolve(root, 'release/phase3/address-manifest.schema.json'))), manifest).length, 0);
+    for (const change of [
+      p => { delete p.schema; },
+      p => { p.roles.quoteCurrency = USDG; },
+      p => { p.pool.priceCandidates.nativeCurrency0.amount0Max = '240000000'; },
+      p => { p.seedIntent.payer = address('9'); },
+      p => { p.hook.processClaimLimit6hWei = '1'; },
+      p => { p.artifacts.hook = 'sha256:' + '0'.repeat(64); },
+    ]) {
+      const changed = structuredClone(policy); change(changed); assert.throws(() => verify(changed));
+    }
+    assert.throws(() => verify(policy, bytes32('1')));
+    const repriced = structuredClone(release); repriced.pool.quoteAsset.amountAtomic = '80000000000000000'; repriced.seed.nativeFunding.amountWei = '80000000000000000';
+    assert.throws(() => materializePhaseThreePriceSelection({ launchInputs: repriced, submission, materializedManifest: manifest }));
+    const unfunded = structuredClone(release); unfunded.pool.quoteAsset.amountAtomic = null;
+    assert.throws(() => materializePhaseThreePriceSelection({ launchInputs: unfunded, submission, materializedManifest: manifest }));
   } finally { rmSync(fixture.directory, { recursive: true, force: true }); }
 });

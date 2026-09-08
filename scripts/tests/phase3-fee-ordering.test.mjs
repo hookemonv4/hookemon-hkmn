@@ -9,43 +9,47 @@ const root = resolve(import.meta.dirname, '../..');
 const launchInputs = JSON.parse(readFileSync(resolve(root, 'release/phase3/launch-inputs.json'), 'utf8'));
 const submission = JSON.parse(readFileSync(resolve(root, 'release/phase3/submission.json'), 'utf8'));
 
-test('the draft submission fee currency follows its USDG-currency0 candidate', () => {
+
+test('native draft preserves currency0 fees while funding is unselected', () => {
   assert.doesNotThrow(() => validateSubmissionFeeOrdering(launchInputs, submission));
 });
 
-test('a selected HKMN-currency0 ordering requires currency1 fee collection', () => {
-  const inputs = structuredClone(launchInputs);
-  inputs.pool.priceCandidates.selection.selectedOrdering = 'hkmnCurrency0';
-  assert.throws(() => validateSubmissionFeeOrdering(inputs, submission), /pool order|fee currency/i);
+test('native ordering refuses reversed assets and a misplaced fee in every quadrant', () => {
+  for (const name of Object.keys(submission.hook.feeMechanism.swapQuadrants)) {
+    const changed = structuredClone(submission);
+    changed.hook.feeMechanism.swapQuadrants[name].currency = 'currency1';
+    assert.throws(() => validateSubmissionFeeOrdering(launchInputs, changed), /fee currency/);
+  }
+  const reversed = structuredClone(submission);
+  reversed.pool.currency0 = 'hkmn'; reversed.pool.currency1 = 'native';
+  assert.throws(() => validateSubmissionFeeOrdering(launchInputs, reversed), /pool order/);
+  const legacy = structuredClone(launchInputs);
+  legacy.pool.priceCandidates.selection.selectedOrdering = 'hkmnCurrency0';
+  assert.throws(() => validateSubmissionFeeOrdering(legacy, submission), /pool order/);
 });
 
-test('the selected candidate binds pool order, selected price, and both quadrant currency sets', () => {
+test('native selected price requires the bound candidate and cannot invent a draft price', () => {
   const inputs = structuredClone(launchInputs);
-  const selectedOrdering = 'hkmnCurrency0';
-  const selectedCandidate = inputs.pool.priceCandidates[selectedOrdering];
-  inputs.pool.priceCandidates.selection.selectedOrdering = selectedOrdering;
-  inputs.pool.priceCandidates.selection.selectedSqrtPriceX96 = selectedCandidate.sqrtPriceX96;
+  inputs.pool.priceCandidates.selection.selectedSqrtPriceX96 = '1';
+  assert.throws(() => validateSubmissionFeeOrdering(inputs, submission), /draft selection/);
+  inputs.pool.priceCandidates.selection.status = 'DERIVED';
+  assert.throws(() => validateSubmissionFeeOrdering(inputs, submission), /selected candidate price/);
+  inputs.pool.quoteAsset.amountAtomic = '40000000000000000';
+  inputs.pool.priceCandidates.nativeCurrency0 = { sqrtPriceX96: '12527072418752396559322253362376889' };
+  inputs.pool.priceCandidates.selection.selectedSqrtPriceX96 = inputs.pool.priceCandidates.nativeCurrency0.sqrtPriceX96;
+  assert.doesNotThrow(() => validateSubmissionFeeOrdering(inputs, submission));
+  inputs.pool.priceCandidates.selection.selectedSqrtPriceX96 = '1';
+  assert.throws(() => validateSubmissionFeeOrdering(inputs, submission), /selected candidate price/);
+});
 
-  const selectedSubmission = structuredClone(submission);
-  selectedSubmission.pool.currency0 = 'hkmn';
-  selectedSubmission.pool.currency1 = 'usdg';
-  for (const quadrant of Object.values(selectedSubmission.hook.feeMechanism.swapQuadrants)) quadrant.currency = 'currency1';
-  assert.doesNotThrow(() => validateSubmissionFeeOrdering(inputs, selectedSubmission));
-
-  const priceMutation = structuredClone(inputs);
-  priceMutation.pool.priceCandidates.selection.selectedSqrtPriceX96 = '1';
-  assert.throws(() => validateSubmissionFeeOrdering(priceMutation, selectedSubmission), /selected candidate price/i);
-
-  const candidateQuadrantMutation = structuredClone(inputs);
-  candidateQuadrantMutation.pool.priceCandidates[selectedOrdering].swapFeeQuadrants.zeroForOneExactInput.currency = 'currency0';
-  assert.throws(() => validateSubmissionFeeOrdering(candidateQuadrantMutation, selectedSubmission), /selected candidate fee currency/i);
-
-  const submissionQuadrantMutation = structuredClone(selectedSubmission);
-  submissionQuadrantMutation.hook.feeMechanism.swapQuadrants.zeroForOneExactInput.currency = 'currency0';
-  assert.throws(() => validateSubmissionFeeOrdering(inputs, submissionQuadrantMutation), /submission fee currency/i);
-
-  const poolOrderMutation = structuredClone(selectedSubmission);
-  poolOrderMutation.pool.currency0 = 'usdg';
-  poolOrderMutation.pool.currency1 = 'hkmn';
-  assert.throws(() => validateSubmissionFeeOrdering(inputs, poolOrderMutation), /submission pool order/i);
+test('historical USDG ordering retains its separate fee currency checks', () => {
+  const quadrants = Object.fromEntries(Object.keys(submission.hook.feeMechanism.swapQuadrants).map(name => [name, { currency: 'currency1' }]));
+  const inputs = { schemaVersion: 'hookemon.phase3.release-launch-inputs.v1', pool: { priceCandidates: {
+    hkmnCurrency0: { sqrtPriceX96: '38813714284914462669', swapFeeQuadrants: quadrants },
+    selection: { selectedOrdering: 'hkmnCurrency0', selectedSqrtPriceX96: '38813714284914462669' },
+  } } };
+  const old = { pool: { currency0: 'hkmn', currency1: 'usdg' }, hook: { feeMechanism: { swapQuadrants: quadrants } } };
+  assert.doesNotThrow(() => validateSubmissionFeeOrdering(inputs, old));
+  const changed = structuredClone(old); changed.hook.feeMechanism.swapQuadrants.zeroForOneExactInput.currency = 'currency0';
+  assert.throws(() => validateSubmissionFeeOrdering(inputs, changed), /submission fee currency/);
 });

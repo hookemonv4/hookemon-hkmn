@@ -52,27 +52,23 @@ contract PhaseThreeReleasePlanTest is Test {
         require(!succeeded, "materialized token was accepted");
     }
 
-    function test_validateDraftRejectsUnapprovedPriceTuple() external {
+    function test_validateDraftRejectsIncompleteNativeStock() external {
         PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
         PhaseThreeReleasePlan.Draft memory draft = _draft(subject);
-        draft.sqrtPriceX96 += 1;
+        draft.liquidity -= 1;
 
         (bool succeeded,) = address(subject).call(abi.encodeCall(subject.validateDraft, (draft)));
 
-        require(!succeeded, "unapproved price tuple was accepted");
+        require(!succeeded, "incomplete native stock was accepted");
     }
 
-    function test_validateDraftAcceptsTheHkmnCurrency0FullAllocationTuple() external {
+    function test_validateDraftRejectsReversedNativeOrdering() external {
         PhaseThreeReleasePlan subject = new PhaseThreeReleasePlan();
         PhaseThreeReleasePlan.Draft memory draft = _draft(subject);
-        draft.liquidity = subject.HKMN_CURRENCY0_LIQUIDITY();
-        draft.sqrtPriceX96 = subject.HKMN_CURRENCY0_SQRT_PRICE_X96();
         draft.amount0Max = subject.POOL_ALLOCATION();
-        draft.amount1Max = subject.USDG_SEED();
-
-        bytes32 actual = subject.validateDraft(draft);
-
-        require(actual == subject.draftDigest(draft), "HKMN-currency0 draft digest mismatch");
+        draft.amount1Max = draft.nativeSeedWei;
+        (bool succeeded,) = address(subject).call(abi.encodeCall(subject.validateDraft, (draft)));
+        require(!succeeded, "reversed native ordering was accepted");
     }
 
     function test_validateDraftRejectsChangedTemplateHash() external {
@@ -83,6 +79,14 @@ contract PhaseThreeReleasePlanTest is Test {
         (bool succeeded,) = address(subject).call(abi.encodeCall(subject.validateDraft, (draft)));
 
         require(!succeeded, "changed template hash was accepted");
+    }
+
+    function test_draftFeasibilityDoesNotSelectFundingToPriceRatio() external {
+        PhaseThreeReleasePlan plan = new PhaseThreeReleasePlan();
+        PhaseThreeReleasePlan.Draft memory draft = _draft(plan);
+        draft.nativeSeedWei *= 2;
+        draft.amount0Max *= 2;
+        assertEq(plan.validateDraft(draft), plan.draftDigest(draft));
     }
 
     function test_validateDraftRejectsChangedSourceFeePolicy() external {
@@ -117,7 +121,7 @@ contract PhaseThreeReleasePlanTest is Test {
             launchWallet: 0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729,
             treasury: 0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729,
             operations: 0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384,
-            usdg: 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168,
+            quoteCurrency: address(0),
             poolManager: 0x8366a39CC670B4001A1121B8F6A443A643e40951,
             positionManager: 0x58daec3116aae6D93017bAAea7749052E8a04fA7,
             permit2: 0x000000000022D473030F116dDEE9F6B43aC78BA3,
@@ -133,10 +137,10 @@ contract PhaseThreeReleasePlanTest is Test {
             totalSupply: 1_000_000_000e18,
             poolAllocation: 1_000_000_000e18,
             remainderCustodyAllocation: 0,
-            usdgSeed: 240_000_000,
-            liquidity: 489897948556635619,
-            sqrtPriceX96: uint160(161723809515207654588927258648643645224),
-            amount0Max: 240_000_000,
+            nativeSeedWei: 40_000_000_000_000_000,
+            liquidity: 6324555320336758663997,
+            sqrtPriceX96: uint160(12527072418752396559322253362376889),
+            amount0Max: 40_000_000_000_000_000,
             amount1Max: 1_000_000_000e18,
             tickLower: -887220,
             tickUpper: 887220,
