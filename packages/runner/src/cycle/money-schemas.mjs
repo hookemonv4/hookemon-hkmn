@@ -889,7 +889,7 @@ function assertMoneyAmount(value, asset, label) {
 export const MONEY_CONFIGURATION_SCHEMA = 'hookemon.money-configuration.v2';
 
 /**
- * MoneyConfigurationV1: every money minimum and gas cap is an explicit TypedAmount. A missing field
+ * MoneyConfigurationV2: every money minimum and gas cap is an explicit TypedAmount. A missing field
  * or the literal atomic value 1 is a configuration error rather than a default.
  */
 export function assertMoneyConfiguration(value, label = 'money configuration') {

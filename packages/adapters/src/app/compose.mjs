@@ -668,7 +668,7 @@ function admittedRelayIdentity(quote) {
  * requested quantity and is the only thing compared against the per-cycle and rolling caps. The
  * aggregate is never divided to obtain a unit price, and the unit is never multiplied to obtain an
  * aggregate: fees and slippage are not linear in quantity, so either substitution would authorize a
- * spend nobody quoted. Both are EXACT_OUTPUT, so Relay reports the source USDG required to deliver
+ * spend nobody quoted. Both are EXACT_OUTPUT, so Relay reports the source native ETH required to deliver
  * an exact settlement-asset target rather than leaving the delivered amount to vary.
  *
  * Returns `null` when the configuration cannot admit a cycle at all, which the service reports as
@@ -818,7 +818,7 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
  *
  * A bare `balanceOf` on the Operations wallet is not this. The cycle's first money mutation is the
  * claim that moves process funds from the hook into Operations, so a correctly empty Operations
- * wallet would refuse a fundable cycle, while a wallet holding owner or unrelated USDG would be
+ * wallet would refuse a fundable cycle, while a wallet holding owner or unrelated ETH would be
  * accepted as process money -- authorizing a spend of funds never attributed to the process. Nor is
  * a configured figure evidence of anything.
  *
@@ -1133,11 +1133,10 @@ export function createProductionSupplementaryStageHandlers({ assertCanary }) {
  * @param {object} config.solana - `{ rpcUrl }`
  * @param {object} config.relay - `{ baseUrl, apiKey }`
  * @param {object} config.collectorCrypt - `{ baseUrl, apiKey }`
- * @param {object} config.contracts - `{ vault, hook, usdg }` (0x addresses or null); `usdg` is
- *   required to classify nonzero custody for production policy. WP-37 adds
+ * @param {object} config.contracts - `{ vault, hook }` (0x addresses or null). Native custody requires authenticated USD valuation. Adds
  *   `treasury`/`pool` (operator-configured fallbacks `distribution.mjs`'s holder-exclusion-set
  *   builder consumes — see `environment.mjs`'s own header) and a test-only `poolManager` override
- *   (defaults to `bindings/robinhood-chain.json`'s `contracts.poolManager`, mirroring `usdg`).
+ *   (defaults to `bindings/robinhood-chain.json`'s `contracts.poolManager`).
  * @param {object} config.accounts - `{ evm, solana }` (addresses or null)
  * @param {object} [config.budget] - `{ availableProcessWei, packPriceWei, outboundCapWei,
  *   returnCapWei, operatingMarginWei }`, all canonical decimal strings; defaults to all-zero

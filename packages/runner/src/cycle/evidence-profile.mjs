@@ -93,7 +93,7 @@ function createEvidenceProfile(deps, preflightAuthority) {
   try {
     moneyConfiguration = assertMoneyConfiguration(deps.moneyConfiguration, 'production evidence profile money configuration');
   } catch (error) {
-    throw new Error(`production evidence profile requires MoneyConfigurationV1: ${error.message}`);
+    throw new Error(`production evidence profile requires MoneyConfigurationV2: ${error.message}`);
   }
 
   const receiptDeps = { observers, programIds };
