@@ -1060,24 +1060,24 @@ test('createCycle preserves a rehearsal provider mode and session identity acros
 test('createCycle persists finalized process liability evidence and replay reproduces the same admission and policy digest', async t => {
   const directory = await tempDirectory(t);
   const cycleId = 'cycle-admission-evidence-roundtrip';
-  const admission = admissionWithEvidence(cycleId);
+  const admission = await nativeProducedAdmissionFixture(cycleId, { amountWei: '1000000', costMicroUsd: '2000000', nowMs: Date.now() });
   const configuration = createDefaultOperatorConfiguration();
   const expectedDigest = deriveCyclePolicyDigest({
-    configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    configuration, cycleId, releaseCostMicroUsd: admission.aggregateFundingUsd.amountMicroUsd, releaseAmountWei: admission.aggregateFundingQuote.amountAtomic,
     packId: admission.packId, liveMode: true, mode: 'production', admission,
   });
 
-  const before = await CycleRepository.open(directory);
+  const before = await CycleRepository.open(directory, Date.now, { testAuthority: createTestProfileMutationAuthority() });
   const created = await before.createCycle({
     releaseAmount: admission.aggregateFundingQuote.amountAtomic, mode: 'production', cycleId, admission,
   });
   assert.deepEqual(created.admission.processLiabilityEvidence, admission.processLiabilityEvidence);
 
-  const after = await CycleRepository.open(directory);
+  const after = await CycleRepository.open(directory, Date.now, { testAuthority: createTestProfileMutationAuthority() });
   const active = await after.readActiveCycle();
   assert.deepEqual(active.admission, created.admission);
   const replayedDigest = deriveCyclePolicyDigest({
-    configuration, cycleId, releaseAmountMicroUsdg: active.admission.aggregateFundingQuote.amountAtomic,
+    configuration, cycleId, releaseCostMicroUsd: active.admission.aggregateFundingUsd.amountMicroUsd, releaseAmountWei: active.admission.aggregateFundingQuote.amountAtomic,
     packId: active.admission.packId, liveMode: true, mode: 'production', admission: active.admission,
   });
   assert.equal(replayedDigest, expectedDigest, 'replayed evidence must still determine the same policy digest');
@@ -1087,7 +1087,7 @@ test('createCycle persists finalized process liability evidence and replay repro
 test('createCycle refuses a quote-bound production admission missing process liability evidence', async t => {
   const directory = await tempDirectory(t);
   const cycleId = 'cycle-missing-evidence-create';
-  const admission = admissionWithEvidence(cycleId);
+  const admission = await nativeProducedAdmissionFixture(cycleId, { amountWei: '1000000', costMicroUsd: '2000000', nowMs: Date.now() });
   delete admission.processLiabilityEvidence;
   const repository = await CycleRepository.open(directory);
   await assert.rejects(
@@ -1106,7 +1106,7 @@ test('reopening a stored production cycle-opened record without process liabilit
   // written before evidence was required (a legitimate createCycle() call can no longer produce one).
   await CycleRepository.open(directory);
 
-  const admission = admissionWithEvidence(cycleId);
+  const admission = await nativeProducedAdmissionFixture(cycleId, { amountWei: '1000000', costMicroUsd: '2000000', nowMs: Date.now() });
   delete admission.processLiabilityEvidence;
   const payload = {
     releaseAmount: admission.aggregateFundingQuote.amountAtomic,
