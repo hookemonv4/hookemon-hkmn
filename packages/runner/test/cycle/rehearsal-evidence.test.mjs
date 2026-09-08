@@ -170,3 +170,19 @@ test('rehearsal evidence refuses a live provider journal without a dedicated pro
     /live rehearsal evidence requires a dedicated Solana proceeds projection/,
   );
 });
+
+test('native rehearsal evidence uses v2 without relabeling retained historical v1', () => {
+  const historical = completedDescription();
+  assert.equal(collectRehearsalEvidence(historical).schema, 'hookemon.rehearsal-evidence.v1');
+  const native = completedDescription();
+  for (const [stage, record] of native.stages) {
+    record.evidence.schema = 'hookemon.rehearsal-stage-evidence.v2';
+    if (stage !== 'payout') record.evidence.finalizedDeltas = [{ chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '30' }];
+  }
+  const evidence = collectRehearsalEvidence(native);
+  assert.equal(evidence.schema, 'hookemon.rehearsal-evidence.v2');
+  assert.equal(evidence.releaseAmount.assetId, 'native');
+  assert.equal(evidence.releaseAmount.decimals, 18);
+  native.stages.get('open').evidence.schema = 'hookemon.rehearsal-stage-evidence.v1';
+  assert.throws(() => collectRehearsalEvidence(native), /cannot mix historical/);
+});

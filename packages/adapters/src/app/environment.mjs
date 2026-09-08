@@ -108,7 +108,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_SOLANA_ACCOUNT',
   'HOOKEMON_SIGNER_MODULE',
   'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
-  'HOOKEMON_BUDGET_PACK_PRICE_USDG',
+  'HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS',
   'HOOKEMON_BUDGET_PACK_PRICE_WEI',
   'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
   'HOOKEMON_BUDGET_RETURN_CAP_WEI',
@@ -160,6 +160,7 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
   'HOOKEMON_SOLANA_LAMPORT_RESERVE',
   'HOOKEMON_REHEARSAL_MODE',
+  'HOOKEMON_REHEARSAL_SETTLEMENT_AMOUNT_ATOMS',
   'HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS',
   'HOOKEMON_REHEARSAL_PAYOUT_SPLIT',
   'HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT',
@@ -318,7 +319,7 @@ function requireProfileInputs(env, profile) {
       'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
       'HOOKEMON_SOLANA_LAMPORT_RESERVE',
       'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
-      'HOOKEMON_BUDGET_PACK_PRICE_USDG',
+      'HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS',
       'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
       'HOOKEMON_BUDGET_RETURN_CAP_WEI',
       'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI',
@@ -353,7 +354,7 @@ function requireProfileInputs(env, profile) {
     'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
     'HOOKEMON_SOLANA_LAMPORT_RESERVE',
     'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
-    'HOOKEMON_BUDGET_PACK_PRICE_USDG',
+    'HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS',
     'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
     'HOOKEMON_BUDGET_RETURN_CAP_WEI',
     'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI',
@@ -503,15 +504,12 @@ function readRehearsal(env, solanaAccount) {
     }
     rehearsal.proceedsAccount = proceedsAccount;
   }
+  if (Object.hasOwn(env, 'HOOKEMON_REHEARSAL_SETTLEMENT_AMOUNT_ATOMS')) rehearsal.settlementAmountAtomic = readBudgetAmount(env, 'HOOKEMON_REHEARSAL_SETTLEMENT_AMOUNT_ATOMS', { defaultValue: '0' });
   return Object.freeze(rehearsal);
 }
 
-/** Every field decideCycleBudget (packages/runner/src/automation/budget-gate.mjs) needs, each a
- * canonical unsigned-decimal atomic-USDG string. Defaults are the same conservative "never ready to
- * spend" posture state-schema.mjs's own default operator configuration documents:
- * `availableProcessWei: '0'` — a positive `packPriceUsdg` (budget-gate itself requires it to be
- * positive) with zero available process liability means `decideCycleBudget` never reports `ready`
- * until the operator explicitly configures a real available balance. */
+/** Parse explicit unsigned atomic quantities. Native process budget fields are wei;
+ * Collector pack prices are separate USDC atoms and never establish USD cost. */
 function readBudgetAmount(env, name, { defaultValue }) {
   const raw = readString(env, name, { defaultValue: null });
   if (raw === null) return defaultValue;
@@ -1052,13 +1050,13 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const budget = Object.freeze({
     availableProcessWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI', { defaultValue: '0' }),
     packPriceWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_PACK_PRICE_WEI', { defaultValue: '0' }),
-    packPriceUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_PACK_PRICE_USDG', { defaultValue: '0' }),
+    collectorPackPriceAtoms: readBudgetAmount(env, 'HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS', { defaultValue: '0' }),
     outboundCapWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI', { defaultValue: '0' }),
     returnCapWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_RETURN_CAP_WEI', { defaultValue: '0' }),
     operatingMarginWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI', { defaultValue: '0' }),
   });
-  if (liveCollectorOnly && budget.packPriceUsdg !== COLLECTOR_ONLY_PACK_PRICE_ATOMIC) {
-    fail(`live collector-only rehearsal requires HOOKEMON_BUDGET_PACK_PRICE_USDG=${COLLECTOR_ONLY_PACK_PRICE_ATOMIC}`);
+  if (liveCollectorOnly && budget.collectorPackPriceAtoms !== COLLECTOR_ONLY_PACK_PRICE_ATOMIC) {
+    fail(`live collector-only rehearsal requires HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS=${COLLECTOR_ONLY_PACK_PRICE_ATOMIC}`);
   }
 
   return Object.freeze({
@@ -1094,7 +1092,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
           chainId: 'solana-mainnet',
           assetId: CIRCLE_USD_MINT,
           decimals: CIRCLE_USD_DECIMALS,
-          amountAtomic: budget.packPriceUsdg,
+          amountAtomic: budget.collectorPackPriceAtoms,
         }),
       } : {}),
       ...(profile === 'production' ? { settlementAsset: COLLECTOR_CRYPT_SETTLEMENT_ASSET } : {}),

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { canonicalJson } from './journal.mjs';
 
-const SESSION_SCHEMA = 'hookemon.rehearsal-session.v1';
+const SESSION_SCHEMA = 'hookemon.rehearsal-session.v2';
 const decimalPattern = /^(0|[1-9][0-9]*)$/;
 const cycleIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
 
@@ -19,7 +19,7 @@ function assertCycles(value) {
 
 function assertCap(value) {
   if (typeof value !== 'string' || !decimalPattern.test(value) || value === '0') {
-    throw new Error('rehearsal session capUsdg must be a positive atomic amount');
+    throw new Error('rehearsal session capMicroUsd must be a positive atomic amount');
   }
   return value;
 }
@@ -52,15 +52,16 @@ function validateCompleted(value) {
   }));
 }
 
-function validateSession(value) {
+function validateSession(value, { historical = false } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('rehearsal session document is invalid');
-  if (value.schema !== SESSION_SCHEMA) throw new Error('rehearsal session schema is invalid');
+  const legacy = historical && value.schema === 'hookemon.rehearsal-session.v1';
+  if (!legacy && value.schema !== SESSION_SCHEMA) throw new Error('historical rehearsal session cannot resume native execution');
   if (typeof value.sessionId !== 'string' || !/^rehearsal-[0-9a-f-]{36}$/.test(value.sessionId)) {
     throw new Error('rehearsal session id is invalid');
   }
   if (value.state !== 'RUNNING' && value.state !== 'COMPLETE') throw new Error('rehearsal session state is invalid');
   const cycles = assertCycles(value.cycles);
-  const capUsdg = assertCap(value.capUsdg);
+  const capMicroUsd = assertCap(legacy ? value.capUsdg : value.capMicroUsd);
   const collectorOnly = assertCollectorOnly(value.collectorOnly);
   if (!Number.isSafeInteger(value.restartCount) || value.restartCount < 0) throw new Error('rehearsal session restartCount is invalid');
   const completed = validateCompleted(value.completed);
@@ -68,11 +69,11 @@ function validateSession(value) {
     throw new Error('rehearsal session completion state is inconsistent');
   }
   return Object.freeze({
-    schema: SESSION_SCHEMA,
+    schema: value.schema,
     sessionId: value.sessionId,
     state: value.state,
     cycles,
-    capUsdg,
+    ...(legacy ? { capUsdg: capMicroUsd } : { capMicroUsd }),
     collectorOnly,
     restartCount: value.restartCount,
     completed,
@@ -101,19 +102,19 @@ async function readSessionFile(path) {
   } catch {
     throw new Error('rehearsal session document is unreadable');
   }
-  return validateSession(parsed);
+  return validateSession(parsed, { historical: true });
 }
 
 function sameRequestedRun(session, input) {
-  return session.cycles === input.cycles && session.capUsdg === input.capUsdg && session.collectorOnly === input.collectorOnly;
+  return session.cycles === input.cycles && session.capMicroUsd === input.capMicroUsd && session.collectorOnly === input.collectorOnly;
 }
 
 /** Opens the single durable restart session for an equivalent bounded rehearsal, or creates it. */
-export async function openOrCreateRehearsalSession({ stateDir, cycles, capUsdg, collectorOnly }) {
+export async function openOrCreateRehearsalSession({ stateDir, cycles, capMicroUsd, collectorOnly }) {
   const input = Object.freeze({
     stateDir: assertStateDir(stateDir),
     cycles: assertCycles(cycles),
-    capUsdg: assertCap(capUsdg),
+    capMicroUsd: assertCap(capMicroUsd),
     collectorOnly: assertCollectorOnly(collectorOnly),
   });
   const directory = sessionsDirectory(input.stateDir);
@@ -127,6 +128,7 @@ export async function openOrCreateRehearsalSession({ stateDir, cycles, capUsdg, 
   }
   if (active.length > 1) throw new Error('multiple active rehearsal sessions require operator review');
   if (active.length === 1) {
+    if (active[0].session.schema !== SESSION_SCHEMA) throw new Error('historical rehearsal session cannot resume native execution');
     if (!sameRequestedRun(active[0].session, input)) {
       throw new Error('active rehearsal session does not match the requested run');
     }
@@ -139,7 +141,7 @@ export async function openOrCreateRehearsalSession({ stateDir, cycles, capUsdg, 
     sessionId,
     state: 'RUNNING',
     cycles: input.cycles,
-    capUsdg: input.capUsdg,
+    capMicroUsd: input.capMicroUsd,
     collectorOnly: input.collectorOnly,
     restartCount: 0,
     completed: [],

@@ -1215,7 +1215,7 @@ export async function compose(config) {
     pack: { code: null },
     moneyConfiguration: null,
     execution: {
-      profile: 'inspection', networkProfile: 'mainnet', providerMode: 'live', dryRun: false, rehearsalCapUsdg: null, rehearsalSessionId: null, enforceProfile: false,
+      profile: 'inspection', networkProfile: 'mainnet', providerMode: 'live', dryRun: false, rehearsalCapMicroUsd: null, rehearsalSessionId: null, enforceProfile: false,
     },
     // WP-36: distribution.mjs's own configuration — the HKMN token contract (once launched; see
     // docs/modules/composition-root.md's "What remains unimplemented" for the current
@@ -1272,16 +1272,16 @@ export async function compose(config) {
   if (typeof resolved.execution.dryRun !== 'boolean') {
     throw new Error('compose execution dryRun is invalid');
   }
-  if (resolved.execution.rehearsalCapUsdg !== null && resolved.execution.rehearsalCapUsdg !== undefined) {
-    assertDecimal(resolved.execution.rehearsalCapUsdg, 'compose execution rehearsalCapUsdg');
+  if (resolved.execution.rehearsalCapMicroUsd !== null && resolved.execution.rehearsalCapMicroUsd !== undefined) {
+    assertDecimal(resolved.execution.rehearsalCapMicroUsd, 'compose execution rehearsalCapMicroUsd');
   }
   if (resolved.rehearsal?.mode === 'relay-roundtrip') {
     if (resolved.execution.profile !== 'rehearsal' || resolved.execution.providerMode !== 'fake') {
       throw new Error('compose relay-roundtrip rehearsal requires fake rehearsal execution');
     }
-    if (resolved.execution.rehearsalCapUsdg === null || resolved.execution.rehearsalCapUsdg === undefined
-      || resolved.execution.rehearsalCapUsdg === '0') {
-      throw new Error('compose relay-roundtrip rehearsal requires a positive explicit rehearsalCapUsdg');
+    if (resolved.execution.rehearsalCapMicroUsd === null || resolved.execution.rehearsalCapMicroUsd === undefined
+      || resolved.execution.rehearsalCapMicroUsd === '0') {
+      throw new Error('compose relay-roundtrip rehearsal requires a positive explicit rehearsalCapMicroUsd');
     }
   }
   if (resolved.execution.rehearsalSessionId !== null && resolved.execution.rehearsalSessionId !== undefined
@@ -1692,8 +1692,8 @@ export async function compose(config) {
       && resolved.execution.dryRun !== true) {
       serviceConfig.beforeMutation = requireNativeStatusCanary;
     }
-    if (mode === 'rehearsal' && resolved.execution.rehearsalCapUsdg !== null && resolved.execution.rehearsalCapUsdg !== undefined) {
-      serviceConfig.policyCapMicroUsd = resolved.execution.rehearsalCapUsdg;
+    if (mode === 'rehearsal' && resolved.execution.rehearsalCapMicroUsd !== null && resolved.execution.rehearsalCapMicroUsd !== undefined) {
+      serviceConfig.policyCapMicroUsd = resolved.execution.rehearsalCapMicroUsd;
     }
     if (resolved.execution.rehearsalSessionId !== null && resolved.execution.rehearsalSessionId !== undefined) {
       serviceConfig.rehearsalSessionId = resolved.execution.rehearsalSessionId;
