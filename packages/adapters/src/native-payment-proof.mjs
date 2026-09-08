@@ -8,6 +8,7 @@ import { readFinalizedTransactionReceipt, readBlockByNumber } from './robinhood-
 
 export const NATIVE_PAYMENT_PROOF_SCHEMA = 'hookemon.native-payment-proof.v1';
 const capabilities = new WeakMap();
+const gasCapabilities = new WeakMap();
 const releaseBindings = new WeakSet();
 const CLAIM_ABI = parseAbi([
   'function claimProcess(bytes32 cycleId, uint256 amountWei, address destination)',
@@ -91,6 +92,8 @@ export async function createNativePaymentProof({ client, signedTransaction, expe
   const block = await readBlockByNumber(client, observed.receiptBlockNumber);
   need(block.hash === observed.receiptBlockHash, 'payment checkpoint reorged');
   const receipt = observed.receipt;
+  need(typeof signed.gas === 'bigint' && receipt.gasUsed <= signed.gas
+    && receipt.effectiveGasPrice <= (signed.maxFeePerGas ?? signed.gasPrice), 'gas costs exceed signed bounds');
   need(typeof receipt.gasUsed === 'bigint' && receipt.gasUsed >= 0n
     && typeof receipt.effectiveGasPrice === 'bigint' && receipt.effectiveGasPrice >= 0n, 'missing separate gas cost');
   const facts = {
@@ -210,7 +213,7 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
 
 /** Idempotent per-transaction gas projection; spread these fields into the same custody write. */
 export function applyNativeCustodyGasPayment(ledger, proof) {
-  need(isProcessNativePaymentProof(proof, { chainId: '4663', assetId: 'native', decimals: 18 })
+  need((isProcessNativePaymentProof(proof, { chainId: '4663', assetId: 'native', decimals: 18 }) || gasCapabilities.has(proof))
     && typeof proof.gasSpentWei === 'string', 'gas cost requires a process native payment proof');
   need(ledger?.schema === 'hookemon.custody-ledger.v3' && ledger.chainId === '4663' && ledger.assetId === 'native'
     && ledger.decimals === 18 && Array.isArray(ledger.gasPayments), 'gas accounting requires native custody v3');
@@ -222,4 +225,40 @@ export function applyNativeCustodyGasPayment(ledger, proof) {
   need(previousTotal.toString() === ledger.gasSpent.amountAtomic, 'gas ledger sum is inconsistent');
   return { gasPayments, gasSpent: { chainId: '4663', assetId: 'native', decimals: 18,
     amountAtomic: (previousTotal + (existing ? 0n : BigInt(proof.gasSpentWei))).toString() } };
+}
+
+
+/** Finalized transaction gas is distinct from payment authority, including reverted transactions. */
+export async function createNativeTransactionGasProof({ client, signedTransaction, expected }) {
+  const intent = structuredClone(expected);
+  need(intent.chainId === '4663' && intent.assetId === 'native' && intent.decimals === 18, 'invalid gas identity');
+  const transactionHash = hash(intent.transactionHash);
+  need(typeof signedTransaction === 'string' && keccak256(signedTransaction) === transactionHash, 'gas signed hash mismatch');
+  const signed = parseTransaction(signedTransaction);
+  const sender = address(await recoverTransactionAddress({ serializedTransaction: signedTransaction }));
+  need(signed.chainId === 4663 && sender === address(intent.transactionSender ?? intent.source)
+    && address(signed.to) === address(intent.recipient) && (signed.value ?? 0n) === BigInt(atomic(intent.amountWei))
+    && keccak256(signed.data ?? '0x') === hash(intent.calldataDigest) && String(signed.nonce) === intent.nonce,
+  'gas signed intent mismatch');
+  need(await client.getChainId() === 4663, 'gas RPC chain mismatch');
+  const observed = await readFinalizedTransactionReceipt(client, transactionHash);
+  need(observed.finalized && ['success', 'reverted'].includes(observed.receipt.status), 'gas receipt is nonfinal or unknown');
+  const tx = await client.getTransaction({ hash: transactionHash });
+  need(hash(tx.hash) === transactionHash && address(tx.from) === sender && address(tx.to) === address(signed.to)
+    && tx.value === (signed.value ?? 0n) && (tx.input ?? tx.data ?? '0x') === (signed.data ?? '0x')
+    && String(tx.nonce) === intent.nonce && tx.blockNumber === observed.receiptBlockNumber
+    && hash(tx.blockHash) === observed.receiptBlockHash, 'gas RPC transaction mismatch');
+  const block = await readBlockByNumber(client, observed.receiptBlockNumber);
+  const receipt = observed.receipt;
+  need(block.hash === observed.receiptBlockHash && typeof receipt.gasUsed === 'bigint' && receipt.gasUsed >= 0n
+    && typeof receipt.effectiveGasPrice === 'bigint' && receipt.effectiveGasPrice >= 0n, 'gas receipt checkpoint or costs are invalid');
+  need(typeof signed.gas === 'bigint' && receipt.gasUsed <= signed.gas
+    && receipt.effectiveGasPrice <= (signed.maxFeePerGas ?? signed.gasPrice), 'gas costs exceed signed bounds');
+  const facts = { schema: 'hookemon.native-transaction-gas-proof.v1', chainId: '4663', assetId: 'native', decimals: 18,
+    transactionHash, transactionDigest: digest(signedTransaction), sender, receiptStatus: receipt.status,
+    blockNumber: block.number.toString(), blockHash: block.hash, timestampUnixSeconds: block.timestamp.toString(),
+    gasSpentWei: (receipt.gasUsed * receipt.effectiveGasPrice).toString() };
+  const proof = Object.freeze({ ...facts, evidenceDigest: digest(facts) });
+  gasCapabilities.set(proof, proof);
+  return proof;
 }
