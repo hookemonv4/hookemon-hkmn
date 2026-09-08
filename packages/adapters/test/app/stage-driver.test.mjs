@@ -1,3 +1,4 @@
+import { producedReturnSigningFixture } from '../native/return-signing-fixture.mjs';
 import { createTestNativePaymentBinding, isReleaseNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 import { isProcessQuoteUsdValuation } from '../../src/relay-client.mjs';
 import assert from 'node:assert/strict';
@@ -3826,7 +3827,7 @@ function returnSignOnlyMoneyConfiguration(solanaMint) {
   };
 }
 
-function returnSignOnlySolanaClient(blockhash, state = { blockHeight: 10, balance: 10_000 }) {
+function returnSignOnlySolanaClient(blockhash, observation, state = { blockHeight: 10, balance: 10_000 }) {
   return createSolanaRpcClient({
     fetchImpl: async (_url, options) => {
       const body = JSON.parse(options.body);
@@ -3835,31 +3836,13 @@ function returnSignOnlySolanaClient(blockhash, state = { blockHeight: 10, balanc
         getLatestBlockhash: { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 100 } },
         isBlockhashValid: { context: { slot: 10 }, value: true },
         getBlockHeight: state.blockHeight,
+        getSlot: 11,
+        getMultipleAccounts: observation,
       };
       if (!Object.hasOwn(resultByMethod, body.method)) throw new Error(`unexpected Solana RPC ${body.method}`);
       return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: body.id, result: resultByMethod[body.method] }) };
     },
   });
-}
-
-function returnSignOnlySplTransferCheckedPlan({ owner, mint, source, destination, amountAtomic }) {
-  const data = Buffer.alloc(10);
-  data.writeUInt8(12, 0);
-  data.writeBigUInt64LE(BigInt(amountAtomic), 1);
-  data.writeUInt8(6, 9);
-  return {
-    instructions: [{
-      programId: TOKEN_PROGRAM_ID,
-      keys: [
-        { pubkey: source, isSigner: false, isWritable: true },
-        { pubkey: mint, isSigner: false, isWritable: false },
-        { pubkey: destination, isSigner: false, isWritable: true },
-        { pubkey: owner, isSigner: true, isWritable: false },
-      ],
-      data: data.toString('hex'),
-    }],
-    addressLookupTableAddresses: [],
-  };
 }
 
 /**
@@ -4017,92 +4000,30 @@ function returnSignOnlyChainRepository(proceeds, solanaMint) {
 
 
 
-// `prepareReturnRequest`'s real relay-client (relay-client.mjs) always builds an 18-field intent
-// (it also carries `tradeType`/`quoteDigest`), while `returnRelayLeg` -> `assertReturnRelayIntent`
-// (money-schemas.mjs) accepts only a 16-field one -- a pre-existing schema gap between those two
-// modules, unrelated to ADR-0025 and out of this change's scope. Rather than route around it with
-// a custom `stageHandlers.return` override (which would also disable the driver's own built-in
-// chain-journal wiring this test exists to prove -- `usesBuiltInHandlers` is keyed off
-// `stageHandlers === null`), `adapters.relay` here is a minimal hand-written stub exposing exactly
-// the two methods `prepareReturnRequest` calls, so it can hand back an already-conformant
-// (16-field) intent directly. Everything downstream of it -- `prepareReturnRequest` itself, the
-// stage driver's real built-in return handler selection, and `mutateReturn` -- is exercised
-// unmodified.
-function returnSignOnlyRelayStub({ quote, execution }) {
-  return {
-    async quoteReturnBridge() { return quote; },
-    prepareExecution({ liveMode }) {
-      if (liveMode !== true) throw new Error('return sign-only relay stub requires liveMode');
-      return execution;
-    },
-  };
-}
-
+// Native return uses the captured deposit grammar and a real Relay quote producer. The
+// loopback runtime observation authorizes only these public synthetic fixture transactions.
 async function returnSignOnlyFixture() {
   const cycleId = 'cycle-return-sign-only';
-  const solanaMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-  const nativeCurrency = '0x0000000000000000000000000000000000000000';
   const sender = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
   const recipient = '0x000000000000000000000000000000000000dEaD';
-  const amountAtomic = '24000000';
-  const destinationAmountAtomic = '23843750';
-  const requestId = 'relay-return-sign-only';
+  const proceeds = '24000000';
+  const nowMs = Date.now();
+  const native = await producedReturnSigningFixture({ cycleId, sender, recipient, amount: proceeds, nowMs });
+  const solanaMint = native.request.inputAmount.assetId;
   const config = {
-    chainId: 4663,
+    chainId: 4663, now: () => nowMs,
     accounts: { evm: recipient, solana: sender },
     relay: { solanaMint, maxSettlementWindowSeconds: '600' },
+    nativePaymentBinding: native.nativePaymentBinding,
     moneyConfiguration: returnSignOnlyMoneyConfiguration(solanaMint),
     solana: { chainId: 'solana-mainnet' },
     collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: solanaMint, decimals: 6 } },
   };
-  const rawQuote = {
-    requestId, details: { sender, recipient,
-      currencyIn: { currency: { chainId: 792703809, address: solanaMint, decimals: 6 }, amount: amountAtomic, amountUsd: '24' },
-      currencyOut: { currency: { chainId: 4663, address: nativeCurrency, decimals: 18 }, amount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic, amountUsd: '23.84375' } },
-    protocol: { v2: { orderId: `0x${'9'.repeat(64)}`, orderData: {
-      inputs: [{ payment: { chainId: 'solana', currency: solanaMint, amount: amountAtomic }, refunds: [{ chainId: 'solana', currency: solanaMint, recipient: sender, deadline: 4_102_444_800 }] }],
-      output: { chainId: 'robinhood', deadline: 4_102_444_800, calls: [], payments: [{ recipient, currency: nativeCurrency, expectedAmount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic }] }
-    } } }, steps: []
-  };
-  const quoteClient = createRelayClient({ quoteValidityMs: 60000,
-    fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(rawQuote) }) });
-  const quote = await quoteClient.quoteReturnBridge({ user: sender, recipient, amount: amountAtomic, originCurrency: solanaMint, skipRouteCheck: true });
-  const intent = {
-    schema: 'hookemon.relay-intent.v2',
-    requestId,
-    orderId: `0x${'9'.repeat(64)}`,
-    direction: 'RETURN',
-    originChainId: 792703809,
-    destinationChainId: 4663,
-    originAssetId: solanaMint,
-    originDecimals: 6,
-    destinationAssetId: 'native',
-    destinationDecimals: 18,
-    originAmount: amountAtomic,
-    quotedDestinationAmount: destinationAmountAtomic,
-    quotedDestinationMinimumAmount: destinationAmountAtomic,
-    sender,
-    recipient,
-    deadlineUnixSeconds: 4_102_444_800,
-  };
-  const steps = [{
-    kind: 'transaction',
-    requestId,
-    items: [{
-      data: returnSignOnlySplTransferCheckedPlan({
-        owner: sender,
-        mint: solanaMint,
-        source: '8MWgLuNVQAhpoTUQZiUUkG9Q1569HCkJbmAivoQ5VhDN',
-        destination: '4nvJ5zWdVspxJiNZzB127U6amPH98SFFkBx2JZrAduia',
-        amountAtomic,
-      }),
-    }],
-  }];
-  const relay = returnSignOnlyRelayStub({ quote, execution: { intent, steps } });
-  return { cycleId, solanaMint, config, relay, proceeds: amountAtomic };
+  return { cycleId, solanaMint, config, relay: { ...native.relay, quoteReturnBridge: args => native.relay.quoteReturnBridge({ ...args, skipRouteCheck: true }) }, proceeds,
+    solanaClient: returnSignOnlySolanaClient('11111111111111111111111111111111', native.observation) };
 }
 test('the real built-in return handler receives a lease-fenced sign-only recovery facade with the complete method surface, and a lost lease refuses before a second Keychain signApproved call', async () => {
-  const { cycleId, solanaMint, config, relay, proceeds } = await returnSignOnlyFixture();
+  const { cycleId, solanaMint, config, relay, proceeds, solanaClient } = await returnSignOnlyFixture();
   const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
 
   let brokerCalls = 0;
@@ -4129,7 +4050,7 @@ test('the real built-in return handler receives a lease-fenced sign-only recover
     collectorCrypt: null,
     relay,
     robinhood: returnSignOnlyRobinhoodClient(),
-    solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
+    solana: { client: solanaClient },
   };
 
   const driver = createStageDriver({
@@ -4183,7 +4104,7 @@ test('the real built-in return handler receives a lease-fenced sign-only recover
 });
 
 test('a plain clone of the real owned Keychain client is never recognized as owned, so a sign-only timeout is never retried through the durable ledger', async () => {
-  const { solanaMint, config, relay, proceeds } = await returnSignOnlyFixture();
+  const { solanaMint, config, relay, proceeds, solanaClient } = await returnSignOnlyFixture();
   const cycleId = 'cycle-return-sign-only-clone';
   const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
 
@@ -4206,7 +4127,7 @@ test('a plain clone of the real owned Keychain client is never recognized as own
     collectorCrypt: null,
     relay,
     robinhood: returnSignOnlyRobinhoodClient(),
-    solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
+    solana: { client: solanaClient },
   };
 
   const driver = createStageDriver({
@@ -4245,7 +4166,7 @@ test('a lease lost while the standing-authority guard await is genuinely suspend
   // Reuses the exact same real owned Keychain client + real built-in return handler + real
   // signOnlyRecoveryRepository facade as the positive sign-only test above -- this test is only
   // about the standing-authority guard's own recheck, not a second huge fixture.
-  const { cycleId, solanaMint, config, relay, proceeds } = await returnSignOnlyFixture();
+  const { cycleId, solanaMint, config, relay, proceeds, solanaClient } = await returnSignOnlyFixture();
   const cycleRepository = returnSignOnlyChainRepository(proceeds, solanaMint);
   // The only method the real standing-authority provider's own first-use reservation needs beyond
   // the narrow sign-only recovery surface above -- added directly since this is the one test in
@@ -4269,7 +4190,7 @@ test('a lease lost while the standing-authority guard await is genuinely suspend
     collectorCrypt: null,
     relay,
     robinhood: returnSignOnlyRobinhoodClient(),
-    solana: { client: returnSignOnlySolanaClient('11111111111111111111111111111111') },
+    solana: { client: solanaClient },
   };
 
   // Default-dated (issued 2026-01-01, expires 2099-01-01): genuinely valid right now, so the
