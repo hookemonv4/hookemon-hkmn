@@ -3,6 +3,7 @@ import { encodeAbiParameters, encodeFunctionData, encodeEventTopics, keccak256, 
 import { privateKeyToAccount } from 'viem/accounts';
 import { createNativePaymentProof, createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 import { createRelayClient, createQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../../src/relay-client.mjs';
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { setup as nativeRelaySetup } from '../native/relay-native-proof-fixture.mjs';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -23,7 +24,7 @@ import { ERC20_TRANSFER_TOPIC, readFinalizedErc20TransferProof } from '../../src
 import { createSolanaRpcClient, readFinalizedRelayDestinationObservation } from '../../src/solana-rpc.mjs';
 import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
 import { canonicalJson, CycleJournal, digest } from '../../../runner/src/cycle/journal.mjs';
-import { MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
+import { CUSTODY_LEDGER_BUCKETS, MAXIMUM_PACK_BATCH_SIZE, OPERATIONAL_CYCLE_STAGES } from '../../../runner/src/cycle/money-schemas.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createDefaultOperatorConfiguration } from '../../../runner/src/config/state-schema.mjs';
 import { deriveCyclePolicyDigest } from '../../../runner/src/automation/policy-engine.mjs';
@@ -1455,17 +1456,41 @@ test('reuses a held position after restart timing changes without doubling its c
   assert.equal(state.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '25000000');
 });
 
+async function nativeSupplementaryBoundary(repository, position, settlement) {
+  const leg = await nativeReturnLeg(`${position.cycleId}-supplementary`);
+  const transport = nativeReturnTransports.get(leg.relayRequestId);
+  leg.sourceTxHash = transport.sourceProof.transactionHash;
+  const proof = await returnDestinationProof(leg);
+  const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  const stage = `supplementary-${digest({ schema: 'hookemon.supplementary-return-stage.v1', positionId: position.positionId }).slice(7, 55)}`;
+  await repository.persistPagedPayoutState(position.cycleId, stage, {
+    schema: 'hookemon.supplementary-return-attempt.v2', cycleId: position.cycleId, positionId: position.positionId, manifestId: settlement.manifestId,
+    recipients: [], rawSignedBytes: transport.encoded, relayRequestId: leg.relayRequestId, intent: leg.returnAttribution.intent,
+    destinationAmount: { ...asset, amountAtomic: leg.destinationAmountAtomic }, destinationUsd: transport.destinationUsd,
+    destinationUsdEvidence: leg.returnAttribution.destinationUsdEvidence,
+  });
+  return { schema: 'hookemon.supplementary-return-boundary.v2', positionId: position.positionId, cycleId: position.cycleId, manifestId: settlement.manifestId,
+    finalizedReturnEvidence: { schema: 'hookemon.supplementary-finalized-return.v2', positionId: position.positionId, cycleId: position.cycleId, manifestId: settlement.manifestId,
+      operations: transport.expected.recipient, assetId: 'native', amountAtomic: leg.destinationAmountAtomic, finalityEvidence: proof } };
+}
+
+async function createNativeHeldCycle(repository, costMicroUsd, packId) {
+  const cycleId = repository.nextCycleId();
+  const admission = await nativeProducedAdmissionFixture(cycleId, { costMicroUsd });
+  admission.packId = packId;
+  return repository.createCycle({ cycleId, releaseAmount: '42', mode: 'production', admission });
+}
+
 test('all held cards complete a cycle with zero main settlement', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '25000000', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-1',
     mint: 'mint-1',
     cardRef: 'mint-1',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -1478,10 +1503,8 @@ test('all held cards complete a cycle with zero main settlement', async t => {
   const completed = await repository.describeCycle(cycleId);
   assert.equal(completed.terminalState, 'COMPLETED');
   assert.deepEqual([...completed.heldPositions.values()], [position]);
-  const ledger = completed.custodyLedgers.get('4663\u0000asset-usdg');
-  assert.equal(ledger.heldPositions, '25000000');
-  assert.equal(ledger.buybackProceeds, '0');
-  assert.equal(ledger.returnReceived, '0');
+  assert.equal(position.costMicroUsd, '25000000');
+  assert.equal(completed.custodyLedgers.size, 0, 'held USD purchase cost creates no native principal or main settlement');
 });
 
 test('records a position-bound held owner decision without terminally holding the cycle', async t => {
@@ -1995,16 +2018,15 @@ test('closes a resolved held position after a completed cycle without retaining 
 
 test('resolves a deadline-held position as sold, refunded, or never sent only on its attributable path', async t => {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '17', 'pack-1');
   const createPosition = async (suffix, reason = 'SENT_UNKNOWN_DEADLINE') => repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: `memo-resolution-${suffix}`,
     mint: `mint-resolution-${suffix}`,
     cardRef: `mint-resolution-${suffix}`,
-    costMicroUsdg: '17',
-    valueMicroUsdg: '17',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '17',
+    valueMicroUsd: '17',
     insuredValue: null,
     reason,
     terminalState: 'HELD_UNRESOLVED',
@@ -2013,6 +2035,10 @@ test('resolves a deadline-held position as sold, refunded, or never sent only on
   const sold = await createPosition('sold');
   const refunded = await createPosition('refunded');
   const neverSent = await createPosition('never-sent');
+  const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  await repository.recordCustodyLedger(cycleId, { schema: 'hookemon.custody-ledger.v3', cycleId: cycleId, ...asset,
+    ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(key => [key, '0'])), expectedCycleAsset: null, verifiedCurrentBalance: null,
+    gasReserve: { ...asset, amountAtomic: '200' }, gasSpent: { ...asset, amountAtomic: '0' }, gasPayments: [] });
   await completeOperationalStages(repository, cycleId);
   await repository.completeCycle(cycleId);
   await repository.recordHeldOwnerDecision(sold.positionId, {
@@ -2041,14 +2067,12 @@ test('resolves a deadline-held position as sold, refunded, or never sent only on
       expectedState,
       nextState,
       evidence: nextState === 'RETURN_BROADCAST'
-        ? supplementaryReturnBoundary(sold, soldSettlement, {
-          finalityEvidence: { expectedState, nextState },
-        })
+        ? await nativeSupplementaryBoundary(repository, sold, soldSettlement)
         : { expectedState, nextState },
     });
   }
 
-  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001);
+  const reopened = await CycleRepository.open(directory, () => 1_700_000_000_001, { testAuthority: createTestProfileMutationAuthority() });
   const outcomes = [];
   outcomes.push(await reopened.resolveHeldPosition(sold.positionId, {
       heldEvidenceDigest: sold.evidenceDigest,
@@ -2103,16 +2127,16 @@ test('projects open held positions from completed cycles as bounded claim exposu
 });
 
 test('keeps interleaved held positions and attributed proceeds in their original cycles', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
 
-  const first = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const first = await createNativeHeldCycle(repository, '11', 'pack-first');
   const firstPosition = await repository.recordHeldPosition(first.cycleId, {
     packId: 'pack-first',
     memo: 'memo-first',
     mint: 'mint-first',
     cardRef: 'mint-first',
-    costMicroUsdg: '11',
-    valueMicroUsdg: '11',
+    costMicroUsd: '11',
+    valueMicroUsd: '11',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -2120,19 +2144,19 @@ test('keeps interleaved held positions and attributed proceeds in their original
   });
   await repository.recordCustodyLedger(first.cycleId, custodyLedger(first.cycleId, {
     buybackProceeds: '17',
-    heldPositions: '11',
+    heldPositions: '0',
   }));
   await completeOperationalStages(repository, first.cycleId);
   await repository.completeCycle(first.cycleId);
 
-  const second = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const second = await createNativeHeldCycle(repository, '19', 'pack-second');
   const secondPosition = await repository.recordHeldPosition(second.cycleId, {
     packId: 'pack-second',
     memo: 'memo-second',
     mint: 'mint-second',
     cardRef: 'mint-second',
-    costMicroUsdg: '19',
-    valueMicroUsdg: '19',
+    costMicroUsd: '19',
+    valueMicroUsd: '19',
     insuredValue: null,
     reason: 'BUYBACK_UNAVAILABLE',
     terminalState: 'HELD_UNAVAILABLE',
@@ -2140,7 +2164,7 @@ test('keeps interleaved held positions and attributed proceeds in their original
   });
   await repository.recordCustodyLedger(second.cycleId, custodyLedger(second.cycleId, {
     buybackProceeds: '29',
-    heldPositions: '19',
+    heldPositions: '0',
   }));
   await completeOperationalStages(repository, second.cycleId);
   await repository.completeCycle(second.cycleId);
@@ -2152,8 +2176,8 @@ test('keeps interleaved held positions and attributed proceeds in their original
   assert.deepEqual([...secondState.heldPositions.values()], [secondPosition]);
   assert.equal(firstState.custodyLedgers.get(ledgerKey).buybackProceeds, '17');
   assert.equal(secondState.custodyLedgers.get(ledgerKey).buybackProceeds, '29');
-  assert.equal(firstState.custodyLedgers.get(ledgerKey).heldPositions, '11');
-  assert.equal(secondState.custodyLedgers.get(ledgerKey).heldPositions, '19');
+  assert.equal(firstState.custodyLedgers.get(ledgerKey).heldPositions, '0');
+  assert.equal(secondState.custodyLedgers.get(ledgerKey).heldPositions, '0');
   assert.deepEqual(await repository.listHeldPositions({ cycleId: first.cycleId }), [firstPosition]);
   assert.deepEqual(await repository.listHeldPositions({ cycleId: second.cycleId }), [secondPosition]);
 });
