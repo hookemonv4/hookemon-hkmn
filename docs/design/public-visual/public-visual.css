@@ -1,0 +1,63 @@
+/* Opt-in marketing typography. Never set body/root tokens or target the dashboard. */
+html[data-public-visual] .hero {
+  background: #f8f6ee;
+}
+html[data-public-visual] .hero .hero-landscape {
+  opacity: .58;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 35%, #000 88%, transparent 100%);
+}
+html[data-public-visual] .hero h1.shared-cycle-title {
+  font-family: "DM Sans", Arial, sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -.045em;
+}
+html[data-public-visual] .hero .hero-copy .hero-description {
+  font-size: 17px;
+  line-height: 1.65;
+  letter-spacing: -.01em;
+  max-width: 48ch;
+}
+html[data-public-visual] .hero .holder-share-callout strong {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -.025em;
+}
+html[data-public-visual] .journey-intro .adventure-heading {
+  font-family: "Lilita One", "Arial Rounded MT Bold", sans-serif;
+  font-size: 40px;
+  line-height: 1.12;
+  letter-spacing: -.02em;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+  color: #15345f;
+}
+html[data-public-visual] #faq h2 {
+  font-family: "DM Sans", Arial, sans-serif;
+  font-size: 36px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -.04em;
+}
+html[data-public-visual] #faq .faq-list p {
+  font-size: 17px;
+  line-height: 1.7;
+  max-width: 68ch;
+}
+@media (max-width: 360px) {
+  html[data-public-visual] .hero h1.shared-cycle-title { font-size: 28px; }
+}
+@media (min-width: 735px) {
+  html[data-public-visual] .hero h1.shared-cycle-title { font-size: 44px; }
+  html[data-public-visual] .journey-intro .adventure-heading { font-size: 56px; }
+  html[data-public-visual] #faq h2 { font-size: 44px; }
+}
+@media (min-width: 1069px) {
+  html[data-public-visual] .hero h1.shared-cycle-title { font-size: 56px; }
+  html[data-public-visual] .hero .hero-copy .hero-description { font-size: 18px; }
+  html[data-public-visual] .hero .holder-share-callout strong { font-size: 23px; }
+  html[data-public-visual] .journey-intro .adventure-heading { font-size: 64px; }
+  html[data-public-visual] #faq h2 { font-size: 48px; }
+}
