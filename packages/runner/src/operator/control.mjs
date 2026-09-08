@@ -340,26 +340,26 @@ function projectOffChainCap(configuration, now) {
   if (configuration === null) return null;
   const used = configuration.spendLedger
     .filter(entry => now >= entry.reservedAtMs && now - entry.reservedAtMs < POLICY_WINDOW_MS)
-    .reduce((sum, entry) => sum + BigInt(entry.amountMicroUsdg), 0n);
-  const limit = BigInt(configuration.max24HourBudgetMicroUsdg);
+    .reduce((sum, entry) => sum + BigInt(entry.amountMicroUsd), 0n);
+  const limit = BigInt(configuration.max24HourBudgetMicroUsd);
   return deepFreeze({
-    usedMicroUsdg: used.toString(),
-    limitMicroUsdg: limit.toString(),
-    remainingMicroUsdg: (limit > used ? limit - used : 0n).toString(),
+    usedMicroUsd: used.toString(),
+    limitMicroUsd: limit.toString(),
+    remainingMicroUsd: (limit > used ? limit - used : 0n).toString(),
   });
 }
 
 function projectCapacity(used, limit) {
   return deepFreeze({
-    usedMicroUsdg: used.toString(),
-    limitMicroUsdg: limit.toString(),
-    remainingMicroUsdg: (limit > used ? limit - used : 0n).toString(),
+    usedMicroUsd: used.toString(),
+    limitMicroUsd: limit.toString(),
+    remainingMicroUsd: (limit > used ? limit - used : 0n).toString(),
   });
 }
 
 function projectPolicyTelemetry(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) return null;
-  for (const field of ['realizedLossMicroUsdg', 'atRiskMicroUsdg', 'outstandingMicroUsdg']) {
+  for (const field of ['realizedLossMicroUsd', 'atRiskMicroUsd', 'outstandingMicroUsd']) {
     if (typeof value[field] !== 'string' || !atomicAmountPattern.test(value[field])) return null;
   }
   for (const field of ['heldAssets', 'unattributed', 'unvaluedExposure']) {
@@ -368,16 +368,16 @@ function projectPolicyTelemetry(value) {
   const heldPositions = value.heldPositions;
   if (!heldPositions || typeof heldPositions !== 'object' || Array.isArray(heldPositions)
     || !Number.isSafeInteger(heldPositions.count) || heldPositions.count < 0
-    || typeof heldPositions.valueMicroUsdg !== 'string' || !atomicAmountPattern.test(heldPositions.valueMicroUsdg)
+    || typeof heldPositions.valueMicroUsd !== 'string' || !atomicAmountPattern.test(heldPositions.valueMicroUsd)
     || !Array.isArray(heldPositions.positions)) return null;
   return deepFreeze({
-    realizedLossMicroUsdg: value.realizedLossMicroUsdg,
-    atRiskMicroUsdg: value.atRiskMicroUsdg,
-    outstandingMicroUsdg: value.outstandingMicroUsdg,
+    realizedLossMicroUsd: value.realizedLossMicroUsd,
+    atRiskMicroUsd: value.atRiskMicroUsd,
+    outstandingMicroUsd: value.outstandingMicroUsd,
     heldAssets: value.heldAssets,
     heldPositions: {
       count: heldPositions.count,
-      valueMicroUsdg: heldPositions.valueMicroUsdg,
+      valueMicroUsd: heldPositions.valueMicroUsd,
       positions: structuredClone(heldPositions.positions),
     },
     unattributed: value.unattributed,
@@ -402,12 +402,12 @@ async function readSafetyTelemetry(readCustody) {
 
 function projectLossCap(configuration, telemetry) {
   if (configuration === null || telemetry === null) return null;
-  const realized = BigInt(telemetry.realizedLossMicroUsdg);
-  const atRisk = BigInt(telemetry.atRiskMicroUsdg);
-  const limit = BigInt(configuration.lossCapMicroUsdg);
+  const realized = BigInt(telemetry.realizedLossMicroUsd);
+  const atRisk = BigInt(telemetry.atRiskMicroUsd);
+  const limit = BigInt(configuration.lossCapMicroUsd);
   return deepFreeze({
-    realizedLossMicroUsdg: realized.toString(),
-    atRiskMicroUsdg: atRisk.toString(),
+    realizedLossMicroUsd: realized.toString(),
+    atRiskMicroUsd: atRisk.toString(),
     ...projectCapacity(realized + atRisk, limit),
   });
 }
@@ -415,8 +415,8 @@ function projectLossCap(configuration, telemetry) {
 function projectOutstandingCustodyCap(configuration, telemetry) {
   if (configuration === null || telemetry === null) return null;
   return projectCapacity(
-    BigInt(telemetry.outstandingMicroUsdg),
-    BigInt(configuration.maxOutstandingCustodyMicroUsdg),
+    BigInt(telemetry.outstandingMicroUsd),
+    BigInt(configuration.maxOutstandingCustodyMicroUsd),
   );
 }
 
@@ -425,8 +425,8 @@ function projectHeldPositionsCap(configuration, telemetry) {
   return deepFreeze({
     count: telemetry.heldPositions.count,
     maxCount: configuration.maxHeldPositions,
-    valueMicroUsdg: telemetry.heldPositions.valueMicroUsdg,
-    maxValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+    valueMicroUsd: telemetry.heldPositions.valueMicroUsd,
+    maxValueMicroUsd: configuration.maxHeldValueMicroUsd,
   });
 }
 
@@ -456,13 +456,13 @@ function configurationIncreasesExposure(current, next) {
     return true;
   }
   for (const field of [
-    'maxUnitPriceMicroUsdg',
-    'maxCycleBudgetMicroUsdg',
-    'max24HourBudgetMicroUsdg',
-    'perCycleCapMicroUsdg',
-    'lossCapMicroUsdg',
-    'maxOutstandingCustodyMicroUsdg',
-    'maxHeldValueMicroUsdg',
+    'maxUnitPriceMicroUsd',
+    'maxCycleBudgetMicroUsd',
+    'max24HourBudgetMicroUsd',
+    'perCycleCapMicroUsd',
+    'lossCapMicroUsd',
+    'maxOutstandingCustodyMicroUsd',
+    'maxHeldValueMicroUsd',
   ]) {
     if (BigInt(next[field]) > BigInt(current[field])) return true;
   }
