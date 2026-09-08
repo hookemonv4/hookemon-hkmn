@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { CycleRunner } from '../../src/cycle/cycle-runner.mjs';
 import {
+  assertFixtureCollectorRequest,
   assertVerifiedFixtureCollectorOpenExecution,
   assertVerifiedFixtureCollectorOpenCustody,
   assertVerifiedFixtureCollectorRpcFinality,
@@ -109,6 +110,18 @@ function authorizeCollectorMutation(runner, action) {
   runner.executeAuthorizedExternalMutationOnce(authorization.requestDigest);
   return request;
 }
+
+test('fixture Collector request pack accepts hyphenated and underscored pack codes and rejects malformed codes', () => {
+  for (const pack of ['return-fixture', 'pokemon_50']) {
+    const request = { ...collectorRequest('generate'), pack };
+    assert.equal(assertFixtureCollectorRequest(request, 'generate').pack, pack);
+  }
+
+  for (const pack of ['UPPER-CASE', '-leading-separator', 'slash/code', 'dot.code', 'a', 'a'.repeat(65)]) {
+    const request = { ...collectorRequest('generate'), pack };
+    assert.throws(() => assertFixtureCollectorRequest(request, 'generate'), /pack/);
+  }
+});
 
 test('Collector generation requires the signed prepared-cycle preflight and consumes one exact response', () => {
   const unprepared = new CycleRunner(cycleId, [], { cycleStore: new FixtureCycleStore() });

@@ -2,28 +2,6 @@
   "schemaVersion": 4,
   "result": "PASSED",
   "errors": [],
-  "controlGatePinBump": {
-    "schema": "hookemon.control-gate-pin-bump.v2",
-    "approvalToken": "OWNER APPROVED",
-    "basePinsSha256": "17d088c34248d17e2820dad373410d9b07ae724409bfe27539d0d9e69e313557",
-    "candidatePinsSha256": "be40708068e70c8153553c5d39d8a9396a11f4ac07b80757d436923dcdf51cc2",
-    "baseChecker": {
-      "path": "scripts/verify-control-dependencies.mjs",
-      "blobId": "84a177be870e28535eb9f33c2b381c20da8a4809"
-    },
-    "controls": [
-      {
-        "path": ".github/workflows/v4-gates.yml",
-        "previousSha256": "df34bc9bd1ecf7d5ac4e34cd1a32e2694124cfbd23786a3b2ae3d65e39a9b374",
-        "sha256": "305870c57fa003dcc60e849ad81f279ec7a2ee6473c013222ac9a69f075df37d"
-      },
-      {
-        "path": "scripts/verify-control-dependencies.mjs",
-        "previousSha256": "673dd77d5c0015434b72191e9cb5d190ef15417e701766d779c9c64d5c6cdeff",
-        "sha256": "1e37c93194b6a2a5f416b6a93c8c45cb32ee66cb40da6f1e8e97c248066fa9ea"
-      }
-    ]
-  },
   "node": {
     "expected": "24.19.0",
     "actual": "24.19.0",
@@ -90,6 +68,10 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/v4-gates.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/web-ci.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       }
@@ -107,8 +89,8 @@
   },
   "workflowIntegrity": {
     "path": ".github/workflows/v4-gates.yml",
-    "expectedSha256": "df34bc9bd1ecf7d5ac4e34cd1a32e2694124cfbd23786a3b2ae3d65e39a9b374",
-    "actualSha256": "df34bc9bd1ecf7d5ac4e34cd1a32e2694124cfbd23786a3b2ae3d65e39a9b374"
+    "expectedSha256": "41d59fb12a421ef0ef4ea7833be2dde68ee01fdff134f41a6dfc139849812740",
+    "actualSha256": "41d59fb12a421ef0ef4ea7833be2dde68ee01fdff134f41a6dfc139849812740"
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
@@ -186,13 +168,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "673dd77d5c0015434b72191e9cb5d190ef15417e701766d779c9c64d5c6cdeff",
-      "actualSha256": "673dd77d5c0015434b72191e9cb5d190ef15417e701766d779c9c64d5c6cdeff",
+      "expectedSha256": "1dac8eb641bac74b93274593884a9be3379d8a55ca3215eefc70a9e0ef66fcb2",
+      "actualSha256": "1dac8eb641bac74b93274593884a9be3379d8a55ca3215eefc70a9e0ef66fcb2",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "673dd77d5c0015434b72191e9cb5d190ef15417e701766d779c9c64d5c6cdeff",
-          "actualSha256": "673dd77d5c0015434b72191e9cb5d190ef15417e701766d779c9c64d5c6cdeff"
+          "sha256": "1dac8eb641bac74b93274593884a9be3379d8a55ca3215eefc70a9e0ef66fcb2",
+          "actualSha256": "1dac8eb641bac74b93274593884a9be3379d8a55ca3215eefc70a9e0ef66fcb2"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -238,15 +220,15 @@
       "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
       "config": {
         "path": ".gitleaks.toml",
-        "expectedSha256": "5360d3e697d5e52d87c5ffca2f10be4de022f07b8c88276bf80e4e528ec5963e",
-        "actualSha256": "5360d3e697d5e52d87c5ffca2f10be4de022f07b8c88276bf80e4e528ec5963e"
+        "expectedSha256": "959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2",
+        "actualSha256": "959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2"
       },
       "workflow": {
         "version": "8.30.1",
         "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
         "archiveSha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
         "executableSha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
-        "configSha256": "5360d3e697d5e52d87c5ffca2f10be4de022f07b8c88276bf80e4e528ec5963e"
+        "configSha256": "959396e7c7b35ee3c62b39e544fd758ceab5d9f5ea7f5f74f05df6fa5c1e24e2"
       }
     }
   },
@@ -261,5 +243,27 @@
       "lockfileVersion": 3,
       "resolvedEntryCount": 89
     }
+  },
+  "controlGatePinBump": {
+    "schema": "hookemon.control-gate-pin-bump.v2",
+    "approvalToken": "OWNER APPROVED",
+    "basePinsSha256": "be40708068e70c8153553c5d39d8a9396a11f4ac07b80757d436923dcdf51cc2",
+    "candidatePinsSha256": "9bd2f379a57b04cf782dcbcf1994ba130a93a84b1f3fa27a83e8328172628439",
+    "baseChecker": {
+      "path": "scripts/verify-control-dependencies.mjs",
+      "blobId": "f1aa980a1bb5283b79c23c0612378c23160f6e97"
+    },
+    "controls": [
+      {
+        "path": ".github/workflows/v4-gates.yml",
+        "previousSha256": "305870c57fa003dcc60e849ad81f279ec7a2ee6473c013222ac9a69f075df37d",
+        "sha256": "41d59fb12a421ef0ef4ea7833be2dde68ee01fdff134f41a6dfc139849812740"
+      },
+      {
+        "path": "scripts/verify-control-dependencies.mjs",
+        "previousSha256": "1e37c93194b6a2a5f416b6a93c8c45cb32ee66cb40da6f1e8e97c248066fa9ea",
+        "sha256": "1dac8eb641bac74b93274593884a9be3379d8a55ca3215eefc70a9e0ef66fcb2"
+      }
+    ]
   }
 }

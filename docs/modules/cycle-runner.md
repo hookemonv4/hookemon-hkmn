@@ -29,6 +29,12 @@ interface, never the repository's writer methods.
   unattributed value. The first record for a key fixes its decimal value; replay rejects a later
   record that changes atomic units.
 
+Return attribution retains either the historical exact 16-field Relay intent or the current exact
+18-field intent with both `tradeType` and `quoteDigest`. Partial pairs, unknown fields, unsupported
+trade types and malformed digests refuse; accepted fields round-trip unchanged. The nested quote
+digest is distinct from the enclosing Relay-leg digest. Historical records remain readable, but the
+current live Relay adapter refuses restoring a 16-field intent without its original trade evidence.
+
 The general chain-attempt runtime is v1; the frozen v2 policy, fencing, refusal,
 and approval-digest fields are unavailable. Built-in outbound and return retain their
 recovery authority with the repository's combined Relay signing record. Provider pre-call recovery
@@ -47,7 +53,13 @@ facade. Chain-journal reconciliation for claim, outbound, and return is the narr
 canonical observation it may write only the relevant broadcast, finality, custody, Relay settlement,
 recovery-context, and wallet-nonce-release transitions. A pre-call failure records retryable
 `NOT_SENT`; only the same request may return to `PREPARED` under the current lease. Only an error
-after an adapter capability call can become observation-only `SENT_UNKNOWN`.
+after an adapter capability call can become observation-only `SENT_UNKNOWN`. This generic
+`NOT_SENT -> PREPARED` retry applies only when no more specific frozen recovery contract already
+terminalizes the cycle. A `TransactionPolicyError` before any signature or broadcast is that
+exception: the prepared request itself is semantically wrong (wrong asset, wrong recipient), which
+an unmodified retry cannot correct, so the attempt still records `NOT_SENT` but the whole cycle also
+holds `HELD_DATA_UNVERIFIED` for an owner decision instead of being retried
+(`docs/runbooks/relay-wrong-asset.md`, `docs/runbooks/transaction-policy-wrong-recipient.md`).
 
 Claim processing, outbound, and return are chain-journal stages. Claim persists `PREPARED`,
 immutable signed bytes, broadcast evidence, and canonical finality in sequence. Outbound and return

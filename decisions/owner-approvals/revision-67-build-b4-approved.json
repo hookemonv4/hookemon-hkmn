@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "build",
+  "itemId": "B4",
+  "rationale": "Approve requirements revision 67 as the R2 contract for its bounded behavior changes.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/build.json": "63126006a4f4e6339c84f152e0e2d00d43e8917f75a57779081d244da528590c",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "d9e287c5bf9d5cc93ebddc84e72756a1d0e02004214f53f394a3e1e7aee60d18"
+  }
+}

@@ -21,7 +21,7 @@
     {
       "id": "provider-binding",
       "path": "docs/modules/provider-binding.md",
-      "sha256": "40d987e9aec90c9a84fa735359b20d26fb9c84ccd8734808be59d9aa29c32e0d"
+      "sha256": "686a469b60753cc802ca7efaa09193cf6b44058abe04e1517037c21e13f4f7f4"
     },
     {
       "id": "deployment-manifest",
@@ -41,7 +41,7 @@
     {
       "id": "canonical-market",
       "path": "docs/modules/canonical-market.md",
-      "sha256": "3788a5d35284b01f29c4f3158d1b2e250ea8a216a8bc81c1ca421ef4506f6f43"
+      "sha256": "27e791b606be8e9a84fbe21671bb3c91db9f7c5c609fcd42dfdc523f8f1d100b"
     },
     {
       "id": "fee-accounting",
@@ -66,7 +66,7 @@
     {
       "id": "adapters",
       "path": "docs/modules/adapters.md",
-      "sha256": "d8a70df0ce3a522d0f1c0420610526c745660672015a1c2be1904fe41443d2a8"
+      "sha256": "9274b2cbb9ddafe8611b20e006422986d0dad0e6b9b7511ab15a772b254dbb56"
     },
     {
       "id": "hook-contract-client",
@@ -86,7 +86,7 @@
     {
       "id": "relay-bridge-client",
       "path": "docs/modules/relay-bridge-client.md",
-      "sha256": "4ca997ac2d604e62d86925eb99c4d5d9d1ea5c973e40b3b6ca1b63260e64ea03"
+      "sha256": "323ef42be2cdec065d8194759e187967cf8ba20477c2555255dda038ed8319fe"
     },
     {
       "id": "collector-crypt-adapter",
@@ -101,17 +101,17 @@
     {
       "id": "signing",
       "path": "docs/modules/signing.md",
-      "sha256": "de7208984d54511b2c45c3cd3ffb64df6cc7a6b8ede1aa9f70c1f5761cdc2826"
+      "sha256": "bcafcf96e36611c91b0966beac81a4001aa59895e363151b75591a57e731a1b4"
     },
     {
       "id": "cycle-repository",
       "path": "docs/modules/cycle-repository.md",
-      "sha256": "2edd4425784972b5d4970a21c3bf35bd1b4001e2c1efcf8ed78c7b0ad2f9d29f"
+      "sha256": "39710d7301115f82ed815c2056c0507b2cf6e45d5c0051613458a9e8915e7895"
     },
     {
       "id": "policy-engine",
       "path": "docs/modules/policy-engine.md",
-      "sha256": "09e8cc1527523c7564fedde60d73cf368e258df3e56538f7df490dd01676c4ab"
+      "sha256": "6e7067ea4028c3ca37002a0f783cad83a0acdd13fada157e0a7655835809840d"
     },
     {
       "id": "eligibility-snapshot",
@@ -121,12 +121,12 @@
     {
       "id": "cycle-runner",
       "path": "docs/modules/cycle-runner.md",
-      "sha256": "8cc42696004559ad324e7cb4e4b520e9a185fade0c20d881e2a2616b165b6e01"
+      "sha256": "719af68e0190b733e82fb5401e29ef262db5f2dc1c2ee8ce1f5822e0215d43b1"
     },
     {
       "id": "direct-payout",
       "path": "docs/modules/direct-payout.md",
-      "sha256": "5e3572dbaa7f6f73fee7d861ec6d89cc8d5e2524d2a77bfc26a075c9f9adcce5"
+      "sha256": "eb12a494eb5b0a0d616e1387a95eac4c4cb38892eeeb32807bd9b6591f03aca2"
     },
     {
       "id": "automation",
@@ -146,12 +146,12 @@
     {
       "id": "composition-root",
       "path": "docs/modules/composition-root.md",
-      "sha256": "af6f3b083424c8256e90a0b8cee20201728b9a8497e7d36808ccaacf52cb8e95"
+      "sha256": "fc0bd1e533c86f20f18f405f3c3b33fc8f26fb2a9fc12e063ff350cd4fa3abec"
     },
     {
       "id": "dashboard",
       "path": "docs/modules/dashboard.md",
-      "sha256": "9e4c754f6f9ff1b4c47f21dc7955e4539fd2234e4d9483eb30b9d4fcbc6f71d4"
+      "sha256": "152234724f572ae038d7ddb5ef6b312806fcf1e8b1628f9f241069a15172889a"
     },
     {
       "id": "release-evidence",

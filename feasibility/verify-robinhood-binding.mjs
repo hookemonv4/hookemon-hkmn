@@ -625,6 +625,48 @@ function listedNames(entries) {
   return entries.map((entry) => typeof entry === "string" ? entry : entry.name).sort();
 }
 
+function validatePhase3OffchainAmendment(freeze, frozen, projectRoot) {
+  if (freeze.offchainAmendment === undefined) return null;
+  const relativePath = "feasibility/phase3-offchain-interface-amendment.json";
+  invariant(freeze.offchainAmendment.path === relativePath, "unsupported offchain amendment path");
+  invariant(hashFile(projectRoot, relativePath) === freeze.offchainAmendment.sha256, "offchain amendment digest mismatch");
+  const amendment = JSON.parse(readFileSync(path.join(projectRoot, relativePath), "utf8"));
+  invariant(amendment.schemaVersion === "hookemon.phase3-offchain-interface-amendment.v1", "unsupported offchain amendment schema");
+  invariant(amendment.interfaceRequirementsRevision === 67 && amendment.interfaceArchitectureRevision === 10
+    && amendment.approvedRequirementsRevision === 68, "unsupported offchain amendment revisions");
+  // Derived from the exact revision-65 interface bytes already pinned by the historical freeze.
+  // These executable pins cannot be rebound by editing only the new amendment document.
+  invariant(amendment.historicalInputHashes["architecture/interfaces.json"] === "sha256:3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10", "offchain historical interface anchor mismatch");
+  invariant(amendment.preservedInterfaceProjectionDigest === "sha256:1b2a01dea4235af5c45df4c87dad67d693c1114044dced4ca813fae76d7df63a", "offchain historical projection anchor mismatch");
+  const inputs = ["architecture/interfaces.json", "specs/requirements.json"];
+  assertExactSet(Object.keys(amendment.currentInputHashes), inputs, "offchain amendment inputs");
+  assertExactSet(Object.keys(amendment.historicalInputHashes), inputs, "offchain historical inputs");
+  for (const input of inputs) {
+    invariant(amendment.historicalInputHashes[input] === freeze.inputHashes[input], `offchain historical binding mismatch: ${input}`);
+    invariant(amendment.currentInputHashes[input] === hashFile(projectRoot, input), `offchain current binding mismatch: ${input}`);
+  }
+  const approvalPaths = ["decisions/owner-approvals/revision-67-spec-s5-approved.json", "decisions/owner-approvals/revision-68-spec-s5-approved.json"];
+  assertExactSet(Object.keys(amendment.ownerApprovalHashes), approvalPaths, "offchain approval paths");
+  for (const approvalPath of approvalPaths) {
+    invariant(hashFile(projectRoot, approvalPath) === amendment.ownerApprovalHashes[approvalPath], "offchain owner approval hash mismatch");
+    const approval = JSON.parse(readFileSync(path.join(projectRoot, approvalPath), "utf8"));
+    invariant(approval.schema === "v4-owner-approval-v2" && approval.authority === "OWNER"
+      && approval.action === "GATE_EVIDENCE" && approval.phase === "spec" && approval.itemId === "S5"
+      && approval.approvalToken === "OWNER APPROVED", "offchain amendment lacks recorded spec approval");
+    if (approvalPath.includes("revision-67-")) invariant(approval.subjectHashes["specs/requirements.json"]
+      === "d9e287c5bf9d5cc93ebddc84e72756a1d0e02004214f53f394a3e1e7aee60d18", "offchain revision-67 approval subject mismatch");
+    if (approvalPath.includes("revision-68-")) invariant(`sha256:${approval.subjectHashes["specs/requirements.json"]}`
+      === amendment.currentInputHashes["specs/requirements.json"], "offchain current spec is not owner approved");
+  }
+  const projection = structuredClone(frozen);
+  delete projection.requirementsRevision;
+  delete projection.architectureRevision;
+  delete projection.cycleExecution.custodyLedger;
+  for (const key of ["providerSpecificPurchasePolicy", "providerSpecificBuybackPolicy", "collectorProductionBindingRegistry"]) delete projection.transactionPolicy[key];
+  invariant(digestCollection(projection) === amendment.preservedInterfaceProjectionDigest, "offchain amendment changed preserved onchain interface projection");
+  return amendment;
+}
+
 function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoot }) {
   invariant(freeze.schemaVersion === "hookemon.interface-freeze.v1", "unsupported interface freeze schema");
   invariant(freeze.productPhase === 3, "interface freeze product phase must be 3");
@@ -635,8 +677,9 @@ function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoo
     "interface freeze status must remain Phase 3 provisional"
   );
   invariant(frozen.productPhase === 3, "frozen interface product phase must be 3");
-  invariant(frozen.requirementsRevision === 65, "frozen interface requirements revision must be 65");
-  invariant(frozen.architectureRevision === 9, "frozen interface architecture revision must be 9");
+  const amendment = validatePhase3OffchainAmendment(freeze, frozen, projectRoot);
+  invariant(frozen.requirementsRevision === (amendment?.interfaceRequirementsRevision ?? 65), "frozen interface requirements revision binding mismatch");
+  invariant(frozen.architectureRevision === (amendment?.interfaceArchitectureRevision ?? 9), "frozen interface architecture revision binding mismatch");
   invariant(
     frozen.status === "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
     "frozen interface status must remain Phase 3 provisional"
@@ -660,7 +703,7 @@ function validatePhase3InterfaceFreeze({ freeze, frozen, provisional, projectRoo
   for (const input of INTERFACE_FREEZE_INPUTS) {
     assertDigest(freeze.inputHashes[input], `interface freeze input ${input}`);
     invariant(
-      freeze.inputHashes[input] === interfaceFreezeInputDigest(projectRoot, input),
+      (amendment?.currentInputHashes[input] ?? freeze.inputHashes[input]) === interfaceFreezeInputDigest(projectRoot, input),
       `interface freeze input hash mismatch: ${input}`
     );
   }

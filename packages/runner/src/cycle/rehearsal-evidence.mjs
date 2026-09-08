@@ -5,16 +5,20 @@ import { canonicalJson } from './journal.mjs';
 import { assertTypedAmount, OPERATIONAL_CYCLE_STAGES } from './money-schemas.mjs';
 
 const residueClassifications = new Set(['none', 'dust', 'held', 'refunded', 'unattributed']);
+const liveCollectorOnlySkippedStages = new Set(['eligibility-snapshot', 'claim-process', 'outbound', 'return']);
+const liveCollectorOnlySettlementAsset = Object.freeze({
+  chainId: 'solana-mainnet',
+  assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  decimals: 6,
+});
+const decimalPattern = /^(0|[1-9][0-9]*)$/;
 
 function requireDescription(value, { allowReadyToComplete = false } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('rehearsal evidence cycle description is invalid');
   if (typeof value.cycleId !== 'string' || value.cycleId.length === 0) throw new Error('rehearsal evidence cycleId is invalid');
   if (value.mode !== 'rehearsal') throw new Error('rehearsal evidence requires a rehearsal cycle');
-  if (value.providerMode !== 'fake') {
-    if (value.providerMode === 'live') {
-      throw new Error('live rehearsal evidence requires a dedicated Solana proceeds projection');
-    }
-    throw new Error('rehearsal evidence requires a persisted fake provider mode');
+  if (value.providerMode !== 'fake' && value.providerMode !== 'live') {
+    throw new Error('rehearsal evidence requires a persisted fake or live provider mode');
   }
   if (!allowReadyToComplete && (value.completed !== true || value.terminalState !== 'COMPLETED')) {
     throw new Error('rehearsal evidence requires a completed cycle');
@@ -27,6 +31,158 @@ function requireDescription(value, { allowReadyToComplete = false } = {}) {
     throw new Error('rehearsal evidence durable projections are invalid');
   }
   return value;
+}
+
+function requirePlainObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function requireNonemptyString(value, label) {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function requireDecimal(value, label) {
+  if (typeof value !== 'string' || !decimalPattern.test(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function requireLiveSettlementAmount(value, label, { positive = false } = {}) {
+  const amount = assertTypedAmount(value, label);
+  if (amount.chainId !== liveCollectorOnlySettlementAsset.chainId
+    || amount.assetId !== liveCollectorOnlySettlementAsset.assetId
+    || amount.decimals !== liveCollectorOnlySettlementAsset.decimals) {
+    throw new Error(`${label} must use the live collector-only settlement asset`);
+  }
+  if (positive && BigInt(amount.amountAtomic) === 0n) throw new Error(`${label} must be positive`);
+  return Object.freeze(amount);
+}
+
+function sameLiveAmount(left, right) {
+  return left.chainId === right.chainId
+    && left.assetId === right.assetId
+    && left.decimals === right.decimals
+    && left.amountAtomic === right.amountAtomic;
+}
+
+function requireLiveStage(cycle, stage, { readOnly = false } = {}) {
+  const record = cycle.stages.get(stage);
+  if (record?.status !== 'COMPLETE') throw new Error(`live rehearsal evidence stage ${stage} is incomplete`);
+  const operational = cycle.operationalAttempts.get(stage);
+  if (readOnly) {
+    if (operational !== undefined && operational?.attempt?.state !== 'RECONCILED') {
+      throw new Error(`live rehearsal evidence read-only stage ${stage} has an unresolved provider attempt`);
+    }
+  } else if (operational?.attempt?.state !== 'RECONCILED') {
+    throw new Error(`live rehearsal evidence stage ${stage} provider attempt is not reconciled`);
+  }
+  return requirePlainObject(record.evidence, `live rehearsal evidence stage ${stage}`);
+}
+
+function requireLiveSkippedStage(cycle, stage) {
+  const evidence = requireLiveStage(cycle, stage, { readOnly: stage === 'eligibility-snapshot' });
+  if (evidence.skipped !== true || evidence.rehearsalMode !== 'collector-only' || evidence.stage !== stage
+    || typeof evidence.reason !== 'string' || evidence.reason.length === 0) {
+    throw new Error(`live rehearsal evidence stage ${stage} must contain canonical no-effect evidence`);
+  }
+  return Object.freeze({ stage, reason: evidence.reason });
+}
+
+function requireFinalizedChainAttempts(cycle) {
+  for (const { attempt } of cycle.chainAttempts.values()) {
+    if (attempt?.state !== 'FINALIZED') throw new Error('rehearsal evidence requires every chain attempt finalized');
+  }
+}
+
+function collectLiveCollectorOnlyEvidence(cycle) {
+  requireFinalizedChainAttempts(cycle);
+  const skipped = [...liveCollectorOnlySkippedStages].map(stage => requireLiveSkippedStage(cycle, stage));
+
+  const purchase = requireLiveStage(cycle, 'purchase');
+  const purchaseMemo = requireNonemptyString(purchase.memo, 'live purchase memo');
+  const purchaseSignature = requireNonemptyString(purchase.signature, 'live purchase signature');
+  if (purchase.expectedCardCount !== 1) throw new Error('live purchase must bind exactly one expected card');
+  const packCost = requireLiveSettlementAmount(purchase.packCost, 'live purchase pack cost', { positive: true });
+  if (packCost.amountAtomic !== requireDecimal(cycle.releaseAmount, 'live rehearsal release amount')) {
+    throw new Error('live purchase pack cost must equal the cycle release amount');
+  }
+
+  const open = requireLiveStage(cycle, 'open');
+  if (open.memo !== purchaseMemo) throw new Error('live open memo does not match the purchase');
+  const openSignature = requireNonemptyString(open.signature, 'live open signature');
+  const mint = requireNonemptyString(open.mint, 'live opened card mint');
+  if (open.assetKind !== 'spl' && open.assetKind !== 'mpl-core') throw new Error('live opened card asset kind is invalid');
+
+  const epicGate = requireLiveStage(cycle, 'epic-gate');
+  if (epicGate.memo !== purchaseMemo || epicGate.mint !== mint || epicGate.decision !== 'sell') {
+    throw new Error('live epic decision does not bind the opened card and sell path');
+  }
+  const offer = requireLiveSettlementAmount(epicGate.offer, 'live epic buyback offer', { positive: true });
+  const insuredValue = requireLiveSettlementAmount(epicGate.insuredValue, 'live epic insured value', { positive: true });
+
+  const buyback = requireLiveStage(cycle, 'buyback');
+  if (buyback.memo !== purchaseMemo || buyback.mint !== mint) throw new Error('live buyback does not bind the opened card');
+  const buybackSignature = requireNonemptyString(buyback.signature, 'live buyback signature');
+  const quote = requireLiveSettlementAmount(buyback.quote, 'live buyback quote', { positive: true });
+  const refundAmount = requireLiveSettlementAmount(buyback.refundAmount, 'live buyback refund amount', { positive: true });
+  const proceeds = requireLiveSettlementAmount(buyback.proceeds, 'live buyback proceeds', { positive: true });
+  if (!sameLiveAmount(offer, quote) || !sameLiveAmount(quote, refundAmount) || !sameLiveAmount(refundAmount, proceeds)) {
+    throw new Error('live buyback amounts do not match the finalized offer and proceeds');
+  }
+  const projection = requirePlainObject(buyback.proceedsProjection, 'live rehearsal evidence requires a dedicated Solana proceeds projection');
+  const proceedsAccount = requireNonemptyString(projection.account, 'live dedicated proceeds account');
+  const beforeAtomic = requireDecimal(projection.beforeAtomic, 'live dedicated proceeds balance before');
+  const afterAtomic = requireDecimal(projection.afterAtomic, 'live dedicated proceeds balance after');
+  const projectedDelta = requireLiveSettlementAmount(projection.delta, 'live dedicated proceeds delta', { positive: true });
+  if (BigInt(afterAtomic) - BigInt(beforeAtomic) !== BigInt(projectedDelta.amountAtomic) || !sameLiveAmount(projectedDelta, proceeds)) {
+    throw new Error('live dedicated proceeds projection does not match the finalized buyback delta');
+  }
+
+  const payout = requireLiveStage(cycle, 'payout');
+  const payoutSignature = requireNonemptyString(payout.signature, 'live payout signature');
+  if (payout.buybackSignature !== buybackSignature || payout.sourceTokenAccount !== proceedsAccount || payout.proceedsAccount !== proceedsAccount) {
+    throw new Error('live payout does not debit the dedicated finalized proceeds account');
+  }
+  const payoutProceeds = requireLiveSettlementAmount(payout.proceeds, 'live payout proceeds', { positive: true });
+  const allocated = requireLiveSettlementAmount(payout.allocated, 'live payout allocation', { positive: true });
+  if (!sameLiveAmount(payoutProceeds, proceeds) || !sameLiveAmount(allocated, proceeds)) {
+    throw new Error('live payout conservation does not match the finalized proceeds delta');
+  }
+  if (!Array.isArray(payout.recipients) || payout.recipients.length === 0) {
+    throw new Error('live payout requires at least one recipient allocation');
+  }
+  const recipientIds = new Set();
+  const recipientAccounts = new Set();
+  let allocatedAtomic = 0n;
+  const recipients = payout.recipients.map((entry, index) => {
+    const recipient = requireNonemptyString(entry?.recipient, `live payout recipient ${index}`);
+    const tokenAccount = requireNonemptyString(entry?.tokenAccount, `live payout recipient ${index} token account`);
+    if (recipient === proceedsAccount || tokenAccount === proceedsAccount || recipientIds.has(recipient) || recipientAccounts.has(tokenAccount)) {
+      throw new Error('live payout recipients must be distinct from the dedicated proceeds account and each other');
+    }
+    const amount = requireLiveSettlementAmount(entry.amount, `live payout recipient ${index} amount`, { positive: true });
+    recipientIds.add(recipient);
+    recipientAccounts.add(tokenAccount);
+    allocatedAtomic += BigInt(amount.amountAtomic);
+    return Object.freeze({ recipient, tokenAccount, amount });
+  });
+  if (allocatedAtomic !== BigInt(allocated.amountAtomic)) throw new Error('live payout recipient allocations do not exactly conserve proceeds');
+
+  return Object.freeze({
+    schema: 'hookemon.rehearsal-evidence.v1',
+    cycleId: cycle.cycleId,
+    mode: cycle.mode,
+    providerMode: cycle.providerMode,
+    releaseAmount: packCost,
+    skippedStages: Object.freeze(skipped),
+    purchase: Object.freeze({ memo: purchaseMemo, signature: purchaseSignature, packCost }),
+    open: Object.freeze({ memo: purchaseMemo, signature: openSignature, mint, assetKind: open.assetKind }),
+    epicGate: Object.freeze({ memo: purchaseMemo, mint, offer, insuredValue }),
+    buyback: Object.freeze({ memo: purchaseMemo, mint, signature: buybackSignature, quote, refundAmount, proceeds }),
+    proceeds: Object.freeze({ account: proceedsAccount, beforeAtomic, afterAtomic, delta: projectedDelta }),
+    payout: Object.freeze({ signature: payoutSignature, recipients: Object.freeze(recipients), proceeds: payoutProceeds, allocated }),
+  });
 }
 
 function requireEvidence(value, cycleId, stage) {
@@ -56,6 +212,7 @@ function sameAmount(left, right) {
 export function collectRehearsalEvidence(description, { allowReadyToComplete = false } = {}) {
   if (typeof allowReadyToComplete !== 'boolean') throw new Error('rehearsal evidence readiness option is invalid');
   const cycle = requireDescription(description, { allowReadyToComplete });
+  if (cycle.providerMode === 'live') return collectLiveCollectorOnlyEvidence(cycle);
   for (const stage of OPERATIONAL_CYCLE_STAGES) {
     const record = cycle.stages.get(stage);
     if (record?.status !== 'COMPLETE') throw new Error(`rehearsal evidence stage ${stage} is incomplete`);

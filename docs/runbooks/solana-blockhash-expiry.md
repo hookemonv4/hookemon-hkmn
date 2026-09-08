@@ -2,46 +2,39 @@
 
 ## Detection
 
-Alert when validity evidence has `observedHeight > lastValidHeight`, the RPC
-rejects signed bytes for a stale blockhash, or a `BROADCAST` attempt lacks
-finalization at that boundary. The journal must retain the signed bytes,
-signature, blockhash, and validity evidence.
+The retained transaction blockhash or its validity height has expired without a finalized result.
 
 ## Safe stop
 
-Do not sign a replacement or advance the stage. Preserve the original attempt
-and reconcile it; a missing final result is not proof that no transaction ran.
+Preserve the original signature and signed bytes. Do not infer non-inclusion from expiry.
 
 ## Runner behavior
 
-The required failure-matrix outcome is `HELD_UNAVAILABLE` with the attempt at
-`BROADCAST`, followed by an owner decision after reconciliation establishes the
-original outcome. Transaction policy rejects stale blockhashes before broadcast
-and binds the blockhash to the signed message.
+The stage remains nonterminal and retains its BROADCAST attempt, original signed bytes, signature, blockhash and validity evidence. A missing final result or an expired height alone never proves the transaction did not land.
 
 ## Operator recovery
 
-No incident-specific CLI recovery control exists. Do not resend bytes from an
-ad-hoc tool. `resume` and `abort-cycle` are planned (WP12); dashboard
-pause/resume is planned (WP10b). Use either only after reconciliation supplies
-finalized evidence for the original attempt.
+Reconcile the original signature and require the approved expired-and-unlanded proof before any replacement.
 
-## Escalation
+## Recovery constraints
 
-Escalate if finalization and non-broadcast cannot be distinguished after the
-validity boundary, if observers disagree, or if a new signature was requested.
+The matrix action describes the existing recovery boundary, not permission to rebroadcast expired bytes. Reconcile the original signature first. Replacement requires canonical expired-and-unlanded proof, one linked replacement and permanent retention of the original evidence under the approved recovery contract. The cited test proves retention across reopen, not the complete replacement sequence.
 
-## Evidence
-
-Failure-matrix cell: Chain transaction:expired-blockhash.
-Traceability: L4-M9.
-Owning work package: WP08a, WP13.
+Requirements revision 68 retains the owner-approved bounded-transient classification from revision 66. Its exact approval is recorded in `decisions/owner-approvals/revision-68-spec-s5-approved.json`. The canonical matrix binds the implemented stage boundary below; broader recovery claims require their own executable evidence. Semantic-invalid wrong-asset, wrong-recipient and conflicting-evidence holds remain unchanged.
 
 ## Recovery contract
 
 Failure-matrix cells: Chain transaction:expired-blockhash
 Owning work package: WP08a
-Expected outcome: terminal=HELD_UNAVAILABLE; attempt=BROADCAST; next=owner-decision
-Test: packages/adapters/test/app/stage-driver.test.mjs — holds an expired return blockhash while retaining a broadcast attempt after reopen
+Expected outcome: terminal=none; attempt=BROADCAST; next=reconcile-or-rebroadcast
+Test: packages/adapters/test/app/stage-driver.test.mjs — keeps an expired return blockhash retryable while retaining a broadcast attempt after reopen
 Alarm reason/code: `SOLANA_BLOCKHASH_STALE`
-Resume command: none supported; reconcile the original signed bytes and signature before any replacement is considered.
+Resume command: none supported outside the approved recovery path; use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
+
+## Escalation
+
+Preserve the cycle and stage identifiers, request digest and redacted failure evidence. Escalate conflicting canonical evidence or an attempted identity, amount or signed-byte change before allowing another effect.
+
+## Evidence
+
+Retain the cycle and attempt identifiers, original request digest, validity context and redacted failure record cited above.

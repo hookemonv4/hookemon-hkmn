@@ -2,8 +2,8 @@
   "schemaVersion": "hookemon.interfaces.v1",
   "source": "Approved Phase 3 plan sections 4, 6, 9, and 11",
   "productPhase": 3,
-  "requirementsRevision": 65,
-  "architectureRevision": 9,
+  "requirementsRevision": 67,
+  "architectureRevision": 10,
   "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
   "bindingManifest": "release/phase3/deployment-manifest.json",
   "bindingManifestDigest": null,
@@ -168,10 +168,22 @@
     },
     "custodyLedger": {
       "schema": "hookemon.custody-ledger.v2",
-      "verifiedCurrentBalance": "finalized observed on-chain TypedAmount",
+      "scope": "EVM USDG canonical row only in this revision; a non-EVM-USDG row stays on hookemon.custody-ledger.v1, or, if migrated, stays permanently unvalued and fail-closed under the admission rule below, until a separately approved evidence producer exists for it",
+      "verifiedCurrentBalance": "CustodyBalanceObservationV1 | null -- {schema, account, balance: TypedAmount, finality: {height, hash, timestampUnixSeconds}}; for the EVM USDG row, produced only by a dedicated public/archive/public-recheck finalized-balance reader reusing payout-availability.mjs's evidence discipline; null permitted only on a key's first-ever write; no non-null-to-null erasure and no v2-to-v1 downgrade",
       "obligations": "tracked separately from verified balance; unresolved principal is counted once",
-      "expectedCycleAssets": "cycle-attributed TypedAmounts",
-      "unattributedExternalDeposits": "separate classification that pauses new claims"
+      "expectedCycleAsset": "singular TypedAmount | null per row, never a collection; a second unresolved return-direction leg for the same resolved chain/asset is refused before append, leaving the row's existing value unchanged",
+      "unattributedExternalDeposits": "separate classification that pauses new claims",
+      "admissionRule": "unvaluedExposure becomes true for the EVM USDG row when verifiedCurrentBalance is null while unresolvedClaim is positive or any current-custody bucket is nonzero; a row with a non-null verifiedCurrentBalance is never marked unvalued by this rule",
+      "nonEvmEvidenceConstructionContract": {
+        "source": "packages/adapters/src/solana-custody-balance-observation.mjs",
+        "sourceDigest": "sha256:08b85e992141a3e2abc8122d857cb3fd8c7d9e165b7cb44dd3fa7c75f54e0274",
+        "exports": ["combineFinalizedBalanceObservation", "observeFinalizedBalanceWithRetry", "SolanaCustodyObservationError"],
+        "trustInputs": "a caller-pinned canonical {chainId, assetId, decimals, mint, owner, tokenProgramId} identity plus two independently configured finalized-commitment read sides; performs no RPC I/O and selects no chain/asset identity itself",
+        "status": "an allowed pure combiner shape only; not itself a durable producer, canonical chain/asset identity source, custody-ledger writer, valuation, or live readiness proof for any row"
+      },
+      "source": "decisions/ADR-0026-custody-ledger-v2-migration.md",
+      "sourceDigest": "sha256:1157569815b5da153388ab6431a19a09eedeeefbf39cda494a67e636bdf23ef5",
+      "liveBindingStatus": "no bindings/index.json entry exists for this interface; none is created until a real, independently approved binding path, digest, and value exist"
     },
     "terminalHold": {"states": "HELD_*", "nextTransition": "idempotent-owner-decision"},
     "writeAhead": true,
@@ -190,7 +202,42 @@
     },
     "revalidateSignedMessageBeforeBroadcast": true,
     "signers": ["operations-evm", "operations-solana"],
-    "nodeSigning": "FORBIDDEN_UNLESS_RECORDED_OWNER_EXCEPTION"
+    "nodeSigning": "FORBIDDEN_UNLESS_RECORDED_OWNER_EXCEPTION",
+    "providerSpecificPurchasePolicy": {
+      "id": "collector-purchase-binding-v1",
+      "source": "packages/adapters/src/signing/collector-purchase-policy.mjs",
+      "sourceDigest": "sha256:e2528a63151b385098ceb2dc84accaf227c94c9ec08bab4c3fcb51b0debf2ae2",
+      "exports": ["COLLECTOR_PURCHASE_BINDING_SCHEMA", "COLLECTOR_PURCHASE_BINDING_VERSION", "CollectorPurchasePolicyError", "assertCollectorPurchaseBindingV1", "createCollectorPurchasePolicy"],
+      "trustInputs": "binding bytes and expectedDigest are independently supplied and digest-verified before the schema is read; durable per-cycle facts; an independently observed RPC blockhash context; candidate transaction bytes are never a legal factory input and are evaluated only by this same hookemon.transaction-policy.v1 decode/evaluate kernel",
+      "integrationStatus": "WIRED_NO_LIVE_ENTRY",
+      "liveBindingStatus": "packages/adapters/src/app/stages/purchase.mjs resolves this factory behind two mutually exclusive seams -- a Node-test-only fixture and the productionBindingRegistry below -- but no live Collector program, account, provider co-signer, mint, expectedDigest source, or repository binding path is approved; no bindings/index.json entry exists for this interface and production composition has no path to a resolvable live entry"
+    },
+    "providerSpecificBuybackPolicy": {
+      "id": "collector-buyback-binding-v1",
+      "source": "packages/adapters/src/signing/collector-buyback-policy.mjs",
+      "sourceDigest": "sha256:f4ab7677a3d2be9c3e21b469d4f40ce64ccdb416ef3bfc6ae6d79f99ae237366",
+      "exports": ["COLLECTOR_BUYBACK_BINDING_SCHEMA", "COLLECTOR_BUYBACK_BINDING_VERSION", "COLLECTOR_BUYBACK_SETTLE_INSTRUCTION_INDEX", "CollectorBuybackPolicyError", "assertCollectorBuybackBindingV1", "createCollectorBuybackPolicy"],
+      "trustInputs": "binding bytes and expectedDigest are independently supplied and digest-verified before the schema is read; durable per-pack facts including the persisted quote/minimum/refund and the opened-asset/current-owner relation; an independently observed RPC blockhash context; candidate transaction bytes are never a legal factory input and are evaluated only by this same hookemon.transaction-policy.v1 decode/evaluate kernel; distinct from and never derived from the purchase binding schema",
+      "integrationStatus": "WIRED_NO_LIVE_ENTRY",
+      "liveBindingStatus": "packages/adapters/src/app/stages/buyback.mjs resolves this factory only through the productionBindingRegistry below, per pack, before the provider buyback() call is awaited; no live Collector program, authority, recipient, proceeds account, discriminator, or expectedDigest source is approved; production composition has no path to a resolvable live entry"
+    },
+    "collectorProductionBindingRegistry": {
+      "id": "collector-production-binding-registry-v1",
+      "source": "packages/adapters/src/signing/collector-production-binding.mjs",
+      "sourceDigest": "sha256:5ab3573c6760f5e6ed0fadd924a3d0cba3d466227aab3a2cfac6445150a55273",
+      "exports": ["COLLECTOR_PRODUCTION_BINDING_REGISTRY_SCHEMA", "COLLECTOR_PRODUCTION_BINDING_ENTRY_SCHEMA", "COLLECTOR_PRODUCTION_BINDING_AUTHORITY_LIVE", "COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE", "CollectorProductionBindingError", "loadCollectorProductionBindingRegistry", "assertCollectorOfflineExecutionBoundary", "createLoopbackConfinedFetch", "createIsolatedKeychainChildSetup", "COLLECTOR_SYNTHETIC_API_KEY", "RELAY_SYNTHETIC_API_KEY", "resolveCollectorProductionBinding"],
+      "authorities": {
+        "live": "refused unconditionally by both loadCollectorProductionBindingRegistry and resolveCollectorProductionBinding; no independently pinned live-authority mechanism exists in this codebase, so an entry cannot grant itself live authority merely by matching its own expectedDigest",
+        "synthetic-offline": "resolves only after assertCollectorOfflineExecutionBoundary passes every one of its independent, composite checks together: production execution profile, no rehearsal configuration, the explicit authority selection, every actually-transport-read endpoint (Collector, Solana, both Robinhood RPCs, Relay) present and resolving to an explicit loopback http/https URL with no embedded userinfo, and config.signer.keychain.isolatedChildSetup being the exact object createIsolatedKeychainChildSetup returned (module-private WeakSet membership, never a value/shape match) with config.signer.keychain.command equal to that setup's own command, running the real live-signing protocol (signer.liveMode===true) against it -- liveMode is not itself an isolation signal, only the authenticated wrapper and endpoint confinement around it make it safe"
+      },
+      "configSurface": {
+        "environment": ["HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY (accepts only \"synthetic-offline\", checked before any credential-file-selector env var is read)", "HOOKEMON_COLLECTOR_SYNTHETIC_ROOT (the isolated root createIsolatedKeychainChildSetup uses; required under synthetic-offline)", "HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH (a JSON file read like any other config file this module reads; the path grants no authority, only the digest-validated content does)", "under synthetic-offline, HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH is refused outright and the inline HOOKEMON_COLLECTOR_CRYPT_API_KEY/HOOKEMON_RELAY_API_KEY values must equal the fixed COLLECTOR_SYNTHETIC_API_KEY/RELAY_SYNTHETIC_API_KEY sentinels"],
+        "composeInjection": "config.collectorProductionBindingRegistry -- a raw registry object/JSON text (from either the environment-sourced file or direct test/CLI injection, the same seam config.adapters already uses), validated by loadCollectorProductionBindingRegistry before compose.mjs attaches it as resolved.collectorCrypt.productionBindingRegistry; bin/hookemon-runner.mjs's compositionInput forwards it, and the constructed env.signer, from readEnvironment's output. config.signer.keychain.isolatedChildSetup is never an env var (an opaque WeakSet-branded object); the real bin/hookemon-runner.mjs entrypoint constructs it itself (applySyntheticIsolatedChildSetup, called from buildComposition once readEnvironment reports synthetic-offline) and overlays it onto env.signer.keychain before composition -- no test-only manual overlay or in-process config surgery is needed",
+        "isolatedChildSetup": "createIsolatedKeychainChildSetup({directory}) takes no caller-supplied security backend or command: it resolves the real bin/hookemon-keychain-signer.mjs, bin/hookemon-wallet.mjs, and test/fixtures/keychain/security all from this module's own import.meta.url root (never a caller-supplied path), requires directory to be an absolute, non-symlinked real directory, reuses an existing ephemeral identity at that root if present (never minting a replacement on every launch), and writes a wrapper (atomic temp-file-then-rename replace) spawning the fixed signer path with a minimal, explicitly allowlisted child environment (PATH pinned to the running interpreter's own directory, plus exactly the isolated backend's fixed variables, never process.env). The returned setup carries a digest over the wrapper's own bytes, re-verified at every point of use",
+        "transportConfinement": "createLoopbackConfinedFetch, threaded as fetchImpl into the Collector, Relay, and Solana RPC clients, and via viem's own http(url,{fetchFn}) transport into all three Robinhood/EVM construction sites (primary client, secondaryLogClient, archiveEvidenceClientFromConfig) compose.mjs's buildAdapters constructs only for the synthetic-offline authority, and into bin/hookemon-runner.mjs's own chainBroadcastTransports (the actual already-signed-byte EVM/Solana broadcast clients, constructed independently of compose.mjs's adapters) for the same authority; refuses a nonlocal request URL and refuses to follow a 3xx redirect response. No EVM exception and no unconfined broadcast path"
+      },
+      "liveBindingStatus": "no live registry entry is approved or shipped anywhere in this repository"
+    }
   },
   "eligibilitySnapshot": {
     "timing": "before-claim-at-finalized-block",

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createDefaultOperatorConfiguration } from '../../src/config/state-schema.mjs';
+import { MAXIMUM_PACK_BATCH_SIZE } from '../../src/cycle/money-schemas.mjs';
 import {
+  assertCollectorOnlyRehearsalPolicy,
+  assertPolicyAdmission,
   createPolicyEngine,
   deriveCyclePolicyDigest,
   POLICY_WINDOW_MS,
@@ -44,6 +48,7 @@ function policyFixture({
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
       ...custody,
@@ -60,6 +65,42 @@ function policyFixture({
     replaceConfiguration: next => { current = next; },
   };
 }
+
+test('collector-only live rehearsal policy binds one approved pack, one booster, and one manual approval', () => {
+  const configuration = configuredPolicy({
+    allowedPackIds: ['collector-25'],
+    requestedOrders: 1,
+    maxBoostersPerCycle: 1,
+    maxUnitPriceMicroUsdg: '25000000',
+    maxCycleBudgetMicroUsdg: '25000000',
+    max24HourBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000',
+    maxCyclesPerDay: 1,
+    manualApprovalCycles: 1,
+  });
+
+  assert.deepEqual(
+    assertCollectorOnlyRehearsalPolicy(configuration, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    configuration,
+  );
+  assert.throws(
+    () => assertCollectorOnlyRehearsalPolicy({ ...configuration, maxBoostersPerCycle: 2 }, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    /maxBoostersPerCycle must equal 1/,
+  );
+  assert.throws(
+    () => assertCollectorOnlyRehearsalPolicy({ ...configuration, allowedPackIds: ['another-pack'] }, {
+      packCode: 'collector-25',
+      packPriceAtomic: '25000000',
+    }),
+    /allow exactly the selected pack/,
+  );
+});
 
 test('standing-authority cap reservation delegates one exact decision to the authoritative repository', async () => {
   const decision = {
@@ -198,6 +239,7 @@ test('a claim admission rechecks custody inside the durable reservation boundary
         atRiskMicroUsdg: '0',
         outstandingMicroUsdg: '0',
         heldAssets: false,
+        heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
         unattributed: reads > 1,
         unvaluedExposure: false,
       };
@@ -331,11 +373,107 @@ test('a claim-stage mutation guard requires the admission reservation to persist
   );
 });
 
-test('claim admission fails closed for the pack allowlist and all custody loss controls', async () => {
+test('claim admission keeps legacy held state and pending decisions nonblocking', async () => {
+  const { engine } = policyFixture({
+    configuration: configuredPolicy({
+      maxHeldPositions: 2,
+      maxHeldValueMicroUsdg: '5',
+      pendingEpicDecisions: [{
+        cycleId: 'cycle-prior-held-decision',
+        cycleDigest: `sha256:${'d'.repeat(64)}`,
+        heldAtMs: 1,
+      }],
+    }),
+    custody: {
+      heldAssets: true,
+      heldPositions: { count: 1, valueMicroUsdg: '5', positions: [{ valueMicroUsdg: '5' }] },
+    },
+  });
+
+  const decision = await engine.admit({
+    boundary: 'claim-process',
+    cycleId: 'cycle-held-position-under-limit',
+    releaseAmountMicroUsdg: '5000000',
+    packId: 'base-pack',
+    liveMode: true,
+  });
+
+  assert.equal(decision.allowed, true);
+});
+
+test('claim admission refuses at the held-position count or value limit', async () => {
+  for (const [configuration, custody] of [
+    [
+      configuredPolicy({ maxHeldPositions: 1, maxHeldValueMicroUsdg: '100' }),
+      { heldPositions: { count: 1, valueMicroUsdg: '0', positions: [{ valueMicroUsdg: '0' }] } },
+    ],
+    [
+      configuredPolicy({ maxHeldPositions: 2, maxHeldValueMicroUsdg: '5' }),
+      { heldPositions: { count: 1, valueMicroUsdg: '6', positions: [{ valueMicroUsdg: '6' }] } },
+    ],
+  ]) {
+    const { engine } = policyFixture({ configuration, custody });
+    assert.deepEqual(await engine.admit({
+      boundary: 'claim-process',
+      cycleId: `cycle-held-limit-${custody.heldPositions.count}-${custody.heldPositions.valueMicroUsdg}`,
+      releaseAmountMicroUsdg: '5000000',
+      packId: 'base-pack',
+      liveMode: true,
+    }), { allowed: false, reason: 'HELD_LIMIT' });
+  }
+});
+
+test('claim admission rejects a held-position projection whose count understates its positions', async () => {
+  const { engine } = policyFixture({
+    configuration: configuredPolicy({ maxHeldPositions: 1, maxHeldValueMicroUsdg: '5' }),
+    custody: {
+      heldPositions: {
+        count: 0,
+        valueMicroUsdg: '0',
+        positions: [{ valueMicroUsdg: '6' }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    engine.admit({
+      boundary: 'claim-process',
+      cycleId: 'cycle-inconsistent-held-positions',
+      releaseAmountMicroUsdg: '5000000',
+      packId: 'base-pack',
+      liveMode: true,
+    }),
+    /heldPositions count/i,
+  );
+});
+
+test('claim admission rejects a held-position projection whose value understates its positions', async () => {
+  const { engine } = policyFixture({
+    configuration: configuredPolicy({ maxHeldPositions: 2, maxHeldValueMicroUsdg: '5' }),
+    custody: {
+      heldPositions: {
+        count: 1,
+        valueMicroUsdg: '0',
+        positions: [{ valueMicroUsdg: '6' }],
+      },
+    },
+  });
+
+  await assert.rejects(
+    engine.admit({
+      boundary: 'claim-process',
+      cycleId: 'cycle-inconsistent-held-value',
+      releaseAmountMicroUsdg: '5000000',
+      packId: 'base-pack',
+      liveMode: true,
+    }),
+    /heldPositions value/i,
+  );
+});
+
+test('claim admission fails closed for the pack allowlist and custody loss controls', async () => {
   const scenarios = [
     [{}, { packId: 'other-pack' }, 'PACK_NOT_ALLOWED'],
-    [{ pendingEpicDecisions: [{ cycleId: 'held-cycle', cycleDigest: `sha256:${'1'.repeat(64)}`, heldAtMs: 1 }] }, {}, 'HELD_CUSTODY'],
-    [{}, { custody: { heldAssets: true } }, 'HELD_CUSTODY'],
     [{}, { custody: { unattributed: true } }, 'UNATTRIBUTED_CUSTODY'],
     [{}, { custody: { unvaluedExposure: true } }, 'UNVALUED_CUSTODY'],
     [{ lossCapMicroUsdg: '5000000' }, { custody: { atRiskMicroUsdg: '1' } }, 'LOSS_CAP'],
@@ -380,10 +518,10 @@ test('the first production cycle needs an approval bound to its exact policy dig
 test('claim admission rejects configuration values above the fixed operator ceilings', async () => {
   const { engine } = policyFixture({
     configuration: configuredPolicy({
-      maxUnitPriceMicroUsdg: '25000001',
-      maxCycleBudgetMicroUsdg: '50000001',
-      max24HourBudgetMicroUsdg: '3600000001',
-      perCycleCapMicroUsdg: '50000001',
+      maxUnitPriceMicroUsdg: '55000001',
+      maxCycleBudgetMicroUsdg: '165000001',
+      max24HourBudgetMicroUsdg: '495000001',
+      perCycleCapMicroUsdg: '165000001',
     }),
   });
 
@@ -397,6 +535,429 @@ test('claim admission rejects configuration values above the fixed operator ceil
     }),
     /fixed hard cap/i,
   );
+});
+
+// H's verified exact-output bridge quote (H-funding-observations.md, 2026-09-05): acquiring
+// 50,000,000 atomic units of Solana mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v (two
+// `pokemon_25` packs) required exactly this many atomic USDG in. The assets differ; this is the one
+// number in this file that is a measured quote, not a derived multiple or a round USD guess.
+const VERIFIED_N2_QUOTE_INPUT_MICRO_USDG = '50309869';
+
+function parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds, requestId: overrideRequestId, orderId: overrideOrderId }) {
+  const sender = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
+  const recipient = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+  const origin = {
+    chainId: 4663, address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amount: unitFunding,
+  };
+  const destination = {
+    chainId: 792703809, address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6,
+    amount: unitPurchase, minimumAmount: unitPurchase,
+  };
+  const requestId = overrideRequestId ?? `relay-unit-${cycleId}`;
+  const orderId = overrideOrderId ?? `0x${'1'.repeat(64)}`;
+  const raw = {
+    requestId,
+    details: {
+      sender,
+      recipient,
+      currencyIn: { currency: { chainId: origin.chainId, address: origin.address, decimals: origin.decimals }, amount: origin.amount },
+      currencyOut: { currency: { chainId: destination.chainId, address: destination.address, decimals: destination.decimals }, amount: destination.amount, minimumAmount: destination.minimumAmount },
+    },
+    protocol: { v2: { orderId, orderData: {
+      inputs: [{ payment: { chainId: 'robinhood', currency: origin.address, amount: origin.amount } }],
+      output: { chainId: 'solana', deadline: deadlineUnixSeconds, calls: [], payments: [{ recipient, currency: destination.address, expectedAmount: destination.amount, minimumAmount: destination.minimumAmount }] },
+    } } },
+    steps: [],
+  };
+  const quote = {
+    direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId, sender, recipient,
+    deadlineUnixSeconds, origin, destination, stepCount: raw.steps.length, raw,
+  };
+  return {
+    ...quote,
+    quoteDigest: digest({
+      schema: 'hookemon.relay-quote.v1', direction: quote.direction, tradeType: quote.tradeType,
+      requestId: quote.requestId, orderId: quote.orderId, sender: quote.sender, recipient: quote.recipient,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds, origin: quote.origin, destination: quote.destination, raw: quote.raw,
+    }),
+  };
+}
+
+// Same sha256-of-the-plain-cycleId formula as `deriveOnchainCycleId` in
+// packages/adapters/src/app/stages/action-builder.mjs, duplicated to keep this package boundary
+// clean; the policy engine's own evidence normalizer computes it the same way.
+function onchainCycleIdFor(cycleId) {
+  return `0x${createHash('sha256').update(cycleId, 'utf8').digest('hex')}`;
+}
+
+const PRODUCTION_HOOK = `0x${'7'.repeat(40)}`;
+
+/** A finalized hook process-liability evidence record covering exactly `ceilingAtomic`. */
+function processLiabilityEvidenceFixture({ cycleId, ceilingAtomic }) {
+  return {
+    schema: 'hookemon.process-liability-evidence.v1',
+    chainId: '4663',
+    assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    decimals: 6,
+    hook: PRODUCTION_HOOK,
+    cycleId,
+    onchainCycleId: onchainCycleIdFor(cycleId),
+    blockNumber: '12345',
+    blockHash: `0x${'3'.repeat(64)}`,
+    finalized: true,
+    processLiability: ceilingAtomic,
+    remainingProcessClaimCapacity: ceilingAtomic,
+    processClaimsPaused: false,
+    processClaimCycleUsed: false,
+    activeProcessClaimLimit: ceilingAtomic,
+    totalLiability: ceilingAtomic,
+    hookUsdgBalance: ceilingAtomic,
+    isSolvent: true,
+    operations: '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384',
+    ceilingAtomic,
+  };
+}
+
+function exactOutputAdmission({
+  cycleId, quantity = 2, unitPurchase = '25000000', unitFunding = '25000000',
+  aggregateFunding = quantity === 1 ? unitFunding : VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, deadlineUnixSeconds = 1_000_000,
+} = {}) {
+  const aggregatePurchase = (BigInt(unitPurchase) * BigInt(quantity)).toString();
+  const unitRelayQuote = parsedUnitRelayQuote({ cycleId, unitFunding, unitPurchase, deadlineUnixSeconds });
+  // The aggregate quote is the one restart and outbound execute, so it now carries the same parsed
+  // and raw evidence as the unit quote and its digest is recomputed from that evidence too.
+  const relayQuote = parsedUnitRelayQuote({
+    cycleId,
+    unitFunding: aggregateFunding,
+    unitPurchase: aggregatePurchase,
+    deadlineUnixSeconds,
+    requestId: 'relay-n2',
+    orderId: `0x${'2'.repeat(64)}`,
+  });
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    packId: 'base-pack',
+    quantity,
+    quoteDigest: relayQuote.quoteDigest,
+    unitPurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: unitPurchase },
+    aggregatePurchase: { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6, amountAtomic: aggregatePurchase },
+    unitFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: unitFunding },
+    aggregateFundingQuote: { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: aggregateFunding },
+    unitRelay: {
+      tradeType: 'EXACT_OUTPUT', requestId: `relay-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`,
+      quoteDigest: unitRelayQuote.quoteDigest, deadlineUnixSeconds,
+      sender: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384', recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE',
+      destinationAmount: unitPurchase, destinationMinimumAmount: unitPurchase,
+    },
+    unitRelayQuote,
+    relayQuote,
+    relay: {
+      tradeType: 'EXACT_OUTPUT', requestId: 'relay-n2', orderId: `0x${'2'.repeat(64)}`,
+      quoteDigest: relayQuote.quoteDigest,
+      deadlineUnixSeconds, sender: '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384',
+      recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE', destinationAmount: aggregatePurchase, destinationMinimumAmount: aggregatePurchase,
+    },
+    processLiabilityEvidence: processLiabilityEvidenceFixture({ cycleId, ceilingAtomic: aggregateFunding }),
+  };
+}
+
+test('N2 admission keeps the independent unit quote on the unit rail and reserves the aggregate quote once', async () => {
+  const cycleId = 'cycle-n2-separate-quotes';
+  const admission = exactOutputAdmission({ cycleId });
+  const configuration = configuredPolicy({
+    maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
+    perCycleCapMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, max24HourBudgetMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
+    lossCapMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, maxOutstandingCustodyMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
+    maxCyclesPerDay: 1, manualApprovalCycles: 0, requestedOrders: 2, maxBoostersPerCycle: 2,
+  });
+  let timestamp = 1_000;
+  const { engine, readConfiguration } = policyFixture({ configuration, now: () => timestamp });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  const admitted = await engine.admit(request);
+  assert.equal(admitted.allowed, true);
+  assert.deepEqual(await engine.evaluatePurchase(request), { allowed: true, cycleDigest: admitted.cycleDigest });
+  assert.equal(readConfiguration().spendLedger.length, 1);
+  assert.equal(readConfiguration().spendLedger[0].amountMicroUsdg, VERIFIED_N2_QUOTE_INPUT_MICRO_USDG);
+
+  const unitOver = exactOutputAdmission({ cycleId, unitFunding: '25000001' });
+  assert.deepEqual(await engine.evaluatePurchase({ ...request, admission: unitOver }), { allowed: false, reason: 'UNIT_PRICE_CAP' });
+  assert.deepEqual(await engine.admit({ ...request, cycleId: 'cycle-n2-over-cap', admission: exactOutputAdmission({ cycleId: 'cycle-n2-over-cap', aggregateFunding: '50309870' }), releaseAmountMicroUsdg: '50309870' }), { allowed: false, reason: 'PER_CYCLE_CAP' });
+  timestamp += POLICY_WINDOW_MS;
+  assert.deepEqual(await engine.evaluatePurchase(request), { allowed: false, reason: 'SPEND_RESERVATION_EXPIRED' });
+});
+
+test('N1 requires immutable parsed Relay quote evidence before it can satisfy the unit-price rail', async () => {
+  const cycleId = 'cycle-unit-raw-evidence';
+  const forged = exactOutputAdmission({ cycleId, unitFunding: '1', aggregateFunding: '50309869' });
+  delete forged.unitRelayQuote;
+  const configuration = configuredPolicy({
+    requestedOrders: 2, maxBoostersPerCycle: 2, maxUnitPriceMicroUsdg: '1',
+    maxCycleBudgetMicroUsdg: '50309869', perCycleCapMicroUsdg: '50309869', max24HourBudgetMicroUsdg: '50309869',
+    lossCapMicroUsdg: '50309869', maxOutstandingCustodyMicroUsdg: '50309869', maxCyclesPerDay: 1, manualApprovalCycles: 0,
+  });
+  const { engine } = policyFixture({ configuration });
+  await assert.rejects(
+    () => engine.admit({
+      boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: '50309869', packId: 'base-pack', liveMode: true, admission: forged,
+    }),
+    /unitRelayQuote must be a parsed Relay quote/,
+  );
+});
+
+test('N1 admission accepts independently parsed unit and aggregate Relay evidence', async () => {
+  const cycleId = 'cycle-n1-parsed-evidence';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine, readConfiguration } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  const decision = await engine.admit(request);
+  assert.equal(decision.allowed, true);
+  assert.deepEqual(await engine.evaluatePurchase(request), { allowed: true, cycleDigest: decision.cycleDigest });
+  assert.equal(readConfiguration().spendLedger[0].amountMicroUsdg, admission.aggregateFundingQuote.amountAtomic);
+});
+
+test('N1 rejects a parsed Relay quote whose canonical digest or raw origin amount changes', async () => {
+  const cycleId = 'cycle-unit-evidence-mutation';
+  const admission = exactOutputAdmission({ cycleId });
+  const configuration = configuredPolicy({ requestedOrders: 2, maxBoostersPerCycle: 2, manualApprovalCycles: 0 });
+  const { engine } = policyFixture({ configuration });
+  const digestMutation = structuredClone(admission);
+  digestMutation.unitRelayQuote.raw.details.operation = 'changed';
+  await assert.rejects(
+    () => engine.admit({ boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, packId: 'base-pack', liveMode: true, admission: digestMutation }),
+    /unitRelayQuote digest does not match/,
+  );
+  const originMutation = structuredClone(admission);
+  originMutation.unitRelayQuote.raw.details.currencyIn.amount = '1';
+  await assert.rejects(
+    () => engine.admit({ boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: VERIFIED_N2_QUOTE_INPUT_MICRO_USDG, packId: 'base-pack', liveMode: true, admission: originMutation }),
+    /raw origin does not bind/,
+  );
+});
+
+test('quote refresh re-admits a replacement under current caps without a second reservation', async () => {
+  const cycleId = 'cycle-quote-refresh-success';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine, readConfiguration } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  const admitted = await engine.admit(request);
+  assert.equal(admitted.allowed, true);
+
+  const replacement = exactOutputAdmission({ cycleId, quantity: 1, deadlineUnixSeconds: 2_000_000 });
+  const decision = await engine.evaluateQuoteRefresh({
+    cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+    liveMode: true, admission, replacement,
+  });
+  assert.equal(decision.allowed, true);
+  assert.match(decision.refreshPolicyDecisionDigest, /^sha256:[0-9a-f]{64}$/);
+  // The refresh decision binds original+replacement together; it is never a stand-in for the
+  // cycle-policy digest that already governs the immutable original admission and reservation.
+  assert.notEqual(decision.refreshPolicyDecisionDigest, admitted.cycleDigest);
+  assert.equal(readConfiguration().spendLedger.length, 1);
+  assert.equal(readConfiguration().spendLedger[0].amountMicroUsdg, admission.aggregateFundingQuote.amountAtomic);
+});
+
+test('quote refresh refuses under a newly engaged kill switch without touching the reservation', async () => {
+  const cycleId = 'cycle-quote-refresh-kill-switch';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine, readConfiguration, replaceConfiguration } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  assert.equal((await engine.admit(request)).allowed, true);
+  replaceConfiguration({ ...readConfiguration(), killSwitch: true });
+
+  const replacement = exactOutputAdmission({ cycleId, quantity: 1, deadlineUnixSeconds: 2_000_000 });
+  assert.deepEqual(await engine.evaluateQuoteRefresh({
+    cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+    liveMode: true, admission, replacement,
+  }), { allowed: false, reason: 'KILL_SWITCH' });
+  assert.equal(readConfiguration().spendLedger.length, 1);
+});
+
+test('quote refresh refuses a replacement whose unit funding exceeds the current unit-price cap', async () => {
+  const cycleId = 'cycle-quote-refresh-unit-cap';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000000', maxCycleBudgetMicroUsdg: '25000000',
+    perCycleCapMicroUsdg: '25000000', max24HourBudgetMicroUsdg: '25000000',
+    lossCapMicroUsdg: '25000000', maxOutstandingCustodyMicroUsdg: '25000000',
+  });
+  const { engine } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  assert.equal((await engine.admit(request)).allowed, true);
+
+  const replacement = exactOutputAdmission({
+    cycleId, quantity: 1, unitFunding: '25000001', aggregateFunding: '25000000', deadlineUnixSeconds: 2_000_000,
+  });
+  assert.deepEqual(await engine.evaluateQuoteRefresh({
+    cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+    liveMode: true, admission, replacement,
+  }), { allowed: false, reason: 'UNIT_PRICE_CAP' });
+});
+
+test('quote refresh refuses a replacement whose principal no longer equals the immutable release amount', async () => {
+  const cycleId = 'cycle-quote-refresh-principal-drift';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const configuration = configuredPolicy({
+    manualApprovalCycles: 0, maxUnitPriceMicroUsdg: '25000001', maxCycleBudgetMicroUsdg: '25000001',
+    perCycleCapMicroUsdg: '25000001', max24HourBudgetMicroUsdg: '25000001',
+    lossCapMicroUsdg: '25000001', maxOutstandingCustodyMicroUsdg: '25000001',
+  });
+  const { engine } = policyFixture({ configuration });
+  const request = {
+    boundary: 'claim-process', cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  };
+  assert.equal((await engine.admit(request)).allowed, true);
+
+  const driftedReplacement = exactOutputAdmission({
+    cycleId, quantity: 1, aggregateFunding: '25000001', deadlineUnixSeconds: 2_000_000,
+  });
+  await assert.rejects(
+    () => engine.evaluateQuoteRefresh({
+      cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack',
+      liveMode: true, admission, replacement: driftedReplacement,
+    }),
+    /release amount does not match the immutable admitted principal/,
+  );
+});
+
+test('a quote-bound admission without process liability evidence is refused, not silently accepted as equivalent', () => {
+  const cycleId = 'cycle-evidence-absent';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  delete admission.processLiabilityEvidence;
+  assert.throws(() => assertPolicyAdmission(admission), /processLiabilityEvidence is required/);
+});
+
+test('a valid process liability evidence record survives normalization unchanged and binds the cycle policy digest', () => {
+  const cycleId = 'cycle-evidence-roundtrip';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const normalized = assertPolicyAdmission(admission);
+  assert.deepEqual(normalized.processLiabilityEvidence, admission.processLiabilityEvidence);
+
+  const configuration = configuredPolicy();
+  const baseDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission,
+  });
+  const mutated = structuredClone(admission);
+  // activeProcessClaimLimit only has a `remainingProcessClaimCapacity <= activeProcessClaimLimit`
+  // upper-bound relationship, so raising it keeps every other invariant intact.
+  mutated.processLiabilityEvidence.activeProcessClaimLimit = (BigInt(mutated.processLiabilityEvidence.activeProcessClaimLimit) + 1n).toString();
+  const mutatedDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg: admission.aggregateFundingQuote.amountAtomic,
+    packId: 'base-pack', liveMode: true, admission: mutated,
+  });
+  assert.notEqual(mutatedDigest, baseDigest, 'a one-field evidence mutation must change the cycle policy digest');
+});
+
+test('an aggregate funding quote above the persisted process liability ceiling is refused', () => {
+  const cycleId = 'cycle-evidence-over-ceiling';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const shrunk = structuredClone(admission);
+  for (const field of ['processLiability', 'remainingProcessClaimCapacity', 'ceilingAtomic']) {
+    shrunk.processLiabilityEvidence[field] = '1';
+  }
+  assert.throws(() => assertPolicyAdmission(shrunk), /exceeds the persisted process liability ceiling/);
+});
+
+test('each independent process liability evidence control refuses the admission', () => {
+  const cycleId = 'cycle-evidence-controls';
+  const admission = exactOutputAdmission({ cycleId, quantity: 1 });
+  const cases = [
+    [{ processClaimsPaused: true }, /refuses while hook process claims are paused/],
+    [{ processClaimCycleUsed: true }, /refuses a cycle id the hook already used/],
+    [{ isSolvent: false, hookUsdgBalance: '0' }, /refuses while the hook is not solvent/],
+    [{ operations: `0x${'9'.repeat(40)}` }, /Operations role does not match the approved deployment identity/],
+    [{ cycleId: 'a-different-cycle' }, /cycleId does not match the admitted cycle/],
+    [{ onchainCycleId: `0x${'9'.repeat(64)}` }, /onchainCycleId does not match its cycleId/],
+    [{ ceilingAtomic: (BigInt(admission.processLiabilityEvidence.ceilingAtomic) + 1n).toString() }, /ceilingAtomic does not equal min/],
+    [{ chainId: '1' }, /not denominated in the configured funding asset/],
+    [{ schema: 'hookemon.process-liability-evidence.v0' }, /must use hookemon\.process-liability-evidence\.v1/],
+    [{ notARecognizedField: '1' }, /unrecognized field/],
+    // The hook's own accounting guarantees these three relationships; a value combination outside
+    // them cannot have come from the contract regardless of who supplied it.
+    [{ activeProcessClaimLimit: '0' }, /remainingProcessClaimCapacity exceeds activeProcessClaimLimit/],
+    [{ totalLiability: '0' }, /processLiability exceeds totalLiability/],
+    [{ isSolvent: true, hookUsdgBalance: '0' }, /isSolvent does not match hookUsdgBalance and totalLiability/],
+  ];
+  for (const [override, pattern] of cases) {
+    const tampered = structuredClone(admission);
+    Object.assign(tampered.processLiabilityEvidence, override);
+    assert.throws(() => assertPolicyAdmission(tampered), pattern, JSON.stringify(override));
+  }
+});
+
+test('a policy admission quantity above the shared batch/catalog ceiling is refused before the cycle exists (BOT-PACK-QUANTITY P1)', () => {
+  const cycleId = 'cycle-quantity-over-ceiling';
+  const admission = exactOutputAdmission({ cycleId, quantity: MAXIMUM_PACK_BATCH_SIZE + 1 });
+  assert.throws(
+    () => assertPolicyAdmission(admission),
+    /policy admission quantity must be an integer from 1 through/,
+  );
+});
+
+test('the verified N2 two-pack USDG quote is admitted under an explicit configuration sized exactly to it, and one atomic unit above the same rail is refused', async () => {
+  const releaseAmountMicroUsdg = VERIFIED_N2_QUOTE_INPUT_MICRO_USDG;
+  const configuration = configuredPolicy({
+    maxUnitPriceMicroUsdg: releaseAmountMicroUsdg,
+    maxCycleBudgetMicroUsdg: releaseAmountMicroUsdg,
+    perCycleCapMicroUsdg: releaseAmountMicroUsdg,
+    max24HourBudgetMicroUsdg: releaseAmountMicroUsdg,
+    lossCapMicroUsdg: releaseAmountMicroUsdg,
+    maxOutstandingCustodyMicroUsdg: releaseAmountMicroUsdg,
+    maxCyclesPerDay: 1,
+    manualApprovalCycles: 0,
+  });
+  const cycleId = 'cycle-n2-verified-quote';
+  const cycleDigest = deriveCyclePolicyDigest({
+    configuration, cycleId, releaseAmountMicroUsdg, packId: 'base-pack', liveMode: true,
+  });
+  const { engine } = policyFixture({
+    configuration: {
+      ...configuration,
+      cycleLedger: [{ cycleId, cycleDigest, mode: 'production', openedAtMs: 1_000, releaseAmountMicroUsdg }],
+      spendLedger: [{ cycleId, cycleDigest, amountMicroUsdg: releaseAmountMicroUsdg, reservedAtMs: 1_000 }],
+    },
+  });
+
+  assert.deepEqual(await engine.evaluatePurchase({
+    boundary: 'purchase', cycleId, releaseAmountMicroUsdg, packId: 'base-pack', liveMode: true,
+  }), { allowed: true, cycleDigest });
+
+  const oneAtomicUnitOver = (BigInt(releaseAmountMicroUsdg) + 1n).toString();
+  assert.deepEqual(await engine.evaluatePurchase({
+    boundary: 'purchase', cycleId, releaseAmountMicroUsdg: oneAtomicUnitOver, packId: 'base-pack', liveMode: true,
+  }), { allowed: false, reason: 'UNIT_PRICE_CAP' });
 });
 
 test('an existing production cycle without its matching durable spend reservation cannot proceed', async () => {
@@ -432,6 +993,7 @@ test('a reservation expires at the end of the off-chain policy window and remain
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -530,6 +1092,7 @@ test('a cycle-bound broadcast guard rereads loss and custody caps before broadca
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -574,6 +1137,7 @@ test('a later-stage execution guard does not count an already observed claim as 
     atRiskMicroUsdg: '0',
     outstandingMicroUsdg: '0',
     heldAssets: false,
+    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
   };
@@ -634,6 +1198,85 @@ test('a pause and resume revision does not invalidate an admitted cycle policy d
     allowed: true,
     cycleDigest: admission.cycleDigest,
   });
+});
+
+test('cycle policy digest binds the unresolved-card reconciliation deadline', () => {
+  const configuration = configuredPolicy({ unresolvedCardDeadlineMinutes: 45 });
+  const cycleId = 'cycle-deadline-policy';
+  const releaseAmountMicroUsdg = '5000000';
+  const expected = digest({
+    schema: 'hookemon.policy-cycle.v3',
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    mode: 'production',
+    policy: {
+      allowedPackIds: [...configuration.allowedPackIds],
+      requestedOrders: configuration.requestedOrders,
+      maxBoostersPerCycle: configuration.maxBoostersPerCycle,
+      maxUnitPriceMicroUsdg: configuration.maxUnitPriceMicroUsdg,
+      perCycleCapMicroUsdg: configuration.perCycleCapMicroUsdg,
+      max24HourBudgetMicroUsdg: configuration.max24HourBudgetMicroUsdg,
+      maxCyclesPerDay: configuration.maxCyclesPerDay,
+      lossCapMicroUsdg: configuration.lossCapMicroUsdg,
+      maxOutstandingCustodyMicroUsdg: configuration.maxOutstandingCustodyMicroUsdg,
+      maxHeldPositions: configuration.maxHeldPositions,
+      maxHeldValueMicroUsdg: configuration.maxHeldValueMicroUsdg,
+      unresolvedCardDeadlineMinutes: configuration.unresolvedCardDeadlineMinutes,
+      manualApprovalCycles: configuration.manualApprovalCycles,
+    },
+  });
+
+  assert.equal(deriveCyclePolicyDigest({
+    configuration,
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    liveMode: true,
+  }), expected);
+});
+
+test('an active held-position policy digest without an unresolved-card deadline remains valid', async () => {
+  const cycleId = 'cycle-pre-deadline-policy';
+  const releaseAmountMicroUsdg = '5000000';
+  const base = configuredPolicy();
+  const cycleDigest = digest({
+    schema: 'hookemon.policy-cycle.v3',
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    mode: 'production',
+    policy: {
+      allowedPackIds: [...base.allowedPackIds],
+      requestedOrders: base.requestedOrders,
+      maxBoostersPerCycle: base.maxBoostersPerCycle,
+      maxUnitPriceMicroUsdg: base.maxUnitPriceMicroUsdg,
+      perCycleCapMicroUsdg: base.perCycleCapMicroUsdg,
+      max24HourBudgetMicroUsdg: base.max24HourBudgetMicroUsdg,
+      maxCyclesPerDay: base.maxCyclesPerDay,
+      lossCapMicroUsdg: base.lossCapMicroUsdg,
+      maxOutstandingCustodyMicroUsdg: base.maxOutstandingCustodyMicroUsdg,
+      maxHeldPositions: base.maxHeldPositions,
+      maxHeldValueMicroUsdg: base.maxHeldValueMicroUsdg,
+      manualApprovalCycles: base.manualApprovalCycles,
+    },
+  });
+  const { engine } = policyFixture({
+    configuration: {
+      ...base,
+      configurationRevision: 2,
+      cycleLedger: [{ cycleId, cycleDigest, mode: 'production', openedAtMs: 1_000, releaseAmountMicroUsdg }],
+      spendLedger: [{ cycleId, cycleDigest, amountMicroUsdg: releaseAmountMicroUsdg, reservedAtMs: 1_000 }],
+    },
+  });
+
+  assert.deepEqual(await engine.evaluatePurchase({
+    boundary: 'purchase',
+    cycleId,
+    releaseAmountMicroUsdg,
+    packId: 'base-pack',
+    liveMode: true,
+  }), { allowed: true, cycleDigest });
 });
 
 test('a legacy policy digest remains valid when only its generic revision changed', async () => {
@@ -700,6 +1343,7 @@ test('manual approval forwards its caller revision into the configuration mutati
       atRiskMicroUsdg: '0',
       outstandingMicroUsdg: '0',
       heldAssets: false,
+      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),

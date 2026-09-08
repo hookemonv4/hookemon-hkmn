@@ -48,6 +48,8 @@ forge test --root packages/contracts --match-path test/integration/HookemonHook.
 
 `packages/contracts/test/market/CanonicalMarketCallbackSurface.t.sol` covers selectors, all eight callback quadrants, ignored hook data, context and PoolKey mutations, partial fills, reentrancy, fee-state rejection, and collection rollback. `packages/contracts/test/market/CanonicalMarket.t.sol` covers the real accounting composition, the 1,000-unit boundary, and carried-remainder exact-output roots. `packages/contracts/test/integration/HookemonHook.t.sol` derives gross USDG and fees from observed PoolManager, caller, and hook deltas across all eight quadrants before checking the hook record, and independently rejects every eligible smaller exact-output root. `packages/contracts/test/blind/market-fees/BlindCanonicalMarketAdapter.t.sol` independently mirrors fresh 10/40/250-basis-point streams to check every buy quadrant's first exact-output gross root and collected split. `packages/contracts/test/bindings/RobinhoodV4PoolManager.t.sol` covers the pinned local PoolManager across all eight quadrants and permanent custody.
 
+The bounded capital scenario in `test/feasibility/OwnerCapital.t.sol` conserves a single 150 USDG initial balance across finite-liquidity round trips using the production callback/accounting composition. Its test hook, tokens and routers are substitutes; the recorded one-transaction gas measurement is not a mainnet cost bound. See `docs/evidence/process-funding-model/report.md` for the conditional budget and exclusions.
+
 ## Recovery pointers
 
 - Keep initialization and callback mutation unavailable when any market, launch-authority, or provider fact is unresolved.

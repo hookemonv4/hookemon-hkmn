@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { MoneyConfigurationRejected, readEnvironment } from '../../src/app/environment.mjs';
+import { CIRCLE_USD_MINT, deriveAssociatedTokenAddress } from '../../src/solana-rpc.mjs';
+
+const OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
+const PROCEEDS_ACCOUNT = deriveAssociatedTokenAddress(OPERATIONS_SOLANA, CIRCLE_USD_MINT).toBase58();
 
 function completeProductionEnvironment(overrides = {}) {
   return {
@@ -78,21 +82,68 @@ test('production profile refuses fake providers before signer construction', () 
   );
 });
 
-test('collector-only rehearsal names the required Solana settlement asset before composition', () => {
+test('collector-only rehearsal names the Circle settlement asset without Relay configuration', () => {
   const environment = completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_PROVIDER_MODE: 'fake',
     HOOKEMON_SIGNER_LIVE_MODE: 'false',
     HOOKEMON_REHEARSAL_MODE: 'collector-only',
-    HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: '11111111111111111111111111111111',
+    HOOKEMON_SOLANA_ACCOUNT: OPERATIONS_SOLANA,
+    HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: PROCEEDS_ACCOUNT,
+    HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm',
     HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
-    HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: '22222222222222222222222222222222',
   });
-  delete environment.HOOKEMON_RELAY_SOLANA_MINT;
-  assert.throws(
-    () => readEnvironment(environment, { profile: 'rehearsal' }),
-    /HOOKEMON_RELAY_SOLANA_MINT is required/,
-  );
+  for (const field of [
+    'HOOKEMON_EVM_ACCOUNT',
+    'HOOKEMON_KEYCHAIN_EVM_ACCOUNT',
+    'HOOKEMON_RELAY_BASE_URL',
+    'HOOKEMON_RELAY_API_KEY',
+    'HOOKEMON_RELAY_SOLANA_MINT',
+    'HOOKEMON_RELAY_SOLANA_DECIMALS',
+    'HOOKEMON_RELAY_EVM_DEPOSITORY',
+    'HOOKEMON_COLLECTOR_CRYPT_API_KEY',
+    'HOOKEMON_VAULT_ADDRESS',
+    'HOOKEMON_HOOK_ADDRESS',
+  ]) delete environment[field];
+
+  const config = readEnvironment(environment, { profile: 'rehearsal' });
+  assert.deepEqual(config.moneyConfiguration.assets.solanaStablecoin, {
+    chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: 6,
+  });
+});
+
+test('collector-only rehearsal keeps its fake fixture profile Solana-only', () => {
+  const environment = completeProductionEnvironment({
+    HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+    HOOKEMON_PROVIDER_MODE: 'fake',
+    HOOKEMON_SIGNER_LIVE_MODE: 'false',
+    HOOKEMON_REHEARSAL_MODE: 'collector-only',
+    HOOKEMON_SOLANA_ACCOUNT: OPERATIONS_SOLANA,
+    HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: PROCEEDS_ACCOUNT,
+    HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm,H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA',
+    HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
+  });
+  for (const field of [
+    'HOOKEMON_ROBINHOOD_RPC_URL',
+    'HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL',
+    'HOOKEMON_EVM_ACCOUNT',
+    'HOOKEMON_KEYCHAIN_EVM_ACCOUNT',
+    'HOOKEMON_RELAY_BASE_URL',
+    'HOOKEMON_RELAY_API_KEY',
+    'HOOKEMON_RELAY_SOLANA_MINT',
+    'HOOKEMON_RELAY_SOLANA_DECIMALS',
+    'HOOKEMON_RELAY_EVM_DEPOSITORY',
+    'HOOKEMON_COLLECTOR_CRYPT_API_KEY',
+    'HOOKEMON_VAULT_ADDRESS',
+    'HOOKEMON_HOOK_ADDRESS',
+  ]) delete environment[field];
+
+  const config = readEnvironment(environment, { profile: 'rehearsal' });
+
+  assert.equal(config.accounts.evm, null);
+  assert.deepEqual(config.signer.roles, ['operator-solana']);
+  assert.equal(config.relay.apiKey, null);
+  assert.equal(config.observability, null);
 });
 
 test('collector-only rehearsal refuses production bridge and provider credentials', () => {
@@ -110,43 +161,167 @@ test('collector-only rehearsal refuses production bridge and provider credential
   );
 });
 
-test('live rehearsal refuses startup until its dedicated Solana proceeds projection is implemented', async t => {
+test('collector-only live rehearsal accepts the Solana Operations signer and dedicated proceeds account', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const keyPath = join(directory, 'collector-key');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(keyPath, 'test-collector-key\n', 'utf8');
+  await chmod(keyPath, 0o600);
+  const environment = completeProductionEnvironment({
+    HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+    HOOKEMON_SOLANA_ACCOUNT: OPERATIONS_SOLANA,
+    HOOKEMON_REHEARSAL_MODE: 'collector-only',
+    HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: PROCEEDS_ACCOUNT,
+    HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm,H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA',
+    HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
+    HOOKEMON_BUDGET_PACK_PRICE_USDG: '25000000',
+    HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH: keyPath,
+    HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+  });
+  for (const field of [
+    'HOOKEMON_EVM_ACCOUNT',
+    'HOOKEMON_COLLECTOR_CRYPT_API_KEY',
+    'HOOKEMON_KEYCHAIN_EVM_ACCOUNT',
+    'HOOKEMON_RELAY_BASE_URL',
+    'HOOKEMON_RELAY_API_KEY',
+    'HOOKEMON_RELAY_SOLANA_MINT',
+    'HOOKEMON_RELAY_SOLANA_DECIMALS',
+    'HOOKEMON_RELAY_EVM_DEPOSITORY',
+    'HOOKEMON_VAULT_ADDRESS',
+    'HOOKEMON_HOOK_ADDRESS',
+  ]) delete environment[field];
+
   assert.throws(
-    () => readEnvironment(completeProductionEnvironment({
-      HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
-      HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
-    }), { profile: 'rehearsal' }),
-    /live rehearsal is unavailable until the dedicated Solana proceeds projection is integrated/,
+    () => readEnvironment({ ...environment, HOOKEMON_SOLANA_ACCOUNT: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' }, { profile: 'rehearsal' }),
+    /must use the configured Operations Solana public key/,
   );
+  assert.throws(
+    () => readEnvironment({ ...environment, HOOKEMON_SIGNER_MODULE: '/tmp/legacy-rehearsal-signer.mjs' }, { profile: 'rehearsal' }),
+    /refuses HOOKEMON_SIGNER_MODULE/,
+  );
+  const config = readEnvironment(environment, { profile: 'rehearsal' });
+
+  assert.equal(config.execution.providerMode, 'live');
+  assert.equal(config.accounts.evm, null);
+  assert.deepEqual(config.signer.roles, ['operator-solana']);
+  assert.equal(config.rehearsal.proceedsAccount, PROCEEDS_ACCOUNT);
+  assert.deepEqual(config.moneyConfiguration.assets.solanaStablecoin, {
+    chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: 6,
+  });
+  assert.deepEqual(config.collectorCrypt.settlementAsset, {
+    chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: 6,
+  });
+  assert.deepEqual(config.collectorCrypt.packPrice, {
+    chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: 6, amountAtomic: '25000000',
+  });
+});
+
+test('collector-only live rehearsal reads its Collector credential from a private path', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-collector-key-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const keyPath = join(directory, 'collector-key');
+  await writeFile(keyPath, 'test-collector-key\n', 'utf8');
+  await chmod(keyPath, 0o600);
+  const environment = completeProductionEnvironment({
+    HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+    HOOKEMON_SOLANA_ACCOUNT: OPERATIONS_SOLANA,
+    HOOKEMON_REHEARSAL_MODE: 'collector-only',
+    HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: PROCEEDS_ACCOUNT,
+    HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: 'GfFAJnHnSgP7C2FQZLz6ogpdTV6Y7259f83qFFm9wxKm,H9ZXYkudxn6qhyp5S25jm5SrA8Vnu8naSfvymm9TptLA',
+    HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
+    HOOKEMON_BUDGET_PACK_PRICE_USDG: '25000000',
+    HOOKEMON_COLLECTOR_CRYPT_API_KEY_PATH: keyPath,
+  });
+  for (const field of [
+    'HOOKEMON_COLLECTOR_CRYPT_API_KEY',
+    'HOOKEMON_EVM_ACCOUNT',
+    'HOOKEMON_KEYCHAIN_EVM_ACCOUNT',
+    'HOOKEMON_RELAY_BASE_URL',
+    'HOOKEMON_RELAY_API_KEY',
+    'HOOKEMON_RELAY_SOLANA_MINT',
+    'HOOKEMON_RELAY_SOLANA_DECIMALS',
+    'HOOKEMON_RELAY_EVM_DEPOSITORY',
+    'HOOKEMON_VAULT_ADDRESS',
+    'HOOKEMON_HOOK_ADDRESS',
+  ]) delete environment[field];
+
+  assert.equal(readEnvironment(environment, { profile: 'rehearsal' }).collectorCrypt.apiKey, 'test-collector-key');
 });
 
 test('production profile accepts an explicit complete configuration', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   const config = readEnvironment(completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
   }), { profile: 'production' });
   assert.equal(config.execution.profile, 'production');
   assert.equal(config.relay.solanaMint, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
   assert.deepEqual(config.observability, {});
 });
 
+test('production profile wires solana.chainId and collectorCrypt.settlementAsset from the Collector settlement asset, distinct from the Relay money namespace', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
+  await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
+  const config = readEnvironment(completeProductionEnvironment({
+    HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+    HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
+  }), { profile: 'production' });
+
+  assert.equal(config.solana.chainId, 'solana-mainnet');
+  assert.deepEqual(config.collectorCrypt.settlementAsset, {
+    chainId: 'solana-mainnet',
+    assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    decimals: 6,
+  });
+  // The Relay-side MoneyConfigurationV1 asset keeps its own numeric chain-id namespace (Relay's
+  // cross-chain identifier, 792703809) — distinct from the native Collector transaction-policy
+  // label above, even though both currently name the same mint and decimals.
+  assert.equal(config.moneyConfiguration.assets.solanaStablecoin.chainId, '792703809');
+  assert.notDeepEqual(config.collectorCrypt.settlementAsset, config.moneyConfiguration.assets.solanaStablecoin);
+});
+
+test('production profile refuses a Relay Solana mint that is not the documented Collector settlement asset', () => {
+  assert.throws(
+    () => readEnvironment(completeProductionEnvironment({
+      HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+      HOOKEMON_RELAY_SOLANA_MINT: 'So11111111111111111111111111111111111111112',
+    }), { profile: 'production' }),
+    /HOOKEMON_RELAY_SOLANA_MINT and HOOKEMON_RELAY_SOLANA_DECIMALS to match the documented Collector settlement asset/,
+  );
+  assert.throws(
+    () => readEnvironment(completeProductionEnvironment({
+      HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
+      HOOKEMON_RELAY_SOLANA_DECIMALS: '9',
+    }), { profile: 'production' }),
+    /HOOKEMON_RELAY_SOLANA_MINT and HOOKEMON_RELAY_SOLANA_DECIMALS to match the documented Collector settlement asset/,
+  );
+});
+
 test('production profile builds MoneyConfigurationV1 from explicit assets, minima, caps, and reserves', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   const config = readEnvironment(completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '2',
     HOOKEMON_MIN_SOLANA_RECEIVE: '3',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
   }), { profile: 'production' });
 
   assert.deepEqual(config.moneyConfiguration, {
@@ -196,10 +371,13 @@ test('production profile rejects the atomic placeholder and refuses legacy nativ
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-observability-config-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const observabilityPath = join(directory, 'observability.json');
+  const eligibilitySnapshotPath = join(directory, 'eligibility-snapshot.json');
   await writeFile(observabilityPath, '{}\n', 'utf8');
+  await writeFile(eligibilitySnapshotPath, '{}\n', 'utf8');
   const complete = completeProductionEnvironment({
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
+    HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
   });
 
   assert.throws(

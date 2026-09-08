@@ -22,13 +22,17 @@ import {
   assertReturnLegDestinationProof,
   createPreparedChainTransactionAttempt,
   createRecordedRelayLeg,
+  CUSTODY_LEDGER_BUCKETS,
 } from '../../../../runner/src/cycle/money-schemas.mjs';
+import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import { COLLECTOR_CRYPT_SETTLEMENT_ASSET } from '../../collector-crypt.mjs';
 import {
   createCanonicalTransactionPolicy,
   createTransactionPolicy,
   decodeProviderTransaction,
   readTransactionPolicyRules,
 } from '../../signing/transaction-policy.mjs';
+import { forwardOwnedKeychainSignOnlyIdentity } from '../../signing/keychain-signer.mjs';
 import {
   OPERATOR_SOLANA_ROLE,
   readTransactionPolicyApprovalContext,
@@ -39,7 +43,7 @@ import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
-import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -95,7 +99,7 @@ function canonicalAmount(value, label) {
   return value;
 }
 
-function typedAmount(leg) {
+export function typedAmount(leg) {
   return Object.freeze({
     chainId: String(leg.chainId),
     assetId: leg.chainId === RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID ? leg.address.toLowerCase() : leg.address,
@@ -104,7 +108,7 @@ function typedAmount(leg) {
   });
 }
 
-function assertReturnConfiguration(config) {
+export function assertReturnConfiguration(config) {
   const evm = config?.accounts?.evm;
   const solana = config?.accounts?.solana;
   const solanaMint = config?.relay?.solanaMint;
@@ -124,6 +128,60 @@ function custodyLedgerFor(state, { chainId, assetId }) {
   return values.find(ledger => ledger?.chainId === chainId && ledger?.assetId === assetId) ?? null;
 }
 
+function sameReturnCustodyAsset(left, right) {
+  return left?.chainId === right?.chainId && left?.assetId === right?.assetId && left?.decimals === right?.decimals;
+}
+
+/**
+ * The native Solana custody identity that buyback.mjs actually attributes realized proceeds under
+ * (`configuredSettlementAsset`/`COLLECTOR_CRYPT_SETTLEMENT_ASSET`, chain id `solana-mainnet` +
+ * `CIRCLE_USD_MINT`) -- never Relay's own wire `SOLANA_CHAIN_ID` (792703809), which identifies a
+ * transport route, not a custody attribution namespace. Matches
+ * `assertSolanaSignerMoneyConfiguration` (`solana-money-controls.mjs`): the configured asset is
+ * proven against the trusted constant `COLLECTOR_CRYPT_SETTLEMENT_ASSET` itself, not merely
+ * checked for self-consistency between two configured fields (`config.solana.chainId` and
+ * `config.collectorCrypt.settlementAsset.chainId` could otherwise both be wrongly set to the same
+ * incorrect value and still "agree"). Then cross-checked against the Relay-facing
+ * `configured.solanaMint` and `MoneyConfigurationV1.assets.solanaStablecoin` so the two namespaces
+ * are proven to name the same mint before either is trusted.
+ */
+function resolveReturnNativeSolanaCustodyIdentity(config, configured, money) {
+  const asset = config?.collectorCrypt?.settlementAsset;
+  if (!asset || typeof asset !== 'object' || Array.isArray(asset)
+    || typeof asset.chainId !== 'string' || asset.chainId.length === 0
+    || typeof asset.assetId !== 'string' || asset.assetId.length === 0
+    || !Number.isInteger(asset.decimals) || asset.decimals < 0 || asset.decimals > 255) {
+    throw new Error('return requires a configured native Solana settlement asset');
+  }
+  if (!sameReturnCustodyAsset(asset, COLLECTOR_CRYPT_SETTLEMENT_ASSET) || config?.solana?.chainId !== asset.chainId) {
+    throw new Error('return native Solana settlement asset does not match the trusted native Collector settlement identity');
+  }
+  if (asset.assetId !== configured.solanaMint) {
+    throw new Error('return native Solana settlement asset does not match the configured Relay Solana mint');
+  }
+  if (asset.decimals !== money.assets.solanaStablecoin.decimals) {
+    throw new Error('return native Solana settlement asset decimals do not match MoneyConfigurationV1');
+  }
+  return Object.freeze({ chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals });
+}
+
+/**
+ * A custody row keyed by Relay's wire chain ID for the same mint is never a legitimate second
+ * source of proceeds -- it is either stale data from before this identity fix or a conflicting
+ * write from elsewhere. Either way this refuses rather than summing it with, or preferring it
+ * over, the native-identity row.
+ */
+function competingReturnCustodyLedger(cycle, nativeIdentity) {
+  if (nativeIdentity.chainId === SOLANA_CHAIN_ID) return null;
+  return custodyLedgerFor(cycle, { chainId: SOLANA_CHAIN_ID, assetId: nativeIdentity.assetId });
+}
+
+function assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity) {
+  if (competingReturnCustodyLedger(cycle, nativeIdentity) !== null) {
+    throw new Error('return has a Solana custody ledger row keyed by the Relay wire chain id, conflicting with the native settlement identity');
+  }
+}
+
 /** Only a ledger-attributed, not a wallet-wide, proceeds delta may enter the return quote. */
 export function returnableProceedsDelta(ledger) {
   if (!ledger) throw new Error('return requires a cycle custody ledger for the configured Solana mint');
@@ -133,7 +191,89 @@ export function returnableProceedsDelta(ledger) {
   return (proceeds - committed).toString();
 }
 
-function assertReturnQuote(quote, config, money = null) {
+function zeroProceedsReturnEvidence({ request, context, configured, money }) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)
+    || request.schema !== 'hookemon.return-zero-proceeds-request.v1'
+    || request.cycleId !== context?.cycleId
+    || !request.inputAmount || !request.destinationAmount) {
+    throw new Error('return zero-proceeds request is invalid');
+  }
+  const input = request.inputAmount;
+  const destination = request.destinationAmount;
+  if (input.chainId !== SOLANA_CHAIN_ID || input.assetId !== configured.solanaMint
+    || input.decimals !== money.assets.solanaStablecoin.decimals || input.amountAtomic !== '0'
+    || destination.chainId !== EVM_CHAIN_ID || destination.assetId?.toLowerCase() !== USDG_ADDRESS
+    || destination.decimals !== money.assets.usdg.decimals || destination.amountAtomic !== '0') {
+    throw new Error('return zero-proceeds request does not match the configured settlement assets');
+  }
+  return Object.freeze({
+    schema: 'hookemon.return-zero-proceeds-evidence.v1',
+    cycleId: context.cycleId,
+    finalized: true,
+    noBridge: true,
+    destinationAccount: configured.evm,
+    destinationAsset: USDG_ADDRESS,
+    destinationCreditAmount: '0',
+  });
+}
+
+function isZeroProceedsReturnEvidence(value, { cycleId, configured, money }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.schema !== 'hookemon.return-zero-proceeds-evidence.v1'
+    || value.cycleId !== cycleId || value.finalized !== true || value.noBridge !== true
+    || value.destinationAccount?.toLowerCase() !== configured.evm.toLowerCase()
+    || value.destinationAsset?.toLowerCase() !== USDG_ADDRESS
+    || value.destinationCreditAmount !== '0') return false;
+  return money.assets.usdg.chainId === EVM_CHAIN_ID && money.assets.usdg.decimals === 6;
+}
+
+function zeroProceedsReturnRequest({ context, configured, money }) {
+  return Object.freeze({
+    schema: 'hookemon.return-zero-proceeds-request.v1',
+    cycleId: context.cycleId,
+    inputAmount: Object.freeze({
+      chainId: SOLANA_CHAIN_ID,
+      assetId: configured.solanaMint,
+      decimals: money.assets.solanaStablecoin.decimals,
+      amountAtomic: '0',
+    }),
+    destinationAmount: Object.freeze({
+      chainId: EVM_CHAIN_ID,
+      assetId: USDG_ADDRESS,
+      decimals: money.assets.usdg.decimals,
+      amountAtomic: '0',
+    }),
+  });
+}
+
+function hasHeldPositionWithoutProceedsLedger(cycle) {
+  return cycle?.heldPositions instanceof Map && cycle.heldPositions.size > 0;
+}
+
+/**
+ * True when the durable buyback stage-attempt evidence (`stage-driver.mjs`'s generic
+ * `recordStageAttempt`/`readStageAttempt('buyback', ...)`, populated from
+ * `reconcileLiveBuyback`'s own `{ packs, soldCount }` result) already records a sold pack. The
+ * custody-ledger write precedes the reconciled result in the normal buyback path. Sold evidence
+ * without that ledger is inconsistent recovery state, not evidence of a normal interruption
+ * between those writes. A held position cannot override that inconsistency.
+ */
+function hasDurableSoldBuybackEvidence(buybackAttempt) {
+  return Boolean(buybackAttempt) && typeof buybackAttempt === 'object' && !Array.isArray(buybackAttempt)
+    && Array.isArray(buybackAttempt.packs) && buybackAttempt.packs.some(pack => pack?.decision === 'sold');
+}
+
+async function assertReturnNoSoldEvidenceWithoutLedger({ cycleRepository, context }) {
+  if (typeof cycleRepository?.readStageAttempt !== 'function') {
+    throw new Error('return requires cycleRepository.readStageAttempt to rule out durable sold buyback evidence before a zero-proceeds return');
+  }
+  const buybackAttempt = await cycleRepository.readStageAttempt(context.cycleId, 'buyback');
+  if (hasDurableSoldBuybackEvidence(buybackAttempt)) {
+    throw new Error('return cannot treat this cycle as zero-proceeds: durable buyback evidence records a sold pack with no matching native custody ledger row');
+  }
+}
+
+export function assertReturnQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.RETURN) throw new Error('return requires a RETURN Relay quote');
   if (quote.origin?.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID || quote.origin?.address !== config.solanaMint) {
     throw new Error('return quote origin does not match the configured Solana mint');
@@ -189,9 +329,19 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const ledger = custodyLedgerFor(cycle, { chainId: String(RELAY_CONSTANTS.SOLANA_CHAIN_ID), assetId: configured.solanaMint });
+  const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+  assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+  const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
+  if (ledger === null && hasHeldPositionWithoutProceedsLedger(cycle)) {
+    await assertReturnNoSoldEvidenceWithoutLedger({ cycleRepository, context });
+    return zeroProceedsReturnRequest({ context, configured, money });
+  }
   const amountAtomic = returnableProceedsDelta(ledger);
-  if (amountAtomic === '0') throw new Error('return has no uncommitted cycle-attributed proceeds');
+  if (amountAtomic === '0') {
+    const proceeds = canonicalAmount(ledger.buybackProceeds, 'return custody buybackProceeds');
+    if (proceeds !== '0') throw new Error('return has no uncommitted cycle-attributed proceeds');
+    return zeroProceedsReturnRequest({ context, configured, money });
+  }
   const quote = await adapters.relay.quoteReturnBridge({
     user: configured.solana,
     recipient: configured.evm,
@@ -227,9 +377,13 @@ export async function probeReturn({ adapters, config, cycleRepository, context }
     return { wouldBridgeReturn: true, configured: false, reason: 'Relay, Operations accounts, or the Solana mint is not configured' };
   }
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const ledger = custodyLedgerFor(cycle, { chainId: String(RELAY_CONSTANTS.SOLANA_CHAIN_ID), assetId: config.relay.solanaMint });
   let amountAtomic;
   try {
+    const configured = assertReturnConfiguration(config);
+    const money = assertReturnMoneyConfiguration(config, configured);
+    const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+    assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+    const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
     amountAtomic = returnableProceedsDelta(ledger);
   } catch (error) {
     return { wouldBridgeReturn: true, configured: true, reason: error.message };
@@ -306,7 +460,7 @@ function exactPolicyRule(decoded, id) {
   });
 }
 
-function assertReturnMoneyConfiguration(config, configured) {
+export function assertReturnMoneyConfiguration(config, configured) {
   let money;
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'return money configuration');
@@ -331,7 +485,7 @@ function assertReturnMutationRepository(cycleRepository) {
     'prepareChainTransactionAttempt',
     'recordSignedTransaction',
     'recordBroadcast',
-    'recordRelayLeg',
+    'recordReturnRelayLegExpectation',
     'recordRelayLegSource',
     'reserveWalletNonce',
     'assertWalletNonce',
@@ -362,7 +516,9 @@ function returnWalletReservation(configured, context) {
 }
 
 async function reserveReturnWalletNonce({ cycleRepository, configured, context }) {
-  const reservation = returnWalletReservation(configured, context);
+  const reservation = await resolveWalletNonceReservation(
+    cycleRepository, context.cycleId, returnWalletReservation(configured, context),
+  );
   await cycleRepository.reserveWalletNonce(context.cycleId, reservation);
   await cycleRepository.assertWalletNonce(context.cycleId, reservation);
   return reservation;
@@ -379,7 +535,9 @@ async function releaseReturnWalletNonce({ cycleRepository, configured, context }
   }
   await cycleRepository.releaseWalletNonce(
     context.cycleId,
-    returnWalletReservation(configured, context),
+    await resolveWalletNonceReservation(
+      cycleRepository, context.cycleId, returnWalletReservation(configured, context), { release: true },
+    ),
   );
 }
 
@@ -416,7 +574,131 @@ function returnRelayLeg(context, request) {
   });
 }
 
-function assertReturnRequest({ request, context, cycle, configured, money }) {
+/**
+ * ADR-0026 / interfaces.json revision 67: the canonical identity for the EVM USDG custody row,
+ * built only from the already-validated `MoneyConfigurationV1.assets.usdg` -- exactly the formula
+ * `claim-process.mjs#claimCustodyAsset` and `payout.mjs#canonicalEvmUsdgCustodyIdentity` already
+ * apply -- never from the leg's own raw destination fields.
+ */
+function returnCustodyAsset(money) {
+  const chainId = `eip155:${money.assets.usdg.chainId}`;
+  return Object.freeze({
+    chainId,
+    assetId: `${chainId}/erc20:${money.assets.usdg.assetId.toLowerCase()}`,
+    decimals: money.assets.usdg.decimals,
+  });
+}
+
+function returnCustodyLedgerKey(asset) {
+  return `${asset.chainId} ${asset.assetId}`;
+}
+
+/**
+ * The legacy, pre-canonical row identity for this same configured EVM USDG asset: the leg's own
+ * raw `(chainId, address)` pair, the same raw shape `returnSettlementCustodyLedger` falls back to
+ * for a leg with no durable canonical association (ADR-0026).
+ */
+function legacyRawReturnCustodyKey(leg) {
+  return `${leg.destinationChainId} ${leg.destinationAssetId}`;
+}
+
+/**
+ * Reuses the reviewed public-finalized -> distinct-archive-at-height/hash -> public-recheck
+ * `CustodyBalanceObservationV1` producer, pinned to the canonical return destination identity and
+ * the configured Operations account -- never a supplied balance callback or a candidate row.
+ */
+async function observeReturnCustodyBalance({ adapters, asset, account }) {
+  const observeBalance = createEvmCustodyBalanceObservationReader({
+    publicClient: adapters?.robinhood?.client ?? null,
+    archiveClient: adapters?.robinhood?.historicalEvidenceClient ?? null,
+    identity: { chainId: asset.chainId, assetId: asset.assetId, decimals: asset.decimals, account },
+  });
+  return observeBalance();
+}
+
+function returnCarriedCustodyBuckets(existing) {
+  return Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [bucket, existing?.[bucket] ?? '0']));
+}
+
+const RETURN_LEG_IDENTITY_FIELDS = Object.freeze([
+  'schema', 'cycleId', 'direction', 'relayRequestId', 'quoteDigest',
+  'sourceChainId', 'sourceAssetId', 'sourceDecimals', 'sourceAmountAtomic',
+  'destinationChainId', 'destinationAssetId', 'destinationDecimals', 'destinationAmountAtomic',
+  'returnAttribution',
+]);
+
+function returnLegIdentity(leg) {
+  return Object.fromEntries(RETURN_LEG_IDENTITY_FIELDS.map(field => [field, leg[field]]));
+}
+
+/**
+ * True when a different, already-recorded return leg already holds this same destination row's
+ * singular `expectedCycleAsset` unresolved (ADR-0026). Checked before any observation or write --
+ * `leg` itself is known not to be durably recorded yet (the caller only reaches this function for a
+ * genuinely new leg), so a non-null existing expectation can only belong to a different leg.
+ */
+function hasConflictingUnresolvedReturnExpectation(existing) {
+  return existing?.schema === 'hookemon.custody-ledger.v2' && existing.expectedCycleAsset !== null;
+}
+
+/**
+ * Records the unsigned RECORDED return leg and its custody row's newly populated singular
+ * `expectedCycleAsset` as one atomic journal entry through `recordReturnRelayLegExpectation`
+ * (ADR-0026). A legacy raw-identity USDG row for this asset -- alone or alongside a canonical row
+ * -- or a different leg's already-unresolved expectation on this same row is refused before any
+ * observation or write, leg creation, nonce reservation, signing, or broadcast -- the row and
+ * journal are left exactly as they were. Called only for a genuinely new leg (the caller never
+ * invokes this again once the leg already exists -- `sourceTxHash`/`state` legitimately advance
+ * afterward, so replaying this same atomic call against an advanced leg would wrongly look like
+ * conflicting evidence): a fresh, non-null observation is always obtained, regardless of whether
+ * the destination row already exists as v1, v2, or not at all -- every existing bucket is carried
+ * forward unchanged. `context.assertLease` is rechecked immediately after each awaited durable step
+ * -- the observation's own multi-RPC round trip, then the custody refresh write -- so a lease lost
+ * during either await reaches zero further durable calls.
+ */
+async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, configured, money, adapters, context }) {
+  const asset = returnCustodyAsset(money);
+  const canonicalKey = returnCustodyLedgerKey(asset);
+  const rawKey = legacyRawReturnCustodyKey(leg);
+  if (rawKey !== canonicalKey && (cycle?.custodyLedgers?.get?.(rawKey) ?? null) !== null) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_LEGACY_RAW_CUSTODY_PREDECESSOR',
+      'a legacy raw-identity USDG custody row exists for this asset, an unresolved raw/canonical '
+      + 'identity conflict; resolve it before recording a new return leg expectation',
+    );
+  }
+  const existing = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  if (hasConflictingUnresolvedReturnExpectation(existing)) {
+    throw new Error('cycle-repository recordReturnRelayLegExpectation: an unresolved return leg for this destination already exists');
+  }
+  if (typeof cycleRepository?.recordCustodyLedger !== 'function' && existing !== null) {
+    throw new Error('return requires cycleRepository.recordCustodyLedger to refresh an existing custody row');
+  }
+  const expectedCycleAsset = Object.freeze({
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    amountAtomic: leg.destinationAmountAtomic,
+  });
+  const observation = await observeReturnCustodyBalance({ adapters, asset, account: configured.evm.toLowerCase() });
+  context?.assertLease?.();
+  const refreshed = Object.freeze({
+    schema: 'hookemon.custody-ledger.v2',
+    cycleId: leg.cycleId,
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    ...returnCarriedCustodyBuckets(existing),
+    verifiedCurrentBalance: observation,
+    expectedCycleAsset: null,
+  });
+  if (existing !== null) await cycleRepository.recordCustodyLedger(leg.cycleId, refreshed);
+  context?.assertLease?.();
+  const ledger = Object.freeze({ ...refreshed, expectedCycleAsset });
+  return cycleRepository.recordReturnRelayLegExpectation(leg.cycleId, leg, ledger);
+}
+
+function assertReturnRequest({ request, context, cycle, configured, money, nativeIdentity }) {
   if (!request || request.schema !== 'hookemon.return-relay-request.v1' || request.cycleId !== context.cycleId) {
     throw new Error('return requires the canonical request prepared for this cycle');
   }
@@ -447,7 +729,7 @@ function assertReturnRequest({ request, context, cycle, configured, money }) {
   canonicalAmount(request.inputAmount.amountAtomic, 'return request input amount');
   canonicalAmount(request.destinationAmount.amountAtomic, 'return request destination amount');
   if (request.inputAmount.amountAtomic === '0') throw new Error('return requires positive cycle-attributed proceeds');
-  const ledger = custodyLedgerFor(cycle, { chainId: SOLANA_CHAIN_ID, assetId: configured.solanaMint });
+  const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
   if (request.inputAmount.amountAtomic !== returnableProceedsDelta(ledger)) {
     throw new Error('return may sign only the cycle-attributed proceeds delta');
   }
@@ -470,7 +752,7 @@ function assertReturnRequest({ request, context, cycle, configured, money }) {
   return request;
 }
 
-function canonicalPositiveInteger(value, label) {
+export function canonicalPositiveInteger(value, label) {
   canonicalAmount(value, label);
   if (BigInt(value) === 0n) throw new Error(`${label} must be positive`);
   return value;
@@ -493,7 +775,7 @@ function maximumReturnPriorityFeeLamports(decoded) {
   return ((BigInt(computeUnitLimit) * microLamports) + 999_999n) / 1_000_000n;
 }
 
-async function assertReturnLamportReserve({ client, configured, money, decoded }) {
+export async function assertReturnLamportReserve({ client, configured, money, decoded }) {
   const balance = await readSolBalance(client, configured.solana);
   const reserve = BigInt(money.solana.lamportReserve.amountAtomic);
   const required = reserve + maximumReturnPriorityFeeLamports(decoded);
@@ -528,8 +810,9 @@ function requireReturnMutationAuthority(preflightAuthority) {
   return requireLiveMutationAuthority();
 }
 
-async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority }) {
-  if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function' || typeof signerClient.solana.broadcast !== 'function') {
+export async function createReturnPolicySigner({ signerClient, client, configured, request, transaction, requestDigest, blockhash, blockhashLastValidHeight, money, now, preflightAuthority, stage = 'return', recoveryRepository, context }) {
+  if (!signerClient?.solana || typeof signerClient.solana.sign !== 'function'
+    || (typeof signerClient.solana.broadcast !== 'function' && typeof signerClient.solana.broadcastApproved !== 'function')) {
     throw new Error('return requires an Operations Solana signer with sign and broadcast capabilities');
   }
   if (typeof now !== 'function') throw new Error('return requires a wall-clock function');
@@ -547,20 +830,42 @@ async function createReturnPolicySigner({ signerClient, client, configured, requ
   }
   assertReturnPriorityFeeCap(decoded, money);
   const policy = createTransactionPolicy({
-    policy: createCanonicalTransactionPolicy({ decoded, stage: 'return', requestDigest }),
+    policy: createCanonicalTransactionPolicy({ decoded, stage, requestDigest }),
     rules: [exactPolicyRule(decoded, 'relay-return-step')],
   });
   const policyRules = readTransactionPolicyRules(policy);
   const rawSigner = signerClient.solana;
+  // ADR-0025 `retry-sign-only-with-durable-binding`: this facade only ever delegates to
+  // `rawSigner`'s own methods unchanged, so it can carry the owned-Keychain attestation through to
+  // the object `wrapTransactionPolicySignerClient` actually checks. `signApproved`/
+  // `broadcastApproved` -- the stronger variants a Solana Keychain backend exposes once a real
+  // broadcast transport is wired -- are forwarded only when `rawSigner` itself exposes them, so this
+  // facade is a faithful, complete delegate rather than one that silently drops the path
+  // `wrapTransactionPolicySignerClient` actually prefers.
+  const delegatingClient = forwardOwnedKeychainSignOnlyIdentity(rawSigner, {
+    role: rawSigner.role ?? OPERATOR_SOLANA_ROLE,
+    sign: requestValue => rawSigner.sign(requestValue),
+    ...(typeof rawSigner.broadcast === 'function'
+      ? { broadcast: signed => rawSigner.broadcast(signed) }
+      : {}),
+    ...(typeof rawSigner.signApproved === 'function'
+      ? { signApproved: (requestValue, proof) => rawSigner.signApproved(requestValue, proof) }
+      : {}),
+    ...(typeof rawSigner.broadcastApproved === 'function'
+      ? { broadcastApproved: (signed, proof) => rawSigner.broadcastApproved(signed, proof) }
+      : {}),
+  });
+  // `recoveryRepository` is the narrow, lease-fenced sign-only-recovery facade the stage driver
+  // builds -- never the raw, unfenced `cycleRepository` `mutateReturn` uses for every other write.
+  const recovery = recoveryRepository && context
+    ? { repository: recoveryRepository, cycleId: context.cycleId, stage, requestDigest }
+    : undefined;
   const policySigner = wrapTransactionPolicySignerClient({
-    client: {
-      role: rawSigner.role ?? OPERATOR_SOLANA_ROLE,
-      sign: requestValue => rawSigner.sign(requestValue),
-      broadcast: signed => rawSigner.broadcast(signed),
-    },
+    client: delegatingClient,
     policy,
     rules: policyRules,
     decodeOptions,
+    recovery,
   });
   const quoteUsable = () => assertQuoteUsable({ quote: request.intent, nowMs: now() });
   return Object.freeze({
@@ -587,9 +892,9 @@ async function createReturnPolicySigner({ signerClient, client, configured, requ
   });
 }
 
-function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, approval, blockhashLastValidHeight }) {
+export function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, approval, blockhashLastValidHeight, stage = 'return' }) {
   return Object.freeze({
-    stage: 'return',
+    stage,
     recipient: null,
     requestDigest,
     policyDigest: approval.policyDigest,
@@ -598,7 +903,7 @@ function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, app
     fencingTokenDigest: canonicalDigest({
       schema: 'hookemon.wallet-nonce-reservation.v1',
       chainId: SOLANA_CHAIN_ID,
-      stage: 'return',
+      stage,
       fencingToken: context.fencingToken,
     }),
     approvedSemanticsDigest: approval.approvedSemanticsDigest,
@@ -608,7 +913,7 @@ function returnRecoveryContext({ context, requestDigest, rawSignedBytesHash, app
   });
 }
 
-function returnPolicyRecoveryContext(recoveryContext) {
+export function returnPolicyRecoveryContext(recoveryContext) {
   if (!recoveryContext || typeof recoveryContext !== 'object' || typeof recoveryContext.blockhashLastValidHeight !== 'string') {
     throw new ReturnRecoveryRequiredError(
       'RETURN_SIGNED_BLOCKHASH_CONTEXT_MISSING',
@@ -631,7 +936,7 @@ function returnPolicyRecoveryContext(recoveryContext) {
   });
 }
 
-function assertReturnBroadcastHash(result, expectedHash) {
+export function assertReturnBroadcastHash(result, expectedHash) {
   const transactionHash = typeof result === 'string' ? result : result?.transactionHash ?? result?.signature;
   if (typeof transactionHash !== 'string' || transactionHash !== expectedHash) {
     throw new Error('return broadcaster returned a hash that does not match the persisted signed Solana bytes');
@@ -665,6 +970,7 @@ export async function mutateReturn({
   signerClient,
   config,
   cycleRepository,
+  signOnlyRecoveryRepository,
   context,
   request,
   preflightAuthority,
@@ -674,15 +980,65 @@ export async function mutateReturn({
   if (typeof context?.requestDigest !== 'string' || !DIGEST.test(context.requestDigest)) {
     throw new Error('return requires the durable stage request digest');
   }
-  assertReturnMutationRepository(cycleRepository);
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
+  if (request?.schema === 'hookemon.return-zero-proceeds-request.v1') {
+    const evidence = zeroProceedsReturnEvidence({ request, context, configured, money });
+    if (typeof cycleRepository?.readStageAttempt !== 'function' || typeof cycleRepository?.recordStageAttempt !== 'function') {
+      throw new Error('return zero-proceeds settlement requires a durable stage-attempt repository');
+    }
+    if (typeof cycleRepository?.describeCycle !== 'function') {
+      throw new Error('return zero-proceeds settlement requires cycleRepository.describeCycle to recheck current proceeds');
+    }
+    // A durable zero-proceeds request or its already-recorded evidence is never trusted from its
+    // own shape alone: this rechecks the current native ledger (and refuses a competing row)
+    // every time, first creation and every replay alike, so a stale false-zero produced before
+    // this identity fix can never finalize or replay while positive attributed proceeds exist now.
+    const cycle = await cycleRepository.describeCycle(context.cycleId);
+    const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+    assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+    const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });
+    if (ledger !== null && returnableProceedsDelta(ledger) !== '0') {
+      throw new Error('return zero-proceeds request conflicts with a positive cycle-attributed proceeds delta observed now');
+    }
+    if (ledger === null) {
+      await assertReturnNoSoldEvidenceWithoutLedger({ cycleRepository, context });
+    }
+    const existing = await cycleRepository.readStageAttempt(context.cycleId, 'return');
+    if (existing !== null && existing !== undefined) {
+      if (canonicalDigest(existing) !== canonicalDigest(evidence)) {
+        throw new Error('return zero-proceeds settlement conflicts with recorded evidence');
+      }
+      return evidence;
+    }
+    await cycleRepository.recordStageAttempt(context.cycleId, 'return', evidence);
+    return evidence;
+  }
+  assertReturnMutationRepository(cycleRepository);
   const client = adapters?.solana?.client;
   if (!client) throw new Error('return requires a configured Solana RPC client');
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  assertReturnRequest({ request, context, cycle, configured, money });
+  const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+  assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
+  assertReturnRequest({ request, context, cycle, configured, money, nativeIdentity });
   assertQuoteUsable({ quote: request.intent, nowMs: now() });
-  await cycleRepository.recordRelayLeg(context.cycleId, returnRelayLeg(context, request));
+  const candidateLeg = returnRelayLeg(context, request);
+  const existingLeg = cycle?.relayLegs?.get?.(candidateLeg.relayRequestId) ?? null;
+  if (existingLeg === null) {
+    // A genuinely new leg: the atomic custody-v2 creator runs exactly once, here, before any
+    // nonce reservation or signing. `sourceTxHash`/`state` only ever advance after this point, so
+    // this call is never repeated against the same relayRequestId.
+    await recordReturnCustodyExpectation({ cycleRepository, cycle, leg: candidateLeg, configured, money, adapters, context });
+  } else {
+    if (canonicalDigest(returnLegIdentity(existingLeg)) !== canonicalDigest(returnLegIdentity(candidateLeg))) {
+      throw new Error('return Relay request id already has different durable leg evidence');
+    }
+    // A resume of an already-durable leg: prove its canonical association and open expectation
+    // before any nonce reservation or signing resumes, rather than trusting matching request
+    // identity alone -- a leg durably created only through the legacy bare `recordRelayLeg` would
+    // otherwise reach new effects here with no association at all.
+    assertReturnCustodyExpectationOpenForLeg(cycle, existingLeg, money);
+  }
   const reservation = await reserveReturnWalletNonce({ cycleRepository, configured, context });
   const attempt = await readOrPrepareReturnAttempt({ cycleRepository, context, request });
   let { record } = attempt;
@@ -708,6 +1064,8 @@ export async function mutateReturn({
       money,
       now,
       preflightAuthority,
+      recoveryRepository: signOnlyRecoveryRepository,
+      context,
     });
     await assertReturnLamportReserve({ client, configured, money, decoded: approved.decoded });
     const signed = await approved.sign();
@@ -886,10 +1244,166 @@ export async function readReturnLegDestinationProof({ client, pointer, leg, sour
 }
 
 /**
+ * Before trusting a return leg's settlement -- whether about to credit it for the first time or
+ * returning a durably SETTLED leg's cached success -- proves the leg has an exact durable canonical
+ * custody association (ADR-0026), never derived or accepted from its raw destination identity. A
+ * leg with no association (including one settled before this migration, or one this repository
+ * only ever recorded through the legacy bare `recordRelayLeg`) refuses rather than being trusted
+ * from its raw identity; a legacy raw-identity row for this asset -- present at all, whether or not
+ * it is where the leg's own credit landed -- also refuses, since only the canonical association is
+ * ever a legitimate identity going forward. Preserves every historical row and leg byte; recovery
+ * is an explicit owner decision, never a silent migration performed here.
+ */
+function assertReturnCanonicalCustodyAssociation(cycle, leg, money) {
+  const asset = returnCustodyAsset(money);
+  const canonicalKey = returnCustodyLedgerKey(asset);
+  const rawKey = legacyRawReturnCustodyKey(leg);
+  const associatedKey = cycle?.returnLegLedgerKeys?.get?.(leg.relayRequestId) ?? null;
+  if (associatedKey !== canonicalKey) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_ASSOCIATION_MISSING',
+      'the return leg has no durable canonical custody ledger association and cannot be trusted from its raw identity',
+    );
+  }
+  const row = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  if (row === null || row.schema !== 'hookemon.custody-ledger.v2'
+    || row.chainId !== asset.chainId || row.assetId !== asset.assetId || row.decimals !== asset.decimals) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_ASSOCIATION_MISSING',
+      "the return leg's durable canonical association does not resolve to a matching v2 custody ledger row",
+    );
+  }
+  if (rawKey !== canonicalKey && (cycle?.custodyLedgers?.get?.(rawKey) ?? null) !== null) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_IDENTITY_SPLIT',
+      'a legacy raw-identity USDG custody row exists for this asset alongside the return leg\'s canonical association and requires operator recovery',
+    );
+  }
+}
+
+/**
+ * For a resumed RECORDED leg only, on top of the canonical association above: proves the row's
+ * still-open `expectedCycleAsset` is this exact leg's own unresolved destination obligation --
+ * never a different leg's, and never one already cleared by a settlement this process has not yet
+ * observed. `mutateReturn` calls this before any nonce reservation or signing resumes on an
+ * already-durable leg, so a leg that only ever reached durable state through the legacy bare
+ * `recordRelayLeg` (identical immutable request identity, no association) refuses here exactly as
+ * a genuinely new leg would, instead of quietly reaching new effects on resume.
+ */
+function assertReturnCustodyExpectationOpenForLeg(cycle, leg, money) {
+  assertReturnCanonicalCustodyAssociation(cycle, leg, money);
+  const asset = returnCustodyAsset(money);
+  const canonicalKey = returnCustodyLedgerKey(asset);
+  const row = cycle?.custodyLedgers?.get?.(canonicalKey) ?? null;
+  const expected = {
+    chainId: asset.chainId,
+    assetId: asset.assetId,
+    decimals: asset.decimals,
+    amountAtomic: leg.destinationAmountAtomic,
+  };
+  if (canonicalDigest(row?.expectedCycleAsset ?? null) !== canonicalDigest(expected)) {
+    throw new ReturnRecoveryRequiredError(
+      'RETURN_CUSTODY_ASSOCIATION_MISSING',
+      "the return leg's durable custody row does not carry this leg's own unresolved expectation",
+    );
+  }
+}
+
+/**
+ * The one payout-facing projection of a SETTLED return leg, built identically whether this is the
+ * first observed settlement or a later durable replay of the same leg -- so the returnBinding
+ * digest downstream (payout.mjs) never diverges between the two. Never trusts the leg's own
+ * `destinationAmountAtomic` as received proceeds -- that field is the Relay quote, not a receipt.
+ * The credited amount is always `netDeltaAtomic`, the repository-derived observed amount proven
+ * from the finalized destination receipt (ADR-0026 / cycle-repository settleRelayLeg). `finalized`
+ * is only ever true once every check below -- cycle, finality, recipient, and asset identity --
+ * has independently passed, never assumed from the leg's recorded `state` alone.
+ */
+function returnPayoutSettlementEvidence(leg, { configured, money, context }) {
+  if (leg.state !== 'SETTLED') {
+    throw new Error('return payout evidence requires a SETTLED relay leg');
+  }
+  if (leg.cycleId !== context.cycleId) {
+    throw new Error('return leg cycleId does not match the reconciling cycle');
+  }
+  if (!leg.finalizedAtSource || !leg.finalizedAtDestination) {
+    throw new Error('return leg is missing finalized source or destination evidence');
+  }
+  const recipient = leg.returnAttribution?.intent?.recipient;
+  if (typeof recipient !== 'string' || recipient.toLowerCase() !== configured.evm.toLowerCase()) {
+    throw new Error('return leg attributed recipient does not match the configured Operations EVM account');
+  }
+  if (leg.destinationChainId !== EVM_CHAIN_ID
+    || typeof leg.destinationAssetId !== 'string' || leg.destinationAssetId.toLowerCase() !== USDG_ADDRESS
+    || leg.destinationDecimals !== money.assets.usdg.decimals) {
+    throw new Error('return leg destination asset does not match the configured USDG identity');
+  }
+  const destinationCreditAmount = canonicalAmount(leg.netDeltaAtomic, 'return leg netDeltaAtomic');
+  return Object.freeze({
+    schema: 'hookemon.return-relay-settlement-evidence.v1',
+    finalized: true,
+    destinationAccount: recipient,
+    destinationAsset: leg.destinationAssetId,
+    destinationCreditAmount,
+    relayLeg: Object.freeze(structuredClone(leg)),
+  });
+}
+
+/**
  * Finalizes the source chain attempt only after this process's own finalized Solana RPC proof,
  * then binds an authenticated Relay hash pointer to a separately finalized EVM receipt proof.
  */
 export async function reconcileLiveReturn({ adapters, config, cycleRepository, context }) {
+  if (typeof cycleRepository?.readStageAttempt === 'function') {
+    const zeroEvidence = await cycleRepository.readStageAttempt(context.cycleId, 'return');
+    if (zeroEvidence?.schema === 'hookemon.return-zero-proceeds-evidence.v1') {
+      const configured = assertReturnConfiguration(config);
+      const money = assertReturnMoneyConfiguration(config, configured);
+      if (!isZeroProceedsReturnEvidence(zeroEvidence, { cycleId: context.cycleId, configured, money })) {
+        throw new ReturnRecoveryRequiredError(
+          'RETURN_ZERO_PROCEEDS_EVIDENCE_INVALID',
+          'the durable zero-proceeds return evidence does not bind the configured cycle route',
+        );
+      }
+      // A durably recorded zero-proceeds evidence is not trusted from its recorded shape alone: a
+      // record produced before this identity fix (via the wrong Relay-wire lookup) could be a false
+      // zero for a genuinely sold cycle. Reverify against the current native ledger every time this
+      // reconciles, so a stale false zero can never keep reporting settled while positive
+      // cycle-attributed proceeds now exist.
+      if (typeof cycleRepository?.describeCycle !== 'function') {
+        throw new ReturnRecoveryRequiredError(
+          'RETURN_ZERO_PROCEEDS_EVIDENCE_UNVERIFIABLE',
+          'the durable zero-proceeds return evidence cannot be rechecked against current custody without cycleRepository.describeCycle',
+        );
+      }
+      const zeroCycle = await cycleRepository.describeCycle(context.cycleId);
+      const zeroNativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
+      assertNoCompetingReturnCustodyLedger(zeroCycle, zeroNativeIdentity);
+      const zeroLedger = custodyLedgerFor(zeroCycle, { chainId: zeroNativeIdentity.chainId, assetId: zeroNativeIdentity.assetId });
+      if (zeroLedger !== null && returnableProceedsDelta(zeroLedger) !== '0') {
+        throw new ReturnRecoveryRequiredError(
+          'RETURN_ZERO_PROCEEDS_EVIDENCE_STALE',
+          'the durable zero-proceeds return evidence conflicts with a positive cycle-attributed proceeds delta observed now',
+        );
+      }
+      if (zeroLedger === null) {
+        if (typeof cycleRepository?.readStageAttempt !== 'function') {
+          throw new ReturnRecoveryRequiredError(
+            'RETURN_ZERO_PROCEEDS_EVIDENCE_UNVERIFIABLE',
+            'the durable zero-proceeds return evidence cannot be rechecked against durable buyback evidence without cycleRepository.readStageAttempt',
+          );
+        }
+        const zeroBuybackAttempt = await cycleRepository.readStageAttempt(context.cycleId, 'buyback');
+        if (hasDurableSoldBuybackEvidence(zeroBuybackAttempt)) {
+          throw new ReturnRecoveryRequiredError(
+            'RETURN_ZERO_PROCEEDS_EVIDENCE_SOLD_WITHOUT_LEDGER',
+            'the durable zero-proceeds return evidence conflicts with durable buyback evidence recording a sold pack with no matching native custody ledger row',
+          );
+        }
+      }
+      return Object.freeze(structuredClone(zeroEvidence));
+    }
+  }
   if (typeof cycleRepository?.describeCycle !== 'function') {
     const intent = legacyUnauthenticatedReturnAttempt(await cycleRepository.readOperationalStageAttempt?.(context.cycleId, 'return'));
     if (intent === null) return null;
@@ -906,10 +1420,15 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
   const leg = legs[0];
   const records = stateValues(cycle?.chainAttempts).filter(record => record?.attempt?.stage === 'return');
   if (leg.state === 'SETTLED') {
-    return Object.freeze({
-      schema: 'hookemon.return-relay-settlement-evidence.v1',
-      relayLeg: Object.freeze(structuredClone(leg)),
-    });
+    const configured = assertReturnConfiguration(config);
+    const money = assertReturnMoneyConfiguration(config, configured);
+    assertReturnCanonicalCustodyAssociation(cycle, leg, money);
+    return returnPayoutSettlementEvidence(leg, { configured, money, context });
+  }
+  if (leg.state === 'RECORDED') {
+    const configured = assertReturnConfiguration(config);
+    const money = assertReturnMoneyConfiguration(config, configured);
+    assertReturnCanonicalCustodyAssociation(cycle, leg, money);
   }
   if (leg.state !== 'RECORDED') {
     if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && records.length === 1 && records[0].attempt?.state === 'FINALIZED') {
@@ -974,12 +1493,9 @@ export async function reconcileLiveReturn({ adapters, config, cycleRepository, c
   const settled = await cycleRepository.settleRelayLeg(context.cycleId, leg.relayRequestId, {
     returnDestinationProof: proof,
   });
-  return settled.state === 'SETTLED'
-    ? Object.freeze({
-      schema: 'hookemon.return-relay-settlement-evidence.v1',
-      relayLeg: Object.freeze(structuredClone(settled)),
-    })
-    : null;
+  if (settled.state !== 'SETTLED') return null;
+  const money = assertReturnMoneyConfiguration(config, configured);
+  return returnPayoutSettlementEvidence(settled, { configured, money, context });
 }
 
 /** Retained only to fail closed for a removed Phase 2 custody route. */

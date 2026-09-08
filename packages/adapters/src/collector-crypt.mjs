@@ -50,8 +50,18 @@ export const COLLECTOR_CRYPT_SETTLEMENT_ASSET = Object.freeze({
   decimals: CIRCLE_USD_DECIMALS,
 });
 
-// Every documented endpoint that mutates provider state. --dry-run refuses all four.
-export const MUTATION_ENDPOINT_NAMES = Object.freeze(['generatePack', 'openPack', 'buyback', 'submitTransaction']);
+// Every documented endpoint that mutates provider state. --dry-run refuses all of them.
+export const MUTATION_ENDPOINT_NAMES = Object.freeze(['generatePack', 'generateYoloPacks', 'openPack', 'buyback', 'submitTransaction']);
+
+// Documented at docs.collectorcrypt.com/gacha/api (fetched 2026-09-05, see
+// H-funding-observations.md): "/api/generateYoloPacks can generate 1-100 separately signed pack
+// transactions/memos." The exact response envelope is UNVERIFIED beyond that sentence — no
+// authenticated call was made. This client requires the documented per-pack shape (memo,
+// transaction) already proven for the single-pack /api/generatePack response, returned as a
+// `packs` array of exactly `quantity` items; it fails closed on any other envelope rather than
+// guessing an alternate field name.
+export const MINIMUM_YOLO_PACK_QUANTITY = 1;
+export const MAXIMUM_YOLO_PACK_QUANTITY = 100;
 
 // GET responses carry no side effects: any of these statuses is safe to retry.
 const DEFAULT_READ_RETRYABLE_STATUSES = Object.freeze([429, 500, 502, 503, 504]);
@@ -61,7 +71,7 @@ const DEFAULT_MUTATION_RETRYABLE_STATUSES = Object.freeze([]);
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 const solanaAddressPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const packTypePattern = /^[a-z][a-z0-9_]{0,63}$/;
+const packTypePattern = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const memoPattern = /^[\x21-\x7e]{1,255}$/; // printable ASCII, no whitespace/control chars
 const base64Pattern = /^[A-Za-z0-9+/]+={0,2}$/;
 const canonicalUnsignedInteger = /^(0|[1-9][0-9]*)$/;
@@ -228,6 +238,29 @@ function validateGeneratePackRequest(request) {
   return out;
 }
 
+function validateGenerateYoloPacksRequest(request) {
+  if (!isPlainObject(request)) throw new TypeError('collector-crypt generateYoloPacks request must be a plain object');
+  if (!Number.isInteger(request.quantity) || request.quantity < MINIMUM_YOLO_PACK_QUANTITY || request.quantity > MAXIMUM_YOLO_PACK_QUANTITY) {
+    throw new TypeError(`collector-crypt generateYoloPacks quantity must be an integer from ${MINIMUM_YOLO_PACK_QUANTITY} through ${MAXIMUM_YOLO_PACK_QUANTITY}`);
+  }
+  const out = {
+    playerAddress: requireSolanaAddress(request.playerAddress, 'collector-crypt generateYoloPacks playerAddress'),
+    quantity: request.quantity,
+  };
+  if (request.packType !== undefined) {
+    if (typeof request.packType !== 'string' || !packTypePattern.test(request.packType)) throw new TypeError('collector-crypt generateYoloPacks packType must be a lowercase machine code');
+    out.packType = request.packType;
+  }
+  if (request.turbo !== undefined) {
+    if (typeof request.turbo !== 'boolean') throw new TypeError('collector-crypt generateYoloPacks turbo must be a boolean');
+    out.turbo = request.turbo;
+  }
+  if (request.altPlayerAddress !== undefined) out.altPlayerAddress = requireSolanaAddress(request.altPlayerAddress, 'collector-crypt generateYoloPacks altPlayerAddress');
+  if (request.altFundsRecipient !== undefined) out.altFundsRecipient = requireSolanaAddress(request.altFundsRecipient, 'collector-crypt generateYoloPacks altFundsRecipient');
+  rejectUnknownFields(request, new Set(['playerAddress', 'packType', 'quantity', 'turbo', 'altPlayerAddress', 'altFundsRecipient']), 'collector-crypt generateYoloPacks request');
+  return out;
+}
+
 function validateOpenPackRequest(request) {
   if (!isPlainObject(request)) throw new TypeError('collector-crypt openPack request must be a plain object');
   if (typeof request.memo !== 'string' || !memoPattern.test(request.memo)) throw new TypeError('collector-crypt openPack memo must be a non-empty printable-ASCII string');
@@ -275,6 +308,19 @@ function assertStatusResponse(value) {
 
 function assertGeneratePackResponse(value) {
   return assertResponseShape(isPlainObject(value) && typeof value.memo === 'string' && value.memo.length > 0 && typeof value.transaction === 'string' && value.transaction.length > 0, 'generatePack', value);
+}
+
+function isGeneratedPackEntry(value) {
+  return isPlainObject(value) && typeof value.memo === 'string' && value.memo.length > 0
+    && typeof value.transaction === 'string' && value.transaction.length > 0;
+}
+
+function assertGenerateYoloPacksResponse(value, quantity) {
+  assertResponseShape(isPlainObject(value) && Array.isArray(value.packs), 'generateYoloPacks', value);
+  assertResponseShape(value.packs.length === quantity && value.packs.every(isGeneratedPackEntry), 'generateYoloPacks', value);
+  const memos = new Set(value.packs.map(pack => pack.memo));
+  assertResponseShape(memos.size === value.packs.length, 'generateYoloPacks', value);
+  return value;
 }
 
 function assertOpenPackResponse(value) {
@@ -495,6 +541,15 @@ export function createCollectorCryptClient(options = {}) {
     return assertGeneratePackResponse(await postMutation('generatePack', '/api/generatePack', validated));
   }
 
+  /** Documented batch pack generation (1-100 per call); one authorized transaction per pack. */
+  async function generateYoloPacks(request) {
+    const validated = validateGenerateYoloPacksRequest(request);
+    return assertGenerateYoloPacksResponse(
+      await postMutation('generateYoloPacks', '/api/generateYoloPacks', validated),
+      validated.quantity,
+    );
+  }
+
   async function openPack(request) {
     const validated = validateOpenPackRequest(request);
     return assertOpenPackResponse(await postMutation('openPack', '/api/openPack', validated));
@@ -536,6 +591,7 @@ export function createCollectorCryptClient(options = {}) {
     getStatus,
     getNfts,
     generatePack,
+    generateYoloPacks,
     openPack,
     getBuybackAvailable,
     getBuybackCheck,

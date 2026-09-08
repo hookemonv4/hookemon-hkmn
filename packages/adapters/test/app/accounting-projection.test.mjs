@@ -58,6 +58,7 @@ function custodyLedger({ cycleId, chainId, assetId, decimals = 6, ...buckets }) 
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -111,6 +112,105 @@ test('policy custody keeps each cycle partitioned and never converts a foreign s
     ['active', '34'],
     ['archived', '14'],
   ]);
+});
+
+test('policy custody carries open held positions at their recorded USDG values', async () => {
+  const position = ({ positionId, cycleId, valueMicroUsdg, resolution = null }) => ({
+    positionId,
+    cycleId,
+    costMicroUsdg: valueMicroUsdg,
+    valueMicroUsdg,
+    insuredValue: null,
+    reason: 'HELD_UNRESOLVED',
+    terminalState: 'HELD_UNRESOLVED',
+    evidenceDigest: `sha256:${'a'.repeat(64)}`,
+    openedAtMs: 1_000,
+    positionRevision: 0,
+    ownerDecision: null,
+    resolution,
+  });
+  const repository = custodyRepository({
+    'cycle-alpha': {
+      cycleId: 'cycle-alpha',
+      terminalState: 'COMPLETED',
+      custodyLedgers: new Map(),
+      heldPositions: new Map([
+        ['held-alpha', position({ positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsdg: '19' })],
+        ['held-resolved', position({
+          positionId: 'held-resolved',
+          cycleId: 'cycle-alpha',
+          valueMicroUsdg: '23',
+          resolution: { state: 'SOLD' },
+        })],
+      ]),
+    },
+    'cycle-beta': {
+      cycleId: 'cycle-beta',
+      terminalState: 'COMPLETED',
+      custodyLedgers: new Map(),
+      heldPositions: new Map([
+        ['held-beta', position({ positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsdg: '31' })],
+      ]),
+    },
+  });
+
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.heldPositions.count, 2);
+  assert.equal(custody.heldPositions.valueMicroUsdg, '50');
+  assert.deepEqual(
+    custody.heldPositions.positions.map(({ positionId, cycleId, valueMicroUsdg }) => ({ positionId, cycleId, valueMicroUsdg })),
+    [
+      { positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsdg: '19' },
+      { positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsdg: '31' },
+    ],
+  );
+  assert.deepEqual(custody.heldPositions.positions[0], {
+    positionId: 'held-alpha',
+    cycleId: 'cycle-alpha',
+    costMicroUsdg: '19',
+    valueMicroUsdg: '19',
+    insuredValue: null,
+    reason: 'HELD_UNRESOLVED',
+    terminalState: 'HELD_UNRESOLVED',
+    evidenceDigest: `sha256:${'a'.repeat(64)}`,
+    openedAtMs: 1_000,
+    positionRevision: 0,
+    ownerDecision: null,
+  });
+});
+
+test('does not classify a separately valued foreign held-position bucket as unvalued custody', async () => {
+  const repository = custodyRepository({
+    held: {
+      cycleId: 'held',
+      terminalState: 'COMPLETED',
+      custodyLedgers: new Map([['solana', custodyLedger({
+        cycleId: 'held',
+        chainId: 'solana:mainnet',
+        assetId: 'spl:card-custody',
+        heldPositions: '40',
+      })]]),
+      heldPositions: new Map([['held-card', {
+        positionId: 'held-card',
+        cycleId: 'held',
+        costMicroUsdg: '40',
+        valueMicroUsdg: '40',
+        insuredValue: null,
+        reason: 'EPIC_THRESHOLD',
+        terminalState: 'HELD_OWNER_DECISION',
+        evidenceDigest: `sha256:${'b'.repeat(64)}`,
+        openedAtMs: 1_000,
+        positionRevision: 0,
+        ownerDecision: null,
+        resolution: null,
+      }]]),
+    },
+  });
+
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.heldPositions.count, 1);
+  assert.equal(custody.heldPositions.valueMicroUsdg, '40');
 });
 
 test('policy custody partition property never offsets one cycle against another', async () => {
@@ -173,20 +273,130 @@ test('a foreign current balance remains unvalued until it is reconciled or class
   assert.equal(custody.unvaluedExposure, true);
 });
 
+function custodyLedgerV2({ cycleId, chainId, assetId, decimals = 6, verifiedCurrentBalance = null, expectedCycleAsset = null, ...buckets }) {
+  return {
+    ...custodyLedger({ cycleId, chainId, assetId, decimals, ...buckets }),
+    schema: 'hookemon.custody-ledger.v2',
+    verifiedCurrentBalance,
+    expectedCycleAsset,
+  };
+}
+
+function custodyBalanceObservation({ chainId, assetId, decimals = 6, amountAtomic = '999' }) {
+  return {
+    schema: 'hookemon.custody-balance-observation.v1',
+    account: '0x2222222222222222222222222222222222222222',
+    balance: { chainId, assetId, decimals, amountAtomic },
+    finality: { height: '18000000', hash: `0x${'3'.repeat(64)}`, timestampUnixSeconds: '1780000000' },
+  };
+}
+
+test('a canonical EVM USDG v2 row with a null observation and a positive unresolved claim is unvalued', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, claimed: '10', returnReceived: '3',
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, true);
+  assert.equal(custody.atRiskMicroUsdg, '7');
+});
+
+test('a canonical EVM USDG v2 row with a null observation and a nonzero current-custody bucket is unvalued', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, residual: '1',
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, true);
+});
+
+test('a canonical EVM USDG v2 row with a non-null observation is never marked unvalued by this rule', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, claimed: '10', returnReceived: '3',
+        verifiedCurrentBalance: custodyBalanceObservation({ chainId: evmUsdg.chainId, assetId: evmUsdg.assetId }),
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.atRiskMicroUsdg, '7');
+});
+
+test('a genuine first-write v2 row with both new fields null and zero buckets leaves the projection unaffected', async () => {
+  const repository = custodyRepository({
+    cycle: {
+      cycleId: 'cycle',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({ cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.outstandingMicroUsdg, '0');
+  assert.equal(custody.atRiskMicroUsdg, '0');
+});
+
+test('two cycles sharing one wallet observation are still reduced independently, never summed', async () => {
+  const sharedObservation = custodyBalanceObservation({ chainId: evmUsdg.chainId, assetId: evmUsdg.assetId });
+  const repository = custodyRepository({
+    alpha: {
+      cycleId: 'alpha',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'alpha', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+        claimed: '10', returnReceived: '0', verifiedCurrentBalance: sharedObservation,
+      })]]),
+    },
+    beta: {
+      cycleId: 'beta',
+      terminalState: null,
+      custodyLedgers: new Map([['evm', custodyLedgerV2({
+        cycleId: 'beta', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+        claimed: '20', returnReceived: '5', verifiedCurrentBalance: sharedObservation,
+      })]]),
+    },
+  });
+  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  assert.equal(custody.unvaluedExposure, false);
+  assert.equal(custody.atRiskMicroUsdg, '25');
+  assert.deepEqual(custody.cycles.map(cycle => [cycle.cycleId, cycle.atRiskMicroUsdg]), [
+    ['alpha', '10'],
+    ['beta', '15'],
+  ]);
+});
+
 test('accounting projection does not reconstruct retired rehearsal evidence at runtime', async () => {
   const source = await readFile(new URL('../../src/app/accounting-projection.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /String\.fromCharCode/);
 });
 
-test('a fresh cycle with no completed stages reports the honest all-zero/all-null shape', async t => {
+test('a fresh cycle with no completed stages reports the honest all-null shape (never an invented zero)', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
 
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.packSpendMicroUsdg, '0', 'nothing was spent before purchase completes');
-  assert.equal(accounting.buybackMicroUsdg, '0');
-  assert.equal(accounting.packGainMicroUsdg, '0');
-  assert.equal(accounting.packLossMicroUsdg, '0');
+  assert.equal(accounting.packSpendMicroUsdg, null);
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.outboundBridgeDebit, null);
+  assert.equal(accounting.inboundBridgeProceeds, null);
+  assert.equal(accounting.collectorPurchaseDebit, null);
+  assert.equal(accounting.collectorBuybackProceeds, null);
+  assert.equal(accounting.packGainMicroUsdg, null);
+  assert.equal(accounting.packLossMicroUsdg, null);
   assert.equal(accounting.quotedCosts.outboundBridgeMicroUsdg, null);
   assert.equal(accounting.holderRewardsStatus, 'not-started');
   assert.equal(accounting.distributionStatus, 'not-started');
@@ -194,20 +404,65 @@ test('a fresh cycle with no completed stages reports the honest all-zero/all-nul
   assert.equal(accounting.protectedCostsMicroUsdg, null);
   assert.equal(accounting.confirmedCostsMicroUsdg, null);
   assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null);
+  assert.equal(accounting.payoutDustMicroUsdg, null);
+  assert.equal(accounting.paidHolderRewardsRecipientCount, null);
 });
 
-test('packSpendMicroUsdg becomes the cycle release amount once purchase durably completes, and packLoss reflects it', async t => {
-  const repository = await openRepository(t);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
-  await completeStageInOrder(repository, cycleId, 'purchase', { memo: 'memo-1', signature: 'sig-1' });
+function relayLeg({
+  direction, state = 'SETTLED',
+  sourceChainId = '4663', sourceAssetId = EXPECTED_USDG_ASSET_ID, sourceDecimals = 6, sourceAmountAtomic = '0',
+  destinationChainId = '4663', destinationAssetId = EXPECTED_USDG_ASSET_ID, destinationDecimals = 6, destinationAmountAtomic = '0',
+}) {
+  return {
+    direction, state,
+    sourceChainId, sourceAssetId, sourceDecimals, sourceAmountAtomic,
+    destinationChainId, destinationAssetId, destinationDecimals, destinationAmountAtomic,
+  };
+}
 
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.packSpendMicroUsdg, '5000000');
-  assert.equal(accounting.packLossMicroUsdg, '5000000', 'no buyback proceeds yet, so the full spend is currently a loss');
-  assert.equal(accounting.packGainMicroUsdg, '0');
+function relayLegRepository({ releaseAmount = '0', relayLegs = new Map(), stages = {} }) {
+  return {
+    async describeCycle() { return { releaseAmount, relayLegs }; },
+    async readStage(_cycleId, stage) { return stages[stage] ?? { status: 'PENDING' }; },
+  };
+}
+
+test('outboundBridgeDebit is the settled outbound bridge amount, never the allocated cycle budget; packSpendMicroUsdg has no honest USDG pack-economics producer and stays null', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '100', // the cycle's allocated budget
+    relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })]]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '50' });
+  assert.equal(accounting.packSpendMicroUsdg, null, 'no honest same-asset USDG pack-economics producer exists');
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.packGainMicroUsdg, null);
+  assert.equal(accounting.packLossMicroUsdg, null);
 });
 
-test('quotedCosts.outboundBridgeMicroUsdg is derived from the outbound stage evidence real quote amounts when present', async t => {
+test('outboundBridgeDebit stays null (unknown) until the outbound leg is durably settled', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '100',
+    relayLegs: new Map([['leg-1', relayLeg({ direction: 'outbound', state: 'RECORDED', sourceAmountAtomic: '50' })]]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.outboundBridgeDebit, null);
+});
+
+test('outboundBridgeDebit stays null when more than one settled outbound leg exists (ambiguous, never guessed)', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '100',
+    relayLegs: new Map([
+      ['leg-1', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })],
+      ['leg-2', relayLeg({ direction: 'outbound', sourceAmountAtomic: '60' })],
+    ]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.outboundBridgeDebit, null);
+});
+
+test('quotedCosts.outboundBridgeMicroUsdg is always null: the quoted origin (USDG) and destination (Solana Circle USD) are different assets, never subtracted', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
   await completeStageInOrder(repository, cycleId, 'outbound', {
@@ -219,19 +474,10 @@ test('quotedCosts.outboundBridgeMicroUsdg is derived from the outbound stage evi
   });
 
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.quotedCosts.outboundBridgeMicroUsdg, '5000');
-});
-
-test('quotedCosts.outboundBridgeMicroUsdg stays null when the outbound evidence carries no real quote amounts (e.g. an injected test fake)', async t => {
-  const repository = await openRepository(t);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
-  await completeStageInOrder(repository, cycleId, 'outbound', { wouldBridgeOutbound: true, configured: true, quote: { wouldExecute: true, requestId: 'req-1' } });
-
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
   assert.equal(accounting.quotedCosts.outboundBridgeMicroUsdg, null);
 });
 
-test('holderRewardsStatus/distributionStatus advance only as return/distribution/payout durably complete', async t => {
+test('holderRewardsStatus fails closed to awaiting-verification when the payout stage is COMPLETE but carries no real finalized-payout evidence', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-accounting-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   let repository = await CycleRepository.open(directory, () => 1_000);
@@ -248,13 +494,31 @@ test('holderRewardsStatus/distributionStatus advance only as return/distribution
   assert.equal(accounting.distributionStatus, 'verified');
   assert.equal(accounting.holderRewardsStatus, 'distribution-verified');
 
+  // The payout stage completes with test-seed evidence ({ seeded: true }), not a real
+  // hookemon.direct-payout-result.v1 bundle — COMPLETE alone must never be read as "paid".
   await completeStageInOrder(repository, cycleId, 'payout', { seeded: true });
   accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
   assert.equal(accounting.distributionStatus, 'settled');
-  assert.equal(accounting.holderRewardsStatus, 'paid');
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
 });
 
-test('completed rehearsal payout evidence supplies the observed proceeds as buyback accounting', async t => {
+test('inboundBridgeProceeds is the settled return bridge amount, never the Solana proceeds at an assumed USDG parity; buybackMicroUsdg stays null', async () => {
+  const repository = relayLegRepository({
+    releaseAmount: '5000000',
+    relayLegs: new Map([
+      ['out', relayLeg({ direction: 'outbound', sourceAmountAtomic: '5000000' })],
+      ['ret', relayLeg({ direction: 'return', destinationAmountAtomic: '4995000' })],
+    ]),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '4995000' });
+  assert.equal(accounting.buybackMicroUsdg, null);
+  assert.equal(accounting.packGainMicroUsdg, null);
+  assert.equal(accounting.packLossMicroUsdg, null);
+});
+
+test('a completed production payout stage carrying only rehearsal Solana proceeds does not populate inboundBridgeProceeds or buybackMicroUsdg', async t => {
   const repository = await openRepository(t);
   const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
   await completeStageInOrder(repository, cycleId, 'purchase', { signature: 'purchase-1' });
@@ -263,33 +527,676 @@ test('completed rehearsal payout evidence supplies the observed proceeds as buyb
     proceedsMicroSolanaStable: '4995000',
   });
   const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.equal(accounting.buybackMicroUsdg, '4995000');
-  assert.equal(accounting.packGainMicroUsdg, '0');
-  assert.equal(accounting.packLossMicroUsdg, '5000');
+  assert.equal(accounting.buybackMicroUsdg, null, 'no settled return bridge leg exists, so this is honestly unknown, not a rehearsal-derived figure');
+  assert.equal(accounting.inboundBridgeProceeds, null);
 });
 
-test('migrated historical rehearsal payout evidence preserves its atomic accounting totals', async t => {
-  const repository = await openRepository(t);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '5000000', mode: 'production' });
-  const migratedHistoricalEvidence = Object.freeze({
-    signature: 'payout-1',
-    proceedsMicroSolanaStable: '4995000',
+test('collectorPurchaseDebit/collectorBuybackProceeds carry the real Collector-Crypt-side (Solana) typed amounts, distinct from the EVM bridge amounts', async () => {
+  const repository = relayLegRepository({
+    relayLegs: new Map([
+      ['out', relayLeg({ direction: 'outbound', sourceAmountAtomic: '50' })],
+      ['ret', relayLeg({ direction: 'return', destinationAmountAtomic: '48' })],
+    ]),
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          packCost: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '49' },
+        },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          proceeds: { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, amountAtomic: '47' },
+        },
+      },
+    },
   });
-  await completeStageInOrder(repository, cycleId, 'purchase', { signature: 'purchase-1' });
-  await completeStageInOrder(repository, cycleId, 'payout', migratedHistoricalEvidence);
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.outboundBridgeDebit, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '50' });
+  assert.deepEqual(accounting.collectorPurchaseDebit, {
+    chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, units: '49',
+  });
+  assert.deepEqual(accounting.inboundBridgeProceeds, { chainId: '4663', assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, units: '48' });
+  assert.deepEqual(accounting.collectorBuybackProceeds, {
+    chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6, units: '47',
+  });
+  // The bridge amount and the Collector amount are genuinely different real numbers (bridge
+  // fees/slippage) - never equated, and packSpendMicroUsdg never reports either as pack economics.
+  assert.notEqual(accounting.outboundBridgeDebit.units, accounting.collectorPurchaseDebit.units);
+  assert.equal(accounting.packSpendMicroUsdg, null);
+});
 
-  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId });
-  assert.deepEqual(
-    {
-      buybackMicroUsdg: accounting.buybackMicroUsdg,
-      packGainMicroUsdg: accounting.packGainMicroUsdg,
-      packLossMicroUsdg: accounting.packLossMicroUsdg,
+const SOLANA_SETTLEMENT_ASSET = { chainId: 'solana:mainnet-beta', assetId: 'spl:stablecoin', decimals: 6 };
+function solAmount(amountAtomic) { return { ...SOLANA_SETTLEMENT_ASSET, amountAtomic }; }
+
+test('collectorPurchaseDebit sums an N-pack purchase batch: verified purchased packs plus genuinely zero-cost not_purchased packs', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 3,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+            { packIndex: 1, memo: 'memo-1', status: 'not_purchased' },
+            { packIndex: 2, memo: 'memo-2', status: 'purchased', packCost: solAmount('20') },
+          ],
+        },
+      },
     },
-    {
-      buybackMicroUsdg: '4995000',
-      packGainMicroUsdg: '0',
-      packLossMicroUsdg: '5000',
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.collectorPurchaseDebit, { ...SOLANA_SETTLEMENT_ASSET, units: '50' });
+});
+
+test('collectorBuybackProceeds sums only sold packs; held (never-sold) packs are a real verified zero, not unknown', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 3,
+          purchasedCount: 3,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 2, memo: 'memo-2', status: 'purchased', packCost: solAmount('10') },
+          ],
+        },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          soldCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+            { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'held', terminalState: 'HELD_OWNER_DECISION', reason: 'insured value exceeds cap' },
+            { packIndex: 2, memo: 'memo-2', mint: 'mint-2', decision: 'sold', signature: 'sig-2', proceeds: solAmount('35') },
+          ],
+        },
+      },
     },
-  );
-  assert.match((await repository.describeCycle(cycleId)).journalHead, /^sha256:[0-9a-f]{64}$/);
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.deepEqual(accounting.collectorBuybackProceeds, { ...SOLANA_SETTLEMENT_ASSET, units: '75' });
+});
+
+test('collectorPurchaseDebit fails closed to null when a purchased pack is missing its own packCost (never a fabricated zero or a silently dropped pack)', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased' }, // packCost missing
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('collectorBuybackProceeds fails closed to null on a mixed-denomination pack batch instead of silently double-mixing assets', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+          ],
+        },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          soldCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+            { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'sold', signature: 'sig-1', proceeds: { chainId: 1, assetId: '0xforeign', decimals: 18, amountAtomic: '35' } },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('collectorPurchaseDebit fails closed to null on a duplicate packIndex instead of double-counting it', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+            { packIndex: 0, memo: 'memo-0-dup', status: 'purchased', packCost: solAmount('30') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('F8-sol-verification repro: quantity/purchasedCount claim 2 packs but only one pack entry is present -- fails closed, never a partial sum over the incomplete batch', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('F8-sol-verification repro: soldCount claims a sale but buyback\'s own packs are fewer than the purchase batch actually produced -- fails closed on the missing predecessor coverage', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: {
+          quantity: 2,
+          purchasedCount: 2,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+            { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+          ],
+        },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: {
+          soldCount: 1,
+          packs: [
+            { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+          ],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('F8-sol-verification repro: a new-shape purchase record (carries quantity/purchasedCount) missing its own packs array never falls back to a legacy top-level packCost', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: { quantity: 2, purchasedCount: 2, packCost: solAmount('30') },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
+});
+
+test('F8-sol-verification repro: a new-shape buyback record (carries soldCount) missing its own packs array never falls back to a legacy top-level proceeds', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      buyback: {
+        status: 'COMPLETE',
+        evidence: { soldCount: 1, proceeds: solAmount('40') },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('F8-sol-verification repro: a sold pack missing its own memo and mint never contributes proceeds -- canonical identity is required, not just amount presence', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      purchase: {
+        status: 'COMPLETE',
+        evidence: { quantity: 1, purchasedCount: 1, packs: [{ packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') }] },
+      },
+      buyback: {
+        status: 'COMPLETE',
+        evidence: { soldCount: 1, packs: [{ packIndex: 0, decision: 'sold', proceeds: solAmount('40') }] },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+test('F9-sol-verification repro: purchase evidence requires dense pack indexes and rejects a contradictory not_purchased debit or signature', async () => {
+  for (const packs of [
+    [
+      { packIndex: 1, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+      { packIndex: 2, memo: 'memo-1', status: 'purchased', packCost: solAmount('20') },
+    ],
+    [
+      { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+      { packIndex: 1, memo: 'memo-1', status: 'not_purchased', packCost: solAmount('999') },
+    ],
+    [
+      { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('30') },
+      { packIndex: 1, memo: 'memo-1', status: 'not_purchased', signature: 'contradictory-sig' },
+    ],
+  ]) {
+    const accounting = await projectCycleAccounting({
+      cycleRepository: relayLegRepository({
+        stages: { purchase: { status: 'COMPLETE', evidence: { quantity: 2, purchasedCount: 1 + Number(packs[1].status === 'purchased'), packs } } },
+      }),
+      cycleId: 'cycle-1',
+    });
+    assert.equal(accounting.collectorPurchaseDebit, null);
+  }
+});
+
+test('F9-sol-verification repro: buyback evidence binds each packIndex and memo to the purchased subset', async () => {
+  const purchase = {
+    status: 'COMPLETE', evidence: {
+      quantity: 3, purchasedCount: 2, packs: [
+        { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+        { packIndex: 1, memo: 'memo-1', status: 'not_purchased' },
+        { packIndex: 2, memo: 'memo-2', status: 'purchased', packCost: solAmount('10') },
+      ],
+    },
+  };
+  for (const packs of [
+    [
+      { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+      { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'held' },
+    ],
+    [
+      { packIndex: 0, memo: 'foreign-memo', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+      { packIndex: 2, memo: 'memo-2', mint: 'mint-2', decision: 'held' },
+    ],
+  ]) {
+    const accounting = await projectCycleAccounting({
+      cycleRepository: relayLegRepository({ stages: { purchase, buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs } } } }),
+      cycleId: 'cycle-1',
+    });
+    assert.equal(accounting.collectorBuybackProceeds, null);
+  }
+});
+
+test('F9-sol-verification repro: a held buyback record carrying sale evidence cannot contribute a partial total', async () => {
+  const accounting = await projectCycleAccounting({
+    cycleRepository: relayLegRepository({
+      stages: {
+        purchase: { status: 'COMPLETE', evidence: { quantity: 2, purchasedCount: 2, packs: [
+          { packIndex: 0, memo: 'memo-0', status: 'purchased', packCost: solAmount('10') },
+          { packIndex: 1, memo: 'memo-1', status: 'purchased', packCost: solAmount('10') },
+        ] } },
+        buyback: { status: 'COMPLETE', evidence: { soldCount: 1, packs: [
+          { packIndex: 0, memo: 'memo-0', mint: 'mint-0', decision: 'sold', signature: 'sig-0', proceeds: solAmount('40') },
+          { packIndex: 1, memo: 'memo-1', mint: 'mint-1', decision: 'held', signature: 'contradictory-sig', proceeds: solAmount('999') },
+        ] } },
+      },
+    }),
+    cycleId: 'cycle-1',
+  });
+  assert.equal(accounting.collectorBuybackProceeds, null);
+});
+
+// The configured USDG token address, standing in for `config.contracts.usdg` at composition time.
+// Every "real" fixture in this file uses this exact assetId; a "foreign token" fixture deliberately
+// uses a different one to prove the asset anchor is a trusted, external identity, never derived from
+// the evidence itself. Real EVM-address-shaped (assertFinalizedPayoutTransferEvidence validates it
+// with the same viem isAddress() check stages/payout.mjs's own assertAddress uses).
+const EXPECTED_USDG_ASSET_ID = `0x${'a'.repeat(40)}`;
+// Standing in for config.accounts.evm (the configured Operations sender) at composition time.
+const OPERATIONS_ADDRESS = `0x${'1'.repeat(40)}`;
+const RECIPIENT_A = `0x${'2'.repeat(40)}`;
+const RECIPIENT_B = `0x${'3'.repeat(40)}`;
+
+/** A fully producer-shaped `finalizedTransfer` object (all 16 fields
+ * `stages/payout.mjs`'s own `normalizeFinalizedTransfer` requires), for the one fixture that must
+ * still project as paid. */
+function realFinalizedTransfer({ recipient, amountAtomic }) {
+  return {
+    from: OPERATIONS_ADDRESS, to: recipient,
+    amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic },
+    finalizedBlockNumber: '100', finalizedBlockHash: '0x' + 'b'.repeat(64),
+    receiptBlockNumber: '99', receiptBlockHash: '0x' + 'c'.repeat(64),
+    previousBlockNumber: '98', previousBlockHash: '0x' + 'd'.repeat(64),
+    sourceBalanceBeforeAtomic: '1000', sourceBalanceAfterAtomic: String(1000 - Number(amountAtomic)), sourceBalanceDeltaAtomic: amountAtomic,
+    recipientBalanceBeforeAtomic: '0', recipientBalanceAfterAtomic: amountAtomic, recipientBalanceDeltaAtomic: amountAtomic,
+    logIndexes: ['0'],
+  };
+}
+
+const trustedPayoutContext = Object.freeze({
+  expectedUsdgAssetId: EXPECTED_USDG_ASSET_ID,
+  operationsAddress: OPERATIONS_ADDRESS,
+});
+
+test('projectPayoutEvidence: without trustedPayoutContext, even a fully producer-shaped valid payout stays all-null/awaiting-verification', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
+          recipients: [{
+            recipient: RECIPIENT_A,
+            amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+            state: 'FINALIZED',
+            nonce: 1,
+            transactionHash: '0x' + '1'.repeat(64),
+            finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+            refusalEvidence: null,
+          }],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  // No trustedPayoutContext supplied - this projection has no immutable anchor for "which token is
+  // USDG" and no finality-proof validator of its own, so it must never guess.
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('F6-sol-verification repro: a non-empty malformed hash plus an amount-only finalizedTransfer never reports paid, even with trustedPayoutContext supplied', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      recipients: [{
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: 'not-a-transaction-hash',
+        finalizedTransfer: { amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' } },
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('F6-sol-verification repro: a fully shaped, internally consistent foreign chain-4663 six-decimal token never reports paid', async () => {
+  const foreignAssetId = '0xforeigntoken';
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          // Internally consistent (all three amounts agree, conservation holds) but NOT the
+          // configured USDG token - the exact class of foreign-token repro F6 demonstrated.
+          distributablePool: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '0' },
+          recipients: [{
+            recipient: RECIPIENT_A,
+            amount: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+            state: 'FINALIZED',
+            nonce: 1,
+            transactionHash: '0x' + '1'.repeat(64),
+            finalizedTransfer: {
+              ...realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+              amount: { chainId: 4663, assetId: foreignAssetId, decimals: 6, amountAtomic: '100' },
+            },
+            refusalEvidence: null,
+          }],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null, 'a fully-formed but foreign chain-4663/six-decimal token must never pass as USDG');
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence: a real finalized payout with a quarantined recipient reports paid-with-liabilities, not paid', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
+          recipients: [
+            {
+              recipient: RECIPIENT_A,
+              amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '70' },
+              state: 'FINALIZED',
+              nonce: 1,
+              transactionHash: '0x' + '1'.repeat(64),
+              finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '70' }),
+              refusalEvidence: null,
+            },
+            { recipient: RECIPIENT_B, amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '30' }, state: 'REFUSED', nonce: 2, transactionHash: null, finalizedTransfer: null, refusalEvidence: { reason: 'REFUSED' } },
+          ],
+          quarantine: [
+            { recipient: RECIPIENT_B, amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' },
+          ],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, '100');
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, '70');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, '30');
+  assert.equal(accounting.payoutDustMicroUsdg, '0');
+  assert.equal(accounting.paidHolderRewardsRecipientCount, 1);
+  assert.equal(accounting.holderRewardsStatus, 'paid-with-liabilities');
+});
+
+test('projectPayoutEvidence: every recipient finalized with zero liability reports paid', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
+          recipients: [
+            {
+              recipient: RECIPIENT_A,
+              amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+              state: 'FINALIZED',
+              nonce: 1,
+              transactionHash: '0x' + '1'.repeat(64),
+              finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+              refusalEvidence: null,
+            },
+          ],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, '100');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, '0');
+  assert.equal(accounting.paidHolderRewardsRecipientCount, 1);
+  assert.equal(accounting.holderRewardsStatus, 'paid');
+});
+
+test('projectPayoutEvidence fails closed to all-null when the payout evidence has an asset-inconsistent amount', async () => {
+  const repository = relayLegRepository({
+    stages: {
+      payout: {
+        status: 'COMPLETE',
+        evidence: {
+          schema: 'hookemon.direct-payout-result.v1',
+          cycleId: 'cycle-1',
+          planDigest: 'sha256:' + 'a'.repeat(64),
+          distributablePool: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          totalAllocated: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+          dust: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '0' },
+          recipients: [
+            // Wrong asset for this recipient's amount - must fail closed, never silently sum it in.
+            { recipient: RECIPIENT_A, amount: { chainId: 1, assetId: '0xother', decimals: 18, amountAtomic: '100' }, state: 'FINALIZED', nonce: 1, transactionHash: '0x' + '1'.repeat(64), finalizedTransfer: {}, refusalEvidence: null },
+          ],
+          quarantine: [],
+          heldPositionExclusions: [],
+        },
+      },
+    },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.plannedHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+function payoutEvidenceStages({ recipients, quarantine = [], distributablePool = '100', totalAllocated = '100', dust = '0', cycleId = 'cycle-1' }) {
+  const usdg = amount => ({ chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: amount });
+  return {
+    payout: {
+      status: 'COMPLETE',
+      evidence: {
+        schema: 'hookemon.direct-payout-result.v1',
+        cycleId,
+        planDigest: 'sha256:' + 'a'.repeat(64),
+        distributablePool: usdg(distributablePool),
+        totalAllocated: usdg(totalAllocated),
+        dust: usdg(dust),
+        recipients,
+        quarantine,
+        heldPositionExclusions: [],
+      },
+    },
+  };
+}
+
+test('F4-sol-verification repro: a FINALIZED label alone, without transactionHash/finalizedTransfer, is never reported as paid', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      recipients: [{
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: null,
+        finalizedTransfer: null,
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null, 'no fabricated paid amount from the FINALIZED label alone');
+  assert.equal(accounting.payoutLiabilityMicroUsdg, null, 'no fabricated zero liability either');
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence fails closed when the evidence cycleId does not match the cycle actually being projected', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      cycleId: 'some-other-cycle',
+      recipients: [{
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: '0x' + '1'.repeat(64),
+        finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence fails closed when a quarantine entry does not pair 1:1 with a non-paid recipient', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      recipients: [{
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: '0x' + '1'.repeat(64),
+        finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+        refusalEvidence: null,
+      }],
+      // A quarantine entry with no corresponding non-paid recipient - must never be summed in.
+      quarantine: [{ recipient: RECIPIENT_B, amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '30' }, reason: 'REFUSED' }],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('projectPayoutEvidence fails closed when totalAllocated + dust does not conserve against distributablePool', async () => {
+  const repository = relayLegRepository({
+    stages: payoutEvidenceStages({
+      distributablePool: '100',
+      totalAllocated: '100',
+      dust: '5', // 100 + 5 != 100 - inconsistent with the plan's own conservation invariant
+      recipients: [{
+        recipient: RECIPIENT_A,
+        amount: { chainId: 4663, assetId: EXPECTED_USDG_ASSET_ID, decimals: 6, amountAtomic: '100' },
+        state: 'FINALIZED',
+        nonce: 1,
+        transactionHash: '0x' + '1'.repeat(64),
+        finalizedTransfer: realFinalizedTransfer({ recipient: RECIPIENT_A, amountAtomic: '100' }),
+        refusalEvidence: null,
+      }],
+      quarantine: [],
+    }),
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1', trustedPayoutContext });
+  assert.equal(accounting.paidHolderRewardsMicroUsdg, null);
+  assert.equal(accounting.holderRewardsStatus, 'awaiting-verification');
+});
+
+test('collectorPurchaseDebit stays null while the purchase stage has not durably completed', async () => {
+  const repository = relayLegRepository({
+    stages: { purchase: { status: 'PENDING' } },
+  });
+  const accounting = await projectCycleAccounting({ cycleRepository: repository, cycleId: 'cycle-1' });
+  assert.equal(accounting.collectorPurchaseDebit, null);
 });

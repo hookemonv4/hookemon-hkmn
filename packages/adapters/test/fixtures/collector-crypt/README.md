@@ -17,6 +17,12 @@ live mapping between numeric prize tiers and card rarity. The documentation maps
 `4` to the documented rarities; the epic gate requires explicit field and asset configuration and
 holds when those observations do not agree.
 
+`generate-yolo-packs.json` is **UNVERIFIED**: the documentation states only that
+`/api/generateYoloPacks` "can generate 1-100 separately signed pack transactions/memos"
+(H-funding-observations.md); no authenticated call confirmed the response envelope. This fixture
+assumes a `packs` array of the same documented `{memo, transaction}` shape `generatePack` already
+proves, one entry per requested pack. `collector-crypt.mjs` fails closed on any other envelope.
+
 `machines.json` retains the documented string shape for `contains`. The permitted public machine
 URL returned HTML rather than JSON on 2026-09-04, as recorded in
 `live-2026-09-04/public-readonly-capture.json`. Its current JSON type and economic meaning are

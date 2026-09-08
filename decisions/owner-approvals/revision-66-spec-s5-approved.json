@@ -1,0 +1,14 @@
+{
+  "schema": "v4-owner-approval-v2",
+  "authority": "OWNER",
+  "action": "GATE_EVIDENCE",
+  "phase": "spec",
+  "itemId": "S5",
+  "rationale": "Approve requirements revision 66 for held-position settlement and bounded recovery.",
+  "approvalToken": "OWNER APPROVED",
+  "subjectHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "a327db3d5dd470c62865b41e63517c5314490818110510c9e5559db5ea138162"
+  }
+}

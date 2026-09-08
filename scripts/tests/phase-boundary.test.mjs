@@ -44,10 +44,10 @@ test('the machine-readable delivery boundary opens Phase 3 under revision 65 and
     2: 'COMPLETE',
     3: 'OPEN',
   });
-  assert.equal(requirements.revision, 65);
+  assert.equal(requirements.revision, readJson('feasibility/phase3-offchain-interface-amendment.json').approvedRequirementsRevision);
   assert.equal(interfaces.productPhase, 3);
-  assert.equal(interfaces.requirementsRevision, 65);
-  assert.equal(interfaces.architectureRevision, 9);
+  assert.equal(interfaces.requirementsRevision, 67);
+  assert.equal(interfaces.architectureRevision, 10);
 });
 
 test('future decision storage is excluded from machine-effective inputs', () => {
@@ -71,7 +71,9 @@ test('Phase 3 interfaces and module index share the active provisional boundary'
   const provisionalIds = provisional.modules.map(module => module.id);
   const indexIds = moduleIndex.modules.map(module => module.id);
 
-  for (const artifact of [interfaces, provisional, capabilityMap, moduleIndex]) {
+  assert.equal(interfaces.requirementsRevision, 67);
+  assert.equal(interfaces.architectureRevision, 10);
+  for (const artifact of [provisional, capabilityMap, moduleIndex]) {
     assert.equal(artifact.productPhase, 3);
     assert.equal(artifact.requirementsRevision, 65);
     assert.equal(artifact.architectureRevision, 9);
