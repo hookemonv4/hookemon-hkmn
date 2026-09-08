@@ -1,0 +1,57 @@
+[
+  {
+    "file": "depository.rs",
+    "url": "https://raw.githubusercontent.com/relayprotocol/relay-depository/458a64c310a3504aaf37e112af9a8707c9eb11ad/packages/solana-vm/programs/relay-depository/src/lib.rs",
+    "sha256": "4772d189b9d9fb6c65016622001f5433256b3088e9a01f39c359fce966aeb7f1"
+  },
+  {
+    "file": "Anchor.toml",
+    "url": "https://raw.githubusercontent.com/relayprotocol/relay-depository/458a64c310a3504aaf37e112af9a8707c9eb11ad/packages/solana-vm/Anchor.toml",
+    "sha256": "4ec5e93b925746dd32bf7ecea36b367952e8609fda3542dcb76c0ffa3ef2e37b"
+  },
+  {
+    "file": "depository-Cargo.toml",
+    "url": "https://raw.githubusercontent.com/relayprotocol/relay-depository/458a64c310a3504aaf37e112af9a8707c9eb11ad/packages/solana-vm/programs/relay-depository/Cargo.toml",
+    "sha256": "be8b190c232ce02ef1519f790f5da8725352f37b764263f5871b760dacac9e5b"
+  },
+  {
+    "file": "anchor-instruction.rs",
+    "url": "https://raw.githubusercontent.com/coral-xyz/anchor/v0.30.1/lang/syn/src/codegen/program/instruction.rs",
+    "sha256": "3843d590c42d6f09aea71935cf70b6cf75ac260e89fa0538070535dc32b97541"
+  },
+  {
+    "file": "anchor-common.rs",
+    "url": "https://raw.githubusercontent.com/coral-xyz/anchor/v0.30.1/lang/syn/src/codegen/program/common.rs",
+    "sha256": "fb445330ebf70352b77939fd471b3f3e4adee429f7f2f246bcc35fccb8d97569"
+  },
+  {
+    "file": "anchor-lib.rs",
+    "url": "https://raw.githubusercontent.com/coral-xyz/anchor/v0.30.1/lang/src/lib.rs",
+    "sha256": "45009cbd370cca1f80a14319e392848d700ecd92ebe58df257ca23739985ec00"
+  },
+  {
+    "file": "oracle-idl.ts",
+    "url": "https://raw.githubusercontent.com/relayprotocol/relay-protocol-oracle/55b22de6358c212c22eebb48d2df5b793a16e863/src/services/attestation/vm/solana-vm/idls/RelayDepositoryIdl.ts",
+    "sha256": "00ee66b6b3e09b4c1298615854eeecfdcfcf50ac1b78d12464d9c996c7b5174e"
+  },
+  {
+    "file": "oracle-solana.ts",
+    "url": "https://raw.githubusercontent.com/relayprotocol/relay-protocol-oracle/55b22de6358c212c22eebb48d2df5b793a16e863/src/services/attestation/vm/solana-vm/index.ts",
+    "sha256": "e560a807b35ad63dbd779ba42c9c367ad67aefaf7aed4aa8cdfe2f1c71ddc58f"
+  },
+  {
+    "file": "borsh-format.md",
+    "url": "https://raw.githubusercontent.com/near/borsh/master/README.md",
+    "sha256": "f54edcf00fe05090910d3d529762ecc7caf6119a59e85bbe6cad76ebfaf91fb4"
+  },
+  {
+    "file": "upgradeable-loader.rs",
+    "url": "https://raw.githubusercontent.com/solana-labs/solana/v1.18.26/sdk/program/src/bpf_loader_upgradeable.rs",
+    "sha256": "25771c53a1b01f08e884ca43d334a68f66b7757e793ddd459e3286953929dea7"
+  },
+  {
+    "file": "verified-build-status.json",
+    "url": "https://verify.osec.io/status/99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+    "sha256": "d12a460cf74cc5e167e078636b4f1efa2cc82679d302d1d390d27d27facc4288"
+  }
+]

@@ -1,0 +1,117 @@
+[
+  {
+    "file": "Anchor.toml",
+    "sha256": "4ec5e93b925746dd32bf7ecea36b367952e8609fda3542dcb76c0ffa3ef2e37b",
+    "bytes": 723
+  },
+  {
+    "file": "anchor-common.rs",
+    "sha256": "fb445330ebf70352b77939fd471b3f3e4adee429f7f2f246bcc35fccb8d97569",
+    "bytes": 1238
+  },
+  {
+    "file": "anchor-instruction.rs",
+    "sha256": "3843d590c42d6f09aea71935cf70b6cf75ac260e89fa0538070535dc32b97541",
+    "bytes": 2831
+  },
+  {
+    "file": "anchor-lib.rs",
+    "sha256": "45009cbd370cca1f80a14319e392848d700ecd92ebe58df257ca23739985ec00",
+    "bytes": 24060
+  },
+  {
+    "file": "borsh-format.md",
+    "sha256": "f54edcf00fe05090910d3d529762ecc7caf6119a59e85bbe6cad76ebfaf91fb4",
+    "bytes": 11736
+  },
+  {
+    "file": "depository-Cargo.toml",
+    "sha256": "be8b190c232ce02ef1519f790f5da8725352f37b764263f5871b760dacac9e5b",
+    "bytes": 437
+  },
+  {
+    "file": "depository.rs",
+    "sha256": "4772d189b9d9fb6c65016622001f5433256b3088e9a01f39c359fce966aeb7f1",
+    "bytes": 37961
+  },
+  {
+    "file": "derived.json",
+    "sha256": "7ff37e902ebe7363da067022b30c2642e5c3323cd1a0c8da3f960ed381d09cbd",
+    "bytes": 681
+  },
+  {
+    "file": "oracle-idl.ts",
+    "sha256": "00ee66b6b3e09b4c1298615854eeecfdcfcf50ac1b78d12464d9c996c7b5174e",
+    "bytes": 12849
+  },
+  {
+    "file": "oracle-solana.ts",
+    "sha256": "e560a807b35ad63dbd779ba42c9c367ad67aefaf7aed4aa8cdfe2f1c71ddc58f",
+    "bytes": 24377
+  },
+  {
+    "file": "program-account-request.json",
+    "sha256": "50cc09a71868639bdb7e75a4d87abb7d87679116dbd14bd1ff01377b45086e45",
+    "bytes": 167
+  },
+  {
+    "file": "program-account-response.json",
+    "sha256": "8bede8d7040a6591180bc505bfa5a6e23f72b0aae21f7e738165fb384268063f",
+    "bytes": 302
+  },
+  {
+    "file": "programdata-observation.json",
+    "sha256": "dce57a40a1cbdecefaa60b37a1f62d5f6e9e1d15ba15fa81ae9ae7762ee02f63",
+    "bytes": 726
+  },
+  {
+    "file": "programdata-request.json",
+    "sha256": "f39b5e0d7a87c98172cdfdaaef50201fbaeef51e01337e51b19e78e3e3b6bb5d",
+    "bytes": 167
+  },
+  {
+    "file": "programdata-response.json.gz",
+    "sha256": "cbdcb4e4c57b5cf7b69baacee3215687aa2693a8d3cc19469cd4e70b71be20c9",
+    "bytes": 132869
+  },
+  {
+    "file": "quote-provenance.json",
+    "sha256": "19ad98da15cc888f3827080a76a140ba7902aee34e5186da5ca25e33b5a5269c",
+    "bytes": 348
+  },
+  {
+    "file": "relay-return-scenario-request.json",
+    "sha256": "f9f5cb605c1187c5ded4525a5640601b0f8a3d3af0222042569c62ac93e821b7",
+    "bytes": 450
+  },
+  {
+    "file": "relay-return-scenario-response.json",
+    "sha256": "29dd53a2b791943bdf1d5a2fad68295c1f45615d9f0fb2be52eea353bcea8b7f",
+    "bytes": 8705
+  },
+  {
+    "file": "report.md",
+    "sha256": "48638d5d99d9e4de0c368611a80cdd75617ae9c883a9f785e6f6e5b8e4e07d3f",
+    "bytes": 6003
+  },
+  {
+    "file": "sources.json",
+    "sha256": "43c21fc7d3e26a417f3fc7067ca1b4cc4f0bd1c5d55fd7962a5b29da0cb5e129",
+    "bytes": 2821
+  },
+  {
+    "file": "upgradeable-loader.rs",
+    "sha256": "25771c53a1b01f08e884ca43d334a68f66b7757e793ddd459e3286953929dea7",
+    "bytes": 18287
+  },
+  {
+    "file": "verified-build-status.json",
+    "sha256": "d12a460cf74cc5e167e078636b4f1efa2cc82679d302d1d390d27d27facc4288",
+    "bytes": 189
+  },
+  {
+    "file": "verify.py",
+    "sha256": "c0b207c4559adfece09e1df8081db56f3df9e697946e78ef394c9ca0daf7212c",
+    "bytes": 3465
+  }
+]

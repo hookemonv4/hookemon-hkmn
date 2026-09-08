@@ -1,0 +1,16 @@
+{
+  "rpc": "https://api.mainnet-beta.solana.com",
+  "responseSha256": "cb577a2eeb095d645e809ff47eb629e5d3249409af86ee582f62e603987a55d6",
+  "context": {
+    "apiVersion": "4.2.2",
+    "slot": 445319652
+  },
+  "programDataAddress": "6y7C7Lfh1WRRbKohE2FQmFBD2asw3yMi17kStwEcAWWF",
+  "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+  "executable": false,
+  "space": 394621,
+  "accountDataSha256": "e9a2015b0f5f16a8270ba91cce4eadae3f57198ed2bcb8ef43d19b9b07821e18",
+  "accountDataLength": 394621,
+  "prefixHex": "03000000d01d051700000000014d1ad51df42ccbf2a8ead2ad697fa2f9d888119c927e126506be04655c33e166",
+  "runtimeBytesSha256Excluding45ByteMetadata": "93a89aef6dd30e66f4cda6d3dafecddbfe58ecc98e5596dbc832feaf5eed9e91"
+}
