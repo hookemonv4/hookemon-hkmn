@@ -36,7 +36,7 @@ Traceability: L4-M15.
 
 Failure-matrix cells: Relay leg:wrong-asset-finalized-delta
 Owning work package: WP07
-Expected outcome: terminal=null; attempt=RECORDED; next=owner-decision
+Expected outcome: terminal=none; attempt=RECORDED; next=owner-decision
 Test: packages/adapters/test/app/cycle-repository.test.mjs — native return refuses a wrong-token or wrong-recipient receipt before settlement after reopen
 Alarm reason/code: OPEN FACT (WP07): no dedicated alarm code is emitted for finalized wrong-asset Relay delta.
 Resume command: none supported; retain both finalized deltas until the owner-decision path is recorded.

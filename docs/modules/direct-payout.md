@@ -35,3 +35,5 @@ Run the focused runner distribution and adapter payout, availability, custody, s
 ## Recovery pointers
 
 Inspect the frozen plan, paged recipient state, wallet nonce reservation, native custody row, and gas transaction list together. Reconcile finalized RPC evidence before recovery. Never edit signed bytes, receipts, principal amounts, or proof digests to advance a stalled recipient.
+
+Recovery pointers: [rejected recipient](../runbooks/payout-recipient-frozen.md), [holder envelope](../runbooks/payout-holder-envelope.md), [nonce interference](../runbooks/evm-nonce-interference.md), and [ambiguous transaction](../runbooks/evm-transaction-ambiguity.md).

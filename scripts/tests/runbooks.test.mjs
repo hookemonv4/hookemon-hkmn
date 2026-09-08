@@ -9,6 +9,7 @@ const failureMatrix = JSON.parse(readFileSync(join(repoRoot, 'docs', 'audit', '2
 const alarmSources = [
   'packages/runner/src/observability/canaries.mjs',
   'packages/runner/src/observability/alert-webhook.mjs',
+  'packages/adapters/src/app/observability.mjs',
 ].map(path => readFileSync(join(repoRoot, path), 'utf8')).join('\n');
 const requiredSections = [
   'Detection',
@@ -82,8 +83,8 @@ test('incident runbooks map every frozen failure-matrix cell exactly once', () =
 test('observability card links the canary recovery runbooks', () => {
   const card = readFileSync(join(repoRoot, 'docs', 'modules', 'observability.md'), 'utf8');
   for (const file of [
-    'usdg-paused.md',
-    'usdg-frozen.md',
+    'native-wrong-principal-identity.md',
+    'native-insufficient-principal-and-gas.md',
     'pool-protocol-fee.md',
     'solana-blockhash-expiry.md',
     'evm-nonce-interference.md',
