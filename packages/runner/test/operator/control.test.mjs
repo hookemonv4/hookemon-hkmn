@@ -1222,3 +1222,43 @@ test('configuration updates reject monetary values above the fixed operator ceil
     /hard cap|ceiling/i,
   );
 });
+
+test('new pack-plan orders and per-pack increases require safety telemetry even at unchanged total quantity', async t => {
+  const statePath = await temporaryState(t);
+  const plan = { schema: 'hookemon.pack-plan.v1', revision: 1, orders: [{ pack: 'alpha', quantity: 2 }, { pack: 'beta', quantity: 2 }] };
+  await seedConfiguration(statePath, configuration({ packPlan: plan }));
+  const { createOperatorControl } = await controlModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => { throw new Error('reader offline'); },
+  });
+  for (const orders of [
+    [{ pack: 'alpha', quantity: 2 }, { pack: 'gamma', quantity: 1 }],
+    [{ pack: 'alpha', quantity: 3 }, { pack: 'beta', quantity: 1 }],
+  ]) {
+    await assert.rejects(control.execute({ expectedRevision: 0, command: { type: 'update-configuration', configuration: { packPlan: { orders } } } }), /safety telemetry.*unavailable/i);
+  }
+  const { readOperatorState } = await stateFileModule();
+  assert.deepEqual((await readOperatorState(statePath)).configuration.packPlan, plan);
+});
+
+test('unchanged, reduced and empty pack plans remain writable without safety telemetry', async t => {
+  const statePath = await temporaryState(t);
+  const orders = [{ pack: 'alpha', quantity: 2 }, { pack: 'beta', quantity: 1 }];
+  await seedConfiguration(statePath, configuration({ packPlan: { schema: 'hookemon.pack-plan.v1', revision: 1, orders } }));
+  const { createOperatorControl } = await controlModule();
+  const { readOperatorState } = await stateFileModule();
+  const control = createOperatorControl({
+    statePath,
+    cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
+    policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
+    readCustody: async () => { throw new Error('reader offline'); },
+  });
+  for (const nextOrders of [orders, [{ pack: 'alpha', quantity: 1 }], []]) {
+    const before = await readOperatorState(statePath);
+    await control.execute({ expectedRevision: before.revision, command: { type: 'update-configuration', configuration: { packPlan: { orders: nextOrders } } } });
+    assert.deepEqual((await readOperatorState(statePath)).configuration.packPlan.orders, nextOrders);
+  }
+});

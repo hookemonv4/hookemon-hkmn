@@ -447,6 +447,8 @@ function hasNewAllowedPack(current, next) {
 }
 
 function configurationIncreasesExposure(current, next) {
+  const currentPlanQuantities = new Map(current.packPlan.orders.map(order => [order.pack, order.quantity]));
+  if (next.packPlan.orders.some(order => order.quantity > (currentPlanQuantities.get(order.pack) ?? 0))) return true;
   if (!current.liveMode && next.liveMode) return true;
   if (next.intervalMinutes < current.intervalMinutes || next.requestedOrders > current.requestedOrders
     || next.maxBoostersPerCycle > current.maxBoostersPerCycle || next.maxCyclesPerDay > current.maxCyclesPerDay
