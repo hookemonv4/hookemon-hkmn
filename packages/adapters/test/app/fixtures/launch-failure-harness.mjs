@@ -13,7 +13,7 @@
 // (`environment.mjs`'s `readPrivateStandingAuthorityArtifact`) before it can reach the signer.
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
-import { generateKeyPairSync, sign as signMessage } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as signMessage } from 'node:crypto';
 import { cp, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:https';
 import { tmpdir } from 'node:os';
@@ -51,7 +51,7 @@ const AGGREGATE_PURCHASE_ATOMIC = 16n;
 
 const RELAY_CHAINS = Object.freeze({
   chains: [
-    { id: ROBINHOOD_CHAIN_ID, depositEnabled: true, erc20Currencies: [{ address: USDG, supportsBridging: true }] },
+    { id: ROBINHOOD_CHAIN_ID, depositEnabled: true, erc20Currencies: [{ address: USDG, supportsBridging: true }, { address: `0x${'0'.repeat(40)}`, supportsBridging: true }] },
     { id: RELAY_SOLANA_CHAIN_ID, depositEnabled: true, solverCurrencies: [{ address: SOLANA_MINT }] },
   ],
 });
@@ -114,7 +114,7 @@ function relayQuote(request) {
     details: {
       sender,
       recipient,
-      currencyIn: { currency: { chainId: ROBINHOOD_CHAIN_ID, address: USDG, symbol: 'USDG', decimals: 6 }, amount: originAmount },
+      currencyIn: { currency: { chainId: ROBINHOOD_CHAIN_ID, address: `0x${'0'.repeat(40)}`, symbol: 'ETH', decimals: 18 }, amount: originAmount, amountUsd: originAmount === '17' ? '0.000017' : '0.000033' },
       currencyOut: {
         currency: { chainId: RELAY_SOLANA_CHAIN_ID, address: SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
         amount: destinationAmount,
@@ -134,8 +134,8 @@ function relayQuote(request) {
             }],
           },
           inputs: [{
-            payment: { chainId: 'robinhood', currency: USDG, amount: originAmount },
-            refunds: [{ chainId: 'robinhood', currency: USDG, recipient: sender, deadline }],
+            payment: { chainId: 'robinhood', currency: `0x${'0'.repeat(40)}`, amount: originAmount },
+            refunds: [{ chainId: 'robinhood', currency: `0x${'0'.repeat(40)}`, recipient: sender, deadline }],
           }],
         },
       },
@@ -171,7 +171,6 @@ function executionLogs(parsed) {
   }
   if (call.functionName !== 'claimProcess') return [];
   const [cycleId, amountAtomicUsdg, destination] = call.args;
-  const amount = encodeAbiParameters([{ type: 'uint256' }], [amountAtomicUsdg]);
   return [
     {
       address: parsed.to,
@@ -180,11 +179,6 @@ function executionLogs(parsed) {
         [{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
         [amountAtomicUsdg, 1n, amountAtomicUsdg, amountAtomicUsdg],
       ),
-    },
-    {
-      address: USDG,
-      topics: encodeEventTopics({ abi: HOOK_ABI, eventName: 'Transfer', args: { from: parsed.to, to: destination } }),
-      data: amount,
     },
   ];
 }
@@ -225,6 +219,9 @@ function respond(response, value) {
  *    only from the second call onward (see `readCommittedPreparedAttempts`/`peekPrepared`, exported
  *    below, which reads the same durable state this reasons about); see `authorityGate` for the
  *    barrier this file also offers at a point that does not have that limitation.
+ *  - `nativePrincipalBarrier()`: awaited at the real native balance RPC read. A true result
+ *    reports zero wei; false reports funded balance. Used to compare an authorized prepared
+ *    claim held for missing principal plus gas with the identical healthy signing boundary.
  *  - `authorityGate()`: an optional async hook awaited before *every* request this server handles,
  *    regardless of URL or RPC method -- a real, generic public-RPC-boundary point rather than one
  *    tied to `isFrozen` specifically. Since the request-digest for a chain-journal stage's first
@@ -238,15 +235,17 @@ export async function fixtureServer(
   directory,
   operationsAccount = () => `0x${'0'.repeat(40)}`,
   operationsSolanaAccount = () => null,
-  { catalogAvailable = () => true, freezeAfterFirstRead = false, freezeBarrier = null, authorityGate = null } = {},
+  { catalogAvailable = () => true, freezeAfterFirstRead = false, freezeBarrier = null, nativePrincipalBarrier = null, authorityGate = null } = {},
 ) {
   const paths = {
     caKey: join(directory, 'ca-key.pem'), caCert: join(directory, 'ca-cert.pem'),
     key: join(directory, 'tls-key.pem'), request: join(directory, 'tls-request.pem'),
     cert: join(directory, 'tls-cert.pem'), extensions: join(directory, 'tls-ext.cnf'),
   };
-  await execFileAsync('/usr/bin/openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', paths.caKey, '-out', paths.caCert, '-subj', '/CN=HKMN failure-matrix fixture']);
-  await execFileAsync('/usr/bin/openssl', ['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', paths.key, '-out', paths.request, '-subj', '/CN=127.0.0.1']);
+  const tlsConfig = join(directory, 'fixture-openssl.cnf');
+  await writeFile(tlsConfig, '[req]\ndistinguished_name=dn\n[dn]\n');
+  await execFileAsync('/usr/bin/openssl', ['req', '-config', tlsConfig, '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-keyout', paths.caKey, '-out', paths.caCert, '-subj', '/CN=HKMN failure-matrix fixture']);
+  await execFileAsync('/usr/bin/openssl', ['req', '-config', tlsConfig, '-newkey', 'rsa:2048', '-nodes', '-keyout', paths.key, '-out', paths.request, '-subj', '/CN=127.0.0.1']);
   await writeFile(paths.extensions, 'subjectAltName=IP:127.0.0.1\n');
   await execFileAsync('/usr/bin/openssl', ['x509', '-req', '-in', paths.request, '-CA', paths.caCert, '-CAkey', paths.caKey, '-CAcreateserial', '-out', paths.cert, '-days', '1', '-extfile', paths.extensions]);
   const [key, cert] = await Promise.all([readFile(paths.key), readFile(paths.cert)]);
@@ -255,14 +254,14 @@ export async function fixtureServer(
     evm: 0, solana: 0, methods: [], quotes: [],
     catalog: 0, evmBroadcasts: 0,
     collectorGenerateYoloPacks: 0, collectorPackStatus: 0, collectorSubmitTransaction: 0,
-    usdgFrozenObservations: [],
+    usdgFrozenObservations: [], nativePrincipalShortageObservations: [],
   };
   const HOOK_STATE_SELECTORS = new Map([
     [toFunctionSelector('function processLiability() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
     [toFunctionSelector('function remainingProcessClaimCapacity() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
     [toFunctionSelector('function activeProcessClaimLimit() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
     [toFunctionSelector('function totalLiability() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
-    [toFunctionSelector('function hookUsdgBalance() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
+    [toFunctionSelector('function hookEthBalance() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
     [toFunctionSelector('function processClaimsPaused() view returns (bool)'), () => abiUint(0n)],
     [toFunctionSelector('function processClaimCycleUsed(bytes32) view returns (bool)'), () => abiUint(0n)],
     [toFunctionSelector('function isSolvent() view returns (bool)'), () => abiUint(1n)],
@@ -348,9 +347,14 @@ export async function fixtureServer(
     if (request.url !== '/solana') {
       calls.evm += 1;
       calls.methods.push(`evm:${rpc.method}`);
+      if (rpc.method === 'eth_getCode') return reply('0x6000');
       if (rpc.method === 'eth_chainId') return reply('0x1237');
       if (rpc.method === 'eth_getTransactionCount') return reply('0x0');
-      if (rpc.method === 'eth_getBalance') return reply('0x61a80');
+      if (rpc.method === 'eth_getBalance') {
+        const insufficient = typeof nativePrincipalBarrier === 'function' ? await nativePrincipalBarrier() : false;
+        calls.nativePrincipalShortageObservations.push(insufficient);
+        return reply(insufficient ? '0x0' : '0x61a80');
+      }
       if (rpc.method === 'eth_maxPriorityFeePerGas') return reply('0x1');
       if (rpc.method === 'eth_estimateGas') return reply('0x5208');
       if (rpc.method === 'eth_getBlockByNumber') {
@@ -525,6 +529,8 @@ export function observabilityConfig(baseUrl, directory, operations) {
   return {
     canaries: {
       chainId: 4663,
+      nativePrincipal: { chainId: '4663', assetId: 'native', decimals: 18 },
+      gasAccounts: { '4663': operations },
       contracts: { usdg: { proxy: pin(USDG), implementation: pin(`0x${'2'.repeat(40)}`), decimals: 6 }, poolManager: pin(`0x${'3'.repeat(40)}`), positionManager: pin(`0x${'4'.repeat(40)}`), router: pin(`0x${'5'.repeat(40)}`), quoter: pin(`0x${'6'.repeat(40)}`) },
       roles: { hookAddress: `0x${'7'.repeat(40)}`, cycleId: `0x${'0'.repeat(64)}`, treasury: `0x${'8'.repeat(40)}`, operations },
       canonicalPool: { poolId: `0x${'f'.repeat(64)}` }, providerPolicyDigest: hash,
@@ -556,15 +562,15 @@ export async function activateTwoPackPolicy(directory) {
     allowedPackIds: ['return-fixture'],
     requestedOrders: 2,
     maxBoostersPerCycle: 2,
-    maxUnitPriceMicroUsdg: '17',
-    maxCycleBudgetMicroUsdg: '34',
-    max24HourBudgetMicroUsdg: '34',
+    maxUnitPriceMicroUsd: '17',
+    maxCycleBudgetMicroUsd: '34',
+    max24HourBudgetMicroUsd: '34',
     paused: false,
     liveMode: true,
     maxCyclesPerDay: 1,
-    perCycleCapMicroUsdg: '34',
-    lossCapMicroUsdg: '1000',
-    maxOutstandingCustodyMicroUsdg: '1000',
+    perCycleCapMicroUsd: '34',
+    lossCapMicroUsd: '1000',
+    maxOutstandingCustodyMicroUsd: '1000',
     executionPaused: false,
     killSwitch: false,
     manualApprovalCycles: 0,
@@ -834,6 +840,9 @@ export async function isolatedSource(directory) {
     status: 'FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING', bindingManifestDigest: `sha256:${'a'.repeat(64)}`,
     fixture: 'failure-matrix isolated test authority; not a release approval',
   })}\n`);
+  const nativeBytes = Buffer.from(JSON.stringify({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663', hook: { address: `0x${'c'.repeat(40)}`, runtimeHash: keccak256('0x6000') }, relay: null }));
+  await writeFile(join(root, 'native-payment-binding.json'), nativeBytes);
+  await writeFile(join(root, 'architecture', 'interfaces.json'), JSON.stringify({ schemaVersion: 'hookemon.interfaces.v1', productPhase: 3, requirementsRevision: 71, architectureRevision: 11, status: 'FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING', bindingManifestDigest: `sha256:${'a'.repeat(64)}`, nativeMigration: { nativePaymentBindingSha256: createHash('sha256').update(nativeBytes).digest('hex') }, fixture: 'isolated synthetic authority; never release approval' }));
   const binPath = await realpath(join(root, 'packages', 'adapters', 'bin', 'hookemon-runner.mjs'));
   let entrypointOutput = '';
   try {
@@ -922,8 +931,8 @@ export function buildProductionEnv({ directory, fixture, signer, authority, obse
     HOOKEMON_EVM_ACCOUNT: signer.evmAccount, HOOKEMON_SOLANA_ACCOUNT: signer.solanaAccount, HOOKEMON_VAULT_ADDRESS: `0x${'b'.repeat(40)}`, HOOKEMON_HOOK_ADDRESS: `0x${'c'.repeat(40)}`, HOOKEMON_HKMN_ADDRESS: `0x${'d'.repeat(40)}`, HOOKEMON_HKMN_DECIMALS: '18',
     HOOKEMON_SIGNER_BACKEND: 'keychain', HOOKEMON_SIGNER_LIVE_MODE: 'true', HOOKEMON_KEYCHAIN_COMMAND: signer.command, HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm', HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
     HOOKEMON_STANDING_AUTHORITY_PATH: authority.documentPath, HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH: authority.ownerPublicKeyPath, HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH: authority.policyPublicKeyPath,
-    HOOKEMON_PACK_CODE: 'return-fixture', HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0', HOOKEMON_MIN_SOLANA_RECEIVE: '0', HOOKEMON_MIN_RETURN_USDG: '0', HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0', HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0', HOOKEMON_EVM_GAS_PRICE_CAP: '2', HOOKEMON_EVM_NATIVE_RESERVE: '2', HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2', HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '85', HOOKEMON_BUDGET_PACK_PRICE_USDG: '17', HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0', HOOKEMON_BUDGET_RETURN_CAP_USDG: '0', HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0', HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath, HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath, NODE_EXTRA_CA_CERTS: fixture.caCert,
+    HOOKEMON_NATIVE_PAYMENT_BINDING_PATH: join(directory, 'source', 'native-payment-binding.json'), HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '8', HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '60000', HOOKEMON_PACK_CODE: 'return-fixture', HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0', HOOKEMON_MIN_SOLANA_RECEIVE: '0', HOOKEMON_MIN_RETURN_ETH: '0', HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0', HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0', HOOKEMON_EVM_GAS_PRICE_CAP: '2', HOOKEMON_EVM_NATIVE_RESERVE: '2', HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2', HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '85', HOOKEMON_BUDGET_PACK_PRICE_WEI: '17', HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0', HOOKEMON_BUDGET_RETURN_CAP_WEI: '0', HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0', HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath, HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath, NODE_EXTRA_CA_CERTS: fixture.caCert,
   };
 }
 
