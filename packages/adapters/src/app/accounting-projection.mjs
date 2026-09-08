@@ -586,7 +586,7 @@ export async function projectCycleAccounting({ cycleRepository, cycleId, trusted
     ...ACCOUNTING_STAGES.map(stage => cycleRepository.readStage(cycleId, stage)),
   ]);
   const [funding, outbound, purchase, buyback, returnStage, distribution, payout] = stages;
-  if (description?.admission?.schema === 'hookemon.policy-admission.v3') {
+  if (['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(description?.admission?.schema)) {
     return projectNativeCycleAccounting(description, stages, cycleId, trustedPayoutContext);
   }
   void funding; // read for symmetry/future use; funding carries no accounting amount today.
@@ -897,7 +897,7 @@ export async function projectPolicyCustody({ cycleRepository, nativeAsset, value
       }
       if (description.terminalState === 'COMPLETED') {
         const cost = description.admission?.aggregateFundingUsd;
-        let proceedsWei = 0n, proceedsUsd = 0n, valued = description.admission?.schema === 'hookemon.policy-admission.v3'
+        let proceedsWei = 0n, proceedsUsd = 0n, valued = ['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(description.admission?.schema)
           && cost?.amount?.amountAtomic === description.releaseAmount && cost?.rounding === 'up';
         for (const leg of description.relayLegs?.values?.() ?? []) {
           if (leg.direction !== 'return' || leg.state !== 'SETTLED') continue;

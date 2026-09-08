@@ -4624,3 +4624,52 @@ test('chain preparation retains only the explicit live clock across canonical co
   await assert.rejects(() => driver.execute({ cycleId: CYCLE_ID, stage: 'return',
     intent: { journalHead: 'clock-preparation' }, assertMutationAllowed: async () => {} }), error => error === marker);
 });
+
+for (const scenario of ['known-prefix', 'known-prefix-prepared', 'uncertain-order', 'changed-request']) {
+  test(`actual stage driver resumes only a known plan prefix: ${scenario}`, async () => {
+    const attempts = new Map();
+    const repository = fakeCycleRepository(new Map(), '0', attempts);
+    const admission = { schema: 'hookemon.policy-admission.v4', orders: [{ orderIndex: 0 }, { orderIndex: 1 }] };
+    const intents = new Map(), responses = new Map();
+    repository.describeCycle = async () => ({ admission });
+    repository.readPackOrderIntent = async (_id, index) => intents.get(index) ?? null;
+    repository.readPackOrderRequest = async (_id, index) => responses.get(index) ?? null;
+    repository.recordStageRequestDigest = async () => {};
+    let changed = false;
+    const calls = [];
+    const driver = createStageDriver({ liveMode: true, ...fixtureStageDriverOptions,
+      cycleRepository: repository, config: baseConfig(), signerClient: null,
+      adapters: { collectorCrypt: { async generate(index) { calls.push(index); } } },
+      stageHandlers: { purchase: {
+        async probe() { return null; },
+        async prepareRequest() { return { orders: [{ pack: changed ? 'different' : 'base' }, { pack: 'premium' }] }; },
+        async reconcileLive() { return null; },
+        async mutate({ adapters, context }) {
+          for (let index = 0; index < 2; index++) {
+            if (responses.has(index)) continue;
+            intents.set(index, { requestDigest: context.requestDigest, admissionDigest: digest(admission) });
+            await adapters.collectorCrypt.generate(index);
+            if (scenario === 'uncertain-order') throw new Error('simulated interruption');
+            responses.set(index, { packs: [{ memo: `memo-${index}` }] });
+            if (index === 0) throw new Error('simulated interruption');
+          }
+          return { generated: 2 };
+        },
+      } },
+    });
+    const context = { cycleId: CYCLE_ID, stage: 'purchase', assertLease() {}, assertMutationAllowed: async () => {} };
+    await assert.rejects(driver.execute(context), /simulated interruption/);
+    assert.equal(attempts.get('purchase').attempt.state, 'SENT_UNKNOWN');
+    if (scenario.startsWith('known-prefix')) {
+      if (scenario === 'known-prefix-prepared') attempts.get('purchase').attempt.state = 'PREPARED';
+      await driver.execute(context);
+      assert.deepEqual(calls, [0, 1]);
+      assert.equal(attempts.get('purchase').attempt.state, 'RESPONSE_RECORDED');
+    } else {
+      changed = scenario === 'changed-request';
+      await assert.rejects(driver.execute(context), /requires reconciliation|original parent request digest/);
+      assert.deepEqual(calls, [0]);
+      assert.equal(attempts.get('purchase').attempt.state, 'SENT_UNKNOWN');
+    }
+  });
+}

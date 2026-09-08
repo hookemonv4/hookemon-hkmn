@@ -547,3 +547,43 @@ test('a durably recorded batch survives a repository reopen and a retried mutate
   assert.equal(generateCalls, 0);
   assert.deepEqual((await reopened.readPackBatchRequest(cycleId, 'purchase')).packs, packs);
 });
+
+for (const generatedFirst of [false, true]) {
+  test(`plan recovery never regenerates an uncertain order (${generatedFirst ? 'second order after durable first' : 'first order'})`, async () => {
+    const cycleRepository = repository();
+    const orders = [
+      { orderIndex: 0, packId: 'pokemon_25', quantity: 1, unitPurchase: { ...settlementAsset(), amountAtomic: '25000000' } },
+      { orderIndex: 1, packId: 'pokemon_50', quantity: 1, unitPurchase: { ...settlementAsset(), amountAtomic: '50000000' } },
+    ];
+    const admission = { schema: 'hookemon.policy-admission.v4', quantity: 2, orders };
+    cycleRepository.describeCycle = async () => ({ admission });
+    const intents = new Map(), batches = new Map();
+    if (generatedFirst) {
+      intents.set(0, { intent: { quantity: 1, packType: 'pokemon_25', expectedCardCountPerPack: 1, playerAddress: OPERATOR } });
+      batches.set(0, { packs: [{ packIndex: 0, memo: 'already-generated', packType: 'pokemon_25', expectedCardCount: 1 }], requestedAtMs: 1000 });
+    }
+    cycleRepository.readPackOrderIntent = async (_id, index) => intents.get(index) ?? null;
+    cycleRepository.readPackOrderRequest = async (_id, index) => batches.get(index) ?? null;
+    cycleRepository.recordPackOrderIntent = async (_id, index, intent) => { const record = { intent }; intents.set(index, record); return record; };
+    cycleRepository.recordPackOrderRequest = async () => assert.fail('lost response must not create a memo batch');
+    const { digest } = await import('../../../runner/src/cycle/journal.mjs');
+    const request = { provider: 'collector-crypt', operation: 'purchase', playerAddress: OPERATOR, quantity: 2,
+      admissionDigest: digest(admission), orders: orders.map(order => ({ ...order, packType: order.packId,
+        aggregatePurchase: order.unitPurchase, expectedCardCountPerPack: 1 })) };
+    const generated = [];
+    const options = { liveMode: true, cycleRepository, request,
+      signerClient: { solana: { async sign() { assert.fail('lost generation has no transaction to sign'); } } },
+      config: baseConfig({ collectorCrypt: { settlementAsset: settlementAsset(), purchase: { policy: {} } } }),
+      adapters: { solana: { client: rpcClient() }, collectorCrypt: { async generateYoloPacks(input) {
+        generated.push(input.packType); throw new Error('response lost after provider generation');
+      } } },
+      context: { cycleId: 'cycle-x', requestDigest: `sha256:${'a'.repeat(64)}` },
+      preflightAuthority: createTestProfileMutationAuthority(),
+    };
+    await assert.rejects(mutatePurchase(options), /response lost after provider generation/);
+    assert.deepEqual(generated, [generatedFirst ? 'pokemon_50' : 'pokemon_25']);
+    await assert.rejects(mutatePurchase(options), /generation is uncertain/);
+    assert.equal(generated.length, 1);
+    assert.equal(intents.size, generatedFirst ? 2 : 1);
+  });
+}

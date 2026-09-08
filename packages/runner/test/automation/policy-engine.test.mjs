@@ -1504,3 +1504,65 @@ test('held purchase costs remain counted without a native principal held bucket'
   assert.deepEqual(await rawEngine.evaluateClaim({ boundary: 'claim-process', cycleId, packId: 'base-pack', liveMode: true,
     releaseAmountWei: '5000000', releaseCostMicroUsd: '5000000', admission }), { allowed: false, reason: 'HELD_LIMIT' });
 });
+
+function selectedPlanAdmission(cycleId = 'cycle-plan-admission') {
+  const a = exactOutputAdmission({ cycleId, quantity: 1, unitPurchase: '25000000' });
+  const b = exactOutputAdmission({ cycleId, quantity: 1, unitPurchase: '50000000', unitFunding: '40000000' });
+  const total = exactOutputAdmission({ cycleId, quantity: 3, aggregateFunding: '70000000' });
+  const { packId, unitPurchase, unitFundingQuote, unitFundingUsd, unitRelay, unitRelayQuote, ...aggregate } = total;
+  return { ...aggregate, schema: 'hookemon.policy-admission.v4', quantity: 2,
+    packPlan: { schema: 'hookemon.pack-plan.v1', revision: 3, orders: [{ pack: 'base-pack', quantity: 1 }, { pack: 'premium-pack', quantity: 1 }] },
+    orders: [a, b].map((unit, orderIndex) => ({ orderIndex, packId: orderIndex ? 'premium-pack' : 'base-pack', quantity: 1,
+      unitPurchase: unit.unitPurchase, unitFundingQuote: unit.unitFundingQuote, unitFundingUsd: unit.unitFundingUsd,
+      unitRelay: unit.unitRelay, unitRelayQuote: unit.unitRelayQuote })) };
+}
+
+test('plan admission validates distinct unit prices against one exact aggregate', () => {
+  const admission = selectedPlanAdmission();
+  const normalized = assertPolicyAdmission(admission);
+  assert.equal(normalized.aggregatePurchase.amountAtomic, '75000000');
+  assert.equal(normalized.quantity, 2);
+  assert.deepEqual(normalized.orders.map(order => order.unitPurchase.amountAtomic), ['25000000', '50000000']);
+  assert.ok(Object.isFrozen(normalized.packPlan.orders));
+  for (const mutate of [
+    value => { value.orders[1].packId = 'base-pack'; },
+    value => { value.orders[1].quantity = 2; },
+    value => { value.quantity = 1; },
+    value => { value.aggregatePurchase.amountAtomic = '50000000'; },
+    value => { value.orders[1].unitRelayQuote.raw.details.currencyOut.amount = '1'; },
+    value => { value.processLiabilityEvidence.ceilingAtomic = '1'; },
+  ]) {
+    const invalid = structuredClone(admission); mutate(invalid);
+    assert.throws(() => assertPolicyAdmission(invalid));
+  }
+});
+
+test('plan digest retains admitted selection when current plan and allowlist expand', () => {
+  const admission = selectedPlanAdmission();
+  const configuration = configuredPolicy({ allowedPackIds: ['base-pack', 'premium-pack'], requestedOrders: 1, maxBoostersPerCycle: 4 });
+  const input = { configuration, cycleId: admission.cycleId, releaseCostMicroUsd: admission.aggregateFundingUsd.amountMicroUsd,
+    releaseAmountWei: admission.aggregateFundingQuote.amountAtomic, packId: 'base-pack', liveMode: true, admission };
+  const first = deriveCyclePolicyDigest(input);
+  const updated = { ...configuration, allowedPackIds: ['base-pack', 'new-pack', 'premium-pack'], requestedOrders: 4,
+    packPlan: { schema: 'hookemon.pack-plan.v1', revision: 4, orders: [{ pack: 'new-pack', quantity: 4 }] } };
+  assert.equal(deriveCyclePolicyDigest({ ...input, configuration: updated }), first);
+});
+
+test('admitted plan continues after selection changes while all unit caps and explicit safety removal remain enforced', async () => {
+  const admission = selectedPlanAdmission('cycle-plan-policy');
+  const fixture = policyFixture({ configuration: configuredPolicy({ allowedPackIds: ['base-pack', 'premium-pack'],
+    requestedOrders: 1, maxBoostersPerCycle: 4, maxUnitPriceMicroUsd: '40000000', maxCycleBudgetMicroUsd: '70000000',
+    perCycleCapMicroUsd: '70000000', max24HourBudgetMicroUsd: '140000000', lossCapMicroUsd: '140000000',
+    maxOutstandingCustodyMicroUsd: '140000000', manualApprovalCycles: 0 }) });
+  const request = { boundary: 'claim-process', cycleId: admission.cycleId, packId: 'base-pack', liveMode: true,
+    releaseCostMicroUsd: admission.aggregateFundingUsd.amountMicroUsd, admission };
+  const admitted = await fixture.engine.admit(request);
+  assert.equal(admitted.allowed, true);
+  fixture.replaceConfiguration({ ...fixture.readConfiguration(), requestedOrders: 4,
+    allowedPackIds: ['base-pack', 'new-pack', 'premium-pack'], packPlan: { schema: 'hookemon.pack-plan.v1', revision: 4, orders: [{ pack: 'new-pack', quantity: 4 }] } });
+  assert.equal((await fixture.engine.evaluatePurchase(request)).allowed, true);
+  fixture.replaceConfiguration({ ...fixture.readConfiguration(), maxUnitPriceMicroUsd: '39999999' });
+  assert.deepEqual(await fixture.engine.evaluatePurchase(request), { allowed: false, reason: 'UNIT_PRICE_CAP' });
+  fixture.replaceConfiguration({ ...fixture.readConfiguration(), maxUnitPriceMicroUsd: '40000000', allowedPackIds: ['base-pack', 'new-pack'] });
+  assert.deepEqual(await fixture.engine.evaluatePurchase(request), { allowed: false, reason: 'PACK_NOT_ALLOWED' });
+});

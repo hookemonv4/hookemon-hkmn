@@ -1,3 +1,4 @@
+import { canonicalJson, digest } from '../../../../runner/src/cycle/journal.mjs';
 import {
   getFinalizedTokenBalanceChanges,
   readAssociatedTokenAccount,
@@ -327,6 +328,22 @@ async function resolvePurchaseQuantity({ cycleRepository, context, config, packT
 export async function preparePurchaseRequest({ adapters, config, cycleRepository, context }) {
   const playerAddress = config?.accounts?.solana;
   if (typeof playerAddress !== 'string' || playerAddress.length === 0) throw new Error('purchase prepareRequest requires HOOKEMON_SOLANA_ACCOUNT');
+  const cycle = typeof cycleRepository?.describeCycle === 'function' && context?.cycleId
+    ? await cycleRepository.describeCycle(context.cycleId) : null;
+  if (cycle?.admission?.schema === 'hookemon.policy-admission.v4') {
+    const admission = cycle.admission;
+    await assertHeldHeadroom({ cycleRepository, context, config, quantity: admission.quantity });
+    const catalog = await adapters.collectorCrypt.getMachines();
+    return { provider: 'collector-crypt', operation: 'purchase', playerAddress, quantity: admission.quantity,
+      admissionDigest: digest(admission), orders: admission.orders.map(order => {
+        const count = expectedCardCountFromCatalog({ catalog, packType: order.packId });
+        if (count !== 1) throw new Error(`Collector machine "${order.packId}" needs an unsupported ${count}-card fan-out per pack`);
+        return { orderIndex: order.orderIndex, packType: order.packId, quantity: order.quantity,
+          unitPurchase: order.unitPurchase,
+          aggregatePurchase: { ...order.unitPurchase, amountAtomic: (BigInt(order.unitPurchase.amountAtomic) * BigInt(order.quantity)).toString() },
+          expectedCardCountPerPack: count };
+      }) };
+  }
   const packType = config?.pack?.code;
   const { quantity, bounds } = await resolvePurchaseQuantity({ cycleRepository, context, config, packType });
   await assertHeldHeadroom({ cycleRepository, context, config, quantity });
@@ -384,7 +401,48 @@ async function holdWholeCycle(cycleRepository, context, evidence) {
   return null;
 }
 
-export async function mutatePurchase({ liveMode, adapters, signerClient, config, cycleRepository, context, request, preflightAuthority }) {
+export async function mutatePurchase(options) {
+  const { cycleRepository, context, request } = options;
+  const cycle = typeof cycleRepository?.describeCycle === 'function' && context?.cycleId
+    ? await cycleRepository.describeCycle(context.cycleId) : null;
+  if (cycle?.admission?.schema !== 'hookemon.policy-admission.v4') {
+    if (request?.orders) throw new Error('legacy purchase refuses plan orders');
+    return mutateSinglePurchase(options);
+  }
+  const admission = cycle.admission;
+  if (request?.admissionDigest !== digest(admission) || request.quantity !== admission.quantity
+    || !Array.isArray(request.orders) || request.orders.length !== admission.orders.length) throw new Error('purchase request does not bind admitted plan');
+  for (const [index, order] of request.orders.entries()) {
+    const admitted = admission.orders[index];
+    if (order.orderIndex !== index || order.packType !== admitted.packId || order.quantity !== admitted.quantity
+      || canonicalJson(order.unitPurchase) !== canonicalJson(admitted.unitPurchase)
+      || BigInt(order.aggregatePurchase?.amountAtomic ?? '-1') !== BigInt(admitted.unitPurchase.amountAtomic) * BigInt(admitted.quantity)
+      || !Number.isSafeInteger(order.expectedCardCountPerPack) || order.expectedCardCountPerPack !== 1) throw new Error('purchase order differs from admitted plan');
+  }
+  for (const order of request.orders) {
+    const offset = admission.orders.slice(0, order.orderIndex).reduce((sum, item) => sum + item.quantity, 0);
+    const existing = await cycleRepository.readPackOrderRequest(context.cycleId, order.orderIndex);
+    if (existing === null && await cycleRepository.readPackOrderIntent(context.cycleId, order.orderIndex) !== null) {
+      throw new Error('purchase order generation is uncertain; reconciliation required');
+    }
+    // Only the per-order generation journal seam changes. All signing, custody and policy
+    // methods remain bound to the same fenced cycle repository and parent request digest.
+    const scoped = new Proxy({}, { get(_target, property) {
+      const target = cycleRepository;
+      if (property === 'readPackBatchRequest') return () => target.readPackOrderRequest(context.cycleId, order.orderIndex);
+      if (property === 'recordPackBatchIntent') return (_cycle, _stage, intent) => target.recordPackOrderIntent(context.cycleId, order.orderIndex, intent, context.requestDigest);
+      if (property === 'recordPackBatchRequest') return (_cycle, _stage, packs) => target.recordPackOrderRequest(context.cycleId, order.orderIndex,
+        packs.map(pack => ({ ...pack, packIndex: offset + pack.packIndex })));
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+    await mutateSinglePurchase({ ...options, cycleRepository: scoped,
+      request: { ...order, playerAddress: request.playerAddress, provider: 'collector-crypt', operation: 'purchase' } });
+  }
+  return { quantity: admission.quantity, orderCount: admission.orders.length };
+}
+
+async function mutateSinglePurchase({ liveMode, adapters, signerClient, config, cycleRepository, context, request, preflightAuthority }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutatePurchase reached without liveMode');
   if (!adapters?.collectorCrypt) throw new Error('purchase mutate requires a configured collector-crypt client');
   requireSolanaConfiguration({ adapters, config, signerClient, stage: 'purchase' });
@@ -652,7 +710,7 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
 
 export async function reconcileLivePurchase({ adapters, config, cycleRepository, context }) {
   const batch = await cycleRepository.readPackBatchRequest(context.cycleId, 'purchase');
-  if (batch === null) {
+  if (batch === null || batch.generationComplete === false) {
     const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'purchase');
     if (record?.attempt?.state !== 'SENT_UNKNOWN' || !Number.isSafeInteger(record.sentAtMs)) return null;
     if (!pastDeadline(record.sentAtMs, config, context)) return null;
@@ -697,19 +755,21 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
   if (cycle?.admission == null) {
     throw new Error('purchase reconciliation requires a durable admission carrying the immutable admitted per-pack amount');
   }
-  const admittedUnitPurchase = assertSolanaAdmittedPurchaseAmount({
-    money,
-    asset,
-    amount: cycle.admission.unitPurchase,
-    label: 'purchase reconciliation admitted unitPurchase',
-  });
+  const boundForPack = pack => {
+    const admission = cycle.admission;
+    const order = admission.schema === 'hookemon.policy-admission.v4'
+      ? admission.orders.find(item => item.packId === pack.packType) : admission;
+    if (!order) throw new Error('purchase reconciliation pack has no admitted order');
+    return assertSolanaAdmittedPurchaseAmount({ money, asset, amount: order.unitPurchase,
+      label: 'purchase reconciliation admitted unitPurchase' });
+  };
 
   const outcomes = [];
   for (const pack of batch.packs) {
     const result = await reconcilePack({
       adapters, config, context, asset, pack, playerAddress,
       deadlineSinceMs: batch.requestedAtMs,
-      unitPurchase: admittedUnitPurchase,
+      unitPurchase: boundForPack(pack),
     });
     if (!result.determined) return null;
     if (result.outcome === 'anomaly') {
