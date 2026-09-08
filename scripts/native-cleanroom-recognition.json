@@ -7398,6 +7398,421 @@
           "basis": "reviewed-native-settlement-fixture-or-exact-ci-evidence"
         }
       ]
+    },
+    "feasibility/native-budget-next-actions/README.md": {
+      "sha256": "ec403fc0f2651e8a54bdc10e37ace8326e25908de9a8ff3f92cddd040642714e",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 747,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 747,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 1080,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 1080,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3979,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3979,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 7444,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 7444,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        }
+      ]
+    },
+    "feasibility/native-budget-next-actions/calculate.py": {
+      "sha256": "63ac3104a2fc8e1ade2a0528d8919b15ac322e042d89155cd3f615381ffe1302",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 674,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 669,
+          "tokenLength": 12,
+          "tokenSha256": "78908687bc055e6910f0ee08ea37031b34ab0c4c69d8d95d7fb8e97871c5fc0f",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 748,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 716,
+          "tokenLength": 39,
+          "tokenSha256": "148cd9c321bcff7aef3bd049beebbeefb5650273fc04b412aea1a4a351e8170d",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 1053,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 1021,
+          "tokenLength": 39,
+          "tokenSha256": "d2a247af892b45ed28c99adc52655c7a672a76ec5f6d044d34720a16dabe3030",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5194,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5185,
+          "tokenLength": 16,
+          "tokenSha256": "3bf086b3a6d18ba6e7c0524704178a9c2474914792a174354f667755d917a37a",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5763,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5744,
+          "tokenLength": 28,
+          "tokenSha256": "7e1323107808a508dabb204480028a0cd758243245d0f01c5b3a1a9a81fc3e83",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5888,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5875,
+          "tokenLength": 22,
+          "tokenSha256": "59a83f287c78c88cbb95433c13912be8e983c1f5da05fbba8298e51daeabc069",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        }
+      ]
+    },
+    "feasibility/native-budget-next-actions/conditional-calculation.json": {
+      "sha256": "d672a9a01b415a05e9967681439b3da391f7a3b0cb62f12606f72f9f9ff0f2fb",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 306,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 274,
+          "tokenLength": 39,
+          "tokenSha256": "d2a247af892b45ed28c99adc52655c7a672a76ec5f6d044d34720a16dabe3030",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3238,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3229,
+          "tokenLength": 16,
+          "tokenSha256": "3bf086b3a6d18ba6e7c0524704178a9c2474914792a174354f667755d917a37a",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 4055,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 4036,
+          "tokenLength": 28,
+          "tokenSha256": "7e1323107808a508dabb204480028a0cd758243245d0f01c5b3a1a9a81fc3e83",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 4148,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 4135,
+          "tokenLength": 22,
+          "tokenSha256": "59a83f287c78c88cbb95433c13912be8e983c1f5da05fbba8298e51daeabc069",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        }
+      ]
+    },
+    "feasibility/native-budget-next-actions/relay-outbound-response.json": {
+      "sha256": "7036ba30243b970b1c8cbdbc8ddd29998e439f6dbf3dd2f8299336a61d81cd15",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 224,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 224,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3497,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3497,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3615,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3615,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5495,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5495,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5613,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5613,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5866,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5866,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5984,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5984,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        }
+      ]
+    },
+    "feasibility/native-budget-next-actions/relay-return-scenario-response.json": {
+      "sha256": "84dcd9dd9952cc8c5a9dee0582f5a08acc41d4c2e6f51d3db43f52a592115245",
+      "matches": [
+        {
+          "rule": "historical-architecture",
+          "offset": 2175,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 2175,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 2293,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 2293,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 2539,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 2539,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 2657,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 2657,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 2907,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 2907,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3025,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3025,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3264,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3264,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3382,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3382,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3608,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3608,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 3726,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 3726,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 4096,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 4096,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 4214,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 4214,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 4824,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 4824,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 4942,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 4942,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5725,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5725,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 5843,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 5843,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 6096,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 6096,
+          "tokenLength": 4,
+          "tokenSha256": "8591ee9090c0c02ca1f103cb637131d8f358870aba145245ff083e138fdd705b",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        },
+        {
+          "rule": "historical-architecture",
+          "offset": 6214,
+          "length": 4,
+          "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "tokenStart": 6214,
+          "tokenLength": 4,
+          "tokenSha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
+          "basis": "reviewed-native-budget-provider-evidence-or-usd-arithmetic"
+        }
+      ]
     }
   },
   "refresh": {
