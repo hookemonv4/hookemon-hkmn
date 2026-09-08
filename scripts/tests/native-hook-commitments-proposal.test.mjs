@@ -1,7 +1,7 @@
 // All identities, compiler bytes and economics below are synthetic, non-launch-authoritative.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonical, deriveProposal, envelope, sha256 } from './commitments.mjs';
+import { canonical, deriveProposal, envelope, sha256 } from '../../decisions/native-hook-commitments-proposal/commitments.mjs';
 const h=`0x${'11'.repeat(32)}`, a=`0x${'22'.repeat(20)}`;
 function fixture() {
  const sourceBytes={'Hook.sol':Buffer.from('contract Synthetic {}'),'compiler':Buffer.from('synthetic compiler, not executable'),'input.json':Buffer.from(JSON.stringify({language:'Solidity',sources:{'Hook.sol':{content:'contract Synthetic {}'}},settings:{optimizer:{enabled:true,runs:200}}}))};
