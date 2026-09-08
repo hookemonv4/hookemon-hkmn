@@ -206,9 +206,9 @@
     "providerSpecificPurchasePolicy": {
       "id": "collector-purchase-binding-v1",
       "source": "packages/adapters/src/signing/collector-purchase-policy.mjs",
-      "sourceDigest": "sha256:e2528a63151b385098ceb2dc84accaf227c94c9ec08bab4c3fcb51b0debf2ae2",
+      "sourceDigest": "sha256:74d396f93692bf5e1253537f2891775b0a331c1e4ca32157e9503f4f6c317cc7",
       "exports": ["COLLECTOR_PURCHASE_BINDING_SCHEMA", "COLLECTOR_PURCHASE_BINDING_VERSION", "CollectorPurchasePolicyError", "assertCollectorPurchaseBindingV1", "createCollectorPurchasePolicy"],
-      "trustInputs": "binding bytes and expectedDigest are independently supplied and digest-verified before the schema is read; durable per-cycle facts; an independently observed RPC blockhash context; candidate transaction bytes are never a legal factory input and are evaluated only by this same hookemon.transaction-policy.v1 decode/evaluate kernel",
+      "trustInputs": "binding bytes and expectedDigest are independently supplied and digest-verified before the schema is read; durable per-cycle facts; an independently observed RPC blockhash context; candidate transaction bytes are never a legal factory input and are evaluated only by this same hookemon.transaction-policy.v1 decode/evaluate kernel The exact generatePack profile admits Limit → Memo → Transfer → Price, a provider-only signed Memo ending :open, and duplicate identical operator authority. Its original blockhash is independently rechecked by RPC against an immutable minimum slot; recovery approval binds the full immutable rule sidecar and never alters original message bytes.",
       "integrationStatus": "WIRED_NO_LIVE_ENTRY",
       "liveBindingStatus": "packages/adapters/src/app/stages/purchase.mjs resolves this factory behind two mutually exclusive seams -- a Node-test-only fixture and the productionBindingRegistry below -- but no live Collector program, account, provider co-signer, mint, expectedDigest source, or repository binding path is approved; no bindings/index.json entry exists for this interface and production composition has no path to a resolvable live entry"
     },
