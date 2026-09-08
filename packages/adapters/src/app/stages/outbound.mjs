@@ -1,3 +1,4 @@
+import { applyNativeCustodyGasPayment } from '../../native-payment-proof.mjs';
 import { createRelayNativePaymentProof } from '../../native-payment-proof.mjs';
 import { createNativeCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
 import { createNativePaymentProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
@@ -1238,8 +1239,7 @@ export function nativeOutboundCustodyAfterPayment(existing, proof, observation) 
     throw new Error('native outbound custody principal conflicts with finalized payment');
   }
   return { ...existing, bridgeOut: proof.amountWei, verifiedCurrentBalance: observation,
-    gasSpent: { ...existing.gasSpent, amountAtomic: (BigInt(existing.gasSpent.amountAtomic)
-      + (existing.bridgeOut === '0' ? BigInt(proof.gasSpentWei) : 0n)).toString() } };
+    ...applyNativeCustodyGasPayment(existing, proof) };
 }
 
 async function recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof }) {

@@ -86,3 +86,7 @@ node --test --test-timeout=120000 packages/runner/test/operator/control.test.mjs
   interface to composition and passing it into this control service. Verified safe alternative: show
   telemetry-source availability and emit the authority alert when required safety telemetry is
   unavailable; do not report an empty alert list as proof that the alert sink is healthy.
+
+Active operator monetary controls use USD micro-units (`*MicroUsd`). Cycle reservations keep
+`releaseAmountWei` distinct from `releaseCostMicroUsd`; cap usage reads the USD spend ledger.
+Native principal and gas never enter a USD cap field without authenticated valuation.

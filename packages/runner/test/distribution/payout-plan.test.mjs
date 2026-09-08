@@ -7,7 +7,7 @@ import * as payoutPlan from '../../src/distribution/payout-plan.mjs';
 const {
   compileSupplementaryDirectPayoutPlan,
   compileDirectPayoutPlan: compilePayoutPlan,
-  createUsdgPayoutAmount,
+  createNativePayoutAmount,
   directPayoutPlanDigest,
   DIRECT_PAYOUT_RECIPIENT_LIMIT,
   supplementaryPayoutPlanDigest,
@@ -16,7 +16,7 @@ const {
 const TOKEN = `0x${'a'.repeat(40)}`;
 const RETURN_BINDING = Object.freeze({
   operations: `0x${'b'.repeat(40)}`,
-  usdgAddress: TOKEN,
+  assetId: 'native',
   evidenceDigest: `sha256:${'e'.repeat(64)}`,
 });
 
@@ -28,8 +28,8 @@ function address(index) {
   return `0x${(index + 1).toString(16).padStart(40, '0')}`;
 }
 
-function usdg(amountAtomic, assetId = RETURN_BINDING.usdgAddress) {
-  return createUsdgPayoutAmount({ assetId, amountAtomic });
+function usdg(amountAtomic, assetId = RETURN_BINDING.assetId) {
+  return createNativePayoutAmount({ assetId, amountAtomic });
 }
 
 function dustSource(overrides = {}) {
@@ -94,7 +94,7 @@ test('retains floor-rounding residual atomic units as durable dust', () => {
     previousDust: usdg('0'),
   });
 
-  assert.equal(plan.schema, 'hookemon.direct-payout-plan.v1');
+  assert.equal(plan.schema, 'hookemon.direct-payout-plan.v2');
   assert.deepEqual(plan.returnDelta, usdg('11'));
   assert.deepEqual(plan.dust, usdg('1'));
   assert.deepEqual(
@@ -115,48 +115,19 @@ test('binds the plan to the finalized return recipient, token, and evidence dige
   assert.deepEqual(plan.returnEvidence, RETURN_BINDING);
 });
 
-test('derives every USDG amount from the canonical return-binding token identity', () => {
-  const boundToken = `0x${'C'.repeat(40)}`;
-  const returnBinding = {
-    ...RETURN_BINDING,
-    usdgAddress: boundToken,
-  };
+test('accepts only the native principal identity', () => {
   const plan = compileDirectPayoutPlan({
-    cycleId: 'cycle-canonical-usdg-identity',
-    eligibilityManifest: eligibilityManifest([holder(0, 2), holder(1, 1)], { cycleId: 'cycle-canonical-usdg-identity' }),
-    finalizedReturn: usdg('3', boundToken),
-    previousDust: usdg('0', boundToken),
-    returnBinding,
+    cycleId: 'native-identity',
+    eligibilityManifest: eligibilityManifest([holder(0, 2), holder(1, 1)], { cycleId: 'native-identity' }),
+    finalizedReturn: usdg('3'), previousDust: usdg('0'),
   });
-  const canonicalToken = boundToken.toLowerCase();
-
-  assert.equal(plan.returnEvidence.usdgAddress, canonicalToken);
-  assert.equal(plan.returnDelta.assetId, canonicalToken);
-  assert.equal(plan.previousDust.assetId, canonicalToken);
-  assert.equal(plan.distributablePool.assetId, canonicalToken);
-  assert.equal(plan.allocations.every(allocation => allocation.amount.assetId === canonicalToken), true);
-  assert.equal(plan.dust.assetId, canonicalToken);
-
-  assert.throws(
-    () => compileDirectPayoutPlan({
-      cycleId: 'cycle-canonical-usdg-identity',
-      eligibilityManifest: eligibilityManifest([holder(0, 1)], { cycleId: 'cycle-canonical-usdg-identity' }),
-      finalizedReturn: { chainId: 4663, assetId: 'usdg', decimals: 6, amountAtomic: '1' },
-      previousDust: usdg('0', boundToken),
-      returnBinding,
-    }),
-    /assetId must be an EVM address/i,
-  );
-  assert.throws(
-    () => compileDirectPayoutPlan({
-      cycleId: 'cycle-canonical-usdg-identity',
-      eligibilityManifest: eligibilityManifest([holder(0, 1)], { cycleId: 'cycle-canonical-usdg-identity' }),
-      finalizedReturn: usdg('1', `0x${'D'.repeat(40)}`),
-      previousDust: usdg('0', boundToken),
-      returnBinding,
-    }),
-    /configured USDG asset identity/i,
-  );
+  assert.equal(plan.returnEvidence.assetId, 'native');
+  assert.equal(plan.allocations.every(row => row.amount.assetId === 'native' && row.amount.decimals === 18), true);
+  assert.throws(() => createNativePayoutAmount({assetId: TOKEN, amountAtomic: '1'}), /native/i);
+  assert.throws(() => compileDirectPayoutPlan({ cycleId: 'native-identity',
+    eligibilityManifest: eligibilityManifest([holder(0, 1)], {cycleId: 'native-identity'}),
+    finalizedReturn: {chainId:'4663',assetId:TOKEN,decimals:6,amountAtomic:'1'}, previousDust:usdg('0'),
+  }), /native|18/i);
 });
 
 test('keeps a persisted dust balance in the next cycle conservation basis', () => {
@@ -372,7 +343,7 @@ test('preserves the frozen HKMN decimals in allocations and eligible-total evide
 
   assert.equal(plan.allocations[0].hkmnBalance.decimals, 7);
   assert.deepEqual(plan.totalEligibleHkmn, {
-    chainId: 4663,
+    chainId: '4663',
     assetId: TOKEN,
     decimals: 7,
     amountAtomic: '3',
@@ -443,7 +414,7 @@ test('uses non-excluded snapshot entries as payout weights while preserving tota
   });
 
   assert.deepEqual(plan.totalEligibleHkmn, {
-    chainId: 4663,
+    chainId: '4663',
     assetId: TOKEN,
     decimals: 18,
     amountAtomic: '3',
@@ -500,7 +471,7 @@ test('compiles a deterministic supplementary payout plan from the original froze
   const second = compileSupplementaryDirectPayoutPlan({ ...input, eligibilityManifest: JSON.parse(canonicalJson(manifest)) });
   manifest.entries[0].hkmnBalance.amountAtomic = '999';
 
-  assert.equal(first.schema, 'hookemon.supplementary-direct-payout-plan.v1');
+  assert.equal(first.schema, 'hookemon.supplementary-direct-payout-plan.v2');
   assert.equal(first.cycleId, cycleId);
   assert.equal(first.manifestId, 'cycle-supplementary:supplementary:2');
   assert.equal(first.supplementaryIndex, 2);

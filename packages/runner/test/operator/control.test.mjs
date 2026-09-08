@@ -36,12 +36,12 @@ function configuration(overrides = {}) {
     liveMode: true,
     allowedPackIds: ['base-pack'],
     requestedOrders: 1,
-    maxUnitPriceMicroUsdg: '100',
-    maxCycleBudgetMicroUsdg: '100',
-    max24HourBudgetMicroUsdg: '100',
-    perCycleCapMicroUsdg: '100',
-    lossCapMicroUsdg: '100',
-    maxOutstandingCustodyMicroUsdg: '100',
+    maxUnitPriceMicroUsd: '100',
+    maxCycleBudgetMicroUsd: '100',
+    max24HourBudgetMicroUsd: '100',
+    perCycleCapMicroUsd: '100',
+    lossCapMicroUsd: '100',
+    maxOutstandingCustodyMicroUsd: '100',
     ...overrides,
   });
 }
@@ -80,11 +80,11 @@ function custodyLedger(cycleId) {
 
 function safetyTelemetry(overrides = {}) {
   return {
-    realizedLossMicroUsdg: '0',
-    atRiskMicroUsdg: '0',
-    outstandingMicroUsdg: '0',
+    realizedLossMicroUsd: '0',
+    atRiskMicroUsd: '0',
+    outstandingMicroUsd: '0',
     heldAssets: false,
-    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+    heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
     unattributed: false,
     unvaluedExposure: false,
     ...overrides,
@@ -131,11 +131,11 @@ function policyEngineForState(statePath) {
     now: () => nowMs,
     readConfiguration: async () => (await (await stateFileModule()).readOperatorState(statePath)).configuration,
     readCustody: async () => ({
-      realizedLossMicroUsdg: '0',
-      atRiskMicroUsdg: '0',
-      outstandingMicroUsdg: '0',
+      realizedLossMicroUsd: '0',
+      atRiskMicroUsd: '0',
+      outstandingMicroUsd: '0',
       heldAssets: false,
-      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+      heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
       cycles: [],
@@ -213,12 +213,12 @@ test('status projects cycle facts and typed custody buckets from the repository'
       cycleDigest: digest,
       mode: 'production',
       openedAtMs: nowMs - 1,
-      releaseAmountMicroUsdg: '40',
+      releaseAmountWei: '400000000000000', releaseCostMicroUsd: '40',
     }],
     spendLedger: [{
       cycleId: 'cycle-one',
       cycleDigest: digest,
-      amountMicroUsdg: '40',
+      amountMicroUsd: '40',
       reservedAtMs: nowMs - 1,
     }],
   }));
@@ -262,27 +262,27 @@ test('status projects cycle facts and typed custody buckets from the repository'
   assert.equal(status.activeCycleId, 'cycle-one');
   assert.deepEqual(status.cap, {
     offChain24Hour: {
-      usedMicroUsdg: '40',
-      limitMicroUsdg: '100',
-      remainingMicroUsdg: '60',
+      usedMicroUsd: '40',
+      limitMicroUsd: '100',
+      remainingMicroUsd: '60',
     },
     loss: {
-      realizedLossMicroUsdg: '0',
-      atRiskMicroUsdg: '0',
-      usedMicroUsdg: '0',
-      limitMicroUsdg: '100',
-      remainingMicroUsdg: '100',
+      realizedLossMicroUsd: '0',
+      atRiskMicroUsd: '0',
+      usedMicroUsd: '0',
+      limitMicroUsd: '100',
+      remainingMicroUsd: '100',
     },
     outstandingCustody: {
-      usedMicroUsdg: '0',
-      limitMicroUsdg: '100',
-      remainingMicroUsdg: '100',
+      usedMicroUsd: '0',
+      limitMicroUsd: '100',
+      remainingMicroUsd: '100',
     },
     heldPositions: {
       count: 0,
       maxCount: 10,
-      valueMicroUsdg: '0',
-      maxValueMicroUsdg: '5000000000',
+      valueMicroUsd: '0',
+      maxValueMicroUsd: '5000000000',
     },
     onChainRemainingCapacity: null,
   });
@@ -367,11 +367,11 @@ test('status projects canonical lifecycle order and durable chain transaction ev
     cycleRepository: repository,
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
     readCustody: async () => ({
-      realizedLossMicroUsdg: '0',
-      atRiskMicroUsdg: '0',
-      outstandingMicroUsdg: '0',
+      realizedLossMicroUsd: '0',
+      atRiskMicroUsd: '0',
+      outstandingMicroUsd: '0',
       heldAssets: false,
-      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+      heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -482,11 +482,11 @@ test('status leaves a payout unavailable when no durable payout stage exists', a
     cycleRepository: repository,
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
     readCustody: async () => ({
-      realizedLossMicroUsdg: '0',
-      atRiskMicroUsdg: '0',
-      outstandingMicroUsdg: '0',
+      realizedLossMicroUsd: '0',
+      atRiskMicroUsd: '0',
+      outstandingMicroUsd: '0',
       heldAssets: false,
-      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+      heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -587,8 +587,8 @@ test('status preserves held owner-decision facts from the repository', async t =
 test('status projects loss and outstanding custody cap usage from policy telemetry', async t => {
   const statePath = await temporaryState(t);
   await seedConfiguration(statePath, configuration({
-    lossCapMicroUsdg: '100',
-    maxOutstandingCustodyMicroUsdg: '100',
+    lossCapMicroUsd: '100',
+    maxOutstandingCustodyMicroUsd: '100',
   }));
   const { createOperatorControl } = await controlModule();
   const control = createOperatorControl({
@@ -596,11 +596,11 @@ test('status projects loss and outstanding custody cap usage from policy telemet
     cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
     readCustody: async () => ({
-      realizedLossMicroUsdg: '7',
-      atRiskMicroUsdg: '8',
-      outstandingMicroUsdg: '19',
+      realizedLossMicroUsd: '7',
+      atRiskMicroUsd: '8',
+      outstandingMicroUsd: '19',
       heldAssets: false,
-      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+      heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -609,16 +609,16 @@ test('status projects loss and outstanding custody cap usage from policy telemet
   const status = await control.status();
 
   assert.deepEqual(status.cap.loss, {
-    realizedLossMicroUsdg: '7',
-    atRiskMicroUsdg: '8',
-    usedMicroUsdg: '15',
-    limitMicroUsdg: '100',
-    remainingMicroUsdg: '85',
+    realizedLossMicroUsd: '7',
+    atRiskMicroUsd: '8',
+    usedMicroUsd: '15',
+    limitMicroUsd: '100',
+    remainingMicroUsd: '85',
   });
   assert.deepEqual(status.cap.outstandingCustody, {
-    usedMicroUsdg: '19',
-    limitMicroUsdg: '100',
-    remainingMicroUsdg: '81',
+    usedMicroUsd: '19',
+    limitMicroUsd: '100',
+    remainingMicroUsd: '81',
   });
   assert.deepEqual(status.alertSources, { safetyTelemetry: true });
   assert.deepEqual(status.alerts, []);
@@ -626,7 +626,7 @@ test('status projects loss and outstanding custody cap usage from policy telemet
 
 test('status exposes held-position limit usage and the open positions', async t => {
   const statePath = await temporaryState(t);
-  await seedConfiguration(statePath, configuration({ maxHeldPositions: 3, maxHeldValueMicroUsdg: '100' }));
+  await seedConfiguration(statePath, configuration({ maxHeldPositions: 3, maxHeldValueMicroUsd: '100' }));
   const position = {
     positionId: 'position-one',
     cycleId: 'cycle-one',
@@ -634,7 +634,7 @@ test('status exposes held-position limit usage and the open positions', async t 
     memo: 'memo-one',
     mint: 'mint-one',
     cardRef: 'card-one',
-    costMicroUsdg: '7',
+    costMicroUsd: '7',
     insuredValue: null,
     reason: 'HELD_UNAVAILABLE',
     terminalState: 'OPEN',
@@ -650,7 +650,7 @@ test('status exposes held-position limit usage and the open positions', async t 
     cycleRepository: createRepository({ activeCycleId: null, knownCycleIds: [] }),
     policyEngine: { recordManualApproval: async () => { throw new Error('not used'); } },
     readCustody: async () => safetyTelemetry({
-      heldPositions: { count: 1, valueMicroUsdg: '7', positions: [position] },
+      heldPositions: { count: 1, valueMicroUsd: '7', positions: [position] },
     }),
   });
 
@@ -659,8 +659,8 @@ test('status exposes held-position limit usage and the open positions', async t 
   assert.deepEqual(status.cap.heldPositions, {
     count: 1,
     maxCount: 3,
-    valueMicroUsdg: '7',
-    maxValueMicroUsdg: '100',
+    valueMicroUsd: '7',
+    maxValueMicroUsd: '100',
   });
   assert.deepEqual(status.heldPositions, [position]);
 });
@@ -723,7 +723,7 @@ test('an exposure-increasing configuration update refuses unavailable safety tel
   await assert.rejects(
     control.execute({
       expectedRevision: 0,
-      command: { type: 'update-configuration', configuration: { max24HourBudgetMicroUsdg: '101' } },
+      command: { type: 'update-configuration', configuration: { max24HourBudgetMicroUsd: '101' } },
     }),
     /safety telemetry.*unavailable/i,
   );
@@ -1195,12 +1195,12 @@ test('configuration updates reject monetary values above the fixed operator ceil
     command: {
       type: 'update-configuration',
       configuration: {
-        maxUnitPriceMicroUsdg: '55000000',
-        maxCycleBudgetMicroUsdg: '165000000',
-        max24HourBudgetMicroUsdg: '495000000',
-        perCycleCapMicroUsdg: '165000000',
-        lossCapMicroUsdg: '495000000',
-        maxOutstandingCustodyMicroUsdg: '495000000',
+        maxUnitPriceMicroUsd: '55000000',
+        maxCycleBudgetMicroUsd: '165000000',
+        max24HourBudgetMicroUsd: '495000000',
+        perCycleCapMicroUsd: '165000000',
+        lossCapMicroUsd: '495000000',
+        maxOutstandingCustodyMicroUsd: '495000000',
       },
     },
   });
@@ -1212,10 +1212,10 @@ test('configuration updates reject monetary values above the fixed operator ceil
       command: {
         type: 'update-configuration',
         configuration: {
-          maxUnitPriceMicroUsdg: '55000001',
-          maxCycleBudgetMicroUsdg: '165000001',
-          perCycleCapMicroUsdg: '165000001',
-          max24HourBudgetMicroUsdg: '495000001',
+          maxUnitPriceMicroUsd: '55000001',
+          maxCycleBudgetMicroUsd: '165000001',
+          perCycleCapMicroUsd: '165000001',
+          max24HourBudgetMicroUsd: '495000001',
         },
       },
     }),

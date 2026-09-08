@@ -227,7 +227,7 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
+async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -262,7 +262,10 @@ async function composeDashboard({ dashboardConfig, chainId, cycleRepository, ope
     // status-projection.mjs's own `readAccounting` parameter) — see accounting-projection.mjs's own
     // header for exactly which fields this can and cannot honestly report today.
     async readAccounting(cycleId) {
-      return projectCycleAccounting({ cycleRepository, cycleId });
+      return projectCycleAccounting({ cycleRepository, cycleId, trustedPayoutContext: {
+        nativeAsset: { chainId: '4663', assetId: 'native', decimals: 18 },
+        operationsAddress,
+      } });
     },
     // Public-Integration-interface.md binding 2: the frozen SchedulerView, read synchronously off
     // the real running scheduler — never wrapped in a Promise, never a second timer's guess.
@@ -1821,6 +1824,7 @@ export async function compose(config) {
       readLastTick: () => lastTick,
       adapters,
       identities: buildDashboardIdentities(resolved),
+      operationsAddress: resolved.accounts.evm,
     })
     : null;
 

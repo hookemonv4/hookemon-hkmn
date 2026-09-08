@@ -46,7 +46,7 @@ test('finalized native outbound spends principal once and records gas separately
   const proof = await createNativePaymentProof(setup());
   const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
   const row = { schema: 'hookemon.custody-ledger.v3', ...asset, claimed: '42', bridgeOut: '0',
-    gasReserve: { ...asset, amountAtomic: '100000' }, gasSpent: { ...asset, amountAtomic: '12' } };
+    gasReserve: { ...asset, amountAtomic: '100000' }, gasSpent: { ...asset, amountAtomic: '12' }, gasPayments: [{ transactionHash: `0x${'99'.repeat(32)}`, amountWei: '12' }] };
   const spent = nativeOutboundCustodyAfterPayment(row, proof, null);
   assert.equal(spent.claimed, '42');
   assert.equal(spent.bridgeOut, '42');
@@ -54,4 +54,21 @@ test('finalized native outbound spends principal once and records gas separately
   assert.deepEqual(nativeOutboundCustodyAfterPayment(spent, proof, null), spent);
   assert.throws(() => nativeOutboundCustodyAfterPayment(row, structuredClone(proof), null));
   assert.throws(() => nativeOutboundCustodyAfterPayment({ ...row, claimed: '41' }, proof, null));
+});
+
+test('reverted native transaction grants only idempotent gas cost authority', async () => {
+  const { createNativeTransactionGasProof, applyNativeCustodyGasPayment } = await import('../src/native-payment-proof.mjs');
+  const input = setup(); input.receipt.status = 'reverted';
+  const proof = await createNativeTransactionGasProof(input);
+  assert.equal(proof.receiptStatus, 'reverted');
+  assert.equal(isProcessNativePaymentProof(proof), false);
+  assert.equal(Object.hasOwn(proof, 'amountWei'), false);
+  const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  const row = { schema: 'hookemon.custody-ledger.v3', ...asset, gasPayments: [], gasSpent: { ...asset, amountAtomic: '0' } };
+  const recorded = applyNativeCustodyGasPayment(row, proof);
+  assert.equal(recorded.gasSpent.amountAtomic, '63000');
+  assert.deepEqual(applyNativeCustodyGasPayment({ ...row, ...recorded }, proof), recorded);
+  assert.throws(() => applyNativeCustodyGasPayment(row, structuredClone(proof)));
+  input.expected.amountWei = '43';
+  await assert.rejects(createNativeTransactionGasProof(input));
 });

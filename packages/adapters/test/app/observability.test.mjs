@@ -34,6 +34,7 @@ const SOLANA_BLOCKHASH = 'SysvarC1ock11111111111111111111111111111111';
 function canaryConfig() {
   return {
     chainId: 4663,
+    nativePrincipal: {chainId:'4663',assetId:'native',decimals:18},
     contracts: {
       usdg: {
         proxy: { address: addresses.usdgProxy, runtimeHash: hashes.usdgProxy },
@@ -66,6 +67,7 @@ function createReaders(config) {
   ]);
   return {
     readChainId: async () => 4663,
+    readNativePrincipalIdentity: async () => ({chainId:'4663',assetId:'native',decimals:18}),
     readRuntimeCodeHash: async address => runtimeHashes.get(address),
     readProxyImplementation: async () => addresses.usdgImplementation,
     readUsdgDecimals: async () => 6,
@@ -104,6 +106,7 @@ function createConfig() {
 
 function canaryContext() {
   return {
+    nativePrincipal: {chainId:'4663',assetId:'native',decimals:18,amountAtomic:'1'},
     destinations: [addresses.destination],
     freshness: { kind: 'evm', account: addresses.operations, expectedNonce: '7' },
     operatorState: {
@@ -515,7 +518,8 @@ test('default readers collect EVM pending nonce and Solana standalone RPC eviden
   });
   try {
     const result = await observability.runPreSignatureCanaries({
-      destinations: [addresses.destination],
+      nativePrincipal: {chainId:'4663',assetId:'native',decimals:18,amountAtomic:'1'},
+    destinations: [addresses.destination],
       freshness: { kind: 'solana', blockhash: SOLANA_BLOCKHASH, lastValidBlockHeight: 100 },
       operatorState: {
         paused: false,
@@ -527,16 +531,15 @@ test('default readers collect EVM pending nonce and Solana standalone RPC eviden
     });
 
     assert.deepEqual(result, { ok: true, drift: [] });
-    assert.equal(calls.find(call => call.method === 'getStorageAt').request.slot, '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc');
-    assert.ok(calls.some(call => call.method === 'readContract' && call.request.functionName === 'decimals'));
-    assert.ok(calls.some(call => call.method === 'readContract' && call.request.functionName === 'paused'));
-    assert.equal(calls.filter(call => call.method === 'readContract' && call.request.functionName === 'isFrozen').length, 2);
+    assert.equal(calls.some(call => call.method === 'getStorageAt'), false);
+    assert.equal(calls.some(call => call.method === 'readContract' && ['decimals','paused','isFrozen'].includes(call.request.functionName)), false);
     assert.ok(calls.some(call => call.method === 'readContract' && call.request.functionName === 'readRoles'));
     assert.ok(calls.some(call => call.method === 'readContract' && call.request.functionName === 'extsload'));
     assert.deepEqual(solanaMethods.sort(), ['getBalance', 'getBlockHeight', 'isBlockhashValid']);
 
     const evmResult = await observability.runPreSignatureCanaries({
-      destinations: [addresses.destination],
+      nativePrincipal: {chainId:'4663',assetId:'native',decimals:18,amountAtomic:'1'},
+    destinations: [addresses.destination],
       freshness: { kind: 'evm', account: addresses.operations, expectedNonce: '7' },
       operatorState: {
         paused: false,
@@ -572,4 +575,18 @@ test('malformed pin configuration fails the start preflight instead of throwing 
   } finally {
     observability.close();
   }
+});
+
+
+test('native principal canary covers principal plus reserve and refuses wrong asset or missing principal', async () => {
+ const config=createConfig();const readers=createReaders(config.canaries);let balance='110';
+ readers.readNativeBalance=async()=>({chainId:'4663',assetId:'native',decimals:18,amountAtomic:balance});
+ const observability=createObservability(config,{readers,fetchImpl:async()=>({ok:true,status:200})});
+ try {
+  const principal={chainId:'4663',assetId:'native',decimals:18,amountAtomic:'10'};
+  assert.equal((await observability.runNativePrincipalCanary({nativePrincipal:principal})).ok,true);
+  balance='109';assert.equal((await observability.runNativePrincipalCanary({nativePrincipal:principal})).ok,false);
+  balance='110';assert.equal((await observability.runNativePrincipalCanary({nativePrincipal:{...principal,assetId:addresses.usdgProxy}})).ok,false);
+  assert.equal((await observability.runNativePrincipalCanary({})).ok,false);
+ } finally {observability.close();}
 });

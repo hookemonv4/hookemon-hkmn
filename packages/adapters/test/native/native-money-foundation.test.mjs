@@ -25,10 +25,12 @@ test('native money v2 rejects old execution identity while historical v1 remains
 test('native custody v3 keeps gas typed and separate from principal', () => {
   const row = { schema: 'hookemon.custody-ledger.v3', cycleId: 'cycle-native', ...eth,
     ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(key => [key, key === 'claimed' ? '42' : '0'])),
-    verifiedCurrentBalance: null, expectedCycleAsset: null, gasReserve: amount(eth, '200'), gasSpent: amount(eth, '12') };
+    verifiedCurrentBalance: null, expectedCycleAsset: null, gasReserve: amount(eth, '200'), gasSpent: amount(eth, '12'), gasPayments: [{ transactionHash: `0x${'99'.repeat(32)}`, amountWei: '12' }] };
   assert.deepEqual(assertCustodyLedger(row), row);
   assert.throws(() => assertCustodyLedger({ ...row, gasReserve: amount(sol, '200') }));
   assert.throws(() => assertCustodyLedger({ ...row, gasSpent: undefined }));
+  assert.throws(() => assertCustodyLedger({ ...row, gasPayments: [] }));
+  assert.throws(() => assertCustodyLedger({ ...row, gasPayments: [...row.gasPayments, ...row.gasPayments] }));
 });
 test('native custody observation requires distinct archive checkpoint and canonical recheck', async () => {
   const hash = `0x${'ab'.repeat(32)}`; const account = `0x${'11'.repeat(20)}`;

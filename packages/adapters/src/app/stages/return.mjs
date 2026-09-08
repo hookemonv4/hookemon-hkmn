@@ -685,6 +685,7 @@ async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, con
     ...returnCarriedCustodyBuckets(existing),
     gasReserve: existing?.gasReserve ?? { ...asset, amountAtomic: '0' },
     gasSpent: existing?.gasSpent ?? { ...asset, amountAtomic: '0' },
+    gasPayments: existing?.gasPayments ?? [],
     verifiedCurrentBalance: observation,
     expectedCycleAsset: null,
   });

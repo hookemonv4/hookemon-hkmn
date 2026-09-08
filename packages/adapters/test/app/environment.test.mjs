@@ -58,18 +58,18 @@ async function productionEnv(t, overrides = {}) {
     HOOKEMON_PACK_CODE: 'collector-25',
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_MIN_SOLANA_RECEIVE: '0',
-    HOOKEMON_MIN_RETURN_USDG: '0',
+    HOOKEMON_MIN_RETURN_ETH: '0',
     HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '2',
     HOOKEMON_NATIVE_GAS_CAP_SOLANA: '2',
     HOOKEMON_EVM_GAS_PRICE_CAP: '2',
     HOOKEMON_EVM_NATIVE_RESERVE: '2',
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '0',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '0',
     HOOKEMON_BUDGET_PACK_PRICE_USDG: '0',
-    HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0',
-    HOOKEMON_BUDGET_RETURN_CAP_USDG: '0',
-    HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
+    HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0',
+    HOOKEMON_BUDGET_RETURN_CAP_WEI: '0',
+    HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
     HOOKEMON_PROVIDER_MODE: 'live',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
     HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
@@ -99,9 +99,9 @@ test('readEnvironment applies documented defaults when nothing else is set', asy
   assert.equal(config.chainId, 4663);
   assert.equal(config.contracts.vault, null);
   assert.equal(config.contracts.hook, null);
-  assert.equal(config.contracts.usdg, binding.contracts.usdg.address.toLowerCase());
-  assert.equal(config.contracts.usdgDecimals, binding.contracts.usdg.metadata.decimals);
-  assert.equal(config.budget.availableProcessUsdg, '0');
+  assert.equal(config.contracts.quoteCurrency, `0x${'00'.repeat(20)}`);
+  assert.equal(config.contracts.quoteDecimals, 18);
+  assert.equal(config.budget.availableProcessWei, '0');
   assert.equal(config.budget.packPriceUsdg, '0');
   assert.equal(config.signerModulePath, null);
   assert.equal(config.rehearsal, null);
@@ -286,8 +286,8 @@ test('readEnvironment refuses a value that looks like raw key material, even in 
 });
 
 test('readEnvironment rejects a non-canonical budget amount', () => {
-  assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '01' })), /canonical unsigned decimal string/);
-  assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '-5' })), /canonical unsigned decimal string/);
+  assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '01' })), /canonical unsigned decimal string/);
+  assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '-5' })), /canonical unsigned decimal string/);
 });
 
 test('readEnvironment rejects a relative HOOKEMON_SIGNER_MODULE path', () => {
@@ -893,7 +893,7 @@ test('missing epic configuration remains data-unverified and wrong settlement id
   const result = await mutateEpicGate({ liveMode: true, config,
     adapters: { collectorCrypt: { async getPackStatus() { assert.fail('missing mapping must refuse before provider reads'); } } },
     cycleRepository: {
-      async describeCycle() { return { releaseAmount: '17' }; },
+      async describeCycle() { return { releaseAmount: '17', admission: { schema: 'hookemon.policy-admission.v3', aggregateFundingUsd: { amountMicroUsd: '23' } } }; },
       async recordHeldPosition(_cycleId, value) { held = value; return { ...value, positionId: 'held-test', evidenceDigest: 'test' }; },
     },
     context: { cycleId: 'missing-epic-config' },
@@ -901,6 +901,7 @@ test('missing epic configuration remains data-unverified and wrong settlement id
   });
   assert.equal(result.packs[0].decision, 'held');
   assert.equal(held.terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(held.costMicroUsd, '23');
   assert.match(held.evidence.reason, /explicit Collector field configuration/);
   const configured = await epicEnvironment(t, explicitEpicFields);
   assert.throws(() => readEnvironment({ ...configured, HOOKEMON_RELAY_SOLANA_MINT: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' }, { profile: 'production' }), /documented Collector settlement asset/);
@@ -916,7 +917,7 @@ test('explicit return window reaches the real return pre-sign request guard with
   const invoke = (config, window) => mutateReturn({
     liveMode: true, config, adapters: { solana: { client: {} } }, cycleRepository: repository,
     context: { cycleId: 'window-cycle', requestDigest: `sha256:${'a'.repeat(64)}` },
-    request: { schema: 'hookemon.return-relay-request.v1', cycleId: 'window-cycle', requestCreatedAtUnixSeconds: '1', maxSettlementWindowSeconds: window },
+    request: { schema: 'hookemon.return-relay-request.v2', cycleId: 'window-cycle', requestCreatedAtUnixSeconds: '1', maxSettlementWindowSeconds: window },
   });
   const absent = readEnvironment({ ...env, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: 'https://archive.example.test' }, { profile: 'production' });
   assert.equal(absent.relay.maxSettlementWindowSeconds, undefined);
@@ -933,4 +934,15 @@ test('return window refuses nonpositive, fractional and unsafe values', async ()
   for (const value of ['0', '-1', '1.5', '9007199254740992', 'NaN']) {
     assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: value })), /must be a positive integer/);
   }
+});
+
+test('native environment keeps explicit quote validity and rejects historical process budget names', () => {
+  const missing = readEnvironment(baseEnv());
+  assert.equal(missing.nativePaymentBindingPath, null);
+  assert.equal(missing.relayQuoteValidityMs, null);
+  const explicit = readEnvironment(baseEnv({ HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '60000', HOOKEMON_NATIVE_PAYMENT_BINDING_PATH: '/tmp/synthetic-native-binding.json' }));
+  assert.equal(explicit.relayQuoteValidityMs, 60000);
+  assert.equal(explicit.nativePaymentBindingPath, '/tmp/synthetic-native-binding.json');
+  assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '1' })), /unknown HOOKEMON/);
+  for (const value of ['0', '-1', '0.5', '9007199254740992']) assert.throws(() => readEnvironment(baseEnv({ HOOKEMON_RELAY_QUOTE_VALIDITY_MS: value })), /explicit positive milliseconds/);
 });

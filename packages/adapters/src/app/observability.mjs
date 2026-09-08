@@ -6,12 +6,6 @@ import { createLogger, redactForLogging } from '../../../runner/src/observabilit
 import { createProtocolFeeMonitor } from '../../../runner/src/observability/protocol-fee-monitor.mjs';
 import { readBlockhashValidity, readBlockHeight, readLatestBlockhash, readSolBalance } from '../solana-rpc.mjs';
 
-const USDG_ABI = parseAbi([
-  'function decimals() view returns (uint8)',
-  'function paused() view returns (bool)',
-  'function isFrozen(address account) view returns (bool)',
-]);
-
 const EXTSLOAD_ABI = parseAbi(['function extsload(bytes32 slot) view returns (bytes32)']);
 
 const HOOK_ROLES_ABI = Object.freeze([{
@@ -99,11 +93,9 @@ function configDrifts(config) {
   if (!isPlainObject(config)) return [missingConfig('observability')];
   const required = [
     'canaries.chainId',
-    'canaries.contracts.usdg.proxy.address',
-    'canaries.contracts.usdg.proxy.runtimeHash',
-    'canaries.contracts.usdg.implementation.address',
-    'canaries.contracts.usdg.implementation.runtimeHash',
-    'canaries.contracts.usdg.decimals',
+    'canaries.nativePrincipal.chainId',
+    'canaries.nativePrincipal.assetId',
+    'canaries.nativePrincipal.decimals',
     'canaries.contracts.poolManager.address',
     'canaries.contracts.poolManager.runtimeHash',
     'canaries.contracts.positionManager.address',
@@ -225,17 +217,9 @@ function createDefaultReaders(config, deps, logger, send) {
       if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error('EIP-1967 implementation slot is malformed');
       return `0x${value.slice(-40)}`;
     },
-    async readUsdgDecimals(address) {
-      if (typeof evmClient?.readContract !== 'function') throw new Error('USDG decimals reader is unavailable');
-      return evmClient.readContract({ address, abi: USDG_ABI, functionName: 'decimals' });
-    },
-    async readUsdgPaused(address) {
-      if (typeof evmClient?.readContract !== 'function') throw new Error('USDG pause reader is unavailable');
-      return evmClient.readContract({ address, abi: USDG_ABI, functionName: 'paused' });
-    },
-    async readUsdgFrozen(address, account) {
-      if (typeof evmClient?.readContract !== 'function') throw new Error('USDG freeze reader is unavailable');
-      return evmClient.readContract({ address, abi: USDG_ABI, functionName: 'isFrozen', args: [account] });
+    async readNativePrincipalIdentity() {
+      if (typeof evmClient?.getChainId !== 'function') throw new Error('native principal chain reader is unavailable');
+      return { chainId: String(await evmClient.getChainId()), assetId: 'native', decimals: 18 };
     },
     async readHookRoles(address, cycleId) {
       if (typeof evmClient?.readContract !== 'function') throw new Error('hook roles reader is unavailable');
@@ -455,125 +439,25 @@ export function createObservability(config, deps = {}) {
   const reporter = createAlertReporter(config, dependencies, logger);
   const readers = createDefaultReaders(config, dependencies, logger, reporter.send);
 
-  async function runUsdgStatusCanary(input = {}) {
-    const source = isPlainObject(input) ? input : {};
+  async function runNativePrincipalCanary(input = {}) {
     const drift = [];
-    const address = value => (typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
-      ? value.toLowerCase()
-      : null);
-    async function fail(checkId, item) {
+    const principal = input.nativePrincipal;
+    const reserve = config?.canaries?.nativeGasReserves?.find(value => String(value.chainId) === '4663');
+    try {
+      if (!principal || principal.chainId !== '4663' || principal.assetId !== 'native' || principal.decimals !== 18
+        || !/^(0|[1-9][0-9]*)$/.test(principal.amountAtomic ?? '') || !reserve || reserve.assetId !== 'native' || reserve.decimals !== 18
+        || !/^(0|[1-9][0-9]*)$/.test(reserve.amountAtomic ?? '')) throw new Error('native principal or reserve identity is invalid');
+      const identity = await readers.readNativePrincipalIdentity();
+      if (identity.chainId !== '4663' || identity.assetId !== 'native' || identity.decimals !== 18) throw new Error('native principal identity differs');
+      const balance = await readers.readNativeBalance(reserve, input);
+      if (String(balance.chainId) !== '4663' || balance.assetId !== 'native' || balance.decimals !== 18
+        || !/^(0|[1-9][0-9]*)$/.test(balance.amountAtomic ?? '')
+        || BigInt(balance.amountAtomic) < BigInt(principal.amountAtomic) + BigInt(reserve.amountAtomic)) throw new Error('native principal and gas are not covered');
+      await reporter.resolve(Object.freeze({ key: 'canary:native-principal' }));
+    } catch {
+      const item = preflightDrift('NATIVE_PRINCIPAL_UNVERIFIED', 'native principal', '4663/native/18 balance covering principal and gas', null, 'restore current native principal and gas evidence before signing');
       drift.push(item);
-      await reporter.report(Object.freeze({ key: `canary:${checkId}`, ...item }), 'CANARY_DRIFT');
-    }
-    async function clear(checkId) {
-      try {
-        await reporter.resolve(Object.freeze({ key: `canary:${checkId}` }));
-      } catch {
-        await fail('usdg-status-alert-state', preflightDrift(
-          'ALERT_STATE_UNVERIFIED',
-          'USDG status canary',
-          'durable alert resolution',
-          null,
-          'restore durable alert state before signing',
-        ));
-      }
-    }
-
-    const proxyAddress = address(config?.canaries?.contracts?.usdg?.proxy?.address);
-    if (proxyAddress === null) {
-      await fail('usdg-paused', preflightDrift(
-        'USDG_PAUSE_UNVERIFIED',
-        'USDG pause state',
-        false,
-        null,
-        'restore the configured USDG pause readback before signing',
-      ));
-    } else {
-      try {
-        const paused = await readers.readUsdgPaused(proxyAddress);
-        if (paused === true) {
-          await fail('usdg-paused', preflightDrift(
-            'USDG_PAUSED',
-            'USDG pause state',
-            false,
-            true,
-            'wait for the USDG pause to be lifted before signing',
-          ));
-        } else if (paused !== false) {
-          await fail('usdg-paused', preflightDrift(
-            'USDG_PAUSE_UNVERIFIED',
-            'USDG pause state',
-            false,
-            null,
-            'restore the USDG pause readback before signing',
-          ));
-        } else {
-          await clear('usdg-paused');
-        }
-      } catch {
-        await fail('usdg-paused', preflightDrift(
-          'USDG_PAUSE_UNVERIFIED',
-          'USDG pause state',
-          false,
-          null,
-          'restore the USDG pause readback before signing',
-        ));
-      }
-    }
-
-    const configuredOperations = address(config?.canaries?.roles?.operations);
-    const requestedDestinations = source.destinations === undefined ? [] : source.destinations;
-    const destinations = Array.isArray(requestedDestinations)
-      ? requestedDestinations.map(address)
-      : null;
-    if (proxyAddress === null || configuredOperations === null || destinations === null || destinations.some(destination => destination === null)) {
-      await fail('usdg-frozen:configuration', preflightDrift(
-        'USDG_FREEZE_UNVERIFIED',
-        'USDG freeze state',
-        false,
-        null,
-        'restore the configured USDG freeze targets before signing',
-      ));
-    } else {
-      const targets = [...new Set([configuredOperations, ...destinations])];
-      for (const target of targets) {
-        const checkId = `usdg-frozen:${target}`;
-        try {
-          // eslint-disable-next-line no-await-in-loop -- every freeze target is an independently attributable safety boundary.
-          const frozen = await readers.readUsdgFrozen(proxyAddress, target);
-          if (frozen === true) {
-            // eslint-disable-next-line no-await-in-loop -- every failed target must produce its own durable alert.
-            await fail(checkId, preflightDrift(
-              'USDG_FROZEN',
-              'USDG freeze state',
-              false,
-              true,
-              'use an unfrozen operations or destination account before signing',
-            ));
-          } else if (frozen !== false) {
-            // eslint-disable-next-line no-await-in-loop -- every unknown target remains independently actionable.
-            await fail(checkId, preflightDrift(
-              'USDG_FREEZE_UNVERIFIED',
-              'USDG freeze state',
-              false,
-              null,
-              'restore the USDG freeze readback before signing',
-            ));
-          } else {
-            // eslint-disable-next-line no-await-in-loop -- a verified target must clear only its own alert key.
-            await clear(checkId);
-          }
-        } catch {
-          // eslint-disable-next-line no-await-in-loop -- failures remain target-specific in the durable alert stream.
-          await fail(checkId, preflightDrift(
-            'USDG_FREEZE_UNVERIFIED',
-            'USDG freeze state',
-            false,
-            null,
-            'restore the USDG freeze readback before signing',
-          ));
-        }
-      }
+      await reporter.report(Object.freeze({ key: 'canary:native-principal', ...item }), 'CANARY_DRIFT');
     }
     return Object.freeze({ ok: drift.length === 0, drift: Object.freeze(drift) });
   }
@@ -662,7 +546,7 @@ export function createObservability(config, deps = {}) {
 
   return Object.freeze({
     logger,
-    runUsdgStatusCanary,
+    runNativePrincipalCanary,
     async runPreSignatureCanaries(context = {}) {
       return runPreSignatureCanaries({
         ...(isPlainObject(context) ? context : {}),

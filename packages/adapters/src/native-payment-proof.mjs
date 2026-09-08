@@ -1,13 +1,14 @@
 import { isProcessRpcRelaySourceDebit } from './solana-rpc.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
+import { createTestProfileMutationAuthority, requireLiveMutationAuthority } from '../../runner/src/cycle/preflight.mjs';
 import { decodeEventLog, decodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTransactionAddress } from 'viem';
 import { digest } from '../../runner/src/cycle/journal.mjs';
 import { readFinalizedTransactionReceipt, readBlockByNumber } from './robinhood-rpc.mjs';
 
 export const NATIVE_PAYMENT_PROOF_SCHEMA = 'hookemon.native-payment-proof.v1';
 const capabilities = new WeakMap();
+const gasCapabilities = new WeakMap();
 const releaseBindings = new WeakSet();
 const CLAIM_ABI = parseAbi([
   'function claimProcess(bytes32 cycleId, uint256 amountWei, address destination)',
@@ -80,7 +81,9 @@ export async function createNativePaymentProof({ client, signedTransaction, expe
       try { decoded = decodeEventLog({ abi: CLAIM_ABI, data: log.data, topics: log.topics, strict: true }); } catch { continue; }
       if (decoded.eventName !== 'ProcessClaimed' || decoded.args.cycleId !== intent.cycleId) continue;
       need(decoded.args.amountWei === BigInt(amountWei) && address(decoded.args.destination) === recipient, 'claim event mismatch');
-      need(log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0, 'invalid claim event inclusion');
+      need(log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0
+        && log.transactionHash === transactionHash && log.blockHash === observed.receiptBlockHash
+        && log.blockNumber === observed.receiptBlockNumber, 'invalid claim event inclusion');
       matches.push(log.logIndex);
     }
     need(matches.length === 1, 'claim requires one unique post-payment event');
@@ -89,6 +92,8 @@ export async function createNativePaymentProof({ client, signedTransaction, expe
   const block = await readBlockByNumber(client, observed.receiptBlockNumber);
   need(block.hash === observed.receiptBlockHash, 'payment checkpoint reorged');
   const receipt = observed.receipt;
+  need(typeof signed.gas === 'bigint' && receipt.gasUsed <= signed.gas
+    && receipt.effectiveGasPrice <= (signed.maxFeePerGas ?? signed.gasPrice), 'gas costs exceed signed bounds');
   need(typeof receipt.gasUsed === 'bigint' && receipt.gasUsed >= 0n
     && typeof receipt.effectiveGasPrice === 'bigint' && receipt.effectiveGasPrice >= 0n, 'missing separate gas cost');
   const facts = {
@@ -121,6 +126,16 @@ export function requireNativePaymentBinding(path) {
   return freeze(binding);
 }
 
+
+/** Explicit synthetic test authority; production composition only loads release-pinned bytes. */
+export function createTestNativePaymentBinding(value, authority) {
+  need(authority === createTestProfileMutationAuthority(), 'synthetic binding requires the exact test profile capability');
+  const binding = structuredClone(value);
+  need(binding.schema === 'hookemon.native-payment-binding.v1' && binding.chainId === '4663', 'invalid synthetic binding');
+  function freeze(item) { if (item && typeof item === 'object') { Object.values(item).forEach(freeze); Object.freeze(item); } return item; }
+  releaseBindings.add(binding);
+  return freeze(binding);
+}
 
 /** A successful router cleanup event is authority only under a release-pinned runtime and source decoder. */
 export async function createRelayNativePaymentProof({ client, binding, sourceProof, signedSourceTransaction, expected }) {
@@ -177,7 +192,9 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
     if (event.args.metadata.toLowerCase() !== orderId) continue;
     need(event.args.from.toLowerCase() === emitter && event.args.to.toLowerCase() === recipient
       && event.args.currency === '0x0000000000000000000000000000000000000000'
-      && event.args.amount > 0n && log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0,
+      && event.args.amount > 0n && log.removed !== true && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0
+      && log.transactionHash === transactionHash && log.blockHash === observed.receiptBlockHash
+      && log.blockNumber === observed.receiptBlockNumber,
     'Relay native payment event conflicts with the attributed order');
     matches.push({ amountWei: event.args.amount.toString(), logIndex: log.logIndex });
   }
@@ -190,5 +207,58 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
     blockNumber: block.number.toString(), blockHash: block.hash, timestampUnixSeconds: block.timestamp.toString(), receiptStatus: 'success' };
   const proof = Object.freeze({ ...facts, evidenceDigest: digest(facts) });
   capabilities.set(proof, proof);
+  return proof;
+}
+
+
+/** Idempotent per-transaction gas projection; spread these fields into the same custody write. */
+export function applyNativeCustodyGasPayment(ledger, proof) {
+  need((isProcessNativePaymentProof(proof, { chainId: '4663', assetId: 'native', decimals: 18 }) || gasCapabilities.has(proof))
+    && typeof proof.gasSpentWei === 'string', 'gas cost requires a process native payment proof');
+  need(ledger?.schema === 'hookemon.custody-ledger.v3' && ledger.chainId === '4663' && ledger.assetId === 'native'
+    && ledger.decimals === 18 && Array.isArray(ledger.gasPayments), 'gas accounting requires native custody v3');
+  const gasPayments = ledger.gasPayments.map(item => ({ ...item }));
+  const existing = gasPayments.find(item => item.transactionHash === proof.transactionHash);
+  if (existing) need(existing.amountWei === proof.gasSpentWei, 'gas transaction cost changed');
+  else gasPayments.push({ transactionHash: proof.transactionHash, amountWei: proof.gasSpentWei });
+  const previousTotal = ledger.gasPayments.reduce((sum, item) => sum + BigInt(atomic(item.amountWei)), 0n);
+  need(previousTotal.toString() === ledger.gasSpent.amountAtomic, 'gas ledger sum is inconsistent');
+  return { gasPayments, gasSpent: { chainId: '4663', assetId: 'native', decimals: 18,
+    amountAtomic: (previousTotal + (existing ? 0n : BigInt(proof.gasSpentWei))).toString() } };
+}
+
+
+/** Finalized transaction gas is distinct from payment authority, including reverted transactions. */
+export async function createNativeTransactionGasProof({ client, signedTransaction, expected }) {
+  const intent = structuredClone(expected);
+  need(intent.chainId === '4663' && intent.assetId === 'native' && intent.decimals === 18, 'invalid gas identity');
+  const transactionHash = hash(intent.transactionHash);
+  need(typeof signedTransaction === 'string' && keccak256(signedTransaction) === transactionHash, 'gas signed hash mismatch');
+  const signed = parseTransaction(signedTransaction);
+  const sender = address(await recoverTransactionAddress({ serializedTransaction: signedTransaction }));
+  need(signed.chainId === 4663 && sender === address(intent.transactionSender ?? intent.source)
+    && address(signed.to) === address(intent.recipient) && (signed.value ?? 0n) === BigInt(atomic(intent.amountWei))
+    && keccak256(signed.data ?? '0x') === hash(intent.calldataDigest) && String(signed.nonce) === intent.nonce,
+  'gas signed intent mismatch');
+  need(await client.getChainId() === 4663, 'gas RPC chain mismatch');
+  const observed = await readFinalizedTransactionReceipt(client, transactionHash);
+  need(observed.finalized && ['success', 'reverted'].includes(observed.receipt.status), 'gas receipt is nonfinal or unknown');
+  const tx = await client.getTransaction({ hash: transactionHash });
+  need(hash(tx.hash) === transactionHash && address(tx.from) === sender && address(tx.to) === address(signed.to)
+    && tx.value === (signed.value ?? 0n) && (tx.input ?? tx.data ?? '0x') === (signed.data ?? '0x')
+    && String(tx.nonce) === intent.nonce && tx.blockNumber === observed.receiptBlockNumber
+    && hash(tx.blockHash) === observed.receiptBlockHash, 'gas RPC transaction mismatch');
+  const block = await readBlockByNumber(client, observed.receiptBlockNumber);
+  const receipt = observed.receipt;
+  need(block.hash === observed.receiptBlockHash && typeof receipt.gasUsed === 'bigint' && receipt.gasUsed >= 0n
+    && typeof receipt.effectiveGasPrice === 'bigint' && receipt.effectiveGasPrice >= 0n, 'gas receipt checkpoint or costs are invalid');
+  need(typeof signed.gas === 'bigint' && receipt.gasUsed <= signed.gas
+    && receipt.effectiveGasPrice <= (signed.maxFeePerGas ?? signed.gasPrice), 'gas costs exceed signed bounds');
+  const facts = { schema: 'hookemon.native-transaction-gas-proof.v1', chainId: '4663', assetId: 'native', decimals: 18,
+    transactionHash, transactionDigest: digest(signedTransaction), sender, receiptStatus: receipt.status,
+    blockNumber: block.number.toString(), blockHash: block.hash, timestampUnixSeconds: block.timestamp.toString(),
+    gasSpentWei: (receipt.gasUsed * receipt.effectiveGasPrice).toString() };
+  const proof = Object.freeze({ ...facts, evidenceDigest: digest(facts) });
+  gasCapabilities.set(proof, proof);
   return proof;
 }
