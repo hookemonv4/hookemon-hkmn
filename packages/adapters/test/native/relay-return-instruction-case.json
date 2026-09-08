@@ -1,0 +1,78 @@
+{
+  "scope": "unsigned captured scenario; not admitted or signable",
+  "sourceCommit": "acce05b40340310ef76f86ea77ae23deaf5d1369",
+  "sourcePath": "docs/evidence/native-provider-20260908/relay-return-scenario-response.json",
+  "sourceSha256": "29dd53a2b791943bdf1d5a2fad68295c1f45615d9f0fb2be52eea353bcea8b7f",
+  "requestId": "0x17888557223056cdba536ad90ca3e11a885a8eff7627cb0d109ac04352e18e98",
+  "orderId": "0xb5568b3a6212f2e4737ecde017642acd9550ac488e186a2f8c9de8426e005f4e",
+  "payer": "BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE",
+  "instructionPlan": {
+    "instructions": [
+      {
+        "keys": [
+          {
+            "pubkey": "Dodg2HifwU8rmaVVyMyUZDGTRbqAJTyVYxXPwcbNpBKc",
+            "isSigner": false,
+            "isWritable": false
+          },
+          {
+            "pubkey": "BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE",
+            "isSigner": true,
+            "isWritable": true
+          },
+          {
+            "pubkey": "BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE",
+            "isSigner": false,
+            "isWritable": false
+          },
+          {
+            "pubkey": "7uTT8Xi5RWXzy7h9XL244GRgEycDYDhLjr3ZyNdXi8pZ",
+            "isSigner": false,
+            "isWritable": false
+          },
+          {
+            "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "isSigner": false,
+            "isWritable": false
+          },
+          {
+            "pubkey": "G4LdLyzDfq6DGt5Ha5C11WydKa2oJ5uNmkYyhLdsLBHo",
+            "isSigner": false,
+            "isWritable": true
+          },
+          {
+            "pubkey": "4nvJ5zWdVspxJiNZzB127U6amPH98SFFkBx2JZrAduia",
+            "isSigner": false,
+            "isWritable": true
+          },
+          {
+            "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "isSigner": false,
+            "isWritable": false
+          },
+          {
+            "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+            "isSigner": false,
+            "isWritable": false
+          },
+          {
+            "pubkey": "11111111111111111111111111111111",
+            "isSigner": false,
+            "isWritable": false
+          }
+        ],
+        "programId": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+        "data": "0b9c60da27a3b41340787d0100000000b5568b3a6212f2e4737ecde017642acd9550ac488e186a2f8c9de8426e005f4e"
+      }
+    ],
+    "addressLookupTableAddresses": [
+      "Hm9fUgcn7qwDaiNTFiGh6pNtVATgnaRcmK6Bbx6EMZfP"
+    ]
+  },
+  "legacyWireSizeArithmetic": {
+    "bytes": 483,
+    "uniqueAccounts": 10,
+    "requiredSignatures": 1,
+    "method": "shortvec lengths + signatures + header + full static addresses + blockhash + complete instructions; not SDK serialization"
+  }
+}

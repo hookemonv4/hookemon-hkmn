@@ -1,0 +1,66 @@
+{
+  "status": "PREPARATION_NOT_EXECUTABLE_ASSERTIONS",
+  "interfaceProposalCommit": "ab56f229b781d10bb9cb9c5da009521c5c5301da",
+  "cases": [
+    {
+      "id": "cross-quote",
+      "trigger": "Use USD field from a different quote digest/requestId",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "wrong-amount",
+      "trigger": "Valuation typed atomic amount differs from exact currencyIn/out amount",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "wrong-side",
+      "trigger": "Value native input using USDC output field",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "wrong-chain",
+      "trigger": "Quote chain differs from TypedAmount chain",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "stale",
+      "trigger": "observedAt/validUntil do not cover admission time",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "float-loss",
+      "trigger": "Parse wei above2^53 through Number",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "round-cost-down",
+      "trigger": "25.0000001 USD cost rounds to25000000 instead of25000001 microUSD",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "round-proceeds-up",
+      "trigger": "25.0000009 USD proceeds round to25000001 instead of25000000",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "parity",
+      "trigger": "Assume USDC1 means USD1 without bound field",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "version-alias",
+      "trigger": "Accept MicroUsdg scalar as native wei or USD cost without a new record version",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "double-count",
+      "trigger": "Reserve claimed principal twice as liquid exposure and committed bridge debit",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    },
+    {
+      "id": "gas-spend",
+      "trigger": "Spend outstanding gas reserve on new cycle principal",
+      "expected": "refuse new risk; observation and authorized recovery remain available"
+    }
+  ]
+}
