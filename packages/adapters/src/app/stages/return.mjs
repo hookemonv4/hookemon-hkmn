@@ -355,9 +355,10 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
     originCurrency: configured.solanaMint,
   });
   assertReturnQuote(quote, configured, money);
-  assertQuoteUsable({ quote, nowMs });
+  const valuationNowMs = (config.now ?? Date.now)();
+  assertQuoteUsable({ quote, nowMs: valuationNowMs });
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
-  const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: typedAmount(quote.destination), rounding: 'down', nowMs });
+  const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: typedAmount(quote.destination), rounding: 'down', nowMs: valuationNowMs });
   return Object.freeze({
     schema: 'hookemon.return-relay-request.v2',
     destinationUsd,

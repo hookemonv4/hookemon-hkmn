@@ -1,3 +1,4 @@
+import { prepareReturnRequest } from '../../src/app/stages/return.mjs';
 import { createRelayClient } from '../../src/relay-client.mjs';
 import { createProductionSupplementaryStageHandlers } from '../../src/app/compose.mjs';
 import assert from 'node:assert/strict';
@@ -114,9 +115,9 @@ function splTransferCheckedPlan({ owner, source, destination, amountAtomic }) {
   };
 }
 
-function fakeRelayAdapter({ requestId, instructionPlan, destinationAmountAtomic = '16', pointer = null }) {
+function fakeRelayAdapter({ requestId, instructionPlan, destinationAmountAtomic = '16', pointer = null, now = () => 1_700_000_000_000, onResponse = () => {}, onQuote = () => {} }) {
   const zero = '0x0000000000000000000000000000000000000000';
-  const client = createRelayClient({ now: () => 1_700_000_000_000, quoteValidityMs: 60000,
+  const client = createRelayClient({ now, quoteValidityMs: 60000,
     fetchImpl: async (_url, options) => {
       const request = JSON.parse(options.body);
       const raw = { requestId, details: { sender: request.user, recipient: request.recipient,
@@ -126,9 +127,10 @@ function fakeRelayAdapter({ requestId, instructionPlan, destinationAmountAtomic 
           refunds: [{ chainId: 'solana', currency: request.originCurrency, recipient: request.user, deadline: 2_000_000_000 }] }],
           output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [], payments: [{ recipient: request.recipient, currency: zero, expectedAmount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic }] } } } },
         steps: [{ kind: 'transaction', requestId, items: [{ data: instructionPlan }] }] };
+      onResponse();
       return { ok: true, status: 200, text: async () => JSON.stringify(raw) };
     } });
-  return { ...client, quoteReturnBridge: params => client.quoteReturnBridge({ ...params, skipRouteCheck: true }),
+  return { ...client, quoteReturnBridge: async params => { const quote = await client.quoteReturnBridge({ ...params, skipRouteCheck: true }); onQuote(); return quote; },
     restoreIntent() {}, async getTerminalDestinationTransactionPointer({ intentDigest }) { assert.equal(intentDigest, requestId); return pointer; } };
 }
 
@@ -683,3 +685,42 @@ test('production supplementary return composition preserves the supplied authori
     assert.equal(signs, preflightAuthority === createTestProfileMutationAuthority() ? 1 : 0);
   }
 });
+
+for (const supplementary of [false, true]) {
+  for (const expired of [false, true]) {
+    test(`return quote clock ${supplementary ? 'supplementary' : 'ordinary'} ${expired ? 'expired' : 'advancing'} preserves original validity`, async () => {
+      const startedAt = 1_700_000_000_000;
+      let timestamp = startedAt;
+      const now = () => timestamp;
+      const owner = Keypair.fromSeed(new Uint8Array(32).fill(7)).publicKey.toBase58();
+      const config = { ...returnConfig(owner), now, solana: { chainId: 'solana-mainnet' },
+        collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: SOLANA_MINT, decimals: 6 } } };
+      const instructionPlan = splTransferCheckedPlan({ owner, source: owner, destination: owner, amountAtomic: '17' });
+      const relay = fakeRelayAdapter({ requestId: 'clock-return', instructionPlan, now,
+        onResponse: () => { timestamp += 2; }, onQuote: () => { if (expired) timestamp += 60_000; } });
+      let prepared = null;
+      if (supplementary) {
+        const repository = fakeRepository();
+        repository.persistPagedPayoutState = async (_cycle, _stage, value) => { prepared = value; throw new Error('clock fixture prepared before signing'); };
+        await assert.rejects(mutateSupplementaryReturn({ liveMode: true, adapters: { relay }, config, signerClient: {},
+          cycleRepository: repository, context: { cycleId: repository.cycleId, positionId: POSITION_ID },
+          confirmedSale: confirmedSale(), now, preflightAuthority: createTestProfileMutationAuthority() }),
+        expired ? /quote is stale/ : /clock fixture prepared before signing/);
+      } else {
+        const cycleId = 'clock-return-cycle';
+        const repository = { async describeCycle() { return { admission: { schema: 'hookemon.policy-admission.v3' },
+          custodyLedgers: new Map([['settlement', { chainId: 'solana-mainnet', assetId: SOLANA_MINT, decimals: 6,
+            buybackProceeds: '17', returnInput: '0' }]]) }; } };
+        const operation = prepareReturnRequest({ adapters: { relay }, config, cycleRepository: repository, context: { cycleId }, nowMs: startedAt });
+        if (expired) await assert.rejects(operation, /quote is stale/);
+        else prepared = await operation;
+      }
+      if (expired) assert.equal(prepared, null, 'expired evidence cannot prepare a return or renew its TTL');
+      else {
+        assert.equal(prepared.destinationUsd.amountMicroUsd, '16000000');
+        assert.equal(prepared.destinationUsd.observedAtMs, startedAt + 2);
+        assert.equal(prepared.destinationUsd.validUntilMs, startedAt + 60_002);
+      }
+    });
+  }
+}
