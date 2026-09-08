@@ -22,11 +22,11 @@
     },
     "workflow": {
       "path": ".github/workflows/v4-gates.yml",
-      "sha256": "414fece23b84abd69f3083e4e384b2b29816b93d7040b9ab258fdb7153239d2d"
+      "sha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5"
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
-      "sha256": "b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975"
+      "sha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79"
     },
     "forkPinCanary": {
       "path": ".github/workflows/fork-pin-canary.yml",
@@ -46,7 +46,7 @@
     },
     "webCi": {
       "path": ".github/workflows/web-ci.yml",
-      "sha256": "49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc"
+      "sha256": "4ae0304b37799e4d05409a2fb79b2b03511a7dc64c41ff1fc6993b32181fc4c7"
     },
     "deployWeb": {
       "path": ".github/workflows/deploy-web.yml",
@@ -84,11 +84,11 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "sha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527",
+      "sha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527"
+          "sha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -110,6 +110,10 @@
         "path": "skills/programmable-v4-hook-builder",
         "normalization": "cleanroom-labels-v1"
       }
+    },
+    "ciChangeClassifier": {
+      "path": "scripts/ci-change-scope.mjs",
+      "sha256": "32c67ba0f0c7740f841dbcb3f2a45950bc82bba30385f2435f0ca111a5ebb0df"
     }
   },
   "npmDependencies": {

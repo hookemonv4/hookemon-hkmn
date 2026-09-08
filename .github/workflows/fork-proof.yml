@@ -10,9 +10,104 @@ concurrency:
   group: fork-proof-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
-  main:
-    name: fork-proof
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      web-required: ${{ steps.scope.outputs.web-required }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Node (classification)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version='24.19.0'
+          node_url='https://nodejs.org/download/release/v24.19.0/node-v24.19.0-linux-x64.tar.xz'
+          node_archive_sha256='14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647'
+          node_executable_sha256='bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12'
+          node_archive="${RUNNER_TEMP}/node-v${node_version}-linux-x64.tar.xz"
+          node_root="${RUNNER_TEMP}/node-v${node_version}-linux-x64"
+          node_executable="${node_root}/bin/node"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error --output "$node_archive" "$node_url"
+          printf '%s  %s\n' "$node_archive_sha256" "$node_archive" | sha256sum --check
+          tar -xJf "$node_archive" -C "$RUNNER_TEMP"
+          printf '%s  %s\n' "$node_executable_sha256" "$node_executable" | sha256sum --check
+          echo "${node_root}/bin" >> "$GITHUB_PATH"
+          [[ "$("$node_executable" --version)" == "v${node_version}" ]]
+      - name: Classify changes with the protected base
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export GIT_NO_REPLACE_OBJECTS=1
+          case "$EVENT_NAME" in
+            pull_request) range_base="$PR_BASE_SHA"; range_head="$PR_HEAD_SHA" ;;
+            push) range_base="$PUSH_BASE_SHA"; range_head="$PUSH_HEAD_SHA" ;;
+            workflow_dispatch)
+              [[ "$GITHUB_REF" == 'refs/heads/main' ]] || exit 1
+              range_base="$PUSH_HEAD_SHA"; range_head="$PUSH_HEAD_SHA" ;;
+            *) echo 'Unsupported CI classification event' >&2; exit 1 ;;
+          esac
+          [[ "$range_base" =~ ^[0-9a-f]{40}$ && "$range_head" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          git cat-file -e "${range_base}^{commit}"
+          if ! git cat-file -e "${range_head}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$range_head"
+          fi
+          git cat-file -e "${range_head}^{commit}"
+          git merge-base --is-ancestor "$range_base" "$range_head"
+          node --input-type=module - "$range_base" "$RUNNER_TEMP" <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { join } from 'node:path';
+          const [base, temp] = process.argv.slice(2);
+          const git = (...args) => execFileSync('git', args);
+          function blob(path) {
+            const entry = git('ls-tree', '-z', base, '--', path).toString();
+            if (!entry) return null;
+            const records = entry.split('\x00');
+            const [metadata, ...names] = records[0].split('\t');
+            const [mode, type, oid, ...extra] = metadata.split(' ');
+            if (records.length !== 2 || records[1] !== '' || names.length !== 1 || names[0] !== path || mode !== '100644' || type !== 'blob' || !/^[0-9a-f]{40}$/.test(oid ?? '') || extra.length) throw new Error('Invalid protected CI blob');
+            return git('show', `${base}:${path}`);
+          }
+          const pinsBytes = blob('product/dependency-pins.json');
+          if (!pinsBytes) throw new Error('Missing protected dependency pins');
+          const pins = JSON.parse(pinsBytes);
+          const pin = pins.controlScripts?.ciChangeClassifier;
+          const path = 'scripts/ci-change-scope.mjs';
+          const bytes = blob(path);
+          if (pin === undefined && bytes === null) {
+            writeFileSync(join(temp, 'ci-helper-mode'), 'bootstrap');
+          } else {
+            if (pin?.path !== path || !/^[0-9a-f]{64}$/.test(pin.sha256 ?? '') || bytes === null) throw new Error('Incomplete protected classifier binding');
+            if (createHash('sha256').update(bytes).digest('hex') !== pin.sha256) throw new Error('Protected classifier digest mismatch');
+            writeFileSync(join(temp, 'ci-change-scope.mjs'), bytes);
+            writeFileSync(join(temp, 'ci-helper-mode'), 'verified');
+          }
+          NODE
+          if [[ "$(cat "$RUNNER_TEMP/ci-helper-mode")" == 'bootstrap' ]]; then
+            printf 'scope=full\nweb-required=true\nbase=%s\nhead=%s\n' "$range_base" "$range_head" >> "$GITHUB_OUTPUT"
+            echo 'Protected base predates the classifier: complete financial and web checks are required.'
+          else
+            node "$RUNNER_TEMP/ci-change-scope.mjs" --base "$range_base" --head "$range_head" --event "$EVENT_NAME" --github-output "$GITHUB_OUTPUT"
+          fi
+  main-proof:
+    needs: [classify]
+    if: ${{ needs.classify.outputs.scope == 'full' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     environment: fork-proof
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -109,9 +204,9 @@ jobs:
           verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"
           node scripts/verify-fork-pin.mjs
           FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'
-  pull-request:
-    name: fork-proof
-    if: github.event_name == 'pull_request'
+  pull-request-proof:
+    needs: [classify]
+    if: ${{ needs.classify.outputs.scope == 'full' && github.event_name == 'pull_request' }}
     environment: fork-proof
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -211,3 +306,40 @@ jobs:
           verify_regular_git_blob 'packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol' "$fork_pin_packages_contracts_test_integration_RobinhoodV4ArchiveFork_t_sol_sha256"
           node scripts/verify-fork-pin.mjs
           FOUNDRY_LIBS='["lib/v4-core","lib/v4-periphery"]' forge test --root packages/contracts -vv --match-path 'test/integration/RobinhoodV4ArchiveFork.t.sol'
+  fork-proof:
+    needs: [classify, main-proof, pull-request-proof]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the applicable archive proof
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CLASSIFICATION_RESULT: ${{ needs.classify.result }}
+          SCOPE: ${{ needs.classify.outputs.scope }}
+          CLASSIFIED_BASE: ${{ needs.classify.outputs.base }}
+          CLASSIFIED_HEAD: ${{ needs.classify.outputs.head }}
+          EXPECTED_BASE: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          MAIN_PROOF_RESULT: ${{ needs.main-proof.result }}
+          PR_PROOF_RESULT: ${{ needs.pull-request-proof.result }}
+        run: |
+          set -euo pipefail
+          [[ "$CLASSIFICATION_RESULT" == 'success' ]] || exit 1
+          [[ "$CLASSIFIED_BASE" == "$EXPECTED_BASE" && "$CLASSIFIED_HEAD" == "$EXPECTED_HEAD" ]] || exit 1
+          if [[ "$SCOPE" == 'presentation' ]]; then
+            [[ "$EVENT_NAME" != 'workflow_dispatch' ]] || exit 1
+            [[ "$MAIN_PROOF_RESULT" == 'skipped' && "$PR_PROOF_RESULT" == 'skipped' ]] || exit 1
+            echo 'Archive fork proof: NOT RUN (protected presentation-only classification). No financial proof is issued.' >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$SCOPE" == 'full' ]]; then
+            case "$EVENT_NAME" in
+              pull_request) [[ "$PR_PROOF_RESULT" == 'success' && "$MAIN_PROOF_RESULT" == 'skipped' ]] || exit 1 ;;
+              push|workflow_dispatch) [[ "$MAIN_PROOF_RESULT" == 'success' && "$PR_PROOF_RESULT" == 'skipped' ]] || exit 1 ;;
+              *) echo 'Unsupported archive-proof event' >&2; exit 1 ;;
+            esac
+            echo 'Exact-head archive fork proof passed.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Missing or invalid archive-proof scope' >&2
+            exit 1
+          fi

@@ -52,6 +52,10 @@
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
+        "workflow": ".github/workflows/fork-proof.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
         "workflow": ".github/workflows/identity-gate.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
@@ -61,6 +65,18 @@
       },
       {
         "workflow": ".github/workflows/launch-gate.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/v4-gates.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/v4-gates.yml",
+        "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
+      },
+      {
+        "workflow": ".github/workflows/v4-gates.yml",
         "ref": "d23441a48e516b6c34aea4fa41551a30e30af803"
       },
       {
@@ -82,6 +98,10 @@
         "ref": "820762786026740c76f36085b0efc47a31fe5020"
       },
       {
+        "workflow": ".github/workflows/v4-gates.yml",
+        "ref": "820762786026740c76f36085b0efc47a31fe5020"
+      },
+      {
         "workflow": ".github/workflows/web-ci.yml",
         "ref": "820762786026740c76f36085b0efc47a31fe5020"
       }
@@ -89,13 +109,13 @@
   },
   "workflowIntegrity": {
     "path": ".github/workflows/v4-gates.yml",
-    "expectedSha256": "414fece23b84abd69f3083e4e384b2b29816b93d7040b9ab258fdb7153239d2d",
-    "actualSha256": "414fece23b84abd69f3083e4e384b2b29816b93d7040b9ab258fdb7153239d2d"
+    "expectedSha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5",
+    "actualSha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5"
   },
   "forkProof": {
     "path": ".github/workflows/fork-proof.yml",
-    "expectedSha256": "b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975",
-    "actualSha256": "b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975"
+    "expectedSha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79",
+    "actualSha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79"
   },
   "forkPinCanary": {
     "path": ".github/workflows/fork-pin-canary.yml",
@@ -119,8 +139,8 @@
   },
   "webCi": {
     "path": ".github/workflows/web-ci.yml",
-    "expectedSha256": "49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc",
-    "actualSha256": "49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc"
+    "expectedSha256": "4ae0304b37799e4d05409a2fb79b2b03511a7dc64c41ff1fc6993b32181fc4c7",
+    "actualSha256": "4ae0304b37799e4d05409a2fb79b2b03511a7dc64c41ff1fc6993b32181fc4c7"
   },
   "deployWeb": {
     "path": ".github/workflows/deploy-web.yml",
@@ -168,13 +188,13 @@
     },
     "controlDependencyVerifier": {
       "path": "scripts/verify-control-dependencies.mjs",
-      "expectedSha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527",
-      "actualSha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527",
+      "expectedSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
+      "actualSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
       "closure": [
         {
           "path": "scripts/verify-control-dependencies.mjs",
-          "sha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527",
-          "actualSha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527"
+          "sha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55",
+          "actualSha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55"
         },
         {
           "path": "scripts/lib/util.mjs",
@@ -182,6 +202,11 @@
           "actualSha256": "887bdba5ffbed11e6cb16e72b8ebbeddff822575c20b9b60b2e7b80bf17eead8"
         }
       ]
+    },
+    "ciChangeClassifier": {
+      "path": "scripts/ci-change-scope.mjs",
+      "expectedSha256": "32c67ba0f0c7740f841dbcb3f2a45950bc82bba30385f2435f0ca111a5ebb0df",
+      "actualSha256": "32c67ba0f0c7740f841dbcb3f2a45950bc82bba30385f2435f0ca111a5ebb0df"
     }
   },
   "controlInputs": {
@@ -248,21 +273,31 @@
     "schema": "hookemon.control-gate-pin-bump.v2",
     "approvalToken": "OWNER APPROVED",
     "basePinsSha256": "9bd2f379a57b04cf782dcbcf1994ba130a93a84b1f3fa27a83e8328172628439",
-    "candidatePinsSha256": "2ad9543ad8113821be14eb1c3bc7dd6e022d45cb7d23a57a25a7d480e2c9274b",
+    "candidatePinsSha256": "f7227e11ff2474e5726bfdd47c1bd0b97eb5505e7411c00f92266f533bbae802",
     "baseChecker": {
       "path": "scripts/verify-control-dependencies.mjs",
       "blobId": "e33c163ac28525e509a76f61fed631376fba7806"
     },
     "controls": [
       {
+        "path": ".github/workflows/fork-proof.yml",
+        "previousSha256": "b732c6906c1bcd79a5577db3dcd21bf3ecd4a95d59a9b04d13de6f7d56a1a975",
+        "sha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79"
+      },
+      {
         "path": ".github/workflows/v4-gates.yml",
         "previousSha256": "41d59fb12a421ef0ef4ea7833be2dde68ee01fdff134f41a6dfc139849812740",
-        "sha256": "414fece23b84abd69f3083e4e384b2b29816b93d7040b9ab258fdb7153239d2d"
+        "sha256": "39aff509012d478a69f9e28268e289d422a4197d9225ba5137cb8ad01a9b0fa5"
+      },
+      {
+        "path": ".github/workflows/web-ci.yml",
+        "previousSha256": "49d83a3c5e41e6a18ec36a70b3fd1983320281dc32bae0d3b27a22503eff07cc",
+        "sha256": "4ae0304b37799e4d05409a2fb79b2b03511a7dc64c41ff1fc6993b32181fc4c7"
       },
       {
         "path": "scripts/verify-control-dependencies.mjs",
         "previousSha256": "1dac8eb641bac74b93274593884a9be3379d8a55ca3215eefc70a9e0ef66fcb2",
-        "sha256": "40b61c07b91351fd33df4b264630d808ee480256dcae653c69384207dd430527"
+        "sha256": "97dd72c9fdc4d1bf40ee5f2adde97545c02fe4144a95d5d6c9151ab8e6daba55"
       }
     ]
   }
