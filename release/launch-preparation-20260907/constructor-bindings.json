@@ -1,0 +1,999 @@
+{
+  "schema": "hookemon.preparation.constructor-bindings.v1",
+  "providerRequest": false,
+  "signable": false,
+  "source": "release/phase3/artifacts/{token,custody,hook}.json",
+  "contextSource": "evidence/provider-capabilities-resume.json",
+  "targets": [
+    {
+      "id": "token",
+      "contractName": "HKMNToken",
+      "artifactPath": "release/phase3/artifacts/token.json",
+      "artifactSha256": "sha256:8a134aa16b09ca267055c976d05c5760ccc865c35ab608ceed20248a0e54ac68",
+      "constructorAbi": {
+        "type": "constructor",
+        "inputs": [
+          {
+            "name": "issuanceAuthority_",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "expectedUsdg_",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "decimals_",
+            "type": "uint8",
+            "internalType": "uint8"
+          },
+          {
+            "name": "launchSqrtPriceX96_",
+            "type": "uint160",
+            "internalType": "uint160"
+          }
+        ],
+        "stateMutability": "nonpayable"
+      },
+      "arguments": [
+        {
+          "index": 0,
+          "name": "issuanceAuthority_",
+          "type": "address",
+          "value": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 1,
+          "name": "expectedUsdg_",
+          "type": "address",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 2,
+          "name": "decimals_",
+          "type": "uint8",
+          "value": 18,
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 3,
+          "name": "launchSqrtPriceX96_",
+          "type": "uint160",
+          "value": null,
+          "status": "UNRESOLVED",
+          "resolution": "Selected USDG seed and address-order-consistent price"
+        }
+      ],
+      "creationBytecodeHash": "0xbe3146f7eb5c0a9a287bb927f197c518611fed9e371f5262552856d6b3e52e58",
+      "runtimeTemplateCodeHash": "0xc79e26bd2c8c26952c04f1d3749db091f009febd7507b67232b3838bb148f429",
+      "runtimeTemplateBytes": 3201,
+      "immutableReferences": {
+        "10244": [
+          {
+            "start": 579,
+            "length": 32
+          },
+          {
+            "start": 1597,
+            "length": 32
+          }
+        ],
+        "10246": [
+          {
+            "start": 507,
+            "length": 32
+          },
+          {
+            "start": 1665,
+            "length": 32
+          },
+          {
+            "start": 1816,
+            "length": 32
+          },
+          {
+            "start": 2407,
+            "length": 32
+          },
+          {
+            "start": 2488,
+            "length": 32
+          }
+        ],
+        "10248": [
+          {
+            "start": 875,
+            "length": 32
+          },
+          {
+            "start": 1527,
+            "length": 32
+          },
+          {
+            "start": 2122,
+            "length": 32
+          }
+        ],
+        "10250": [
+          {
+            "start": 675,
+            "length": 32
+          },
+          {
+            "start": 1707,
+            "length": 32
+          }
+        ],
+        "10252": [
+          {
+            "start": 914,
+            "length": 32
+          },
+          {
+            "start": 1051,
+            "length": 32
+          }
+        ]
+      },
+      "materializedRuntime": null,
+      "initializer": {
+        "signature": "allocate(address)",
+        "selector": "0xffd7d983",
+        "caller": "graphFactory",
+        "arguments": [
+          "resolved HookemonHook address"
+        ],
+        "calldata": null
+      },
+      "deployerRequirement": "constructor issuanceAuthority_ must equal msg.sender"
+    },
+    {
+      "id": "custody",
+      "contractName": "PermanentPositionCustody",
+      "artifactPath": "release/phase3/artifacts/custody.json",
+      "artifactSha256": "sha256:08043ea6d688242703d972040bb476b4d5da3ef4a5e9c04db1e0636a1ff86ae5",
+      "constructorAbi": {
+        "type": "constructor",
+        "inputs": [
+          {
+            "name": "manager",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ],
+        "stateMutability": "nonpayable"
+      },
+      "arguments": [
+        {
+          "index": 0,
+          "name": "manager",
+          "type": "address",
+          "value": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 1,
+          "name": "tokenId",
+          "type": "uint256",
+          "value": 0,
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        }
+      ],
+      "creationBytecodeHash": "0x778625cf6f5b602c891c7d605941d5e3cfc4662624a9407d67e2873cd4d99dd5",
+      "runtimeTemplateCodeHash": "0x06f47cecc7026b4d9c5d393c39f8883c7e87c3fdacd30cf6f496ee41c9d4ca0c",
+      "runtimeTemplateBytes": 3040,
+      "immutableReferences": {
+        "9847": [
+          {
+            "start": 328,
+            "length": 32
+          },
+          {
+            "start": 1679,
+            "length": 32
+          }
+        ],
+        "9849": [
+          {
+            "start": 189,
+            "length": 32
+          },
+          {
+            "start": 627,
+            "length": 32
+          },
+          {
+            "start": 1584,
+            "length": 32
+          },
+          {
+            "start": 2130,
+            "length": 32
+          },
+          {
+            "start": 2332,
+            "length": 32
+          }
+        ]
+      },
+      "materializedRuntime": null,
+      "initializer": {
+        "signature": "configureBindingHook(address)",
+        "selector": "0xc81cbd43",
+        "caller": "graphFactory",
+        "arguments": [
+          "resolved HookemonHook address"
+        ],
+        "calldata": null
+      },
+      "deployerRequirement": "deployer is msg.sender and exclusively configures bindingHook",
+      "constructorArguments": "0x00000000000000000000000058daec3116aae6d93017baaea7749052e8a04fa70000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "hook",
+      "contractName": "HookemonHook",
+      "artifactPath": "release/phase3/artifacts/hook.json",
+      "artifactSha256": "sha256:389f63c267cbb76cd703101fd22d00f1221656cd7ea3adcb082d2719dd41aa66",
+      "constructorAbi": {
+        "type": "constructor",
+        "inputs": [
+          {
+            "name": "config",
+            "type": "tuple",
+            "internalType": "struct HookemonHook.ConstructorConfig",
+            "components": [
+              {
+                "name": "manager",
+                "type": "address",
+                "internalType": "contract IPoolManager"
+              },
+              {
+                "name": "positionManager",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "permit2",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "usdg",
+                "type": "address",
+                "internalType": "Currency"
+              },
+              {
+                "name": "hkmn",
+                "type": "address",
+                "internalType": "Currency"
+              },
+              {
+                "name": "tickSpacing",
+                "type": "int24",
+                "internalType": "int24"
+              },
+              {
+                "name": "programmable",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "treasury",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "operations",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "launchAuthority",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "issuanceAuthority",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "expectedDecimals",
+                "type": "uint8",
+                "internalType": "uint8"
+              },
+              {
+                "name": "bindingDigest",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "runtimeDigest",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "processClaimLimit6h",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "processClaimLimitMax",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "processClaimMaxCount",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "operationsRotationDelay",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          }
+        ],
+        "stateMutability": "nonpayable"
+      },
+      "arguments": [
+        {
+          "index": 0,
+          "name": "manager",
+          "type": "address",
+          "value": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 1,
+          "name": "positionManager",
+          "type": "address",
+          "value": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 2,
+          "name": "permit2",
+          "type": "address",
+          "value": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 3,
+          "name": "usdg",
+          "type": "address",
+          "value": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 4,
+          "name": "hkmn",
+          "type": "address",
+          "value": null,
+          "status": "UNRESOLVED",
+          "resolution": "Derived token address"
+        },
+        {
+          "index": 5,
+          "name": "tickSpacing",
+          "type": "int24",
+          "value": 60,
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 6,
+          "name": "programmable",
+          "type": "address",
+          "value": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 7,
+          "name": "treasury",
+          "type": "address",
+          "value": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 8,
+          "name": "operations",
+          "type": "address",
+          "value": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 9,
+          "name": "launchAuthority",
+          "type": "address",
+          "value": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 10,
+          "name": "issuanceAuthority",
+          "type": "address",
+          "value": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 11,
+          "name": "expectedDecimals",
+          "type": "uint8",
+          "value": 18,
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 12,
+          "name": "bindingDigest",
+          "type": "bytes32",
+          "value": null,
+          "status": "UNRESOLVED",
+          "resolution": "Exact project binding/runtime commitment preimage; nonzero required, never placeholder"
+        },
+        {
+          "index": 13,
+          "name": "runtimeDigest",
+          "type": "bytes32",
+          "value": null,
+          "status": "UNRESOLVED",
+          "resolution": "Exact project binding/runtime commitment preimage; nonzero required, never placeholder"
+        },
+        {
+          "index": 14,
+          "name": "processClaimLimit6h",
+          "type": "uint256",
+          "value": "50000000000",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 15,
+          "name": "processClaimLimitMax",
+          "type": "uint256",
+          "value": "500000000000",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        },
+        {
+          "index": 16,
+          "name": "processClaimMaxCount",
+          "type": "uint256",
+          "value": null,
+          "status": "UNRESOLVED",
+          "resolution": "Owner affirmative count decision"
+        },
+        {
+          "index": 17,
+          "name": "operationsRotationDelay",
+          "type": "uint256",
+          "value": "43200",
+          "status": "RECORDED_INPUT",
+          "resolution": "Revalidate against exact admitted route before materialization"
+        }
+      ],
+      "creationBytecodeHash": "0x39c3aeecae31c42f7ad707dae7b18ea976687d33f715befbe9941b853e0af8c2",
+      "runtimeTemplateCodeHash": "0x95302da944386ccd8b7fb1b898d128098cce7aef178b318998a7a14c1897a36c",
+      "runtimeTemplateBytes": 30033,
+      "immutableReferences": {
+        "4283": [
+          {
+            "start": 6537,
+            "length": 32
+          },
+          {
+            "start": 8069,
+            "length": 32
+          },
+          {
+            "start": 8408,
+            "length": 32
+          }
+        ],
+        "4285": [
+          {
+            "start": 2338,
+            "length": 32
+          },
+          {
+            "start": 3939,
+            "length": 32
+          },
+          {
+            "start": 4450,
+            "length": 32
+          },
+          {
+            "start": 14884,
+            "length": 32
+          },
+          {
+            "start": 19314,
+            "length": 32
+          },
+          {
+            "start": 19495,
+            "length": 32
+          },
+          {
+            "start": 20220,
+            "length": 32
+          },
+          {
+            "start": 20427,
+            "length": 32
+          }
+        ],
+        "4287": [
+          {
+            "start": 1301,
+            "length": 32
+          },
+          {
+            "start": 4485,
+            "length": 32
+          },
+          {
+            "start": 5065,
+            "length": 32
+          },
+          {
+            "start": 11877,
+            "length": 32
+          },
+          {
+            "start": 19117,
+            "length": 32
+          },
+          {
+            "start": 19160,
+            "length": 32
+          },
+          {
+            "start": 19203,
+            "length": 32
+          },
+          {
+            "start": 19246,
+            "length": 32
+          },
+          {
+            "start": 19376,
+            "length": 32
+          },
+          {
+            "start": 20308,
+            "length": 32
+          },
+          {
+            "start": 20543,
+            "length": 32
+          },
+          {
+            "start": 20586,
+            "length": 32
+          }
+        ],
+        "4289": [
+          {
+            "start": 2024,
+            "length": 32
+          },
+          {
+            "start": 3250,
+            "length": 32
+          },
+          {
+            "start": 5691,
+            "length": 32
+          }
+        ],
+        "4291": [
+          {
+            "start": 1477,
+            "length": 32
+          },
+          {
+            "start": 6457,
+            "length": 32
+          },
+          {
+            "start": 6710,
+            "length": 32
+          },
+          {
+            "start": 11492,
+            "length": 32
+          },
+          {
+            "start": 15668,
+            "length": 32
+          }
+        ],
+        "4293": [
+          {
+            "start": 2512,
+            "length": 32
+          },
+          {
+            "start": 4889,
+            "length": 32
+          },
+          {
+            "start": 5361,
+            "length": 32
+          },
+          {
+            "start": 5619,
+            "length": 32
+          },
+          {
+            "start": 6385,
+            "length": 32
+          },
+          {
+            "start": 6661,
+            "length": 32
+          }
+        ],
+        "4295": [
+          {
+            "start": 1184,
+            "length": 32
+          },
+          {
+            "start": 11532,
+            "length": 32
+          },
+          {
+            "start": 15708,
+            "length": 32
+          }
+        ],
+        "4297": [
+          {
+            "start": 2377,
+            "length": 32
+          }
+        ],
+        "4299": [
+          {
+            "start": 2473,
+            "length": 32
+          },
+          {
+            "start": 8235,
+            "length": 32
+          }
+        ],
+        "4301": [
+          {
+            "start": 2150,
+            "length": 32
+          },
+          {
+            "start": 9932,
+            "length": 32
+          },
+          {
+            "start": 10024,
+            "length": 32
+          },
+          {
+            "start": 18411,
+            "length": 32
+          },
+          {
+            "start": 18830,
+            "length": 32
+          }
+        ],
+        "4303": [
+          {
+            "start": 1349,
+            "length": 32
+          },
+          {
+            "start": 7495,
+            "length": 32
+          },
+          {
+            "start": 7596,
+            "length": 32
+          }
+        ],
+        "7371": [
+          {
+            "start": 1682,
+            "length": 32
+          },
+          {
+            "start": 15429,
+            "length": 32
+          }
+        ],
+        "8061": [
+          {
+            "start": 25098,
+            "length": 32
+          },
+          {
+            "start": 25345,
+            "length": 32
+          }
+        ],
+        "10898": [
+          {
+            "start": 13335,
+            "length": 32
+          }
+        ],
+        "10900": [
+          {
+            "start": 13426,
+            "length": 32
+          }
+        ],
+        "10902": [
+          {
+            "start": 13959,
+            "length": 32
+          }
+        ],
+        "10904": [
+          {
+            "start": 14006,
+            "length": 32
+          }
+        ],
+        "12484": [
+          {
+            "start": 2939,
+            "length": 32
+          },
+          {
+            "start": 4687,
+            "length": 32
+          },
+          {
+            "start": 6155,
+            "length": 32
+          },
+          {
+            "start": 6596,
+            "length": 32
+          },
+          {
+            "start": 13114,
+            "length": 32
+          },
+          {
+            "start": 14410,
+            "length": 32
+          },
+          {
+            "start": 17615,
+            "length": 32
+          },
+          {
+            "start": 22137,
+            "length": 32
+          },
+          {
+            "start": 23426,
+            "length": 32
+          }
+        ],
+        "12487": [
+          {
+            "start": 3060,
+            "length": 32
+          },
+          {
+            "start": 5170,
+            "length": 32
+          },
+          {
+            "start": 10379,
+            "length": 32
+          },
+          {
+            "start": 10464,
+            "length": 32
+          },
+          {
+            "start": 10501,
+            "length": 32
+          },
+          {
+            "start": 10558,
+            "length": 32
+          },
+          {
+            "start": 10723,
+            "length": 32
+          },
+          {
+            "start": 11152,
+            "length": 32
+          },
+          {
+            "start": 11452,
+            "length": 32
+          },
+          {
+            "start": 11827,
+            "length": 32
+          },
+          {
+            "start": 14604,
+            "length": 32
+          },
+          {
+            "start": 15620,
+            "length": 32
+          },
+          {
+            "start": 17870,
+            "length": 32
+          },
+          {
+            "start": 19047,
+            "length": 32
+          },
+          {
+            "start": 20179,
+            "length": 32
+          },
+          {
+            "start": 20628,
+            "length": 32
+          },
+          {
+            "start": 21846,
+            "length": 32
+          },
+          {
+            "start": 21931,
+            "length": 32
+          },
+          {
+            "start": 21968,
+            "length": 32
+          },
+          {
+            "start": 22025,
+            "length": 32
+          },
+          {
+            "start": 22943,
+            "length": 32
+          }
+        ],
+        "12490": [
+          {
+            "start": 1100,
+            "length": 32
+          },
+          {
+            "start": 3814,
+            "length": 32
+          },
+          {
+            "start": 5402,
+            "length": 32
+          },
+          {
+            "start": 10337,
+            "length": 32
+          },
+          {
+            "start": 10426,
+            "length": 32
+          },
+          {
+            "start": 10596,
+            "length": 32
+          },
+          {
+            "start": 11579,
+            "length": 32
+          },
+          {
+            "start": 12679,
+            "length": 32
+          },
+          {
+            "start": 15755,
+            "length": 32
+          },
+          {
+            "start": 19080,
+            "length": 32
+          },
+          {
+            "start": 20274,
+            "length": 32
+          },
+          {
+            "start": 21804,
+            "length": 32
+          },
+          {
+            "start": 21893,
+            "length": 32
+          },
+          {
+            "start": 22063,
+            "length": 32
+          }
+        ],
+        "12492": [
+          {
+            "start": 2883,
+            "length": 32
+          },
+          {
+            "start": 3606,
+            "length": 32
+          },
+          {
+            "start": 3674,
+            "length": 32
+          },
+          {
+            "start": 10668,
+            "length": 32
+          },
+          {
+            "start": 22298,
+            "length": 32
+          }
+        ]
+      },
+      "materializedRuntime": null,
+      "initializer": {
+        "signature": "initializeGraphLaunch(address,uint160)",
+        "selector": "0x726bb4ae",
+        "caller": "graphFactory",
+        "arguments": [
+          "resolved PermanentPositionCustody address",
+          "selected address-order sqrtPriceX96 candidate"
+        ],
+        "calldata": null
+      },
+      "deployerRequirement": "issuanceAuthority is graph initializer; launchAuthority must differ in graph mode"
+    }
+  ],
+  "notes": [
+    "Only fields present in the compiled ABI are encoded. Historical seedIntentDigest is not a HookemonHook constructor member.",
+    "Custody tokenId is zero before the seed mint.",
+    "Token price is immutable and changes token init-code/address. Resolve and verify address ordering consistently; never select price after fixing incompatible token init-code.",
+    "Hook low 14 bits must equal 0x20cc.",
+    "Immutable reference offsets describe compiler runtime templates; they are not materialized deployed bytecode."
+  ]
+}

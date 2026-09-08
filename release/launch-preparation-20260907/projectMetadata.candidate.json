@@ -1,0 +1,50 @@
+{
+  "presentation": {
+    "description": "Hookemon buys gacha card packs, opens them, sells the cards and pays the proceeds to HKMN holders. Trading fees fund the packs.",
+    "image": {
+      "byteLength": 172568,
+      "contentSha256": "sha256:d21a88989a104f6534741861cb9966bf0d3b12fe86457d73d143de2fe83ed2ad",
+      "height": 512,
+      "mediaType": "image/png",
+      "uri": null,
+      "width": 512
+    },
+    "links": [
+      {
+        "kind": "website",
+        "uri": "https://hookemon.com"
+      },
+      {
+        "kind": "x",
+        "uri": "https://x.com/hookemon4"
+      }
+    ],
+    "schemaVersion": "programmable.launch-presentation-draft.v1"
+  },
+  "schemaVersion": "programmable.project-metadata.v1",
+  "token": {
+    "name": "Hookemon",
+    "symbol": "HKMN"
+  },
+  "tokenMetadataBinding": {
+    "declarationBinding": "request-and-launch-id",
+    "name": {
+      "argumentIndex": null,
+      "argumentName": null,
+      "staticSource": "not-deterministically-extractable"
+    },
+    "postDeploymentReadback": "required",
+    "schemaVersion": "programmable.project-token-metadata-binding.v1",
+    "standardReadModel": {
+      "name": true,
+      "symbol": true
+    },
+    "symbol": {
+      "argumentIndex": null,
+      "argumentName": null,
+      "staticSource": "not-deterministically-extractable"
+    },
+    "tokenTargetId": "token"
+  },
+  "preparationNote": "Non-executable candidate: restore and review the immutable image URL from the original descriptor before request construction."
+}

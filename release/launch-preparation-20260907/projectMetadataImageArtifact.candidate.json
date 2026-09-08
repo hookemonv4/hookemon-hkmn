@@ -1,0 +1,8 @@
+{
+  "byteLength": "172568",
+  "contentSha256": "sha256:d21a88989a104f6534741861cb9966bf0d3b12fe86457d73d143de2fe83ed2ad",
+  "mediaType": "image/png",
+  "schemaVersion": "hookemon.image-artifact-reference.v1",
+  "repositoryPath": "release/phase3/metadata/hookemon-mark.png",
+  "preparationNote": "Review reference only, not provider wire format. Reconstruct the original provider image artifact from these exact image bytes before request construction."
+}

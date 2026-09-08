@@ -1,0 +1,14 @@
+{
+  "status": "EDITORIAL_CANDIDATE",
+  "providerRequestField": false,
+  "tags": [
+    "Hookemon",
+    "HKMN",
+    "Robinhood Chain",
+    "Uniswap v4",
+    "USDG",
+    "Gacha",
+    "Collectible Cards"
+  ],
+  "basis": "Token identity and intended card operations in release/phase3/launch-inputs.json; pool model in pinned contract source. Gacha/card tags describe intent, not live acceptance."
+}

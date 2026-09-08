@@ -1,0 +1,28 @@
+[
+  {
+    "path": "/v4/chains/4663/custom-launches",
+    "observedAt": "2026-09-07T18:34:11.938Z",
+    "status": 200,
+    "body": {
+      "schemaVersion": "programmable.custom-launch-list.v4",
+      "apiVersion": "v4",
+      "chainId": "4663",
+      "caip2": "eip155:4663",
+      "generatedAt": "2026-09-07T18:34:12.068Z",
+      "launches": [],
+      "nextCursor": null
+    }
+  },
+  {
+    "path": "/v4/chains/4663/multi-role-custom-launches",
+    "observedAt": "2026-09-07T18:34:12.095Z",
+    "status": 200,
+    "body": {
+      "schemaVersion": "programmable.multi-role-custom-launch-list.v2",
+      "chainId": "4663",
+      "caip2": "eip155:4663",
+      "launches": [],
+      "nextCursor": null
+    }
+  }
+]
