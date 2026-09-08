@@ -82,7 +82,7 @@ OPEN FACT: provider-policy comparison needs an authoritative source and a canoni
 
 Use the [incident index](../runbooks/README.md) for the failure-specific safe
 stop, recovery boundary, and escalation record. The direct canary recoveries
-are [USDG paused](../runbooks/usdg-paused.md), [USDG frozen](../runbooks/usdg-frozen.md),
+are [Wrong native principal identity](../runbooks/native-wrong-principal-identity.md), [Insufficient native principal and gas](../runbooks/native-insufficient-principal-and-gas.md),
 [nonzero pool fee](../runbooks/pool-protocol-fee.md), [stale Solana blockhash](../runbooks/solana-blockhash-expiry.md),
 [EVM nonce interference](../runbooks/evm-nonce-interference.md), and
 [unattributed custody](../runbooks/unattributed-deposit.md). The status output

@@ -61,8 +61,8 @@ not assume either without checking.
 
 ## USDG and pool controls
 
-- [Paused USDG](usdg-paused.md)
-- [Frozen USDG account](usdg-frozen.md)
+- [Wrong native principal identity](native-wrong-principal-identity.md)
+- [Insufficient native principal and gas](native-insufficient-principal-and-gas.md)
 - [USDG implementation change](usdg-upgraded.md)
 - [Nonzero pool protocol fee](pool-protocol-fee.md)
 

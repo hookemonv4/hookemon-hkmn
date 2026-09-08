@@ -32,3 +32,5 @@ Run the focused policy, configuration, budget, wallet, service and canary tests 
 ## Recovery pointers
 
 Retain old configuration, receipt and journal records as history. Start native execution with v4 configuration and v3 admission rather than relabeling historical USDG principal. Reauthenticate exact fetched-quote valuations before additional risk; use the original cost basis for observation and recovery. Restore unknown custody attribution before admitting another cycle.
+
+Recovery pointers: [wrong Relay asset](../runbooks/relay-wrong-asset.md), [wrong transaction recipient](../runbooks/transaction-policy-wrong-recipient.md), [held epic card](../runbooks/epic-card-held.md), [epic threshold equality](../runbooks/epic-threshold-equality.md), and [unattributed deposit](../runbooks/unattributed-deposit.md).

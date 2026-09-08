@@ -218,22 +218,22 @@
       "test": "packages/adapters/test/app/eligibility-snapshot.test.mjs — holds a holder envelope breach durably after reopen before the sole claim transition"
     },
     {
-      "system": "USDG canary",
-      "failureClass": "paused",
+      "system": "Native principal canary",
+      "failureClass": "wrong-principal-identity",
       "expectedTerminalState": "HELD_UNAVAILABLE",
       "expectedAttemptState": null,
       "expectedNextStage": "owner-decision",
       "owningWp": "WP14",
-      "test": "packages/adapters/test/app/compose.test.mjs — holds an active cycle on a paused USDG status canary before any signing boundary"
+      "test": "packages/adapters/test/app/compose.test.mjs — holds an active cycle on a wrong native principal identity before any signing boundary"
     },
     {
-      "system": "USDG canary",
-      "failureClass": "frozen",
+      "system": "Native principal canary",
+      "failureClass": "insufficient-principal-and-gas",
       "expectedTerminalState": "HELD_UNAVAILABLE",
       "expectedAttemptState": null,
       "expectedNextStage": "owner-decision",
       "owningWp": "WP14",
-      "test": "packages/adapters/test/app/compose.test.mjs — holds an active cycle on a frozen USDG status canary before any signing boundary"
+      "test": "packages/adapters/test/app/compose.test.mjs — holds an active cycle on insufficient native principal plus gas before any signing boundary"
     },
     {
       "system": "External signer",

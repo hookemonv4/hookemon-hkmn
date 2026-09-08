@@ -1,0 +1,128 @@
+[
+  {
+    "name": "manager",
+    "abiType": "address",
+    "byteOffset": 0,
+    "value": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "positionManager",
+    "abiType": "address",
+    "byteOffset": 32,
+    "value": "0x58daec3116aae6D93017bAAea7749052E8a04fA7",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "permit2",
+    "abiType": "address",
+    "byteOffset": 64,
+    "value": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "quoteCurrency",
+    "abiType": "address",
+    "byteOffset": 96,
+    "value": "0x0000000000000000000000000000000000000000",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "hkmn",
+    "abiType": "address",
+    "byteOffset": 128,
+    "value": "0x357D13937522240562cd46FD9ec1445aFe4408af",
+    "dependency": "resolved token CREATE2 address"
+  },
+  {
+    "name": "tickSpacing",
+    "abiType": "int24",
+    "byteOffset": 160,
+    "value": 60,
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "programmable",
+    "abiType": "address",
+    "byteOffset": 192,
+    "value": "0x4957f49620AFf3Adbbe8195a4f633E49cc93376c",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "treasury",
+    "abiType": "address",
+    "byteOffset": 224,
+    "value": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "operations",
+    "abiType": "address",
+    "byteOffset": 256,
+    "value": "0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "launchAuthority",
+    "abiType": "address",
+    "byteOffset": 288,
+    "value": "0xfc82B0da6d487B97d7eA1AA0d51E00AfF4F3a729",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "issuanceAuthority",
+    "abiType": "address",
+    "byteOffset": 320,
+    "value": "0x0B6b3F40f84Df25D3bd69238f937096177DD09Bd",
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "expectedDecimals",
+    "abiType": "uint8",
+    "byteOffset": 352,
+    "value": 18,
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "bindingDigest",
+    "abiType": "bytes32",
+    "byteOffset": 384,
+    "value": null,
+    "dependency": "OPEN FACT: native noncircular manifest/runtime-authority preimages and their producer are not established. Existing derive-addresses only validates supplied nonzero digests."
+  },
+  {
+    "name": "runtimeDigest",
+    "abiType": "bytes32",
+    "byteOffset": 416,
+    "value": null,
+    "dependency": "OPEN FACT: native noncircular manifest/runtime-authority preimages and their producer are not established. Existing derive-addresses only validates supplied nonzero digests."
+  },
+  {
+    "name": "processClaimLimit6hWei",
+    "abiType": "uint256",
+    "byteOffset": 448,
+    "value": "15000000000000000",
+    "dependency": "reviewed native wei ceiling selection"
+  },
+  {
+    "name": "processClaimLimitMaxWei",
+    "abiType": "uint256",
+    "byteOffset": 480,
+    "value": "20000000000000000",
+    "dependency": "reviewed native wei ceiling selection"
+  },
+  {
+    "name": "processClaimMaxCount",
+    "abiType": "uint256",
+    "byteOffset": 512,
+    "value": 24,
+    "dependency": "existing release role or frozen policy"
+  },
+  {
+    "name": "operationsRotationDelay",
+    "abiType": "uint256",
+    "byteOffset": 544,
+    "value": "43200",
+    "dependency": "existing release role or frozen policy"
+  }
+]

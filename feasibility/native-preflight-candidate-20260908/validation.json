@@ -1,0 +1,69 @@
+{
+  "valid": false,
+  "errors": [
+    {
+      "instancePath": "/graphBundle/targets/2/applicantSalt",
+      "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/applicantSalt/type",
+      "keyword": "type",
+      "params": {
+        "type": "string"
+      },
+      "message": "must be string"
+    },
+    {
+      "instancePath": "/graphBundle/targets/2/constructorArguments",
+      "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/constructorArguments/type",
+      "keyword": "type",
+      "params": {
+        "type": "string"
+      },
+      "message": "must be string"
+    },
+    {
+      "instancePath": "/graphBundle/targets/2/expectedRuntimeCodeHash",
+      "schemaPath": "#/properties/graphBundle/properties/targets/items/properties/expectedRuntimeCodeHash/type",
+      "keyword": "type",
+      "params": {
+        "type": "string"
+      },
+      "message": "must be string"
+    },
+    {
+      "instancePath": "/verificationBundle/components/2/constructorArguments",
+      "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/constructorArguments/type",
+      "keyword": "type",
+      "params": {
+        "type": "string"
+      },
+      "message": "must be string"
+    },
+    {
+      "instancePath": "/verificationBundle/components/2/runtimeMaterialization",
+      "schemaPath": "#/properties/verificationBundle/properties/components/items/properties/runtimeMaterialization/type",
+      "keyword": "type",
+      "params": {
+        "type": "object"
+      },
+      "message": "must be object"
+    },
+    {
+      "instancePath": "/launchIntentHash",
+      "schemaPath": "#/properties/launchIntentHash/type",
+      "keyword": "type",
+      "params": {
+        "type": "string"
+      },
+      "message": "must be string"
+    },
+    {
+      "instancePath": "/agentAttestation",
+      "schemaPath": "#/properties/agentAttestation/type",
+      "keyword": "type",
+      "params": {
+        "type": "object"
+      },
+      "message": "must be object"
+    }
+  ],
+  "scope": "Structural schema validation only. No profile acceptance, full graph consistency, owner approval or signability."
+}
