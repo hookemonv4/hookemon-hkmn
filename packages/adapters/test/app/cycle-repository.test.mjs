@@ -904,6 +904,14 @@ function supplementaryPayoutSource(position, settlement, returnBoundary, {
   previousDustSource = null,
 } = {}) {
   const finalizedReturnEvidence = returnBoundary.finalizedReturnEvidence;
+  if (returnBoundary.schema === 'hookemon.supplementary-return-boundary.v2') return {
+    schema: 'hookemon.supplementary-payout-source.v2', positionId: position.positionId, cycleId: position.cycleId, manifestId: settlement.manifestId,
+    finalizedReturn: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: finalizedReturnEvidence.amountAtomic },
+    previousDust: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' }, previousDustSource: null,
+    returnBinding: { operations: finalizedReturnEvidence.operations, assetId: 'native', evidenceDigest: digest({
+      schema: 'hookemon.supplementary-finalized-return-binding.v2', positionId: position.positionId, cycleId: position.cycleId,
+      manifestId: settlement.manifestId, finalizedReturnEvidence }) },
+  };
   return {
     schema: 'hookemon.supplementary-payout-source.v1',
     positionId: position.positionId,
@@ -1720,8 +1728,8 @@ test('atomically persists supplementary signed bytes and recovery context across
 
 test('persists the completed eligibility evidence and zero-dust return source for a sell settlement across restart', async t => {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25', 'pack-1');
   const snapshotEvidence = {
     schema: 'fixture.eligibility-snapshot.v1',
     cycleId,
@@ -1738,8 +1746,8 @@ test('persists the completed eligibility evidence and zero-dust return source fo
     memo: 'memo-supplementary-source',
     mint: 'mint-supplementary-source',
     cardRef: 'mint-supplementary-source',
-    costMicroUsdg: '25',
-    valueMicroUsdg: '25',
+    costMicroUsd: '25',
+    valueMicroUsd: '25',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -1748,12 +1756,13 @@ test('persists the completed eligibility evidence and zero-dust return source fo
   await repository.recordPayoutDust(cycleId, {
     amount: {
       chainId: '4663',
-      assetId: SUPPLEMENTARY_USDG,
-      decimals: 6,
+      assetId: 'native',
+      decimals: 18,
       amountAtomic: '1',
     },
     planDigest: digest({ schema: 'fixture.normal-payout-plan.v1', cycleId }),
   });
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, (await repository.describeCycle(cycleId)).admission));
   await repository.completeCycle(cycleId);
   await repository.recordHeldOwnerDecision(position.positionId, {
     heldEvidenceDigest: position.evidenceDigest,
@@ -1765,7 +1774,7 @@ test('persists the completed eligibility evidence and zero-dust return source fo
   assert.equal(prepared.eligibilitySnapshotEvidenceDigest, digest(snapshotEvidence));
   assert.equal(prepared.payoutSourceDigest, null);
 
-  const returnBoundary = supplementaryReturnBoundary(position, prepared);
+  const returnBoundary = await nativeSupplementaryBoundary(repository, position, prepared);
   const expectedPayoutSource = supplementaryPayoutSource(position, prepared, returnBoundary);
   await repository.advanceSupplementarySettlement(position.positionId, {
     expectedState: 'PREPARED',
@@ -1805,22 +1814,22 @@ test('persists the completed eligibility evidence and zero-dust return source fo
     () => reopened.advanceSupplementarySettlement(position.positionId, {
       expectedState: 'BUYBACK_SENT_UNKNOWN',
       nextState: 'RETURN_BROADCAST',
-      evidence: supplementaryReturnBoundary(position, prepared, { amountAtomic: '8' }),
+      evidence: { ...returnBoundary, finalizedReturnEvidence: { ...returnBoundary.finalizedReturnEvidence, amountAtomic: '8' } },
     }),
-    /boundary evidence conflicts/i,
+    /native supplementary return differs from its original position source and destination/i,
   );
 });
 
 test('does not reuse normal dust after a newer cycle consumes it', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-supplementary-consumed-dust',
     mint: 'mint-supplementary-consumed-dust',
     cardRef: 'mint-supplementary-consumed-dust',
-    costMicroUsdg: '25',
-    valueMicroUsdg: '25',
+    costMicroUsd: '25',
+    valueMicroUsd: '25',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -1829,13 +1838,14 @@ test('does not reuse normal dust after a newer cycle consumes it', async t => {
   const normalDust = await repository.recordPayoutDust(cycleId, {
     amount: {
       chainId: '4663',
-      assetId: SUPPLEMENTARY_USDG,
-      decimals: 6,
+      assetId: 'native',
+      decimals: 18,
       amountAtomic: '1',
     },
     planDigest: digest({ schema: 'fixture.normal-payout-plan.v1', cycleId }),
   });
   await completeOperationalStages(repository, cycleId);
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, (await repository.describeCycle(cycleId)).admission));
   await repository.completeCycle(cycleId);
 
   const newer = await repository.createCycle({ releaseAmount: '2', mode: 'production' });
@@ -1859,7 +1869,7 @@ test('does not reuse normal dust after a newer cycle consumes it', async t => {
   await repository.advanceSupplementarySettlement(position.positionId, {
     expectedState: 'BUYBACK_SENT_UNKNOWN',
     nextState: 'RETURN_BROADCAST',
-    evidence: supplementaryReturnBoundary(position, settlement),
+    evidence: await nativeSupplementaryBoundary(repository, position, settlement),
   });
 
   const returnBoundary = await repository.readSupplementarySettlementEvidence(position.positionId);
@@ -1902,22 +1912,22 @@ test('peekActiveCycle skips a resolved completed cycle while a newer cycle is ac
 
 test('persists every supplementary settlement boundary across a restart without replacing the manifest', async t => {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-supplementary-restart',
     mint: 'mint-supplementary-restart',
     cardRef: 'mint-supplementary-restart',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
     evidence: { stage: 'epic-gate', decision: 'hold' },
   });
   await completeOperationalStages(repository, cycleId);
+  await repository.recordCustodyLedger(cycleId, claimCustodyLedger(cycleId, (await repository.describeCycle(cycleId)).admission));
   await repository.completeCycle(cycleId);
   await repository.recordHeldOwnerDecision(position.positionId, {
     heldEvidenceDigest: position.evidenceDigest,
@@ -1926,9 +1936,7 @@ test('persists every supplementary settlement boundary across a restart without 
     choice: 'sell',
   });
   const prepared = await repository.readSupplementarySettlement(position.positionId);
-  const returnBoundaryInput = supplementaryReturnBoundary(position, prepared, {
-    finalityEvidence: { transactionHash: 'return-broadcast-1', finalizedBuyback: true },
-  });
+  const returnBoundaryInput = await nativeSupplementaryBoundary(repository, position, prepared);
 
   await repository.advanceSupplementarySettlement(position.positionId, {
     expectedState: 'PREPARED',
@@ -3258,6 +3266,39 @@ test('durable transaction reserves a Relay transaction hash atomically across st
   await assert.rejects(() => store.commit(second), /global reservation key is already reserved/);
 });
 
+async function prepareNativeOutboundSettlement(repository, cycleId, recorded, deadlineUnixSeconds, routeSender = null) {
+  const account = privateKeyToAccount(`0x${'01'.repeat(32)}`); // Public fixture key, isolated transport only.
+  const sender = account.address.toLowerCase(), depository = SETTLEMENT_DEPOSITORY.toLowerCase();
+  const orderId = `0x${'c'.repeat(64)}`, runtime = '0x6000';
+  const data = encodeFunctionData({ abi: parseAbi(['function depositNative(address depositor, bytes32 id)']),
+    functionName: 'depositNative', args: [sender, orderId] });
+  const signedSourceTransaction = await account.signTransaction({ chainId: 4663, type: 'eip1559', nonce: 7,
+    to: depository, data, value: BigInt(recorded.sourceAmountAtomic), gas: 100000n, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n });
+  const sourceTxHash = keccak256(signedSourceTransaction), sourceHash = `0x${'6'.repeat(64)}`;
+  const sourceFinality = { height: '100', hash: sourceHash, timestampUnixSeconds: '1700000000' };
+  const parsed = parseTransaction(signedSourceTransaction);
+  const sourceClient = { getChainId: async () => 4663,
+    getTransaction: async () => ({ ...parsed, hash: sourceTxHash, from: sender, blockNumber: 100n, blockHash: sourceHash }),
+    getTransactionReceipt: async () => ({ transactionHash: sourceTxHash, blockNumber: 100n, blockHash: sourceHash,
+      status: 'success', gasUsed: 21000n, effectiveGasPrice: 1n, logs: [] }),
+    getBlock: async () => ({ number: 100n, hash: sourceHash, timestamp: 1700000000n }) };
+  const sourceProof = await createNativePaymentProof({ client: sourceClient, signedTransaction: signedSourceTransaction,
+    expected: { kind: 'direct', chainId: '4663', assetId: 'native', decimals: 18, transactionHash: sourceTxHash,
+      source: sender, recipient: depository, amountWei: recorded.sourceAmountAtomic, calldataDigest: keccak256(data), nonce: '7' } });
+  const requestDigest = await prepareOutboundRelaySettlementAttempt(repository, cycleId, sourceTxHash, deadlineUnixSeconds, recorded, {
+    signedBytes: signedSourceTransaction, relayRoute: { sourceSender: routeSender ?? sender, sourceRecipient: depository, destinationOwner: SETTLEMENT_SOLANA_OWNER },
+    relayIntent: createRelayClient().prepareExecution({ liveMode: true, quote: {
+      direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId: recorded.relayRequestId,
+      orderId, sender, recipient: SETTLEMENT_SOLANA_OWNER, deadlineUnixSeconds: Number(deadlineUnixSeconds),
+      origin: { chainId: 4663, address: `0x${'00'.repeat(20)}`, decimals: 18, amount: recorded.sourceAmountAtomic },
+      destination: { chainId: 792703809, address: SETTLEMENT_SOLANA_MINT, decimals: 6,
+        amount: recorded.destinationAmountAtomic, minimumAmount: recorded.destinationAmountAtomic },
+      raw: { steps: [] },
+    } }).intent,
+  });
+  return { sourceProof, requestDigest, sourceTxHash, sourceFinality };
+}
+
 test('Relay settlement writes the matrix hold exactly once after both process-RPC finality observations', async t => {
   const cases = [
     { expectedState: 'HELD_RELAY_PARTIAL', mint: SETTLEMENT_SOLANA_MINT, amountAtomic: '1', deadlineUnixSeconds: '1700000200' },
@@ -3269,30 +3310,16 @@ test('Relay settlement writes the matrix hold exactly once after both process-RP
     const repository = await CycleRepository.open(directory);
     const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
     const recorded = await repository.recordRelayLeg(cycleId, relayLeg(cycleId, {
-      sourceAssetId: SETTLEMENT_SOURCE_ASSET,
+      schema: 'hookemon.relay-leg.v2', sourceAssetId: 'native', sourceDecimals: 18,
       destinationAssetId: SETTLEMENT_SOLANA_MINT,
     }));
-    const sourceTransactionHash = `0x${String(index + 6).repeat(64)}`;
-    const requestDigest = await prepareOutboundRelaySettlementAttempt(
-      repository,
-      cycleId,
-      sourceTransactionHash,
-      fixtureCase.deadlineUnixSeconds,
-      recorded,
-    );
+    const { sourceProof, requestDigest, sourceTxHash: sourceTransactionHash, sourceFinality } =
+      await prepareNativeOutboundSettlement(repository, cycleId, recorded, fixtureCase.deadlineUnixSeconds);
     await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTransactionHash);
-    const sourceProof = await finalizedOutboundSourceProof({
-      transactionHash: sourceTransactionHash,
-      amountAtomic: recorded.sourceAmountAtomic,
-    });
     await repository.recordBroadcast(cycleId, 'outbound', requestDigest, { transactionHash: sourceTransactionHash });
     await repository.recordFinality(cycleId, 'outbound', requestDigest, {
       transactionHash: sourceTransactionHash,
-      finalizedAtSource: {
-        height: sourceProof.receiptBlockNumber.toString(),
-        hash: sourceProof.receiptBlockHash,
-        timestampUnixSeconds: sourceProof.receiptBlockTimestampUnixSeconds,
-      },
+      finalizedAtSource: sourceFinality,
     });
     const submission = {
       sourceProof,
@@ -3395,28 +3422,11 @@ test('settleRelayLeg rejects branded outbound evidence whose accounts differ fro
   const repository = await CycleRepository.open(await tempDirectory(t));
   const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
   const recorded = await repository.recordRelayLeg(cycleId, relayLeg(cycleId, {
-    sourceAssetId: SETTLEMENT_SOURCE_ASSET,
+    schema: 'hookemon.relay-leg.v2', sourceAssetId: 'native', sourceDecimals: 18,
     destinationAssetId: SETTLEMENT_SOLANA_MINT,
   }));
-  const sourceTxHash = `0x${'d'.repeat(64)}`;
-  await prepareOutboundRelaySettlementAttempt(
-    repository,
-    cycleId,
-    sourceTxHash,
-    '1700000200',
-    recorded,
-    {
-      relayRoute: {
-        ...outboundRelayRoute(),
-        sourceSender: '0x00000000000000000000000000000000000000aa',
-      },
-    },
-  );
+  const { sourceProof, sourceTxHash } = await prepareNativeOutboundSettlement(repository, cycleId, recorded, '1700000200', '0x00000000000000000000000000000000000000aa');
   await repository.recordRelayLegSource(cycleId, recorded.relayRequestId, sourceTxHash);
-  const sourceProof = await finalizedOutboundSourceProof({
-    transactionHash: sourceTxHash,
-    amountAtomic: recorded.sourceAmountAtomic,
-  });
   const destinationObservation = await finalizedDestinationObservation({
     relayRequestId: recorded.relayRequestId,
     mint: SETTLEMENT_SOLANA_MINT,
@@ -3693,7 +3703,7 @@ test('settleRelayLeg leaves an unfinalized return source unsettled after reopen'
   const requestDigest = `sha256:${'5'.repeat(64)}`;
   await repository.prepareChainTransactionAttempt(cycleId, 'return', preparedChainAttempt(cycleId, 'return', requestDigest));
   await repository.recordSignedTransaction(cycleId, 'return', requestDigest, {
-    rawBytes: 'return-signed-bytes', nonce: null, blockhash: 'return-blockhash', hash: `sha256:${'4'.repeat(64)}`,
+    rawBytes: nativeReturnTransports.get(recorded.relayRequestId).encoded, nonce: null, blockhash: '11111111111111111111111111111111', hash: sourceTxHash,
   });
   await repository.recordBroadcast(cycleId, 'return', requestDigest, { transactionHash: sourceTxHash });
   const proof = await returnDestinationProof(attributed);
