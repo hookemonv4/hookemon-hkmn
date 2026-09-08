@@ -1,3 +1,4 @@
+import { createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
 // Exercises the real ordinary-CLI path this task's followthrough review found missing: an actual
 // `HOOKEMON_*` environment -> `readEnvironment` -> `compose` pipeline that resolves a Collector
 // production binding registry from a real file, through the same digest/schema validation
@@ -208,21 +209,23 @@ function isolatedProductionEnvironment(stateDir, { registryPath, overrides = {} 
     HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm',
     HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
     HOOKEMON_PROVIDER_MODE: 'live',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '25000000',
+    HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '60000',
     HOOKEMON_PACK_CODE: 'collector-25',
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_MIN_SOLANA_RECEIVE: '0',
-    HOOKEMON_MIN_RETURN_USDG: '0',
+    HOOKEMON_MIN_RETURN_ETH: '0',
     HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0',
     HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0',
     HOOKEMON_EVM_GAS_PRICE_CAP: '2000000000',
     HOOKEMON_EVM_NATIVE_RESERVE: '3000000000000000',
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '25000',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '5000000',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '0',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '0',
-    HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0',
-    HOOKEMON_BUDGET_RETURN_CAP_USDG: '0',
-    HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '0',
+    HOOKEMON_BUDGET_PACK_PRICE_WEI: '0',
+    HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0',
+    HOOKEMON_BUDGET_RETURN_CAP_WEI: '0',
+    HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
     HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY: 'synthetic-offline',
     HOOKEMON_COLLECTOR_SYNTHETIC_ROOT: sharedSyntheticRoot,
     ...(registryPath === undefined ? {} : { HOOKEMON_COLLECTOR_PRODUCTION_BINDING_REGISTRY_PATH: registryPath }),
@@ -323,6 +326,8 @@ async function composeIsolated(t, envOverrides = {}, registry = offlineRegistry(
   const { config, stateDir } = await readIsolatedEnvironment(t, { registry, overrides: envOverrides });
   return compose(composeReadyConfig(config, {
     statePath: join(stateDir, 'operator-state.json'),
+    preflightAuthority: createTestProfileMutationAuthority(),
+    nativePaymentBinding: createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663', hook: { address: config.contracts.hook, runtimeHash: `0x${'1'.repeat(64)}` }, relay: null }, createTestProfileMutationAuthority()),
     adapters: minimalInjectedAdapters(),
     networkIdentity: networkIdentity(),
   }));

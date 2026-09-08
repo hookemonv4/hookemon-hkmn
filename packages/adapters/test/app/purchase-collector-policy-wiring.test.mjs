@@ -115,14 +115,14 @@ const RAW_BINDING = Object.freeze(rawBinding());
 const FIXTURE_BINDING = Object.freeze({ binding: RAW_BINDING, expectedDigest: digest(RAW_BINDING) });
 
 function moneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6 };
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18 };
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin: settlementAsset() },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin: settlementAsset() },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...eth, amountAtomic: '0' },
       solanaReceive: { ...settlementAsset(), amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...eth, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
