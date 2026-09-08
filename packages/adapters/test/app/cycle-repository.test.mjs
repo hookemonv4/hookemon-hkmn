@@ -1391,17 +1391,16 @@ test('completeCycle archives the cycle so readActiveCycle reports null and a new
 });
 
 test('records a held position without terminally holding its cycle', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
 
   const recorded = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-1',
     mint: 'mint-1',
     cardRef: 'mint-1',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: {
       chainId: '792703809',
       assetId: SETTLEMENT_SOLANA_MINT,
@@ -1419,7 +1418,7 @@ test('records a held position without terminally holding its cycle', async t => 
   const current = await repository.describeCycle(cycleId);
   assert.equal(current.terminalState, null);
   assert.deepEqual([...current.heldPositions.values()], [recorded]);
-  assert.equal(current.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '25000000');
+  assert.equal(current.custodyLedgers.size, 0, 'a card purchase cost is not fungible native principal');
   assert.deepEqual(await repository.readHeldPosition(recorded.positionId), recorded);
   assert.deepEqual(await repository.listHeldPositions(), [recorded]);
 
@@ -1429,18 +1428,17 @@ test('records a held position without terminally holding its cycle', async t => 
   assert.deepEqual(await repository.listHeldPositions(), [recorded]);
 });
 
-test('reuses a held position after restart timing changes without doubling its custody bucket', async t => {
+test('reuses a held position after restart timing changes without duplicating its frozen purchase cost', async t => {
   let nowMs = 1_700_000_000_000;
-  const repository = await CycleRepository.open(await tempDirectory(t), () => nowMs);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => nowMs, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const input = {
     packId: 'pack-1',
     memo: 'memo-1',
     mint: 'mint-1',
     cardRef: 'mint-1',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'BUYBACK_UNAVAILABLE',
     terminalState: 'HELD_UNAVAILABLE',
@@ -1453,7 +1451,7 @@ test('reuses a held position after restart timing changes without doubling its c
   assert.deepEqual(retry, first);
   const state = await repository.describeCycle(cycleId);
   assert.equal(state.heldPositions.size, 1);
-  assert.equal(state.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '25000000');
+  assert.equal(state.custodyLedgers.size, 0, 'retry does not create native principal from USD purchase cost');
 });
 
 async function nativeSupplementaryBoundary(repository, position, settlement) {
