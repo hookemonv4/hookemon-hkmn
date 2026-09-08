@@ -165,6 +165,8 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'completeStage',
   'completeCycle',
   'holdCycle',
+  'recordPackOrderReconciliation',
+  'readPackOrderReconciliation',
   'recordPackOrderIntent',
   'recordPackOrderRequest',
   'readPackOrderIntent',
@@ -3107,6 +3109,23 @@ function validateNativeAdmissionProvenance(provenance, admission, cycleId) {
   return provenance;
 }
 
+function assertPackOrderReconciliation(admission, batch, orderIndex, outcomes) {
+  const order = admission?.schema === 'hookemon.policy-admission.v4' ? admission.orders[orderIndex] : null;
+  if (!order || !batch || !Array.isArray(outcomes) || outcomes.length !== order.quantity) throw new Error('pack order reconciliation requires the complete generated order');
+  return outcomes.map((outcome, i) => {
+    const pack = batch.packs[i];
+    if (!outcome || outcome.packIndex !== pack.packIndex || outcome.memo !== pack.memo || !['purchased', 'not_purchased'].includes(outcome.status)) throw new Error('pack order reconciliation identity is invalid');
+    if (outcome.status === 'purchased') {
+      const cost = assertTypedAmount(outcome.packCost, 'pack order observed debit');
+      if (typeof outcome.signature !== 'string' || !outcome.signature || outcome.expectedCardCount !== pack.expectedCardCount
+        || ![order.unitPurchase.chainId, 'solana-mainnet'].includes(cost.chainId) || cost.assetId !== order.unitPurchase.assetId
+        || cost.decimals !== order.unitPurchase.decimals || BigInt(cost.amountAtomic) <= 0n
+        || BigInt(cost.amountAtomic) > BigInt(order.unitPurchase.amountAtomic)) throw new Error('pack order reconciliation exceeds its admitted debit or identity');
+    }
+    return structuredClone(outcome);
+  });
+}
+
 function applyPackOrderEvent({ admission, cycleId, payload, kind, intents, requests, requestDigests }) {
   const order = admission?.schema === 'hookemon.policy-admission.v4' ? admission.orders[payload.orderIndex] : null;
   if (!order || !Number.isSafeInteger(payload.orderIndex) || payload.orderIndex < 0 || payload.stage !== 'purchase') {
@@ -3287,6 +3306,7 @@ export class CycleRepository {
     const payoutQuarantines = new Map();
     const evmNonceLocks = new Map();
     const packBatchRequests = new Map();
+    const packOrderReconciliations = new Map();
     const packBatchIntents = new Map();
     const supplementaryChainAttempts = new Map();
     const supplementaryChainAttemptRecoveryContexts = new Map();
@@ -3320,6 +3340,7 @@ export class CycleRepository {
       payoutQuarantines,
       evmNonceLocks,
       packBatchRequests,
+      packOrderReconciliations,
       packBatchIntents,
     };
     let completed = false;
@@ -3403,6 +3424,14 @@ export class CycleRepository {
           throw new Error(`stored stage "${entry.payload.stage}" has conflicting completion evidence`);
         }
         stages.set(entry.payload.stage, { status: 'COMPLETE', evidence: entry.payload.evidence });
+      } else if (entry.kind === 'pack-order-reconciled') {
+        const { orderIndex, outcomes, admissionDigest, responseDigest } = entry.payload;
+        const batch = packBatchRequests.get(`purchase:${orderIndex}`);
+        if (admissionDigest !== digest(admission) || responseDigest !== digest(batch)) throw new Error('pack order reconciliation binding mismatch');
+        const checked = assertPackOrderReconciliation(admission, batch, orderIndex, outcomes);
+        const old = packOrderReconciliations.get(orderIndex);
+        if (old && canonicalJson(old) !== canonicalJson(checked)) throw new Error('pack order reconciliation conflicts with prior outcome');
+        packOrderReconciliations.set(orderIndex, checked);
       } else if (['pack-order-intent-recorded', 'pack-order-request-recorded'].includes(entry.kind)) {
         applyPackOrderEvent({ admission, cycleId, payload: entry.payload, kind: entry.kind, intents: packBatchIntents, requests: packBatchRequests, requestDigests: stageRequestDigests });
       } else if (entry.kind === 'pack-batch-intent-recorded') {
@@ -4185,6 +4214,7 @@ export class CycleRepository {
       payoutQuarantines,
       evmNonceLocks,
       packBatchRequests,
+      packOrderReconciliations,
       packBatchIntents,
       outboundQuoteRefresh,
       completed,
@@ -4737,14 +4767,26 @@ export class CycleRepository {
     });
   }
 
-  /**
-   * Durably persists the exact quantity and pack code this cycle is about to request from a
-   * batch provider call, before that call is ever made. This is the pre-call counterpart to
-   * `recordPackBatchRequest`: an operator recovering a cycle whose batch call's response was
-   * lost with no memo at all still has a durable, human-readable record of what was attempted
-   * (cycle, quantity, pack code) to reconcile against provider support, rather than only the
-   * generic stage-attempt's opaque request digest.
-   */
+  /** Terminal per-memo outcomes authorize resuming a known generated plan prefix. */
+  async readPackOrderReconciliation(cycleId, orderIndex) {
+    return structuredClone((await this.#replay(cycleId)).packOrderReconciliations.get(orderIndex) ?? null);
+  }
+  async recordPackOrderReconciliation(cycleId, orderIndex, outcomes) {
+    const state = await this.#replay(cycleId);
+    const batch = state.packBatchRequests.get(`purchase:${orderIndex}`);
+    const checked = assertPackOrderReconciliation(state.admission, batch, orderIndex, outcomes);
+    const existing = state.packOrderReconciliations.get(orderIndex);
+    if (existing) {
+      if (canonicalJson(existing) !== canonicalJson(checked)) throw new Error('pack order reconciliation conflicts with prior outcome');
+      return structuredClone(existing);
+    }
+    await this.#append(cycleId, 'pack-order-reconciled', { orderIndex, outcomes: checked,
+      admissionDigest: digest(state.admission), responseDigest: digest(batch) }, { operation: 'recordPackOrderReconciliation', assertState: current => {
+      if (current.terminalState || canonicalJson(current.packBatchRequests.get(`purchase:${orderIndex}`)) !== canonicalJson(batch)) throw new Error('pack order changed during reconciliation');
+    } });
+    return checked;
+  }
+
   async readPackOrderIntent(cycleId, orderIndex) {
     return structuredClone((await this.#replay(cycleId)).packBatchIntents.get(`purchase:${orderIndex}`) ?? null);
   }

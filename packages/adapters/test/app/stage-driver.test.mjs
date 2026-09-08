@@ -4634,6 +4634,7 @@ for (const scenario of ['known-prefix', 'known-prefix-prepared', 'uncertain-orde
     repository.describeCycle = async () => ({ admission });
     repository.readPackOrderIntent = async (_id, index) => intents.get(index) ?? null;
     repository.readPackOrderRequest = async (_id, index) => responses.get(index) ?? null;
+    repository.readPackOrderReconciliation = async (_id, index) => responses.has(index) ? [{ status: 'purchased' }] : null;
     repository.recordStageRequestDigest = async () => {};
     let changed = false;
     const calls = [];

@@ -78,3 +78,20 @@ test('stored expiry evidence binds all plan unit identities and rejects omission
   await repository.recordOutboundQuoteExpired(admission.cycleId, evidence);
   assert.equal((await repository.readOutboundQuoteRefresh(admission.cycleId)).state, 'REFRESH_REQUIRED');
 });
+
+test('terminal per-order outcomes persist exact memo and bounded debit before recovery can advance', async t => {
+  const { directory, repository, admission } = await fixture(t);
+  await repository.recordPackOrderIntent('cycle-orders', 0, intent('base-pack', 2), requestDigest);
+  await repository.recordPackOrderRequest('cycle-orders', 0, [pack(0, 'base-pack'), pack(1, 'base-pack')]);
+  const outcomes = [0, 1].map(packIndex => ({ packIndex, memo: `memo-${packIndex}`, status: 'purchased',
+    signature: `finalized-${packIndex}`, expectedCardCount: 1, packCost: admission.orders[0].unitPurchase }));
+  await assert.rejects(repository.recordPackOrderReconciliation('cycle-orders', 0, outcomes.slice(0, 1)), /complete generated order/);
+  await assert.rejects(repository.recordPackOrderReconciliation('cycle-orders', 0, [{ ...outcomes[0], memo: 'foreign' }, outcomes[1]]), /identity/);
+  await assert.rejects(repository.recordPackOrderReconciliation('cycle-orders', 0, [{ ...outcomes[0], packCost: { ...outcomes[0].packCost, amountAtomic: '1000001' } }, outcomes[1]]), /admitted debit/);
+  await repository.recordPackOrderReconciliation('cycle-orders', 0, outcomes);
+  const restarted = await CycleRepository.open(directory, now, { testAuthority: createTestProfileMutationAuthority() });
+  assert.deepEqual(await restarted.readPackOrderReconciliation('cycle-orders', 0), outcomes);
+  assert.equal((await restarted.readPackBatchRequest('cycle-orders', 'purchase')).generationComplete, false);
+  await restarted.recordPackOrderReconciliation('cycle-orders', 0, outcomes);
+  await assert.rejects(restarted.recordPackOrderReconciliation('cycle-orders', 0, [{ ...outcomes[0], signature: 'different' }, outcomes[1]]), /conflicts/);
+});

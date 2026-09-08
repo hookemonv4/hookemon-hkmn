@@ -422,6 +422,9 @@ export async function mutatePurchase(options) {
   for (const order of request.orders) {
     const offset = admission.orders.slice(0, order.orderIndex).reduce((sum, item) => sum + item.quantity, 0);
     const existing = await cycleRepository.readPackOrderRequest(context.cycleId, order.orderIndex);
+    if (existing !== null && await cycleRepository.readPackOrderReconciliation(context.cycleId, order.orderIndex) === null) {
+      throw new Error('purchase order signing outcome requires reconciliation before another order');
+    }
     if (existing === null && await cycleRepository.readPackOrderIntent(context.cycleId, order.orderIndex) !== null) {
       throw new Error('purchase order generation is uncertain; reconciliation required');
     }
@@ -708,9 +711,16 @@ async function reconcilePack({ adapters, config, context, asset, pack, playerAdd
   };
 }
 
+function purchaseOutcomeEvidence(outcome) {
+  return outcome.outcome === 'purchased'
+    ? { packIndex: outcome.packIndex, memo: outcome.memo, status: 'purchased', signature: outcome.signature,
+      expectedCardCount: outcome.expectedCardCount, packCost: outcome.packCost }
+    : { packIndex: outcome.packIndex, memo: outcome.memo, status: 'not_purchased' };
+}
+
 export async function reconcileLivePurchase({ adapters, config, cycleRepository, context }) {
   const batch = await cycleRepository.readPackBatchRequest(context.cycleId, 'purchase');
-  if (batch === null || batch.generationComplete === false) {
+  if (batch === null) {
     const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'purchase');
     if (record?.attempt?.state !== 'SENT_UNKNOWN' || !Number.isSafeInteger(record.sentAtMs)) return null;
     if (!pastDeadline(record.sentAtMs, config, context)) return null;
@@ -766,9 +776,14 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
 
   const outcomes = [];
   for (const pack of batch.packs) {
+    const admittedOrder = cycle.admission.schema === 'hookemon.policy-admission.v4'
+      ? cycle.admission.orders.find(order => order.packId === pack.packType) : null;
+    const orderBatch = admittedOrder
+      ? await cycleRepository.readPackOrderRequest(context.cycleId, admittedOrder.orderIndex) : batch;
+    if (!Number.isSafeInteger(orderBatch?.requestedAtMs)) throw new Error('purchase reconciliation requires its own order request time');
     const result = await reconcilePack({
       adapters, config, context, asset, pack, playerAddress,
-      deadlineSinceMs: batch.requestedAtMs,
+      deadlineSinceMs: orderBatch.requestedAtMs,
       unitPurchase: boundForPack(pack),
     });
     if (!result.determined) return null;
@@ -783,19 +798,27 @@ export async function reconcileLivePurchase({ adapters, config, cycleRepository,
     outcomes.push(result);
   }
 
+  if (cycle.admission.schema === 'hookemon.policy-admission.v4') {
+    for (const order of cycle.admission.orders) {
+      const requested = await cycleRepository.readPackOrderRequest(context.cycleId, order.orderIndex);
+      if (requested === null) {
+        const intent = await cycleRepository.readPackOrderIntent(context.cycleId, order.orderIndex);
+        if (intent !== null && pastDeadline(intent.recordedAtMs, config, context)) {
+          return holdWholeCycle(cycleRepository, context, { stage: 'purchase', orderIndex: order.orderIndex,
+            reason: 'purchase order generation remained uncertain past the reconcile deadline' });
+        }
+        break;
+      }
+      const packIndices = new Set(requested.packs.map(pack => pack.packIndex));
+      const reconciled = outcomes.filter(outcome => packIndices.has(outcome.packIndex)).map(purchaseOutcomeEvidence);
+      await cycleRepository.recordPackOrderReconciliation(context.cycleId, order.orderIndex, reconciled);
+    }
+    if (batch.generationComplete === false) return null;
+  }
   const purchased = outcomes.filter(outcome => outcome.outcome === 'purchased');
   return {
     quantity: batch.packs.length,
-    packs: outcomes.map(outcome => (outcome.outcome === 'purchased'
-      ? {
-        packIndex: outcome.packIndex,
-        memo: outcome.memo,
-        status: 'purchased',
-        signature: outcome.signature,
-        expectedCardCount: outcome.expectedCardCount,
-        packCost: outcome.packCost,
-      }
-      : { packIndex: outcome.packIndex, memo: outcome.memo, status: 'not_purchased' })),
+    packs: outcomes.map(purchaseOutcomeEvidence),
     purchasedCount: purchased.length,
   };
 }

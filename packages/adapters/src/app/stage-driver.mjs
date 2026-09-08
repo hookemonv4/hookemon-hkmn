@@ -181,6 +181,9 @@ const RECONCILIATION_REPOSITORY_METHODS = Object.freeze([
   'readClaimPreconditions',
   'readPackBatchIntent',
   'readPackBatchRequest',
+  'readPackOrderIntent',
+  'readPackOrderRequest',
+  'readPackOrderReconciliation',
   'listHeldPositions',
   'listKnownCycleIds',
 ]);
@@ -343,6 +346,7 @@ function rejectLegacyRelayOperationalAttempt(stage, attemptRecord) {
 async function canResumePlanPurchase(cycleRepository, context, current) {
   if (context.stage !== 'purchase' || !['SENT_UNKNOWN', 'PREPARED'].includes(current?.attempt?.state)
     || typeof cycleRepository.describeCycle !== 'function'
+    || typeof cycleRepository.readPackOrderReconciliation !== 'function'
     || typeof cycleRepository.readPackOrderIntent !== 'function' || typeof cycleRepository.readPackOrderRequest !== 'function') return false;
   const cycle = await cycleRepository.describeCycle(context.cycleId);
   if (cycle?.terminalState || cycle?.admission?.schema !== 'hookemon.policy-admission.v4') return false;
@@ -354,6 +358,7 @@ async function canResumePlanPurchase(cycleRepository, context, current) {
     if (intent === null && response === null) { missing = true; continue; }
     if (missing || intent === null || response === null || intent.requestDigest !== current.attempt.requestDigest
       || intent.admissionDigest !== digest(cycle.admission)) return false;
+    if (await cycleRepository.readPackOrderReconciliation(context.cycleId, order.orderIndex) === null) return false;
     generated++;
   }
   return generated > 0 && generated < cycle.admission.orders.length;
@@ -986,6 +991,10 @@ function cardReconciliationRepository(cycleRepository, context) {
     if (recordHeldPosition) repository.recordHeldPosition = recordHeldPosition;
     const holdCycle = leaseFencedReadMethod(cycleRepository, 'holdCycle', context.assertLease);
     if (holdCycle) repository.holdCycle = holdCycle;
+  }
+  if (context.stage === 'purchase') {
+    const record = leaseFencedReadMethod(cycleRepository, 'recordPackOrderReconciliation', context.assertLease);
+    if (record) repository.recordPackOrderReconciliation = record;
   }
   if (CUSTODY_LEDGER_RECONCILIATION_STAGES.has(context.stage)) {
     const recordCustodyLedger = leaseFencedReadMethod(cycleRepository, 'recordCustodyLedger', context.assertLease);
