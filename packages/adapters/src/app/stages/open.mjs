@@ -44,23 +44,7 @@ function heldMint(evidence) {
   return null;
 }
 
-const HELD_POSITION_EVM_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
 
-/**
- * ADR-0026: the sole raw-to-canonical relation this repository recognizes for the configured USDG
- * asset -- chain 4663, six decimals, a normalized lower-case 20-byte EVM token -- matching
- * `evmUsdgCanonicalCustodyIdentity` in cycle-repository.mjs exactly, so this held write lands on
- * the same custody row claim and payout already maintain instead of a competing raw identity.
- */
-function heldPositionLedgerAsset(config) {
-  const asset = config?.moneyConfiguration?.assets?.usdg;
-  const typed = assertTypedAmount({ ...asset, amountAtomic: '0' }, 'held open USDG ledger asset');
-  if (typed.chainId !== '4663' || typed.decimals !== 6 || !HELD_POSITION_EVM_ADDRESS_PATTERN.test(typed.assetId)) {
-    throw new Error('held open USDG ledger asset must use the configured six-decimal normalized USDG asset');
-  }
-  const chainId = `eip155:${typed.chainId}`;
-  return { chainId, assetId: `${chainId}/erc20:${typed.assetId}`, decimals: typed.decimals };
-}
 
 /** Carves one unresolved card out without touching the cycle's terminal state or other packs. */
 async function holdPack(cycleRepository, config, context, evidence, { terminalState = 'HELD_DATA_UNVERIFIED', reason = heldPositionReason(terminalState) } = {}) {
@@ -73,20 +57,19 @@ async function holdPack(cycleRepository, config, context, evidence, { terminalSt
     throw new Error('open requires held-position attribution capabilities');
   }
   const description = await cycleRepository.describeCycle(context.cycleId);
-  const costMicroUsdg = description?.releaseAmount;
+  const costMicroUsd = description?.admission?.aggregateFundingUsd?.amountMicroUsd;
   const packId = config?.pack?.code;
-  if (typeof costMicroUsdg !== 'string' || !canonicalUnsignedInteger.test(costMicroUsdg)
+  if (typeof costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(costMicroUsd)
     || typeof packId !== 'string' || packId.length === 0) {
-    throw new Error('open cannot attribute a held card without a cycle release amount and pack identifier');
+    throw new Error('open cannot attribute a held card without a committed USD purchase cost and pack identifier');
   }
   const position = await cycleRepository.recordHeldPosition(context.cycleId, {
     packId,
     memo,
     mint,
     cardRef: mint ?? memo,
-    costMicroUsdg,
-    valueMicroUsdg: costMicroUsdg,
-    ledgerAsset: heldPositionLedgerAsset(config),
+    costMicroUsd,
+    valueMicroUsd: costMicroUsd,
     insuredValue: null,
     reason,
     terminalState,

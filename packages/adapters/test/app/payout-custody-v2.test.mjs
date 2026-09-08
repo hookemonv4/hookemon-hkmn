@@ -7,7 +7,7 @@ import test from 'node:test';
 import { keccak256, TransactionReceiptNotFoundError } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { compileDirectPayoutPlan, createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
+import { compileDirectPayoutPlan, createNativePayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
 import { DirectPayoutError, mutatePayout, reconcileLivePayout } from '../../src/app/stages/payout.mjs';
@@ -27,18 +27,18 @@ const OPERATIONS = ACCOUNT.address.toLowerCase();
 const RECIPIENT_A = `0x${'2'.repeat(40)}`;
 const RETURN_BINDING = Object.freeze({
   operations: OPERATIONS,
-  usdgAddress: TOKEN,
+  assetId: 'native',
   evidenceDigest: `sha256:${'9'.repeat(64)}`,
 });
 const FIXTURE_SIGNER_OPTIONS = Object.freeze({ preflightAuthority: createTestProfileMutationAuthority() });
 
-const CANONICAL_CHAIN_ID = 'eip155:4663';
-const CANONICAL_ASSET_ID = `eip155:4663/erc20:${TOKEN}`;
+const CANONICAL_CHAIN_ID = '4663';
+const CANONICAL_ASSET_ID = 'native';
 const CANONICAL_KEY = `${CANONICAL_CHAIN_ID}${String.fromCharCode(0)}${CANONICAL_ASSET_ID}`;
-const RAW_KEY = `4663${String.fromCharCode(0)}${TOKEN}`;
+const RAW_KEY = CANONICAL_KEY;
 
 function usdg(amountAtomic) {
-  return createUsdgPayoutAmount({ assetId: TOKEN, amountAtomic: String(amountAtomic) });
+  return createNativePayoutAmount({ assetId: 'native', amountAtomic: String(amountAtomic) });
 }
 
 function payoutManifest(cycleId) {
@@ -87,7 +87,7 @@ function payoutPlan(cycleId, returnAmountAtomic = '9') {
 }
 
 function baseConfig() {
-  const usdgAsset = { chainId: '4663', assetId: TOKEN, decimals: 6 };
+  const usdgAsset = { chainId: '4663', assetId: 'native', decimals: 18 };
   const solanaStablecoin = {
     chainId: '792703809',
     assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -98,12 +98,12 @@ function baseConfig() {
     accounts: { evm: OPERATIONS },
     contracts: { usdg: TOKEN },
     moneyConfiguration: {
-      schema: 'hookemon.money-configuration.v1',
-      assets: { usdg: usdgAsset, solanaStablecoin },
+      schema: 'hookemon.money-configuration.v2',
+      assets: { eth: usdgAsset, solanaStablecoin },
       minimums: {
         robinhoodReceive: { ...usdgAsset, amountAtomic: '0' },
         solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-        returnUsdg: { ...usdgAsset, amountAtomic: '0' },
+        returnEth: { ...usdgAsset, amountAtomic: '0' },
       },
       evm: {
         perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '5' },
@@ -137,7 +137,7 @@ function rpc({
     async getTransactionCount() { return nonce; },
     async getBalance() { return balance; },
     async readCycleAttributableFinalizedAvailable() {
-      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '999999999999999999999999' };
+      return { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '999999999999999999999999' };
     },
     async sendRawTransaction() {
       return { transactionHash: `0x${'0'.repeat(64)}` };
@@ -152,7 +152,7 @@ function rpc({
   };
   if (historicalEvidenceClient === 'default') {
     client.historicalEvidenceClient = {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) {
         return {
           value: archiveBalance,
           blockNumber: archiveBlockNumber ?? blockNumber,
@@ -224,11 +224,11 @@ async function customRow(cycleRepository, cycleId, overrides = {}) {
     heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
   };
   const row = {
-    schema: 'hookemon.custody-ledger.v1',
+    schema: 'hookemon.custody-ledger.v3',
     cycleId,
     chainId: CANONICAL_CHAIN_ID,
     assetId: CANONICAL_ASSET_ID,
-    decimals: 6,
+    decimals:18,gasReserve:{chainId:'4663',assetId:'native',decimals:18,amountAtomic:'10'},gasSpent:{chainId:'4663',assetId:'native',decimals:18,amountAtomic:'0'},gasPayments:[],verifiedCurrentBalance:null,expectedCycleAsset:null,
     ...buckets,
     ...overrides,
   };
@@ -246,8 +246,8 @@ async function rawRow(cycleRepository, cycleId, overrides = {}) {
     schema: 'hookemon.custody-ledger.v1',
     cycleId,
     chainId: '4663',
-    assetId: TOKEN,
-    decimals: 6,
+    assetId: 'native',
+    decimals: 18,
     ...buckets,
     ...overrides,
   };
@@ -290,7 +290,7 @@ test('refuses a raw-only legacy USDG predecessor before any custody write, signa
     }),
     error => {
       assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /legacy raw-identity USDG predecessor row/);
+      assert.match(error.message, /historical custody state/);
       return true;
     },
   );
@@ -300,44 +300,12 @@ test('refuses a raw-only legacy USDG predecessor before any custody write, signa
   const state = await cycleRepository.describeCycle(cycleId);
   assert.equal(state.custodyLedgers.size, 1, 'must not create a competing canonical row');
   assert.deepEqual(state.custodyLedgers.get(RAW_KEY), {
-    schema: 'hookemon.custody-ledger.v1', cycleId, chainId: '4663', assetId: TOKEN, decimals: 6,
+    schema: 'hookemon.custody-ledger.v1', cycleId, chainId: '4663', assetId: 'native', decimals: 18,
     claimed: '100', bridgeOut: '0', bridgeIn: '0', packCost: '0', buybackProceeds: '0',
     returnInput: '0', returnReceived: '0', refunds: '0', residual: '0', heldAssets: '0',
     heldPositions: '0', payoutLiability: '0', dust: '0', unattributed: '0',
   });
-  assert.equal(state.custodyLedgers.get(CANONICAL_KEY), undefined);
-});
-
-test('refuses when a raw predecessor already coexists with a canonical row, leaving both untouched', async t => {
-  const { repository: cycleRepository, cycleId } = await durableCycle(t);
-  const raw = await rawRow(cycleRepository, cycleId, { claimed: '40', returnReceived: '0' });
-  const canonical = await customRow(cycleRepository, cycleId, { claimed: '9', returnReceived: '9' });
-
-  const plan = payoutPlan(cycleId, '9');
-  const counter = { sign: 0 };
-  await assert.rejects(
-    () => mutatePayout({
-      liveMode: true,
-      config: baseConfig(),
-      cycleRepository,
-      context: context(cycleId),
-      request: { plan },
-      adapters: { robinhood: { client: rpc() } },
-      signerClient: signer(counter),
-    }),
-    error => {
-      assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /legacy raw-identity USDG predecessor row/);
-      return true;
-    },
-  );
-  assert.equal(counter.sign, 0, 'must not sign before the raw-predecessor refusal');
-  assert.equal(counter.broadcasts, undefined, 'must not broadcast before the raw-predecessor refusal');
-
-  const state = await cycleRepository.describeCycle(cycleId);
-  assert.equal(state.custodyLedgers.size, 2, 'both the raw and canonical rows must be preserved');
-  assert.deepEqual(state.custodyLedgers.get(RAW_KEY), raw);
-  assert.deepEqual(state.custodyLedgers.get(CANONICAL_KEY), canonical);
+  assert.equal(state.custodyLedgers.get(CANONICAL_KEY).schema, 'hookemon.custody-ledger.v1');
 });
 
 test('writes a new canonical v2 custody row on first admission with a real observation', async t => {
@@ -348,7 +316,7 @@ test('writes a new canonical v2 custody row on first admission with a real obser
   const state = await cycleRepository.describeCycle(cycleId);
   const row = state.custodyLedgers.get(CANONICAL_KEY);
   assert.ok(row, 'expected a canonical v2 custody row');
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(row.schema, 'hookemon.custody-ledger.v3');
   assert.equal(row.chainId, CANONICAL_CHAIN_ID);
   assert.equal(row.assetId, CANONICAL_ASSET_ID);
   assert.equal(row.returnReceived, '9');
@@ -369,7 +337,7 @@ test('upgrades a legitimate existing canonical v1 row, retaining every bucket, o
 
   const state = await cycleRepository.describeCycle(cycleId);
   const row = state.custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(row.schema, 'hookemon.custody-ledger.v3');
   assert.equal(row.claimed, '100');
   assert.equal(row.bridgeIn, '20');
   assert.equal(row.returnReceived, '9');
@@ -392,7 +360,7 @@ test('refuses when the existing canonical row does not yet prove the finalized r
 
   const state = await cycleRepository.describeCycle(cycleId);
   const row = state.custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v1');
+  assert.equal(row.schema, 'hookemon.custody-ledger.v3');
   assert.equal(row.returnReceived, '3');
 });
 
@@ -433,7 +401,7 @@ test('accepts a truthful zero observed balance as evidence, independently of pay
 test('refuses a configured USDG chain mismatch before any custody write', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   const config = baseConfig();
-  config.moneyConfiguration.assets.usdg.chainId = '1';
+  config.moneyConfiguration.assets.eth.chainId = '1';
 
   await assert.rejects(
     () => runPayout({ cycleRepository, cycleId, config, client: rpc() }),
@@ -447,7 +415,7 @@ test('refuses a configured USDG token/asset mismatch before any custody write', 
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   const config = baseConfig();
   const otherToken = `0x${'b'.repeat(40)}`;
-  config.moneyConfiguration.assets.usdg.assetId = otherToken;
+  config.moneyConfiguration.assets.eth.assetId = otherToken;
 
   await assert.rejects(
     () => runPayout({ cycleRepository, cycleId, config, client: rpc() }),
@@ -460,7 +428,7 @@ test('refuses a configured USDG token/asset mismatch before any custody write', 
 test('refuses a configured USDG decimals mismatch before any custody write', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   const config = baseConfig();
-  config.moneyConfiguration.assets.usdg.decimals = 8;
+  config.moneyConfiguration.assets.eth.decimals = 8;
 
   await assert.rejects(
     () => runPayout({ cycleRepository, cycleId, config, client: rpc() }),
@@ -489,7 +457,7 @@ test('refuses a missing archive-capable historical evidence client', async t => 
     () => runPayout({ cycleRepository, cycleId, config: baseConfig(), client: rpc({ historicalEvidenceClient: 'none' }) }),
     error => {
       assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /distinct archive-capable historical evidence client is required/);
+      assert.match(error.message, /distinct native archive evidence reader required/);
       return true;
     },
   );
@@ -503,7 +471,7 @@ test('refuses an archive client that is the same object as the public client', a
     () => runPayout({ cycleRepository, cycleId, config: baseConfig(), client: rpc({ historicalEvidenceClient: 'same' }) }),
     error => {
       assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /distinct archive-capable historical evidence client is required/);
+      assert.match(error.message, /distinct native archive evidence reader required/);
       return true;
     },
   );
@@ -522,7 +490,7 @@ test('refuses an archive read that does not bind the requested finalized block',
     }),
     error => {
       assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /did not bind the requested finalized block/);
+      assert.match(error.message, /native archive evidence checkpoint mismatch/);
       return true;
     },
   );
@@ -541,7 +509,7 @@ test('refuses a public reorg between the finalized read and the recheck', async 
     }),
     error => {
       assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /public finalized block hash changed after the archive read/);
+      assert.match(error.message, /native custody checkpoint changed/);
       return true;
     },
   );
@@ -611,7 +579,7 @@ test('a restarted resume preserves every bucket and expectedCycleAsset with no d
   await runPayout({ cycleRepository, cycleId, config: baseConfig(), client: rpc(), ctx });
   const afterFirst = await cycleRepository.describeCycle(cycleId);
   const firstRow = afterFirst.custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(firstRow.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(firstRow.schema, 'hookemon.custody-ledger.v3');
   assert.equal(firstRow.claimed, '9');
   const dustConsumptionsBefore = afterFirst.payoutDustConsumptions.size;
 
@@ -643,7 +611,7 @@ test('a zero-payable-recipient payout never reads the chain and writes a first-e
 
   assert.equal(evidence.distributablePool.amountAtomic, '0');
   const row = (await cycleRepository.describeCycle(cycleId)).custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(row.schema, 'hookemon.custody-ledger.v3');
   assert.equal(row.verifiedCurrentBalance, null);
 });
 
@@ -671,7 +639,7 @@ test('reconciliation refuses a persisted zero-recipient payout backed only by a 
     }),
     error => {
       assert.ok(error instanceof DirectPayoutError);
-      assert.match(error.message, /legacy raw-identity USDG predecessor row/);
+      assert.match(error.message, /historical custody state/);
       return true;
     },
   );
@@ -679,7 +647,7 @@ test('reconciliation refuses a persisted zero-recipient payout backed only by a 
 
   const beforeReconcile = await cycleRepository.describeCycle(cycleId);
   assert.equal(beforeReconcile.custodyLedgers.size, 1, 'must not create a competing canonical row');
-  assert.equal(beforeReconcile.custodyLedgers.get(CANONICAL_KEY), undefined);
+  assert.equal(beforeReconcile.custodyLedgers.get(CANONICAL_KEY).schema, 'hookemon.custody-ledger.v1');
 
   // Reopen the repository, simulating a restart onto the already-persisted zero-recipient state.
   const reopened = await CycleRepository.open(directory);
@@ -702,7 +670,7 @@ test('reconciliation refuses a completed zero-recipient payout with no existing 
   // atomic-persist-then-custody-refuse sequence as the raw-predecessor case, but leaves no custody
   // row of any kind -- modeling a corrupted or never-admitted custody ledger for this cycle.
   const mismatchedConfig = baseConfig();
-  mismatchedConfig.moneyConfiguration.assets.usdg.chainId = '1';
+  mismatchedConfig.moneyConfiguration.assets.eth.chainId = '1';
   const plan = payoutPlan(cycleId, '0');
   await assert.rejects(
     () => mutatePayout({
@@ -722,32 +690,6 @@ test('reconciliation refuses a completed zero-recipient payout with no existing 
   const facade = reconciliationOnlyFacade(reopened);
   const evidence = await reconcileLivePayout({ config: baseConfig(), cycleRepository: facade, context: context(cycleId) });
   assert.equal(evidence, null, 'a missing custody row must never be treated as evidence of prior admission');
-});
-
-test('reconciliation refuses a completed zero-recipient payout whose custody identity is a raw+canonical pair', async t => {
-  const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
-  const raw = await rawRow(cycleRepository, cycleId, { claimed: '40', returnReceived: '0' });
-  const canonical = await customRow(cycleRepository, cycleId, { claimed: '0', returnReceived: '0' });
-
-  const plan = payoutPlan(cycleId, '0');
-  await mutatePayout({
-    liveMode: true,
-    config: baseConfig(),
-    cycleRepository,
-    context: context(cycleId),
-    request: { plan },
-    adapters: { robinhood: { client: rpc() } },
-    signerClient: signer({ sign: 0 }),
-  }).catch(() => {});
-
-  const reopened = await CycleRepository.open(directory);
-  const facade = reconciliationOnlyFacade(reopened);
-  const evidence = await reconcileLivePayout({ config: baseConfig(), cycleRepository: facade, context: context(cycleId) });
-  assert.equal(evidence, null);
-
-  const state = await reopened.describeCycle(cycleId);
-  assert.deepEqual(state.custodyLedgers.get(RAW_KEY), raw);
-  assert.deepEqual(state.custodyLedgers.get(CANONICAL_KEY), canonical);
 });
 
 test('reconciliation recovers a genuinely completed zero-recipient payout backed by an existing canonical row', async t => {
@@ -813,8 +755,15 @@ test('reconciliation refuses when the runtime USDG contract no longer matches th
   });
 
   const driftedConfig = baseConfig();
-  driftedConfig.contracts.usdg = `0x${'c'.repeat(40)}`;
+  driftedConfig.moneyConfiguration.assets.eth.assetId = `0x${'c'.repeat(40)}`;
   const facade = reconciliationOnlyFacade(cycleRepository);
   const evidence = await reconcileLivePayout({ config: driftedConfig, cycleRepository: facade, context: ctx });
   assert.equal(evidence, null, 'a drifted USDG contract must never finalize a payout signed under a different identity');
+});
+
+test('refuses historical custody reinterpretation before native payout can mutate it', async t => {
+ const {repository,cycleId}=await durableCycle(t);
+ await rawRow(repository,cycleId);
+ await assert.rejects(()=>customRow(repository,cycleId),/cannot reinterpret historical custody as native/);
+ assert.equal((await repository.describeCycle(cycleId)).custodyLedgers.get(CANONICAL_KEY).schema,'hookemon.custody-ledger.v1');
 });

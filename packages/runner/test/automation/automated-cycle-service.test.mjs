@@ -51,11 +51,11 @@ class MemoryCycleRepository {
 }
 
 const readyBudget = () => ({
-  availableProcessUsdg: '55000000',
-  packPriceUsdg: '50000000',
-  outboundCapUsdg: '1000000',
-  returnCapUsdg: '1000000',
-  operatingMarginUsdg: '3000000',
+  availableProcessWei: '55000000',
+  packPriceWei: '50000000',
+  outboundCapWei: '1000000',
+  returnCapWei: '1000000',
+  operatingMarginWei: '3000000',
   activeCycleId: null,
 });
 
@@ -144,12 +144,12 @@ test('refuses a service whose live flag disagrees with its declared provider mod
 });
 
 test('waits without creating a cycle when process liability is below budget', async () => {
-  const { service, cycles } = fixture({ budget: { ...readyBudget(), availableProcessUsdg: '54999999' } });
+  const { service, cycles } = fixture({ budget: { ...readyBudget(), availableProcessWei: '54999999' } });
   assert.deepEqual(await service.runOnce(), {
     status: 'WAITING_FOR_PROCESS_BUDGET',
     cycleId: null,
     stage: null,
-    requiredProcessUsdg: '55000000',
+    requiredProcessWei: '55000000',
   });
   assert.equal(cycles.active, null);
 });
@@ -163,7 +163,7 @@ test('recovers a prepared supplementary settlement without a normal active cycle
     memo: 'memo-supplementary',
     mint: 'mint-supplementary',
     cardRef: 'mint-supplementary',
-    costMicroUsdg: '25',
+    costMicroUsd: '25',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -234,7 +234,7 @@ test('leaves normal recovery idle when a supplementary handler is pending', asyn
     memo: 'memo-supplementary-pending',
     mint: 'mint-supplementary-pending',
     cardRef: 'mint-supplementary-pending',
-    costMicroUsdg: '25',
+    costMicroUsd: '25',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -345,7 +345,7 @@ test('a live service consults policy before cycle creation, claim, purchase, and
   assert.equal(calls.filter(call => call[0] === 'fence').length, AUTOMATED_CYCLE_STAGES.length);
   for (const input of fenceInputs) {
     assert.equal(input.cycleId, 'cycle-1');
-    assert.equal(input.releaseAmountMicroUsdg, '55000000');
+    assert.equal(input.releaseAmountWei, '55000000');
     assert.equal(input.packId, 'base-pack');
     assert.ok(AUTOMATED_CYCLE_STAGES.includes(input.stage));
     assert.match(input.fencingToken, /^[0-9a-f-]{36}$/);

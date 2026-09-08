@@ -107,11 +107,12 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_OPERATIONS_TRIGGER_ACCOUNT',
   'HOOKEMON_SOLANA_ACCOUNT',
   'HOOKEMON_SIGNER_MODULE',
-  'HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG',
+  'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
   'HOOKEMON_BUDGET_PACK_PRICE_USDG',
-  'HOOKEMON_BUDGET_OUTBOUND_CAP_USDG',
-  'HOOKEMON_BUDGET_RETURN_CAP_USDG',
-  'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG',
+  'HOOKEMON_BUDGET_PACK_PRICE_WEI',
+  'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
+  'HOOKEMON_BUDGET_RETURN_CAP_WEI',
+  'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI',
   // WP-33: the operator signer client's backend selection. 'external-module' (default) is the
   // existing HOOKEMON_SIGNER_MODULE flow, unchanged. 'keychain' builds it instead from
   // HOOKEMON_KEYCHAIN_COMMAND/HOOKEMON_KEYCHAIN_EVM_ACCOUNT/HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT through
@@ -149,7 +150,9 @@ const ALLOWED_ENV_VARS = Object.freeze([
   'HOOKEMON_PACK_CODE',
   'HOOKEMON_MIN_ROBINHOOD_RECEIVE',
   'HOOKEMON_MIN_SOLANA_RECEIVE',
-  'HOOKEMON_MIN_RETURN_USDG',
+  'HOOKEMON_MIN_RETURN_ETH',
+  'HOOKEMON_NATIVE_PAYMENT_BINDING_PATH',
+  'HOOKEMON_RELAY_QUOTE_VALIDITY_MS',
   'HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD',
   'HOOKEMON_NATIVE_GAS_CAP_SOLANA',
   'HOOKEMON_EVM_GAS_PRICE_CAP',
@@ -307,18 +310,18 @@ function requireProfileInputs(env, profile) {
       'HOOKEMON_PACK_CODE',
       'HOOKEMON_MIN_ROBINHOOD_RECEIVE',
       'HOOKEMON_MIN_SOLANA_RECEIVE',
-      'HOOKEMON_MIN_RETURN_USDG',
+      'HOOKEMON_MIN_RETURN_ETH',
       'HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD',
       'HOOKEMON_NATIVE_GAS_CAP_SOLANA',
       'HOOKEMON_EVM_GAS_PRICE_CAP',
       'HOOKEMON_EVM_NATIVE_RESERVE',
       'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
       'HOOKEMON_SOLANA_LAMPORT_RESERVE',
-      'HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG',
+      'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
       'HOOKEMON_BUDGET_PACK_PRICE_USDG',
-      'HOOKEMON_BUDGET_OUTBOUND_CAP_USDG',
-      'HOOKEMON_BUDGET_RETURN_CAP_USDG',
-      'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG',
+      'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
+      'HOOKEMON_BUDGET_RETURN_CAP_WEI',
+      'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI',
       'HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS',
       'HOOKEMON_REHEARSAL_PAYOUT_SPLIT',
       'HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT',
@@ -342,18 +345,18 @@ function requireProfileInputs(env, profile) {
     'HOOKEMON_PACK_CODE',
     'HOOKEMON_MIN_ROBINHOOD_RECEIVE',
     'HOOKEMON_MIN_SOLANA_RECEIVE',
-    'HOOKEMON_MIN_RETURN_USDG',
+    'HOOKEMON_MIN_RETURN_ETH',
     'HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD',
     'HOOKEMON_NATIVE_GAS_CAP_SOLANA',
     'HOOKEMON_EVM_GAS_PRICE_CAP',
     'HOOKEMON_EVM_NATIVE_RESERVE',
     'HOOKEMON_SOLANA_PRIORITY_FEE_CAP',
     'HOOKEMON_SOLANA_LAMPORT_RESERVE',
-    'HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG',
+    'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI',
     'HOOKEMON_BUDGET_PACK_PRICE_USDG',
-    'HOOKEMON_BUDGET_OUTBOUND_CAP_USDG',
-    'HOOKEMON_BUDGET_RETURN_CAP_USDG',
-    'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG',
+    'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI',
+    'HOOKEMON_BUDGET_RETURN_CAP_WEI',
+    'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI',
     'HOOKEMON_PROVIDER_MODE',
   ];
   requireExplicit(env, moneyFields);
@@ -506,7 +509,7 @@ function readRehearsal(env, solanaAccount) {
 /** Every field decideCycleBudget (packages/runner/src/automation/budget-gate.mjs) needs, each a
  * canonical unsigned-decimal atomic-USDG string. Defaults are the same conservative "never ready to
  * spend" posture state-schema.mjs's own default operator configuration documents:
- * `availableProcessUsdg: '0'` — a positive `packPriceUsdg` (budget-gate itself requires it to be
+ * `availableProcessWei: '0'` — a positive `packPriceUsdg` (budget-gate itself requires it to be
  * positive) with zero available process liability means `decideCycleBudget` never reports `ready`
  * until the operator explicitly configures a real available balance. */
 function readBudgetAmount(env, name, { defaultValue }) {
@@ -524,13 +527,13 @@ function freezeMoneyConfiguration(value) {
   return Object.freeze({
     schema: value.schema,
     assets: Object.freeze({
-      usdg: Object.freeze({ ...value.assets.usdg }),
+      eth: Object.freeze({ ...value.assets.eth }),
       solanaStablecoin: Object.freeze({ ...value.assets.solanaStablecoin }),
     }),
     minimums: Object.freeze({
       robinhoodReceive: freezeTypedAmount(value.minimums.robinhoodReceive),
       solanaReceive: freezeTypedAmount(value.minimums.solanaReceive),
-      returnUsdg: freezeTypedAmount(value.minimums.returnUsdg),
+      returnEth: freezeTypedAmount(value.minimums.returnEth),
     }),
     evm: Object.freeze({
       perTransactionGasPriceCap: freezeTypedAmount(value.evm.perTransactionGasPriceCap),
@@ -552,20 +555,20 @@ export function validateMoneyConfiguration(value) {
   }
 }
 
-function buildMoneyConfiguration({ profile, chainId, frozenUsdg, relaySolanaMint, relaySolanaDecimals, collectorOnlyRehearsal, minimums, evmGasPriceCap, evmNativeReserve, solanaPriorityFeeCap, solanaLamportReserve }) {
+function buildMoneyConfiguration({ profile, chainId, relaySolanaMint, relaySolanaDecimals, collectorOnlyRehearsal, minimums, evmGasPriceCap, evmNativeReserve, solanaPriorityFeeCap, solanaLamportReserve }) {
   if (profile === 'inspection') return null;
   if (!collectorOnlyRehearsal && (relaySolanaMint === null || relaySolanaDecimals === null)) {
     throw new MoneyConfigurationRejected('configured Solana stablecoin asset metadata is required');
   }
-  const usdg = Object.freeze({
+  const eth = Object.freeze({
     chainId: String(chainId),
-    assetId: frozenUsdg.address,
-    decimals: frozenUsdg.decimals,
+    assetId: 'native',
+    decimals: 18,
   });
   const solanaStablecoin = Object.freeze(collectorOnlyRehearsal
     ? { chainId: 'solana-mainnet', assetId: CIRCLE_USD_MINT, decimals: CIRCLE_USD_DECIMALS }
     : { chainId: '792703809', assetId: relaySolanaMint, decimals: relaySolanaDecimals });
-  const evmNative = Object.freeze({ chainId: usdg.chainId, assetId: 'native', decimals: 18 });
+  const evmNative = Object.freeze({ chainId: eth.chainId, assetId: 'native', decimals: 18 });
   const solanaNative = Object.freeze({ chainId: solanaStablecoin.chainId, assetId: 'native', decimals: 9 });
   const solanaPriorityFee = Object.freeze({
     chainId: solanaStablecoin.chainId,
@@ -573,12 +576,12 @@ function buildMoneyConfiguration({ profile, chainId, frozenUsdg, relaySolanaMint
     decimals: 0,
   });
   return validateMoneyConfiguration({
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: minimums.robinhoodReceive },
+      robinhoodReceive: { ...eth, amountAtomic: minimums.robinhoodReceive },
       solanaReceive: { ...solanaStablecoin, amountAtomic: minimums.solanaReceive },
-      returnUsdg: { ...usdg, amountAtomic: minimums.returnUsdg },
+      returnEth: { ...eth, amountAtomic: minimums.returnEth },
     },
     evm: {
       perTransactionGasPriceCap: { ...evmNative, amountAtomic: evmGasPriceCap },
@@ -825,8 +828,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const leaseTtlMs = readPositiveInteger(env, 'HOOKEMON_LEASE_TTL_MS', { defaultValue: DEFAULT_LEASE_TTL_MS });
   const defaultIntervalMs = readPositiveInteger(env, 'HOOKEMON_DEFAULT_INTERVAL_MS', { defaultValue: 1_200_000 });
   const chainId = readPositiveInteger(env, 'HOOKEMON_CHAIN_ID', { defaultValue: DEFAULT_CHAIN_ID });
-  const frozenUsdg = readFrozenUsdgBinding();
-  if (chainId !== frozenUsdg.chainId) fail('HOOKEMON_CHAIN_ID must match the frozen USDG binding chainId');
+  if (chainId !== 4663) fail('native runtime requires Robinhood chain 4663');
 
   const robinhoodRpcUrl = readUrl(env, 'HOOKEMON_ROBINHOOD_RPC_URL', { defaultValue: DEFAULT_ROBINHOOD_RPC_URL });
   const robinhoodArchiveRpcUrl = readUrl(env, 'HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL', { defaultValue: null });
@@ -928,7 +930,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
       fail('production profile requires both Operations identities');
     }
     if (relaySolanaMint === null || relayEvmDepository === null) {
-      fail('production profile requires explicit USDG and Solana stablecoin asset routes');
+      fail('production profile requires explicit native ETH and Solana stablecoin asset routes');
     }
     // Asset-identity check only, not a chain-id/namespace claim: the Collector Crypt platform only
     // ever settles purchase/buyback in the documented mint and decimals identified by
@@ -992,6 +994,10 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   if (standingAuthorityPaths.some(path => path === null) && standingAuthorityPaths.some(path => path !== null)) {
     fail('HOOKEMON_STANDING_AUTHORITY_PATH, HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH, and HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH must be set together');
   }
+  const nativePaymentBindingPath = readAbsolutePath(env, 'HOOKEMON_NATIVE_PAYMENT_BINDING_PATH', { required: false });
+  const relayQuoteValidityMsRaw = readString(env, 'HOOKEMON_RELAY_QUOTE_VALIDITY_MS', { defaultValue: null });
+  const relayQuoteValidityMs = relayQuoteValidityMsRaw === null ? null : Number(relayQuoteValidityMsRaw);
+  if (relayQuoteValidityMs !== null && (!Number.isSafeInteger(relayQuoteValidityMs) || relayQuoteValidityMs <= 0)) fail('HOOKEMON_RELAY_QUOTE_VALIDITY_MS must be explicit positive milliseconds');
   const observability = readJsonObjectFile(env, 'HOOKEMON_OBSERVABILITY_CONFIG_PATH', {
     required: profile !== 'inspection' && !collectorOnlyRehearsal,
   });
@@ -1004,7 +1010,7 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const minimums = Object.freeze({
     robinhoodReceive: readBudgetAmount(env, 'HOOKEMON_MIN_ROBINHOOD_RECEIVE', { defaultValue: '0' }),
     solanaReceive: readBudgetAmount(env, 'HOOKEMON_MIN_SOLANA_RECEIVE', { defaultValue: '0' }),
-    returnUsdg: readBudgetAmount(env, 'HOOKEMON_MIN_RETURN_USDG', { defaultValue: '0' }),
+    returnEth: readBudgetAmount(env, 'HOOKEMON_MIN_RETURN_ETH', { defaultValue: '0' }),
   });
   const nativeGasCaps = Object.freeze({
     robinhood: readBudgetAmount(env, 'HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD', { defaultValue: '0' }),
@@ -1013,7 +1019,6 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   const moneyConfiguration = buildMoneyConfiguration({
     profile,
     chainId,
-    frozenUsdg,
     relaySolanaMint,
     relaySolanaDecimals,
     collectorOnlyRehearsal,
@@ -1045,11 +1050,12 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
   }
 
   const budget = Object.freeze({
-    availableProcessUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG', { defaultValue: '0' }),
+    availableProcessWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI', { defaultValue: '0' }),
+    packPriceWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_PACK_PRICE_WEI', { defaultValue: '0' }),
     packPriceUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_PACK_PRICE_USDG', { defaultValue: '0' }),
-    outboundCapUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_OUTBOUND_CAP_USDG', { defaultValue: '0' }),
-    returnCapUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_RETURN_CAP_USDG', { defaultValue: '0' }),
-    operatingMarginUsdg: readBudgetAmount(env, 'HOOKEMON_BUDGET_OPERATING_MARGIN_USDG', { defaultValue: '0' }),
+    outboundCapWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_OUTBOUND_CAP_WEI', { defaultValue: '0' }),
+    returnCapWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_RETURN_CAP_WEI', { defaultValue: '0' }),
+    operatingMarginWei: readBudgetAmount(env, 'HOOKEMON_BUDGET_OPERATING_MARGIN_WEI', { defaultValue: '0' }),
   });
   if (liveCollectorOnly && budget.packPriceUsdg !== COLLECTOR_ONLY_PACK_PRICE_ATOMIC) {
     fail(`live collector-only rehearsal requires HOOKEMON_BUDGET_PACK_PRICE_USDG=${COLLECTOR_ONLY_PACK_PRICE_ATOMIC}`);
@@ -1099,12 +1105,14 @@ export function readEnvironment(env = process.env, { profile = 'inspection', dry
     contracts: Object.freeze({
       vault: vaultAddress,
       hook: hookAddress,
-      usdg: frozenUsdg.address,
-      usdgDecimals: frozenUsdg.decimals,
+      quoteCurrency: '0x0000000000000000000000000000000000000000',
+      quoteDecimals: 18,
       treasury: treasuryAddress,
       pool: poolAddress,
     }),
     accounts: Object.freeze({ evm: evmAccount, solana: solanaAccount }),
+    nativePaymentBindingPath,
+    relayQuoteValidityMs,
     budget,
     signerModulePath,
     signer: Object.freeze({

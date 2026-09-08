@@ -1,3 +1,5 @@
+import { applyNativeCustodyGasPayment } from '../../native-payment-proof.mjs';
+import { createNativePaymentProof } from '../../native-payment-proof.mjs';
 import {
   decodeEventLog,
   keccak256,
@@ -6,11 +8,10 @@ import {
   recoverTransactionAddress,
 } from 'viem';
 
-import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import { createNativeCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
 import { buildClaimProcessCall, HOOK_ABI } from '../../hook-contract-client.mjs';
 import {
   RobinhoodMalformedResponseError,
-  readFinalizedErc20TransferCredit,
   readFinalizedTransactionReceipt,
   readTransaction,
   sendRawTransaction,
@@ -30,17 +31,17 @@ import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
-import { deriveOnchainCycleId, readUsdgAddress } from './action-builder.mjs';
+import { deriveOnchainCycleId } from './action-builder.mjs';
 import { readBlockByNumber, readFinalizedBlock } from '../../robinhood-rpc.mjs';
 import { StageMutationRevertedError } from './errors.mjs';
 import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
-const USDG_DECIMALS = 6;
+const NATIVE_DECIMALS = 18;
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_HASH = /^0x[0-9a-fA-F]{64}$/;
 const EVM_BYTES = /^0x(?:[0-9a-fA-F]{2})+$/;
 const CLAIM_EVENT_ABI = parseAbi([
-  'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountAtomicUsdg, address indexed destination, uint256 timestamp, uint256 cap, uint256 usedAfter)',
+  'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountWei, address indexed destination, uint256 timestamp, uint256 cap, uint256 usedAfter)',
 ]);
 const TEST_PROFILE_MUTATION_AUTHORITY = createTestProfileMutationAuthority();
 
@@ -60,7 +61,8 @@ function assertClaimConfiguration(config) {
     chainId: config.chainId ?? 4663,
     hook: config.contracts.hook,
     operations: config.accounts.evm,
-    usdg: readUsdgAddress(config),
+    nativePaymentBinding: config.nativePaymentBinding,
+    gasReserve: config.moneyConfiguration?.evm?.nativeReserve,
   };
 }
 
@@ -69,12 +71,12 @@ function assertClaimMoneyConfiguration(config, configured) {
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'claim-process money configuration');
   } catch (error) {
-    throw new Error(`claim-process requires MoneyConfigurationV1: ${error.message}`);
+    throw new Error(`claim-process requires MoneyConfigurationV2: ${error.message}`);
   }
-  if (money.assets.usdg.chainId !== String(configured.chainId)
-    || money.assets.usdg.assetId.toLowerCase() !== configured.usdg.toLowerCase()
-    || money.assets.usdg.decimals !== USDG_DECIMALS) {
-    throw new Error('claim-process MoneyConfigurationV1 USDG asset does not match the configured claim route');
+  if (money.assets.eth.chainId !== String(configured.chainId)
+    || money.assets.eth.assetId.toLowerCase() !== 'native'
+    || money.assets.eth.decimals !== NATIVE_DECIMALS) {
+    throw new Error('claim-process MoneyConfigurationV2 native ETH asset does not match the configured claim route');
   }
   return money;
 }
@@ -165,12 +167,12 @@ async function prepareClaimTransaction({ adapters, configured, call, money }) {
   const maxFeePerGas = positiveBigInt(fees?.maxFeePerGas, 'claim-process EIP-1559 maxFeePerGas');
   const maxPriorityFeePerGas = positiveBigInt(fees?.maxPriorityFeePerGas, 'claim-process EIP-1559 maxPriorityFeePerGas');
   const gasLimit = positiveBigInt(gas, 'claim-process estimated gas');
-  const gasPriceCap = positiveBigInt(money.evm.perTransactionGasPriceCap.amountAtomic, 'claim-process MoneyConfigurationV1 EVM gas-price cap');
+  const gasPriceCap = positiveBigInt(money.evm.perTransactionGasPriceCap.amountAtomic, 'claim-process MoneyConfigurationV2 EVM gas-price cap');
   if (maxFeePerGas > gasPriceCap || maxPriorityFeePerGas > gasPriceCap || maxPriorityFeePerGas > maxFeePerGas) {
-    throw new Error('claim-process EIP-1559 gas price exceeds the configured MoneyConfigurationV1 cap');
+    throw new Error('claim-process EIP-1559 gas price exceeds the configured MoneyConfigurationV2 cap');
   }
   const requiredNative = (gasLimit * maxFeePerGas)
-    + nonnegativeBigInt(money.evm.nativeReserve.amountAtomic, 'claim-process MoneyConfigurationV1 EVM native reserve');
+    + nonnegativeBigInt(money.evm.nativeReserve.amountAtomic, 'claim-process MoneyConfigurationV2 EVM native reserve');
   if (nonnegativeBigInt(balance, 'claim-process Operations native balance') < requiredNative) {
     throw new Error('claim-process Operations native balance does not retain the configured reserve after quoted gas');
   }
@@ -206,6 +208,7 @@ export async function prepareClaimProcessRequest({ config, cycleRepository, cont
   if (hasUnresolvedCustody(custody)) {
     throw new Error('claim-process refuses while custody has unresolved assets or obligations');
   }
+  if (cycle?.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native claim refuses historical or unbound cycle admission');
   const amountAtomic = cycle?.releaseAmount;
   if (typeof amountAtomic !== 'string' || !ATOMIC_AMOUNT.test(amountAtomic) || amountAtomic === '0') {
     throw new Error('claim-process requires a positive canonical cycle release amount');
@@ -215,14 +218,14 @@ export async function prepareClaimProcessRequest({ config, cycleRepository, cont
   const onchainCycleId = deriveOnchainCycleId(context.cycleId);
   const call = buildClaimProcessCall(configured.hook, onchainCycleId, amountAtomic, configured.operations);
   return Object.freeze({
-    schema: 'hookemon.claim-process-request.v1',
+    schema: 'hookemon.claim-process-request.v2',
     cycleId: context.cycleId,
     onchainCycleId,
     destination: configured.operations,
     amount: Object.freeze({
       chainId: String(configured.chainId),
-      assetId: configured.usdg.toLowerCase(),
-      decimals: USDG_DECIMALS,
+      assetId: 'native',
+      decimals: NATIVE_DECIMALS,
       amountAtomic,
     }),
     call,
@@ -619,7 +622,7 @@ function claimEvent(receipt, { hook, onchainCycleId, destination, amountAtomic }
       if (decoded.eventName !== 'ProcessClaimed') continue;
       if (decoded.args.cycleId?.toLowerCase() !== onchainCycleId.toLowerCase()
         || !equalAddress(decoded.args.destination, destination)
-        || decoded.args.amountAtomicUsdg !== BigInt(amountAtomic)) {
+        || decoded.args.amountWei !== BigInt(amountAtomic)) {
         continue;
       }
       matches.push(decoded);
@@ -634,39 +637,17 @@ function claimEvent(receipt, { hook, onchainCycleId, destination, amountAtomic }
 }
 
 function claimCustodyAsset(configured) {
-  const chainId = `eip155:${configured.chainId}`;
+  const chainId = String(configured.chainId);
   return Object.freeze({
     chainId,
-    assetId: `${chainId}/erc20:${configured.usdg.toLowerCase()}`,
-    decimals: USDG_DECIMALS,
+    assetId: 'native',
+    decimals: NATIVE_DECIMALS,
   });
 }
 
-/**
- * The legacy, pre-canonical row identity for this same configured EVM USDG asset: a raw
- * `(chainId, address)` pair (no `eip155:`/`erc20:` CAIP wrapping), the same raw shape
- * `returnSettlementCustodyLedger` keys its own row by (ADR-0026). This claim writer has always used
- * the canonical CAIP identity from `claimCustodyAsset` -- it never produced this raw key itself --
- * but `custodyLedgerKey` is an exact string match, so a row already durable under this raw key for
- * this asset is invisible to a canonical-only lookup. Derived only from `assertClaimConfiguration`
- * output, matching `claimCustodyAsset`'s own trusted inputs exactly.
- */
-function legacyRawClaimCustodyKey(configured) {
-  return `${String(configured.chainId)}${String.fromCharCode(0)}${configured.usdg.toLowerCase()}`;
-}
-
-/**
- * ADR-0026's dedicated EVM USDG `CustodyBalanceObservationV1` producer, invoked at the moment this
- * writer records a v2 row for the claim key. `identity` is built only from `assertClaimConfiguration`
- * output (`asset`, already the canonical CAIP identity `claimCustodyAsset` derives, plus the
- * configured Operations address) -- never from any RPC response or candidate evidence. Reuses the
- * public-finalized-head -> distinct-archive-read-at-that-height/hash -> public-same-height-recheck
- * discipline `createEvmCustodyBalanceObservationReader` already owns; this function neither reads
- * chain state directly nor claims causal provenance for the claim -- that authority is the already
- * -verified canonical transaction/event/credit this is only ever called after.
- */
+/** Independently observe native custody at a finalized public/archive checkpoint. */
 async function observeClaimCustodyBalance({ adapters, configured, asset }) {
-  const observeBalance = createEvmCustodyBalanceObservationReader({
+  const observeBalance = createNativeCustodyBalanceObservationReader({
     publicClient: adapters?.robinhood?.client ?? null,
     archiveClient: adapters?.robinhood?.historicalEvidenceClient ?? null,
     identity: {
@@ -679,21 +660,15 @@ async function observeClaimCustodyBalance({ adapters, configured, asset }) {
   return observeBalance();
 }
 
-async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters) {
+async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, nativeProof) {
   if (typeof cycleRepository?.recordCustodyLedger !== 'function') {
     throw new Error('claim-process requires custody-ledger persistence before finality');
   }
-  // Refuse before any balance read or custody write -- and before finality ever advances -- if a
-  // durable legacy raw-identity row for this same configured asset exists at all, regardless of its
-  // bucket values (an all-zero row, or the common historical-return shape of claimed='0' with a
-  // nonzero returnReceived, is exactly as ambiguous as a nonzero claimed row: the identity split
-  // itself is the problem, not any one bucket), and whether or not a canonical row also already
-  // coexists. This is detection only: no bucket is copied or aliased across the two keys, no row is
-  // touched or migrated, and the already-legitimate canonical v1-to-v2 upgrade path is unaffected
-  // when no such row exists.
-  const legacyRawRow = cycle?.custodyLedgers?.get?.(legacyRawClaimCustodyKey(configured)) ?? null;
-  if (legacyRawRow !== null) {
-    throw new Error('claim-process refuses: a legacy raw-identity custody row exists for this asset, an unresolved raw/canonical identity conflict; resolve it before any canonical custody write or finality advancement');
+  // Historical EVM rows never become native execution state.
+  for (const row of cycle?.custodyLedgers?.values?.() ?? []) {
+    if (row.schema !== 'hookemon.custody-ledger.v3' && (row.chainId === '4663' || row.chainId === 'eip155:4663')) {
+      throw new Error('native claim cannot resume historical EVM custody');
+    }
   }
   const asset = claimCustodyAsset(configured);
   const key = `${asset.chainId}\u0000${asset.assetId}`;
@@ -704,7 +679,7 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
       || existing.chainId !== asset.chainId
       || existing.assetId !== asset.assetId
       || existing.decimals !== asset.decimals) {
-      throw new Error('claim-process existing custody ledger does not match the finalized USDG credit');
+      throw new Error('claim-process existing custody ledger does not match the finalized native ETH credit');
     }
     if (existing.claimed !== '0' && existing.claimed !== amountAtomic) {
       throw new Error('claim-process existing custody ledger has a conflicting claimed amount');
@@ -721,16 +696,18 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
   // ADR-0026: only the dedicated return-leg writers may populate or clear `expectedCycleAsset`; this
   // generic claim writer must carry an existing v2 row's value forward unchanged, never null it out
   // from under an in-flight return expectation.
-  const expectedCycleAsset = existing?.schema === 'hookemon.custody-ledger.v2' ? existing.expectedCycleAsset : null;
+  const expectedCycleAsset = existing?.schema === 'hookemon.custody-ledger.v3' ? existing.expectedCycleAsset : null;
   await cycleRepository.recordCustodyLedger(
     request.cycleId,
     Object.freeze({
-      schema: 'hookemon.custody-ledger.v2',
+      schema: 'hookemon.custody-ledger.v3',
       cycleId: request.cycleId,
       ...asset,
       ...buckets,
       verifiedCurrentBalance,
       expectedCycleAsset,
+      gasReserve: existing?.gasReserve ?? configured.gasReserve,
+      ...applyNativeCustodyGasPayment(existing ?? { schema: 'hookemon.custody-ledger.v3', ...asset, gasPayments: [], gasSpent: { ...asset, amountAtomic: '0' } }, nativeProof),
     }),
   );
 }
@@ -763,14 +740,9 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
   let chain = attempts[0];
   const request = await prepareClaimProcessRequest({ config, cycleRepository, context });
   const configured = assertClaimConfiguration(config);
-  if (chain.attempt.state === 'FINALIZED') {
-    await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters);
-    await releaseClaimWalletNonce({ cycleRepository, context, configured });
-    return Object.freeze(chain.finalityEvidence);
-  }
   if (!adapters?.robinhood?.client) return null;
   if (chain.attempt.state === 'PREPARED') return null;
-  if (!['SIGNED', 'BROADCAST'].includes(chain.attempt.state)) {
+  if (!['SIGNED', 'BROADCAST', 'FINALIZED'].includes(chain.attempt.state)) {
     throw new Error(`claim-process chain attempt is in unexpected state ${chain.attempt.state}`);
   }
   const transactionHash = chain.attempt.hash;
@@ -796,7 +768,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
       Object.freeze({ transactionHash }),
     );
   }
-  if (chain.attempt.state !== 'BROADCAST') return null;
+  if (!['BROADCAST', 'FINALIZED'].includes(chain.attempt.state)) return null;
   let observation;
   try {
     observation = await readFinalizedTransactionReceipt(adapters.robinhood.client, transactionHash);
@@ -828,16 +800,17 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
     destination: request.destination,
     amountAtomic: request.amount.amountAtomic,
   });
-  const credit = await readFinalizedErc20TransferCredit(adapters.robinhood.client, {
-    hash: transactionHash,
-    token: configured.usdg,
-    recipient: configured.operations,
+  const nativeProof = await createNativePaymentProof({
+    client: adapters.robinhood.client,
+    signedTransaction: chain.attempt.rawBytes,
+    expected: {
+      kind: 'hook-claim', chainId: String(configured.chainId), assetId: 'native', decimals: 18,
+      transactionHash, source: configured.hook, recipient: configured.operations,
+      transactionSender: configured.operations, amountWei: request.amount.amountAtomic,
+      calldataDigest: keccak256(request.call.data), nonce: String(parseTransaction(chain.attempt.rawBytes).nonce),
+      cycleId: request.onchainCycleId, hookRuntimeHash: configured.nativePaymentBinding?.hook?.runtimeHash,
+    },
   });
-  const matchingTransfers = credit.transfers.filter(transfer => equalAddress(transfer.from, configured.hook)
-    && transfer.amountAtomic === request.amount.amountAtomic);
-  if (!credit.finalized || credit.successful !== true || matchingTransfers.length !== 1 || credit.transfers.length !== 1) {
-    throw new Error('claim-process receipt does not prove one exact USDG credit from the hook to Operations');
-  }
   const evidence = Object.freeze({
     transactionHash,
     finalized: true,
@@ -845,9 +818,10 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
     finalizedBlockHash: observation.receipt.blockHash.toLowerCase(),
     receiptStatus: observation.receipt.status,
     claimedAmountAtomic: request.amount.amountAtomic,
+    nativePaymentProof: nativeProof,
     destination: request.destination,
   });
-  await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters);
+  await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters, nativeProof);
   await cycleRepository.recordFinality(context.cycleId, 'claim-process', chain.attempt.requestDigest, evidence);
   await releaseClaimWalletNonce({ cycleRepository, context, configured });
   return evidence;

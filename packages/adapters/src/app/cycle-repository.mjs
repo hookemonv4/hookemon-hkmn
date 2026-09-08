@@ -1,3 +1,4 @@
+import { isProcessNativePaymentProof } from '../native-payment-proof.mjs';
 // The durable authority for one operational cycle. `compose.mjs` injects this same instance into
 // the scheduler, CLI service, and in-process dashboard so they observe one append-only journal
 // rather than a placeholder runner or a second store. The exported client facade gives future
@@ -18,7 +19,7 @@ import { isProcessRpcFinalizedErc20TransferProof } from '../robinhood-rpc.mjs';
 import { isProcessRpcRelayDestinationObservation } from '../solana-rpc.mjs';
 import { isProcessRpcOutboundRefundProof } from './stages/outbound.mjs';
 import { isProcessRpcReturnLegDestinationProof } from './stages/return.mjs';
-import { assertPolicyAdmission } from '../../../runner/src/automation/policy-engine.mjs';
+import { assertPolicyAdmission, decodeHistoricalPolicyAdmission } from '../../../runner/src/automation/policy-engine.mjs';
 import {
   assertRelayLeg,
   assertStandingAuthorityDecision,
@@ -472,7 +473,7 @@ function createStateDirectoryRecoveryRepository(hold) {
         heldAssets: true,
         unattributed: true,
         unresolvedObligations: true,
-        heldPositions: Object.freeze({ count: 0, valueMicroUsdg: '0', positions: Object.freeze([]) }),
+        heldPositions: Object.freeze({ count: 0, valueMicroUsd: '0', positions: Object.freeze([]) }),
       });
     },
     async readHeldPosition() { return null; },
@@ -622,7 +623,7 @@ function assertReservedCycleId(value) {
  * store accepts is exactly the record that engine will digest and that outbound will replay. What
  * this adds is the persistence-boundary obligation that the record names this cycle.
  */
-function assertDurableCycleAdmission(value, cycleId, operations, label = 'cycle-repository admission') {
+function assertDurableCycleAdmission(value, cycleId, operations, label = 'cycle-repository admission', { historicalRead = false } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new Error(`${label} must be a plain object`);
   }
@@ -630,7 +631,8 @@ function assertDurableCycleAdmission(value, cycleId, operations, label = 'cycle-
   // route legs, order binding, and each quote digest recomputed from that evidence rather than
   // trusted as supplied. What is persisted is that normalized result, so the stored record cannot
   // contain executable raw steps the checks never saw.
-  const normalized = assertPolicyAdmission(value, operations);
+  const normalized = historicalRead && value.schema === 'hookemon.policy-admission.v2'
+    ? decodeHistoricalPolicyAdmission(value, operations ?? undefined) : assertPolicyAdmission(value, operations);
   if (normalized.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
   canonicalJson(normalized);
   return Object.freeze(structuredClone(normalized));
@@ -750,11 +752,18 @@ function assertCustodyLedgerTransition(previous, next, label = 'cycle-repository
   if (previous.decimals !== next.decimals) {
     throw new Error(`${label} decimals are immutable for this cycle, chain, and asset`);
   }
+  if (previous.schema === 'hookemon.custody-ledger.v3' && next.schema !== previous.schema) throw new Error(`${label} cannot downgrade native custody`);
+  if (next.schema === 'hookemon.custody-ledger.v3' && previous.schema !== next.schema) throw new Error(`${label} cannot reinterpret historical custody as native`);
+  if (next.schema === 'hookemon.custody-ledger.v3' && BigInt(next.gasSpent.amountAtomic) < BigInt(previous.gasSpent.amountAtomic)) throw new Error(`${label} cannot erase native gas costs`);
+  if (next.schema === 'hookemon.custody-ledger.v3' && (next.gasPayments.length < previous.gasPayments.length
+    || previous.gasPayments.some((payment, index) => canonicalJson(payment) !== canonicalJson(next.gasPayments[index])))) {
+    throw new Error(`${label} native gas payment history is append-only`);
+  }
   if (previous.schema === 'hookemon.custody-ledger.v2' && next.schema !== 'hookemon.custody-ledger.v2') {
     throw new Error(`${label} cannot downgrade from hookemon.custody-ledger.v2 to v1 for this key`);
   }
-  const previousBalance = previous.schema === 'hookemon.custody-ledger.v2' ? previous.verifiedCurrentBalance : null;
-  const nextBalance = next.schema === 'hookemon.custody-ledger.v2' ? next.verifiedCurrentBalance : null;
+  const previousBalance = ['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(previous.schema) ? previous.verifiedCurrentBalance : null;
+  const nextBalance = ['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(next.schema) ? next.verifiedCurrentBalance : null;
   // A key already exists (`previous` is non-null here): interfaces.json permits a null
   // verifiedCurrentBalance only on a key's genuine first-ever write, never on any later write to
   // that same key -- including a v1 row's first-ever v2 write, and including a v2 row that itself
@@ -762,7 +771,7 @@ function assertCustodyLedgerTransition(previous, next, label = 'cycle-repository
   if (previousBalance !== null && nextBalance === null) {
     throw new Error(`${label} cannot erase a previously recorded verifiedCurrentBalance`);
   }
-  if (next.schema === 'hookemon.custody-ledger.v2' && nextBalance === null) {
+  if (['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(next.schema) && nextBalance === null) {
     throw new Error(`${label} verifiedCurrentBalance may be null only on a key's first-ever write`);
   }
   if (previousBalance === null) return;
@@ -785,8 +794,8 @@ function assertCustodyLedgerTransition(previous, next, label = 'cycle-repository
  * caller cannot manufacture or erase an expectation without its Relay leg.
  */
 function assertCustodyLedgerExpectedAssetUnchanged(previous, next, label = 'cycle-repository custody ledger') {
-  const previousExpected = previous?.schema === 'hookemon.custody-ledger.v2' ? previous.expectedCycleAsset : null;
-  const nextExpected = next.schema === 'hookemon.custody-ledger.v2' ? next.expectedCycleAsset : null;
+  const previousExpected = ['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(previous?.schema) ? previous.expectedCycleAsset : null;
+  const nextExpected = ['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(next.schema) ? next.expectedCycleAsset : null;
   if (canonicalJson(nextExpected) !== canonicalJson(previousExpected)) {
     throw new Error(`${label} expectedCycleAsset can only be populated or cleared by the dedicated return-leg expectation and settlement/held-clearing writers`);
   }
@@ -1032,32 +1041,13 @@ function canonicalFinalityInteger(value, label) {
 }
 
 function observedOutboundSourceFinality(leg, sourceProof, route) {
-  if (!isProcessRpcFinalizedErc20TransferProof(sourceProof, {
-    hash: leg.sourceTxHash,
-    token: leg.sourceAssetId,
-    source: route.sourceSender,
-    recipient: route.sourceRecipient,
-    amountAtomic: leg.sourceAmountAtomic,
-  })) {
-    throw new Error('relay settlement requires an own process RPC source proof');
+  if (leg.schema !== 'hookemon.relay-leg.v2' || leg.sourceAssetId !== 'native' || leg.sourceDecimals !== 18
+    || !isProcessNativePaymentProof(sourceProof, { kind: 'direct', chainId: '4663', assetId: 'native', decimals: 18,
+      transactionHash: leg.sourceTxHash.toLowerCase(), source: route.sourceSender.toLowerCase(),
+      recipient: route.sourceRecipient.toLowerCase(), amountWei: leg.sourceAmountAtomic })) {
+    throw new Error('relay settlement requires an own process finalized native source proof');
   }
-  if (sourceProof.finalized !== true || sourceProof.successful !== true || sourceProof.proofAvailable !== true
-    || sourceProof.amountAtomic !== leg.sourceAmountAtomic
-    || sourceProof.sourceBalanceDeltaAtomic !== leg.sourceAmountAtomic
-    || sourceProof.recipientBalanceDeltaAtomic !== leg.sourceAmountAtomic) {
-    throw new Error('relay settlement source proof does not prove the exact finalized source delta');
-  }
-  if (typeof sourceProof.receiptBlockHash !== 'string' || sourceProof.receiptBlockHash.length === 0) {
-    throw new Error('relay settlement source proof has no finalized block hash');
-  }
-  return Object.freeze({
-    height: canonicalFinalityInteger(sourceProof.receiptBlockNumber, 'relay settlement source proof block number'),
-    hash: sourceProof.receiptBlockHash,
-    timestampUnixSeconds: canonicalFinalityInteger(
-      sourceProof.receiptBlockTimestampUnixSeconds,
-      'relay settlement source proof timestamp',
-    ),
-  });
+  return Object.freeze({ height: sourceProof.blockNumber, hash: sourceProof.blockHash, timestampUnixSeconds: sourceProof.timestampUnixSeconds });
 }
 
 function observedOutboundDestination(leg, destinationObservation, route) {
@@ -1152,7 +1142,7 @@ function observedOutboundRefundSettlement(state, leg, sourceFinality, refundProo
   if (!isProcessRpcOutboundRefundProof(refundProof, {
     relayRequestId: leg.relayRequestId,
     sourceTxHash: leg.sourceTxHash,
-    observedSource: route.sourceRecipient,
+    sourceDepository: route.sourceRecipient,
   })) {
     throw new Error('relay refund settlement requires an own process RPC origin credit proof');
   }
@@ -1167,18 +1157,23 @@ function observedOutboundRefundSettlement(state, leg, sourceFinality, refundProo
     'transferCount',
     'observedToken',
     'observedSource',
+    'sourceDepository',
+    'nativePaymentProof',
     'observedRecipient',
     'observedAmountAtomic',
   ], 'relay refund proof');
   assertPlainExactObject(refundProof.terminalStatus, ['status', 'refundTxHash'], 'relay refund terminal status');
-  if (refundProof.schema !== 'hookemon.outbound-relay-origin-refund-proof.v1'
+  if (refundProof.schema !== 'hookemon.outbound-relay-origin-refund-proof.v2'
+    || leg.schema !== 'hookemon.relay-leg.v2'
+    || !isProcessNativePaymentProof(refundProof.nativePaymentProof, { kind: 'relay-refund', transactionHash: refundProof.refundTxHash,
+      source: refundProof.observedSource, recipient: refundProof.observedRecipient, amountWei: refundProof.observedAmountAtomic })
     || refundProof.relayRequestId !== leg.relayRequestId
     || refundProof.terminalStatus.status !== 'REFUND'
     || !sameRelayTransactionHash(leg.sourceChainId, refundProof.sourceTxHash, leg.sourceChainId, leg.sourceTxHash)
     || !sameRelayTransactionHash(leg.sourceChainId, refundProof.refundTxHash, leg.sourceChainId, refundProof.terminalStatus.refundTxHash)
     || refundProof.transferCount !== 1
-    || refundProof.observedToken !== assertEvmAddress(leg.sourceAssetId, 'relay refund source asset')
-    || refundProof.observedSource !== route.sourceRecipient
+    || refundProof.observedToken !== 'native'
+    || refundProof.sourceDepository !== route.sourceRecipient
     || refundProof.observedRecipient !== route.sourceSender
     || typeof refundProof.observedAmountAtomic !== 'string'
     || !decimalPattern.test(refundProof.observedAmountAtomic)
@@ -1285,7 +1280,7 @@ function returnSettlementCustodyLedger(state, leg) {
     return {
       ...previous,
       returnReceived: (BigInt(previous.returnReceived) + received).toString(),
-      ...(previous.schema === 'hookemon.custody-ledger.v2' ? { expectedCycleAsset: null } : {}),
+      ...(['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(previous.schema) ? { expectedCycleAsset: null } : {}),
     };
   }
   return {
@@ -1321,7 +1316,7 @@ function clearedReturnExpectationLedger(state, leg) {
   const key = state.returnLegLedgerKeys.get(leg.relayRequestId)
     ?? custodyLedgerKey({ chainId: leg.destinationChainId, assetId: leg.destinationAssetId });
   const previous = state.custodyLedgers.get(key) ?? null;
-  if (previous === null || previous.schema !== 'hookemon.custody-ledger.v2' || previous.expectedCycleAsset === null) {
+  if (previous === null || !['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(previous.schema) || previous.expectedCycleAsset === null) {
     return null;
   }
   return { ...previous, expectedCycleAsset: null };
@@ -1386,6 +1381,9 @@ function assertRelaySettlementInput(leg, value, state) {
 }
 
 function observedReturnRelaySettlement(state, leg, value) {
+  if (leg.schema !== 'hookemon.relay-leg.v2' || value?.returnDestinationProof?.schema !== 'hookemon.return-leg-destination-proof.v2') {
+    throw new Error('native return settlement refuses historical token legs and proofs');
+  }
   assertRuntimeExactObject(value, ['returnDestinationProof'], 'return relay settlement observation');
   if (leg.direction !== 'return') {
     throw new Error('return relay settlement requires a return Relay leg');
@@ -1508,7 +1506,7 @@ function assertOutboundRelayIntent(value, label, { allowLegacyIntent = false } =
   const candidate = allowLegacyIntent ? completeLegacyRelayIntent(value) : value;
   assertPlainExactObject(candidate, OUTBOUND_RELAY_INTENT_FIELDS, label);
   value = candidate;
-  if (value.schema !== 'hookemon.relay-intent.v1' || value.direction !== 'OUTBOUND') {
+  if (value.schema !== 'hookemon.relay-intent.v2' || value.direction !== 'OUTBOUND') {
     throw new Error(`${label} identity is invalid`);
   }
   const legacyIdentity = allowLegacyIntent && value.tradeType === null && value.quoteDigest === null;
@@ -2067,14 +2065,13 @@ function heldPositionId({ cycleId, memo, mint, cardRef }) {
 
 function heldPositionEvidenceDigest(position, evidence) {
   return digest({
-    schema: 'hookemon.held-position-evidence.v1',
+    schema: Object.hasOwn(position, 'costMicroUsd') ? 'hookemon.held-position-evidence.v2' : 'hookemon.held-position-evidence.v1',
     cycleId: position.cycleId,
     packId: position.packId,
     memo: position.memo,
     mint: position.mint,
     cardRef: position.cardRef,
-    costMicroUsdg: position.costMicroUsdg,
-    valueMicroUsdg: position.valueMicroUsdg,
+    ...(Object.hasOwn(position, 'costMicroUsd') ? { costMicroUsd: position.costMicroUsd, valueMicroUsd: position.valueMicroUsd } : { costMicroUsdg: position.costMicroUsdg, valueMicroUsdg: position.valueMicroUsdg }),
     insuredValue: position.insuredValue,
     reason: position.reason,
     terminalState: position.terminalState,
@@ -2427,6 +2424,9 @@ function assertSupplementarySettlement(value, label = 'supplementary settlement'
 }
 
 function assertHeldPosition(value, label = 'held position') {
+  const native = Object.hasOwn(value ?? {}, 'costMicroUsd');
+  const costKey = native ? 'costMicroUsd' : 'costMicroUsdg';
+  const valueKey = native ? 'valueMicroUsd' : 'valueMicroUsdg';
   exactObject(value, [
     'positionId',
     'cycleId',
@@ -2434,8 +2434,8 @@ function assertHeldPosition(value, label = 'held position') {
     'memo',
     'mint',
     'cardRef',
-    'costMicroUsdg',
-    'valueMicroUsdg',
+    costKey,
+    valueKey,
     'insuredValue',
     'reason',
     'terminalState',
@@ -2456,8 +2456,9 @@ function assertHeldPosition(value, label = 'held position') {
   if (value.positionId !== heldPositionId({ cycleId, memo, mint, cardRef })) {
     throw new Error(`${label}.positionId does not bind its card identity`);
   }
-  const costMicroUsdg = assertHeldPositionAtomic(value.costMicroUsdg, `${label}.costMicroUsdg`);
-  const valueMicroUsdg = assertHeldPositionAtomic(value.valueMicroUsdg, `${label}.valueMicroUsdg`);
+  const costMicroUsdg = assertHeldPositionAtomic(value[costKey], `${label}.costMicroUsdg`);
+  const valueMicroUsdg = assertHeldPositionAtomic(value[valueKey], `${label}.valueMicroUsdg`);
+  if (native && costMicroUsdg !== valueMicroUsdg) throw new Error(`${label} native held value must equal purchase cost`);
   const insuredValue = value.insuredValue === null ? null : assertTypedAmount(value.insuredValue, `${label}.insuredValue`);
   if (typeof value.reason !== 'string' || !quarantineReasonPattern.test(value.reason)) {
     throw new Error(`${label}.reason is invalid`);
@@ -2510,8 +2511,8 @@ function assertHeldPosition(value, label = 'held position') {
     memo,
     mint,
     cardRef,
-    costMicroUsdg,
-    valueMicroUsdg,
+    [costKey]: costMicroUsdg,
+    [valueKey]: valueMicroUsdg,
     insuredValue,
     reason: value.reason,
     terminalState: value.terminalState,
@@ -2529,8 +2530,8 @@ function heldPositionInput(cycleId, value, openedAtMs) {
     'memo',
     'mint',
     'cardRef',
-    'costMicroUsdg',
-    'valueMicroUsdg',
+    'costMicroUsd',
+    'valueMicroUsd',
     'insuredValue',
     'reason',
     'terminalState',
@@ -2539,6 +2540,7 @@ function heldPositionInput(cycleId, value, openedAtMs) {
   if (Object.hasOwn(value ?? {}, 'ledgerAsset')) fields.push('ledgerAsset');
   exactObject(value, fields, 'held position input');
   const evidence = cloneEvidence(value.evidence, 'held position input evidence');
+  if (value.ledgerAsset !== undefined) throw new Error('native held USD cost cannot be written into an asset principal ledger');
   const ledgerAsset = value.ledgerAsset === undefined
     ? null
     : assertHeldPositionLedgerAsset(value.ledgerAsset, 'held position input ledgerAsset');
@@ -2548,8 +2550,8 @@ function heldPositionInput(cycleId, value, openedAtMs) {
     memo: value.memo,
     mint: value.mint,
     cardRef: value.cardRef,
-    costMicroUsdg: value.costMicroUsdg,
-    valueMicroUsdg: value.valueMicroUsdg,
+    costMicroUsd: value.costMicroUsd,
+    valueMicroUsd: value.valueMicroUsd,
     insuredValue: value.insuredValue,
     reason: value.reason,
     terminalState: value.terminalState,
@@ -2992,7 +2994,7 @@ export class CycleRepository {
           // taken from the stored record. Deriving the expectation from the record would let a
           // stored admission certify its own accounts and assets, which is exactly the check this
           // is here to perform.
-          admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, null, 'stored cycle admission');
+          admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, null, 'stored cycle admission', { historicalRead: true });
         }
         if (Object.hasOwn(entry.payload, 'mode')) {
           mode = assertCycleMode(entry.payload.mode, 'stored cycle mode');
@@ -3346,7 +3348,7 @@ export class CycleRepository {
         }
         const ledger = assertCustodyLedger(entry.payload.ledger, 'stored return relay leg expectation custody ledger', { allowLegacyBuckets: true });
         if (ledger.cycleId !== cycleId) throw new Error('stored return relay leg expectation custody ledger cycleId is invalid');
-        if (ledger.schema !== 'hookemon.custody-ledger.v2' || ledger.expectedCycleAsset === null) {
+        if (!['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(ledger.schema) || ledger.expectedCycleAsset === null) {
           throw new Error('stored return relay leg expectation requires a v2 custody ledger with a populated expectedCycleAsset');
         }
         if (ledger.decimals !== leg.destinationDecimals || ledger.expectedCycleAsset.amountAtomic !== leg.destinationAmountAtomic) {
@@ -4154,8 +4156,9 @@ export class CycleRepository {
       return null;
     }
     const funding = state.admission.aggregateFundingQuote;
-    const chainId = `eip155:${funding.chainId}`;
-    const assetId = `${chainId}/erc20:${funding.assetId.toLowerCase()}`;
+    if (funding.chainId !== '4663' || funding.assetId !== 'native' || funding.decimals !== 18) return null;
+    const chainId = '4663';
+    const assetId = 'native';
     const ledger = state.custodyLedgers.get(custodyLedgerKey({ chainId, assetId }));
     if (!ledger || ledger.decimals !== funding.decimals || ledger.claimed !== state.releaseAmount) return null;
     return Object.freeze({
@@ -4401,6 +4404,7 @@ export class CycleRepository {
   async recordHeldPosition(cycleId, input) {
     const { position, evidence, ledgerAsset } = heldPositionInput(cycleId, input, currentRepositoryTime(this.#now));
     const state = await this.#replay(cycleId);
+    if (state.admission?.schema !== 'hookemon.policy-admission.v3' || position.costMicroUsd !== state.admission.aggregateFundingUsd?.amountMicroUsd) throw new Error('held USD cost is not the committed admission basis');
     const existing = state.heldPositions.get(position.positionId) ?? null;
     if (existing !== null) {
       if (existing.evidenceDigest === position.evidenceDigest) {
@@ -5421,7 +5425,8 @@ export class CycleRepository {
       for (const position of state.heldPositions.values()) {
         if (position.resolution !== null) continue;
         positions.push(structuredClone(position));
-        heldPositionValue += BigInt(position.valueMicroUsdg);
+        if (!Object.hasOwn(position, 'costMicroUsd')) throw new Error('historical USDG held position cannot authorize native risk');
+        heldPositionValue += BigInt(position.costMicroUsd);
       }
     }
     positions.sort((left, right) => left.openedAtMs - right.openedAtMs || left.positionId.localeCompare(right.positionId));
@@ -5431,7 +5436,7 @@ export class CycleRepository {
       unresolvedObligations,
       heldPositions: {
         count: positions.length,
-        valueMicroUsdg: heldPositionValue.toString(),
+        valueMicroUsd: heldPositionValue.toString(),
         positions,
       },
     };
@@ -6438,7 +6443,7 @@ export class CycleRepository {
     if (ledger.cycleId !== cycleId) {
       throw new Error('cycle-repository recordReturnRelayLegExpectation: custody ledger cycleId does not match');
     }
-    if (ledger.schema !== 'hookemon.custody-ledger.v2' || ledger.expectedCycleAsset === null) {
+    if (!['hookemon.custody-ledger.v2', 'hookemon.custody-ledger.v3'].includes(ledger.schema) || ledger.expectedCycleAsset === null) {
       throw new Error('cycle-repository recordReturnRelayLegExpectation requires a v2 custody ledger with a populated expectedCycleAsset');
     }
     if (ledger.decimals !== leg.destinationDecimals) {

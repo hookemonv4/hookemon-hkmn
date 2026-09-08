@@ -736,8 +736,8 @@ test('buildUnsignedTransaction rejects an empty instruction list', () => {
   assert.throws(() => buildUnsignedTransaction({ feePayer: OWNER, recentBlockhash: SYSTEM_PROGRAM_ID, instructions: [] }), SolanaAdapterError);
 });
 
-test('buildRelayLegacyTransaction refuses an instruction plan with address lookup tables instead of guessing a legacy account layout', () => {
-  assert.throws(
+test('buildRelayLegacyTransaction compiles complete unsigned accounts while retaining lookup metadata', () => {
+  assert.doesNotThrow(
     () => buildRelayLegacyTransaction({
       feePayer: OWNER,
       recentBlockhash: SYSTEM_PROGRAM_ID,
@@ -753,7 +753,6 @@ test('buildRelayLegacyTransaction refuses an instruction plan with address looku
         addressLookupTableAddresses: [ASSOCIATED_TOKEN_PROGRAM_ID],
       },
     }),
-    /address lookup tables/,
   );
 });
 

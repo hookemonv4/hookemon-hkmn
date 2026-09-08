@@ -142,32 +142,9 @@ function heldPositionReason(terminalState) {
   return 'DATA_UNVERIFIED';
 }
 
-function heldPositionValueMicroUsdg(costMicroUsdg, insuredValue, config) {
-  const usdg = config?.moneyConfiguration?.assets?.usdg;
-  if (insuredValue !== null && sameAsset(insuredValue, usdg)
-    && insuredValue.chainId === '4663' && insuredValue.decimals === 6) {
-    return insuredValue.amountAtomic;
-  }
-  return costMicroUsdg;
-}
+function heldPositionValueMicroUsd(costMicroUsd) { return costMicroUsd; }
 
-const HELD_POSITION_EVM_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
 
-/**
- * ADR-0026: the sole raw-to-canonical relation this repository recognizes for the configured USDG
- * asset -- chain 4663, six decimals, a normalized lower-case 20-byte EVM token -- matching
- * `evmUsdgCanonicalCustodyIdentity` in cycle-repository.mjs exactly, so this held write lands on
- * the same custody row claim and payout already maintain instead of a competing raw identity.
- */
-function heldPositionLedgerAsset(config) {
-  const asset = config?.moneyConfiguration?.assets?.usdg;
-  const typed = assertTypedAmount({ ...asset, amountAtomic: '0' }, 'held epic USDG ledger asset');
-  if (typed.chainId !== '4663' || typed.decimals !== 6 || !HELD_POSITION_EVM_ADDRESS_PATTERN.test(typed.assetId)) {
-    throw new Error('held epic USDG ledger asset must use the configured six-decimal normalized USDG asset');
-  }
-  const chainId = `eip155:${typed.chainId}`;
-  return { chainId, assetId: `${chainId}/erc20:${typed.assetId}`, decimals: typed.decimals };
-}
 
 function optionalTypedAmount(value) {
   try {
@@ -185,9 +162,9 @@ async function recordHeldEpicPosition({ cycleRepository, config, context, packIn
     throw new Error('epic gate requires cycleRepository.describeCycle for held-card attribution');
   }
   const description = await cycleRepository.describeCycle(context.cycleId);
-  const costMicroUsdg = description?.releaseAmount;
-  if (typeof costMicroUsdg !== 'string' || !canonicalUnsignedInteger.test(costMicroUsdg)) {
-    throw new Error('epic gate cannot attribute a held card without the cycle release amount');
+  const costMicroUsd = description?.admission?.aggregateFundingUsd?.amountMicroUsd;
+  if (typeof costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(costMicroUsd)) {
+    throw new Error('epic gate cannot attribute a held card without the committed USD purchase cost');
   }
   const packId = config?.pack?.code;
   if (typeof packId !== 'string' || packId.length === 0) {
@@ -199,9 +176,8 @@ async function recordHeldEpicPosition({ cycleRepository, config, context, packIn
     memo,
     mint,
     cardRef: mint,
-    costMicroUsdg,
-    valueMicroUsdg: heldPositionValueMicroUsdg(costMicroUsdg, verifiedInsuredValue, config),
-    ledgerAsset: heldPositionLedgerAsset(config),
+    costMicroUsd,
+    valueMicroUsd: heldPositionValueMicroUsd(costMicroUsd, verifiedInsuredValue, config),
     insuredValue: verifiedInsuredValue,
     reason,
     terminalState,

@@ -1,3 +1,7 @@
+import { applyNativeCustodyGasPayment } from '../../native-payment-proof.mjs';
+import { createRelayNativePaymentProof } from '../../native-payment-proof.mjs';
+import { createNativeCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import { createNativePaymentProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
 import {
   DIRECTIONS,
   RELAY_CONSTANTS,
@@ -42,9 +46,9 @@ const EVM_TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
 const EVM_WORD = /^0x[0-9a-fA-F]{64}$/;
 const EVM_CHAIN_ID = String(RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID);
 const SOLANA_CHAIN_ID = String(RELAY_CONSTANTS.SOLANA_CHAIN_ID);
-const USDG_ADDRESS = RELAY_CONSTANTS.USDG_ADDRESS.toLowerCase();
+const NATIVE_ADDRESS = RELAY_CONSTANTS.NATIVE_ADDRESS;
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3';
-const RELAY_DEPOSIT_SELECTOR = '0xe8017952';
+const RELAY_DEPOSIT_SELECTOR = '0x49290c1c';
 const TERMINAL_RELAY_LEG_STATES = new Set([
   'SETTLED',
   'HELD_RELAY_PARTIAL',
@@ -100,7 +104,7 @@ function equalEvmAddress(left, right) {
 function typedAmount(leg) {
   return Object.freeze({
     chainId: String(leg.chainId),
-    assetId: leg.chainId === RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID ? leg.address.toLowerCase() : leg.address,
+    assetId: leg.chainId === RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID && leg.address.toLowerCase() === NATIVE_ADDRESS ? 'native' : leg.address,
     decimals: leg.decimals,
     amountAtomic: leg.amount,
   });
@@ -131,14 +135,14 @@ function assertOutboundMoneyConfiguration(config, configured) {
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'outbound money configuration');
   } catch (error) {
-    throw new Error(`outbound requires MoneyConfigurationV1: ${error.message}`);
+    throw new Error(`outbound requires MoneyConfigurationV2: ${error.message}`);
   }
-  if (money.assets.usdg.chainId !== EVM_CHAIN_ID || money.assets.usdg.assetId.toLowerCase() !== USDG_ADDRESS || money.assets.usdg.decimals !== 6) {
-    throw new Error('outbound MoneyConfigurationV1 USDG asset does not match the configured Robinhood route');
+  if (money.assets.eth.chainId !== EVM_CHAIN_ID || money.assets.eth.assetId !== 'native' || money.assets.eth.decimals !== 18) {
+    throw new Error('outbound MoneyConfigurationV2 USDG asset does not match the configured Robinhood route');
   }
   if (money.assets.solanaStablecoin.chainId !== SOLANA_CHAIN_ID
     || money.assets.solanaStablecoin.assetId !== configured.solanaMint) {
-    throw new Error('outbound MoneyConfigurationV1 Solana asset does not match the configured Relay route');
+    throw new Error('outbound MoneyConfigurationV2 Solana asset does not match the configured Relay route');
   }
   return money;
 }
@@ -146,7 +150,7 @@ function assertOutboundMoneyConfiguration(config, configured) {
 function assertOutboundQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.OUTBOUND) throw new Error('outbound requires an OUTBOUND Relay quote');
   if (quote.tradeType !== 'EXACT_OUTPUT') throw new Error('outbound requires an EXACT_OUTPUT Relay quote');
-  if (quote.origin?.chainId !== RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID || quote.origin?.address?.toLowerCase() !== USDG_ADDRESS) {
+  if (quote.origin?.chainId !== RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID || quote.origin?.address?.toLowerCase() !== NATIVE_ADDRESS) {
     throw new Error('outbound quote origin is not USDG on chain 4663');
   }
   if (quote.destination?.chainId !== RELAY_CONSTANTS.SOLANA_CHAIN_ID || quote.destination?.address !== config.solanaMint) {
@@ -159,9 +163,9 @@ function assertOutboundQuote(quote, config, money = null) {
   if (!Number.isInteger(quote.origin.decimals) || !Number.isInteger(quote.destination.decimals)) {
     throw new Error('outbound quote is missing asset decimals');
   }
-  if (money !== null && (quote.origin.decimals !== money.assets.usdg.decimals
+  if (money !== null && (quote.origin.decimals !== money.assets.eth.decimals
     || quote.destination.decimals !== money.assets.solanaStablecoin.decimals)) {
-    throw new Error('outbound quote decimals do not match MoneyConfigurationV1 assets');
+    throw new Error('outbound quote decimals do not match MoneyConfigurationV2 assets');
   }
   return quote;
 }
@@ -181,14 +185,14 @@ function assertAdmittedAmount(value, expected, label) {
  * deliberately has no quote fallback: the signed Relay steps must be for that one admission.
  */
 function assertOutboundAdmission(admission, configured, money, cycleId) {
-  if (!admission || typeof admission !== 'object' || admission.schema !== 'hookemon.policy-admission.v2') {
-    throw new Error('outbound requires a durable policy-admission.v2 record');
+  if (!admission || typeof admission !== 'object' || admission.schema !== 'hookemon.policy-admission.v3') {
+    throw new Error('outbound requires a durable policy-admission.v3 record');
   }
   if (admission.cycleId !== cycleId) throw new Error('outbound admission cycle identity does not match the request');
   if (typeof admission.quoteDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(admission.quoteDigest)) {
     throw new Error('outbound admission quote digest is invalid');
   }
-  const usdg = { chainId: EVM_CHAIN_ID, assetId: USDG_ADDRESS, decimals: money.assets.usdg.decimals };
+  const usdg = { chainId: EVM_CHAIN_ID, assetId: 'native', decimals: money.assets.eth.decimals };
   const solana = { chainId: SOLANA_CHAIN_ID, assetId: configured.solanaMint, decimals: money.assets.solanaStablecoin.decimals };
   const unitFunding = assertAdmittedAmount(admission.unitFundingQuote, usdg, 'outbound admission unit funding quote');
   const aggregateFunding = assertAdmittedAmount(admission.aggregateFundingQuote, usdg, 'outbound admission aggregate funding quote');
@@ -253,35 +257,17 @@ function atomicAmountFromWord(word, label) {
 function assertOutboundRelayEnvelope(transactions, {
   operationsAccount, depository, amountAtomic, orderId,
 }) {
-  if (transactions.length !== 2) throw new Error('outbound Relay quote must contain exactly the recorded approval and deposit transactions');
-  const [approvalPlan, depositPlan] = transactions;
-  const approval = approvalPlan.transaction;
-  const deposit = depositPlan.transaction;
-  if (!equalEvmAddress(approval.to, USDG_ADDRESS) || String(approval.value) !== '0') {
-    throw new Error('outbound Relay approval must target USDG with zero native value');
+  if (transactions.length !== 1) throw new Error('native outbound requires exactly one deposit and no token approval');
+  const deposit = transactions[0].transaction;
+  if (!equalEvmAddress(deposit.to, depository) || String(deposit.value) !== amountAtomic) {
+    throw new Error('native outbound deposit target/value differs from the bound principal');
   }
-  const [approvalSpenderWord, approvalAmountWord] = calldataWords(approval.data, ERC20_APPROVE_SELECTOR, 2, 'outbound Relay approval');
-  if (!equalEvmAddress(evmAddressFromWord(approvalSpenderWord, 'outbound Relay approval spender'), depository)) {
-    throw new Error('outbound Relay approval spender is outside the configured depository allowlist');
+  const [senderWord, orderWord] = calldataWords(deposit.data, RELAY_DEPOSIT_SELECTOR, 2, 'native Relay deposit');
+  if (!equalEvmAddress(evmAddressFromWord(senderWord, 'native deposit sender'), operationsAccount)
+    || `0x${orderWord}`.toLowerCase() !== orderId.toLowerCase()) {
+    throw new Error('native outbound deposit does not bind Operations and the Relay order');
   }
-  if (atomicAmountFromWord(approvalAmountWord, 'outbound Relay approval amount') !== amountAtomic) {
-    throw new Error('outbound Relay approval amount does not equal the cycle reserve');
-  }
-  if (!equalEvmAddress(deposit.to, depository) || String(deposit.value) !== '0') {
-    throw new Error('outbound Relay deposit does not target the configured depository with zero native value');
-  }
-  const [depositSenderWord, depositAssetWord, depositAmountWord, depositOrderIdWord] = calldataWords(
-    deposit.data,
-    RELAY_DEPOSIT_SELECTOR,
-    4,
-    'outbound Relay deposit',
-  );
-  if (!equalEvmAddress(evmAddressFromWord(depositSenderWord, 'outbound Relay deposit sender'), operationsAccount)
-    || !equalEvmAddress(evmAddressFromWord(depositAssetWord, 'outbound Relay deposit asset'), USDG_ADDRESS)
-    || atomicAmountFromWord(depositAmountWord, 'outbound Relay deposit amount') !== amountAtomic
-    || `0x${depositOrderIdWord}`.toLowerCase() !== orderId.toLowerCase()) {
-    throw new Error('outbound Relay deposit does not exactly bind Operations, USDG, the cycle reserve, and the Relay order');
-  }
+
 }
 
 export function extractRelayEvmTransactions({
@@ -290,10 +276,11 @@ export function extractRelayEvmTransactions({
   if (!Array.isArray(steps) || steps.length === 0) throw new Error('outbound Relay quote has no steps');
   const transactions = [];
   for (const step of steps) {
-    if (!step || step.kind !== 'transaction' || step.requestId !== requestId || !Array.isArray(step.items) || step.items.length === 0) {
+    if (!step || step.kind !== 'transaction' || (step.requestId !== undefined && step.requestId !== requestId) || !Array.isArray(step.items) || step.items.length === 0) {
       throw new Error('outbound Relay step is not a recorded transaction step for this quote');
     }
     for (let itemIndex = 0; itemIndex < step.items.length; itemIndex += 1) {
+      if (step.requestId === undefined && (step.items[itemIndex]?.check?.method !== 'GET' || step.items[itemIndex]?.check?.endpoint !== `/intents/status/v3?requestId=${requestId}`)) throw new Error('native outbound step lacks exact request binding');
       const transaction = step.items[itemIndex]?.data;
       if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
         throw new Error('outbound Relay transaction item is missing data');
@@ -331,7 +318,7 @@ async function verifiedOutboundPlans({
   const decodeOptions = Object.freeze({
     family: 'evm',
     chainId: EVM_CHAIN_ID,
-    tokenMetadata: Object.freeze({ [USDG_ADDRESS]: Object.freeze({ assetId: USDG_ADDRESS, decimals: 6 }) }),
+    tokenMetadata: Object.freeze({}),
   });
   const plans = await Promise.all(transactions.map(async (transactionPlan) => {
     const decoded = await decodeProviderTransaction({ ...decodeOptions, transaction: transactionPlan.transaction });
@@ -435,7 +422,7 @@ export async function prepareOutboundRequest({ adapters, config, cycleRepository
     deadlineUnixSeconds: quote.deadlineUnixSeconds,
   });
   return Object.freeze({
-    schema: 'hookemon.outbound-relay-request.v1',
+    schema: 'hookemon.outbound-relay-request.v2',
     cycleId: context.cycleId,
     inputAmount: typedAmount(quote.origin),
     destinationAmount: typedAmount(quote.destination),
@@ -633,7 +620,7 @@ function outboundStepRequestDigest(context, plan, index) {
 function outboundRelayLeg(context, request) {
   const { inputAmount, destinationAmount } = request;
   return Object.freeze({
-    schema: 'hookemon.relay-leg.v1',
+    schema: 'hookemon.relay-leg.v2',
     cycleId: context.cycleId,
     direction: 'outbound',
     relayRequestId: request.intent.requestId,
@@ -740,7 +727,7 @@ function assertOutboundGasCaps(plans, money) {
     const maxFeePerGas = asNonnegativeBigInt(plan.transaction.maxFeePerGas, 'outbound Relay maxFeePerGas');
     const maxPriorityFeePerGas = asNonnegativeBigInt(plan.transaction.maxPriorityFeePerGas, 'outbound Relay maxPriorityFeePerGas');
     if (maxFeePerGas > gasPriceCap || maxPriorityFeePerGas > gasPriceCap || maxPriorityFeePerGas > maxFeePerGas) {
-      throw new Error('outbound Relay gas price exceeds the configured MoneyConfigurationV1 cap');
+      throw new Error('outbound Relay gas price exceeds the configured MoneyConfigurationV2 cap');
     }
     maximumCost += gas * maxFeePerGas;
   }
@@ -872,18 +859,18 @@ export async function mutateOutbound({
   assertOutboundMutationRepository(cycleRepository);
   const configured = assertOutboundConfiguration(config);
   const money = assertOutboundMoneyConfiguration(config, configured);
-  if (!request || request.schema !== 'hookemon.outbound-relay-request.v1' || request.cycleId !== context.cycleId) {
+  if (!request || request.schema !== 'hookemon.outbound-relay-request.v2' || request.cycleId !== context.cycleId) {
     throw new Error('outbound requires the canonical request prepared for this cycle');
   }
   if (request.inputAmount.amountAtomic === '0' || request.inputAmount.amountAtomic !== (await cycleRepository.describeCycle(context.cycleId)).releaseAmount) {
     throw new Error('outbound may sign only the cycle claimed principal');
   }
-  if (request.inputAmount.chainId !== money.assets.usdg.chainId || request.inputAmount.assetId.toLowerCase() !== money.assets.usdg.assetId.toLowerCase()
-    || request.inputAmount.decimals !== money.assets.usdg.decimals
+  if (request.inputAmount.chainId !== money.assets.eth.chainId || request.inputAmount.assetId.toLowerCase() !== money.assets.eth.assetId.toLowerCase()
+    || request.inputAmount.decimals !== money.assets.eth.decimals
     || request.destinationAmount.chainId !== money.assets.solanaStablecoin.chainId
     || request.destinationAmount.assetId !== money.assets.solanaStablecoin.assetId
     || request.destinationAmount.decimals !== money.assets.solanaStablecoin.decimals) {
-    throw new Error('outbound request assets do not match MoneyConfigurationV1');
+    throw new Error('outbound request assets do not match MoneyConfigurationV2');
   }
   if (!Array.isArray(request.transactions) || request.transactions.length === 0 || typeof request.intent?.requestId !== 'string') {
     throw new Error('outbound canonical request is missing Relay steps or request identity');
@@ -1049,11 +1036,8 @@ function canonicalUnixSeconds(value) {
 }
 
 function observedOutboundSourceProof(proof, leg) {
-  if (proof?.finalized !== true || proof.successful !== true || proof.proofAvailable !== true) return null;
-  if (proof.amountAtomic !== leg.sourceAmountAtomic
-    || proof.sourceBalanceDeltaAtomic !== leg.sourceAmountAtomic
-    || proof.recipientBalanceDeltaAtomic !== leg.sourceAmountAtomic) return null;
-  return outboundSourceFinality(proof);
+  if (!isProcessNativePaymentProof(proof, { transactionHash: leg.sourceTxHash.toLowerCase(), amountWei: leg.sourceAmountAtomic })) return null;
+  return { height: proof.blockNumber, hash: proof.blockHash, timestampUnixSeconds: proof.timestampUnixSeconds };
 }
 
 function observedPositiveDestinationCredit(observation) {
@@ -1071,11 +1055,11 @@ function successfulEvmReceipt(receipt) {
 function boundOutboundRecoveryIntent(recoveryContext, leg, configured) {
   const intent = recoveryContext?.relayIntent;
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)
-    || intent.schema !== 'hookemon.relay-intent.v1'
+    || intent.schema !== 'hookemon.relay-intent.v2'
     || intent.direction !== DIRECTIONS.OUTBOUND
     || intent.requestId !== leg.relayRequestId
     || String(intent.originChainId) !== leg.sourceChainId
-    || !equalEvmAddress(intent.originAssetId, leg.sourceAssetId)
+    || intent.originAssetId !== leg.sourceAssetId
     || intent.originDecimals !== leg.sourceDecimals
     || intent.originAmount !== leg.sourceAmountAtomic
     || String(intent.destinationChainId) !== leg.destinationChainId
@@ -1090,93 +1074,31 @@ function boundOutboundRecoveryIntent(recoveryContext, leg, configured) {
   return intent;
 }
 
-function outboundRefundTransfer(receipt, { token, source, recipient }) {
-  if (!Array.isArray(receipt?.logs)) return null;
-  const transfers = [];
-  for (const log of receipt.logs) {
-    if (typeof log?.topics?.[0] !== 'string' || log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
-    if (typeof log.address !== 'string' || !EVM_ADDRESS.test(log.address)
-      || log.topics.length !== 3 || !EVM_WORD.test(log.topics[1]) || !EVM_WORD.test(log.topics[2])
-      || typeof log.data !== 'string' || !EVM_WORD.test(log.data)) {
-      return null;
-    }
-    const observedSource = `0x${log.topics[1].slice(-40).toLowerCase()}`;
-    const observedRecipient = `0x${log.topics[2].slice(-40).toLowerCase()}`;
-    if (!equalEvmAddress(log.address, token)
-      || !equalEvmAddress(observedSource, source)
-      || !equalEvmAddress(observedRecipient, recipient)) continue;
-    transfers.push({
-      token: log.address.toLowerCase(),
-      source: observedSource,
-      recipient: observedRecipient,
-      amountAtomic: BigInt(log.data).toString(),
-    });
-  }
-  return transfers.length === 1 ? transfers[0] : null;
-}
-
-/**
- * Binds Relay's authenticated refund hash pointer to one finalized origin-chain USDG credit
- * observed through this process's Robinhood RPC client. The pointer remains only a locator.
- */
-export async function readOutboundOriginRefundProof({ client, pointer, leg, sourceFinality, sourceAccount, operationsAccount }) {
-  if (!client || typeof client !== 'object') throw new Error('outbound refund proof requires a Robinhood RPC client');
+/** Refund pointers locate receipts; release-bound native payment facts establish the credit. */
+export async function readOutboundOriginRefundProof({ client, pointer, leg, sourceFinality, sourceAccount, operationsAccount,
+  sourceProof, signedSourceTransaction, nativePaymentBinding, orderId }) {
   if (!pointer || pointer.schema !== 'hookemon.relay-terminal-origin-refund-pointer.v1'
     || pointer.relayRequestId !== leg?.relayRequestId || pointer.status !== 'REFUND'
     || typeof pointer.refundTxHash !== 'string' || !EVM_TRANSACTION_HASH.test(pointer.refundTxHash)) {
     throw new Error('outbound refund proof requires an authenticated refunded Relay transaction pointer');
   }
-  if (!EVM_ADDRESS.test(sourceAccount ?? '') || !EVM_ADDRESS.test(operationsAccount ?? '') || typeof leg?.sourceTxHash !== 'string'
-    || !EVM_TRANSACTION_HASH.test(leg.sourceTxHash)
-    || pointer.refundTxHash.toLowerCase() === leg.sourceTxHash.toLowerCase()) {
-    return null;
-  }
-  if (canonicalUnixSeconds(sourceFinality?.timestampUnixSeconds) === null) return null;
-  const observation = await readFinalizedTransactionReceipt(client, pointer.refundTxHash);
-  if (!observation.finalized || !successfulEvmReceipt(observation.receipt)
-    || observation.receiptBlockNumber === null || observation.receiptBlockHash === null) {
-    return null;
-  }
-  const receiptBlock = await readBlockByNumber(client, observation.receiptBlockNumber);
-  if (receiptBlock.hash !== observation.receiptBlockHash) return null;
-  const transfer = outboundRefundTransfer(observation.receipt, {
-    token: leg.sourceAssetId,
-    source: sourceAccount,
-    recipient: operationsAccount,
-  });
-  if (transfer === null || BigInt(transfer.amountAtomic) === 0n
-    || BigInt(transfer.amountAtomic) > BigInt(leg.sourceAmountAtomic)) {
-    return null;
-  }
-  const timestampUnixSeconds = canonicalUnixSeconds(String(receiptBlock.timestamp));
-  if (timestampUnixSeconds === null || BigInt(timestampUnixSeconds) < BigInt(sourceFinality.timestampUnixSeconds)) {
-    return null;
-  }
-  const proof = Object.freeze({
-    schema: 'hookemon.outbound-relay-origin-refund-proof.v1',
-    relayRequestId: leg.relayRequestId,
-    terminalStatus: Object.freeze({ status: pointer.status, refundTxHash: pointer.refundTxHash.toLowerCase() }),
-    sourceTxHash: leg.sourceTxHash,
-    sourceFinality: Object.freeze(structuredClone(sourceFinality)),
-    refundTxHash: pointer.refundTxHash.toLowerCase(),
-    refundFinality: Object.freeze({
-      height: receiptBlock.number.toString(),
-      hash: receiptBlock.hash,
-      timestampUnixSeconds,
-    }),
-    transferCount: 1,
-    observedToken: transfer.token,
-    observedSource: transfer.source,
-    observedRecipient: transfer.recipient,
-    observedAmountAtomic: transfer.amountAtomic,
-  });
-  processRpcOutboundRefundProofs.set(proof, Object.freeze({
-    proofDigest: digest(proof),
-    relayRequestId: proof.relayRequestId,
-    sourceTxHash: proof.sourceTxHash.toLowerCase(),
-    refundTxHash: proof.refundTxHash.toLowerCase(),
-    observedSource: proof.observedSource,
-  }));
+  if (leg.schema !== 'hookemon.relay-leg.v2' || leg.sourceAssetId !== 'native' || leg.sourceDecimals !== 18
+    || pointer.refundTxHash.toLowerCase() === leg.sourceTxHash.toLowerCase()) return null;
+  const native = await createRelayNativePaymentProof({ client, binding: nativePaymentBinding, sourceProof, signedSourceTransaction,
+    expected: { kind: 'relay-refund', chainId: '4663', assetId: 'native', decimals: 18,
+      transactionHash: pointer.refundTxHash, sourceTransactionHash: leg.sourceTxHash, relayRequestId: leg.relayRequestId,
+      orderId, recipient: operationsAccount, depository: sourceAccount, sourceAmountAtomic: leg.sourceAmountAtomic } });
+  if (BigInt(native.amountWei) > BigInt(leg.sourceAmountAtomic)
+    || BigInt(native.timestampUnixSeconds) < BigInt(sourceFinality.timestampUnixSeconds)) return null;
+  const proof = Object.freeze({ schema: 'hookemon.outbound-relay-origin-refund-proof.v2', relayRequestId: leg.relayRequestId,
+    terminalStatus: Object.freeze({ status: 'REFUND', refundTxHash: native.transactionHash }),
+    sourceTxHash: leg.sourceTxHash, sourceFinality: Object.freeze(structuredClone(sourceFinality)),
+    refundTxHash: native.transactionHash,
+    refundFinality: Object.freeze({ height: native.blockNumber, hash: native.blockHash, timestampUnixSeconds: native.timestampUnixSeconds }),
+    transferCount: 1, observedToken: 'native', observedSource: native.source, sourceDepository: sourceAccount.toLowerCase(),
+    observedRecipient: native.recipient, observedAmountAtomic: native.amountWei, nativePaymentProof: native });
+  processRpcOutboundRefundProofs.set(proof, Object.freeze({ proofDigest: digest(proof), relayRequestId: proof.relayRequestId,
+    sourceTxHash: proof.sourceTxHash.toLowerCase(), refundTxHash: proof.refundTxHash, sourceDepository: proof.sourceDepository }));
   return proof;
 }
 
@@ -1240,7 +1162,7 @@ async function assertOutboundApprovalAttemptRole(entry, {
   if (!equalEvmAddress(signer, operationsAccount)) {
     refuse('the outbound prerequisite attempt was not signed by the Operations account');
   }
-  if (String(parsed.chainId) !== EVM_CHAIN_ID || !equalEvmAddress(parsed.to, USDG_ADDRESS) || BigInt(parsed.value ?? 0n) !== 0n) {
+  if (String(parsed.chainId) !== EVM_CHAIN_ID || !equalEvmAddress(parsed.to, NATIVE_ADDRESS) || BigInt(parsed.value ?? 0n) !== 0n) {
     refuse('the outbound prerequisite attempt is not a zero-value chain-4663 USDG call');
   }
   let spenderWord;
@@ -1302,9 +1224,36 @@ function outboundSettlementEvidence(leg) {
     throw new Error('outbound settlement evidence requires a durably settled Relay leg');
   }
   return Object.freeze({
-    schema: 'hookemon.outbound-relay-settlement-evidence.v1',
+    schema: 'hookemon.outbound-relay-settlement-evidence.v2',
     relayLeg: Object.freeze(structuredClone(leg)),
   });
+}
+
+export function nativeOutboundCustodyAfterPayment(existing, proof, observation) {
+  if (!existing || existing.schema !== 'hookemon.custody-ledger.v3' || existing.chainId !== '4663'
+    || existing.assetId !== 'native' || existing.decimals !== 18 || !isProcessNativePaymentProof(proof, { kind: 'direct' })) {
+    throw new Error('native outbound custody requires native claimed principal and process payment proof');
+  }
+  const paid = BigInt(proof.amountWei);
+  if (BigInt(existing.claimed) < paid || (existing.bridgeOut !== '0' && existing.bridgeOut !== proof.amountWei)) {
+    throw new Error('native outbound custody principal conflicts with finalized payment');
+  }
+  return { ...existing, bridgeOut: proof.amountWei, verifiedCurrentBalance: observation,
+    ...applyNativeCustodyGasPayment(existing, proof) };
+}
+
+async function recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof }) {
+  const cycle = await cycleRepository.describeCycle(context.cycleId);
+  const key = '4663\u0000native';
+  const existing = cycle.custodyLedgers?.get(key);
+  const observation = await createNativeCustodyBalanceObservationReader({
+    publicClient: adapters.robinhood.client, archiveClient: adapters.robinhood.historicalEvidenceClient,
+    identity: { chainId: '4663', assetId: 'native', decimals: 18, account: configured.evm.toLowerCase() },
+  })();
+  context.assertLease?.();
+  const next = nativeOutboundCustodyAfterPayment(existing, proof, observation);
+  await cycleRepository.recordCustodyLedger(context.cycleId, next);
+  context.assertLease?.();
 }
 
 async function finalizeOutboundSourceAttempt({ cycleRepository, context, record, leg, sourceFinality }) {
@@ -1365,35 +1314,8 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
   const record = records[0];
   const configured = assertOutboundConfiguration(config);
 
-  // The durable outbound attempt set must be exactly the canonical two-step Relay envelope: the
-  // deposit matched above, and exactly one prerequisite -- the USDG approval that must precede it
-  // (`assertOutboundRelayEnvelope` above enforces this same two-step shape before either is ever
-  // signed). It is proven and independently finalized here, before any settled- or held-leg fast
-  // path below, so a restart that finds the leg already SETTLED still proves and finalizes the
-  // approval rather than skipping it because the deposit and destination already succeeded.
-  const prerequisites = allOutboundAttempts.filter(candidate => candidate.attempt.requestDigest !== record.attempt.requestDigest);
-  if (prerequisites.length !== 1) {
-    throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'the outbound leg does not have exactly one durable prerequisite chain attempt');
-  }
-  const [prerequisite] = prerequisites;
-  // A client is required only to read finality for a not-yet-finalized prerequisite; an
-  // already-FINALIZED one is still role-checked below from its own durable bytes alone, with no
-  // RPC involved.
-  const prerequisiteClient = adapters?.robinhood?.client;
-  if (prerequisite.attempt.state !== 'FINALIZED' && !prerequisiteClient) return null;
-  const resolved = await finalizeOutboundApprovalAttempt({
-    cycleRepository,
-    context,
-    client: prerequisiteClient,
-    prerequisite,
-    operationsAccount: configured.evm,
-    depository: configured.evmDepository,
-    amountAtomic: leg.sourceAmountAtomic,
-    sourceNonce: record.attempt.nonce,
-    sourceHash: leg.sourceTxHash,
-  });
-  if (!resolved) return null;
-
+  if (leg.schema !== 'hookemon.relay-leg.v2' || leg.sourceAssetId !== 'native' || leg.sourceDecimals !== 18
+    || allOutboundAttempts.length !== 1) throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'native outbound requires one exact native deposit attempt');
   if (leg.state === 'SETTLED') return outboundSettlementEvidence(leg);
   if (leg.state !== 'RECORDED') {
     if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && record.attempt?.state === 'FINALIZED') {
@@ -1408,19 +1330,24 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
 
   let sourceProof;
   try {
-    sourceProof = await readFinalizedErc20TransferProof(robinhoodClient, {
-      hash: leg.sourceTxHash,
-      token: leg.sourceAssetId,
-      source: configured.evm,
-      recipient: configured.evmDepository,
-      amountAtomic: leg.sourceAmountAtomic,
-      evidenceClient: adapters?.robinhood?.historicalEvidenceClient,
+    const signed = parseTransaction(record.attempt.rawBytes);
+    const recovery = await cycleRepository.readChainAttemptRecoveryContext(context.cycleId, { stage: 'outbound', recipient: null, requestDigest: record.attempt.requestDigest, rawSignedBytesHash: record.attempt.hash });
+    const recoveryIntent = recovery?.relayIntent;
+    if (!recoveryIntent?.orderId) return null;
+    assertOutboundRelayEnvelope([{ transaction: { to: signed.to, value: String(signed.value), data: signed.data } }], {
+      operationsAccount: configured.evm, depository: configured.evmDepository, amountAtomic: leg.sourceAmountAtomic, orderId: recoveryIntent.orderId,
     });
+    sourceProof = await createNativePaymentProof({ client: robinhoodClient, signedTransaction: record.attempt.rawBytes,
+      expected: { kind: 'direct', chainId: EVM_CHAIN_ID, assetId: 'native', decimals: 18, source: configured.evm,
+        recipient: configured.evmDepository, amountWei: leg.sourceAmountAtomic, transactionHash: leg.sourceTxHash,
+        calldataDigest: keccak256(signed.data), nonce: String(signed.nonce) } });
+
   } catch {
     return null;
   }
   const sourceFinality = observedOutboundSourceProof(sourceProof, leg);
   if (sourceFinality === null) return null;
+  await recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof: sourceProof });
   const finalizedAttempt = await finalizeOutboundSourceAttempt({ cycleRepository, context, record, leg, sourceFinality });
   if (finalizedAttempt.attempt.state !== 'FINALIZED') {
     throw new OutboundRecoveryRequiredError(
@@ -1486,6 +1413,7 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
       sourceFinality,
       sourceAccount: configured.evmDepository,
       operationsAccount: configured.evm,
+      sourceProof, signedSourceTransaction: record.attempt.rawBytes, nativePaymentBinding: config.nativePaymentBinding, orderId: intent.orderId,
     });
   } catch {
     return null;

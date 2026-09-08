@@ -1,3 +1,4 @@
+import { requireNativePaymentBinding } from '../native-payment-proof.mjs';
 // The production composition root: wires the real scheduler (packages/runner/src/scheduler), the
 // real automation service (packages/runner/src/automation/automated-cycle-service.mjs), the durable
 // cycle repository and on-disk lease store (this directory), and the real provider adapters
@@ -26,7 +27,7 @@ import { assertProxyCredentialConfigured } from '../../../dashboard/src/auth/pro
 import { readDashboardProfile } from '../../../dashboard/src/contracts/dashboard-profile.mjs';
 import { deriveOnchainCycleId } from './stages/action-builder.mjs';
 import { createCollectorCryptClient } from '../collector-crypt.mjs';
-import { createRelayClient } from '../relay-client.mjs';
+import { createRelayClient, createQuoteUsdValuation, isProcessQuoteUsdValuation } from '../relay-client.mjs';
 import {
   createHistoricalErc20EvidenceClient, createRobinhoodClient, readBlockByNumber, readChainId,
   readFinalizedBlock,
@@ -80,31 +81,21 @@ const missingStateFileMessage = 'operator state file does not exist';
 
 function emptyPolicyCustody({ unvaluedExposure = false } = {}) {
   return Object.freeze({
-    realizedLossMicroUsdg: '0',
-    atRiskMicroUsdg: '0',
-    outstandingMicroUsdg: '0',
+    realizedLossMicroUsd: '0',
+    atRiskMicroUsd: '0',
+    outstandingMicroUsd: '0',
     heldAssets: false,
-    heldPositions: Object.freeze({ count: 0, valueMicroUsdg: '0', positions: Object.freeze([]) }),
+    heldPositions: Object.freeze({ count: 0, valueMicroUsd: '0', positions: Object.freeze([]) }),
     unattributed: false,
     unvaluedExposure,
     cycles: Object.freeze([]),
   });
 }
 
-function configuredEvmUsdgAsset(config) {
-  const chainId = config.chainId;
-  const address = config.contracts?.usdg;
-  const decimals = config.contracts?.usdgDecimals;
-  if (!Number.isSafeInteger(chainId) || chainId <= 0 || typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)
-    || !Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
-    return null;
-  }
-  const normalizedAddress = address.toLowerCase();
-  return Object.freeze({
-    chainId: `eip155:${chainId}`,
-    assetId: `eip155:${chainId}/erc20:${normalizedAddress}`,
-    decimals,
-  });
+function configuredEvmNativeAsset(config) {
+  const asset = config.moneyConfiguration?.assets?.eth;
+  if (asset?.chainId !== '4663' || asset.assetId !== 'native' || asset.decimals !== 18) return null;
+  return Object.freeze({ ...asset });
 }
 
 function isLiveCollectorOnlyRehearsal(config) {
@@ -169,10 +160,15 @@ async function mutatePolicyConfiguration({ statePath, mutation, expectedRevision
   throw new Error('policy configuration mutation retry loop was exhausted');
 }
 
-function buildPolicyCustodyReader({ config, cycleRepository }) {
-  const evmUsdg = configuredEvmUsdgAsset(config);
-  if (evmUsdg === null) return async () => emptyPolicyCustody({ unvaluedExposure: true });
-  return async () => projectPolicyCustody({ cycleRepository, evmUsdg });
+function buildPolicyCustodyReader({ config, cycleRepository, relay }) {
+  const nativeAsset = configuredEvmNativeAsset(config);
+  if (nativeAsset === null) return async () => emptyPolicyCustody({ unvaluedExposure: true });
+  const valueAmountUsd = async (amount, { rounding }) => {
+    const quote = await relay.quoteOutboundBridge({ user: config.accounts.evm, recipient: config.accounts.solana,
+      amount: amount.amountAtomic, tradeType: 'EXACT_INPUT', destinationCurrency: config.relay.solanaMint });
+    return createQuoteUsdValuation({ quote, side: 'origin', amount, rounding, nowMs: config.now() });
+  };
+  return async () => projectPolicyCustody({ cycleRepository, nativeAsset, valueAmountUsd, now: config.now });
 }
 
 function operatorAuditResultCode(command) {
@@ -231,7 +227,7 @@ function buildDashboardIdentities(config) {
   });
 }
 
-async function composeDashboard({ dashboardConfig, chainId, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
+async function composeDashboard({ dashboardConfig, chainId, operationsAddress, cycleRepository, operatorControl, readLastTick, adapters, identities, getSchedulerView, listRecentWinners }) {
   const auditVerification = await verifyAuditChain(dashboardConfig.auditLogPath);
   if (!auditVerification.valid) {
     throw new Error(`compose dashboard audit chain is invalid at sequence ${auditVerification.brokenAtSequence}: ${auditVerification.reason}`);
@@ -266,7 +262,10 @@ async function composeDashboard({ dashboardConfig, chainId, cycleRepository, ope
     // status-projection.mjs's own `readAccounting` parameter) — see accounting-projection.mjs's own
     // header for exactly which fields this can and cannot honestly report today.
     async readAccounting(cycleId) {
-      return projectCycleAccounting({ cycleRepository, cycleId });
+      return projectCycleAccounting({ cycleRepository, cycleId, trustedPayoutContext: {
+        nativeAsset: { chainId: '4663', assetId: 'native', decimals: 18 },
+        operationsAddress,
+      } });
     },
     // Public-Integration-interface.md binding 2: the frozen SchedulerView, read synchronously off
     // the real running scheduler — never wrapped in a Promise, never a second timer's guess.
@@ -414,6 +413,8 @@ function buildAdapters(config) {
       : createRelayClient({
         baseUrl: config.relay.baseUrl,
         apiKey: config.relay.apiKey ?? undefined,
+        quoteValidityMs: config.relayQuoteValidityMs ?? null,
+        now: config.now ?? Date.now,
         ...(offlineTransportFetch === null ? {} : { fetchImpl: offlineTransportFetch }),
       });
   const robinhoodClient = liveCollectorOnly ? null : createRobinhoodClient({
@@ -686,7 +687,7 @@ export function buildAdmissionPlanner({ config, adapters, readConfiguration, pro
         throw new Error('admission planner requires a Relay client');
       }
       const settlementAsset = config.moneyConfiguration.assets.solanaStablecoin;
-      const fundingAsset = config.moneyConfiguration.assets.usdg;
+      const fundingAsset = config.moneyConfiguration.assets.eth;
       // Fails closed: with no attributable finalized process liability there is nothing that shows
       // this cycle may spend process money, and a wallet balance or configured figure is not a
       // substitute.
@@ -722,7 +723,7 @@ export function buildAdmissionPlanner({ config, adapters, readConfiguration, pro
         throw new Error('admission planner refuses an aggregate quote above the attributable process liability');
       }
       return Object.freeze({
-        schema: 'hookemon.policy-admission.v2',
+        schema: 'hookemon.policy-admission.v3',
         cycleId,
         packId,
         quantity,
@@ -731,6 +732,8 @@ export function buildAdmissionPlanner({ config, adapters, readConfiguration, pro
         aggregatePurchase: typedAdmissionAmount(settlementAsset, aggregateAtomic),
         unitFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(unitQuote.origin.amount)),
         aggregateFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(aggregateQuote.origin.amount)),
+        unitFundingUsd: createQuoteUsdValuation({ quote: unitQuote, side: 'origin', amount: typedAdmissionAmount(fundingAsset, BigInt(unitQuote.origin.amount)), rounding: 'up', nowMs: (config.now ?? Date.now)() }),
+        aggregateFundingUsd: createQuoteUsdValuation({ quote: aggregateQuote, side: 'origin', amount: typedAdmissionAmount(fundingAsset, BigInt(aggregateQuote.origin.amount)), rounding: 'up', nowMs: (config.now ?? Date.now)() }),
         relay: admittedRelayIdentity(aggregateQuote),
         unitRelay: admittedRelayIdentity(unitQuote),
         unitRelayQuote: unitQuote,
@@ -761,7 +764,7 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
         throw new Error('quote refresh planner requires a Relay client');
       }
       const settlementAsset = config.moneyConfiguration.assets.solanaStablecoin;
-      const fundingAsset = config.moneyConfiguration.assets.usdg;
+      const fundingAsset = config.moneyConfiguration.assets.eth;
       const route = {
         user: config.accounts.evm,
         recipient: config.accounts.solana,
@@ -776,7 +779,7 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
         throw new Error('quote refresh planner received one Relay quote for both the unit and aggregate targets');
       }
       return Object.freeze({
-        schema: 'hookemon.policy-admission.v2',
+        schema: 'hookemon.policy-admission.v3',
         cycleId,
         packId,
         quantity: admission.quantity,
@@ -785,6 +788,8 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
         aggregatePurchase: admission.aggregatePurchase,
         unitFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(unitQuote.origin.amount)),
         aggregateFundingQuote: typedAdmissionAmount(fundingAsset, BigInt(aggregateQuote.origin.amount)),
+        unitFundingUsd: createQuoteUsdValuation({ quote: unitQuote, side: 'origin', amount: typedAdmissionAmount(fundingAsset, BigInt(unitQuote.origin.amount)), rounding: 'up', nowMs: (config.now ?? Date.now)() }),
+        aggregateFundingUsd: createQuoteUsdValuation({ quote: aggregateQuote, side: 'origin', amount: typedAdmissionAmount(fundingAsset, BigInt(aggregateQuote.origin.amount)), rounding: 'up', nowMs: (config.now ?? Date.now)() }),
         relay: admittedRelayIdentity(aggregateQuote),
         unitRelay: admittedRelayIdentity(unitQuote),
         unitRelayQuote: unitQuote,
@@ -864,7 +869,7 @@ export function buildProcessLiabilityReader({ config, adapters }) {
         ? state.processLiability
         : state.remainingProcessClaimCapacity;
       return {
-        schema: 'hookemon.process-liability-evidence.v1',
+        schema: 'hookemon.process-liability-evidence.v2',
         chainId: fundingAsset.chainId,
         assetId: fundingAsset.assetId,
         decimals: fundingAsset.decimals,
@@ -880,7 +885,7 @@ export function buildProcessLiabilityReader({ config, adapters }) {
         processClaimCycleUsed: state.processClaimCycleUsed,
         activeProcessClaimLimit: state.activeProcessClaimLimit.toString(),
         totalLiability: state.totalLiability.toString(),
-        hookUsdgBalance: state.hookUsdgBalance.toString(),
+        hookNativeBalance: state.hookNativeBalance.toString(),
         isSolvent: state.isSolvent,
         operations: state.operations,
         ceilingAtomic: ceiling.toString(),
@@ -902,7 +907,7 @@ const PROCESS_LIABILITY_EVIDENCE_FIELDS = Object.freeze([
   'schema', 'chainId', 'assetId', 'decimals', 'hook', 'cycleId', 'onchainCycleId', 'blockNumber',
   'blockHash', 'finalized', 'processLiability', 'remainingProcessClaimCapacity',
   'processClaimsPaused', 'processClaimCycleUsed', 'activeProcessClaimLimit', 'totalLiability',
-  'hookUsdgBalance', 'isSolvent', 'operations', 'ceilingAtomic',
+  'hookNativeBalance', 'isSolvent', 'operations', 'ceilingAtomic',
 ]);
 
 function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, operations }) {
@@ -915,8 +920,8 @@ function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, op
       throw new Error(`process liability evidence has an unrecognized field "${key}"`);
     }
   }
-  if (value.schema !== 'hookemon.process-liability-evidence.v1') {
-    throw new Error('process liability evidence must use hookemon.process-liability-evidence.v1');
+  if (value.schema !== 'hookemon.process-liability-evidence.v2') {
+    throw new Error('process liability evidence must use hookemon.process-liability-evidence.v2');
   }
   if (value.finalized !== true) throw new Error('process liability evidence must be finalized');
   if (value.chainId !== fundingAsset.chainId || value.assetId?.toLowerCase() !== fundingAsset.assetId.toLowerCase()
@@ -936,7 +941,7 @@ function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, op
   }
   for (const field of [
     'processLiability', 'remainingProcessClaimCapacity', 'activeProcessClaimLimit',
-    'totalLiability', 'hookUsdgBalance', 'ceilingAtomic',
+    'totalLiability', 'hookNativeBalance', 'ceilingAtomic',
   ]) {
     if (typeof value[field] !== 'string' || !UNSIGNED_DECIMAL.test(value[field])) {
       throw new Error(`process liability evidence ${field} is invalid`);
@@ -955,8 +960,8 @@ function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, op
   if (BigInt(value.processLiability) > BigInt(value.totalLiability)) {
     throw new Error('process liability evidence processLiability exceeds totalLiability');
   }
-  if (value.isSolvent !== (BigInt(value.hookUsdgBalance) >= BigInt(value.totalLiability))) {
-    throw new Error('process liability evidence isSolvent does not match hookUsdgBalance and totalLiability');
+  if (value.isSolvent !== (BigInt(value.hookNativeBalance) >= BigInt(value.totalLiability))) {
+    throw new Error('process liability evidence isSolvent does not match hookNativeBalance and totalLiability');
   }
   if (value.processClaimsPaused !== false) throw new Error('process liability evidence refuses while hook process claims are paused');
   if (value.processClaimCycleUsed !== false) throw new Error('process liability evidence refuses a cycle id the hook already used');
@@ -987,7 +992,7 @@ function assertProcessLiabilityEvidence(value, fundingAsset, { hook, cycleId, op
     processClaimCycleUsed: value.processClaimCycleUsed,
     activeProcessClaimLimit: value.activeProcessClaimLimit,
     totalLiability: value.totalLiability,
-    hookUsdgBalance: value.hookUsdgBalance,
+    hookNativeBalance: value.hookNativeBalance,
     isSolvent: value.isSolvent,
     operations: value.operations,
     ceilingAtomic: value.ceilingAtomic,
@@ -1002,15 +1007,15 @@ function buildBudgetReader({ config, cycleRepository, readConfiguration, liveMod
       const disabled = liveMode && (configuration === null || (configuration.liveMode && (
         configuration.requestedOrders === 0
         || configuration.allowedPackIds.length === 0
-        || configuration.maxUnitPriceMicroUsdg === '0'
-        || configuration.perCycleCapMicroUsdg === '0'
+        || configuration.maxUnitPriceMicroUsd === '0'
+        || configuration.perCycleCapMicroUsd === '0'
       )));
       return {
-        availableProcessUsdg: disabled ? '0' : config.budget.availableProcessUsdg,
-        packPriceUsdg: disabled ? config.budget.packPriceUsdg : (liveMode && configuration?.liveMode ? configuration.maxUnitPriceMicroUsdg : config.budget.packPriceUsdg),
-        outboundCapUsdg: config.budget.outboundCapUsdg,
-        returnCapUsdg: config.budget.returnCapUsdg,
-        operatingMarginUsdg: config.budget.operatingMarginUsdg,
+        availableProcessWei: disabled ? '0' : config.budget.availableProcessWei,
+        packPriceWei: config.budget.packPriceWei,
+        outboundCapWei: config.budget.outboundCapWei,
+        returnCapWei: config.budget.returnCapWei,
+        operatingMarginWei: config.budget.operatingMarginWei,
         activeCycleId: active ? active.cycleId : null,
       };
     },
@@ -1121,8 +1126,8 @@ export function createProductionSupplementaryStageHandlers({ assertCanary }) {
  *   builder consumes — see `environment.mjs`'s own header) and a test-only `poolManager` override
  *   (defaults to `bindings/robinhood-chain.json`'s `contracts.poolManager`, mirroring `usdg`).
  * @param {object} config.accounts - `{ evm, solana }` (addresses or null)
- * @param {object} [config.budget] - `{ availableProcessUsdg, packPriceUsdg, outboundCapUsdg,
- *   returnCapUsdg, operatingMarginUsdg }`, all canonical decimal strings; defaults to all-zero
+ * @param {object} [config.budget] - `{ availableProcessWei, packPriceWei, outboundCapWei,
+ *   returnCapWei, operatingMarginWei }`, all canonical decimal strings; defaults to all-zero
  *   (never ready to spend) when omitted.
  * @param {object|null} [config.signerClient] - `{ evm, solana, distributionSigner }` (see
  *   packages/adapters/README.md's injected signerClient seam); `null` unless the operator supplied
@@ -1176,11 +1181,11 @@ export async function compose(config) {
 
   const now = config.now ?? (() => Date.now());
   const budget = {
-    availableProcessUsdg: '0',
-    packPriceUsdg: '0',
-    outboundCapUsdg: '0',
-    returnCapUsdg: '0',
-    operatingMarginUsdg: '0',
+    availableProcessWei: '0',
+    packPriceWei: '0',
+    outboundCapWei: '0',
+    returnCapWei: '0',
+    operatingMarginWei: '0',
     ...(config.budget ?? {}),
   };
   for (const [key, value] of Object.entries(budget)) assertDecimal(value, `compose config.budget.${key}`);
@@ -1226,6 +1231,12 @@ export async function compose(config) {
     throw new Error('compose supplementaryStageHandlers are available only from the Node test runner');
   }
 
+  if (resolved.execution?.profile === 'production' && resolved.execution?.dryRun !== true) {
+    resolved.nativePaymentBinding = requireNativePaymentBinding(resolved.nativePaymentBindingPath);
+    if (resolved.nativePaymentBinding.hook.address.toLowerCase() !== resolved.contracts.hook?.toLowerCase()) {
+      throw new Error('native payment release binding names a different hook');
+    }
+  }
   if (!resolved.execution || typeof resolved.execution !== 'object' || Array.isArray(resolved.execution)) {
     throw new Error('compose execution profile is invalid');
   }
@@ -1377,8 +1388,9 @@ export async function compose(config) {
   const leaseStore = createFileLeaseStore(join(config.stateDir, 'lease.json'));
   const observability = composeObservability({ config: resolved, adapters, cycleRepository });
   const readConfiguration = () => readPolicyConfiguration(resolved.statePath);
-  const readCustody = buildPolicyCustodyReader({ config: resolved, cycleRepository });
+  const readCustody = buildPolicyCustodyReader({ config: resolved, cycleRepository, relay: adapters.relay });
   const policyEngine = createPolicyEngine({
+    verifyQuoteUsdValuation: isProcessQuoteUsdValuation,
     now,
     readConfiguration,
     readCustody,
@@ -1449,9 +1461,9 @@ export async function compose(config) {
     }
   }
 
-  function redactedUsdgStatusEvidence(stage, drift) {
+  function redactedNativeStatusEvidence(stage, drift) {
     return Object.freeze({
-      schema: 'hookemon.usdg-status-canary-hold.v1',
+      schema: 'hookemon.native-status-canary-hold.v1',
       stage,
       drift: Object.freeze(drift.map(item => Object.freeze({
         code: item.code,
@@ -1462,16 +1474,18 @@ export async function compose(config) {
     });
   }
 
-  async function requireUsdgStatusCanary({ cycleId, stage, assertLease }) {
-    if (observability === null || typeof observability.runUsdgStatusCanary !== 'function') {
-      throw new Error('USDG status canary is required before a production mutation');
+  async function requireNativeStatusCanary({ cycleId, stage, assertLease }) {
+    if (observability === null || typeof observability.runNativePrincipalCanary !== 'function') {
+      throw new Error('native principal canary is required before a production mutation');
     }
     assertLease();
-    const result = await observability.runUsdgStatusCanary({ destinations: [] });
+    const current = await cycleRepository.describeCycle(cycleId);
+    if (current?.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native canary requires native cycle admission');
+    const result = await observability.runNativePrincipalCanary({ nativePrincipal: current.admission.aggregateFundingQuote, destinations: [] });
     if (!result || !Array.isArray(result.drift) || typeof result.ok !== 'boolean') {
-      throw new Error('USDG status canary returned an invalid result');
+      throw new Error('native principal canary returned an invalid result');
     }
-    const heldDrift = result.drift.filter(item => item?.code === 'USDG_PAUSED' || item?.code === 'USDG_FROZEN');
+    const heldDrift = result.drift.filter(item => item?.code === 'NATIVE_PRINCIPAL_IDENTITY_DRIFT' || item?.code === 'NATIVE_BALANCE_INSUFFICIENT');
     if (heldDrift.length > 0) {
       assertLease();
       const active = await cycleRepository.readActiveCycle();
@@ -1479,16 +1493,16 @@ export async function compose(config) {
         await cycleRepository.holdCycle(
           cycleId,
           'HELD_UNAVAILABLE',
-          redactedUsdgStatusEvidence(stage, heldDrift),
+          redactedNativeStatusEvidence(stage, heldDrift),
           { assertLease },
         );
       }
       const codes = heldDrift.map(item => item.code).join(', ');
-      throw new Error(`USDG status canary failed: ${codes}`);
+      throw new Error(`native principal canary failed: ${codes}`);
     }
     if (!result.ok) {
       const codes = result.drift.map(item => item?.code ?? 'UNVERIFIED').join(', ');
-      throw new Error(`USDG status canary failed: ${codes}`);
+      throw new Error(`native principal canary failed: ${codes}`);
     }
   }
 
@@ -1591,7 +1605,7 @@ export async function compose(config) {
       throw new Error('compose fake rehearsal requires a dedicated proceeds account');
     }
     const productionSupplementaryStageHandlers = liveMode === true && resolved.execution.profile === 'production'
-      ? createProductionSupplementaryStageHandlers({ assertCanary: requireUsdgStatusCanary })
+      ? createProductionSupplementaryStageHandlers({ assertCanary: requireNativeStatusCanary })
       : null;
     const stageDriver = mode === 'rehearsal' && resolved.execution.providerMode === 'fake'
       ? createRehearsalStageDriver({
@@ -1660,10 +1674,10 @@ export async function compose(config) {
       && resolved.execution.profile === 'production'
       && resolved.execution.providerMode === 'live'
       && resolved.execution.dryRun !== true) {
-      serviceConfig.beforeMutation = requireUsdgStatusCanary;
+      serviceConfig.beforeMutation = requireNativeStatusCanary;
     }
     if (mode === 'rehearsal' && resolved.execution.rehearsalCapUsdg !== null && resolved.execution.rehearsalCapUsdg !== undefined) {
-      serviceConfig.policyCapUsdg = resolved.execution.rehearsalCapUsdg;
+      serviceConfig.policyCapMicroUsd = resolved.execution.rehearsalCapUsdg;
     }
     if (resolved.execution.rehearsalSessionId !== null && resolved.execution.rehearsalSessionId !== undefined) {
       serviceConfig.rehearsalSessionId = resolved.execution.rehearsalSessionId;
@@ -1810,6 +1824,7 @@ export async function compose(config) {
       readLastTick: () => lastTick,
       adapters,
       identities: buildDashboardIdentities(resolved),
+      operationsAddress: resolved.accounts.evm,
     })
     : null;
 

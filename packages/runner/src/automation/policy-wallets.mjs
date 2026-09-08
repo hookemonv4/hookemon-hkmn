@@ -61,6 +61,7 @@ function validatePolicy(policy, chainPrefix) {
   assertUniqueStrings(policy.allowedDestinations, 'wallet policy destinations');
   assertUniqueStrings(policy.allowedFunctions, 'wallet policy functions');
   assertUniqueStrings(policy.allowedAssets, 'wallet policy assets');
+  if (policy.chain === 'eip155:4663' && (policy.allowedAssets.length !== 1 || policy.allowedAssets[0] !== 'native')) throw new Error('Robinhood wallet policy requires native ETH');
   parseAmount(policy.maxAmount, 'wallet policy maxAmount');
   return structuredClone(policy);
 }

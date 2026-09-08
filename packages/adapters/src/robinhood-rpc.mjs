@@ -152,6 +152,20 @@ export function createHistoricalErc20EvidenceClient({ client } = {}) {
      * malformed getter, a mixed height, or a changed hash is a refusal, because the alternative is
      * authorizing a claim against state nobody can point to.
      */
+    async readNativeBalanceAtBlock({ account, blockNumber, blockHash } = {}) {
+      const owner = assertAddress(account, 'account');
+      const height = assertBlockNumber(blockNumber, 'blockNumber');
+      const expected = assertTxHash(blockHash, 'blockHash').toLowerCase();
+      const [value, block] = await Promise.all([
+        client.getBalance({ address: owner, blockNumber: height }),
+        client.getBlock({ blockNumber: height }),
+      ]);
+      const observed = normalizeBlockIdentity(block, height, 'historical native balance block');
+      if (observed.hash !== expected || typeof value !== 'bigint' || value < 0n) {
+        throw new RobinhoodMalformedResponseError('native balance does not bind the requested finalized checkpoint');
+      }
+      return Object.freeze({ value, blockNumber: height, blockHash: expected });
+    },
     async readHookProcessStateAtBlock({ hook, onchainCycleId, blockNumber, blockHash } = {}) {
       const hookAddress = assertAddress(hook, 'hook');
       const requestedBlock = assertBlockNumber(blockNumber, 'blockNumber');
@@ -167,17 +181,17 @@ export function createHistoricalErc20EvidenceClient({ client } = {}) {
       });
       const [
         processLiability, remainingProcessClaimCapacity, processClaimsPaused, processClaimCycleUsed,
-        activeProcessClaimLimit, totalLiability, hookUsdgBalance, isSolvent, roles, block,
+        activeProcessClaimLimit, totalLiability, hookNativeBalance, isSolvent, roles, block,
       ] = await Promise.all([
         at('processLiability'), at('remainingProcessClaimCapacity'), at('processClaimsPaused'),
         at('processClaimCycleUsed', [onchainCycleId]), at('activeProcessClaimLimit'),
-        at('totalLiability'), at('hookUsdgBalance'), at('isSolvent'),
+        at('totalLiability'), at('hookEthBalance'), at('isSolvent'),
         at('readRoles', [onchainCycleId]), client.getBlock({ blockNumber: requestedBlock }),
       ]);
       for (const [label, value] of [
         ['processLiability', processLiability], ['remainingProcessClaimCapacity', remainingProcessClaimCapacity],
         ['activeProcessClaimLimit', activeProcessClaimLimit], ['totalLiability', totalLiability],
-        ['hookUsdgBalance', hookUsdgBalance],
+        ['hookNativeBalance', hookNativeBalance],
       ]) {
         if (typeof value !== 'bigint' || value < 0n) {
           throw new RobinhoodMalformedResponseError(`hook process state ${label} is not a nonnegative uint256`);
@@ -196,7 +210,7 @@ export function createHistoricalErc20EvidenceClient({ client } = {}) {
       }
       return Object.freeze({
         processLiability, remainingProcessClaimCapacity, processClaimsPaused, processClaimCycleUsed,
-        activeProcessClaimLimit, totalLiability, hookUsdgBalance, isSolvent,
+        activeProcessClaimLimit, totalLiability, hookNativeBalance, isSolvent,
         operations: operations.toLowerCase(),
         blockNumber: observed.number,
         blockHash: observed.hash,

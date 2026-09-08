@@ -7,7 +7,7 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const DECIMAL = /^(?:0|[1-9][0-9]*)$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const TYPED_AMOUNT_FIELDS = ['chainId', 'assetId', 'decimals', 'amountAtomic'];
-const RETURN_BINDING_FIELDS = ['operations', 'usdgAddress', 'evidenceDigest'];
+const RETURN_BINDING_FIELDS = ['operations', 'assetId', 'evidenceDigest'];
 const PREVIOUS_DUST_SOURCE_FIELDS = ['cycleId', 'digest', 'planDigest'];
 const FORBIDDEN_CANONICAL_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -44,8 +44,10 @@ export const DIRECT_PAYOUT_OUTCOME = Object.freeze({
   NON_SPENDING_NO_ELIGIBLE_HOLDERS: 'NON_SPENDING_NO_ELIGIBLE_HOLDERS',
 });
 
-export const USDG_PAYOUT_CHAIN_ID = 4663;
-export const USDG_PAYOUT_DECIMALS = 6;
+export const NATIVE_PAYOUT_CHAIN_ID = '4663';
+export const NATIVE_PAYOUT_DECIMALS = 18;
+
+function assertNativeAsset(value) { if (value !== 'native') throw new Error('payout asset must be native'); return value; }
 
 function assertPlainObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
@@ -78,31 +80,27 @@ function assertAddress(value, label) {
   return value.toLowerCase();
 }
 
-/**
- * Builds a canonical typed USDG amount bound to its deployed token address.
- * The token address comes from finalized return evidence, which keeps a persisted plan
- * reconstructable without relying on a symbolic asset identifier.
- */
-export function createUsdgPayoutAmount({ assetId, amountAtomic }) {
+/** Builds an exact chain 4663 native principal amount in wei. */
+export function createNativePayoutAmount({ assetId, amountAtomic }) {
   return Object.freeze({
-    chainId: USDG_PAYOUT_CHAIN_ID,
-    assetId: assertAddress(assetId, 'USDG assetId'),
-    decimals: USDG_PAYOUT_DECIMALS,
-    amountAtomic: assertAtomic(amountAtomic, 'USDG amountAtomic'),
+    chainId: NATIVE_PAYOUT_CHAIN_ID,
+    assetId: assertNativeAsset(assetId),
+    decimals: NATIVE_PAYOUT_DECIMALS,
+    amountAtomic: assertAtomic(amountAtomic, 'native ETH amountAtomic'),
   });
 }
 
-function copyUsdAmount(value, label, expectedAssetId) {
+function copyPrincipalAmount(value, label, expectedAssetId) {
   const amount = assertExactFields(value, TYPED_AMOUNT_FIELDS, label);
-  if (!(amount.chainId === USDG_PAYOUT_CHAIN_ID || amount.chainId === String(USDG_PAYOUT_CHAIN_ID))) {
-    throw new Error(`${label} chainId must be ${USDG_PAYOUT_CHAIN_ID}`);
+  if (!(amount.chainId === NATIVE_PAYOUT_CHAIN_ID || amount.chainId === String(NATIVE_PAYOUT_CHAIN_ID))) {
+    throw new Error(`${label} chainId must be ${NATIVE_PAYOUT_CHAIN_ID}`);
   }
-  const configuredAssetId = assertAddress(expectedAssetId, 'configured USDG assetId');
-  const assetId = assertAddress(amount.assetId, `${label} assetId`);
-  if (assetId !== configuredAssetId || amount.decimals !== USDG_PAYOUT_DECIMALS) {
-    throw new Error(`${label} must identify the configured USDG asset identity on chain ${USDG_PAYOUT_CHAIN_ID} with six decimals`);
+  const configuredAssetId = assertNativeAsset(expectedAssetId);
+  const assetId = assertNativeAsset(amount.assetId);
+  if (assetId !== configuredAssetId || amount.decimals !== NATIVE_PAYOUT_DECIMALS) {
+    throw new Error(`${label} must identify the configured native ETH asset identity on chain ${NATIVE_PAYOUT_CHAIN_ID} with eighteen decimals`);
   }
-  return createUsdgPayoutAmount({ assetId: configuredAssetId, amountAtomic: amount.amountAtomic });
+  return createNativePayoutAmount({ assetId: configuredAssetId, amountAtomic: amount.amountAtomic });
 }
 
 function copyNativeAmount(value, label) {
@@ -114,7 +112,7 @@ function copyNativeAmount(value, label) {
     throw new Error(`${label} must identify the chain 4663 native asset with eighteen decimals`);
   }
   return Object.freeze({
-    chainId: 4663,
+    chainId: '4663',
     assetId: 'native',
     decimals: 18,
     amountAtomic: assertAtomic(amount.amountAtomic, `${label} amountAtomic`),
@@ -141,7 +139,7 @@ function copyHkmnAmount(value, label, expected = null) {
     throw new Error(`${label} must identify the frozen eligibility manifest HKMN asset`);
   }
   return Object.freeze({
-    chainId: 4663,
+    chainId: '4663',
     assetId: amount.assetId.toLowerCase(),
     decimals: amount.decimals,
     amountAtomic,
@@ -155,7 +153,7 @@ function normalizeReturnBinding(value) {
   }
   return Object.freeze({
     operations: assertAddress(binding.operations, 'finalized return binding Operations address'),
-    usdgAddress: assertAddress(binding.usdgAddress, 'finalized return binding USDG address'),
+    assetId: assertNativeAsset(binding.assetId),
     evidenceDigest: binding.evidenceDigest,
   });
 }
@@ -433,8 +431,8 @@ export function compileDirectPayoutPlan({
   if (typeof cycleId !== 'string' || cycleId.length === 0) throw new Error('payout plan cycleId is invalid');
   const eligibility = normalizeEligibilityManifest(eligibilityManifest, cycleId);
   const returnEvidence = normalizeReturnBinding(returnBinding);
-  const returnDelta = copyUsdAmount(finalizedReturn, 'finalized return', returnEvidence.usdgAddress);
-  const carryInDust = copyUsdAmount(previousDust, 'previous dust', returnEvidence.usdgAddress);
+  const returnDelta = copyPrincipalAmount(finalizedReturn, 'finalized return', returnEvidence.assetId);
+  const carryInDust = copyPrincipalAmount(previousDust, 'previous dust', returnEvidence.assetId);
   const carryInDustSource = normalizePreviousDustSource(previousDustSource, carryInDust);
   const distributablePool = BigInt(returnDelta.amountAtomic) + BigInt(carryInDust.amountAtomic);
   if (distributablePool > MAX_UINT256) {
@@ -464,18 +462,18 @@ export function compileDirectPayoutPlan({
     .map(candidate => ({
       recipient: candidate.recipient,
       hkmnBalance: candidate.hkmnBalance,
-      amount: createUsdgPayoutAmount({
-        assetId: returnEvidence.usdgAddress,
+      amount: createNativePayoutAmount({
+        assetId: returnEvidence.assetId,
         amountAtomic: candidate.amountAtomic.toString(),
       }),
     }));
   const totalAllocated = allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount.amountAtomic), 0n);
-  const dust = createUsdgPayoutAmount({
-    assetId: returnEvidence.usdgAddress,
+  const dust = createNativePayoutAmount({
+    assetId: returnEvidence.assetId,
     amountAtomic: dustAtomic.toString(),
   });
   const unsigned = {
-    schema: 'hookemon.direct-payout-plan.v1',
+    schema: 'hookemon.direct-payout-plan.v2',
     cycleId,
     eligibility: {
       snapshotBlock: eligibility.snapshotBlock,
@@ -491,8 +489,8 @@ export function compileDirectPayoutPlan({
     returnDelta,
     previousDust: carryInDust,
     previousDustSource: carryInDustSource,
-    distributablePool: createUsdgPayoutAmount({
-      assetId: returnEvidence.usdgAddress,
+    distributablePool: createNativePayoutAmount({
+      assetId: returnEvidence.assetId,
       amountAtomic: distributablePool.toString(),
     }),
     totalEligibleHkmn: {
@@ -502,8 +500,8 @@ export function compileDirectPayoutPlan({
       amountAtomic: totalEligibleHkmn.toString(),
     },
     allocations,
-    totalAllocated: createUsdgPayoutAmount({
-      assetId: returnEvidence.usdgAddress,
+    totalAllocated: createNativePayoutAmount({
+      assetId: returnEvidence.assetId,
       amountAtomic: totalAllocated.toString(),
     }),
     dust,
@@ -542,7 +540,7 @@ export function compileSupplementaryDirectPayoutPlan({
     returnBinding,
   });
   const unsigned = {
-    schema: 'hookemon.supplementary-direct-payout-plan.v1',
+    schema: 'hookemon.supplementary-direct-payout-plan.v2',
     cycleId,
     manifestId: `${cycleId}:supplementary:${index}`,
     supplementaryIndex: index,
@@ -553,3 +551,7 @@ export function compileSupplementaryDirectPayoutPlan({
     supplementaryPlanDigest: supplementaryPayoutPlanDigest(unsigned),
   });
 }
+
+// Historical decoding constants; native execution uses NATIVE_PAYOUT_* exclusively.
+export const USDG_PAYOUT_CHAIN_ID = 4663;
+export const USDG_PAYOUT_DECIMALS = 6;

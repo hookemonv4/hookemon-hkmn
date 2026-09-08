@@ -4,8 +4,8 @@
 
 `packages/adapters/src/relay-client.mjs` is the clean-room provider adapter for Relay's
 cross-chain bridge (`https://api.relay.link`), covering both legs the peg cycle needs: OUTBOUND
-(Robinhood Chain 4663 USDG -> Solana 792703809 stablecoin) and RETURN (Solana stablecoin ->
-Robinhood Chain USDG). The Solana asset identity is the configured mint address
+(Robinhood Chain 4663 native ETH -> Solana 792703809 stablecoin) and RETURN (Solana stablecoin ->
+Robinhood Chain native ETH). The Solana asset identity is the configured mint address
 (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` in the recorded fixture), never a ticker
 string. It performs real, read-only network calls for quoting and status/detail reads; it never
 signs or broadcasts anything itself. A Relay status response does not bind a submitted intent to
@@ -16,13 +16,13 @@ record.
 
 ## Public interface
 
-- `createRelayClient({ baseUrl, apiKey, fetchImpl, timeoutMs })` — returns a client with:
+- `createRelayClient({ baseUrl, apiKey, fetchImpl, timeoutMs, quoteValidityMs, now })` — returns a client with:
   - `getChains()` — `GET /chains`, always allowed.
   - `quote`, `quoteOutboundBridge`, `quoteReturnBridge` — `POST /quote/v2`; always checks
     `assertRouteEnabled` first (chain-level `depositEnabled` plus per-currency
     `supportsBridging`/presence in `erc20Currencies`/`solverCurrencies`) and never calls `/quote/v2`
     when that check fails. The configured Solana mint overrides only the Solana leg;
-    USDG remains fixed on chain 4663. Returns a typed `QuoteResult` (`requestId`, `orderId`,
+    Native ETH (zero-address wire identity, 18 decimals) remains fixed on chain 4663. Returns a typed `QuoteResult` (`requestId`, `orderId`,
     `tradeType`, `quoteDigest`,
     `origin`/`destination` `{chainId, address, decimals, amount, minimumAmount}`, sender,
     recipient, order deadline, and `raw`).
@@ -327,3 +327,50 @@ node packages/adapters/test/relay-client.live-chains.mjs
   and do not re-sign: the durable attempt is retried on its own recorded bytes only.
 
 Return wallet reservations resolve renewed automation contexts against their original durable lease window before reserve and finalized-source release. Release also resolves an already released reservation for idempotent recovery; reserve only resolves held reservations. Assertions use the captured reservation. Original expiry, fence identity and repository takeover checks remain authoritative across heartbeat and reopen.
+
+## Native USD valuation authority
+
+`createQuoteUsdValuation({quote, side, amount, requestDigest, rounding, nowMs})` produces
+`hookemon.quote-usd-valuation.v1` only from a quote fetched by this adapter. It binds the exact
+POST digest, immutable response digest, quoted asset/atomic amount, documented amountUsd path,
+and explicit observation/expiry window. `quoteValidityMs` has no guessed default; missing it
+refuses valuation. The expiry is also capped by the order deadline. Integer decimal parsing
+rounds costs/exposure up and proceeds down. `isProcessQuoteUsdValuation` rejects copied JSON;
+recovery must fetch and authenticate current evidence before granting new risk.
+
+Quotes request explicit deposit, refund-to-sender and protocol data. The frozen outbound native
+scenario fixture is copied unchanged from provider evidence acce05b4, SHA-256
+`7b1b5a871f7db31b8ad708df47cdbdde73ba9c0905d25c55d69f96c90af03176`.
+It proves an observed quote shape, not current execution or provider approval.
+
+Unsigned Relay instructions with complete public-key metas can be compiled by
+`buildRelayLegacyTransaction` with addresses inline. The original lookup-table list remains
+on the persisted provider plan. The compiler bounds instructions/accounts, refuses extra signers,
+serializes within 1232 bytes, and decodes to verify exact programs, data, ordered accounts and
+effective transaction-wide privileges. Incomplete/index-only plans and oversized packets refuse.
+This capability does not imply provider route approval and never recompiles Collector co-signed
+messages. The captured complete return plan measures 483 bytes with pinned SDK 1.98.4.
+
+Native return reconciliation requires a release-authenticated `hookemon.native-payment-binding.v1`
+object. Its Relay route identifies the exact router runtime and source instruction decoder. A null
+route cannot issue a payment proof. The source reader verifies the persisted Solana transaction's
+signatures, fee payer, finalized token debit, and byte-for-byte finalized RPC transaction. The
+pinned decoder binds its program, discriminator, amount and order. A return payment requires one
+successful native `FundsMovement` cleanup with that order as metadata, the configured recipient,
+and the matching historical router code hash. The destination receipt and canonical checkpoint
+are independently finalized. The repository reserves the destination transaction hash across all
+cycles before applying a return credit; a retry preserves that attribution.
+
+Native outbound finality records principal in `bridgeOut` and execution cost in typed `gasSpent`.
+These are separate amounts. Reconciliation repeats RPC observation and preserves the already
+recorded debit and gas cost. Held cards retain their USD purchase basis outside native custody.
+
+Synthetic proof tests may construct bindings only with the exact test-profile capability.
+Production composition obtains binding authority solely from the frozen release digest. Payment
+logs must carry the expected transaction hash, block hash, block number and unique log index;
+matching event data from a different receipt cannot establish inclusion.
+
+`createNativeTransactionGasProof` verifies persisted signed bytes and the finalized transaction
+and receipt for gas accounting, including reverts. It never grants native payment authority.
+Gas costs must fit the signed gas and fee bounds and enter custody through the same unique-hash
+accounting helper as successful payments.

@@ -1,0 +1,81 @@
+{
+  "status": "PREPARATION_NOT_EXECUTABLE_ASSERTIONS",
+  "interfaceProposalCommit": "ab56f229b781d10bb9cb9c5da009521c5c5301da",
+  "cases": [
+    {
+      "id": "forged-json",
+      "trigger": "Caller constructs matching native-proof JSON without process-local RPC provenance",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "outer-success-inner-failure",
+      "trigger": "Receipt succeeds while intended payment subcall fails with allowFailure",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "receive-event",
+      "trigger": "SolverNativeTransfer sends to router itself from receive()",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "wrong-emitter",
+      "trigger": "FundsMovement from another contract with copied topics",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "unbound-metadata",
+      "trigger": "Correct ETH amount and recipient but metadata belongs to another request",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "callrequest-order-confusion",
+      "trigger": "Treat RelayCallExecuted CallRequest hash as orderId",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "latest-runtime-only",
+      "trigger": "Current code matches but no runtime identity at canonical payment checkpoint",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "wrong-recipient",
+      "trigger": "Successful ETH payment to another account",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "wrong-amount",
+      "trigger": "Successful native amount differs from bound settlement",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "wrong-asset",
+      "trigger": "ERC20 Transfer substituted for native proof",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "balance-only",
+      "trigger": "Recipient ending balance grows due to an unrelated payment",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "duplicate-credit",
+      "trigger": "Reuse same canonical transaction/log across two cycles",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "gas-as-principal",
+      "trigger": "Credit source gas refund or gas reserve as process principal",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "refund-destination-asset",
+      "trigger": "Origin refund classifier receives destination-currency refund",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    },
+    {
+      "id": "superseded-journal",
+      "trigger": "Resume a v1 USDG request as v2 ETH by changing only asset text",
+      "expected": "refuse custody credit and payout; retain existing reconciliation or held-state rules"
+    }
+  ]
+}

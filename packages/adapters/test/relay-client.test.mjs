@@ -29,9 +29,20 @@ import {
   reconcileIntentOutcome,
 } from '../src/relay-client.mjs';
 
+// Derived native mock scenarios; the recorded USDG fixture files remain unchanged history.
+function nativeScenario(value) {
+  if (Array.isArray(value)) return value.map(nativeScenario);
+  if (!value || typeof value !== 'object') {
+    return typeof value === 'string' ? value.replaceAll('0x5fc5360d0400a0fd4f2af552add042d716f1d168', '0x0000000000000000000000000000000000000000') : value;
+  }
+  const result = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, nativeScenario(item)]));
+  if (result.chainId === 4663 && result.address === '0x0000000000000000000000000000000000000000') { result.decimals = 18; result.symbol = 'ETH'; }
+  return result;
+}
+
 function loadFixture(name) {
   const path = fileURLToPath(new URL(`./fixtures/relay/${name}`, import.meta.url));
-  return JSON.parse(readFileSync(path, 'utf8'));
+  return nativeScenario(JSON.parse(readFileSync(path, 'utf8')));
 }
 
 const chainsFixture = loadFixture('chains.json');
@@ -73,7 +84,7 @@ function createScriptedFetch(script) {
 // Route-enable gate (depositEnabled + supportsBridging)
 // ---------------------------------------------------------------------------
 
-test('assertRouteEnabled passes for both directions against the real recorded /chains fixture', () => {
+test('assertRouteEnabled passes for both directions against the derived native /chains mock', () => {
   const outbound = assertRouteEnabled({ direction: DIRECTIONS.OUTBOUND, chainsResponse: chainsFixture });
   assert.equal(outbound.origin.chainId, 4663);
   assert.equal(outbound.destination.chainId, 792703809);
@@ -130,7 +141,7 @@ test('quote() checks the route before ever calling /quote/v2', async () => {
 // Both bridge directions have a typed client function
 // ---------------------------------------------------------------------------
 
-test('quoteOutboundBridge returns a typed QuoteResult for USDG(4663) -> Solana Circle USD', async () => {
+test('quoteOutboundBridge returns a typed QuoteResult for native ETH(4663) -> Solana Circle USD', async () => {
   const fetchImpl = createScriptedFetch({
     'GET /chains': jsonResponse(200, chainsFixture),
     'POST /quote/v2': jsonResponse(200, quoteOutboundFixture),
@@ -141,14 +152,14 @@ test('quoteOutboundBridge returns a typed QuoteResult for USDG(4663) -> Solana C
   assert.equal(quote.requestId, quoteOutboundFixture.requestId);
   assert.equal(quote.orderId, quoteOutboundFixture.protocol.v2.orderId);
   assert.equal(quote.origin.chainId, 4663);
-  assert.equal(quote.origin.decimals, 6);
+  assert.equal(quote.origin.decimals, 18);
   assert.equal(quote.destination.chainId, 792703809);
   assert.equal(quote.destination.decimals, 6);
   assert.equal(quote.destination.amount, quoteOutboundFixture.details.currencyOut.amount);
   assert.equal(quote.destination.minimumAmount, quoteOutboundFixture.details.currencyOut.minimumAmount);
 });
 
-test('EXACT_OUTPUT binds the requested Solana destination amount and preserves the required USDG origin amount', async () => {
+test('EXACT_OUTPUT binds the requested Solana destination amount and preserves the required ETH origin amount', async () => {
   const exactOutput = structuredClone(quoteOutboundFixture);
   exactOutput.details.currencyOut.amount = '50000000';
   exactOutput.details.currencyOut.minimumAmount = '50000000';
@@ -175,7 +186,7 @@ test('EXACT_OUTPUT binds the requested Solana destination amount and preserves t
   assert.equal(client.prepareExecution({ quote, liveMode: true }).intent.tradeType, 'EXACT_OUTPUT');
 });
 
-test('quoteReturnBridge returns a typed QuoteResult for Solana Circle USD -> USDG(4663)', async () => {
+test('quoteReturnBridge returns a typed QuoteResult for Solana Circle USD -> native ETH(4663)', async () => {
   const fetchImpl = createScriptedFetch({
     'GET /chains': jsonResponse(200, chainsFixture),
     'POST /quote/v2': jsonResponse(200, quoteReturnFixture),
@@ -358,7 +369,7 @@ test('restoreIntent rejects a tampered persisted destination chain before making
   assert.throws(
     () => client.restoreIntent({
       intent: {
-        schema: 'hookemon.relay-intent.v1',
+        schema: 'hookemon.relay-intent.v2',
         requestId: quoteOutboundFixture.requestId,
         orderId: quoteOutboundFixture.protocol.v2.orderId,
         direction: DIRECTIONS.OUTBOUND,
