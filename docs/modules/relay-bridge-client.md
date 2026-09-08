@@ -23,6 +23,7 @@ record.
     `supportsBridging`/presence in `erc20Currencies`/`solverCurrencies`) and never calls `/quote/v2`
     when that check fails. The configured Solana mint overrides only the Solana leg;
     USDG remains fixed on chain 4663. Returns a typed `QuoteResult` (`requestId`, `orderId`,
+    `tradeType`, `quoteDigest`,
     `origin`/`destination` `{chainId, address, decimals, amount, minimumAmount}`, sender,
     recipient, order deadline, and `raw`).
   - `simulateExecution({ quote })` — always allowed; a structured "would execute" record, no state
@@ -80,12 +81,27 @@ record.
   a block timestamp inside the persisted settlement window. Other finalized transfer observations
   are retained only for their named terminal hold. Each source or destination hash reserves
   globally in the same durable attribution or settlement path before custody is attributed.
+- A return leg's destination-side custody row is the canonical CAIP EVM USDG row (ADR-0026), built
+  only from `MoneyConfigurationV1.assets.usdg`, never from the leg's own raw destination fields. The
+  unsigned `RECORDED` leg and that row's newly populated `expectedCycleAsset` are written together
+  through the repository's `recordReturnRelayLegExpectation`, before nonce reservation or signing. A
+  legacy raw-identity row for the same asset — alone, or coexisting with a canonical row — refuses
+  before that write. A row that does not yet exist, or exists only as a v1 row, is (re)written with a
+  fresh finalized `CustodyBalanceObservationV1` first; an existing canonical v2 row is reused exactly
+  as recorded, so a resumed leg never re-observes the balance.
 
 ## Invariants
 
 - Every amount this module reads or emits is a canonical unsigned decimal integer string
   (`^(?:0|[1-9][0-9]*)$`), converted to `BigInt` only for comparison; a malformed amount from
   Relay is a hard `RelayMalformedResponseError`, never coerced.
+- `EXACT_INPUT` binds the request amount to `currencyIn.amount`. `EXACT_OUTPUT` binds it to
+  `currencyOut.amount` and retains Relay's computed `currencyIn.amount` as the authorized source
+  amount. Relay documents that exact-output amount includes associated fees in its
+  [trade-type reference](https://docs.relay.link/references/api/api_core_concepts/trade-types).
+- `quoteDigest` is a SHA-256 content address over the parsed quote identity and Relay's complete
+  raw executable response. The durable admission and serialized Relay intent retain it; changing
+  steps, route, amount, identity, or deadline cannot reuse the prior admission.
 - `assertRouteEnabled` is checked before every quote, for both currencies and both chains, using
   only fields independently re-verified against the live API on 2026-09-02 (see the module's
   header comment for the exact evidence per endpoint); a quote is never trusted without it passing
@@ -102,6 +118,25 @@ record.
 - Before a Relay request reaches a signer, its source and destination asset identities and decimal
   precisions must match `MoneyConfigurationV1`. Quote metadata cannot introduce a different Solana
   precision or an implicit money minimum.
+- A return leg's *source* custody delta is attributed under the native Collector/Solana settlement
+  identity (`config.collectorCrypt.settlementAsset`, chain id `solana-mainnet`,
+  `COLLECTOR_CRYPT_SETTLEMENT_ASSET` -- the same identity `buyback.mjs` records realized proceeds
+  under) -- never Relay's own wire `SOLANA_CHAIN_ID` (792703809), which stays exactly as Relay
+  expects for every quote, intent, request, and transaction-policy identity. `return.mjs`
+  (`resolveReturnNativeSolanaCustodyIdentity`) resolves this once and reuses it in
+  `prepareReturnRequest`, `probeReturn`, and mutation validation, so a positive prepare and its
+  mutation always read the same backing row. The configured asset is checked against the trusted
+  constant itself (matching `assertSolanaSignerMoneyConfiguration` in `solana-money-controls.mjs`),
+  not merely for self-consistency between `config.solana.chainId` and
+  `config.collectorCrypt.settlementAsset.chainId` -- two configured fields that could otherwise both
+  be wrong in the same way and still "agree". A custody row also present at the Relay wire chain id
+  for the same mint is a conflicting identity, refused rather than summed or preferred over the
+  native row. Preparation permits a missing native row as zero-proceeds when a held position
+  exists and neither a competing wire-identity row nor durable buyback attempt evidence of a sold
+  pack exists. Sold evidence without its native ledger is inconsistent recovery state and refuses.
+  Mutation and reconciliation recheck recorded zero requests and evidence against the current
+  native ledger and, when that ledger is absent, durable buyback attempt evidence. Positive
+  attributed proceeds or a sold pack without its ledger invalidate the zero return.
 - `assertQuoteUsable` rejects at the exact recorded order deadline. A caller that needs a new
   quote must retain the same cycle reserve and request a new intent; it must not silently reuse an
   expired one.
@@ -125,6 +160,19 @@ record.
   Its Solana memo must equal the recorded `relayRequestId`, and its mint and net credit must exactly
   match the recorded destination amount. Missing timestamp, memo, amount, or asset evidence leaves
   the leg unsettled.
+- An outbound leg's Relay envelope is exactly two EVM transactions per source: the USDG approval,
+  then the depository deposit that carries `leg.sourceTxHash`. Both durable chain attempts must
+  independently reach `FINALIZED` chain evidence before the outbound stage may complete; the
+  deposit's own finalized ERC20 transfer proof is never treated as evidence for the approval that
+  precedes it. The approval's own durably recorded raw bytes must decode to exactly its expected
+  role — a zero-value call to USDG `approve(depository, leg.sourceAmountAtomic)`, signed by
+  Operations, at the nonce immediately preceding the deposit's own reserved nonce — before its own
+  receipt is read; a missing, extra, wrong-identity, or role-mismatched prerequisite attempt is a
+  hard refusal, never silently accepted (`packages/adapters/src/app/stages/outbound.mjs`,
+  `assertOutboundApprovalAttemptRole`/`finalizeOutboundApprovalAttempt`). This check runs before
+  any settled- or held-leg fast path, so a restart that finds the leg already `SETTLED` with its
+  approval attempt still `BROADCAST` still proves and finalizes it rather than skipping it because
+  the deposit and destination already succeeded.
 - An outbound `HELD_RELAY_REFUND` requires a request-bound OUTBOUND `REFUND` pointer plus one
   finalized origin-chain USDG Transfer from the persisted EVM depository to Operations observed
   through this process's Robinhood RPC client. The refund transfer must be positive, no larger than
@@ -164,6 +212,24 @@ record.
   only after the exact `ReturnLegDestinationProofV1` writes `SETTLED`, its custody ledger, and the
   destination-hash reservation in the same repository settlement append. A wrong amount, late
   receipt, or wrong token or recipient writes its named terminal hold instead.
+- Before trusting a durably `SETTLED` return leg's cached success, the stage proves its credited
+  custody row is exactly the one row that leg is attributed to (its durable canonical association,
+  or its own raw-identity row for a leg settled before this migration): a distinct row at the other
+  identity coexisting alongside it, or no row at all, requires operator recovery rather than being
+  silently trusted or re-derived from the leg's raw identity.
+- The `hookemon.return-relay-settlement-evidence.v1` record `reconcileLiveReturn` returns for a
+  `SETTLED` leg carries the leg (`schema`, `relayLeg`) plus one payout-facing projection —
+  `finalized`, `destinationAccount`, `destinationAsset`, `destinationCreditAmount` — built the same
+  way whether the leg was just settled or is a later durable replay, so payout's `returnBinding`
+  digest never diverges between the two. `destinationCreditAmount` is always the leg's own
+  `netDeltaAtomic` (the repository-derived observed amount), never the leg's `destinationAmountAtomic`
+  (the Relay quote); `destinationAccount` is the leg's bound intent recipient and `destinationAsset`
+  its actual destination asset, each proven — cycle identity, source and destination finality,
+  recipient, and asset identity — before `finalized` is ever set `true`. The validated settlement
+  contract (`assertReturnLegAttribution` plus `returnRelayTerminalState`) requires the quote, the
+  recorded destination amount, and the observed amount to already agree for a leg to reach
+  `SETTLED`, so the two fields are numerically equal today; the correction is about provenance
+  (which field payout trusts), not a currently reachable numeric divergence.
 
 ## State transitions
 
@@ -188,7 +254,10 @@ record.
    are exact, the canonical destination block time is within the persisted interval from source
    timestamp through quote deadline, and the destination memo equals the recorded request ID.
    Positive partial, late, and wrong-asset observations enter their named terminal recovery state
-   and wait for an idempotent owner decision.
+   and wait for an idempotent owner decision. Independently of the leg's own settlement, the
+   outbound stage cannot complete until its preceding USDG approval attempt is also durably
+   `FINALIZED` from its own role-checked receipt (see Invariants above); this can resolve before or
+   after the leg reaches `SETTLED`, but never by inference from the deposit's proof.
 8. An outbound refund enters `HELD_RELAY_REFUND` only after a restored durable intent authenticates
    the Relay refund pointer and the process-observed Robinhood receipt proves one origin USDG
    credit from its persisted depository to Operations. A destination-side debit cannot enter that
@@ -204,6 +273,7 @@ record.
 cd packages/adapters && npm ci --ignore-scripts
 node --test packages/adapters/test/relay-client.test.mjs
 node --test packages/adapters/test/app/outbound.test.mjs packages/adapters/test/app/return.test.mjs
+node --test packages/adapters/test/app/return-chain-identity.test.mjs packages/adapters/test/app/return-custody-v2.test.mjs
 # Separate, non-blocking, real network call — never part of the required CI gate:
 node packages/adapters/test/relay-client.live-chains.mjs
 ```
@@ -237,3 +307,23 @@ node packages/adapters/test/relay-client.live-chains.mjs
 - When a terminal Relay pointer, source finality, or process-RPC destination receipt is absent,
   retain the leg `RECORDED` and do not attribute custody or start payout. A duplicate source or
   destination hash remains rejected across every cycle.
+- `RETURN_ZERO_PROCEEDS_EVIDENCE_STALE` means a durably recorded zero-proceeds return evidence no
+  longer matches the current native custody ledger -- a positive delta now exists for the configured
+  native Solana settlement identity. This is an owner recovery decision (likely a false zero
+  produced before this identity fix, or proceeds attributed after the zero record was written), not
+  a retry: do not fabricate a return request from the stale evidence, and do not clear the recorded
+  evidence without an explicit owner decision. `RETURN_ZERO_PROCEEDS_EVIDENCE_SOLD_WITHOUT_LEDGER`
+  means the same durable evidence instead conflicts with a durable buyback stage-attempt record of a
+  sold pack that has no matching native custody ledger row. The normal buyback path writes the
+  ledger before returning reconciled evidence; investigate this inconsistent recovery state and
+  restore attribution only from verified evidence before treating the cycle as zero. `RETURN_ZERO_PROCEEDS_EVIDENCE_UNVERIFIABLE` means the repository exposes
+  `readStageAttempt` without `describeCycle`, or lacks `readStageAttempt` entirely, so one of these
+  rechecks could not run; treat it the same as the other two until the repository capability gap is
+  closed.
+- When the outbound approval attempt's receipt is missing, reverted, or non-canonical, or its own
+  durable raw bytes do not decode to the exact expected role, leave that attempt — and the whole
+  outbound stage — unresolved (`OutboundRecoveryRequiredError` with `OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS`
+  for a missing, extra, or role-invalid prerequisite). Do not substitute the deposit's own finality,
+  and do not re-sign: the durable attempt is retried on its own recorded bytes only.
+
+Return wallet reservations resolve renewed automation contexts against their original durable lease window before reserve and finalized-source release. Release also resolves an already released reservation for idempotent recovery; reserve only resolves held reservations. Assertions use the captured reservation. Original expiry, fence identity and repository takeover checks remain authoritative across heartbeat and reopen.

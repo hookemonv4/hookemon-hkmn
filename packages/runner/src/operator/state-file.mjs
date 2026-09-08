@@ -21,11 +21,33 @@ const maximumLockBytes = 512;
 const lockOwnerFields = ['pid', 'token'];
 const lockTokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+// These are pack-spend rails, not the owner's funding ceiling. The owner's $250 total is cumulative
+// external top-up capital (plan.md); a process can also recycle finalized returns without another
+// owner dollar, so the top-up ceiling neither authorizes nor bounds per-unit/per-cycle/rolling-24h
+// spend by itself, and conflating the two (as an earlier revision of this file did, assigning
+// 250,000,000 to all three fields) can either block legitimate catalog spend or silently license a
+// single cycle/day to consume the owner's entire lifetime top-up.
+//
+// The Collector catalog's listed stablecoin and USDG (the atomic unit these rails are denominated
+// in) are different assets on different chains; there is no verified 1:1 parity between them. The
+// historical 50,309,869 USDG observation was a total N=2 exact-output quote and is retained only
+// as a test fixture. It is never a unit-price calibration: production admission uses a fresh N=1
+// quote for maxUnitPriceMicroUsdg and an independent N quote for the cycle and rolling rails.
+// The constants here are immutable operator ceilings, not current prices or funding authority.
+// The operator's own configured
+// perCycleCapMicroUsdg, max24HourBudgetMicroUsdg, and lossCapMicroUsdg remain the real, tighter
+// day-to-day operating limits; these are only the immutable outer rail no configuration edit can
+// exceed, and none of it is spend authorization by itself.
+const MAX_UNIT_PRICE_MICRO_USDG = 55_000_000n;
+const CYCLE_BUDGET_MULTIPLE = 3n; // headroom for a modest multi-pack cycle, e.g. up to 3 packs
+const DAILY_BUDGET_MULTIPLE = 3n; // headroom for a modest number of cycles per day
+
 export const OPERATOR_HARD_CAPS = Object.freeze({
   maxBoostersPerCycle: '1000',
-  maxUnitPriceMicroUsdg: '25000000',
-  maxCycleBudgetMicroUsdg: '50000000',
-  max24HourBudgetMicroUsdg: '3600000000',
+  maxUnitPriceMicroUsdg: MAX_UNIT_PRICE_MICRO_USDG.toString(),
+  maxCycleBudgetMicroUsdg: (MAX_UNIT_PRICE_MICRO_USDG * CYCLE_BUDGET_MULTIPLE).toString(),
+  max24HourBudgetMicroUsdg: (MAX_UNIT_PRICE_MICRO_USDG * CYCLE_BUDGET_MULTIPLE * DAILY_BUDGET_MULTIPLE).toString(),
+  maxHeldPositions: '1000',
 });
 
 function exactObject(value, fields, label) {

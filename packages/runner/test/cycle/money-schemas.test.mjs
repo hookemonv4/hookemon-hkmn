@@ -5,16 +5,31 @@ import {
   CHAIN_TRANSACTION_ATTEMPT_STATES,
   CUSTODY_LEDGER_BUCKETS,
   CYCLE_TERMINAL_STATES,
+  MAXIMUM_PACK_BATCH_SIZE,
   OPERATIONAL_CYCLE_STAGES,
   PROVIDER_MUTATION_ATTEMPT_STATES,
+  SIGN_ONLY_INVOCATION_LEDGER_SCHEMA,
+  SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA,
   assertChainTransactionAttempt,
+  assertCustodyBalanceObservation,
   assertCustodyLedger,
+  assertOperationIdentity,
+  assertPackBatchRequest,
+  assertPackBatchRequestEntry,
+  assertPublicAmount,
+  assertPublicCardEvent,
+  assertSignOnlyInvocationLedger,
+  assertSignOnlyPreSignBinding,
+  toPublicAmount,
   assertTransactionPolicy,
   assertTypedAmount,
   assertProviderMutationAttempt,
   createPreparedChainTransactionAttempt,
+  createReservedSignOnlyInvocationLedger,
+  packOperationId,
   transitionChainTransactionAttempt,
   transitionProviderMutationAttempt,
+  transitionSignOnlyInvocationLedger,
   RELAY_LEG_STATES,
   RELAY_LEG_TERMINAL_STATES,
   assertMoneyConfiguration,
@@ -58,6 +73,7 @@ function custodyLedger(overrides = {}) {
     refunds: '0',
     residual: '0',
     heldAssets: '0',
+    heldPositions: '0',
     payoutLiability: '0',
     dust: '0',
     unattributed: '0',
@@ -93,10 +109,73 @@ test('validates atomic amounts and a per-cycle custody ledger with every require
   assert.deepEqual(assertCustodyLedger(ledger), ledger);
   assert.deepEqual(CUSTODY_LEDGER_BUCKETS, [
     'claimed', 'bridgeOut', 'bridgeIn', 'packCost', 'buybackProceeds', 'returnInput',
-    'returnReceived', 'refunds', 'residual', 'heldAssets', 'payoutLiability', 'dust', 'unattributed',
+    'returnReceived', 'refunds', 'residual', 'heldAssets', 'heldPositions', 'payoutLiability', 'dust', 'unattributed',
   ]);
   assert.throws(() => assertCustodyLedger({ ...ledger, unexpected: '0' }), /exact schema/);
   assert.throws(() => assertCustodyLedger({ ...ledger, dust: '-1' }), /dust/);
+});
+
+function custodyBalanceObservation(overrides = {}) {
+  return {
+    schema: 'hookemon.custody-balance-observation.v1',
+    account: '0x2222222222222222222222222222222222222222',
+    balance: amount({ chainId: 'eip155:4663', assetId: 'eip155:4663/erc20:stablecoin', decimals: 6, amountAtomic: '12300000000' }),
+    finality: { height: '18000000', hash: `0x${'3'.repeat(64)}`, timestampUnixSeconds: '1780000000' },
+    ...overrides,
+  };
+}
+
+function custodyLedgerV2(overrides = {}) {
+  return custodyLedger({
+    schema: 'hookemon.custody-ledger.v2',
+    verifiedCurrentBalance: null,
+    expectedCycleAsset: null,
+    ...overrides,
+  });
+}
+
+test('validates CustodyBalanceObservationV1 and its byte-for-byte identity against a row', () => {
+  const observation = custodyBalanceObservation();
+  assert.deepEqual(assertCustodyBalanceObservation(observation), observation);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, unexpected: '0' }), /exact schema/);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, schema: 'hookemon.custody-balance-observation.v2' }), /schema/);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, account: '' }), /account/);
+  assert.throws(() => assertCustodyBalanceObservation({ ...observation, finality: { ...observation.finality, hash: '' } }), /finality/);
+});
+
+test('hookemon.custody-ledger.v2 requires exactly twenty-one fields and canonical row identity', () => {
+  const v2 = custodyLedgerV2();
+  assert.deepEqual(assertCustodyLedger(v2), v2);
+  assert.equal(Object.keys(assertCustodyLedger(v2)).length, 21);
+
+  // Missing either new field is rejected -- exact field count, none fewer.
+  const { verifiedCurrentBalance, ...missingBalance } = v2;
+  assert.throws(() => assertCustodyLedger(missingBalance), /exact schema/);
+  const { expectedCycleAsset, ...missingExpected } = v2;
+  assert.throws(() => assertCustodyLedger(missingExpected), /exact schema/);
+
+  // A third schema string, and a v1 row carrying a v2 field, are both rejected.
+  assert.throws(() => assertCustodyLedger({ ...v2, schema: 'hookemon.custody-ledger.v3' }), /schema/);
+  assert.throws(() => assertCustodyLedger({ ...custodyLedger(), verifiedCurrentBalance: null }), /exact schema/);
+
+  // verifiedCurrentBalance.balance and expectedCycleAsset must equal the row's own identity exactly.
+  const observation = custodyBalanceObservation();
+  const valued = custodyLedgerV2({ verifiedCurrentBalance: observation });
+  assert.deepEqual(assertCustodyLedger(valued), valued);
+  assert.throws(
+    () => assertCustodyLedger(custodyLedgerV2({ verifiedCurrentBalance: { ...observation, balance: { ...observation.balance, decimals: 18 } } })),
+    /verifiedCurrentBalance/,
+  );
+  assert.throws(
+    () => assertCustodyLedger(custodyLedgerV2({ verifiedCurrentBalance: { ...observation, balance: { ...observation.balance, chainId: 'eip155:1' } } })),
+    /verifiedCurrentBalance/,
+  );
+  const expectation = amount({ chainId: 'eip155:4663', assetId: 'eip155:4663/erc20:stablecoin', decimals: 6, amountAtomic: '498000000' });
+  assert.deepEqual(assertCustodyLedger(custodyLedgerV2({ expectedCycleAsset: expectation })).expectedCycleAsset, expectation);
+  assert.throws(
+    () => assertCustodyLedger(custodyLedgerV2({ expectedCycleAsset: { ...expectation, assetId: 'eip155:4663/erc20:other' } })),
+    /expectedCycleAsset/,
+  );
 });
 
 test('allows provider attempts to advance only through the write-ahead state machine', () => {
@@ -151,6 +230,68 @@ test('requires signed chain material before broadcast and never permits substitu
     }),
     /requires exactly one nonce or blockhash/,
   );
+});
+
+function signOnlyPreSignBindingFixture(overrides = {}) {
+  return {
+    schema: SIGN_ONLY_PRE_SIGN_BINDING_SCHEMA,
+    cycleId: 'cycle-contract-1',
+    stage: 'claim-process',
+    requestDigest: DIGEST_A,
+    role: 'operator-evm',
+    account: 'hookemon-operator-primary',
+    unsignedWireBytes: '{"to":"0x1"}',
+    unsignedRequestDigest: DIGEST_B,
+    policyDigest: DIGEST_A,
+    validityContextDigest: DIGEST_B,
+    ...overrides,
+  };
+}
+
+test('assertSignOnlyPreSignBinding requires the exact ADR-0025 schema and every digest field', () => {
+  const binding = signOnlyPreSignBindingFixture();
+  assert.deepEqual(assertSignOnlyPreSignBinding(binding), binding);
+
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, schema: 'wrong' }), /schema is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, stage: 'not-a-stage' }), /stage is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, requestDigest: 'not-a-digest' }), /requestDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, role: '' }), /role is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, account: '' }), /account is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, unsignedWireBytes: '' }), /unsignedWireBytes is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, unsignedRequestDigest: 'nope' }), /unsignedRequestDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, policyDigest: 'nope' }), /policyDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, validityContextDigest: 'nope' }), /validityContextDigest is invalid/);
+  assert.throws(() => assertSignOnlyPreSignBinding({ ...binding, extra: 'field' }), /exact schema/);
+});
+
+test('the sign-only invocation ledger only ever advances ORDINAL_1_ALLOCATED -> ORDINAL_1_TIMED_OUT -> ORDINAL_2_ALLOCATED -> ORDINAL_2_TIMED_OUT', () => {
+  const ordinal1 = createReservedSignOnlyInvocationLedger({ cycleId: 'cycle-contract-1', stage: 'claim-process', requestDigest: DIGEST_A });
+  assert.deepEqual(ordinal1, {
+    schema: SIGN_ONLY_INVOCATION_LEDGER_SCHEMA,
+    cycleId: 'cycle-contract-1',
+    stage: 'claim-process',
+    requestDigest: DIGEST_A,
+    state: 'ORDINAL_1_ALLOCATED',
+  });
+  assert.deepEqual(assertSignOnlyInvocationLedger(ordinal1), ordinal1);
+
+  const ordinal1TimedOut = transitionSignOnlyInvocationLedger(ordinal1, 'ORDINAL_1_TIMED_OUT');
+  assert.equal(ordinal1TimedOut.state, 'ORDINAL_1_TIMED_OUT');
+  const ordinal2 = transitionSignOnlyInvocationLedger(ordinal1TimedOut, 'ORDINAL_2_ALLOCATED');
+  assert.equal(ordinal2.state, 'ORDINAL_2_ALLOCATED');
+  const ordinal2TimedOut = transitionSignOnlyInvocationLedger(ordinal2, 'ORDINAL_2_TIMED_OUT');
+  assert.equal(ordinal2TimedOut.state, 'ORDINAL_2_TIMED_OUT');
+
+  // No transition skips a state, runs backwards, or continues past the terminal ordinal-2 outcome.
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal1, 'ORDINAL_2_ALLOCATED'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal1, 'ORDINAL_2_TIMED_OUT'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal1TimedOut, 'ORDINAL_1_ALLOCATED'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal2TimedOut, 'ORDINAL_1_ALLOCATED'), /transition is invalid/);
+  assert.throws(() => transitionSignOnlyInvocationLedger(ordinal2TimedOut, 'ORDINAL_2_ALLOCATED'), /transition is invalid/);
+
+  assert.throws(() => assertSignOnlyInvocationLedger({ ...ordinal1, schema: 'wrong' }), /schema is invalid/);
+  assert.throws(() => assertSignOnlyInvocationLedger({ ...ordinal1, state: 'BOGUS' }), /state is invalid/);
+  assert.throws(() => assertSignOnlyInvocationLedger({ ...ordinal1, requestDigest: 'nope' }), /requestDigest is invalid/);
 });
 
 test('freezes a transaction policy against a typed amount and one expected recipient', () => {
@@ -323,6 +464,85 @@ test('a return Relay leg persists its request window and accepts only a terminal
   );
 });
 
+function currentReturnRelayLegInput(overrides = {}) {
+  const returnIntent = {
+    schema: 'hookemon.relay-intent.v1',
+    requestId: 'relay-return-proof-2',
+    orderId: `0x${'f'.repeat(64)}`,
+    direction: 'RETURN',
+    tradeType: 'EXACT_INPUT',
+    quoteDigest: DIGEST_B,
+    originChainId: 792703809,
+    destinationChainId: 4663,
+    originAssetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    originDecimals: 6,
+    destinationAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+    destinationDecimals: 6,
+    originAmount: '17',
+    quotedDestinationAmount: '16',
+    quotedDestinationMinimumAmount: '16',
+    sender: '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto',
+    recipient: '0x000000000000000000000000000000000000dead',
+    deadlineUnixSeconds: 1_800_000_000,
+    ...overrides,
+  };
+  return {
+    cycleId: 'cycle-return-proof-2',
+    direction: 'return',
+    relayRequestId: returnIntent.requestId,
+    quoteDigest: DIGEST_A,
+    source: { chainId: '792703809', assetId: returnIntent.originAssetId, decimals: 6, amountAtomic: '17' },
+    destination: { chainId: '4663', assetId: returnIntent.destinationAssetId, decimals: 6, amountAtomic: '16' },
+    returnAttribution: {
+      schema: 'hookemon.return-leg-attribution-context.v1',
+      intent: returnIntent,
+      requestCreatedAtUnixSeconds: '1700000000',
+      maxSettlementWindowSeconds: '600',
+    },
+  };
+}
+
+test('a return Relay leg also accepts the current Relay intent shape with tradeType and quoteDigest', () => {
+  const input = currentReturnRelayLegInput();
+  const leg = createRecordedRelayLeg(input);
+  assert.deepEqual(Object.keys(leg.returnAttribution.intent).sort(), Object.keys(input.returnAttribution.intent).sort());
+  assert.equal(leg.returnAttribution.intent.tradeType, 'EXACT_INPUT');
+  assert.equal(leg.returnAttribution.intent.quoteDigest, DIGEST_B);
+  assert.deepEqual(assertRelayLeg(leg), leg);
+
+  // The nested intent.quoteDigest (Relay's own quote-evidence digest) is intentionally distinct
+  // from the outer relay leg's quoteDigest (return.mjs's canonical envelope digest) — they must
+  // never be compared for equality.
+  assert.notEqual(leg.returnAttribution.intent.quoteDigest, leg.quoteDigest);
+});
+
+test('a return Relay intent requires tradeType and quoteDigest together, not as a partial pair', () => {
+  const withOnlyTradeType = currentReturnRelayLegInput();
+  delete withOnlyTradeType.returnAttribution.intent.quoteDigest;
+  assert.throws(() => createRecordedRelayLeg(withOnlyTradeType), /tradeType and quoteDigest together/);
+
+  const withOnlyQuoteDigest = currentReturnRelayLegInput();
+  delete withOnlyQuoteDigest.returnAttribution.intent.tradeType;
+  assert.throws(() => createRecordedRelayLeg(withOnlyQuoteDigest), /tradeType and quoteDigest together/);
+});
+
+test('a return Relay intent rejects an unsupported tradeType and a malformed quoteDigest', () => {
+  const badTradeType = currentReturnRelayLegInput({ tradeType: 'MARKET_ORDER' });
+  assert.throws(() => createRecordedRelayLeg(badTradeType), /tradeType is invalid/);
+
+  const numericDigest = currentReturnRelayLegInput({ quoteDigest: 12345 });
+  assert.throws(() => createRecordedRelayLeg(numericDigest), /quoteDigest is invalid/);
+
+  const malformedDigest = currentReturnRelayLegInput({ quoteDigest: 'not-a-digest' });
+  assert.throws(() => createRecordedRelayLeg(malformedDigest), /quoteDigest is invalid/);
+});
+
+test('a return Relay intent rejects an arbitrary extra field on the current 18-field shape', () => {
+  const withExtraField = currentReturnRelayLegInput();
+  withExtraField.returnAttribution.intent.unexpectedField = 'x';
+  assert.throws(() => createRecordedRelayLeg(withExtraField), /exact schema/);
+});
+
 test('a standing-authority decision binds its digests and both reservations exactly', () => {
   const decision = {
     schema: 'hookemon.standing-authority-decision.v1',
@@ -406,4 +626,80 @@ test('money configuration is explicit typed amounts; a literal 1 or a missing ca
     () => assertMoneyConfiguration(moneyConfiguration({ evm: { ...configuration.evm, nativeReserve: { ...configuration.evm.nativeReserve, chainId: '1' } } })),
     /nativeReserve/,
   );
+});
+
+function packBatchEntry(overrides = {}) {
+  return { packIndex: 0, memo: 'memo-0', expectedCardCount: 1, packType: 'pokemon_25', ...overrides };
+}
+
+test('pack batch requests are bounded, index-ordered, and memo-unique', () => {
+  const batch = [packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-1' })];
+  assert.deepEqual(assertPackBatchRequest(batch), batch);
+  assert.throws(() => assertPackBatchRequest([]), /non-empty/);
+  assert.throws(
+    () => assertPackBatchRequest(Array.from({ length: MAXIMUM_PACK_BATCH_SIZE + 1 }, (_, index) => packBatchEntry({ packIndex: index, memo: `memo-${index}` }))),
+    /at most/,
+  );
+  assert.throws(() => assertPackBatchRequest([packBatchEntry({ packIndex: 1 })]), /packIndex must equal/);
+  assert.throws(
+    () => assertPackBatchRequest([packBatchEntry(), packBatchEntry({ packIndex: 1, memo: 'memo-0' })]),
+    /unique/,
+  );
+});
+
+test('pack batch request entries accept the canonical pack-code grammar, hyphen and underscore alike', () => {
+  for (const packType of ['return-fixture', 'pokemon_50']) {
+    const entry = packBatchEntry({ packType });
+    assert.deepEqual(assertPackBatchRequestEntry(entry), entry);
+  }
+});
+
+test('pack batch request entries refuse a pack code outside the canonical grammar', () => {
+  for (const packType of ['Pokemon_25', 'pokemon 25', '-pokemon25', '_pokemon25', 'pokemon/25', 'pokemon.25', 'p', 'p'.repeat(65)]) {
+    assert.throws(
+      () => assertPackBatchRequestEntry(packBatchEntry({ packType })),
+      /packType is invalid/,
+    );
+  }
+});
+
+test('operation identity and public card events bind a stable per-pack identity', () => {
+  const operationId = packOperationId('cycle-1', 2);
+  assert.equal(operationId, 'pack:cycle-1:2');
+  const identity = { cycleId: 'cycle-1', operationId, packIndex: 2, memo: 'memo-2', mint: null };
+  assert.deepEqual(assertOperationIdentity(identity), identity);
+  const event = {
+    ...identity,
+    eventId: 'sha256:'.padEnd(71, '0'),
+    sequence: '1',
+    state: 'PURCHASED',
+    name: null,
+    imageUrl: null,
+    observedAt: '2026-09-06T00:00:00.000Z',
+    finalizedAt: null,
+    transactionId: null,
+    proceeds: null,
+  };
+  assert.deepEqual(assertPublicCardEvent(event), event);
+  assert.throws(() => assertPublicCardEvent({ ...event, state: 'UNKNOWN' }), /state is invalid/);
+  assert.equal(packOperationId('cycle-1', 2), operationId);
+});
+
+test('the public Amount contract uses units, never amountAtomic, and toPublicAmount preserves full precision', () => {
+  const internal = { chainId: 'solana-mainnet', assetId: 'mint', decimals: 6, amountAtomic: '900719925474099312345678' };
+  const publicAmount = toPublicAmount(internal);
+  assert.deepEqual(publicAmount, { chainId: 'solana-mainnet', assetId: 'mint', decimals: 6, units: '900719925474099312345678' });
+  assert.equal(Object.hasOwn(publicAmount, 'amountAtomic'), false);
+  assert.deepEqual(assertPublicAmount(publicAmount), publicAmount);
+  assert.throws(() => assertPublicAmount(internal), /public amount.*is invalid|must use the exact schema/);
+  assert.equal(toPublicAmount(null), null);
+
+  const event = {
+    cycleId: 'cycle-1', operationId: 'pack:cycle-1:0', packIndex: 0, memo: 'memo-0', mint: 'mint',
+    eventId: `sha256:${'0'.repeat(64)}`, sequence: '1', state: 'SOLD', name: null, imageUrl: null,
+    observedAt: '2026-09-06T00:00:00.000Z', finalizedAt: '2026-09-06T00:00:01.000Z', transactionId: 'sig',
+    proceeds: publicAmount,
+  };
+  assert.deepEqual(assertPublicCardEvent(event), event);
+  assert.throws(() => assertPublicCardEvent({ ...event, proceeds: internal }), /must use the exact schema/);
 });

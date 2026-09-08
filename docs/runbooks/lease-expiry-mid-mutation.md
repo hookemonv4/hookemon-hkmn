@@ -2,46 +2,39 @@
 
 ## Detection
 
-- Alert reason: the wallet lease or fencing token is no longer current immediately before a provider mutation, signature, or broadcast.
-- Target journal state: retain the existing `PREPARED`, `SIGNED`, or `BROADCAST` evidence and enter `HELD_UNAVAILABLE`.
+The worker loses its fenced lease before the provider effect.
 
 ## Safe stop
 
-- Mark the path unavailable and do not invoke a live runner that could let the stale worker send another action. An execution-pause control is planned (WP10b).
-- Do not reacquire a lease and then send old prepared bytes, use a fresh nonce, or create a second cycle.
+Stop the stale worker. Preserve its NOT_SENT record and reservation evidence.
 
 ## Runner behavior
 
-- The runner checks the fence immediately before the provider mutation. A pre-call fence loss
-  records `NOT_SENT`, holds the cycle `HELD_UNAVAILABLE`, and invokes no provider effect.
-- Retain existing bytes and provider records for reconciliation; a stale fence never authorizes a new action.
-- A wallet nonce reservation carries its fencing token plus `leaseAcquiredAtMs` and
-  `leaseExpiresAtMs`. An expired reservation fails its next signer or broadcast assertion. A
-  replacement worker may take it over only with a later valid lease window after expiry; it must not
-  delete or release the old reservation first.
+A fence lost before a provider effect leaves the cycle nonterminal with NOT_SENT evidence and no provider mutation. A stale worker never receives authority from this retry state. Preserve the prepared request and lease evidence.
 
 ## Operator recovery
 
-- The production status output does not expose provider, transaction, or finality evidence. Preserve the recorded action and use only the approved reconciliation control when it is available.
-- No control overrides a stale fence. Resume is planned (WP12) and remains unavailable until reconciliation proves the prior outcome.
-- Terminal reconciliation releases only the exact global wallet reservation with its matching
-  fencing token and lease window. A stale release cannot erase a newer fence; an already released
-  record may only clear the same stranded global reservation idempotently.
+Only a current fenced owner may recover; a stale lease must never release a newer reservation.
 
-## Escalation
+## Recovery constraints
 
-Escalate the lease owner, fencing value, cycle, stage, and journal digest to the operations owner when another worker may have acquired the lease.
+Only a newly valid fenced owner may retry the identical request. Existing nonce reservations retain their fencing token and lease window; takeover requires a later valid lease after expiry, and a stale release cannot clear a newer reservation. Post-provider-boundary ambiguity remains observation-only SENT_UNKNOWN. Post-signing lease loss follows the separate PREPARED/SIGNED/BROADCAST/REFUSED chain journal. The cited matrix test covers only pre-effect loss.
 
-## Evidence
-
-- Failure-matrix cell: `Wallet lease:lost-lease` expects `HELD_UNAVAILABLE` and is owned by WP07.
-- Traceability: L3-M9 and L5-M12.
+Requirements revision 68 retains the owner-approved bounded-transient classification from revision 66. Its exact approval is recorded in `decisions/owner-approvals/revision-68-spec-s5-approved.json`. The canonical matrix binds the implemented stage boundary below; broader recovery claims require their own executable evidence. Semantic-invalid wrong-asset, wrong-recipient and conflicting-evidence holds remain unchanged.
 
 ## Recovery contract
 
 Failure-matrix cells: Wallet lease:lost-lease
 Owning work package: WP07
-Expected outcome: terminal=HELD_UNAVAILABLE; attempt=NOT_SENT; next=owner-decision
-Test: packages/adapters/test/app/stage-driver.test.mjs — holds a lost lease before a provider effect and retains a NOT_SENT retry record
+Expected outcome: terminal=none; attempt=NOT_SENT; next=retry
+Test: packages/adapters/test/app/stage-driver.test.mjs — keeps a lost lease retryable before a provider effect and retains a NOT_SENT record
 Alarm reason/code: `LEASE_CONTENTION`
-Resume command: none supported; no action may resume until the prior effect is reconciled.
+Resume command: none supported outside the approved recovery path; use only the supported policy- and lease-fenced runner recovery; no ad-hoc signing or broadcast.
+
+## Escalation
+
+Preserve the cycle and stage identifiers, request digest and redacted failure evidence. Escalate conflicting canonical evidence or an attempted identity, amount or signed-byte change before allowing another effect.
+
+## Evidence
+
+Retain the cycle and attempt identifiers, original request digest, validity context and redacted failure record cited above.

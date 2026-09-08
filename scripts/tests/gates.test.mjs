@@ -49,6 +49,17 @@ function proj() {
   return root;
 }
 
+function copyFreezeClosure(root) {
+  const freeze = JSON.parse(readFileSync(join(projectRoot, 'feasibility/interface-freeze.json'), 'utf8'));
+  const amendment = JSON.parse(readFileSync(join(projectRoot, freeze.offchainAmendment.path), 'utf8'));
+  const inputs = [...Object.keys(freeze.inputHashes), 'feasibility/interface-freeze.json', freeze.offchainAmendment.path, ...Object.keys(amendment.ownerApprovalHashes)];
+  for (const input of inputs) {
+    mkdirSync(dirname(join(root, input)), { recursive: true });
+    cpSync(join(projectRoot, input), join(root, input));
+  }
+  return inputs;
+}
+
 function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'v4-feasibility-'));
   const architecture = JSON.parse(readFileSync(join(projectRoot, 'gates', 'architecture.json'), 'utf8'));
@@ -78,10 +89,11 @@ function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = t
     mkdirSync(dirname(join(root, input)), { recursive: true });
     cpSync(join(projectRoot, input), join(root, input));
   }
+  copyFreezeClosure(root);
   const freezePath = join(root, 'feasibility', 'interface-freeze.json');
   const freeze = JSON.parse(readFileSync(freezePath, 'utf8'));
   for (const input of Object.keys(freeze.inputHashes)) {
-    freeze.inputHashes[input] = interfaceFreezeInputDigest(root, input);
+    if (!freeze.offchainAmendment) freeze.inputHashes[input] = interfaceFreezeInputDigest(root, input);
   }
   if (!compatible) {
     freeze.compatibilityVerdict.status = 'FAILED';
@@ -109,6 +121,7 @@ function integrationSpikeProject(integrationSpikes) {
 
 function moduleIndexProject() {
   const root = mkdtempSync(join(tmpdir(), 'v4-module-index-'));
+  copyFreezeClosure(root);
   const architecture = JSON.parse(readFileSync(join(projectRoot, 'gates', 'architecture.json'), 'utf8'));
   writeJson(join(root, 'gates', 'architecture.json'), {
     ...architecture,
@@ -414,13 +427,14 @@ test('architecture A6 accepts the provisional Phase 3 module index and binds eve
   assert.equal(index.requirementsRevision, 65);
   assert.equal(index.architectureRevision, 9);
   assert.equal(index.interfaceStatus, 'PROVISIONAL');
-  const expectedInputs = [
+  const expectedInputs = [...new Set([
+    ...copyFreezeClosure(root),
     'gates/architecture.json',
     'architecture/capability-map.json',
     'docs/modules/index.json',
     'specs/requirements.json',
     ...index.modules.map(module => module.path),
-  ].sort();
+  ])].sort();
 
   assert.deepEqual(Object.keys(receipt.inputHashes).sort(), expectedInputs);
   assert.equal(checkGate(root, 'architecture').result, 'PASSED');
@@ -1191,4 +1205,15 @@ test('NOT_APPLICABLE validates the run before creating an append-only receipt', 
     /must contain an items object/,
   );
   assert.deepEqual(listReceipts(root), []);
+});
+
+test('architecture A6 binds exact amendment approval evidence and rejects drift', () => {
+  const root = moduleIndexProject();
+  const receipt = recordGateEvidence(root, 'architecture', 'A6', ['docs/modules/index.json']);
+  const amendmentPath = 'feasibility/phase3-offchain-interface-amendment.json';
+  const amendment = JSON.parse(readFileSync(join(root, amendmentPath), 'utf8'));
+  for (const input of [amendmentPath, ...Object.keys(amendment.ownerApprovalHashes)]) assert.ok(receipt.inputHashes[input]);
+  const approval = Object.keys(amendment.ownerApprovalHashes).at(-1);
+  writeFileSync(join(root, approval), `${readFileSync(join(root, approval), 'utf8')}\n`);
+  assert.throws(() => recordGateEvidence(root, 'architecture', 'A6', ['docs/modules/index.json']), /owner approval hash mismatch/);
 });

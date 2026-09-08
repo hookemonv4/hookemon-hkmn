@@ -30,7 +30,7 @@ import { assertStandingAuthorityDecision } from './money-schemas.mjs';
 import { reserveStandingAuthorityDecision } from '../automation/policy-engine.mjs';
 
 const identifier = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
-const packCode = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const packCode = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const base64urlSignature = /^[A-Za-z0-9_-]{86}$/;
 const positiveDecimal = /^(?:[1-9][0-9]*)$/;

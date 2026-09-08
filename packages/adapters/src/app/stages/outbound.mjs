@@ -1,9 +1,11 @@
 import {
   DIRECTIONS,
   RELAY_CONSTANTS,
+  RelayQuoteExpiredError,
   assertQuoteUsable,
+  relayQuoteDigest,
 } from '../../relay-client.mjs';
-import { keccak256 } from 'viem';
+import { keccak256, parseTransaction, recoverTransactionAddress } from 'viem';
 import {
   ERC20_TRANSFER_TOPIC,
   readBlockByNumber,
@@ -31,7 +33,7 @@ import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
-import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -143,6 +145,7 @@ function assertOutboundMoneyConfiguration(config, configured) {
 
 function assertOutboundQuote(quote, config, money = null) {
   if (!quote || quote.direction !== DIRECTIONS.OUTBOUND) throw new Error('outbound requires an OUTBOUND Relay quote');
+  if (quote.tradeType !== 'EXACT_OUTPUT') throw new Error('outbound requires an EXACT_OUTPUT Relay quote');
   if (quote.origin?.chainId !== RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID || quote.origin?.address?.toLowerCase() !== USDG_ADDRESS) {
     throw new Error('outbound quote origin is not USDG on chain 4663');
   }
@@ -161,6 +164,67 @@ function assertOutboundQuote(quote, config, money = null) {
     throw new Error('outbound quote decimals do not match MoneyConfigurationV1 assets');
   }
   return quote;
+}
+
+function assertAdmittedAmount(value, expected, label) {
+  if (!value || typeof value !== 'object') throw new Error(`${label} is required`);
+  if (String(value.chainId) !== expected.chainId
+    || value.assetId !== expected.assetId
+    || value.decimals !== expected.decimals) {
+    throw new Error(`${label} asset identity does not match the configured money asset`);
+  }
+  return canonicalAmount(value.amountAtomic, `${label} amount`);
+}
+
+/**
+ * The admission is produced and durably bound by the policy layer before this stage. This stage
+ * deliberately has no quote fallback: the signed Relay steps must be for that one admission.
+ */
+function assertOutboundAdmission(admission, configured, money, cycleId) {
+  if (!admission || typeof admission !== 'object' || admission.schema !== 'hookemon.policy-admission.v2') {
+    throw new Error('outbound requires a durable policy-admission.v2 record');
+  }
+  if (admission.cycleId !== cycleId) throw new Error('outbound admission cycle identity does not match the request');
+  if (typeof admission.quoteDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(admission.quoteDigest)) {
+    throw new Error('outbound admission quote digest is invalid');
+  }
+  const usdg = { chainId: EVM_CHAIN_ID, assetId: USDG_ADDRESS, decimals: money.assets.usdg.decimals };
+  const solana = { chainId: SOLANA_CHAIN_ID, assetId: configured.solanaMint, decimals: money.assets.solanaStablecoin.decimals };
+  const unitFunding = assertAdmittedAmount(admission.unitFundingQuote, usdg, 'outbound admission unit funding quote');
+  const aggregateFunding = assertAdmittedAmount(admission.aggregateFundingQuote, usdg, 'outbound admission aggregate funding quote');
+  const aggregatePurchase = assertAdmittedAmount(admission.aggregatePurchase, solana, 'outbound admission aggregate purchase target');
+  if (aggregatePurchase === '0' || aggregateFunding === '0' || unitFunding === '0') {
+    throw new Error('outbound admission amounts must be positive');
+  }
+  const relay = admission.relay;
+  if (!relay || relay.tradeType !== 'EXACT_OUTPUT'
+    || typeof relay.requestId !== 'string' || relay.requestId.length === 0
+    || !/^0x[0-9a-fA-F]{64}$/.test(relay.orderId ?? '')
+    || !Number.isSafeInteger(relay.deadlineUnixSeconds) || relay.deadlineUnixSeconds <= 0
+    || !equalEvmAddress(relay.sender, configured.evm) || relay.recipient !== configured.solana) {
+    throw new Error('outbound admission Relay identity is invalid');
+  }
+  if (canonicalAmount(relay.destinationAmount, 'outbound admission Relay destination amount') !== aggregatePurchase
+    || canonicalAmount(relay.destinationMinimumAmount, 'outbound admission Relay destination minimum amount') !== aggregatePurchase) {
+    throw new Error('outbound admission Relay destination does not exactly cover the aggregate purchase target');
+  }
+  const quote = admission.relayQuote;
+  if (!quote || typeof quote !== 'object') throw new Error('outbound admission is missing the immutable Relay quote');
+  return Object.freeze({ admission, relay, quote, aggregateFunding, aggregatePurchase });
+}
+
+function assertQuoteMatchesAdmission(quote, admitted) {
+  if (quote.requestId !== admitted.relay.requestId || quote.orderId !== admitted.relay.orderId
+    || quote.deadlineUnixSeconds !== admitted.relay.deadlineUnixSeconds
+    || quote.sender !== admitted.relay.sender || quote.recipient !== admitted.relay.recipient
+    || quote.tradeType !== 'EXACT_OUTPUT'
+    || quote.origin.amount !== admitted.aggregateFunding
+    || quote.destination.amount !== admitted.aggregatePurchase
+    || quote.destination.minimumAmount !== admitted.aggregatePurchase
+    || quote.quoteDigest !== admitted.admission.quoteDigest
+    || relayQuoteDigest(quote) !== admitted.admission.quoteDigest) {
+    throw new Error('outbound Relay quote differs from the durable policy admission');
+  }
 }
 
 /**
@@ -286,22 +350,80 @@ async function verifiedOutboundPlans({
   return Object.freeze(plans);
 }
 
+/**
+ * ADR-0025 `refresh-after-readmission` evidence: the exact, narrow record cycle-repository's
+ * `recordOutboundQuoteExpired` accepts, binding this cycle's *immutable original* admission and
+ * both its admitted quote identities to the moment a Relay quote was observed expired -- never the
+ * raw Relay steps, and never a replacement's identity, which could not match this cycle's original
+ * admission digest even if supplied.
+ */
+function outboundQuoteExpiryEvidence(admission, observedAtMs) {
+  return {
+    schema: 'hookemon.outbound-quote-expiry-evidence.v1',
+    cycleId: admission.cycleId,
+    admissionDigest: digest(admission),
+    aggregateQuote: {
+      requestId: admission.relay.requestId,
+      deadlineUnixSeconds: admission.relay.deadlineUnixSeconds,
+      quoteDigest: admission.relay.quoteDigest,
+    },
+    unitQuote: {
+      requestId: admission.unitRelay.requestId,
+      deadlineUnixSeconds: admission.unitRelay.deadlineUnixSeconds,
+      quoteDigest: admission.unitRelay.quoteDigest,
+    },
+    observedAtMs,
+  };
+}
+
 /** Builds the immutable Relay request whose digest must be persisted before any signature. */
 export async function prepareOutboundRequest({ adapters, config, cycleRepository, context, nowMs = Date.now() }) {
   if (!adapters?.relay) throw new Error('outbound requires a configured Relay client');
   const configured = assertOutboundConfiguration(config);
   const money = assertOutboundMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  const amountAtomic = canonicalAmount(cycle?.releaseAmount, 'outbound cycle release amount');
-  if (amountAtomic === '0') throw new Error('outbound requires a positive cycle release amount');
-  const quote = await adapters.relay.quoteOutboundBridge({
-    user: configured.evm,
-    recipient: configured.solana,
-    amount: amountAtomic,
-    destinationCurrency: configured.solanaMint,
-  });
+  if (!cycle?.admission) throw new Error('outbound requires a repository-owned durable policy admission');
+  if (context.admission !== undefined && digest(context.admission) !== digest(cycle.admission)) {
+    throw new Error('outbound context admission conflicts with the repository-owned admission');
+  }
+  // ADR-0025 `refresh-after-readmission`: once a replacement is durably selected, outbound signs
+  // and broadcasts that replacement -- never the original, now-expired quote -- while every other
+  // check above and below still binds to the immutable original cycle admission and releaseAmount.
+  const refresh = typeof cycleRepository.readOutboundQuoteRefresh === 'function'
+    ? await cycleRepository.readOutboundQuoteRefresh(context.cycleId)
+    : null;
+  const effectiveAdmission = refresh?.state === 'ACTIVE' ? refresh.replacement : cycle.admission;
+  const admitted = assertOutboundAdmission(effectiveAdmission, configured, money, context.cycleId);
+  if (canonicalAmount(cycle.releaseAmount, 'outbound cycle release amount') !== admitted.aggregateFunding) {
+    throw new Error('outbound cycle release amount does not match the durable aggregate funding quote');
+  }
+  const { quote, aggregateFunding: amountAtomic } = admitted;
   assertOutboundQuote(quote, configured, money);
-  assertQuoteUsable({ quote, nowMs });
+  assertQuoteMatchesAdmission(quote, admitted);
+  try {
+    assertQuoteUsable({ quote, nowMs });
+  } catch (error) {
+    if (!(error instanceof RelayQuoteExpiredError)) throw error;
+    if (refresh === null) {
+      // The one and only typed pre-effect recovery boundary: this is reached before any stage
+      // request digest, Relay leg, or chain attempt exists, so the repository still accepts this
+      // as the first (and only) expiry evidence for the immutable original admission.
+      if (typeof cycleRepository.recordOutboundQuoteExpired === 'function') {
+        await cycleRepository.recordOutboundQuoteExpired(context.cycleId, outboundQuoteExpiryEvidence(cycle.admission, nowMs));
+      }
+      throw error;
+    }
+    if (refresh.state === 'ACTIVE' && typeof cycleRepository.holdCycle === 'function') {
+      // The one-replacement scope has no second refresh: a replacement that itself expires before
+      // preparation leaves a durable, zero-effect owner-decision hold rather than fetching again.
+      await cycleRepository.holdCycle(context.cycleId, 'HELD_DATA_UNVERIFIED', {
+        stage: 'outbound',
+        reason: 'OUTBOUND_QUOTE_REFRESH_REPLACEMENT_EXPIRED',
+        error: error.message,
+      });
+    }
+    throw error;
+  }
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
   const transactions = await verifiedOutboundPlans({
     steps: execution.steps,
@@ -398,6 +520,8 @@ export async function createOutboundPolicySigner({
   }),
   now = Date.now,
   preflightAuthority,
+  recoveryRepository,
+  context,
 }) {
   if (!outboundPlanBrand.has(plan)) {
     throw new Error('outbound policy signer requires a verified Relay plan produced by prepareOutboundRequest');
@@ -416,7 +540,16 @@ export async function createOutboundPolicySigner({
     rules: [exactPolicyRule(decoded, 'relay-outbound-step')],
   });
   const policyRules = readTransactionPolicyRules(policy);
-  const signer = wrapTransactionPolicySignerClient({ client: signerClient, policy, rules: policyRules, decodeOptions });
+  // ADR-0025 `retry-sign-only-with-durable-binding`: `recoveryRepository`/`context` are supplied
+  // only by the live `mutateOutbound` caller, which already holds the durable stage identity this
+  // exact chain attempt was PREPARED under; a bare policy-signer construction (e.g. a fixture test)
+  // omits them and gets today's unchanged, non-retrying behavior. `recoveryRepository` is the
+  // narrow, lease-fenced sign-only-recovery facade the stage driver builds -- never the raw,
+  // unfenced `cycleRepository` this same caller uses for every other durable write.
+  const recovery = recoveryRepository && context
+    ? { repository: recoveryRepository, cycleId: context.cycleId, stage: 'outbound', requestDigest }
+    : undefined;
+  const signer = wrapTransactionPolicySignerClient({ client: signerClient, policy, rules: policyRules, decodeOptions, recovery });
   const assertPlanQuoteUsable = () => assertQuoteUsable({ quote: plan.relayQuote, nowMs: now() });
   return Object.freeze({
     decoded,
@@ -541,7 +674,7 @@ function outboundWalletReservation(configured, context) {
 }
 
 async function reserveOutboundWalletNonce({ cycleRepository, configured, context }) {
-  const reservation = outboundWalletReservation(configured, context);
+  const reservation = await resolveWalletNonceReservation(cycleRepository, context.cycleId, outboundWalletReservation(configured, context));
   await cycleRepository.reserveWalletNonce(context.cycleId, reservation);
   await cycleRepository.assertWalletNonce(context.cycleId, reservation);
   return reservation;
@@ -558,7 +691,7 @@ async function releaseOutboundWalletNonce({ cycleRepository, configured, context
   }
   await cycleRepository.releaseWalletNonce(
     context.cycleId,
-    outboundWalletReservation(configured, context),
+    await resolveWalletNonceReservation(cycleRepository, context.cycleId, outboundWalletReservation(configured, context), { release: true }),
   );
 }
 
@@ -720,13 +853,18 @@ export async function mutateOutbound({
   signerClient,
   config,
   cycleRepository,
+  signOnlyRecoveryRepository,
   context,
   request,
   preflightAuthority,
   now = Date.now,
 }) {
   if (liveMode !== true) throw new Error('stage-driver internal error: mutateOutbound reached without liveMode');
-  if (!signerClient?.evm || typeof signerClient.evm.sign !== 'function' || typeof signerClient.evm.broadcast !== 'function') {
+  // broadcast() or broadcastApproved(), the same pair signer-client.mjs itself accepts. A client
+  // wired to a real chain RPC transport deliberately exposes only the approved variant, so insisting
+  // on the bare method here would reject exactly the production configuration.
+  if (!signerClient?.evm || typeof signerClient.evm.sign !== 'function'
+    || (typeof signerClient.evm.broadcast !== 'function' && typeof signerClient.evm.broadcastApproved !== 'function')) {
     throw new Error('outbound requires an Operations EVM signer with sign and broadcast capabilities');
   }
   if (typeof context?.requestDigest !== 'string') throw new Error('outbound requires the durable stage request digest');
@@ -787,6 +925,8 @@ export async function mutateOutbound({
         requestDigest: entry.requestDigest,
         now,
         preflightAuthority,
+        recoveryRepository: signOnlyRecoveryRepository,
+        context,
       });
       const signed = await approved.signer.sign({
         transaction: plan.transaction,
@@ -1040,6 +1180,118 @@ export async function readOutboundOriginRefundProof({ client, pointer, leg, sour
   return proof;
 }
 
+/**
+ * Independently proves one prerequisite (non-source) outbound EVM transaction -- the USDG
+ * approval that must precede the Relay depository deposit -- is canonically finalized and
+ * succeeded, from its own hash alone. The deposit's own finality (an independent ERC20 transfer
+ * proof against a different hash) is never accepted as evidence for this transaction: a caller
+ * must supply this attempt's own durably recorded hash, never the leg's `sourceTxHash`.
+ */
+async function readOutboundPrerequisiteFinality(client, hash) {
+  const observation = await readFinalizedTransactionReceipt(client, hash);
+  if (!observation.finalized || !successfulEvmReceipt(observation.receipt)
+    || observation.receiptBlockNumber === null || observation.receiptBlockHash === null) {
+    return null;
+  }
+  const receiptBlock = await readBlockByNumber(client, observation.receiptBlockNumber);
+  if (receiptBlock.hash !== observation.receiptBlockHash) return null;
+  const timestampUnixSeconds = canonicalUnixSeconds(String(receiptBlock.timestamp));
+  if (timestampUnixSeconds === null) return null;
+  return Object.freeze({
+    transactionHash: hash.toLowerCase(),
+    finalizedAt: Object.freeze({ height: receiptBlock.number.toString(), hash: receiptBlock.hash, timestampUnixSeconds }),
+  });
+}
+
+/**
+ * Fails closed unless this durable outbound attempt is exactly the canonical USDG approval the
+ * matched deposit required: its own recorded raw bytes decode to a zero-value chain-4663 call to
+ * USDG `approve(depository, leg.sourceAmountAtomic)`, signed by the Operations account, at the
+ * nonce immediately preceding the deposit's own reserved nonce. Reuses the exact calldata decoding
+ * this stage already trusts before signing (`calldataWords`/`evmAddressFromWord`/
+ * `atomicAmountFromWord`, the same primitives `assertOutboundRelayEnvelope` above verifies
+ * pre-signature) -- never a new decoder, and never inferred from the deposit's own, separate
+ * evidence.
+ */
+async function assertOutboundApprovalAttemptRole(entry, {
+  operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
+}) {
+  const { attempt } = entry;
+  const refuse = (message, cause) => {
+    throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', message, cause === undefined ? {} : { cause });
+  };
+  if (typeof attempt.hash === 'string' && attempt.hash.toLowerCase() === sourceHash.toLowerCase()) {
+    refuse('an outbound prerequisite attempt duplicates the deposit transaction hash');
+  }
+  if (typeof attempt.rawBytes !== 'string' || attempt.rawBytes.length === 0) {
+    refuse('an outbound prerequisite attempt has no durable signed bytes');
+  }
+  if (keccak256(attempt.rawBytes).toLowerCase() !== String(attempt.hash).toLowerCase()) {
+    refuse('an outbound prerequisite attempt hash does not match its own durable raw bytes');
+  }
+  let parsed;
+  let signer;
+  try {
+    parsed = parseTransaction(attempt.rawBytes);
+    signer = await recoverTransactionAddress({ serializedTransaction: attempt.rawBytes });
+  } catch (error) {
+    refuse('an outbound prerequisite attempt raw bytes do not decode as a signed EVM transaction', error);
+  }
+  if (!equalEvmAddress(signer, operationsAccount)) {
+    refuse('the outbound prerequisite attempt was not signed by the Operations account');
+  }
+  if (String(parsed.chainId) !== EVM_CHAIN_ID || !equalEvmAddress(parsed.to, USDG_ADDRESS) || BigInt(parsed.value ?? 0n) !== 0n) {
+    refuse('the outbound prerequisite attempt is not a zero-value chain-4663 USDG call');
+  }
+  let spenderWord;
+  let amountWord;
+  try {
+    [spenderWord, amountWord] = calldataWords(parsed.data ?? '0x', ERC20_APPROVE_SELECTOR, 2, 'outbound prerequisite approval');
+  } catch (error) {
+    refuse('the outbound prerequisite attempt is not a canonical USDG approval call', error);
+  }
+  if (!equalEvmAddress(evmAddressFromWord(spenderWord, 'outbound prerequisite approval spender'), depository)) {
+    refuse('the outbound prerequisite approval spender is not the configured Relay depository');
+  }
+  if (atomicAmountFromWord(amountWord, 'outbound prerequisite approval amount') !== amountAtomic) {
+    refuse('the outbound prerequisite approval amount does not equal the leg source amount');
+  }
+  if (parsed.nonce === null || parsed.nonce === undefined
+    || sourceNonce === null || sourceNonce === undefined
+    || BigInt(parsed.nonce) + 1n !== BigInt(sourceNonce)) {
+    refuse('the outbound prerequisite attempt nonce does not immediately precede the deposit nonce');
+  }
+}
+
+/**
+ * Resolves the leg's one durable prerequisite attempt. Its role is verified from its own durable
+ * bytes unconditionally -- including when already FINALIZED, so a durable attempt that was never
+ * actually the expected approval cannot ride through as trusted just because some earlier run
+ * marked it finalized. Only the RPC finality read and the `recordFinality` write are skipped once
+ * FINALIZED (restart-safe: `recordFinality` itself also refuses conflicting evidence). Not-yet-
+ * BROADCAST means nothing to check or read yet. A missing, reverted, or non-canonical receipt
+ * leaves the attempt -- and therefore the whole stage -- unresolved rather than fabricating success
+ * from the deposit's separate evidence.
+ */
+async function finalizeOutboundApprovalAttempt({
+  cycleRepository, context, client, prerequisite, operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
+}) {
+  if (!['BROADCAST', 'FINALIZED'].includes(prerequisite.attempt.state)) return false;
+  await assertOutboundApprovalAttemptRole(prerequisite, {
+    operationsAccount, depository, amountAtomic, sourceNonce, sourceHash,
+  });
+  if (prerequisite.attempt.state === 'FINALIZED') return true;
+  let finality;
+  try {
+    finality = await readOutboundPrerequisiteFinality(client, prerequisite.attempt.hash);
+  } catch {
+    finality = null;
+  }
+  if (finality === null) return false;
+  await cycleRepository.recordFinality(context.cycleId, 'outbound', prerequisite.attempt.requestDigest, finality);
+  return true;
+}
+
 function isExactOutboundDestinationCredit(leg, observation) {
   return observation.mint === leg.destinationAssetId
     && BigInt(observation.netDeltaAtomic) === BigInt(leg.destinationAmountAtomic);
@@ -1104,24 +1356,52 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
   }
   const leg = legs[0];
   if (typeof leg.sourceTxHash !== 'string' || leg.sourceTxHash.length === 0) return null;
-  const records = stateValues(cycle?.chainAttempts)
-    .filter(record => record?.attempt?.stage === 'outbound'
-      && typeof record.attempt.hash === 'string'
-      && record.attempt.hash.toLowerCase() === leg.sourceTxHash.toLowerCase());
-  if (leg.state === 'SETTLED') return outboundSettlementEvidence(leg);
-  if (leg.state !== 'RECORDED') {
-    if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && records.length === 1 && records[0].attempt?.state === 'FINALIZED') {
-      const configured = assertOutboundConfiguration(config);
-      await releaseOutboundWalletNonce({ cycleRepository, configured, context });
-    }
-    return null;
-  }
+  const allOutboundAttempts = stateValues(cycle?.chainAttempts).filter(candidate => candidate?.attempt?.stage === 'outbound');
+  const records = allOutboundAttempts.filter(record => typeof record.attempt.hash === 'string'
+    && record.attempt.hash.toLowerCase() === leg.sourceTxHash.toLowerCase());
   if (records.length !== 1) {
     throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'the outbound Relay leg cannot be matched to one durable chain attempt');
   }
   const record = records[0];
-  if (!['SIGNED', 'BROADCAST', 'FINALIZED'].includes(record.attempt.state)) return null;
   const configured = assertOutboundConfiguration(config);
+
+  // The durable outbound attempt set must be exactly the canonical two-step Relay envelope: the
+  // deposit matched above, and exactly one prerequisite -- the USDG approval that must precede it
+  // (`assertOutboundRelayEnvelope` above enforces this same two-step shape before either is ever
+  // signed). It is proven and independently finalized here, before any settled- or held-leg fast
+  // path below, so a restart that finds the leg already SETTLED still proves and finalizes the
+  // approval rather than skipping it because the deposit and destination already succeeded.
+  const prerequisites = allOutboundAttempts.filter(candidate => candidate.attempt.requestDigest !== record.attempt.requestDigest);
+  if (prerequisites.length !== 1) {
+    throw new OutboundRecoveryRequiredError('OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS', 'the outbound leg does not have exactly one durable prerequisite chain attempt');
+  }
+  const [prerequisite] = prerequisites;
+  // A client is required only to read finality for a not-yet-finalized prerequisite; an
+  // already-FINALIZED one is still role-checked below from its own durable bytes alone, with no
+  // RPC involved.
+  const prerequisiteClient = adapters?.robinhood?.client;
+  if (prerequisite.attempt.state !== 'FINALIZED' && !prerequisiteClient) return null;
+  const resolved = await finalizeOutboundApprovalAttempt({
+    cycleRepository,
+    context,
+    client: prerequisiteClient,
+    prerequisite,
+    operationsAccount: configured.evm,
+    depository: configured.evmDepository,
+    amountAtomic: leg.sourceAmountAtomic,
+    sourceNonce: record.attempt.nonce,
+    sourceHash: leg.sourceTxHash,
+  });
+  if (!resolved) return null;
+
+  if (leg.state === 'SETTLED') return outboundSettlementEvidence(leg);
+  if (leg.state !== 'RECORDED') {
+    if (TERMINAL_RELAY_LEG_STATES.has(leg.state) && record.attempt?.state === 'FINALIZED') {
+      await releaseOutboundWalletNonce({ cycleRepository, configured, context });
+    }
+    return null;
+  }
+  if (!['SIGNED', 'BROADCAST', 'FINALIZED'].includes(record.attempt.state)) return null;
   const robinhoodClient = adapters?.robinhood?.client;
   const solanaClient = adapters?.solana?.client;
   if (!robinhoodClient) return null;

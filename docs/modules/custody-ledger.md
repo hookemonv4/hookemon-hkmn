@@ -5,6 +5,57 @@
 `projectPolicyCustody` in `packages/adapters/src/app/accounting-projection.mjs` projects the durable
 per-cycle custody ledgers into the policy engine's USDG loss and outstanding-custody controls.
 
+`packages/adapters/src/solana-custody-balance-observation.mjs` is a pure combiner that validates two
+independently produced finalized-commitment read sides and, only after strict agreement, binds them
+to a caller-supplied canonical `{chainId, assetId, decimals}` custody balance observation. It
+imports no transport and performs no direct RPC itself, and it selects no chain/asset identity on
+its own. It is a bounded validator/orchestrator only — not an identity source, not a durable
+producer or writer, not a historical observer, not a valuation, and not a readiness proof. See
+`product/SOLANA_CUSTODY_CURRENT_BALANCE_OBSERVATION_DRAFT.md` (DRAFT, non-authoritative) for what
+remains unresolved before any writer may treat its output as custody evidence.
+
+`packages/adapters/src/evm-custody-balance-observation.mjs` is the EVM USDG row's own producer: given
+a pre-validated, frozen canonical identity and a distinct public/archive Robinhood client pair, it
+owns the public-finalized-head → archive-balance-at-that-height/hash → public-same-height-recheck
+read itself (unlike the Solana combiner, it performs the RPC calls; it accepts no caller-supplied read
+sides). `packages/adapters/src/app/stages/claim-process.mjs`'s `recordClaimCustodyLedger` is the EVM
+USDG row's `v1`→`v2` writer: it derives the row's `chainId`/`assetId`/`decimals` only from
+`assertClaimConfiguration`, never from this producer's output, and calls the producer only after the
+canonical claim transaction, receipt, `ProcessClaimed` event, and exact USDG credit are already
+independently verified — the producer's non-null observation is current wallet-level custody
+evidence, never claim attribution.
+
+The claim writer also checks, before that producer call and before any custody write or finality
+advancement, whether a durable row already exists at all under the legacy raw `(chainId, address)`
+identity for this same configured asset (the same raw shape a return-settlement row is keyed by),
+regardless of its bucket values — an all-zero row or the common historical-return shape of
+`claimed: '0'` with a nonzero `returnReceived` is exactly as ambiguous as a nonzero `claimed` row,
+since the identity split itself is the conflict. Because `custodyLedgerKey` is an exact string
+match, such a row is otherwise invisible to the canonical-only lookup and would let a second,
+canonical-keyed row claim the same principal again. This is refusal only: no bucket is copied or
+aliased across the two keys, no row is migrated or mutated, and the ordinary canonical `v1`→`v2`
+upgrade is unaffected when no
+such legacy row exists.
+
+`packages/adapters/src/app/cycle-repository.mjs`'s `recordHeldPosition` writes the held-position row
+under the same canonical EVM USDG identity claim and payout use: each of `stages/open.mjs`,
+`stages/epic-gate.mjs`, and `stages/buyback.mjs` derives `eip155:4663`/`eip155:4663/erc20:<address>`
+from its own local `heldPositionLedgerAsset(config)`, checking chain `4663`, six decimals, and a
+normalized 20-byte address before construction — never an alias, and never the repository's concern
+to re-derive or trust blindly (the repository only recognizes the exact same relation through its own
+`heldPositionCanonicalRawKey`, so a caller cannot make an arbitrary `eip155:4663/erc20:`-prefixed
+string authoritative). An existing row at that identity is incremented on `heldPositions` only, with
+every other bucket, `verifiedCurrentBalance`, and `expectedCycleAsset` carried forward byte-for-byte
+(a v1 predecessor upgrades to v2 with both fields honestly `null`, never a fabricated observation); an
+absent row is created as v2 with both fields `null`. A live write refuses outright, before any append,
+if a legacy raw-identity row already durably exists for the same asset — coexisting or not with a
+canonical row. `resolveHeldPosition` always decrements the exact row `recordHeldPosition` associated
+the position with, never re-deriving identity from configuration. Replay drives entirely off each
+stored event's own already-validated schema, never off the identity's shape, so a historical row —
+raw or canonical, v1 or v2 — always replays back to itself byte-for-byte; a retry that matches a
+position's evidence digest still has its named (or omitted) ledger identity checked against the
+position's actual recorded association before being treated as idempotent.
+
 ## Public interface
 
 - `projectPolicyCustody({cycleRepository, evmUsdg})` reads every active and archived cycle.
@@ -12,6 +63,9 @@ per-cycle custody ledgers into the policy engine's USDG loss and outstanding-cus
   an unvalued-exposure flag, and one partitioned summary per cycle.
 - The Phase 3 custody contract records `verifiedCurrentBalance` as a finalized observed on-chain
   typed amount, obligations separately, expected cycle assets, and unattributed external deposits.
+- `combineFinalizedBalanceObservation(sideA, sideB, { chainId, assetId, decimals, mint, owner, tokenProgramId, expectedGenesisHash? })` returns a frozen `{ account, balance: { chainId, assetId, decimals, amountAtomic }, finality: { height, hash, timestampUnixSeconds } }` or throws `SolanaCustodyObservationError`.
+- `observeFinalizedBalanceWithRetry(readRound, request, { maxAttempts? })` invokes a caller-supplied `readRound(attempt)` up to `maxAttempts` bounded times (default 3), returning the first round that combines successfully, and throws `SolanaCustodyObservationError` after exhaustion. `readRound` is the helper's only I/O boundary: the helper itself imports no transport and never calls `fetch` or an RPC client directly, but the resulting observation still depends on whatever I/O the caller's `readRound` performs.
+- `SolanaCustodyObservationError` is the sole thrown error type from the balance-observation helper.
 
 ## Invariants
 
@@ -25,6 +79,12 @@ per-cycle custody ledgers into the policy engine's USDG loss and outstanding-cus
 - Held or unattributed value on any ledger is visible to policy even when the ledger is foreign.
 - Expected cycle assets are cycle-attributed typed amounts. Unattributed external deposits remain
   outside expected assets and pause new claims until reconciled or classified.
+- Both balance-observation read sides must be at `commitment: 'finalized'`; a lower commitment is rejected, never silently accepted.
+- Both sides must report the same `context.slot` and the same non-empty `block.blockhash` and `block.blockTime` (including both `null`, never coerced to a timestamp).
+- Both sides' token account `{address, mint, owner, tokenProgram, decimals, amountAtomic}` must agree with each other and with the caller-supplied expected `mint`/`owner`/`tokenProgramId`/canonical `decimals`.
+- When `expectedGenesisHash` is supplied, both sides must report exactly that genesis hash.
+- The returned balance observation's `chainId`/`assetId`/`decimals` are exactly the caller-supplied canonical values — this helper never selects `solana-mainnet` or Relay `792703809` itself.
+- `minContextSlot` is out of scope for the balance-observation helper: it is the caller's read boundary's concern and is never treated here as pinning a historical slot.
 
 ## State transitions
 
@@ -32,10 +92,19 @@ The projection is read-only. A completed cycle's unresolved EVM USDG claim becom
 the same unresolved amount on any other cycle remains at risk and outstanding custody. Finalized
 observations update verified balances without changing the one-time principal obligation.
 
+The balance-observation helper is stateless: each call is an independent pure validation, and
+`observeFinalizedBalanceWithRetry` carries no state beyond its own bounded loop counter. It only
+constructs evidence from already-read sides; it never produces or persists a balance itself.
+
 ## Operational commands
 
 ```sh
 node --test packages/adapters/test/app/accounting-projection.test.mjs
+```
+
+```sh
+cd packages/adapters && npm ci --ignore-scripts
+node --test test/solana-custody-balance-observation.test.mjs
 ```
 
 ## Recovery pointers
@@ -43,3 +112,9 @@ node --test packages/adapters/test/app/accounting-projection.test.mjs
 - Record an attributed ledger update before relying on a balance to permit a new claim.
 - Treat an unvalued asset, missing USDG identity, or unknown quarantine representation as a pause
   condition until the underlying custody data is classified.
+- A thrown `SolanaCustodyObservationError` from `observeFinalizedBalanceWithRetry` means no round
+  agreed within `maxAttempts`; there is no partial or best-effort result to recover.
+- The balance-observation helper has no durable state and nothing to reconcile after a crash: a
+  restart simply re-runs `readRound` and re-validates from scratch.
+- Fixture coverage for the balance-observation helper is in
+  `packages/adapters/test/solana-custody-balance-observation.test.mjs`.

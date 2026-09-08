@@ -1,0 +1,20 @@
+{
+  "id": "r-00645",
+  "at": "2026-09-06T20:15:41.498Z",
+  "type": "owner-spec-approved",
+  "phase": "spec",
+  "result": "PASSED",
+  "data": {
+    "approvalInput": "decisions/owner-approvals/revision-67-spec-s5-approved.json",
+    "itemId": "S5",
+    "producer": "v4-owner-authorize-v1",
+    "proofSchema": "sha256-input-manifest-v1",
+    "rationale": "Approve requirements revision 67 for the offline Collector purchase-policy binding and EVM-only custody-ledger v2 contract."
+  },
+  "inputHashes": {
+    "gates/spec.json": "23d8ad8e9c416b02267bbf432e89cd30c0ae48c8a03b660971eca970c88a3343",
+    "policy/policy.json": "3ffc546b2bee1aa64d71f8399cfbf40b96847c1bcd87c0f65db09e797375a4d8",
+    "specs/requirements.json": "d9e287c5bf9d5cc93ebddc84e72756a1d0e02004214f53f394a3e1e7aee60d18",
+    "decisions/owner-approvals/revision-67-spec-s5-approved.json": "aebdddeb596ce2f9b6cd1fed6cbd9621cbcb5897c06b911d291608f5f376ca8b"
+  }
+}

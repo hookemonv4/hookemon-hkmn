@@ -9,7 +9,7 @@ const transactionSignerPublicKey = createPublicKey({ key: Buffer.from('302a30050
 const providerPublicKey = createPublicKey({ key: Buffer.from('302a300506032b65700321000378aa0da09b0890aeaf8c5a34a64834ce852dca35722fcafc12d0fcf1dddfd1', 'hex'), format: 'der', type: 'spki' });
 const rpcPublicKey = createPublicKey({ key: Buffer.from('302a300506032b6570032100d64a93bacc40d48ad76b9485eb78e2c0242d4ae1c7d31932cd1bcaeccd619f03', 'hex'), format: 'der', type: 'spki' });
 const identifier = /^[A-Za-z0-9][A-Za-z0-9:._-]{1,127}$/;
-const packCode = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const packCode = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 const signature = /^[A-Za-z0-9_-]{86}$/;
 const fixtureAuthorizationValidatedAt = '2029-01-01T00:00:00.000Z';
 

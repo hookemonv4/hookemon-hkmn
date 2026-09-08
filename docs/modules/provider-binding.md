@@ -50,3 +50,9 @@ node scripts/verify-deployment-manifest.mjs
 - OPEN FACT: source-bundle coverage lacks a committed attestation evidence file and selected metadata image. Add both paths and regenerate the package; the verified alternative keeps the declaration unresolved and prevents a preflight POST.
 - `PROVIDER_API_KEY_PENDING`, `OWNER_WALLET_FUNDING_PENDING`, and `BUILDER_IDENTITY_PENDING` remain separate inputs for preflight, the owner-signed seed, and evidence attribution. Keep each external action unavailable until its own controls are met.
 - Reject a mismatched provider response, retain the observed evidence, and rerun the local verifier with the current frozen inputs.
+
+### Historical interface evidence and approved offchain amendments
+
+The Phase 3 interface proof retains requirements revision 65 and architecture revision 9. `feasibility/phase3-offchain-interface-amendment.json` binds the exact current interface and requirements bytes to the existing revision-67 and revision-68 S5 approvals. The verifier keeps executable pins for the original interface bytes and its preserved projection, derived from commit `2297d07f` (interface SHA-256 `3350ef517e171acc89015d843d9a9dbe5ad530d1618279aad01b39a16805eb10`). Projection removes only revision labels, `cycleExecution.custodyLedger`, and the three named Collector policy/registry additions; all other interface fields remain identical.
+
+An amendment does not upgrade historical contract, cycle-control or reproducibility evidence to a newer revision. Changed current bytes, approval bytes or preserved interface fields invalidate the binding. The unresolved deployment manifest and `productionReady: false` remain authoritative. Run `node --test scripts/tests/offchain-interface-amendment.test.mjs` for the rejection cases.

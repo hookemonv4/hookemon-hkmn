@@ -46,17 +46,34 @@ repository client.
 - `createStageDriver({liveMode, adapters, reconciliationAdapters, signerClient, config,
   cycleRepository, preflightAuthority})` returns the `reconcile`, `execute`, and side-effect-free `commit` methods
   used by `AutomatedCycleService`. `preflightAuthority` accepts only the exact Node test fixture;
-  production construction omits it. The ordinary reconciliation seam is read-only and separate from
-  mutation adapters. Chain-journal reconciliation for claim, outbound, and return additionally
+  production construction omits it. Built-in card reconciliation uses the real adapters when no
+  explicit reconciliationAdapters are supplied; explicit observation adapters retain precedence.
+  Custom handlers retain their separate reconciliation seam. Adapter calls and the narrow
+  reconciliation repository remain lease-fenced, and reconciliation does not resend provider mutations. Chain-journal reconciliation for claim, outbound, and return additionally
   receives only fenced broadcast, finality, custody, Relay-settlement, recovery-context, and
   wallet-nonce-release writers after canonical chain observation. Direct payout may idempotently
   record successor dust and release its nonce fence before returning terminal recovery evidence.
+- `HOOKEMON_COLLECTOR_EPIC_GATE_CONFIG_PATH` optionally names a JSON object containing exactly
+  `nftAddressField`, `insuredValueField`, `prizeTierField`, and `rarityField`. Values are distinct
+  plain field identifiers supplied independently of provider responses; there are no default field
+  names. The loader freezes the mapping and derives its asset from the native Collector settlement
+  identity after validating the configured money asset. The file cannot override that asset or any
+  epic threshold. Missing configuration preserves the handler's data-unverified refusal; malformed
+  configuration refuses loading. This configuration selects provider fields, not transaction signing
+  authority or approval of live provider facts.
 - `readEnvironment` accepts standing-authority material only as one document path, one owner public
   key path, and one policy public key path. `loadStandingAuthority` verifies the owner signature and
   policy-key binding, then loads the private canonical state-directory artifact
   `standing-authority-step-authorizations.json`. Its digest-bound, policy-signed entries resolve
   production step authorizations before the private repository writer persists first use and the raw
   signer is invoked.
+- `createTrustedSolanaBlockhashContextResolver(client)` builds the one trusted
+  `config.solana.blockhashContextResolver` compose wires, constructed only from the composed Solana
+  RPC client -- no other adapter or config value feeds it. Called with an observed transaction
+  blockhash, it reads a fresh `readUsableLatestBlockhash(client)` pair and accepts only an exact
+  match between the observed blockhash and that pair's own current latest, usable blockhash,
+  returning its `lastValidBlockHeight`. It refuses any other blockhash outright; it never accepts or
+  derives a deadline from an arbitrary still-valid older blockhash.
 - The root exposes read-only dependency health and readiness to automation and dashboard surfaces.
   The decoder-backed, request-scoped signing wrapper remains an integration boundary; live startup
   preflight does not replace its final per-signature canary call.
@@ -66,6 +83,16 @@ repository client.
   valid persisted policy configuration whose `liveMode` matches the selected provider profile.
   Production requires `manualApprovalCycles >= 3`; rehearsal requires at least one manual approval
   slot.
+
+- The supplementary buyback handler resolves the Collector production binding against the original open evidence and freshly finalized ownership, and preserves the frozen policy when replaying signed bytes. See [Supplementary Buyback](supplementary-buyback.md) for its interface and recovery rules.
+
+`HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS` supplies the explicit positive safe-integer
+return settlement bound as a canonical decimal string. It has no default; omission retains the
+return handler's pre-sign refusal. The request must carry the same configured bound.
+
+The return policy signer accepts either a plain broadcast port or the owned Keychain client’s
+policy-approved broadcast port. The latter stays behind transaction revalidation and the stage
+driver’s lease and authority checks; the Keychain child remains sign-only.
 
 ## Invariants
 
@@ -96,11 +123,34 @@ repository client.
   both EIP-1559 fee fields and a post-fee native reserve. Return, purchase, and buyback require the
   configured Solana asset, cap the decoded priority fee, and check the post-fee lamport reserve;
   these are pre-sign balance checks, not transactional balance reservations.
+- For the production profile, `readEnvironment` binds `config.solana.chainId` and
+  `config.collectorCrypt.settlementAsset` to the native `COLLECTOR_CRYPT_SETTLEMENT_ASSET`
+  (`solana-mainnet`, the Collector transaction-policy label), the same value collector-only
+  rehearsal already uses, and refuses a configured `HOOKEMON_RELAY_SOLANA_MINT`/
+  `HOOKEMON_RELAY_SOLANA_DECIMALS` pair whose mint and decimals are not exactly that documented
+  asset identity, since Collector Crypt purchase and buyback settle only in it. This is an
+  asset-identity check, not a namespace merge: `MoneyConfigurationV1`'s Solana asset keeps its own
+  numeric Relay chain-id namespace (`792703809`) unchanged.
 - The composition return value and dashboard request context expose only the frozen repository
   client. Writer methods remain reachable only through the composition's closed-over automation
   dependencies.
 - The policy engine rereads the persisted operator configuration for each decision. Its production
   reservations are written through the operator-state mutation lock, not an in-memory cache.
+- The live admission planner (`buildAdmissionPlanner`) admits a cycle only against a full normalized
+  reading of the hook's process-liability ledger -- every control getter, the hook and cycle
+  identity it was read against, and `ceilingAtomic = min(processLiability,
+  remainingProcessClaimCapacity)` -- never a wallet balance or a configured figure. The production
+  reader (`buildProcessLiabilityReader`) selects the public finalized block, binds the archive read
+  to it, and re-reads the same height from the public client before returning, refusing on a hash
+  mismatch. The planner validates that same shape and each control independently of the reader that
+  supplied it, so a test reader cannot hand it evidence a real one would have refused.
+- After the private `CycleRepository` opens, production composition derives its Robinhood client
+  by wiring `createCycleAttributableFinalizedAvailableReader()` (closing over that private
+  repository and the distinct archive client) as `readCycleAttributableFinalizedAvailable`,
+  spread in last so it always wins over any same-named method an injected raw client already
+  carries. This derived view, never the raw injected one, reaches the stage driver and the
+  composed result's exposed `adapters`; an untrusted client can never self-attest its own
+  cycle-attributable payout availability.
 - A cycle stores one immutable mode, `production` or `rehearsal`, at creation. Production services
   refuse rehearsal cycles and rehearsal services refuse production cycles.
 - `readEnvironment` resolves the EVM USDG address and decimals from the frozen binding. The
@@ -172,6 +222,12 @@ repository client.
 - Fake rehearsal composes sealed fake Relay and Collector adapters. They provide deterministic
   effect records to the rehearsal driver and cannot issue a network request. Its evidence is sealed
   after every stage is reconciled and before terminal archival.
+- Frozen request/evidence and child stage payloads remain data-only: canonicalization strips
+  function fields, so a resolver or other capability is never serialized into a stored record. The
+  one exception is the production supplementary reconcile call site, which re-attaches this exact
+  in-process `blockhashContextResolver` function after canonicalization solely so the production
+  supplementary buyback handler can resolve trusted blockhash context; no other frozen preparation
+  or reconciliation payload carries a function capability.
 
 ## State transitions
 
@@ -252,3 +308,43 @@ node --test packages/runner/test/cycle/money-schemas.test.mjs packages/runner/te
 - Keep production signing closed unless all three standing-authority verification paths and a
   policy-signed step-intent source are present. Do not replace a missing intent with a fixture,
   inferred payload, or a fresh signature.
+
+Supplementary handlers receive the driver's existing opaque `preflightAuthority` unchanged.
+Production callers without that capability retain the frozen-interface authorization check;
+the branded fixture authority remains restricted to the Node test runner.
+
+Supplementary return consumes finalized Collector sale proceeds in the native Solana namespace,
+with the documented settlement mint and decimals checked against MoneyConfiguration. It preserves
+the position-attributed atomic amount; Relay transport identifiers belong to the subsequently
+validated bridge quote, not to the confirmed sale evidence.
+
+Supplementary dispatch retains the process-local isolated signer setup by reference alongside the
+trusted Solana blockhash resolver. Other configuration remains frozen data. The production binding
+boundary still authenticates the setup's private identity; a value-identical copy is not authority.
+
+`createProductionSupplementaryStageHandlers` builds the canary-guarded production handlers.
+Its return handler forwards the existing opaque `preflightAuthority` unchanged to the return
+mutation helper. Missing authority retains frozen-interface validation; the branded fixture
+authority remains restricted to the Node test runner.
+
+The supplementary payout handler passes the complete durable return boundary, including its
+evidence digest and attributed payout source, alongside the original completed eligibility
+snapshot. After `PAYOUT_BROADCAST`, it reads the carried return boundary and resumes the same
+payout manifest without new signatures or transfers for finalized recipients. Both dispatch
+states retain exact boundary schema, snapshot, source, and digest validation.
+
+Supplementary dispatch accepts active settlements only. After a payout handler returns, its
+result may be `COMPLETE` from either payout dispatch state. The driver rechecks the held-position
+identity, original manifest and eligibility digest, any established payout-source digest, and
+the current lease before reporting advancement; a completed settlement cannot start dispatch.
+
+The literal production acceptance graph runs `hookemon-runner` against synthetic loopback
+providers and the module-owned isolated signing child. It admits two packs, finalizes an ordinary
+90-unit payout and a later 45-unit held-sale payout to the original holder snapshot, and checks
+conservation and custody independently. Fresh CLI processes reopen both completions without new
+logical purchases or payments; durable manifests, attempts, recipients and provider counts remain
+stable. Every process must complete without a failed tick, and copied runtime bytes may differ
+only at the two fixture identity pins and fixed synthetic interface metadata. This test does not
+establish live provider acceptance or authorize live signing, spending or deployment.
+
+The wallet nonce boundary resolves a renewed automation context against the durable reservation before asserting or releasing it. Only the same cycle, chain, wallet, stage, fencing token and acquisition timestamp may retain that reservation's original expiry. A later context expiry does not extend a held nonce lease; signing still refuses after its original deadline. Released handles retain their original window only for idempotent release. A new reservation after release uses the current active lease window. Reopening the repository or rebuilding a context does not change the binding, and a stale release cannot remove a successor's global reservation.

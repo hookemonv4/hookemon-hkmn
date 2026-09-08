@@ -6,7 +6,8 @@ import {
   recoverTransactionAddress,
 } from 'viem';
 
-import { buildClaimProcessCall } from '../../hook-contract-client.mjs';
+import { createEvmCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
+import { buildClaimProcessCall, HOOK_ABI } from '../../hook-contract-client.mjs';
 import {
   RobinhoodMalformedResponseError,
   readFinalizedErc20TransferCredit,
@@ -20,34 +21,24 @@ import {
   decodeProviderTransaction,
   readTransactionPolicyRules,
 } from '../../signing/transaction-policy.mjs';
-import { assertMoneyConfiguration, createPreparedChainTransactionAttempt } from '../../../../runner/src/cycle/money-schemas.mjs';
+import {
+  assertMoneyConfiguration,
+  createPreparedChainTransactionAttempt,
+  CUSTODY_LEDGER_BUCKETS,
+} from '../../../../runner/src/cycle/money-schemas.mjs';
 import {
   createTestProfileMutationAuthority,
   requireLiveMutationAuthority,
 } from '../../../../runner/src/cycle/preflight.mjs';
 import { deriveOnchainCycleId, readUsdgAddress } from './action-builder.mjs';
+import { readBlockByNumber, readFinalizedBlock } from '../../robinhood-rpc.mjs';
 import { StageMutationRevertedError } from './errors.mjs';
-import { walletNonceLeaseWindow } from '../wallet-nonce-lease.mjs';
+import { walletNonceLeaseWindow, resolveWalletNonceReservation } from '../wallet-nonce-lease.mjs';
 
 const USDG_DECIMALS = 6;
 const ATOMIC_AMOUNT = /^(?:0|[1-9][0-9]*)$/;
 const EVM_HASH = /^0x[0-9a-fA-F]{64}$/;
 const EVM_BYTES = /^0x(?:[0-9a-fA-F]{2})+$/;
-const CUSTODY_BUCKETS = Object.freeze([
-  'claimed',
-  'bridgeOut',
-  'bridgeIn',
-  'packCost',
-  'buybackProceeds',
-  'returnInput',
-  'returnReceived',
-  'refunds',
-  'residual',
-  'heldAssets',
-  'payoutLiability',
-  'dust',
-  'unattributed',
-]);
 const CLAIM_EVENT_ABI = parseAbi([
   'event ProcessClaimed(bytes32 indexed cycleId, uint256 amountAtomicUsdg, address indexed destination, uint256 timestamp, uint256 cap, uint256 usedAfter)',
 ]);
@@ -111,7 +102,7 @@ async function reserveClaimWalletNonce({ cycleRepository, context, configured })
     if (process.env.NODE_TEST_CONTEXT !== undefined) return null;
     throw new Error('claim-process requires a global wallet nonce reservation repository');
   }
-  const reservation = claimWalletNonceReservation({ configured, context });
+  const reservation = await resolveWalletNonceReservation(cycleRepository, context.cycleId, claimWalletNonceReservation({ configured, context }));
   await cycleRepository.reserveWalletNonce(context.cycleId, reservation);
   await cycleRepository.assertWalletNonce(context.cycleId, reservation);
   return reservation;
@@ -129,7 +120,7 @@ async function releaseClaimWalletNonce({ cycleRepository, context, configured })
   }
   await cycleRepository.releaseWalletNonce(
     context.cycleId,
-    claimWalletNonceReservation({ configured, context }),
+    await resolveWalletNonceReservation(cycleRepository, context.cycleId, claimWalletNonceReservation({ configured, context }), { release: true }),
   );
 }
 
@@ -501,6 +492,8 @@ export async function mutateClaimProcess({
     });
     await assertClaimWalletNonce({ cycleRepository, context, reservation: walletReservation });
     requireClaimMutationAuthority(preflightAuthority);
+    // After the authority check, which needs no network, and still before any signer call.
+    await assertClaimStillCoveredByHookLiability({ adapters, configured, context, request });
     const signed = await signerClient.evm.sign({
       transaction: approved.transaction,
       transactionPolicy: approved.policy,
@@ -555,6 +548,63 @@ export async function mutateClaimProcess({
  * must inspect capacity or liability evidence and prepare a new owner-authorized cycle, never
  * retry the same claimed cycle identifier.
  */
+/**
+ * Last veto before a signature: re-read the hook's liability and claim controls, and let the
+ * canonical claim call itself be estimated.
+ *
+ * This may only refuse. It never raises the admitted amount, reprices, or mints a new quote or cycle
+ * identity -- the persisted admission stays immutable, and a snapshot that has dropped below it means
+ * the cycle stops rather than adapts. The estimate is what catches state a getter cannot express,
+ * notably a full active-entry ring (`ProcessClaimEntryLimitReached`), and it runs before any signer
+ * call so a refusal costs no signature.
+ *
+ * Absent capability is not silent success: if neither the archive state read nor the estimate is
+ * available, the claim refuses.
+ */
+async function assertClaimStillCoveredByHookLiability({ adapters, configured, context, request }) {
+  const publicClient = adapters?.robinhood?.client ?? null;
+  const archive = adapters?.robinhood?.historicalEvidenceClient ?? null;
+  if (publicClient === null || typeof archive?.readHookProcessStateAtBlock !== 'function') {
+    throw new Error('claim-process requires finalized hook process-liability evidence before signing');
+  }
+  const amount = BigInt(request.amount.amountAtomic);
+  const onchainCycleId = deriveOnchainCycleId(context.cycleId);
+  const finalized = await readFinalizedBlock(publicClient);
+  const state = await archive.readHookProcessStateAtBlock({
+    hook: configured.hook,
+    onchainCycleId,
+    blockNumber: finalized.number,
+    blockHash: finalized.hash,
+  });
+  // The archive read binds its values to `finalized.hash`, but the archive itself could sit behind a
+  // reorg the public chain has already abandoned. Re-reading the same height from the public client
+  // now -- after the archive read, before any control check, estimate, or signer call -- catches that
+  // window instead of signing off a hash the canonical chain no longer reports.
+  const recheck = await readBlockByNumber(publicClient, finalized.number);
+  if (recheck.hash?.toLowerCase() !== state.blockHash) {
+    throw new Error('claim-process refuses to sign: the public finalized block hash changed after the archive read');
+  }
+  if (state.processClaimsPaused) throw new Error('claim-process refuses to sign while hook process claims are paused');
+  if (state.processClaimCycleUsed) throw new Error('claim-process refuses to sign a cycle the hook already claimed');
+  if (!state.isSolvent) throw new Error('claim-process refuses to sign while the hook is not solvent');
+  if (state.operations !== configured.operations.toLowerCase()) {
+    throw new Error('claim-process refuses to sign against a changed hook Operations role');
+  }
+  if (amount > state.processLiability || amount > state.remainingProcessClaimCapacity) {
+    throw new Error('claim-process refuses to sign: the admitted amount is no longer covered by hook liability and capacity');
+  }
+  // The canonical call, estimated as Operations would send it. A revert here is a refusal.
+  if (typeof publicClient.estimateContractGas === 'function') {
+    await publicClient.estimateContractGas({
+      address: configured.hook,
+      abi: HOOK_ABI,
+      functionName: 'claimProcess',
+      args: [onchainCycleId, amount, configured.operations],
+      account: configured.operations,
+    });
+  }
+}
+
 function claimChainAttempts(cycle) {
   const entries = cycle?.chainAttempts instanceof Map ? [...cycle.chainAttempts.values()] : [];
   return entries.filter(record => record?.attempt?.stage === 'claim-process');
@@ -592,9 +642,58 @@ function claimCustodyAsset(configured) {
   });
 }
 
-async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured) {
+/**
+ * The legacy, pre-canonical row identity for this same configured EVM USDG asset: a raw
+ * `(chainId, address)` pair (no `eip155:`/`erc20:` CAIP wrapping), the same raw shape
+ * `returnSettlementCustodyLedger` keys its own row by (ADR-0026). This claim writer has always used
+ * the canonical CAIP identity from `claimCustodyAsset` -- it never produced this raw key itself --
+ * but `custodyLedgerKey` is an exact string match, so a row already durable under this raw key for
+ * this asset is invisible to a canonical-only lookup. Derived only from `assertClaimConfiguration`
+ * output, matching `claimCustodyAsset`'s own trusted inputs exactly.
+ */
+function legacyRawClaimCustodyKey(configured) {
+  return `${String(configured.chainId)}${String.fromCharCode(0)}${configured.usdg.toLowerCase()}`;
+}
+
+/**
+ * ADR-0026's dedicated EVM USDG `CustodyBalanceObservationV1` producer, invoked at the moment this
+ * writer records a v2 row for the claim key. `identity` is built only from `assertClaimConfiguration`
+ * output (`asset`, already the canonical CAIP identity `claimCustodyAsset` derives, plus the
+ * configured Operations address) -- never from any RPC response or candidate evidence. Reuses the
+ * public-finalized-head -> distinct-archive-read-at-that-height/hash -> public-same-height-recheck
+ * discipline `createEvmCustodyBalanceObservationReader` already owns; this function neither reads
+ * chain state directly nor claims causal provenance for the claim -- that authority is the already
+ * -verified canonical transaction/event/credit this is only ever called after.
+ */
+async function observeClaimCustodyBalance({ adapters, configured, asset }) {
+  const observeBalance = createEvmCustodyBalanceObservationReader({
+    publicClient: adapters?.robinhood?.client ?? null,
+    archiveClient: adapters?.robinhood?.historicalEvidenceClient ?? null,
+    identity: {
+      chainId: asset.chainId,
+      assetId: asset.assetId,
+      decimals: asset.decimals,
+      account: String(configured.operations).toLowerCase(),
+    },
+  });
+  return observeBalance();
+}
+
+async function recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters) {
   if (typeof cycleRepository?.recordCustodyLedger !== 'function') {
     throw new Error('claim-process requires custody-ledger persistence before finality');
+  }
+  // Refuse before any balance read or custody write -- and before finality ever advances -- if a
+  // durable legacy raw-identity row for this same configured asset exists at all, regardless of its
+  // bucket values (an all-zero row, or the common historical-return shape of claimed='0' with a
+  // nonzero returnReceived, is exactly as ambiguous as a nonzero claimed row: the identity split
+  // itself is the problem, not any one bucket), and whether or not a canonical row also already
+  // coexists. This is detection only: no bucket is copied or aliased across the two keys, no row is
+  // touched or migrated, and the already-legitimate canonical v1-to-v2 upgrade path is unaffected
+  // when no such row exists.
+  const legacyRawRow = cycle?.custodyLedgers?.get?.(legacyRawClaimCustodyKey(configured)) ?? null;
+  if (legacyRawRow !== null) {
+    throw new Error('claim-process refuses: a legacy raw-identity custody row exists for this asset, an unresolved raw/canonical identity conflict; resolve it before any canonical custody write or finality advancement');
   }
   const asset = claimCustodyAsset(configured);
   const key = `${asset.chainId}\u0000${asset.assetId}`;
@@ -610,20 +709,28 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
     if (existing.claimed !== '0' && existing.claimed !== amountAtomic) {
       throw new Error('claim-process existing custody ledger has a conflicting claimed amount');
     }
-    if (existing.claimed === amountAtomic) return;
-    await cycleRepository.recordCustodyLedger(
-      request.cycleId,
-      Object.freeze({ ...existing, claimed: amountAtomic }),
-    );
-    return;
   }
+  // The observation is fetched, and can refuse, before any write -- a missing/drifted/malformed
+  // read never reaches `recordCustodyLedger` and never advances finality (both callers only proceed
+  // to `recordFinality` after this resolves).
+  const verifiedCurrentBalance = await observeClaimCustodyBalance({ adapters, configured, asset });
+  const buckets = Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(bucket => [
+    bucket,
+    bucket === 'claimed' ? amountAtomic : (existing?.[bucket] ?? '0'),
+  ]));
+  // ADR-0026: only the dedicated return-leg writers may populate or clear `expectedCycleAsset`; this
+  // generic claim writer must carry an existing v2 row's value forward unchanged, never null it out
+  // from under an in-flight return expectation.
+  const expectedCycleAsset = existing?.schema === 'hookemon.custody-ledger.v2' ? existing.expectedCycleAsset : null;
   await cycleRepository.recordCustodyLedger(
     request.cycleId,
     Object.freeze({
-      schema: 'hookemon.custody-ledger.v1',
+      schema: 'hookemon.custody-ledger.v2',
       cycleId: request.cycleId,
       ...asset,
-      ...Object.fromEntries(CUSTODY_BUCKETS.map(bucket => [bucket, bucket === 'claimed' ? amountAtomic : '0'])),
+      ...buckets,
+      verifiedCurrentBalance,
+      expectedCycleAsset,
     }),
   );
 }
@@ -657,7 +764,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
   const request = await prepareClaimProcessRequest({ config, cycleRepository, context });
   const configured = assertClaimConfiguration(config);
   if (chain.attempt.state === 'FINALIZED') {
-    await recordClaimCustodyLedger(cycleRepository, cycle, request, configured);
+    await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters);
     await releaseClaimWalletNonce({ cycleRepository, context, configured });
     return Object.freeze(chain.finalityEvidence);
   }
@@ -740,7 +847,7 @@ export async function reconcileLiveClaimProcess({ adapters, config, cycleReposit
     claimedAmountAtomic: request.amount.amountAtomic,
     destination: request.destination,
   });
-  await recordClaimCustodyLedger(cycleRepository, cycle, request, configured);
+  await recordClaimCustodyLedger(cycleRepository, cycle, request, configured, adapters);
   await cycleRepository.recordFinality(context.cycleId, 'claim-process', chain.attempt.requestDigest, evidence);
   await releaseClaimWalletNonce({ cycleRepository, context, configured });
   return evidence;

@@ -260,7 +260,11 @@ export function evaluatePayoutFeasibility({ entries, feasibility }) {
   if (recipientCount > DIRECT_PAYOUT_RECIPIENT_LIMIT) reasons.push('recipient-count-exceeds-direct-payout-capacity');
   if (recipientCount > feasibility.maxRecipientCount) reasons.push('recipient-count-exceeds-configured-maximum');
   if (transactionCount > feasibility.maxTransactionCount) reasons.push('transaction-count-exceeds-configured-maximum');
-  if (feasibility.nativeBalanceWei < requiredNativeWei) reasons.push('native-balance-below-reserve-and-fee');
+  if (feasibility.nativeBalanceWei < requiredNativeWei) {
+    // Admission must report the actual shortfall, not just a category, so a non-spending refusal
+    // is auditable and actionable before any irreversible signature.
+    reasons.push(`native-balance-below-reserve-and-fee(deficitWei=${(requiredNativeWei - feasibility.nativeBalanceWei).toString()})`);
+  }
   const nativeAmount = amountAtomic => ({
     chainId: feasibility.chainId,
     assetId: 'native',

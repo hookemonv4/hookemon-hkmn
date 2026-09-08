@@ -9,7 +9,12 @@ export const REWARD_RECIPIENT_LIMITS = Object.freeze(
   Array.from({ length: 10 }, (_, index) => (index + 1) * 100),
 );
 
-export const HARD_CAPS = OPERATOR_HARD_CAPS;
+export const HARD_CAPS = Object.freeze({
+  maxBoostersPerCycle: OPERATOR_HARD_CAPS.maxBoostersPerCycle,
+  maxUnitPriceMicroUsdg: OPERATOR_HARD_CAPS.maxUnitPriceMicroUsdg,
+  maxCycleBudgetMicroUsdg: OPERATOR_HARD_CAPS.maxCycleBudgetMicroUsdg,
+  max24HourBudgetMicroUsdg: OPERATOR_HARD_CAPS.max24HourBudgetMicroUsdg,
+});
 
 function effectiveConfiguration(configuration) {
   return configuration ?? createDefaultOperatorConfiguration();

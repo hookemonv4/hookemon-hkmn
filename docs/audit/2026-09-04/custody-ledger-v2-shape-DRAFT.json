@@ -1,0 +1,133 @@
+{
+  "draft": true,
+  "canonical": false,
+  "note": "Illustrative, non-canonical machine-readable companion to decisions/ADR-0026-custody-ledger-v2-migration.md. Not read by packages/runner/test/cycle/money-schemas.test.mjs, any CI gate, specs/requirements.json, or architecture/interfaces.json. Do not treat any value below as an approved or observed figure; every amount is a placeholder chosen only to satisfy the existing atomic-string and address-format conventions.",
+  "scope": "verifiedCurrentBalance and its admission rule apply only to the canonical EVM USDG row in this revision. No Solana observation producer is defined; a non-EVM-USDG v2 row stays permanently unvalued and fail-closed under the same rule until a future revision defines one.",
+  "unchangedFromV1": {
+    "custodyLedgerBuckets": [
+      "claimed", "bridgeOut", "bridgeIn", "packCost", "buybackProceeds",
+      "returnInput", "returnReceived", "refunds", "residual", "heldAssets",
+      "heldPositions", "payoutLiability", "dust", "unattributed"
+    ],
+    "source": "packages/runner/src/cycle/money-schemas.mjs:63-78 (CUSTODY_LEDGER_BUCKETS), unchanged names, order, and atomic-string semantics"
+  },
+  "legacyReplayContract": {
+    "storedJournalBytes": "never rewritten; a historical thirteen-bucket hookemon.custody-ledger.v1 entry stays exactly as persisted",
+    "projectedValue": "assertCustodyLedger(..., {allowLegacyBuckets: true}) backfills heldPositions: '0' in the value returned to callers only -- this is the shape describeCycle/projectPolicyCustody/the dashboard actually see, and it never gains a v2 field",
+    "source": "packages/runner/src/cycle/money-schemas.mjs:262-276 (completeLegacyCustodyBuckets), packages/adapters/src/app/cycle-repository.mjs:3166-3174 (replay call site)"
+  },
+  "canonicalAssetIdentity": {
+    "formula": "{chainId: `eip155:${money.assets.usdg.chainId}`, assetId: `eip155:${money.assets.usdg.chainId}/erc20:${money.assets.usdg.assetId.toLowerCase()}`, decimals: money.assets.usdg.decimals}",
+    "provenance": "identical to claimCustodyAsset's existing formula (claim-process.mjs:635-641) applied to configured.chainId/configured.usdg instead of money.assets.usdg -- claim-process.mjs:73-75 already asserts these two sources are equal before any claim proceeds, so both routes to the canonical identity produce the same value",
+    "preConstructionGate": {
+      "checkedFields": ["leg.destinationChainId === EVM_CHAIN_ID", "leg.destinationAssetId.toLowerCase() === USDG_ADDRESS", "leg.destinationDecimals === money.assets.usdg.decimals"],
+      "onMismatch": "refuse the write -- do not construct or append a ledger row",
+      "why": "the ledger row's own decimals field is always sourced from money.assets.usdg.decimals, never copied from leg.destinationDecimals, so this check exists to catch a settled leg whose actual decimals convention disagrees with configuration, not to sanitize the row (which is already safe by construction)",
+      "constants": "EVM_CHAIN_ID = String(RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID) = \"4663\", USDG_ADDRESS = RELAY_CONSTANTS.USDG_ADDRESS.toLowerCase() = \"0x5fc5360d0400a0fd4f2af552add042d716f1d168\" (packages/adapters/src/relay-client.mjs:50,52,1055-1062; packages/adapters/src/app/stages/return.mjs:48,50)"
+    },
+    "whereResolutionHappens": "the return stage (return.mjs) only -- it already holds money and the raw RELAY_CONSTANTS-derived comparison values. CycleRepository receives the already-resolved canonical chainId/assetId/decimals as part of the ledger row payload and performs no resolution of its own: it is constructed from a directory and a clock only (cycle-repository.mjs:2492-2513) and takes no injected configuration anywhere.",
+    "failureModeIfMisresolved": "a stray, unreferenced ledger row at a wrong key -- never a merge or overwrite of an existing row, because chainId/assetId are part of custodyLedgerKey itself",
+    "notAGeneralFramework": "one fixed formula for the one asset in scope this revision; not an N-chain/N-asset resolver"
+  },
+  "newSchemas": {
+    "hookemon.custody-balance-observation.v1": {
+      "fields": {
+        "schema": "literal 'hookemon.custody-balance-observation.v1'",
+        "account": "non-empty string; the configured Operations EVM address",
+        "balance": "TypedAmount ({chainId, assetId, decimals, amountAtomic}); chainId/assetId/decimals MUST equal the owning ledger row's own canonical identity",
+        "finality": "{height: atomic-string block number, hash: non-empty string, timestampUnixSeconds: atomic-string|null} -- assertRelayFinality's exact shape, money-schemas.mjs:457-463"
+      },
+      "producer": "a new adapters-layer function, EVM USDG row only, reusing the public/archive/public-recheck evidence pattern payout-availability.mjs#reloadFinalizedOperationsUsdgBalance already implements (packages/adapters/src/app/payout-availability.mjs:199-227) without calling into or modifying that file"
+    },
+    "hookemon.custody-ledger.v2": {
+      "fields": {
+        "schema": "literal 'hookemon.custody-ledger.v2'",
+        "cycleId": "non-empty string (unchanged)",
+        "chainId": "non-empty string (unchanged)",
+        "assetId": "non-empty string (unchanged)",
+        "decimals": "integer 0-255 (unchanged)",
+        "claimed|bridgeOut|bridgeIn|packCost|buybackProceeds|returnInput|returnReceived|refunds|residual|heldAssets|heldPositions|payoutLiability|dust|unattributed": "atomic-string (unchanged, all fourteen)",
+        "verifiedCurrentBalance": "CustodyBalanceObservationV1 | null -- new; null permitted only on a key's first-ever write",
+        "expectedCycleAsset": "TypedAmount | null; when non-null its chainId/assetId/decimals MUST equal the row's own canonical identity -- new"
+      },
+      "exactFieldCount": 21
+    }
+  },
+  "expectedCycleAssetRule": {
+    "writeTimeGuard": "the new return-leg-recording repository method refuses to append a second RECORDED return-direction leg whose resolved destination chain/asset matches an already-unresolved leg's on the same cycle -- the append does not happen; the row's existing expectedCycleAsset is left unchanged",
+    "consequence": "a row can never durably hold more than one unresolved expectation, so expectedCycleAsset is a safe nullable scalar, not a collection",
+    "onRefusal": "not one of ADR-0024's named semantic-invalid classes; how the calling stage surfaces this as an owner-visible state is an open fact for the implementation task"
+  },
+  "expectedCycleAssetTransitionTable": [
+    {"returnLegState": "no return leg recorded for this row's resolved chain/asset", "expectedCycleAsset": null},
+    {"returnLegState": "exactly one, RECORDED (the only state a second write could reach, since a competing second leg is refused before append)", "expectedCycleAsset": "{chainId, assetId, decimals, amountAtomic} from leg.destinationChainId/Asset/Decimals/AmountAtomic, resolved to the row's canonical identity", "writtenBy": "one new atomic append (leg + ledger row together), following the recordHeldPosition precedent at cycle-repository.mjs:3730-3772"},
+    {"returnLegState": "that leg transitions to SETTLED", "expectedCycleAsset": null, "note": "cleared in the same existing atomic append that adds the amount to returnReceived (cycle-repository.mjs:1074-1150) -- no new call site needed here"},
+    {"returnLegState": "that leg transitions to HELD_RELAY_PARTIAL | HELD_RELAY_REFUND | HELD_RELAY_LATE | HELD_RELAY_WRONG_ASSET", "expectedCycleAsset": null, "note": "current behavior writes no custody ledger row at all for a non-SETTLED outcome (cycle-repository.mjs:1140-1148); clearing this field requires a new dedicated atomic write this migration adds"}
+  ],
+  "verifiedCurrentBalanceWriteRule": {
+    "acceptIf": [
+      "previous is null",
+      "new finality.height > previous finality.height",
+      "the new observation is canonically identical in full to the previous one (same account, same balance, same finality -- exact idempotent replay, not just matching height/hash)"
+    ],
+    "refuseIf": [
+      "new finality.height == previous finality.height AND new finality.hash != previous finality.hash (same-height reorg)",
+      "new finality.height == previous finality.height AND new finality.hash == previous finality.hash BUT account, balance, or timestampUnixSeconds differs (evidence rewrite at the same checkpoint)",
+      "new finality.height < previous finality.height (stale observation)",
+      "previous verifiedCurrentBalance is non-null AND new verifiedCurrentBalance is null (erasure -- forbidden regardless of finality)",
+      "previous row schema is hookemon.custody-ledger.v2 AND new row schema is hookemon.custody-ledger.v1 (downgrade -- forbidden)"
+    ],
+    "enforcedAt": "CycleRepository#recordCustodyLedger's assertState callback (repository transition boundary) -- cycle-repository.mjs:5556-5568 is the existing check this extends",
+    "neverAllocateAcrossCycles": "verifiedCurrentBalance.balance is a wallet-level observation; it is never summed, subtracted, or divided across the cycles that share its account, and it never substitutes for the payout-availability.mjs reader's own returnDelta + previousDust admission source"
+  },
+  "admissionRule": {
+    "extends": "projectPolicyCustody's existing unvaluedExposure flag (accounting-projection.mjs:568-577,626-631,736,774), currently set only for a foreign non-matching-asset ledger with nonzero POLICY_CUSTODY_CURRENT_BUCKETS",
+    "newCondition": "also true for the canonical EVM USDG row when verifiedCurrentBalance is null AND (unresolvedClaim = claimed - returnReceived is positive OR any POLICY_CUSTODY_CURRENT_BUCKETS bucket on that row is nonzero)",
+    "whyNoWindow": "a claim write always sets claimed before anything else touches the key, so this rule engages immediately after the first write that puts real money on the row -- never retained as v1 (no-check) admission behavior with an unknown v2 balance",
+    "unaffectedWhenValued": "a row with a non-null verifiedCurrentBalance is never marked unvalued by this rule regardless of its custody buckets"
+  },
+  "exampleV2Row": {
+    "schema": "hookemon.custody-ledger.v2",
+    "cycleId": "cycle:example-0001",
+    "chainId": "eip155:4663",
+    "assetId": "eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+    "decimals": 6,
+    "claimed": "500000000",
+    "bridgeOut": "500000000",
+    "bridgeIn": "0",
+    "packCost": "0",
+    "buybackProceeds": "0",
+    "returnInput": "0",
+    "returnReceived": "0",
+    "refunds": "0",
+    "residual": "0",
+    "heldAssets": "0",
+    "heldPositions": "0",
+    "payoutLiability": "0",
+    "dust": "0",
+    "unattributed": "0",
+    "verifiedCurrentBalance": {
+      "schema": "hookemon.custody-balance-observation.v1",
+      "account": "0x2222222222222222222222222222222222222222",
+      "balance": {
+        "chainId": "eip155:4663",
+        "assetId": "eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "decimals": 6,
+        "amountAtomic": "12300000000"
+      },
+      "finality": {
+        "height": "18000000",
+        "hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "timestampUnixSeconds": "1780000000"
+      }
+    },
+    "expectedCycleAsset": {
+      "chainId": "eip155:4663",
+      "assetId": "eip155:4663/erc20:0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "decimals": 6,
+      "amountAtomic": "498000000"
+    },
+    "exampleNote": "example only: claimed 500000000, bridged out to Solana for purchase (bridgeOut 500000000), exactly one return leg RECORDED with a quoted destination of 498000000 (expectedCycleAsset), not yet SETTLED (returnReceived still 0). chainId/assetId here use RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID (4663) and USDG_ADDRESS as the underlying real identity, wrapped in the canonical eip155 form -- this is the same value claimCustodyAsset produces for the claim row, not Relay's raw wire pair. verifiedCurrentBalance.balance is the Operations wallet's whole observed balance at that account and height -- it is unrelated in magnitude to this cycle's own 498000000 expectation and must not be read as this cycle's share of it."
+  },
+  "finiteTestMatrixReference": "see decisions/ADR-0026-custody-ledger-v2-migration.md, section 'Finite test matrix', items 1-18"
+}

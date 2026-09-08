@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
-import { createKeychainSignerClient } from '../../src/signing/keychain-signer.mjs';
+import {
+  createKeychainSignerClient,
+  forwardOwnedKeychainSignOnlyIdentity,
+  isOwnedKeychainSignOnlyClient,
+  KeychainPreInvocationDenialError,
+  KeychainSignOnlyTimeoutError,
+  readOwnedKeychainSignOnlyIdentity,
+} from '../../src/signing/keychain-signer.mjs';
 import { SignerClientError } from '../../src/signing/signer-client.mjs';
 import {
   decodeProviderTransaction,
@@ -337,4 +344,96 @@ test('keychain-signer transports a Buffer request as base64, not as a raw byte-a
   await client.sign(Buffer.from('a-digest-buffer'));
   assert.equal(sentRequest.encoding, 'base64');
   assert.equal(Buffer.from(sentRequest.data, 'base64').toString('utf8'), 'a-digest-buffer');
+});
+
+test('keychain-signer classifies a sign timeout as the typed sign-only timeout, distinct from a generic error', async () => {
+  const client = createKeychainSignerClient({
+    role: 'operator-evm',
+    liveMode: true,
+    ...fixtureSignerOptions,
+    timeoutMs: 5,
+    exec: async () => new Promise(() => {}),
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-primary',
+  });
+  await assert.rejects(
+    () => client.sign({ example: 1 }),
+    error => error instanceof KeychainSignOnlyTimeoutError && !(error instanceof KeychainPreInvocationDenialError),
+  );
+});
+
+test('keychain-signer classifies a proven pre-invocation denial distinctly from a generic error', async () => {
+  const denied = createKeychainSignerClient({
+    role: 'operator-evm',
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec: async () => {
+      const error = new Error('spawn /opt/hookemon/bin/hookemon-keychain-sign EACCES');
+      error.code = 'EACCES';
+      throw error;
+    },
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-primary',
+  });
+  await assert.rejects(
+    () => denied.sign({ example: 1 }),
+    error => error instanceof KeychainPreInvocationDenialError && !(error instanceof KeychainSignOnlyTimeoutError),
+  );
+
+  const generic = createKeychainSignerClient({
+    role: 'operator-evm',
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec: async () => { throw new Error('the executor crashed mid-run'); },
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-primary',
+  });
+  await assert.rejects(
+    () => generic.sign({ example: 1 }),
+    error => error instanceof SignerClientError
+      && !(error instanceof KeychainPreInvocationDenialError)
+      && !(error instanceof KeychainSignOnlyTimeoutError),
+  );
+});
+
+test('keychain-signer marks only its own returned client as an owned sign-only capability', () => {
+  const client = createKeychainSignerClient({
+    role: 'operator-evm',
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec: fakeExec([]),
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-primary',
+  });
+  assert.equal(isOwnedKeychainSignOnlyClient(client), true);
+  assert.deepEqual(readOwnedKeychainSignOnlyIdentity(client), { role: 'operator-evm', account: 'hookemon-operator-primary' });
+
+  const spoof = { role: 'operator-evm', sign: client.sign, broadcast: client.broadcast };
+  assert.equal(isOwnedKeychainSignOnlyClient(spoof), false);
+  assert.equal(readOwnedKeychainSignOnlyIdentity(spoof), null);
+
+  const spread = { ...client };
+  assert.equal(isOwnedKeychainSignOnlyClient(spread), false, 'a structural clone must not inherit the capability');
+
+  assert.equal(isOwnedKeychainSignOnlyClient(null), false);
+  assert.equal(isOwnedKeychainSignOnlyClient('not-an-object'), false);
+});
+
+test('keychain-signer lets a trusted delegating wrapper forward the owned capability, and only that', () => {
+  const client = createKeychainSignerClient({
+    role: 'operator-solana',
+    liveMode: true,
+    ...fixtureSignerOptions,
+    exec: fakeExec([]),
+    command: '/opt/hookemon/bin/hookemon-keychain-sign',
+    account: 'hookemon-operator-solana',
+  });
+  const wrapper = { role: client.role, sign: request => client.sign(request) };
+  forwardOwnedKeychainSignOnlyIdentity(client, wrapper);
+  assert.equal(isOwnedKeychainSignOnlyClient(wrapper), true);
+  assert.deepEqual(readOwnedKeychainSignOnlyIdentity(wrapper), readOwnedKeychainSignOnlyIdentity(client));
+
+  const unrelated = { role: 'operator-solana', sign: async () => ({ signature: 'fake' }) };
+  forwardOwnedKeychainSignOnlyIdentity({ role: 'operator-solana' }, unrelated);
+  assert.equal(isOwnedKeychainSignOnlyClient(unrelated), false, 'forwarding from a non-owned original must not mint ownership');
 });

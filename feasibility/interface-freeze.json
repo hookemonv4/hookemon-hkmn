@@ -182,5 +182,9 @@
     ],
     "ownerAndClaimDestinationPolicy": "OPERATIONS_CALLER_SELF_DESTINATION_WITH_SEPARATE_OWNER_ACTIONS",
     "rule": "The Phase 3 interface is provisional and cannot authorize signing, broadcast, deployment, asset movement, gas spend, or publication."
+  },
+  "offchainAmendment": {
+    "path": "feasibility/phase3-offchain-interface-amendment.json",
+    "sha256": "sha256:9e94624d9ef77277354ee3f1590c448747ae436c95f6c7f2b9497cf63a094581"
   }
 }

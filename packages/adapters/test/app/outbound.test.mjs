@@ -5,10 +5,11 @@ import test from 'node:test';
 import { keccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { createRelayClient, RelayIntentAuthenticationError } from '../../src/relay-client.mjs';
+import { createRelayClient, relayQuoteDigest, RelayIntentAuthenticationError, RelayQuoteExpiredError } from '../../src/relay-client.mjs';
 import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { digest } from '../../../runner/src/cycle/journal.mjs';
 import {
   OutboundRecoveryRequiredError,
   createOutboundPolicySigner,
@@ -28,6 +29,12 @@ function fixture(name) {
 
 const chains = fixture('chains.json');
 const quoteFixture = fixture('quote-outbound.json');
+// This fixture remains a deterministic recorded EVM envelope, but the admission path below
+// models an EXACT_OUTPUT quote: the requested settlement target and minimum are both 25 atomic units.
+quoteFixture.details.currencyOut.amount = '25000000';
+quoteFixture.details.currencyOut.minimumAmount = '25000000';
+quoteFixture.protocol.v2.orderData.output.payments[0].expectedAmount = '25000000';
+quoteFixture.protocol.v2.orderData.output.payments[0].minimumAmount = '25000000';
 const RELAY_DEPOSITORY = quoteFixture.steps[1].items[0].data.to;
 
 function response(body) {
@@ -44,8 +51,60 @@ function relayClient(quote = quoteFixture) {
   });
 }
 
+function admittedQuote(raw = quoteFixture) {
+  const parsed = {
+    direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
+    requestId: raw.requestId,
+    orderId: raw.protocol.v2.orderId,
+    sender: raw.details.sender,
+    recipient: raw.details.recipient,
+    deadlineUnixSeconds: raw.protocol.v2.orderData.output.deadline,
+    origin: {
+      chainId: 4663,
+      address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
+      decimals: 6,
+      amount: raw.details.currencyIn.amount,
+    },
+    destination: {
+      chainId: 792703809,
+      address: SOLANA_MINT,
+      decimals: 6,
+      amount: raw.details.currencyOut.amount,
+      minimumAmount: raw.details.currencyOut.minimumAmount,
+    },
+    raw,
+  };
+  return { ...parsed, quoteDigest: relayQuoteDigest(parsed) };
+}
+
+function admission(cycleId, quote = admittedQuote()) {
+  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: quote.origin.amount };
+  const destinationAsset = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: quote.destination.amount };
+  return {
+    schema: 'hookemon.policy-admission.v2',
+    cycleId,
+    quoteDigest: quote.quoteDigest,
+    quantity: 1,
+    unitFundingQuote: usdg,
+    aggregateFundingQuote: usdg,
+    aggregatePurchase: destinationAsset,
+    relay: {
+      tradeType: 'EXACT_OUTPUT',
+      requestId: quote.requestId,
+      orderId: quote.orderId,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds,
+      sender: quote.sender,
+      recipient: quote.recipient,
+      destinationAmount: destinationAsset.amountAtomic,
+      destinationMinimumAmount: destinationAsset.amountAtomic,
+    },
+    relayQuote: quote,
+  };
+}
+
 function repository(releaseAmount = '25000000') {
-  return { async describeCycle() { return { releaseAmount }; } };
+  return { async describeCycle(cycleId) { return { releaseAmount, admission: admission(cycleId) }; } };
 }
 
 test('prepareOutboundRequest refuses an absent MoneyConfigurationV1 before requesting a Relay quote', async () => {
@@ -109,6 +168,51 @@ test('prepareOutboundRequest binds the same cycle reserve to the configured Sola
   ]);
 });
 
+test('prepareOutboundRequest consumes the admitted exact-output quote without requoting and refuses a short minimum output', async () => {
+  const shortQuote = admittedQuote();
+  shortQuote.destination.minimumAmount = '49999999';
+  const cycleId = 'cycle-outbound-admission-shortfall';
+  let requoteCalls = 0;
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: {
+        relay: {
+          async quoteOutboundBridge() { requoteCalls += 1; throw new Error('must not requote'); },
+          prepareExecution() { throw new Error('must not prepare a short quote'); },
+        },
+      },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository: { async describeCycle() { return { releaseAmount: '25000000', admission: admission(cycleId, shortQuote) }; } },
+      context: { cycleId },
+      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    }),
+    /differs from the durable policy admission/,
+  );
+  assert.equal(requoteCalls, 0);
+});
+
+test('prepareOutboundRequest refuses a context admission that differs from the repository-owned quote or reserve', async () => {
+  const cycleId = 'cycle-outbound-context-conflict';
+  const durable = admission(cycleId);
+  const conflicting = structuredClone(durable);
+  conflicting.quoteDigest = `sha256:${'d'.repeat(64)}`;
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: { chainId: 4663, accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT }, relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY }, moneyConfiguration: moneyConfiguration() },
+      cycleRepository: { async describeCycle() { return { releaseAmount: durable.aggregateFundingQuote.amountAtomic, admission: durable }; } },
+      context: { cycleId, admission: conflicting },
+      nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
+    }),
+    /context admission conflicts/,
+  );
+});
+
 test('prepareOutboundRequest fails closed when the exact configured Solana mint does not match the quote', async () => {
   await assert.rejects(
     () => prepareOutboundRequest({
@@ -123,7 +227,7 @@ test('prepareOutboundRequest fails closed when the exact configured Solana mint 
       context: { cycleId: 'cycle-outbound-2' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
-    /not fully enabled/,
+    /asset identity/,
   );
 });
 
@@ -139,12 +243,172 @@ test('prepareOutboundRequest rejects a recorded-shaped Relay transaction whose d
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
         moneyConfiguration: moneyConfiguration(),
       },
-      cycleRepository: repository(),
+      cycleRepository: { async describeCycle(cycleId) { return { releaseAmount: altered.details.currencyIn.amount, admission: admission(cycleId, admittedQuote(altered)) }; } },
       context: { cycleId: 'cycle-outbound-depository' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
     /depository/,
   );
+});
+
+/**
+ * `admission()` above omits `unitRelay`/`quoteDigest`-on-`relay` fields no other outbound.mjs check
+ * needs, but ADR-0025 `refresh-after-readmission` evidence binds both admitted quote identities.
+ * This augments it with exactly those fields for the tests below.
+ */
+function refreshableAdmission(cycleId, { quote = admittedQuote() } = {}) {
+  const base = admission(cycleId, quote);
+  return {
+    ...base,
+    relay: { ...base.relay, quoteDigest: quote.quoteDigest },
+    unitRelay: {
+      requestId: `unit-${quote.requestId}`,
+      deadlineUnixSeconds: quote.deadlineUnixSeconds,
+      quoteDigest: `sha256:${'9'.repeat(64)}`,
+    },
+  };
+}
+
+test('prepareOutboundRequest records ADR-0025 outbound quote expiry evidence exactly once before any effect, then rethrows the typed error', async () => {
+  const cycleId = 'cycle-outbound-quote-expired';
+  const deadline = quoteFixture.protocol.v2.orderData.output.deadline;
+  const durable = refreshableAdmission(cycleId);
+  const expiryCalls = [];
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: durable.aggregateFundingQuote.amountAtomic, admission: durable }; },
+    async readOutboundQuoteRefresh() { return null; },
+    async recordOutboundQuoteExpired(id, evidence) { expiryCalls.push({ id, evidence }); },
+  };
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository,
+      context: { cycleId },
+      nowMs: deadline * 1000,
+    }),
+    RelayQuoteExpiredError,
+  );
+  assert.equal(expiryCalls.length, 1);
+  assert.equal(expiryCalls[0].id, cycleId);
+  assert.deepEqual(expiryCalls[0].evidence, {
+    schema: 'hookemon.outbound-quote-expiry-evidence.v1',
+    cycleId,
+    admissionDigest: digest(durable),
+    aggregateQuote: {
+      requestId: durable.relay.requestId,
+      deadlineUnixSeconds: durable.relay.deadlineUnixSeconds,
+      quoteDigest: durable.relay.quoteDigest,
+    },
+    unitQuote: {
+      requestId: durable.unitRelay.requestId,
+      deadlineUnixSeconds: durable.unitRelay.deadlineUnixSeconds,
+      quoteDigest: durable.unitRelay.quoteDigest,
+    },
+    observedAtMs: deadline * 1000,
+  });
+});
+
+test('prepareOutboundRequest does not record a second expiry once REFRESH_REQUIRED is already durable', async () => {
+  const cycleId = 'cycle-outbound-quote-already-expired';
+  const deadline = quoteFixture.protocol.v2.orderData.output.deadline;
+  const durable = refreshableAdmission(cycleId);
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: durable.aggregateFundingQuote.amountAtomic, admission: durable }; },
+    async readOutboundQuoteRefresh() { return { state: 'REFRESH_REQUIRED', expiryDigest: `sha256:${'7'.repeat(64)}` }; },
+    async recordOutboundQuoteExpired() { throw new Error('must not record a second expiry while REFRESH_REQUIRED'); },
+  };
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository,
+      context: { cycleId },
+      nowMs: deadline * 1000,
+    }),
+    RelayQuoteExpiredError,
+  );
+});
+
+test('prepareOutboundRequest signs the ACTIVE selected replacement instead of the expired original admission', async () => {
+  const cycleId = 'cycle-outbound-quote-refreshed';
+  const original = refreshableAdmission(cycleId);
+  const originalDeadline = original.relay.deadlineUnixSeconds;
+
+  const replacementRaw = structuredClone(quoteFixture);
+  replacementRaw.protocol.v2.orderData.output.deadline = originalDeadline + 10_000;
+  const replacement = refreshableAdmission(cycleId, { quote: admittedQuote(replacementRaw) });
+
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: original.aggregateFundingQuote.amountAtomic, admission: original }; },
+    async readOutboundQuoteRefresh() { return { state: 'ACTIVE', replacement }; },
+    async recordOutboundQuoteExpired() { throw new Error('must not record expiry once a replacement is already active'); },
+    async holdCycle() { throw new Error('must not hold while the active replacement is still fresh'); },
+  };
+
+  const request = await prepareOutboundRequest({
+    adapters: { relay: relayClient() },
+    config: {
+      chainId: 4663,
+      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+      moneyConfiguration: moneyConfiguration(),
+    },
+    cycleRepository,
+    context: { cycleId },
+    // Past the original (immutable, durable) deadline -- the original admission would throw
+    // RelayQuoteExpiredError here if it, rather than the ACTIVE replacement, were used.
+    nowMs: (originalDeadline * 1000) + 1,
+  });
+  assert.equal(request.intent.requestId, replacement.relay.requestId);
+});
+
+test('prepareOutboundRequest holds the cycle for an owner decision when the selected replacement itself expires before preparation', async () => {
+  const cycleId = 'cycle-outbound-replacement-expired';
+  const original = refreshableAdmission(cycleId);
+  const originalDeadline = original.relay.deadlineUnixSeconds;
+  const replacementRaw = structuredClone(quoteFixture);
+  replacementRaw.protocol.v2.orderData.output.deadline = originalDeadline + 1;
+  const replacement = refreshableAdmission(cycleId, { quote: admittedQuote(replacementRaw) });
+  const holdCalls = [];
+  const cycleRepository = {
+    async describeCycle() { return { releaseAmount: original.aggregateFundingQuote.amountAtomic, admission: original }; },
+    async readOutboundQuoteRefresh() { return { state: 'ACTIVE', replacement }; },
+    async recordOutboundQuoteExpired() { throw new Error('must not record a fresh expiry for an already-active replacement'); },
+    async holdCycle(id, terminalState, evidence) { holdCalls.push({ id, terminalState, evidence }); },
+  };
+
+  await assert.rejects(
+    () => prepareOutboundRequest({
+      adapters: { relay: relayClient() },
+      config: {
+        chainId: 4663,
+        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+        moneyConfiguration: moneyConfiguration(),
+      },
+      cycleRepository,
+      context: { cycleId },
+      // Past both the original and the replacement's deadlines.
+      nowMs: (originalDeadline + 1) * 1000,
+    }),
+    RelayQuoteExpiredError,
+  );
+  assert.equal(holdCalls.length, 1);
+  assert.equal(holdCalls[0].id, cycleId);
+  assert.equal(holdCalls[0].terminalState, 'HELD_DATA_UNVERIFIED');
+  assert.equal(holdCalls[0].evidence.stage, 'outbound');
+  assert.equal(holdCalls[0].evidence.reason, 'OUTBOUND_QUOTE_REFRESH_REPLACEMENT_EXPIRED');
 });
 
 test('createOutboundPolicySigner refuses an unsigned Relay plan until a journal-owned EVM nonce is available', async () => {
@@ -219,7 +483,7 @@ test('createOutboundPolicySigner refuses the provisional authority before either
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       moneyConfiguration: moneyConfiguration(),
     },
-    cycleRepository: repository(),
+    cycleRepository: { async describeCycle(cycleId) { return { releaseAmount: quote.details.currencyIn.amount, admission: admission(cycleId, admittedQuote(quote)) }; } },
     context: { cycleId: 'cycle-outbound-authority' },
     nowMs,
   });
@@ -254,6 +518,8 @@ function outboundIntent() {
     requestId: quoteFixture.requestId,
     orderId: quoteFixture.protocol.v2.orderId,
     direction: 'OUTBOUND',
+    tradeType: 'EXACT_OUTPUT',
+    quoteDigest: admittedQuote().quoteDigest,
     originChainId: 4663,
     destinationChainId: 792703809,
     originAssetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
@@ -263,7 +529,7 @@ function outboundIntent() {
     originAmount: quoteFixture.details.currencyIn.amount,
     quotedDestinationAmount: quoteFixture.details.currencyOut.amount,
     quotedDestinationMinimumAmount: quoteFixture.details.currencyOut.minimumAmount,
-    sender: EVM_ACCOUNT,
+    sender: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address,
     recipient: SOLANA_ACCOUNT,
     deadlineUnixSeconds: quoteFixture.protocol.v2.orderData.output.deadline,
   };
@@ -305,7 +571,7 @@ function finalizedOutboundSourceClient({ amountAtomic, transactionHash }) {
     status: 'success',
     logs: [{
       address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(EVM_ACCOUNT), addressTopic(RELAY_DEPOSITORY)],
+      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
       data: `0x${amount.toString(16).padStart(64, '0')}`,
       logIndex: 0n,
     }],
@@ -341,7 +607,7 @@ function finalizedOutboundSourceAndRefundClient({
     status: 'success',
     logs: [{
       address: quoteFixture.details.currencyIn.currency.address,
-      topics: [ERC20_TRANSFER_TOPIC, addressTopic(EVM_ACCOUNT), addressTopic(RELAY_DEPOSITORY)],
+      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
       data: `0x${sourceAmount.toString(16).padStart(64, '0')}`,
       logIndex: 0n,
     }],
@@ -354,7 +620,7 @@ function finalizedOutboundSourceAndRefundClient({
     logs: refundTransfers.map(({
       token = quoteFixture.details.currencyIn.currency.address,
       source = RELAY_DEPOSITORY,
-      recipient = EVM_ACCOUNT,
+      recipient = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address,
       amountAtomic,
     }, index) => ({
       address: token,
@@ -379,12 +645,12 @@ function finalizedOutboundSourceAndRefundClient({
   };
 }
 
-function outboundArchiveEvidence({ amountAtomic }) {
+function outboundArchiveEvidence({ amountAtomic, sourceAccount = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) {
   const amount = BigInt(amountAtomic);
   return {
     async readErc20BalanceAtBlock({ account, blockNumber, blockHash }) {
       assert.equal(typeof blockHash, 'string');
-      const source = account.toLowerCase() === EVM_ACCOUNT.toLowerCase();
+      const source = account.toLowerCase() === sourceAccount.toLowerCase();
       const value = source
         ? (blockNumber === 99n ? 100_000_000n : 100_000_000n - amount)
         : (blockNumber === 99n ? 5_000_000n : 5_000_000n + amount);
@@ -461,7 +727,7 @@ function originRefundRelayClient(refundTxHash) {
   });
 }
 
-function outboundReconciliationRepository({
+async function outboundReconciliationRepository({
   transactionHash,
   relayRequestId,
   destinationAmountAtomic,
@@ -479,6 +745,26 @@ function outboundReconciliationRepository({
       nonce: '9',
       blockhash: null,
       hash: transactionHash,
+    },
+  };
+  // The canonical two-step Relay envelope's other durable attempt: this shared repository is used
+  // by every reconcile test in this file that does not itself exercise prerequisite-role/finality
+  // behavior. It is already FINALIZED, but `reconcileLiveOutbound` still validates a FINALIZED
+  // prerequisite's role from its own durable bytes, so this must be a real, canonically valid
+  // signed USDG approval -- never a placeholder -- for `OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT` (the
+  // Operations account these reconcile tests configure).
+  const canonicalApproval = await signOutboundApproval();
+  const approvalRecord = {
+    attempt: {
+      schema: 'hookemon.chain-transaction-attempt.v1',
+      cycleId: 'cycle-outbound-reconcile',
+      stage: 'outbound',
+      state: 'FINALIZED',
+      requestDigest: `sha256:${'0'.repeat(64)}`,
+      rawBytes: canonicalApproval.rawBytes,
+      nonce: '8',
+      blockhash: null,
+      hash: canonicalApproval.hash,
     },
   };
   const leg = {
@@ -515,7 +801,10 @@ function outboundReconciliationRepository({
     async describeCycle() {
       return {
         relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
-        chainAttempts: new Map([[`outbound\u0000${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)]]),
+        chainAttempts: new Map([
+          [`outbound\u0000${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)],
+          [`outbound\u0000${approvalRecord.attempt.requestDigest}`, structuredClone(approvalRecord)],
+        ]),
       };
     },
     async recordBroadcast() {
@@ -626,7 +915,8 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
   ];
 
   for (const fixtureCase of cases) {
-    const cycleRepository = outboundReconciliationRepository({
+    // eslint-disable-next-line no-await-in-loop
+    const cycleRepository = await outboundReconciliationRepository({
       transactionHash: sourceTransactionHash,
       relayRequestId,
       destinationAmountAtomic,
@@ -648,7 +938,7 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -669,7 +959,7 @@ test('reconcileLiveOutbound records own-RPC source finality and classifies only 
       cycleId: 'cycle-outbound-reconcile',
       reservation: {
         chainId: '4663',
-        wallet: EVM_ACCOUNT.toLowerCase(),
+        wallet: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address.toLowerCase(),
         stage: 'outbound',
         fencingToken: '11111111-1111-4111-8111-111111111111',
         leaseAcquiredAtMs: 0,
@@ -691,7 +981,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
   const refundTransactionHash = `0x${'5'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
   const refundAmountAtomic = '24500000';
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId,
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -711,7 +1001,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
       relay: originRefundRelayClient(refundTransactionHash),
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -747,7 +1037,7 @@ test('reconcileLiveOutbound holds a request-bound origin refund credit observed 
     transferCount: 1,
     observedToken: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
     observedSource: RELAY_DEPOSITORY.toLowerCase(),
-    observedRecipient: EVM_ACCOUNT.toLowerCase(),
+    observedRecipient: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address.toLowerCase(),
     observedAmountAtomic: refundAmountAtomic,
   });
 });
@@ -756,7 +1046,7 @@ test('reconcileLiveOutbound rejects an origin refund credit that was not sent by
   const sourceTransactionHash = `0x${'2'.repeat(64)}`;
   const refundTransactionHash = `0x${'1'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId,
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -777,7 +1067,7 @@ test('reconcileLiveOutbound rejects an origin refund credit that was not sent by
       relay: originRefundRelayClient(refundTransactionHash),
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -796,7 +1086,7 @@ test('reconcileLiveOutbound does not treat a Solana debit as a refund without on
   const sourceTransactionHash = `0x${'4'.repeat(64)}`;
   const refundTransactionHash = `0x${'3'.repeat(64)}`;
   const relayRequestId = quoteFixture.requestId;
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId,
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -823,7 +1113,7 @@ test('reconcileLiveOutbound does not treat a Solana debit as a refund without on
       solana: { client: destination.client },
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -849,7 +1139,8 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
   ];
 
   for (const fixtureCase of cases) {
-    const cycleRepository = outboundReconciliationRepository({
+    // eslint-disable-next-line no-await-in-loop
+    const cycleRepository = await outboundReconciliationRepository({
       transactionHash: sourceTransactionHash,
       relayRequestId,
       destinationAmountAtomic,
@@ -873,7 +1164,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -910,7 +1201,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
         solana: { client: destination.client },
       },
       config: {
-        accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+        accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
       },
       cycleRepository,
@@ -936,7 +1227,7 @@ test('reconcileLiveOutbound settles an exact credit only inside its signed-attem
 
 test('reconcileLiveOutbound retains the wallet nonce reservation while source finality is unresolved', async () => {
   const sourceTransactionHash = `0x${'7'.repeat(64)}`;
-  const cycleRepository = outboundReconciliationRepository({
+  const cycleRepository = await outboundReconciliationRepository({
     transactionHash: sourceTransactionHash,
     relayRequestId: 'relay-outbound-unfinalized',
     destinationAmountAtomic: quoteFixture.details.currencyOut.amount,
@@ -968,7 +1259,7 @@ test('reconcileLiveOutbound retains the wallet nonce reservation while source fi
       }).client },
     },
     config: {
-      accounts: { evm: EVM_ACCOUNT, solana: SOLANA_ACCOUNT },
+      accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
       relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     },
     cycleRepository,
@@ -1009,6 +1300,504 @@ test('reconcileLiveOutbound refuses unauthenticated Relay status data before it 
   assert.equal(statusCalls, 0);
 });
 
+const SOURCE_REQUEST_DIGEST = `sha256:${'e'.repeat(64)}`;
+const APPROVAL_REQUEST_DIGEST = `sha256:${'d'.repeat(64)}`;
+const ERC20_APPROVE_SELECTOR = '0x095ea7b3';
+// Real keypairs (not the placeholder `EVM_ACCOUNT` literal used by tests that never need a
+// signature to recover): the approval-role check recovers the signer from raw bytes, so these
+// tests need an account that can actually produce one.
+const OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT = privateKeyToAccount(`0x${'3'.repeat(64)}`);
+const OUTBOUND_APPROVAL_OTHER_ACCOUNT = privateKeyToAccount(`0x${'4'.repeat(64)}`);
+
+function abiAddressWord(address) {
+  return address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+}
+
+function abiAmountWord(amountAtomic) {
+  return BigInt(amountAtomic).toString(16).padStart(64, '0');
+}
+
+function outboundApproveCalldata(spender, amountAtomic) {
+  return `${ERC20_APPROVE_SELECTOR}${abiAddressWord(spender)}${abiAmountWord(amountAtomic)}`;
+}
+
+/**
+ * A real, offline-signed EVM transaction for the exact USDG `approve` call the outbound leg's
+ * prerequisite must be -- never a placeholder. Defaults to the canonical role (Operations signer,
+ * Relay depository spender, the leg's own source amount, zero value, nonce 8 immediately preceding
+ * the deposit's durable nonce 9); overrides let a case deviate along exactly one dimension.
+ */
+async function signOutboundApproval({
+  signer = OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT,
+  spender = RELAY_DEPOSITORY,
+  amountAtomic = quoteFixture.details.currencyIn.amount,
+  nonce = 8,
+  to = quoteFixture.details.currencyIn.currency.address,
+  value = 0n,
+} = {}) {
+  const rawBytes = await signer.signTransaction({
+    chainId: 4663,
+    to,
+    data: outboundApproveCalldata(spender, amountAtomic),
+    value,
+    nonce,
+    gas: 60000n,
+    maxFeePerGas: 2n,
+    maxPriorityFeePerGas: 1n,
+  });
+  return { rawBytes, hash: keccak256(rawBytes) };
+}
+
+function throwingRobinhoodClient() {
+  return {
+    async getTransactionReceipt() { throw new Error('no EVM receipt read is expected here'); },
+    async getBlock() { throw new Error('no EVM block read is expected here'); },
+  };
+}
+
+function throwingSolanaClient() {
+  return createSolanaRpcClient({ fetchImpl: async () => { throw new Error('no Solana request is expected here'); } });
+}
+
+/**
+ * A durable outbound repository shaped like `outboundReconciliationRepository` above, but with the
+ * full canonical attempt set under caller control: the deposit (source) plus an explicit list of
+ * every other durable "outbound" chain attempt (0, 1, or many), so a test can exercise the exact
+ * membership and role invariants `reconcileLiveOutbound` now enforces.
+ */
+function outboundApprovalRepository({
+  relayRequestId,
+  destinationAmountAtomic,
+  sourceHash,
+  sourceNonce = '9',
+  sourceState = 'BROADCAST',
+  legState = 'RECORDED',
+  legOverrides = {},
+  attempts = [],
+}) {
+  const cycleId = 'cycle-outbound-reconcile';
+  let sourceRecord = {
+    attempt: {
+      schema: 'hookemon.chain-transaction-attempt.v1',
+      cycleId,
+      stage: 'outbound',
+      state: sourceState,
+      requestDigest: SOURCE_REQUEST_DIGEST,
+      rawBytes: '0x1234',
+      nonce: sourceNonce,
+      blockhash: null,
+      hash: sourceHash,
+    },
+  };
+  let extra = attempts.map(fields => ({
+    attempt: { schema: 'hookemon.chain-transaction-attempt.v1', cycleId, stage: 'outbound', blockhash: null, ...fields },
+  }));
+  const leg = {
+    schema: 'hookemon.relay-leg.v1',
+    cycleId,
+    direction: 'outbound',
+    relayRequestId,
+    quoteDigest: `sha256:${'f'.repeat(64)}`,
+    sourceChainId: '4663',
+    sourceTxHash: sourceHash,
+    sourceAssetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(),
+    sourceDecimals: 6,
+    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
+    destinationChainId: '792703809',
+    destinationTxHash: null,
+    destinationAssetId: SOLANA_MINT,
+    destinationDecimals: 6,
+    destinationAmountAtomic,
+    finalizedAtSource: null,
+    finalizedAtDestination: null,
+    netDeltaAtomic: null,
+    state: legState,
+    ...legOverrides,
+  };
+  const finalityCalls = [];
+  const settlements = [];
+  const walletReleases = [];
+  return {
+    get finalityCalls() { return structuredClone(finalityCalls); },
+    get settlements() { return structuredClone(settlements); },
+    get walletReleases() { return structuredClone(walletReleases); },
+    get sourceAttemptState() { return sourceRecord.attempt.state; },
+    get attemptStates() {
+      return Object.fromEntries([sourceRecord, ...extra].map(entry => [entry.attempt.requestDigest, entry.attempt.state]));
+    },
+    async describeCycle() {
+      return {
+        relayLegs: new Map([[relayRequestId, structuredClone(leg)]]),
+        chainAttempts: new Map([
+          [`outbound ${sourceRecord.attempt.requestDigest}`, structuredClone(sourceRecord)],
+          ...extra.map(entry => [`outbound ${entry.attempt.requestDigest}`, structuredClone(entry)]),
+        ]),
+      };
+    },
+    async recordBroadcast() {
+      throw new Error('a broadcast attempt must not be rebroadcast during finality reconciliation');
+    },
+    async recordFinality(cycleIdArg, stage, requestDigest, evidence) {
+      assert.equal(cycleIdArg, cycleId);
+      assert.equal(stage, 'outbound');
+      finalityCalls.push({ requestDigest, evidence: structuredClone(evidence) });
+      if (requestDigest === sourceRecord.attempt.requestDigest) {
+        sourceRecord = { ...sourceRecord, attempt: { ...sourceRecord.attempt, state: 'FINALIZED' } };
+        return structuredClone(sourceRecord);
+      }
+      const index = extra.findIndex(entry => entry.attempt.requestDigest === requestDigest);
+      assert.ok(index >= 0, `recordFinality for an unrecognized outbound attempt ${requestDigest}`);
+      extra[index] = { attempt: { ...extra[index].attempt, state: 'FINALIZED' } };
+      return structuredClone(extra[index]);
+    },
+    async settleRelayLeg(cycleIdArg, requestId, settlement) {
+      assert.equal(cycleIdArg, cycleId);
+      assert.equal(requestId, relayRequestId);
+      const { destinationObservation } = settlement;
+      assert.equal(destinationObservation.mint, leg.destinationAssetId, 'test only models the exact-credit settlement path');
+      assert.equal(destinationObservation.netDeltaAtomic, leg.destinationAmountAtomic, 'test only models the exact-credit settlement path');
+      const normalizedSettlement = {
+        destinationTxHash: destinationObservation.transactionHash,
+        finalizedAtDestination: destinationObservation.finality,
+        netDeltaAtomic: destinationObservation.netDeltaAtomic,
+        terminalState: 'SETTLED',
+      };
+      settlements.push(structuredClone(normalizedSettlement));
+      Object.assign(leg, {
+        destinationTxHash: normalizedSettlement.destinationTxHash,
+        finalizedAtDestination: normalizedSettlement.finalizedAtDestination,
+        netDeltaAtomic: normalizedSettlement.netDeltaAtomic,
+        state: normalizedSettlement.terminalState,
+      });
+      return structuredClone(leg);
+    },
+    async readChainAttemptRecoveryContext() {
+      return { relayQuoteDeadlineUnixSeconds: '1700000200' };
+    },
+    async releaseWalletNonce(cycleIdArg, reservation) {
+      walletReleases.push({ cycleId: cycleIdArg, reservation: structuredClone(reservation) });
+    },
+  };
+}
+
+/**
+ * One Robinhood RPC client answering for both outbound EVM transactions on their own hashes: the
+ * deposit (source, same finalized-and-successful shape as `finalizedOutboundSourceClient`) and the
+ * approval (prerequisite), independently parameterized so a test can make only the approval's own
+ * receipt missing, reverted, or non-canonical without touching the deposit's evidence at all.
+ */
+function outboundApprovalEvmClient({
+  sourceTransactionHash,
+  sourceAmountAtomic,
+  approvalHash,
+  approvalIncluded = true,
+  approvalStatus = 'success',
+  approvalBlockNumber = 90n,
+  approvalBlockHash = `0x${'7'.repeat(64)}`,
+  approvalCanonicalBlockHash = approvalBlockHash,
+}) {
+  const sourceReceiptBlockHash = `0x${'a'.repeat(64)}`;
+  const sourceParentBlockHash = `0x${'b'.repeat(64)}`;
+  const finalizedBlockHash = `0x${'c'.repeat(64)}`;
+  const amount = BigInt(sourceAmountAtomic);
+  const sourceReceipt = {
+    transactionHash: sourceTransactionHash,
+    blockNumber: 100n,
+    blockHash: sourceReceiptBlockHash,
+    status: 'success',
+    logs: [{
+      address: quoteFixture.details.currencyIn.currency.address,
+      topics: [ERC20_TRANSFER_TOPIC, addressTopic(OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address), addressTopic(RELAY_DEPOSITORY)],
+      data: `0x${amount.toString(16).padStart(64, '0')}`,
+      logIndex: 0n,
+    }],
+  };
+  const approvalReceipt = approvalIncluded
+    ? {
+      transactionHash: approvalHash, blockNumber: approvalBlockNumber, blockHash: approvalBlockHash, status: approvalStatus, logs: [],
+    }
+    : {
+      transactionHash: approvalHash, blockNumber: null, blockHash: null, status: null, logs: [],
+    };
+  const calls = [];
+  return {
+    calls,
+    async getTransactionReceipt({ hash }) {
+      calls.push(`receipt:${hash}`);
+      if (hash === sourceTransactionHash) return structuredClone(sourceReceipt);
+      if (hash === approvalHash) return structuredClone(approvalReceipt);
+      throw new Error(`unexpected transaction receipt ${hash}`);
+    },
+    async getBlock({ blockTag, blockNumber }) {
+      calls.push(`block:${blockTag ?? blockNumber}`);
+      if (blockTag === 'finalized') return { number: 101n, hash: finalizedBlockHash, timestamp: 1_700_000_090n };
+      if (blockNumber === 100n) return { number: 100n, hash: sourceReceiptBlockHash, parentHash: sourceParentBlockHash, timestamp: 1_700_000_080n };
+      if (blockNumber === 99n) return { number: 99n, hash: sourceParentBlockHash, parentHash: `0x${'d'.repeat(64)}`, timestamp: 1_700_000_070n };
+      if (blockNumber === approvalBlockNumber) return { number: approvalBlockNumber, hash: approvalCanonicalBlockHash, timestamp: 1_700_000_060n };
+      throw new Error(`unexpected outbound block read ${String(blockTag ?? blockNumber)}`);
+    },
+  };
+}
+
+function outboundApprovalTestConfig() {
+  return {
+    accounts: { evm: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address, solana: SOLANA_ACCOUNT },
+    relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
+  };
+}
+
+test('reconcileLiveOutbound fails closed unless the durable outbound attempt set is exactly the canonical two-step envelope', async () => {
+  const sourceHash = `0x${'6'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-membership';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  const amountAtomic = quoteFixture.details.currencyIn.amount;
+
+  const cases = [
+    { name: 'no prerequisite attempt', build: async () => [] },
+    {
+      name: 'two prerequisite attempts',
+      build: async () => {
+        const valid = await signOutboundApproval();
+        return [
+          { requestDigest: APPROVAL_REQUEST_DIGEST, hash: valid.hash, nonce: '8', state: 'BROADCAST', rawBytes: valid.rawBytes },
+          { requestDigest: `sha256:${'1'.repeat(64)}`, hash: `0x${'2'.repeat(64)}`, nonce: '7', state: 'BROADCAST', rawBytes: '0x1234' },
+        ];
+      },
+    },
+    {
+      // Caught by the pre-existing deposit-matching guard (both the source and this attempt now
+      // match `leg.sourceTxHash`), not by the prerequisite-role check -- still a hard refusal.
+      name: 'prerequisite duplicates the deposit transaction hash',
+      build: async () => {
+        const valid = await signOutboundApproval();
+        return [{ requestDigest: `sha256:${'1'.repeat(64)}`, hash: sourceHash, nonce: '8', state: 'BROADCAST', rawBytes: valid.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite hash does not match its own durable raw bytes',
+      build: async () => {
+        const valid = await signOutboundApproval();
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: `0x${'3'.repeat(64)}`, nonce: '8', state: 'BROADCAST', rawBytes: valid.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite raw bytes do not decode as a signed EVM transaction',
+      build: async () => [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: keccak256('0xdeadbeef'), nonce: '8', state: 'BROADCAST', rawBytes: '0xdeadbeef' }],
+    },
+    {
+      name: 'prerequisite was not signed by the Operations account',
+      build: async () => {
+        const wrong = await signOutboundApproval({ signer: OUTBOUND_APPROVAL_OTHER_ACCOUNT });
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'BROADCAST', rawBytes: wrong.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite does not target USDG',
+      build: async () => {
+        const wrong = await signOutboundApproval({ to: RELAY_DEPOSITORY });
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'BROADCAST', rawBytes: wrong.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite carries nonzero native value',
+      build: async () => {
+        const wrong = await signOutboundApproval({ value: 1n });
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'BROADCAST', rawBytes: wrong.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite approval spender is not the configured Relay depository',
+      build: async () => {
+        const wrong = await signOutboundApproval({ spender: OUTBOUND_APPROVAL_OTHER_ACCOUNT.address });
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'BROADCAST', rawBytes: wrong.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite approval amount does not equal the leg source amount',
+      build: async () => {
+        const wrong = await signOutboundApproval({ amountAtomic: String(BigInt(amountAtomic) + 1n) });
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'BROADCAST', rawBytes: wrong.rawBytes }];
+      },
+    },
+    {
+      name: 'prerequisite nonce does not immediately precede the deposit nonce',
+      build: async () => {
+        const wrong = await signOutboundApproval({ nonce: 7 });
+        return [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '7', state: 'BROADCAST', rawBytes: wrong.rawBytes }];
+      },
+    },
+  ];
+
+  for (const fixtureCase of cases) {
+    // eslint-disable-next-line no-await-in-loop
+    const attempts = await fixtureCase.build();
+    const cycleRepository = outboundApprovalRepository({ relayRequestId, destinationAmountAtomic, sourceHash, attempts });
+    // eslint-disable-next-line no-await-in-loop
+    await assert.rejects(
+      () => reconcileLiveOutbound({
+        adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
+        config: outboundApprovalTestConfig(),
+        cycleRepository,
+        context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+      }),
+      error => error instanceof OutboundRecoveryRequiredError && error.recoveryState === 'OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS',
+      fixtureCase.name,
+    );
+    assert.deepEqual(cycleRepository.finalityCalls, [], fixtureCase.name);
+    assert.deepEqual(cycleRepository.settlements, [], fixtureCase.name);
+  }
+});
+
+test('reconcileLiveOutbound refuses an already-FINALIZED prerequisite whose durable role is invalid, even with the leg already SETTLED', async () => {
+  const sourceHash = `0x${'6'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-finalized-invalid';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  // Wrong spender: a durable FINALIZED attempt's role is still checked from its own bytes, never
+  // trusted merely because an earlier run marked it finalized.
+  const wrong = await signOutboundApproval({ spender: OUTBOUND_APPROVAL_OTHER_ACCOUNT.address });
+  const cycleRepository = outboundApprovalRepository({
+    relayRequestId,
+    destinationAmountAtomic,
+    sourceHash,
+    sourceState: 'FINALIZED',
+    legState: 'SETTLED',
+    legOverrides: {
+      destinationTxHash: 'relay-destination-observation',
+      finalizedAtDestination: { height: '88', hash: `0x${'c'.repeat(64)}`, timestampUnixSeconds: '1700000100' },
+      netDeltaAtomic: destinationAmountAtomic,
+    },
+    attempts: [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: wrong.hash, nonce: '8', state: 'FINALIZED', rawBytes: wrong.rawBytes }],
+  });
+
+  await assert.rejects(
+    () => reconcileLiveOutbound({
+      adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
+      config: outboundApprovalTestConfig(),
+      cycleRepository,
+      context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+    }),
+    error => error instanceof OutboundRecoveryRequiredError && error.recoveryState === 'OUTBOUND_CHAIN_ATTEMPT_AMBIGUOUS',
+  );
+  // No RPC (throwing clients above were never invoked) and no settlement or finality write, even
+  // though both the prerequisite and the leg already looked durably resolved.
+  assert.deepEqual(cycleRepository.finalityCalls, []);
+  assert.deepEqual(cycleRepository.settlements, []);
+});
+
+test('reconcileLiveOutbound reconciles a durably SETTLED leg whose approval attempt is still BROADCAST, without re-settling', async () => {
+  const sourceHash = `0x${'6'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-restart';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  const approval = await signOutboundApproval();
+  const cycleRepository = outboundApprovalRepository({
+    relayRequestId,
+    destinationAmountAtomic,
+    sourceHash,
+    sourceState: 'FINALIZED',
+    legState: 'SETTLED',
+    legOverrides: {
+      destinationTxHash: 'relay-destination-observation',
+      finalizedAtDestination: { height: '88', hash: `0x${'c'.repeat(64)}`, timestampUnixSeconds: '1700000100' },
+      netDeltaAtomic: destinationAmountAtomic,
+    },
+    attempts: [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: approval.hash, nonce: '8', state: 'BROADCAST', rawBytes: approval.rawBytes }],
+  });
+  const client = outboundApprovalEvmClient({
+    sourceTransactionHash: sourceHash,
+    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
+    approvalHash: approval.hash,
+  });
+  const config = outboundApprovalTestConfig();
+
+  const result = await reconcileLiveOutbound({
+    adapters: {
+      robinhood: { client, historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount, sourceAccount: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) },
+      solana: { client: throwingSolanaClient() },
+    },
+    config,
+    cycleRepository,
+    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+  });
+
+  assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(result.relayLeg.state, 'SETTLED');
+  assert.equal(cycleRepository.attemptStates[APPROVAL_REQUEST_DIGEST], 'FINALIZED');
+  assert.equal(cycleRepository.finalityCalls.length, 1);
+  assert.equal(cycleRepository.finalityCalls[0].requestDigest, APPROVAL_REQUEST_DIGEST);
+  assert.equal(client.calls.includes(`receipt:${approval.hash}`), true);
+  // The leg was already durably SETTLED: no new settlement may be recorded, and (proven by the
+  // throwing Solana client above) destination evidence is never re-inspected.
+  assert.deepEqual(cycleRepository.settlements, []);
+
+  const replay = await reconcileLiveOutbound({
+    adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
+    config,
+    cycleRepository,
+    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+  });
+  assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(replay.relayLeg.state, 'SETTLED');
+  assert.equal(cycleRepository.finalityCalls.length, 1);
+  assert.deepEqual(cycleRepository.settlements, []);
+});
+
+test('reconcileLiveOutbound independently finalizes the approval and deposit before settling, and is restart-idempotent', async () => {
+  const sourceHash = `0x${'6'.repeat(64)}`;
+  const relayRequestId = 'relay-outbound-approval-success';
+  const destinationAmountAtomic = quoteFixture.details.currencyOut.amount;
+  const approval = await signOutboundApproval();
+  const cycleRepository = outboundApprovalRepository({
+    relayRequestId,
+    destinationAmountAtomic,
+    sourceHash,
+    attempts: [{ requestDigest: APPROVAL_REQUEST_DIGEST, hash: approval.hash, nonce: '8', state: 'BROADCAST', rawBytes: approval.rawBytes }],
+  });
+  const destination = discoveredOutboundDestinationClient({ relayRequestId, mint: SOLANA_MINT, amountAtomic: destinationAmountAtomic });
+  const client = outboundApprovalEvmClient({
+    sourceTransactionHash: sourceHash,
+    sourceAmountAtomic: quoteFixture.details.currencyIn.amount,
+    approvalHash: approval.hash,
+  });
+  const config = outboundApprovalTestConfig();
+
+  const result = await reconcileLiveOutbound({
+    adapters: {
+      robinhood: { client, historicalEvidenceClient: outboundArchiveEvidence({ amountAtomic: quoteFixture.details.currencyIn.amount, sourceAccount: OUTBOUND_APPROVAL_OPERATIONS_ACCOUNT.address }) },
+      solana: { client: destination.client },
+    },
+    config,
+    cycleRepository,
+    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+  });
+
+  assert.equal(result.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(result.relayLeg.state, 'SETTLED');
+  assert.equal(cycleRepository.attemptStates[APPROVAL_REQUEST_DIGEST], 'FINALIZED');
+  assert.equal(cycleRepository.sourceAttemptState, 'FINALIZED');
+  assert.equal(cycleRepository.finalityCalls.length, 2);
+  const approvalFinality = cycleRepository.finalityCalls.find(entry => entry.requestDigest === APPROVAL_REQUEST_DIGEST);
+  assert.equal(approvalFinality.evidence.transactionHash, approval.hash.toLowerCase());
+  assert.deepEqual(approvalFinality.evidence.finalizedAt, { height: '90', hash: `0x${'7'.repeat(64)}`, timestampUnixSeconds: '1700000060' });
+  assert.equal(cycleRepository.settlements.length, 1);
+  assert.equal(cycleRepository.settlements[0].terminalState, 'SETTLED');
+  assert.equal(client.calls.includes(`receipt:${approval.hash}`), true);
+  assert.equal(client.calls.includes(`receipt:${sourceHash}`), true);
+
+  // Restart: the durable repository already reflects FINALIZED/SETTLED. No EVM or Solana read of
+  // any kind -- not even a re-check of the already-proven approval -- may happen, and nothing is
+  // recorded or settled a second time.
+  const replay = await reconcileLiveOutbound({
+    adapters: { robinhood: { client: throwingRobinhoodClient() }, solana: { client: throwingSolanaClient() } },
+    config,
+    cycleRepository,
+    context: { cycleId: 'cycle-outbound-reconcile', fencingToken: '11111111-1111-4111-8111-111111111111' },
+  });
+  assert.equal(replay.schema, 'hookemon.outbound-relay-settlement-evidence.v1');
+  assert.equal(replay.relayLeg.state, 'SETTLED');
+  assert.equal(cycleRepository.finalityCalls.length, 2);
+  assert.equal(cycleRepository.settlements.length, 1);
+});
+
 function moneyConfiguration({ solanaMint = SOLANA_MINT } = {}) {
   return {
     schema: 'hookemon.money-configuration.v1',
@@ -1044,7 +1833,7 @@ function quoteForOperationsAccount(account) {
   return quote;
 }
 
-function outboundChainRepository(releaseAmount = quoteFixture.details.currencyIn.amount) {
+function outboundChainRepository(releaseAmount = quoteFixture.details.currencyIn.amount, durableAdmission = null) {
   const attempts = new Map();
   const recoveryContexts = new Map();
   const reservations = [];
@@ -1054,7 +1843,7 @@ function outboundChainRepository(releaseAmount = quoteFixture.details.currencyIn
     get relayLeg() { return relayLeg; },
     get recoveryContexts() { return [...recoveryContexts.values()].map(context => structuredClone(context)); },
     get reservations() { return structuredClone(reservations); },
-    async describeCycle() { return { releaseAmount, chainAttempts: new Map(attempts) }; },
+    async describeCycle() { return { releaseAmount, ...(durableAdmission === null ? {} : { admission: durableAdmission }), chainAttempts: new Map(attempts) }; },
     async readChainTransactionAttempt(_cycleId, stage, requestDigest) {
       return attempts.get(`${stage}\u0000${requestDigest}`) ?? null;
     },
@@ -1111,12 +1900,16 @@ test('mutateOutbound records the Relay leg before signing and rebroadcasts durab
     relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
     moneyConfiguration: moneyConfiguration(),
   };
-  const cycleRepository = outboundChainRepository();
+  const durableAdmission = admission('cycle-outbound-durable', admittedQuote(quote));
+  const cycleRepository = outboundChainRepository(quote.details.currencyIn.amount, durableAdmission);
   const request = await prepareOutboundRequest({
     adapters: { relay: relayClient(quote) },
     config,
     cycleRepository,
-    context: { cycleId: 'cycle-outbound-durable' },
+    context: {
+      cycleId: 'cycle-outbound-durable',
+      admission: durableAdmission,
+    },
     nowMs: (quote.protocol.v2.orderData.output.deadline * 1000) - 1,
   });
   const context = {

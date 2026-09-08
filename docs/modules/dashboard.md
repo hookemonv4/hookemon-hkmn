@@ -117,3 +117,5 @@ audit log if its projection is missing or stale.
   such as a fixed-cap configuration refusal. Resolve it by documenting a typed `REJECTED` authority
   result and retaining it in the audit lifecycle. Verified safe alternative: record an authority
   exception as `UNCERTAIN` rather than infer that no effect occurred.
+
+The bootstrap hard-cap projection exposes only its four published pack-spend fields. Additional runner custody limits remain enforced by the operator authority and do not change the dashboard response schema.
