@@ -814,12 +814,7 @@ async function reconcileUnknownPack({ adapters, config, cycleRepository, context
     return null;
   }
   if (!plainObject(check) || typeof check.exists !== 'boolean' || !check.exists) return null;
-  if (check.status === '') return null;
-  if (typeof check.status !== 'string' || check.status !== 'complete') {
-    return holdPack(cycleRepository, config, context, unknown.packIndex, unknown.memo, unknown.mint, 'HELD_DATA_UNVERIFIED', {
-      stage: 'buyback', ...unknown, check, reason: 'buyback check status is not a documented pending or complete value',
-    });
-  }
+  if (typeof check.status !== 'string' || check.status !== 'complete') return null;
   const asset = configuredSettlementAsset(config);
   let checkedQuote;
   try {
@@ -887,6 +882,27 @@ export async function reconcileLiveBuyback({ adapters, config, cycleRepository, 
       : await reconcilePack({ adapters, config, cycleRepository, context, submitted, assetKind });
     if (outcome === null) {
       if (!overdue) return null;
+      // A deadline ends automatic waiting; it does not prove that Operations still owns the card.
+      // Missing transports, ownership uncertainty or a finalized outgoing transfer hold the cycle
+      // without inventing a held-asset position or treating unattributed proceeds as available.
+      try {
+        if (!canReconcile) throw new Error('verification transports are unavailable');
+        await verifyFinalizedOwnership({ adapters, config, pack: submitted, openEvidencePacks });
+        if (typeof submitted.signature === 'string') {
+          const status = await readFinalizedSignatureStatus(adapters.solana.client, submitted.signature);
+          if (status !== null && !status.err && await cardLeftOperator({ adapters, signature: submitted.signature,
+            mint: submitted.mint, owner: config.accounts.solana, assetKind })) {
+            throw new Error('finalized outgoing card transfer remains unresolved with the provider');
+          }
+        }
+      } catch {
+        return holdWholeCycleForUnattributableCard(cycleRepository, context, {
+          stage: 'buyback', memo: submitted.memo, mint: submitted.mint,
+          ...(typeof submitted.signature === 'string' ? { signature: submitted.signature } : {}),
+          sentAtMs: record.sentAtMs, deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+          reason: 'unresolved buyback has no verified current Operations custody at its deadline',
+        });
+      }
       outcome = await holdPack(cycleRepository, config, context, submitted.packIndex, submitted.memo, submitted.mint, 'HELD_UNRESOLVED', {
         stage: 'buyback', ...submitted, attempt: record.attempt, sentAtMs: record.sentAtMs,
         deadlineMinutes: unresolvedCardDeadlineMinutes(config),

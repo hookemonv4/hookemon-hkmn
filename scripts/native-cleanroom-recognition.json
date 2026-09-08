@@ -7237,7 +7237,7 @@
       ]
     },
     "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
-      "sha256": "5f6bcdbe55146e275cdf83d46ab2b6190532170bddd5279cdd59331c2e1ed6c8",
+      "sha256": "7c57ad6ce2a894ecf092ecc92dc390a6c7dc91bd8f5450c081b98db0e8f0278d",
       "matches": [
         {
           "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",

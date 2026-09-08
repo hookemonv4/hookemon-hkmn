@@ -2052,7 +2052,7 @@ test('carves an overdue SENT_UNKNOWN buyback into a held position without anothe
   assert.equal(cycleRepository.heldPositions[0].costMicroUsd, '35000000');
 });
 
-for(const absentBinding of [false,true,'omitted','null'])test(`Core buyback stage ${absentBinding?'refuses missing authority before mutation':'reaches Operations second-slot signing through the production registry'}`,async()=>{
+for(const absentBinding of [false,true,'omitted','null'])test(`Core buyback stage ${absentBinding?`refuses ${absentBinding} authority before mutation`:'reaches Operations second-slot signing through the production registry'}`,async()=>{
  const {syntheticCoreBuyback}=await import('../fixtures/collector-core-buyback.mjs');
  const memo='cc-12345678-1234-1234-1234-123456789abc';
  const candidate=syntheticCoreBuyback({operator:OPERATOR_KEYPAIR,asset:CARD_ASSET,amountAtomic:'85',memo});
@@ -2067,7 +2067,8 @@ for(const absentBinding of [false,true,'omitted','null'])test(`Core buyback stag
  const execute=()=>mutateBuyback({liveMode:true,config,cycleRepository,context:{cycleId:CYCLE_ID,assertLease:async()=>{}},preflightAuthority:TEST_PROFILE_MUTATION_AUTHORITY,
   adapters:{solana:{client:rpc},collectorCrypt:{async getBuybackAvailable(){return {available:true,amount:quote};},async buyback(){providerCalls++;return {memo,refundAmount:quote,serializedTransaction:candidate.serializedTransaction};},async submitTransaction(){throw new Error('test stops at signer');}}},
   signerClient:{solana:{async sign(bytes){signCalls++;const tx=Transaction.from(Buffer.from(bytes,'base64'));assert.equal(tx.signatures[1].publicKey.toBase58(),OPERATOR);assert.equal(tx.verifySignatures(false),true);throw new Error('deliberate test stop before signing');}}}});
- if(absentBinding)await assert.rejects(execute);else {const result=await execute();assert.equal(result.packs[0].decision,'unknown');}
+ assert.equal(config.execution.profile,'production');
+ if(absentBinding)await assert.rejects(execute,/production binding/);else {const result=await execute();assert.equal(result.packs[0].decision,'unknown');}
  assert.equal(providerCalls,absentBinding?0:1);assert.equal(signCalls,absentBinding?0:1);
 });
 
@@ -2119,3 +2120,29 @@ test('buyback crash before response persistence recovers a batch card by its dur
   assert.deepEqual(result.packs[0].proceeds, amount);
   assert.equal(cycleRepository.heldPositions.length, 0);
 });
+
+for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed']) {
+  test(`overdue buyback ${failure} holds the cycle without inventing held card custody`, async () => {
+    const amount = { ...settlementAsset(), amountAtomic: '85' };
+    const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET,
+      signature: BUYBACK_SIGNATURE, quote: amount, refundAmount: amount };
+    const cycleRepository = repository({
+      stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+      attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, sentAtMs: 1_700_000_000_000, responseEvidence: { packs: [submitted] } } },
+    });
+    const adapters = failure === 'no-transports' ? {} : {
+      collectorCrypt: { async getBuybackCheck() { return { exists: false }; } },
+      solana: { client: rpcClient({ cardOwner: failure === 'owner-changed' ? COLLECTOR_RECIPIENT : OPERATOR,
+        entries: failure === 'outgoing-finalized' ? [
+          { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, CARD_ASSET).toBase58(), owner: OPERATOR, mint: CARD_ASSET, preAmount: '1', postAmount: '0' },
+          { tokenAccount: deriveAssociatedTokenAddress(OPERATOR, SETTLEMENT_ASSET).toBase58(), owner: OPERATOR, mint: SETTLEMENT_ASSET, preAmount: '7', postAmount: '92' },
+        ] : [] }) },
+    };
+    assert.equal(await reconcileLiveBuyback({ adapters, config: baseConfig(), cycleRepository,
+      context: { cycleId: CYCLE_ID, nowMs: 1_700_001_800_000 } }), null);
+    assert.equal(cycleRepository.heldPositions.length, 0);
+    assert.equal(cycleRepository.held.length, 1);
+    assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+    assert.equal(cycleRepository.ledgers.length, 0);
+  });
+}
