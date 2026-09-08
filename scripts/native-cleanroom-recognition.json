@@ -5872,7 +5872,7 @@
       ]
     },
     "packages/adapters/src/app/compose.mjs": {
-      "sha256": "2643e4762187a6476425972e7091fa5ff1d9a10e645d244af5ec84060f360293",
+      "sha256": "c8d7ad127b31e0c1acaa0b073f5fb72d308a079deb5a423e261095a1eefe55de",
       "matches": [
         {
           "file": "packages/adapters/src/app/compose.mjs",
@@ -5899,10 +5899,10 @@
         {
           "file": "packages/adapters/src/app/compose.mjs",
           "rule": "historical-architecture",
-          "offset": 77123,
+          "offset": 77152,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 77106,
+          "tokenStart": 77135,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
@@ -5910,10 +5910,10 @@
         {
           "file": "packages/adapters/src/app/compose.mjs",
           "rule": "historical-architecture",
-          "offset": 84118,
+          "offset": 84147,
           "length": 4,
           "sha256": "a34645ceb35b11e4a8aa9e39fd3b06fe6a6cd5f5028efbe1c53f8e2903aab966",
-          "tokenStart": 84101,
+          "tokenStart": 84130,
           "tokenLength": 24,
           "tokenSha256": "369d3802ba58cbb7c557d5c36ccee725b2719f0b5a2ba59f7fce2729db31320f",
           "basis": "reviewed-native-71-or-retained-provider-source"
