@@ -13,7 +13,7 @@ contract HKMNToken {
     uint8 public immutable decimals;
     uint256 public immutable totalSupply;
     address public immutable issuanceAuthority;
-    address public immutable expectedUsdg;
+    address public immutable expectedQuoteCurrency;
     uint160 public immutable launchSqrtPriceX96;
     address public canonicalMarket;
     bool public allocated;
@@ -34,20 +34,20 @@ contract HKMNToken {
 
     constructor(
         address issuanceAuthority_,
-        address expectedUsdg_,
+        address expectedQuoteCurrency_,
         uint8 decimals_,
         uint160 launchSqrtPriceX96_
     ) {
         if (
             issuanceAuthority_ == address(0) || issuanceAuthority_ != msg.sender
-                || expectedUsdg_ == address(0) || decimals_ != CANONICAL_DECIMALS
+                || expectedQuoteCurrency_ != address(0) || decimals_ != CANONICAL_DECIMALS
                 || launchSqrtPriceX96_ == 0
         ) revert InvalidLaunchConfiguration();
         uint256 scale = _scale(decimals_);
         if (WHOLE_HKMN_SUPPLY > type(uint256).max / scale) revert InvalidLaunchConfiguration();
 
         issuanceAuthority = issuanceAuthority_;
-        expectedUsdg = expectedUsdg_;
+        expectedQuoteCurrency = expectedQuoteCurrency_;
         decimals = decimals_;
         launchSqrtPriceX96 = launchSqrtPriceX96_;
         totalSupply = WHOLE_HKMN_SUPPLY * scale;
@@ -103,38 +103,38 @@ contract HKMNToken {
 
     function validateGraphConfiguration(
         address canonicalMarket_,
-        address usdg_,
+        address quoteCurrency_,
         uint160 sqrtPriceX96,
         address expectedIssuanceAuthority_,
         uint8 expectedDecimals_
     ) external view returns (bool) {
         return _allocationMatches(
-            canonicalMarket_, usdg_, expectedIssuanceAuthority_, expectedDecimals_
+            canonicalMarket_, quoteCurrency_, expectedIssuanceAuthority_, expectedDecimals_
         ) && sqrtPriceX96 == launchSqrtPriceX96;
     }
 
     function validateIssuedAllocation(
         address canonicalMarket_,
-        address usdg_,
+        address quoteCurrency_,
         address expectedIssuanceAuthority_,
         uint8 expectedDecimals_
     ) external view returns (bool) {
         return _allocationMatches(
-            canonicalMarket_, usdg_, expectedIssuanceAuthority_, expectedDecimals_
+            canonicalMarket_, quoteCurrency_, expectedIssuanceAuthority_, expectedDecimals_
         );
     }
 
     function _allocationMatches(
         address canonicalMarket_,
-        address usdg_,
+        address quoteCurrency_,
         address expectedIssuanceAuthority_,
         uint8 expectedDecimals_
     ) private view returns (bool) {
         return allocated && issuanceAuthority == expectedIssuanceAuthority_
             && expectedDecimals_ == CANONICAL_DECIMALS && decimals == expectedDecimals_
-            && totalSupply == WHOLE_HKMN_SUPPLY * _scale(expectedDecimals_) && usdg_ == expectedUsdg
-            && canonicalMarket_ == canonicalMarket && balanceOf[canonicalMarket_] == totalSupply
-            && balanceOf[address(this)] == 0;
+            && totalSupply == WHOLE_HKMN_SUPPLY * _scale(expectedDecimals_)
+            && quoteCurrency_ == expectedQuoteCurrency && canonicalMarket_ == canonicalMarket
+            && balanceOf[canonicalMarket_] == totalSupply && balanceOf[address(this)] == 0;
     }
 
     function _transfer(address from, address to, uint256 amount) private {

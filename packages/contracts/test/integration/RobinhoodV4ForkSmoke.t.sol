@@ -164,7 +164,8 @@ contract RobinhoodV4ForkSmokeTest is Test {
         SmokeTestToken first = new SmokeTestToken();
         SmokeTestToken second = new SmokeTestToken();
         (token0, token1) = address(first) < address(second) ? (first, second) : (second, first);
-        currency0 = Currency.wrap(address(token0));
+        currency0 = Currency.wrap(address(0));
+        vm.deal(address(this), 1e40);
         currency1 = Currency.wrap(address(token1));
 
         token0.mint(address(this), 10 ** 30);
@@ -186,7 +187,7 @@ contract RobinhoodV4ForkSmokeTest is Test {
         HookemonHook hook = _deployHook(currency0);
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-120, 120, 10 ** 24, bytes32(0)), bytes("")
         );
 
@@ -199,12 +200,12 @@ contract RobinhoodV4ForkSmokeTest is Test {
         PoolKey memory key,
         bytes memory hookData
     ) private {
-        uint256 callerBefore = token0.balanceOf(address(this));
-        uint256 managerBefore = token0.balanceOf(address(manager));
-        uint256 hookBefore = token0.balanceOf(address(hook));
+        uint256 callerBefore = address(this).balance;
+        uint256 managerBefore = address(manager).balance;
+        uint256 hookBefore = address(hook).balance;
         uint256 liabilityBefore = hook.totalLiability();
         vm.recordLogs();
-        BalanceDelta delta = swapRouter.swap(
+        BalanceDelta delta = swapRouter.swap{ value: 1e24 }(
             key,
             SwapParams(true, -int256(100_000), TickMath.MIN_SQRT_PRICE + 1),
             PoolSwapTest.TestSettings(false, false),
@@ -216,7 +217,7 @@ contract RobinhoodV4ForkSmokeTest is Test {
         ExpectedSplit memory expected = _expectedSwapSplit(hook, observed.gross);
         assertEq(observed.fee, expected.total);
         assertEq(hook.lastExecutedUsdg(), observed.gross);
-        assertEq(token0.balanceOf(address(hook)) - hookBefore, expected.total);
+        assertEq(address(hook).balance - hookBefore, expected.total);
         assertEq(hook.totalLiability() - liabilityBefore, expected.total);
     }
 
@@ -262,10 +263,9 @@ contract RobinhoodV4ForkSmokeTest is Test {
         observed.rawPoolDelta = _rawPoolUsdgDelta(key, logs);
         observed.callerDelta = delta.amount0();
 
-        int256 callerBalanceDelta = _balanceDelta(token0.balanceOf(address(this)), callerBefore);
-        int256 managerBalanceDelta =
-            _balanceDelta(token0.balanceOf(address(manager)), managerBefore);
-        int256 hookBalanceDelta = _balanceDelta(token0.balanceOf(address(key.hooks)), hookBefore);
+        int256 callerBalanceDelta = _balanceDelta(address(this).balance, callerBefore);
+        int256 managerBalanceDelta = _balanceDelta(address(manager).balance, managerBefore);
+        int256 hookBalanceDelta = _balanceDelta(address(key.hooks).balance, hookBefore);
         int256 observedFee = int256(observed.rawPoolDelta) - int256(observed.callerDelta);
 
         assertGt(observedFee, 0);
@@ -330,8 +330,8 @@ contract RobinhoodV4ForkSmokeTest is Test {
                 manager: manager,
                 positionManager: ROBINHOOD_POSITION_MANAGER,
                 permit2: PERMIT2,
-                usdg: usdg,
-                hkmn: usdg == currency0 ? currency1 : currency0,
+                quoteCurrency: usdg,
+                hkmn: currency1,
                 tickSpacing: 60,
                 programmable: PROGRAMMABLE,
                 treasury: TREASURY,
@@ -341,15 +341,13 @@ contract RobinhoodV4ForkSmokeTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: BINDING_DIGEST,
                 runtimeDigest: RUNTIME_DIGEST,
-                processClaimLimit6h: 1_000_000,
-                processClaimLimitMax: 2_000_000,
+                processClaimLimit6hWei: 1_000_000,
+                processClaimLimitMaxWei: 2_000_000,
                 processClaimMaxCount: 8,
                 operationsRotationDelay: 3 days
             })
         );
         bytes32 initCodeHash = factory.initCodeHash();
-        uint256 originalChainId = block.chainid;
-        vm.chainId(31_337);
         for (uint256 nonce; nonce < 100_000; ++nonce) {
             bytes32 salt = bytes32(nonce);
             address predicted = vm.computeCreate2Address(salt, initCodeHash, address(factory));
@@ -359,7 +357,6 @@ contract RobinhoodV4ForkSmokeTest is Test {
                 break;
             }
         }
-        vm.chainId(originalChainId);
         assertTrue(address(hook) != address(0), "no valid CREATE2 salt found in 100_000 tries");
     }
 
@@ -375,4 +372,5 @@ contract RobinhoodV4ForkSmokeTest is Test {
     function _hookData(address recipient) private pure returns (bytes memory) {
         return abi.encode(recipient, uint256(7));
     }
+    receive() external payable { }
 }

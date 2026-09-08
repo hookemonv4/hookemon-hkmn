@@ -21,7 +21,7 @@ import { HookemonHook } from "../../../src/HookemonHook.sol";
 /// @dev A mock USDG whose `transfer` can be armed to make one outbound call to an arbitrary
 ///      target/payload before returning, used to mount reentrancy attempts (self- and
 ///      cross-function) against the money path lock.
-contract ReentryToken {
+contract ReentryToken is Test {
     mapping(address account => uint256 balance) private balances;
     bool private armed;
     address private target;
@@ -30,15 +30,15 @@ contract ReentryToken {
     error ReentryCallReverted();
 
     function mint(address account, uint256 amount) external {
-        balances[account] += amount;
+        vm.deal(account, account.balance + amount);
     }
 
     function burn(address account, uint256 amount) external {
-        balances[account] -= amount;
+        vm.deal(account, account.balance - amount);
     }
 
     function balanceOf(address account) external view returns (uint256) {
-        return balances[account];
+        return account.balance;
     }
 
     function arm(address reentryTarget, bytes calldata reentryPayload) external {
@@ -47,9 +47,7 @@ contract ReentryToken {
         armed = true;
     }
 
-    function transfer(address recipient, uint256 amount) external returns (bool) {
-        balances[msg.sender] -= amount;
-        balances[recipient] += amount;
+    function runReentry() external returns (bool) {
         if (armed) {
             armed = false;
             (bool ok,) = target.call(payload);
@@ -99,6 +97,16 @@ contract ClaimsBlindFactory {
 /// @dev Generic actor used both as a claim caller and, via `vm.etch`, to occupy the pinned
 ///      Programmable-beneficiary address so the reentrancy tests can drive it.
 contract ClaimActor {
+    ReentryToken private control;
+
+    function configure(ReentryToken value) external {
+        control = value;
+    }
+
+    receive() external payable {
+        control.runReentry();
+    }
+
     function claimProcess(HookemonHook hook, bytes32 cycleId, uint256 amount) external {
         hook.claimProcess(cycleId, amount, address(this));
     }
@@ -340,6 +348,7 @@ contract ClaimsAdversarialBlindTest is Test {
 
     function testReentrantProcessClaimDuringItsOwnTransferIsBlockedAtomically() external {
         ClaimActor actor = new ClaimActor();
+        actor.configure(token);
         ClaimsBlindHookHarness hook = _deploy(address(actor), 1_000, 1_000, 4, 1 days);
         _accrue(hook, 100_000);
         token.arm(address(actor), abi.encodeCall(ClaimActor.claimProcess, (hook, CYCLE_B, 1)));
@@ -355,6 +364,7 @@ contract ClaimsAdversarialBlindTest is Test {
 
     function testReentrantTreasuryClaimDuringItsOwnTransferIsBlockedAtomically() external {
         ClaimActor actor = new ClaimActor();
+        actor.configure(token);
         ClaimsBlindHookHarness hook = _deployWithTreasury(address(actor), 1_000, 1_000, 4, 1 days);
         _accrue(hook, 100_000);
         token.arm(address(actor), abi.encodeCall(ClaimActor.claimTreasury, (hook, 1)));
@@ -370,13 +380,15 @@ contract ClaimsAdversarialBlindTest is Test {
 
     function testReentrantProgrammableClaimDuringItsOwnTransferIsBlockedAtomically() external {
         ClaimActor implementation = new ClaimActor();
+        implementation.configure(token);
         vm.etch(PROGRAMMABLE, address(implementation).code);
+        ClaimActor(payable(PROGRAMMABLE)).configure(token);
         ClaimsBlindHookHarness hook = _deploy(OPERATIONS, 1_000, 1_000, 4, 1 days);
         _accrue(hook, 100_000);
         token.arm(PROGRAMMABLE, abi.encodeCall(ClaimActor.claimProgrammable, (hook, 1)));
 
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
-        ClaimActor(PROGRAMMABLE).claimProgrammable(hook, 1);
+        ClaimActor(payable(PROGRAMMABLE)).claimProgrammable(hook, 1);
 
         (uint256 programmableLiability,,) = hook.readFeeLiabilities(TREASURY);
         assertEq(programmableLiability, 100, "programmable liability must roll back");
@@ -388,6 +400,7 @@ contract ClaimsAdversarialBlindTest is Test {
     ///      independent liability streams.
     function testProcessClaimTransferCannotReenterTreasuryClaim() external {
         ClaimActor operationsActor = new ClaimActor();
+        operationsActor.configure(token);
         ClaimsBlindHookHarness hook = _deployWithBoth(
             address(operationsActor), address(operationsActor), 1_000, 1_000, 4, 1 days
         );
@@ -408,8 +421,11 @@ contract ClaimsAdversarialBlindTest is Test {
     /// @dev Cross-function: a Treasury claim's transfer tries to reenter claimProgrammable.
     function testTreasuryClaimTransferCannotReenterProgrammableClaim() external {
         ClaimActor implementation = new ClaimActor();
+        implementation.configure(token);
         vm.etch(PROGRAMMABLE, address(implementation).code);
+        ClaimActor(payable(PROGRAMMABLE)).configure(token);
         ClaimActor treasuryActor = new ClaimActor();
+        treasuryActor.configure(token);
         ClaimsBlindHookHarness hook =
             _deployWithTreasury(address(treasuryActor), 1_000, 1_000, 4, 1 days);
         _accrue(hook, 100_000);
@@ -508,7 +524,7 @@ contract ClaimsAdversarialBlindTest is Test {
                 manager: IPoolManager(address(0xC000)),
                 positionManager: address(0xC001),
                 permit2: address(0xC002),
-                usdg: Currency.wrap(address(token)),
+                quoteCurrency: Currency.wrap(address(0)),
                 hkmn: Currency.wrap(address(0xC003)),
                 tickSpacing: 60,
                 programmable: PROGRAMMABLE,
@@ -519,8 +535,8 @@ contract ClaimsAdversarialBlindTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: keccak256("blind-claims-binding"),
                 runtimeDigest: keccak256("blind-claims-runtime"),
-                processClaimLimit6h: limit,
-                processClaimLimitMax: maximum,
+                processClaimLimit6hWei: limit,
+                processClaimLimitMaxWei: maximum,
                 processClaimMaxCount: maxCount,
                 operationsRotationDelay: rotationDelay
             }),

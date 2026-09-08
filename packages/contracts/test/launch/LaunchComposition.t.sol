@@ -188,7 +188,7 @@ contract ProgrammableGraphHarness {
         address[3] memory targets = _execute(_providerDeployments(request));
         token = HKMNToken(targets[0]);
         custody = PermanentPositionCustody(targets[1]);
-        hook = HookemonHook(targets[2]);
+        hook = HookemonHook(payable(targets[2]));
     }
 
     function providerDeployments(GraphRequest calldata request)
@@ -223,7 +223,7 @@ contract ProgrammableGraphHarness {
 
     function initializeAgain(address hook, address custody, uint160 sqrtPriceX96) external {
         if (msg.sender != AUTHORIZED_LAUNCHER) revert UnauthorizedLauncher(msg.sender);
-        HookemonHook(hook).initializeGraphLaunch(custody, sqrtPriceX96);
+        HookemonHook(payable(hook)).initializeGraphLaunch(custody, sqrtPriceX96);
     }
 
     function setLaunchPriceX96(uint160 launchPriceX96_) external {
@@ -367,7 +367,7 @@ contract ProgrammableGraphHarness {
             manager: poolManager,
             positionManager: positionManager,
             permit2: permit2,
-            usdg: Currency.wrap(hookUsdg),
+            quoteCurrency: Currency.wrap(hookUsdg),
             hkmn: Currency.wrap(token),
             tickSpacing: 60,
             programmable: RobinhoodBindings.PROGRAMMABLE_BENEFICIARY,
@@ -378,8 +378,8 @@ contract ProgrammableGraphHarness {
             expectedDecimals: hookExpectedDecimals,
             bindingDigest: keccak256("launch-composition-binding"),
             runtimeDigest: keccak256("launch-composition-runtime"),
-            processClaimLimit6h: 1_000_000,
-            processClaimLimitMax: 2_000_000,
+            processClaimLimit6hWei: 1_000_000,
+            processClaimLimitMaxWei: 2_000_000,
             processClaimMaxCount: 8,
             operationsRotationDelay: 3 days
         });
@@ -430,7 +430,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
             manager,
             address(positionManager),
             address(permit2),
-            address(usdg),
+            address(0),
             0,
             OWNER,
             keccak256("launch-composition-route"),
@@ -488,13 +488,13 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
         assertEq(token.balanceOf(address(custody)), 0);
         assertEq(token.balanceOf(address(token)), 0);
         assertEq(token.balanceOf(address(graph)), 0);
-        assertEq(usdg.balanceOf(address(hook)), 0);
+        assertEq(address(hook).balance, 0);
         (bool custodyCanTransferRemainder,) =
             address(custody).call(abi.encodeWithSelector(bytes4(0xa9059cbb), OWNER, 1));
         assertFalse(custodyCanTransferRemainder);
         assertTrue(
             token.validateGraphConfiguration(
-                address(hook), address(usdg), graph.launchPriceX96(), address(graph), 18
+                address(hook), address(0), graph.launchPriceX96(), address(graph), 18
             )
         );
 
@@ -510,7 +510,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
         _approvePayer(address(hook), USDG_MAX);
         HookemonHook.SeedParams memory seedParams = _seedParams(token, hook, custody);
         vm.prank(OWNER);
-        hook.seedCanonicalLiquidity(seedParams);
+        hook.seedCanonicalLiquidity{ value: seedParams.amount0Max }(seedParams);
 
         uint256 positionTokenId = hook.canonicalPositionTokenId();
         assertTrue(hook.canonicalLiquiditySeeded());
@@ -519,13 +519,13 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
         assertEq(custody.positionTokenId(), positionTokenId);
         assertTrue(custody.positionReceived());
         assertEq(positionManager.ownerOf(positionTokenId), address(custody));
-        assertEq(usdg.balanceOf(address(hook)), 0);
+        assertEq(address(hook).balance, 0);
         uint256 hkmnSpent = token.balanceOf(address(manager));
         uint256 hkmnDustTransferred = token.balanceOf(TREASURY);
         assertEq(hkmnDustTransferred, 0);
         assertEq(token.balanceOf(address(hook)), 0);
         assertEq(hkmnSpent, marketAllocation);
-        assertEq(usdg.balanceOf(PAYER), 0);
+        assertEq(PAYER.balance, 0);
     }
 
     function testWrongPriceRevertsTheWholeGraphLaunch() external {
@@ -580,7 +580,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
         request.allocationCustody = address(wrongCustody);
 
         _expectGraphLaunchRevert(request);
-        assertEq(usdg.balanceOf(address(wrongCustody)), 0);
+        assertEq(address(wrongCustody).balance, 0);
     }
 
     function testProviderExecutorRejectsOutOfOrderTriplesAndRollsBackAllTargets() external {
@@ -609,19 +609,18 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
     function testTokenRejectsAnIssuanceAuthorityOtherThanItsFactory() external {
         uint160 launchPriceX96 = graph.launchPriceX96();
         vm.expectRevert(HKMNToken.InvalidLaunchConfiguration.selector);
-        new HKMNToken(OWNER, address(usdg), 18, launchPriceX96);
+        new HKMNToken(OWNER, address(0), 18, launchPriceX96);
     }
 
     function testTokenRejectsNonCanonicalDecimals() external {
         uint160 launchPriceX96 = graph.launchPriceX96();
         vm.expectRevert(HKMNToken.InvalidLaunchConfiguration.selector);
-        new HKMNToken(address(this), address(usdg), 6, launchPriceX96);
+        new HKMNToken(address(this), address(0), 6, launchPriceX96);
     }
 
     function testGraphModeRejectsLegacyInitializerForMalformedToken() external {
         LaunchCompositionTestToken malformedToken = new LaunchCompositionTestToken();
-        bytes32 initCodeHash =
-            graph.graphHookInitCodeHash(address(malformedToken), address(usdg), 18);
+        bytes32 initCodeHash = graph.graphHookInitCodeHash(address(malformedToken), address(0), 18);
         bytes32 applicantSalt = _findHookApplicantSalt(initCodeHash);
         address predicted = vm.computeCreate2Address(
             graph.effectiveSalt(HOOK_TARGET_ID, applicantSalt), initCodeHash, address(graph)
@@ -629,7 +628,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
 
         vm.prank(ROUTER);
         HookemonHook malformedHook =
-            graph.deployGraphModeHook(applicantSalt, address(malformedToken), address(usdg), 18);
+            graph.deployGraphModeHook(applicantSalt, address(malformedToken), address(0), 18);
         assertEq(address(malformedHook), predicted);
         assertTrue(malformedHook.graphMode());
         uint160 launchPriceX96 = graph.launchPriceX96();
@@ -688,7 +687,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
                 hookApplicantSalt: bytes32(0),
                 custodyApplicantSalt: keccak256("launch-composition-custody-salt"),
                 initializationPriceX96: graph.launchPriceX96(),
-                hookUsdg: address(usdg),
+                hookUsdg: address(0),
                 allocationCustody: address(0),
                 hookExpectedDecimals: 18
             });
@@ -733,7 +732,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
             manager: manager,
             positionManager: address(positionManager),
             permit2: address(permit2),
-            usdg: Currency.wrap(address(usdg)),
+            quoteCurrency: Currency.wrap(address(0)),
             hkmn: Currency.wrap(token),
             tickSpacing: 60,
             programmable: RobinhoodBindings.PROGRAMMABLE_BENEFICIARY,
@@ -744,28 +743,24 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
             expectedDecimals: 18,
             bindingDigest: keccak256("known-provider-binding"),
             runtimeDigest: keccak256("known-provider-runtime"),
-            processClaimLimit6h: 1_000_000,
-            processClaimLimitMax: 2_000_000,
+            processClaimLimit6hWei: 1_000_000,
+            processClaimLimitMaxWei: 2_000_000,
             processClaimMaxCount: 8,
             operationsRotationDelay: 3 days
         });
     }
 
     function _key(HKMNToken token, HookemonHook hook) private view returns (PoolKey memory) {
-        address currency0 = address(usdg) < address(token) ? address(usdg) : address(token);
-        address currency1 = currency0 == address(usdg) ? address(token) : address(usdg);
+        address currency0 = address(0) < address(token) ? address(0) : address(token);
+        address currency1 = currency0 == address(0) ? address(token) : address(0);
         return
             PoolKey(
                 Currency.wrap(currency0), Currency.wrap(currency1), 0, 60, IHooks(address(hook))
             );
     }
 
-    function _approvePayer(address hook, uint256 amount) private {
-        usdg.mint(PAYER, amount);
-        vm.startPrank(PAYER);
-        usdg.approve(address(permit2), amount);
-        permit2.approve(address(usdg), hook, uint160(amount), type(uint48).max);
-        vm.stopPrank();
+    function _approvePayer(address, uint256 amount) private {
+        vm.deal(OWNER, amount);
     }
 
     function _seedParams(HKMNToken token, HookemonHook hook, PermanentPositionCustody custody)
@@ -774,7 +769,7 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
         returns (HookemonHook.SeedParams memory params)
     {
         uint256 hkmnMax = token.balanceOf(address(hook));
-        bool usdgIsCurrency0 = address(usdg) < address(token);
+        bool usdgIsCurrency0 = true;
         params = HookemonHook.SeedParams({
             tickLower: TICK_LOWER,
             tickUpper: TICK_UPPER,
@@ -789,11 +784,5 @@ contract LaunchCompositionTest is Test, DeployPermit2 {
 
     function _selectReleasePriceCandidate() private {
         graph.setLaunchPriceX96(USDG_CURRENCY0_SQRT_PRICE_X96);
-        (address usdgCurrency0Token,,) = graph.predict(_request());
-        if (address(usdg) < usdgCurrency0Token) return;
-
-        graph.setLaunchPriceX96(HKMN_CURRENCY0_SQRT_PRICE_X96);
-        (address hkmnCurrency0Token,,) = graph.predict(_request());
-        assertLt(uint160(hkmnCurrency0Token), uint160(address(usdg)));
     }
 }

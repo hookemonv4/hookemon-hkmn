@@ -468,18 +468,12 @@ contract CanonicalMarketCallbackSurfaceTest {
         assert(hook.accrualCalls() == 1);
     }
 
-    function testRejectsZeroUsdgCurrency() external {
+    function testAcceptsNativeQuoteCurrency() external {
         PoolManager manager = new PoolManager(address(this));
-        bool rejected;
-        try new LocalCanonicalMarketHook(
+        LocalCanonicalMarketHook nativeHook = new LocalCanonicalMarketHook(
             manager, Currency.wrap(address(0)), Currency.wrap(address(0x2000))
-        ) returns (
-            LocalCanonicalMarketHook
-        ) { }
-        catch {
-            rejected = true;
-        }
-        assert(rejected);
+        );
+        assert(Currency.unwrap(nativeHook.quoteCurrency()) == address(0));
     }
 
     function testRejectsZeroHkmnCurrency() external {

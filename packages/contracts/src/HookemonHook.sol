@@ -15,6 +15,10 @@ import { BeforeSwapDelta } from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol"
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { ModifyLiquidityParams, SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { SqrtPriceMath } from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
+import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 
 interface ILaunchPermit2 {
@@ -41,7 +45,7 @@ interface ILaunchPositionManager {
 interface IGraphIssuedToken {
     function validateGraphConfiguration(
         address canonicalMarket,
-        address usdg,
+        address quoteCurrency,
         uint160 sqrtPriceX96,
         address expectedIssuanceAuthority,
         uint8 expectedDecimals
@@ -49,7 +53,7 @@ interface IGraphIssuedToken {
 
     function validateIssuedAllocation(
         address canonicalMarket,
-        address usdg,
+        address quoteCurrency,
         address expectedIssuanceAuthority,
         uint8 expectedDecimals
     ) external view returns (bool);
@@ -57,6 +61,9 @@ interface IGraphIssuedToken {
 
 /// @notice The immutable Hookemon v4 callback and money-accounting composition.
 contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, HookemonIssuance {
+    using StateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
+
     uint160 private constant ALL_HOOK_PERMISSION_MASK = (1 << 14) - 1;
     uint160 private constant REQUIRED_HOOK_PERMISSION_MASK = 0x20CC;
     uint256 private constant PROCESS_CLAIM_WINDOW = 21_600;
@@ -84,7 +91,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
     address public canonicalLaunchCustody;
 
     struct ProcessClaimWindowEntry {
-        uint256 amountAtomicUsdg;
+        uint256 amountWei;
         uint256 claimedAt;
     }
 
@@ -106,7 +113,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
     error InvalidProcessClaimConfig();
     error UnusedHookCallback();
     error InvalidUsdgCall();
-    error InvalidUsdgIdentity();
+    error InvalidQuoteCurrencyIdentity();
     error InitializationNotAuthorized();
     error UnauthorizedLaunchAuthority();
     error UnauthorizedGraphInitializer();
@@ -140,16 +147,16 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         address indexed payer,
         address indexed custody,
         uint256 indexed positionTokenId,
-        uint256 usdgRefund,
+        uint256 refundWei,
         uint256 hkmnDustTransferred
     );
     event ProcessClaimed(
         bytes32 indexed cycleId,
-        uint256 amountAtomicUsdg,
+        uint256 amountWei,
         address indexed destination,
         uint256 timestamp,
-        uint256 cap,
-        uint256 usedAfter
+        uint256 capWei,
+        uint256 usedAfterWei
     );
     event ProcessClaimLimitSet(uint256 activeLimit);
     event ProcessClaimLimitIncreaseScheduled(uint256 pendingLimit, uint256 activationTimestamp);
@@ -166,7 +173,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         IPoolManager manager;
         address positionManager;
         address permit2;
-        Currency usdg;
+        Currency quoteCurrency;
         Currency hkmn;
         int24 tickSpacing;
         address programmable;
@@ -177,8 +184,8 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         uint8 expectedDecimals;
         bytes32 bindingDigest;
         bytes32 runtimeDigest;
-        uint256 processClaimLimit6h;
-        uint256 processClaimLimitMax;
+        uint256 processClaimLimit6hWei;
+        uint256 processClaimLimitMaxWei;
         uint256 processClaimMaxCount;
         uint256 operationsRotationDelay;
     }
@@ -197,7 +204,9 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
     constructor(ConstructorConfig memory config)
         FeeAccounting(config.programmable)
         MoneyRoles(config.programmable, config.treasury, config.operations)
-        CanonicalMarketCallback(config.manager, config.usdg, config.hkmn, config.tickSpacing)
+        CanonicalMarketCallback(
+            config.manager, config.quoteCurrency, config.hkmn, config.tickSpacing
+        )
         HookemonIssuance(
             config.issuanceAuthority,
             config.expectedDecimals,
@@ -225,16 +234,16 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             revert InvalidConstructorConfig();
         }
         if (
-            config.processClaimLimit6h > config.processClaimLimitMax
+            config.processClaimLimit6hWei == 0 || config.processClaimLimitMaxWei == 0
+                || config.processClaimLimit6hWei > config.processClaimLimitMaxWei
                 || config.processClaimMaxCount == 0
                 || config.processClaimMaxCount > MAX_PROCESS_CLAIM_WINDOW_ENTRIES
                 || config.operationsRotationDelay == 0
                 || config.operationsRotationDelay > MAX_OPERATIONS_ROTATION_DELAY
         ) revert InvalidProcessClaimConfig();
-        if (
-            block.chainid == RobinhoodBindings.ROBINHOOD_CHAIN_ID
-                && Currency.unwrap(config.usdg) != RobinhoodBindings.ROBINHOOD_USDG
-        ) revert InvalidUsdgIdentity();
+        if (Currency.unwrap(config.quoteCurrency) != address(0)) {
+            revert InvalidQuoteCurrencyIdentity();
+        }
         programmableBeneficiary = config.programmable;
         positionManager = config.positionManager;
         permit2 = config.permit2;
@@ -242,11 +251,11 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         graphInitializer = config.issuanceAuthority;
         graphMode = graphMode_;
         graphExpectedDecimals = config.expectedDecimals;
-        processClaimLimit6h = config.processClaimLimit6h;
-        processClaimLimitMax = config.processClaimLimitMax;
+        processClaimLimit6h = config.processClaimLimit6hWei;
+        processClaimLimitMax = config.processClaimLimitMaxWei;
         processClaimMaxCount = config.processClaimMaxCount;
         operationsRotationDelay = config.operationsRotationDelay;
-        processClaimLimit = config.processClaimLimit6h;
+        processClaimLimit = config.processClaimLimit6hWei;
     }
 
     function getHookPermissions() public pure returns (Hooks.Permissions memory permissions) {
@@ -334,22 +343,24 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         canonicalPoolInitialized = true;
     }
 
-    function seedCanonicalLiquidity(SeedParams calldata params) external {
+    function seedCanonicalLiquidity(SeedParams calldata params) external payable moneyPath {
         if (msg.sender != launchAuthority) revert UnauthorizedLaunchAuthority();
         if (!canonicalPoolInitialized) revert CanonicalPoolNotInitialized();
         if (canonicalLiquiditySeeded) revert CanonicalLiquidityAlreadySeeded();
         if (
-            params.payer == address(0) || params.custody == address(0)
-                || params.custody.code.length == 0 || params.liquidity == 0
-                || params.tickLower >= params.tickUpper || params.tickLower % tickSpacing != 0
-                || params.tickUpper % tickSpacing != 0 || params.deadline < block.timestamp
+            params.payer == address(0) || params.payer == address(this)
+                || params.custody == address(0) || params.custody.code.length == 0
+                || params.liquidity == 0 || params.liquidity > uint256(uint128(type(int128).max))
+                || params.tickLower != -887220 || params.tickUpper != 887220
+                || params.tickLower % tickSpacing != 0 || params.tickUpper % tickSpacing != 0
+                || params.deadline < block.timestamp
         ) revert InvalidSeedParams();
 
         PoolKey memory key = _canonicalPoolKey();
-        (uint256 usdgMax, uint256 hkmnMax) = _seedMaximums(key, params);
+        uint256 hkmnMax = params.amount1Max;
+        if (msg.value != params.amount0Max) revert SeedFundingMismatch();
         uint256 hkmnBalanceBefore = _tokenBalance(Currency.unwrap(hkmn), address(this));
-        uint256 usdgBalanceBefore = _usdgBalanceOf(address(this));
-        if (hkmnMax == 0 || usdgMax == 0 || hkmnMax != hkmnBalanceBefore) {
+        if (hkmnMax == 0 || params.amount0Max == 0 || hkmnMax != hkmnBalanceBefore) {
             revert InvalidSeedParams();
         }
 
@@ -367,20 +378,16 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         {
             revert InvalidSeedCustody();
         }
-        _requireExactPayerAllowance(params.payer, usdgMax);
-
         canonicalLiquiditySeeded = true;
-        ILaunchPermit2(permit2)
-            .transferFrom(params.payer, address(this), uint160(usdgMax), Currency.unwrap(usdg));
-        if (_usdgBalanceOf(address(this)) != usdgBalanceBefore + usdgMax) {
-            revert SeedFundingMismatch();
-        }
-
-        uint256 mintedTokenId =
-            _mintAndBindCanonicalPosition(manager, custody, key, params, usdgMax, hkmnMax);
+        (uint256 mintedTokenId, uint256 nativeDebt) =
+            _mintAndBindCanonicalPosition(manager, custody, key, params, hkmnMax);
         canonicalPositionTokenId = mintedTokenId;
-
-        uint256 usdgRefund = _refundUsdg(params.payer, usdgBalanceBefore);
+        uint256 refundWei = msg.value - nativeDebt;
+        if (refundWei != 0) {
+            (bool refunded,) = params.payer.call{ value: refundWei }("");
+            if (!refunded) revert SeedRefundFailed();
+        }
+        _requireSolvent();
         uint256 hkmnDustTransferred;
         if (graphMode) {
             if (_tokenBalance(Currency.unwrap(hkmn), address(this)) != 0) {
@@ -390,7 +397,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             hkmnDustTransferred = _transferHkmnDustToTreasury();
         }
         emit CanonicalLiquiditySeeded(
-            params.payer, params.custody, mintedTokenId, usdgRefund, hkmnDustTransferred
+            params.payer, params.custody, mintedTokenId, refundWei, hkmnDustTransferred
         );
     }
 
@@ -466,12 +473,12 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         return _claimProgrammableLiability(destination);
     }
 
-    function claimProgrammable(uint256 amountAtomicUsdg, address destination)
+    function claimProgrammable(uint256 amountWei, address destination)
         external
         returns (uint256 amount)
     {
         _authorizeProgrammableClaim(programmableBeneficiary, destination);
-        return _claimProgrammableLiability(amountAtomicUsdg, destination);
+        return _claimProgrammableLiability(amountWei, destination);
     }
 
     function claimTreasury(address destination) external returns (uint256 amount) {
@@ -479,15 +486,15 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         return _claimTreasuryLiability(destination);
     }
 
-    function claimTreasury(uint256 amountAtomicUsdg, address destination)
+    function claimTreasury(uint256 amountWei, address destination)
         external
         returns (uint256 amount)
     {
         _authorizeTreasuryClaim(msg.sender, destination);
-        return _claimTreasuryLiability(amountAtomicUsdg, destination);
+        return _claimTreasuryLiability(amountWei, destination);
     }
 
-    function claimProcess(bytes32 cycleId, uint256 amountAtomicUsdg, address destination)
+    function claimProcess(bytes32 cycleId, uint256 amountWei, address destination)
         external
         returns (uint256 amount)
     {
@@ -500,10 +507,10 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         _pruneExpiredProcessClaimEntries();
         uint256 cap = processClaimLimit;
         uint256 used = activeProcessClaimUsage;
-        if (amountAtomicUsdg == 0 || amountAtomicUsdg > _processLiability()) {
+        if (amountWei == 0 || amountWei > _processLiability()) {
             revert InvalidLiabilityAmount();
         }
-        if (used >= cap || amountAtomicUsdg > cap - used) revert ProcessClaimCapacityExceeded();
+        if (used >= cap || amountWei > cap - used) revert ProcessClaimCapacityExceeded();
         if (processClaimWindowCount == processClaimMaxCount) {
             revert ProcessClaimEntryLimitReached();
         }
@@ -511,14 +518,13 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         uint256 entryIndex =
             (processClaimWindowHead + processClaimWindowCount) % processClaimMaxCount;
         processClaimCycleUsed[cycleId] = true;
-        processClaimWindowEntries[entryIndex] = ProcessClaimWindowEntry({
-            amountAtomicUsdg: amountAtomicUsdg, claimedAt: block.timestamp
-        });
+        processClaimWindowEntries[entryIndex] =
+            ProcessClaimWindowEntry({ amountWei: amountWei, claimedAt: block.timestamp });
         ++processClaimWindowCount;
-        uint256 usedAfter = used + amountAtomicUsdg;
+        uint256 usedAfter = used + amountWei;
         activeProcessClaimUsage = usedAfter;
 
-        amount = _claimProcessLiability(amountAtomicUsdg, destination);
+        amount = _claimProcessLiability(amountWei, destination);
         emit ProcessClaimed(cycleId, amount, destination, block.timestamp, cap, usedAfter);
     }
 
@@ -627,7 +633,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         return _totalLiability();
     }
 
-    function hookUsdgBalance() external view returns (uint256) {
+    function hookEthBalance() external view returns (uint256) {
         return _hookUsdgBalance();
     }
 
@@ -663,7 +669,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             uint256 entryIndex = (processClaimWindowHead + offset) % processClaimMaxCount;
             ProcessClaimWindowEntry storage entry = processClaimWindowEntries[entryIndex];
             if (block.timestamp - entry.claimedAt < PROCESS_CLAIM_WINDOW) {
-                used += entry.amountAtomicUsdg;
+                used += entry.amountWei;
             }
         }
     }
@@ -673,7 +679,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             ProcessClaimWindowEntry memory entry = processClaimWindowEntries[processClaimWindowHead];
             if (block.timestamp - entry.claimedAt < PROCESS_CLAIM_WINDOW) return;
 
-            activeProcessClaimUsage -= entry.amountAtomicUsdg;
+            activeProcessClaimUsage -= entry.amountWei;
             delete processClaimWindowEntries[processClaimWindowHead];
             processClaimWindowHead = (processClaimWindowHead + 1) % processClaimMaxCount;
             --processClaimWindowCount;
@@ -749,40 +755,42 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         return value == 1;
     }
 
-    function _seedMaximums(PoolKey memory key, SeedParams calldata params)
+    function _setPositionManagerApprovals(uint256 hkmnMax) private {
+        address hkmnToken = Currency.unwrap(hkmn);
+        _approveToken(hkmnToken, permit2, 0);
+        _approveToken(hkmnToken, permit2, hkmnMax);
+        ILaunchPermit2(permit2)
+            .approve(hkmnToken, positionManager, uint160(hkmnMax), uint48(block.timestamp));
+    }
+
+    /// @dev Matches pinned Pool.modifyLiquidity rounded-up principal debt in all tick regions.
+    function _seedDebts(PoolKey memory key, SeedParams calldata params)
         private
         view
-        returns (uint256 usdgMax, uint256 hkmnMax)
+        returns (uint256 nativeDebt, uint256 tokenDebt)
     {
-        bool usdgIsCurrency0 = Currency.unwrap(key.currency0) == Currency.unwrap(usdg);
-        usdgMax = usdgIsCurrency0 ? params.amount0Max : params.amount1Max;
-        hkmnMax = usdgIsCurrency0 ? params.amount1Max : params.amount0Max;
-    }
-
-    function _requireExactPayerAllowance(address payer, uint256 usdgMax) private view {
-        (uint160 amount, uint48 expiration,) =
-            ILaunchPermit2(permit2).allowance(payer, Currency.unwrap(usdg), address(this));
-        if (uint256(amount) != usdgMax || uint256(expiration) < block.timestamp) {
-            revert PayerPermit2AllowanceInvalid();
+        (uint160 price,,,) = poolManager.getSlot0(key.toId());
+        uint160 lower = TickMath.getSqrtPriceAtTick(params.tickLower);
+        uint160 upper = TickMath.getSqrtPriceAtTick(params.tickUpper);
+        uint128 liquidity = uint128(params.liquidity);
+        if (price <= lower) {
+            nativeDebt = SqrtPriceMath.getAmount0Delta(lower, upper, liquidity, true);
+        } else if (price < upper) {
+            nativeDebt = SqrtPriceMath.getAmount0Delta(price, upper, liquidity, true);
+            tokenDebt = SqrtPriceMath.getAmount1Delta(lower, price, liquidity, true);
+        } else {
+            tokenDebt = SqrtPriceMath.getAmount1Delta(lower, upper, liquidity, true);
         }
-    }
-
-    function _setPositionManagerApprovals(uint256 usdgMax, uint256 hkmnMax) private {
-        address usdgToken = Currency.unwrap(usdg);
-        address hkmnToken = Currency.unwrap(hkmn);
-        _approveToken(usdgToken, permit2, 0);
-        _approveToken(hkmnToken, permit2, 0);
-        _approveToken(usdgToken, permit2, usdgMax);
-        _approveToken(hkmnToken, permit2, hkmnMax);
-        ILaunchPermit2 permit = ILaunchPermit2(permit2);
-        permit.approve(usdgToken, positionManager, uint160(usdgMax), uint48(block.timestamp));
-        permit.approve(hkmnToken, positionManager, uint160(hkmnMax), uint48(block.timestamp));
+        if (nativeDebt > params.amount0Max || tokenDebt > params.amount1Max) {
+            revert SeedFundingMismatch();
+        }
     }
 
     function _mintCanonicalPosition(
         ILaunchPositionManager manager,
         PoolKey memory key,
-        SeedParams calldata params
+        SeedParams calldata params,
+        uint256 nativeDebt
     ) private {
         bytes[] memory actionParams = new bytes[](2);
         actionParams[0] = abi.encode(
@@ -796,7 +804,7 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
             bytes("")
         );
         actionParams[1] = abi.encode(key.currency0, key.currency1);
-        manager.modifyLiquidities(
+        manager.modifyLiquidities{ value: nativeDebt }(
             abi.encode(
                 abi.encodePacked(
                     bytes1(uint8(Actions.MINT_POSITION)), bytes1(uint8(Actions.SETTLE_PAIR))
@@ -812,12 +820,12 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         PermanentPositionCustody custody,
         PoolKey memory key,
         SeedParams calldata params,
-        uint256 usdgMax,
         uint256 hkmnMax
-    ) private returns (uint256 mintedTokenId) {
+    ) private returns (uint256 mintedTokenId, uint256 nativeDebt) {
         uint256 nextTokenIdBefore = manager.nextTokenId();
-        _setPositionManagerApprovals(usdgMax, hkmnMax);
-        _mintCanonicalPosition(manager, key, params);
+        _setPositionManagerApprovals(hkmnMax);
+        (nativeDebt,) = _seedDebts(key, params);
+        _mintCanonicalPosition(manager, key, params, nativeDebt);
         _clearPositionManagerApprovals();
 
         uint256 nextTokenIdAfter = manager.nextTokenId();
@@ -829,21 +837,10 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
     }
 
     function _clearPositionManagerApprovals() private {
-        address usdgToken = Currency.unwrap(usdg);
         address hkmnToken = Currency.unwrap(hkmn);
         ILaunchPermit2 permit = ILaunchPermit2(permit2);
-        permit.approve(usdgToken, positionManager, 0, 0);
         permit.approve(hkmnToken, positionManager, 0, 0);
-        _approveToken(usdgToken, permit2, 0);
         _approveToken(hkmnToken, permit2, 0);
-    }
-
-    function _refundUsdg(address payer, uint256 balanceBefore) private returns (uint256 refund) {
-        uint256 balanceAfter = _usdgBalanceOf(address(this));
-        if (balanceAfter < balanceBefore) revert SeedFundingMismatch();
-        refund = balanceAfter - balanceBefore;
-        if (refund != 0 && !_transferUsdg(payer, refund)) revert SeedRefundFailed();
-        if (_usdgBalanceOf(address(this)) != balanceBefore) revert SeedRefundFailed();
     }
 
     function _transferHkmnDustToTreasury() private returns (uint256 transferred) {
@@ -900,19 +897,23 @@ contract HookemonHook is FeeAccounting, MoneyRoles, CanonicalMarketCallback, Hoo
         return FeeAccounting._previewTotalFee(executedUsdg);
     }
 
-    function _usdgBalanceOf(address account) internal view override returns (uint256 balance) {
-        (bool success, bytes memory result) =
-            Currency.unwrap(usdg).staticcall(abi.encodeWithSelector(bytes4(0x70a08231), account));
-        if (!success || result.length != 32) revert InvalidUsdgCall();
-        balance = abi.decode(result, (uint256));
+    function _usdgBalanceOf(address account) internal view override returns (uint256) {
+        return account.balance;
+    }
+
+    /// @dev Native payment proves successful exact call value, including forwarding recipients.
+    function _transferExactUsdg(address recipient, uint256 amount) internal override {
+        _requireEnteredMoneyPath();
+        if (recipient == address(0) || recipient == address(this) || amount == 0) {
+            revert InvalidBeneficiary();
+        }
+        if (!_transferUsdg(recipient, amount)) revert TokenTransferFailed();
     }
 
     function _transferUsdg(address recipient, uint256 amount) internal override returns (bool) {
-        (bool success, bytes memory result) = Currency.unwrap(usdg)
-            .call(abi.encodeWithSelector(bytes4(0xa9059cbb), recipient, amount));
-        if (!success || result.length != 32 || !abi.decode(result, (bool))) {
-            return false;
-        }
-        return true;
+        (bool success,) = recipient.call{ value: amount }("");
+        return success;
     }
+
+    receive() external payable { }
 }

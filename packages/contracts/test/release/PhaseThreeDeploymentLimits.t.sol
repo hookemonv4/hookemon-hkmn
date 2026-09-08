@@ -13,7 +13,7 @@ contract PhaseThreeDeploymentLimitsTest is Test {
     uint256 private constant PHASE_THREE_BLOCK_GAS_LIMIT = 30_000_000;
     uint160 private constant ALL_HOOK_PERMISSION_MASK = (1 << 14) - 1;
     uint160 private constant REQUIRED_HOOK_PERMISSION_MASK = 0x20CC;
-    address private constant USDG = address(0x1002);
+    address private constant NATIVE_QUOTE = address(0);
     address private constant HKMN = address(0x1003);
     address private constant PROGRAMMABLE = 0x4957f49620AFf3Adbbe8195a4f633E49cc93376c;
 
@@ -39,7 +39,7 @@ contract PhaseThreeDeploymentLimitsTest is Test {
     function _deployToken() private returns (uint256 gasUsed) {
         uint256 gasBefore = gasleft();
         HKMNToken token =
-            new HKMNToken(address(this), USDG, 18, 194068571418249185253397768292205730969);
+            new HKMNToken(address(this), NATIVE_QUOTE, 18, 194068571418249185253397768292205730969);
         gasUsed = gasBefore - gasleft();
         assertGt(address(token).code.length, 0);
     }
@@ -74,7 +74,7 @@ contract PhaseThreeDeploymentLimitsTest is Test {
             manager: IPoolManager(address(0x1001)),
             positionManager: address(0x1004),
             permit2: address(0x1005),
-            usdg: Currency.wrap(USDG),
+            quoteCurrency: Currency.wrap(NATIVE_QUOTE),
             hkmn: Currency.wrap(HKMN),
             tickSpacing: 60,
             programmable: PROGRAMMABLE,
@@ -85,8 +85,8 @@ contract PhaseThreeDeploymentLimitsTest is Test {
             expectedDecimals: 18,
             bindingDigest: bytes32(uint256(1)),
             runtimeDigest: bytes32(uint256(2)),
-            processClaimLimit6h: 50_000_000_000,
-            processClaimLimitMax: 500_000_000_000,
+            processClaimLimit6hWei: 50_000_000_000,
+            processClaimLimitMaxWei: 500_000_000_000,
             processClaimMaxCount: 24,
             operationsRotationDelay: 43_200
         });

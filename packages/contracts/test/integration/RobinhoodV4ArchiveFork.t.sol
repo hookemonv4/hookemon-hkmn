@@ -211,7 +211,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
     address private constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     bytes32 private constant PERMIT2_RUNTIME_CODEHASH =
         0x5208783f52488f7d3493e5e38311ab707c1d75457fe472a19b0b4d57d66a7fca;
-    address private constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
+    /// @dev Synthetic native test amounts below are not approved launch funding.
+    address private constant USDG = address(0);
+    address private constant HISTORICAL_USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     bytes32 private constant USDG_PROXY_RUNTIME_CODEHASH =
         0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6;
     address private constant USDG_IMPLEMENTATION = 0x68184C449E1a8f34fA18d289737129FD27B66f8F;
@@ -425,6 +427,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
     }
 
     struct SeedSnapshot {
+        uint256 launchAuthorityEth;
         uint256 payerUsdg;
         uint256 hookUsdg;
         uint256 poolManagerUsdg;
@@ -433,8 +436,6 @@ contract RobinhoodV4ArchiveForkTest is Test {
         uint256 hookHkmn;
         uint256 poolManagerHkmn;
         uint256 positionManagerHkmn;
-        uint256 payerUsdgPermit2Allowance;
-        uint256 hookUsdgPermit2Allowance;
         uint256 hookHkmnPermit2Allowance;
         Permit2AllowanceSnapshot payerUsdgToHook;
         Permit2AllowanceSnapshot hookUsdgToPositionManager;
@@ -619,7 +620,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
     function testUniversalRouterExactInputCollectsTheGrossUsdgFee() external {
         _fundRouterTrader(hkmn, TRADER);
-        uint256 hookBalanceBefore = IArchiveErc20(USDG).balanceOf(address(hook));
+        uint256 hookBalanceBefore = address(hook).balance;
         uint256 liabilityBefore = hook.totalLiability();
 
         RouterUsdgObservation memory route =
@@ -631,7 +632,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(hook.lastExecutedUsdg(), USDG_ROUTER_TRADE_AMOUNT, "gross USDG mismatch");
         assertEq(route.gross, USDG_ROUTER_TRADE_AMOUNT, "router-derived gross USDG mismatch");
         assertEq(route.fee, expectedFee, "router-derived USDG fee mismatch");
-        assertEq(IArchiveErc20(USDG).balanceOf(address(hook)) - hookBalanceBefore, expectedFee);
+        assertEq(address(hook).balance - hookBalanceBefore, expectedFee);
         assertEq(hook.totalLiability() - liabilityBefore, expectedFee);
         assertEq(programmable, uint256(USDG_ROUTER_TRADE_AMOUNT) * 10 / 10_000);
         assertEq(treasury, uint256(USDG_ROUTER_TRADE_AMOUNT) * 40 / 10_000);
@@ -639,7 +640,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
         _assertSolvent();
     }
 
-    function testV4QuoterAndUniversalRouterCoverEightFeeQuadrantsAcrossBothTokenOrders() external {
+    function testV4QuoterAndUniversalRouterCoverFourNativeQuadrantsAcrossIndependentMarkets()
+        external
+    {
         Market memory inverseOrder = _deploySeededMarket(false, SECOND_PAYER);
         Market memory primaryOrder = Market({
             token: hkmn,
@@ -651,7 +654,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             custodyPredicted: custodyPredicted
         });
         assertTrue(_usdgIsCurrency0(), "first market token order drifted");
-        assertFalse(
+        assertTrue(
             Currency.unwrap(_canonicalKeyFor(inverseOrder.token, inverseOrder.hook).currency0)
                 == USDG,
             "second market token order drifted"
@@ -772,33 +775,32 @@ contract RobinhoodV4ArchiveForkTest is Test {
         _assertSolvent(candidate.hook);
     }
 
-    function testSeedPermit2FundingAndCustodyFailuresRevertAtomically() external {
+    function testSeedNativeFundingAndCustodyFailuresRevertAtomically() external {
         Market memory missingPermit = _deployUnseededMarket(true);
         _prepareSeedInventory(SECOND_PAYER, true);
         _assertSolvent(missingPermit.hook);
         uint256 missingPermitHkmnBefore = missingPermit.token.balanceOf(address(missingPermit.hook));
-        uint256 missingPermitUsdgBefore = IArchiveErc20(USDG).balanceOf(SECOND_PAYER);
+        uint256 missingPermitUsdgBefore = SECOND_PAYER.balance;
         uint256 nextTokenBefore = positionManager.nextTokenId();
         HookemonHook.SeedParams memory missingPermitParams = _seedParams(
             missingPermit.token, missingPermit.hook, SECOND_PAYER, address(missingPermit.custody)
         );
-        vm.expectRevert(HookemonHook.PayerPermit2AllowanceInvalid.selector);
+        vm.expectRevert(HookemonHook.SeedFundingMismatch.selector);
         vm.prank(AUTHORITY);
         missingPermit.hook.seedCanonicalLiquidity(missingPermitParams);
         assertFalse(missingPermit.hook.canonicalLiquiditySeeded());
         assertEq(
             missingPermit.token.balanceOf(address(missingPermit.hook)), missingPermitHkmnBefore
         );
-        assertEq(IArchiveErc20(USDG).balanceOf(SECOND_PAYER), missingPermitUsdgBefore);
+        assertEq(SECOND_PAYER.balance, missingPermitUsdgBefore);
         assertEq(positionManager.nextTokenId(), nextTokenBefore);
         _assertSolvent(missingPermit.hook);
 
         Market memory fundingFailure = _deployUnseededMarket(true);
         _prepareSeedInventory(UNFUNDED_PAYER, false);
         _assertSolvent(fundingFailure.hook);
-        _approveSeedPayer(UNFUNDED_PAYER, fundingFailure.hook);
         uint256 fundingHkmnBefore = fundingFailure.token.balanceOf(address(fundingFailure.hook));
-        uint256 fundingUsdgBefore = IArchiveErc20(USDG).balanceOf(UNFUNDED_PAYER);
+        uint256 fundingUsdgBefore = UNFUNDED_PAYER.balance;
         nextTokenBefore = positionManager.nextTokenId();
         HookemonHook.SeedParams memory fundingFailureParams = _seedParams(
             fundingFailure.token,
@@ -808,30 +810,33 @@ contract RobinhoodV4ArchiveForkTest is Test {
         );
         vm.expectRevert();
         vm.prank(AUTHORITY);
-        fundingFailure.hook.seedCanonicalLiquidity(fundingFailureParams);
+        fundingFailure.hook.seedCanonicalLiquidity{ value: fundingFailureParams.amount0Max }(
+            fundingFailureParams
+        );
         assertFalse(fundingFailure.hook.canonicalLiquiditySeeded());
         assertEq(fundingFailure.token.balanceOf(address(fundingFailure.hook)), fundingHkmnBefore);
-        assertEq(IArchiveErc20(USDG).balanceOf(UNFUNDED_PAYER), fundingUsdgBefore);
+        assertEq(UNFUNDED_PAYER.balance, fundingUsdgBefore);
         assertEq(positionManager.nextTokenId(), nextTokenBefore);
         _assertSolvent(fundingFailure.hook);
 
         Market memory custodyMismatch = _deployUnseededMarket(true);
         _prepareSeedInventory(THIRD_PAYER, true);
         _assertSolvent(custodyMismatch.hook);
-        _approveSeedPayer(THIRD_PAYER, custodyMismatch.hook);
         PermanentPositionCustody foreignCustody = new PermanentPositionCustody(POSITION_MANAGER, 0);
         uint256 mismatchHkmnBefore = custodyMismatch.token.balanceOf(address(custodyMismatch.hook));
-        uint256 mismatchUsdgBefore = IArchiveErc20(USDG).balanceOf(THIRD_PAYER);
+        uint256 mismatchUsdgBefore = THIRD_PAYER.balance;
         nextTokenBefore = positionManager.nextTokenId();
         HookemonHook.SeedParams memory custodyMismatchParams = _seedParams(
             custodyMismatch.token, custodyMismatch.hook, THIRD_PAYER, address(foreignCustody)
         );
         vm.expectRevert(HookemonHook.InvalidSeedCustody.selector);
         vm.prank(AUTHORITY);
-        custodyMismatch.hook.seedCanonicalLiquidity(custodyMismatchParams);
+        custodyMismatch.hook.seedCanonicalLiquidity{ value: custodyMismatchParams.amount0Max }(
+            custodyMismatchParams
+        );
         assertFalse(custodyMismatch.hook.canonicalLiquiditySeeded());
         assertEq(custodyMismatch.token.balanceOf(address(custodyMismatch.hook)), mismatchHkmnBefore);
-        assertEq(IArchiveErc20(USDG).balanceOf(THIRD_PAYER), mismatchUsdgBefore);
+        assertEq(THIRD_PAYER.balance, mismatchUsdgBefore);
         assertEq(positionManager.nextTokenId(), nextTokenBefore);
         _assertSolvent(custodyMismatch.hook);
     }
@@ -839,7 +844,6 @@ contract RobinhoodV4ArchiveForkTest is Test {
     function testSeedCustodyBindingFailureAfterMintRollsBackAllState() external {
         Market memory candidate = _deployUnseededMarket(true);
         _prepareSeedInventory(THIRD_PAYER, true);
-        _approveSeedPayer(THIRD_PAYER, candidate.hook);
 
         _assertLateSeedCustodyRollback(candidate, THIRD_PAYER);
     }
@@ -880,32 +884,24 @@ contract RobinhoodV4ArchiveForkTest is Test {
         market = _deployGraphMarket(
             usdgIsCurrency0, keccak256(abi.encodePacked("archive-fork-seeded", payer))
         );
-        _fundUsdg(payer, USDG_SEED_AMOUNT);
+        _fundUsdg(AUTHORITY, USDG_SEED_AMOUNT);
         deal(payer, 100 ether);
-        vm.startPrank(payer);
-        assertTrue(IArchiveErc20(USDG).approve(PERMIT2, USDG_SEED_AMOUNT), "USDG approval failed");
-        permit2.approve(USDG, address(market.hook), USDG_SEED_AMOUNT, type(uint48).max);
-        vm.stopPrank();
 
         uint256 hkmnFunded = market.token.balanceOf(address(market.hook));
-        uint256 payerUsdgBefore = IArchiveErc20(USDG).balanceOf(payer);
+        uint256 payerUsdgBefore = payer.balance;
         uint256 treasuryHkmnBefore = market.token.balanceOf(TREASURY);
         uint256 poolManagerHkmnBefore = market.token.balanceOf(POOL_MANAGER);
         HookemonHook.SeedParams memory params =
             _seedParams(market.token, market.hook, payer, address(market.custody));
         vm.prank(AUTHORITY);
-        market.hook.seedCanonicalLiquidity(params);
+        market.hook.seedCanonicalLiquidity{ value: params.amount0Max }(params);
 
         uint256 hkmnContributed = market.token.balanceOf(POOL_MANAGER) - poolManagerHkmnBefore;
         uint256 hkmnDustTransferred = market.token.balanceOf(TREASURY) - treasuryHkmnBefore;
         assertEq(hkmnFunded, HKMN_POOL_ALLOCATION, "graph allocation drifted");
         assertEq(hkmnContributed, hkmnFunded, "seed did not consume the complete allocation");
         assertEq(hkmnDustTransferred, 0, "graph seed transferred HKMN to treasury");
-        assertEq(
-            IArchiveErc20(USDG).balanceOf(payer),
-            payerUsdgBefore - USDG_SEED_AMOUNT,
-            "full-range seed refunded USDG"
-        );
+        assertEq(payer.balance, payerUsdgBefore, "full-range seed refunded USDG");
         assertEq(market.token.balanceOf(address(market.hook)), 0, "seed left HKMN in hook");
         assertEq(
             hkmnFunded, hkmnContributed + hkmnDustTransferred, "seed HKMN conservation drifted"
@@ -921,18 +917,11 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
     function _prepareSeedInventory(address payer, bool fundPayer) private {
         if (fundPayer) {
-            _fundUsdg(payer, USDG_SEED_AMOUNT);
+            _fundUsdg(AUTHORITY, USDG_SEED_AMOUNT);
         } else {
-            deal(USDG, payer, 0, true);
+            vm.deal(AUTHORITY, 0);
         }
         deal(payer, 100 ether);
-    }
-
-    function _approveSeedPayer(address payer, HookemonHook target) private {
-        vm.startPrank(payer);
-        assertTrue(IArchiveErc20(USDG).approve(PERMIT2, USDG_SEED_AMOUNT), "USDG approval failed");
-        permit2.approve(USDG, address(target), USDG_SEED_AMOUNT, type(uint48).max);
-        vm.stopPrank();
     }
 
     function _launchAndSeed() private {
@@ -941,18 +930,13 @@ contract RobinhoodV4ArchiveForkTest is Test {
         );
         assertEq(address(positionManager.permit2()), PERMIT2, "PositionManager Permit2 mismatch");
 
-        _fundUsdg(PAYER, USDG_SEED_AMOUNT);
+        _fundUsdg(AUTHORITY, USDG_SEED_AMOUNT);
         deal(PAYER, 100 ether);
-
-        vm.startPrank(PAYER);
-        assertTrue(IArchiveErc20(USDG).approve(PERMIT2, USDG_SEED_AMOUNT), "USDG approval failed");
-        permit2.approve(USDG, address(hook), USDG_SEED_AMOUNT, type(uint48).max);
-        vm.stopPrank();
 
         nextTokenIdBeforeSeed = positionManager.nextTokenId();
         HookemonHook.SeedParams memory params = _seedParams(hkmn, hook, PAYER, address(custody));
         vm.prank(AUTHORITY);
-        hook.seedCanonicalLiquidity(params);
+        hook.seedCanonicalLiquidity{ value: params.amount0Max }(params);
     }
 
     function _fundRouterTrader(HKMNToken token, address trader) private {
@@ -962,11 +946,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
         vm.startPrank(trader);
         assertTrue(token.approve(PERMIT2, type(uint256).max), "HKMN Permit2 approval failed");
-        assertTrue(
-            IArchiveErc20(USDG).approve(PERMIT2, type(uint256).max), "USDG Permit2 approval failed"
-        );
         permit2.approve(address(token), UNIVERSAL_ROUTER, type(uint160).max, type(uint48).max);
-        permit2.approve(USDG, UNIVERSAL_ROUTER, type(uint160).max, type(uint48).max);
         vm.stopPrank();
     }
 
@@ -1032,7 +1012,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
         bytes[] memory inputs = new bytes[](1);
         inputs[0] = abi.encode(actions, actionParams);
         vm.prank(trader);
-        IArchiveUniversalRouter(UNIVERSAL_ROUTER).execute(hex"10", inputs, block.timestamp + 1);
+        IArchiveUniversalRouter(UNIVERSAL_ROUTER).execute{ value: zeroForOne ? amountIn : 0 }(
+            hex"10", inputs, block.timestamp + 1
+        );
     }
 
     function _executeExactOutputForWithMaximum(
@@ -1068,7 +1050,10 @@ contract RobinhoodV4ArchiveForkTest is Test {
         inputs[0] = abi.encode(actions, actionParams);
         vm.recordLogs();
         vm.prank(trader);
-        IArchiveUniversalRouter(UNIVERSAL_ROUTER).execute(hex"10", inputs, block.timestamp + 1);
+        IArchiveUniversalRouter(UNIVERSAL_ROUTER)
+        .execute{ value: zeroForOne ? amountInMaximum : 0 }(
+            hex"10", inputs, block.timestamp + 1
+        );
         observation = _observeRouterUsdgSwap(key, trader, before, vm.getRecordedLogs());
         _assertStateViewMatchesManager(key);
     }
@@ -1308,14 +1293,10 @@ contract RobinhoodV4ArchiveForkTest is Test {
         Vm.Log[] memory logs
     ) private view returns (RouterUsdgObservation memory observation) {
         observation.rawPoolDelta = _rawPoolUsdgDelta(key, logs);
-        observation.traderDelta =
-            _balanceDelta(IArchiveErc20(USDG).balanceOf(trader), before.trader);
-        observation.managerDelta =
-            _balanceDelta(IArchiveErc20(USDG).balanceOf(address(manager)), before.manager);
-        observation.routerDelta =
-            _balanceDelta(IArchiveErc20(USDG).balanceOf(UNIVERSAL_ROUTER), before.router);
-        observation.hookDelta =
-            _balanceDelta(IArchiveErc20(USDG).balanceOf(address(key.hooks)), before.hook);
+        observation.traderDelta = _balanceDelta(trader.balance, before.trader);
+        observation.managerDelta = _balanceDelta(address(manager).balance, before.manager);
+        observation.routerDelta = _balanceDelta(UNIVERSAL_ROUTER.balance, before.router);
+        observation.hookDelta = _balanceDelta(address(key.hooks).balance, before.hook);
 
         int256 fee = int256(observation.rawPoolDelta) - observation.traderDelta;
         assertGt(fee, 0, "router route did not collect a USDG fee");
@@ -1356,10 +1337,10 @@ contract RobinhoodV4ArchiveForkTest is Test {
         view
         returns (RouterUsdgBalances memory balances)
     {
-        balances.trader = IArchiveErc20(USDG).balanceOf(trader);
-        balances.manager = IArchiveErc20(USDG).balanceOf(address(manager));
-        balances.router = IArchiveErc20(USDG).balanceOf(UNIVERSAL_ROUTER);
-        balances.hook = IArchiveErc20(USDG).balanceOf(address(key.hooks));
+        balances.trader = trader.balance;
+        balances.manager = address(manager).balance;
+        balances.router = UNIVERSAL_ROUTER.balance;
+        balances.hook = address(key.hooks).balance;
     }
 
     function _routerRollbackSnapshot(
@@ -1488,7 +1469,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
     }
 
     function _feeSnapshot(HookemonHook target) private view returns (FeeSnapshot memory snapshot) {
-        snapshot.usdgBalance = IArchiveErc20(USDG).balanceOf(address(target));
+        snapshot.usdgBalance = address(target).balance;
         snapshot.liability = target.totalLiability();
         (snapshot.programmable, snapshot.treasury, snapshot.process) =
             target.readFeeLiabilities(TREASURY);
@@ -1592,7 +1573,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertGt(claimed.treasury, 0, "nondivisible route did not accrue treasury fees");
 
         address programmable = RobinhoodBindings.PROGRAMMABLE_BENEFICIARY;
-        uint256 programmableBefore = IArchiveErc20(USDG).balanceOf(programmable);
+        uint256 programmableBefore = programmable.balance;
         vm.prank(programmable);
         assertEq(
             target.claimProgrammable(claimed.programmable, programmable),
@@ -1602,12 +1583,12 @@ contract RobinhoodV4ArchiveForkTest is Test {
         FeeSnapshot memory afterProgrammable = _feeSnapshot(target);
         _assertClaimDebit(target, before, afterProgrammable, claimed.programmable, 0, 0);
         assertEq(
-            IArchiveErc20(USDG).balanceOf(programmable) - programmableBefore,
+            programmable.balance - programmableBefore,
             claimed.programmable,
             "nondivisible programmable destination amount drifted"
         );
 
-        uint256 treasuryBefore = IArchiveErc20(USDG).balanceOf(TREASURY);
+        uint256 treasuryBefore = TREASURY.balance;
         vm.prank(TREASURY);
         assertEq(
             target.claimTreasury(claimed.treasury, TREASURY),
@@ -1617,7 +1598,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         FeeSnapshot memory afterTreasury = _feeSnapshot(target);
         _assertClaimDebit(target, afterProgrammable, afterTreasury, 0, claimed.treasury, 0);
         assertEq(
-            IArchiveErc20(USDG).balanceOf(TREASURY) - treasuryBefore,
+            TREASURY.balance - treasuryBefore,
             claimed.treasury,
             "nondivisible treasury destination amount drifted"
         );
@@ -1709,32 +1690,32 @@ contract RobinhoodV4ArchiveForkTest is Test {
 
     function _claimProgrammableAndAssert(uint256 amount, address destination) private {
         FeeSnapshot memory before = _feeSnapshot(hook);
-        uint256 destinationBefore = IArchiveErc20(USDG).balanceOf(destination);
+        uint256 destinationBefore = destination.balance;
         vm.prank(RobinhoodBindings.PROGRAMMABLE_BENEFICIARY);
         assertEq(hook.claimProgrammable(amount, destination), amount);
         FeeSnapshot memory afterClaim = _feeSnapshot(hook);
         _assertClaimDebit(hook, before, afterClaim, amount, 0, 0);
-        assertEq(IArchiveErc20(USDG).balanceOf(destination) - destinationBefore, amount);
+        assertEq(destination.balance - destinationBefore, amount);
     }
 
     function _claimTreasuryAndAssert(uint256 amount, address destination) private {
         FeeSnapshot memory before = _feeSnapshot(hook);
-        uint256 destinationBefore = IArchiveErc20(USDG).balanceOf(destination);
+        uint256 destinationBefore = destination.balance;
         vm.prank(TREASURY);
         assertEq(hook.claimTreasury(amount, destination), amount);
         FeeSnapshot memory afterClaim = _feeSnapshot(hook);
         _assertClaimDebit(hook, before, afterClaim, 0, amount, 0);
-        assertEq(IArchiveErc20(USDG).balanceOf(destination) - destinationBefore, amount);
+        assertEq(destination.balance - destinationBefore, amount);
     }
 
     function _claimProcessAndAssert(bytes32 cycleId, uint256 amount, address operations) private {
         FeeSnapshot memory before = _feeSnapshot(hook);
-        uint256 destinationBefore = IArchiveErc20(USDG).balanceOf(operations);
+        uint256 destinationBefore = operations.balance;
         vm.prank(operations);
         assertEq(hook.claimProcess(cycleId, amount, operations), amount);
         FeeSnapshot memory afterClaim = _feeSnapshot(hook);
         _assertClaimDebit(hook, before, afterClaim, 0, 0, amount);
-        assertEq(IArchiveErc20(USDG).balanceOf(operations) - destinationBefore, amount);
+        assertEq(operations.balance - destinationBefore, amount);
     }
 
     function _assertLateSeedCustodyRollback(Market memory market, address payer) private {
@@ -1763,7 +1744,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             )
         );
         vm.prank(AUTHORITY);
-        market.hook.seedCanonicalLiquidity(params);
+        market.hook.seedCanonicalLiquidity{ value: params.amount0Max }(params);
         vm.clearMockedCalls();
 
         _assertSeedSnapshot(market, payer, before);
@@ -1776,17 +1757,15 @@ contract RobinhoodV4ArchiveForkTest is Test {
         returns (SeedSnapshot memory snapshot)
     {
         PoolKey memory key = _canonicalKeyFor(market.token, market.hook);
-        snapshot.payerUsdg = IArchiveErc20(USDG).balanceOf(payer);
-        snapshot.hookUsdg = IArchiveErc20(USDG).balanceOf(address(market.hook));
-        snapshot.poolManagerUsdg = IArchiveErc20(USDG).balanceOf(POOL_MANAGER);
-        snapshot.positionManagerUsdg = IArchiveErc20(USDG).balanceOf(POSITION_MANAGER);
+        snapshot.launchAuthorityEth = AUTHORITY.balance;
+        snapshot.payerUsdg = payer.balance;
+        snapshot.hookUsdg = address(market.hook).balance;
+        snapshot.poolManagerUsdg = POOL_MANAGER.balance;
+        snapshot.positionManagerUsdg = POSITION_MANAGER.balance;
         snapshot.payerHkmn = market.token.balanceOf(payer);
         snapshot.hookHkmn = market.token.balanceOf(address(market.hook));
         snapshot.poolManagerHkmn = market.token.balanceOf(POOL_MANAGER);
         snapshot.positionManagerHkmn = market.token.balanceOf(POSITION_MANAGER);
-        snapshot.payerUsdgPermit2Allowance = IArchiveErc20(USDG).allowance(payer, PERMIT2);
-        snapshot.hookUsdgPermit2Allowance =
-            IArchiveErc20(USDG).allowance(address(market.hook), PERMIT2);
         snapshot.hookHkmnPermit2Allowance = market.token.allowance(address(market.hook), PERMIT2);
         (
             snapshot.payerUsdgToHook.amount,
@@ -1821,6 +1800,11 @@ contract RobinhoodV4ArchiveForkTest is Test {
         view
     {
         SeedSnapshot memory afterFailure = _seedSnapshot(market, payer);
+        assertEq(
+            afterFailure.launchAuthorityEth,
+            before.launchAuthorityEth,
+            "late rollback changed native launch funding"
+        );
         assertEq(afterFailure.payerUsdg, before.payerUsdg, "late rollback changed payer USDG");
         assertEq(afterFailure.hookUsdg, before.hookUsdg, "late rollback changed hook USDG");
         assertEq(
@@ -1844,16 +1828,6 @@ contract RobinhoodV4ArchiveForkTest is Test {
             afterFailure.positionManagerHkmn,
             before.positionManagerHkmn,
             "late rollback changed PositionManager HKMN"
-        );
-        assertEq(
-            afterFailure.payerUsdgPermit2Allowance,
-            before.payerUsdgPermit2Allowance,
-            "late rollback changed payer USDG Permit2 allowance"
-        );
-        assertEq(
-            afterFailure.hookUsdgPermit2Allowance,
-            before.hookUsdgPermit2Allowance,
-            "late rollback changed hook USDG Permit2 allowance"
         );
         assertEq(
             afterFailure.hookHkmnPermit2Allowance,
@@ -1955,8 +1929,8 @@ contract RobinhoodV4ArchiveForkTest is Test {
     }
 
     function _fundUsdg(address recipient, uint256 amount) private {
-        deal(USDG, recipient, amount, true);
-        assertEq(IArchiveErc20(USDG).balanceOf(recipient), amount, "USDG funding mismatch");
+        vm.deal(recipient, amount);
+        assertEq(recipient.balance, amount, "USDG funding mismatch");
     }
 
     function _canonicalKey() private view returns (PoolKey memory) {
@@ -2092,7 +2066,8 @@ contract RobinhoodV4ArchiveForkTest is Test {
     }
 
     function _releaseSqrtPriceX96(bool usdgIsCurrency0) private pure returns (uint160) {
-        return usdgIsCurrency0 ? USDG_CURRENCY0_SQRT_PRICE_X96 : HKMN_CURRENCY0_SQRT_PRICE_X96;
+        usdgIsCurrency0;
+        return USDG_CURRENCY0_SQRT_PRICE_X96;
     }
 
     function _graphRequest(
@@ -2117,7 +2092,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             request.tokenApplicantSalt =
                 keccak256(abi.encodePacked("archive-fork-token", graphNonce, nonce));
             (address predictedToken,,) = executor.predict(request);
-            if ((USDG < predictedToken) == usdgIsCurrency0) break;
+            if (USDG < predictedToken) break;
             if (nonce == 9_999) revert("ordered graph token salt not found");
         }
 
@@ -2349,7 +2324,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             manager: IPoolManager(POOL_MANAGER),
             positionManager: POSITION_MANAGER,
             permit2: PERMIT2,
-            usdg: Currency.wrap(USDG),
+            quoteCurrency: Currency.wrap(USDG),
             hkmn: Currency.wrap(token),
             tickSpacing: 60,
             programmable: RobinhoodBindings.PROGRAMMABLE_BENEFICIARY,
@@ -2360,8 +2335,8 @@ contract RobinhoodV4ArchiveForkTest is Test {
             expectedDecimals: 18,
             bindingDigest: keccak256("phase-three-provider-gas-binding-v1"),
             runtimeDigest: keccak256("phase-three-provider-gas-runtime-v1"),
-            processClaimLimit6h: 50_000_000_000,
-            processClaimLimitMax: 500_000_000_000,
+            processClaimLimit6hWei: 50_000_000_000,
+            processClaimLimitMaxWei: 500_000_000_000,
             processClaimMaxCount: 24,
             operationsRotationDelay: 43_200
         });
@@ -2495,7 +2470,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
             launchId: PROVIDER_GAS_LAUNCH_ID,
             token: plan.token,
             tokenRuntimeCodeHash: runtimeCodeHashes[0],
-            poolKey: _canonicalKeyFor(HKMNToken(plan.token), HookemonHook(plan.hook)),
+            poolKey: _canonicalKeyFor(HKMNToken(plan.token), HookemonHook(payable(plan.hook))),
             hookRuntimeCodeHash: runtimeCodeHashes[2],
             components: components
         });
@@ -2648,7 +2623,9 @@ contract RobinhoodV4ArchiveForkTest is Test {
             "PositionManager runtime drifted"
         );
         assertEq(PERMIT2.codehash, PERMIT2_RUNTIME_CODEHASH, "Permit2 runtime drifted");
-        assertEq(USDG.codehash, USDG_PROXY_RUNTIME_CODEHASH, "USDG proxy runtime drifted");
+        assertEq(
+            HISTORICAL_USDG.codehash, USDG_PROXY_RUNTIME_CODEHASH, "USDG proxy runtime drifted"
+        );
         assertEq(
             UNIVERSAL_ROUTER.codehash,
             UNIVERSAL_ROUTER_RUNTIME_CODEHASH,
@@ -2658,7 +2635,7 @@ contract RobinhoodV4ArchiveForkTest is Test {
         assertEq(V4_QUOTER.codehash, V4_QUOTER_RUNTIME_CODEHASH, "V4Quoter runtime drifted");
 
         address implementation =
-            address(uint160(uint256(vm.load(USDG, EIP1967_IMPLEMENTATION_SLOT))));
+            address(uint160(uint256(vm.load(HISTORICAL_USDG, EIP1967_IMPLEMENTATION_SLOT))));
         assertEq(implementation, USDG_IMPLEMENTATION, "USDG implementation address drifted");
         assertEq(
             implementation.codehash,

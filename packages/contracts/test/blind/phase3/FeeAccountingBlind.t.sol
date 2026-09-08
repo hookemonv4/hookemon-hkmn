@@ -24,19 +24,19 @@ import { MoneyRoles } from "../../../src/access/MoneyRoles.sol";
 import { RobinhoodBindings } from "../../../src/bindings/RobinhoodBindings.sol";
 import { HookemonHook } from "../../../src/HookemonHook.sol";
 
-contract BlindFeeToken {
+contract BlindFeeToken is Test {
     mapping(address account => uint256 balance) private balances;
 
     function mint(address account, uint256 amount) external {
-        balances[account] += amount;
+        vm.deal(account, account.balance + amount);
     }
 
     function burn(address account, uint256 amount) external {
-        balances[account] -= amount;
+        vm.deal(account, account.balance - amount);
     }
 
     function balanceOf(address account) external view returns (uint256) {
-        return balances[account];
+        return account.balance;
     }
 
     function transfer(address recipient, uint256 amount) external returns (bool) {
@@ -269,25 +269,25 @@ contract FeeAccountingBlindTest is Test {
         FeeAccountingBlindHarness hook = _deploy();
 
         _accrueIfAboveMinimum(hook, bound(uint256(rawA1), 0, 1_000_000_000));
-        assertGe(hook.hookUsdgBalance(), hook.totalLiability());
+        assertGe(hook.hookEthBalance(), hook.totalLiability());
         _accrueIfAboveMinimum(hook, bound(uint256(rawA2), 0, 1_000_000_000));
-        assertGe(hook.hookUsdgBalance(), hook.totalLiability());
+        assertGe(hook.hookEthBalance(), hook.totalLiability());
         _accrueIfAboveMinimum(hook, bound(uint256(rawA3), 0, 1_000_000_000));
-        assertGe(hook.hookUsdgBalance(), hook.totalLiability());
+        assertGe(hook.hookEthBalance(), hook.totalLiability());
 
         (uint256 progLiability,,) = hook.readFeeLiabilities(TREASURY);
         if (progLiability > 0) {
             vm.prank(PROGRAMMABLE);
             hook.claimProgrammable(bound(uint256(rawClaimProg), 1, progLiability), PROGRAMMABLE);
         }
-        assertGe(hook.hookUsdgBalance(), hook.totalLiability());
+        assertGe(hook.hookEthBalance(), hook.totalLiability());
 
         (, uint256 treasuryLiability,) = hook.readFeeLiabilities(TREASURY);
         if (treasuryLiability > 0) {
             vm.prank(TREASURY);
             hook.claimTreasury(bound(uint256(rawClaimTreasury), 1, treasuryLiability), TREASURY);
         }
-        assertGe(hook.hookUsdgBalance(), hook.totalLiability());
+        assertGe(hook.hookEthBalance(), hook.totalLiability());
 
         uint256 processLiability = hook.processLiability();
         if (processLiability > 0) {
@@ -298,7 +298,7 @@ contract FeeAccountingBlindTest is Test {
             );
         }
 
-        assertGe(hook.hookUsdgBalance(), hook.totalLiability(), "insolvent after claim sequence");
+        assertGe(hook.hookEthBalance(), hook.totalLiability(), "insolvent after claim sequence");
         (uint256 pFinal, uint256 tFinal,) = hook.readFeeLiabilities(TREASURY);
         assertEq(
             hook.totalLiability(),
@@ -319,7 +319,7 @@ contract FeeAccountingBlindTest is Test {
                 manager: IPoolManager(address(0x8000)),
                 positionManager: address(0x8001),
                 permit2: address(0x8002),
-                usdg: Currency.wrap(address(token)),
+                quoteCurrency: Currency.wrap(address(0)),
                 hkmn: Currency.wrap(address(0x8003)),
                 tickSpacing: 60,
                 programmable: PROGRAMMABLE,
@@ -330,8 +330,8 @@ contract FeeAccountingBlindTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: keccak256("blind-fee-binding"),
                 runtimeDigest: keccak256("blind-fee-runtime"),
-                processClaimLimit6h: 1_000_000_000_000,
-                processClaimLimitMax: 1_000_000_000_000,
+                processClaimLimit6hWei: 1_000_000_000_000,
+                processClaimLimitMaxWei: 1_000_000_000_000,
                 processClaimMaxCount: 8,
                 operationsRotationDelay: 1 days
             }),

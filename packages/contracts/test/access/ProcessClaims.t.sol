@@ -11,7 +11,7 @@ import { MoneyRoles } from "../../src/access/MoneyRoles.sol";
 import { RobinhoodBindings } from "../../src/bindings/RobinhoodBindings.sol";
 import { HookemonHook } from "../../src/HookemonHook.sol";
 
-contract ProcessClaimsToken {
+contract ProcessClaimsToken is Test {
     mapping(address account => uint256 balance) private balances;
     bool private transferFailure;
     bool private reentryEnabled;
@@ -21,15 +21,15 @@ contract ProcessClaimsToken {
     error ReentryRejected();
 
     function mint(address account, uint256 amount) external {
-        balances[account] += amount;
+        vm.deal(account, account.balance + amount);
     }
 
     function burn(address account, uint256 amount) external {
-        balances[account] -= amount;
+        vm.deal(account, account.balance - amount);
     }
 
     function balanceOf(address account) external view returns (uint256) {
-        return balances[account];
+        return account.balance;
     }
 
     function setTransferFailure(bool value) external {
@@ -40,6 +40,13 @@ contract ProcessClaimsToken {
         reentryTarget = target;
         reentryCall = callData;
         reentryEnabled = true;
+    }
+
+    function runReentry() external {
+        if (reentryEnabled) {
+            (bool ok,) = reentryTarget.call(reentryCall);
+            require(ok, "native reentry rejected");
+        }
     }
 
     function clearReentry() external {
@@ -101,6 +108,16 @@ contract ProcessClaimsFactory {
 }
 
 contract OperationsClaimActor {
+    ProcessClaimsToken private control;
+
+    function configure(ProcessClaimsToken value) external {
+        control = value;
+    }
+
+    receive() external payable {
+        control.runReentry();
+    }
+
     function claim(
         HookemonHook hook,
         bytes32 cycleId,
@@ -438,6 +455,7 @@ contract ProcessClaimsTest is Test {
 
     function testReentrantProcessClaimRollsBackLiabilityHistoryAndBalances() external {
         OperationsClaimActor operations = new OperationsClaimActor();
+        operations.configure(token);
         ProcessClaimsHookHarness hook = _deploy(address(operations), 100, 200, 2);
         _accrue(hook);
         token.setReentry(
@@ -449,7 +467,7 @@ contract ProcessClaimsTest is Test {
 
         assertEq(hook.processLiability(), 250);
         assertEq(hook.totalLiability(), 300);
-        assertEq(hook.hookUsdgBalance(), 300);
+        assertEq(hook.hookEthBalance(), 300);
         assertEq(hook.remainingProcessClaimCapacity(), 100);
         assertEq(token.balanceOf(address(operations)), 0);
         assertFalse(hook.processClaimCycleUsed(CYCLE_ONE));
@@ -459,14 +477,14 @@ contract ProcessClaimsTest is Test {
     function testProcessTransferFailureRollsBackLiabilityHistoryAndBalances() external {
         ProcessClaimsHookHarness hook = _deploy(OPERATIONS_ONE, 100, 200, 2);
         _accrue(hook);
-        token.setTransferFailure(true);
+        vm.etch(OPERATIONS_ONE, hex"60006000fd");
 
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         _claimAs(OPERATIONS_ONE, hook, CYCLE_ONE, 1);
 
         assertEq(hook.processLiability(), 250);
         assertEq(hook.totalLiability(), 300);
-        assertEq(hook.hookUsdgBalance(), 300);
+        assertEq(hook.hookEthBalance(), 300);
         assertEq(hook.remainingProcessClaimCapacity(), 100);
         assertEq(token.balanceOf(OPERATIONS_ONE), 0);
         assertFalse(hook.processClaimCycleUsed(CYCLE_ONE));
@@ -496,7 +514,7 @@ contract ProcessClaimsTest is Test {
 
         assertEq(hook.processLiability(), 250);
         assertEq(hook.totalLiability(), 300);
-        assertEq(hook.hookUsdgBalance(), 299);
+        assertEq(hook.hookEthBalance(), 299);
         assertEq(hook.remainingProcessClaimCapacity(), 100);
         assertEq(token.balanceOf(OPERATIONS_ONE), 0);
         assertFalse(hook.processClaimCycleUsed(CYCLE_ONE));
@@ -573,7 +591,7 @@ contract ProcessClaimsTest is Test {
                 manager: IPoolManager(address(0x1000)),
                 positionManager: address(0x1001),
                 permit2: address(0x1002),
-                usdg: Currency.wrap(address(token)),
+                quoteCurrency: Currency.wrap(address(0)),
                 hkmn: Currency.wrap(address(0x2000)),
                 tickSpacing: 60,
                 programmable: PROGRAMMABLE,
@@ -584,8 +602,8 @@ contract ProcessClaimsTest is Test {
                 expectedDecimals: 18,
                 bindingDigest: keccak256("process-claims-binding"),
                 runtimeDigest: keccak256("process-claims-runtime"),
-                processClaimLimit6h: limit,
-                processClaimLimitMax: maximum,
+                processClaimLimit6hWei: limit,
+                processClaimLimitMaxWei: maximum,
                 processClaimMaxCount: maxCount,
                 operationsRotationDelay: rotationDelay
             }),
@@ -608,7 +626,7 @@ contract ProcessClaimsTest is Test {
         hook.accrueForTest(10_000);
         assertEq(hook.processLiability(), 250);
         assertEq(hook.totalLiability(), 300);
-        assertEq(hook.hookUsdgBalance(), 300);
+        assertEq(hook.hookEthBalance(), 300);
     }
 
     function _claimAs(address caller, HookemonHook hook, bytes32 cycleId, uint256 amountAtomicUsdg)

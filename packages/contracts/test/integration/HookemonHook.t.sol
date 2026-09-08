@@ -133,7 +133,7 @@ contract HookFactory {
         manager = config.manager;
         positionManager = config.positionManager;
         permit2 = config.permit2;
-        usdg = config.usdg;
+        usdg = config.quoteCurrency;
         hkmn = config.hkmn;
         tickSpacing = config.tickSpacing;
         programmable = config.programmable;
@@ -144,8 +144,8 @@ contract HookFactory {
         expectedDecimals = config.expectedDecimals;
         bindingDigest = config.bindingDigest;
         runtimeDigest = config.runtimeDigest;
-        processClaimLimit6h = config.processClaimLimit6h;
-        processClaimLimitMax = config.processClaimLimitMax;
+        processClaimLimit6h = config.processClaimLimit6hWei;
+        processClaimLimitMax = config.processClaimLimitMaxWei;
         processClaimMaxCount = config.processClaimMaxCount;
         operationsRotationDelay = config.operationsRotationDelay;
     }
@@ -159,7 +159,7 @@ contract HookFactory {
                         manager: manager,
                         positionManager: positionManager,
                         permit2: permit2,
-                        usdg: usdg,
+                        quoteCurrency: usdg,
                         hkmn: hkmn,
                         tickSpacing: tickSpacing,
                         programmable: programmable,
@@ -170,8 +170,8 @@ contract HookFactory {
                         expectedDecimals: expectedDecimals,
                         bindingDigest: bindingDigest,
                         runtimeDigest: runtimeDigest,
-                        processClaimLimit6h: processClaimLimit6h,
-                        processClaimLimitMax: processClaimLimitMax,
+                        processClaimLimit6hWei: processClaimLimit6h,
+                        processClaimLimitMaxWei: processClaimLimitMax,
                         processClaimMaxCount: processClaimMaxCount,
                         operationsRotationDelay: operationsRotationDelay
                     })
@@ -186,7 +186,7 @@ contract HookFactory {
                 manager: manager,
                 positionManager: positionManager,
                 permit2: permit2,
-                usdg: usdg,
+                quoteCurrency: usdg,
                 hkmn: hkmn,
                 tickSpacing: tickSpacing,
                 programmable: programmable,
@@ -197,8 +197,8 @@ contract HookFactory {
                 expectedDecimals: expectedDecimals,
                 bindingDigest: bindingDigest,
                 runtimeDigest: runtimeDigest,
-                processClaimLimit6h: processClaimLimit6h,
-                processClaimLimitMax: processClaimLimitMax,
+                processClaimLimit6hWei: processClaimLimit6h,
+                processClaimLimitMaxWei: processClaimLimitMax,
                 processClaimMaxCount: processClaimMaxCount,
                 operationsRotationDelay: operationsRotationDelay
             })
@@ -246,7 +246,8 @@ contract HookemonHookTest is Test {
         HookToken first = new HookToken();
         HookToken second = new HookToken();
         (token0, token1) = address(first) < address(second) ? (first, second) : (second, first);
-        currency0 = Currency.wrap(address(token0));
+        currency0 = Currency.wrap(address(0));
+        vm.deal(address(this), 1e40);
         currency1 = Currency.wrap(address(token1));
         token0.mint(address(this), 10 ** 30);
         token1.mint(address(this), 10 ** 30);
@@ -294,20 +295,20 @@ contract HookemonHookTest is Test {
         factory.deploy(salt);
     }
 
-    function testConstructorRejectsWrongUsdgOnRobinhood() external {
-        HookFactory factory = _factory(currency0);
+    function testConstructorRejectsNonNativeQuoteOnRobinhood() external {
+        HookFactory factory = _factory(Currency.wrap(address(token0)));
         bytes32 salt = _validHookSalt(factory);
         uint256 originalChainId = block.chainid;
         vm.chainId(4663);
-        vm.expectRevert(HookemonHook.InvalidUsdgIdentity.selector);
+        vm.expectRevert(HookemonHook.InvalidQuoteCurrencyIdentity.selector);
         factory.deploy(salt);
         vm.chainId(originalChainId);
     }
 
-    function testConstructorAcceptsBoundUsdgOnRobinhood() external {
+    function testConstructorAcceptsNativeQuoteOnRobinhood() external {
         uint256 originalChainId = block.chainid;
         vm.chainId(RobinhoodBindings.ROBINHOOD_CHAIN_ID);
-        HookFactory factory = _factory(Currency.wrap(RobinhoodBindings.ROBINHOOD_USDG));
+        HookFactory factory = _factory(Currency.wrap(address(0)));
         HookemonHook hook = factory.deploy(_validHookSalt(factory));
         vm.chainId(originalChainId);
         assertTrue(address(hook) != address(0));
@@ -340,7 +341,14 @@ contract HookemonHookTest is Test {
         _expectConfigRevert(config, HookemonHook.InvalidConstructorConfig.selector);
 
         config = _config(currency0);
-        config.processClaimLimit6h = config.processClaimLimitMax + 1;
+        config.processClaimLimit6hWei = 0;
+        _expectConfigRevert(config, HookemonHook.InvalidProcessClaimConfig.selector);
+        config = _config(currency0);
+        config.processClaimLimitMaxWei = 0;
+        _expectConfigRevert(config, HookemonHook.InvalidProcessClaimConfig.selector);
+
+        config = _config(currency0);
+        config.processClaimLimit6hWei = config.processClaimLimitMaxWei + 1;
         _expectConfigRevert(config, HookemonHook.InvalidProcessClaimConfig.selector);
 
         config = _config(currency0);
@@ -465,12 +473,12 @@ contract HookemonHookTest is Test {
         bytes32 salt = _validHookSalt(factory);
         address predicted = vm.computeCreate2Address(salt, factory.initCodeHash(), address(factory));
         PoolKey memory key = _keyFor(IHooks(predicted));
-        uint256 managerCurrency0Before = token0.balanceOf(address(manager));
+        uint256 managerCurrency0Before = address(manager).balance;
         uint256 managerCurrency1Before = token1.balanceOf(address(manager));
 
         vm.expectRevert(Hooks.InvalidHookResponse.selector);
         manager.initialize(key, uint160(1 << 96));
-        assertEq(token0.balanceOf(address(manager)), managerCurrency0Before);
+        assertEq(address(manager).balance, managerCurrency0Before);
         assertEq(token1.balanceOf(address(manager)), managerCurrency1Before);
 
         HookemonHook hook = factory.deploy(salt);
@@ -485,7 +493,7 @@ contract HookemonHookTest is Test {
         );
         manager.initialize(key, uint160(1 << 96));
         assertFalse(hook.canonicalPoolInitialized());
-        assertEq(token0.balanceOf(address(manager)), managerCurrency0Before);
+        assertEq(address(manager).balance, managerCurrency0Before);
         assertEq(token1.balanceOf(address(manager)), managerCurrency1Before);
 
         _initializeHook(hook);
@@ -504,11 +512,9 @@ contract HookemonHookTest is Test {
         hook.initializeCanonicalPool(uint160(1 << 96));
     }
 
-    function testEightSwapQuadrantsConserveThreePercentAcrossBothTokenOrders() external {
+    function testFourSwapQuadrantsConserveThreePercentOnNativePool() external {
         HookemonHook first = _deployHook(currency0);
-        HookemonHook second = _deployHook(currency1);
         _exerciseFourQuadrants(first, currency0);
-        _exerciseFourQuadrants(second, currency1);
     }
 
     /// @dev Every live callback quadrant produces observed gross USDG fragments whose cumulative
@@ -516,7 +522,7 @@ contract HookemonHookTest is Test {
     ///      precise 1,000/1,499 two-versus-one boundary proof lives in FeeAccounting.t.sol:
     ///      a real exact-input swap whose USDG is output can round one atomic unit below its
     ///      specified input, so those boundary values are not stable live-pool fixtures.
-    function testAllEightLiveQuadrantsKeepSplitObservedGrossEquivalentToUnsplitTransition()
+    function testAllFourLiveQuadrantsKeepSplitObservedGrossEquivalentToUnsplitTransition()
         external
     {
         _exerciseAllLiveQuadrantSplitProperties(2_000, 2_000);
@@ -524,7 +530,7 @@ contract HookemonHookTest is Test {
     }
 
     /// forge-config: default.fuzz.runs = 4
-    function testFuzz_allEightLiveQuadrantsKeepFuzzedSplitObservedGrossEquivalentToUnsplitTransition(
+    function testFuzz_allFourLiveQuadrantsKeepFuzzedSplitObservedGrossEquivalentToUnsplitTransition(
         uint16 rawFirst,
         uint16 rawSecond
     ) external {
@@ -533,63 +539,13 @@ contract HookemonHookTest is Test {
         _exerciseAllLiveQuadrantSplitProperties(firstAmount, secondAmount);
     }
 
-    function testPoolManagerCollectionUsesExactBalanceDeltaForMalformedReturnData() external {
+    function testNativeCollectionIgnoresForcedSurplusForLiabilities() external {
         HookemonHook hook = _deployHook(currency0);
-        PoolKey memory key = _key(hook);
-        _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
-            key, ModifyLiquidityParams(-120, 120, 10 ** 18, bytes32(0)), bytes("")
-        );
-
-        HookToken.TransferReturn[2] memory acceptedReturns =
-            [HookToken.TransferReturn.Empty, HookToken.TransferReturn.Excess];
-        HookToken.TransferBalance[3] memory rejectedBalances = [
-            HookToken.TransferBalance.None,
-            HookToken.TransferBalance.Short,
-            HookToken.TransferBalance.Excess
-        ];
-
-        for (uint256 i; i < acceptedReturns.length; ++i) {
-            token0.setTransferReturn(acceptedReturns[i]);
-            for (uint256 j; j < rejectedBalances.length; ++j) {
-                token0.setTransferBalance(rejectedBalances[j]);
-                vm.expectRevert(
-                    abi.encodeWithSelector(
-                        CustomRevert.WrappedError.selector,
-                        address(hook),
-                        IHooks.afterSwap.selector,
-                        abi.encodeWithSelector(FeeAccounting.InvalidCollectionDelta.selector),
-                        abi.encodeWithSelector(Hooks.HookCallFailed.selector)
-                    )
-                );
-                _performSwap(key, true, -int256(10_000));
-                assertEq(token0.balanceOf(address(hook)), 0);
-                assertEq(hook.totalLiability(), 0);
-                assertEq(hook.lastExecutedUsdg(), 0);
-            }
-        }
-
-        token0.setTransferBalance(HookToken.TransferBalance.Exact);
-        for (uint256 i; i < acceptedReturns.length; ++i) {
-            token0.setTransferReturn(acceptedReturns[i]);
-            LiabilitySnapshot memory beforeLiability = _snapshot(hook, currency0);
-            vm.recordLogs();
-            BalanceDelta delta = _performSwap(key, true, -int256(10_000));
-            ObservedUsdgSwap memory observed = _observeUsdgSwap(
-                key,
-                currency0,
-                delta,
-                beforeLiability.callerUsdgBalance,
-                beforeLiability.managerUsdgBalance,
-                beforeLiability.hookUsdgBalance,
-                vm.getRecordedLogs()
-            );
-            ExpectedSplit memory expected = _expectedSwapSplit(hook, observed.gross);
-            assertEq(expected.total, observed.fee);
-            assertEq(hook.lastExecutedUsdg(), observed.gross);
-            _assertFeeBalance(hook, currency0, beforeLiability.hookUsdgBalance, expected);
-            _assertLiabilityDelta(hook, beforeLiability, expected);
-        }
+        vm.deal(address(hook), 71);
+        _accrueHookFee(hook);
+        assertEq(address(hook).balance, 371);
+        assertEq(hook.totalLiability(), 300);
+        assertEq(hook.lastExecutedUsdg(), 10000);
     }
 
     function _exerciseFourQuadrants(HookemonHook hook, Currency usdg) private {
@@ -604,7 +560,7 @@ contract HookemonHookTest is Test {
     ) private {
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-120, 120, 10 ** 24, bytes32(0)), bytes("")
         );
         for (uint256 direction; direction < 2; ++direction) {
@@ -619,7 +575,7 @@ contract HookemonHookTest is Test {
     function _exerciseAllLiveQuadrantSplitProperties(uint256 firstAmount, uint256 secondAmount)
         private
     {
-        for (uint256 order; order < 2; ++order) {
+        for (uint256 order; order < 1; ++order) {
             Currency usdg = order == 0 ? currency0 : currency1;
             for (uint256 direction; direction < 2; ++direction) {
                 for (uint256 exactness; exactness < 2; ++exactness) {
@@ -641,7 +597,7 @@ contract HookemonHookTest is Test {
         HookemonHook hook = _deployHook(usdg);
         PoolKey memory key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-120, 120, 10 ** 24, bytes32(0)), bytes("")
         );
 
@@ -703,7 +659,7 @@ contract HookemonHookTest is Test {
         private
         returns (BalanceDelta)
     {
-        return swapRouter.swap(
+        return swapRouter.swap{ value: zeroForOne ? 1e24 : 0 }(
             key,
             SwapParams(
                 zeroForOne,
@@ -895,9 +851,7 @@ contract HookemonHookTest is Test {
     }
 
     function _usdgBalance(Currency usdg, address account) private view returns (uint256) {
-        return Currency.unwrap(usdg) == address(token0)
-            ? token0.balanceOf(account)
-            : token1.balanceOf(account);
+        return usdg.balanceOf(account);
     }
 
     function _balanceDelta(uint256 afterBalance, uint256 beforeBalance)
@@ -930,17 +884,12 @@ contract HookemonHookTest is Test {
         assertEq(hook.processLiability(), 250);
         address programmableDestination = address(0xBEEF);
         address treasuryDestination = address(0xCAFE);
-        token0.setBalanceReturnsMalformed(true);
-        vm.expectRevert(HookemonHook.InvalidUsdgCall.selector);
-        vm.prank(PROGRAMMABLE);
-        hook.claimProgrammable(PROGRAMMABLE);
-        token0.setBalanceReturnsMalformed(false);
-        token0.setTransferReturn(HookToken.TransferReturn.False);
+        vm.etch(PROGRAMMABLE, hex"60006000fd");
         vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         vm.prank(PROGRAMMABLE);
         hook.claimProgrammable(PROGRAMMABLE);
         assertEq(hook.processLiability(), 250);
-        token0.setTransferReturn(HookToken.TransferReturn.True);
+        vm.etch(PROGRAMMABLE, hex"");
         vm.expectRevert(MoneyRoles.InvalidDestination.selector);
         vm.prank(PROGRAMMABLE);
         hook.claimProgrammable(address(0));
@@ -954,7 +903,7 @@ contract HookemonHookTest is Test {
         vm.prank(OPERATIONS);
         hook.claimTreasury(treasuryDestination);
 
-        uint256 programmableBalanceBefore = token0.balanceOf(programmableDestination);
+        uint256 programmableBalanceBefore = programmableDestination.balance;
         vm.recordLogs();
         vm.prank(PROGRAMMABLE);
         hook.claimProgrammable(4, programmableDestination);
@@ -965,23 +914,23 @@ contract HookemonHookTest is Test {
             programmableDestination,
             4
         );
-        assertEq(token0.balanceOf(programmableDestination) - programmableBalanceBefore, 4);
+        assertEq(programmableDestination.balance - programmableBalanceBefore, 4);
 
-        uint256 treasuryBalanceBefore = token0.balanceOf(treasuryDestination);
+        uint256 treasuryBalanceBefore = treasuryDestination.balance;
         vm.recordLogs();
         vm.prank(TREASURY);
         hook.claimTreasury(15, treasuryDestination);
         _assertBeneficiaryClaimed(
             vm.getRecordedLogs(), hook, "TreasuryClaimed(address,uint256)", treasuryDestination, 15
         );
-        assertEq(token0.balanceOf(treasuryDestination) - treasuryBalanceBefore, 15);
+        assertEq(treasuryDestination.balance - treasuryBalanceBefore, 15);
         vm.prank(PROGRAMMABLE);
         hook.claimProgrammable(programmableDestination);
         vm.prank(TREASURY);
         hook.claimTreasury(treasuryDestination);
-        assertEq(token0.balanceOf(programmableDestination), 10);
-        assertEq(token0.balanceOf(treasuryDestination), 40);
-        assertEq(token0.balanceOf(OPERATIONS), 0);
+        assertEq(programmableDestination.balance, 10);
+        assertEq(treasuryDestination.balance, 40);
+        assertEq(OPERATIONS.balance, 0);
         assertEq(hook.processLiability(), 250);
 
         vm.recordLogs();
@@ -1031,28 +980,18 @@ contract HookemonHookTest is Test {
         assertEq(process, 250);
     }
 
-    function testClaimsRequireCanonicalTrueTransferReturn() external {
+    function testNativeClaimsRequireSuccessfulValueCall() external {
         HookemonHook hook = _deployHook(currency0);
         _accrueHookFee(hook);
-        HookToken.TransferReturn[4] memory rejected = [
-            HookToken.TransferReturn.Empty,
-            HookToken.TransferReturn.Short,
-            HookToken.TransferReturn.Excess,
-            HookToken.TransferReturn.False
-        ];
-
-        for (uint256 i; i < rejected.length; ++i) {
-            token0.setTransferReturn(rejected[i]);
-            vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
-            vm.prank(PROGRAMMABLE);
-            hook.claimProgrammable(PROGRAMMABLE);
-            assertEq(token0.balanceOf(PROGRAMMABLE), 0);
-        }
-
-        token0.setTransferReturn(HookToken.TransferReturn.True);
+        vm.etch(PROGRAMMABLE, hex"60006000fd");
+        vm.expectRevert(FeeAccounting.TokenTransferFailed.selector);
         vm.prank(PROGRAMMABLE);
         hook.claimProgrammable(PROGRAMMABLE);
-        assertEq(token0.balanceOf(PROGRAMMABLE), 10);
+        assertEq(PROGRAMMABLE.balance, 0);
+        vm.etch(PROGRAMMABLE, hex"");
+        vm.prank(PROGRAMMABLE);
+        hook.claimProgrammable(PROGRAMMABLE);
+        assertEq(PROGRAMMABLE.balance, 10);
     }
 
     function _accrueHookFee(HookemonHook hook) private {
@@ -1063,7 +1002,7 @@ contract HookemonHookTest is Test {
     function _prepareHookLiquidity(HookemonHook hook) private returns (PoolKey memory key) {
         key = _key(hook);
         _initializeHook(hook);
-        liquidityRouter.modifyLiquidity(
+        liquidityRouter.modifyLiquidity{ value: 1e26 }(
             key, ModifyLiquidityParams(-120, 120, 10 ** 18, bytes32(0)), bytes("")
         );
     }
@@ -1168,8 +1107,8 @@ contract HookemonHookTest is Test {
             manager: manager,
             positionManager: address(0x1001),
             permit2: address(0x1002),
-            usdg: usdg,
-            hkmn: usdg == currency0 ? currency1 : currency0,
+            quoteCurrency: usdg,
+            hkmn: currency1,
             tickSpacing: 60,
             programmable: PROGRAMMABLE,
             treasury: TREASURY,
@@ -1179,8 +1118,8 @@ contract HookemonHookTest is Test {
             expectedDecimals: 18,
             bindingDigest: BINDING_DIGEST,
             runtimeDigest: RUNTIME_DIGEST,
-            processClaimLimit6h: 1_000_000,
-            processClaimLimitMax: 2_000_000,
+            processClaimLimit6hWei: 1_000_000,
+            processClaimLimitMaxWei: 2_000_000,
             processClaimMaxCount: 8,
             operationsRotationDelay: 3 days
         });
@@ -1221,4 +1160,5 @@ contract HookemonHookTest is Test {
     function _hookData(address recipient) private pure returns (bytes memory) {
         return abi.encode(recipient, uint256(123));
     }
+    receive() external payable { }
 }
