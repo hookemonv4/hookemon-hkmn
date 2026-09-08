@@ -144,3 +144,5 @@ not establish payment. Native cycle history retains the status-and-timestamp-onl
 Focused verification: `node --experimental-strip-types --test apps/web/tests/native-accounting.test.mjs`
 exercises projection, both public parser boundaries, the served comic dashboard, exact wei averages
 and parser parity. Historical contract and dashboard presentation tests exercise the old readers.
+
+A fixed USD cap refusal is a deterministic pre-effect rejection: the command audit records `REJECTED` and HTTP returns 409. The same classification recognizes retained historical cap-error field names. Unclassified authority errors retain `UNCERTAIN` and HTTP 503.

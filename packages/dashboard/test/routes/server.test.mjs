@@ -24,17 +24,17 @@ function configuration(overrides = {}) {
     allowedPackIds: ['base-pack'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '100',
-    maxCycleBudgetMicroUsdg: '100',
-    max24HourBudgetMicroUsdg: '100',
+    maxUnitPriceMicroUsd: '100',
+    maxCycleBudgetMicroUsd: '100',
+    max24HourBudgetMicroUsd: '100',
     paused: false,
     executionPaused: false,
     killSwitch: false,
     liveMode: false,
     maxCyclesPerDay: 1,
-    perCycleCapMicroUsdg: '100',
-    lossCapMicroUsdg: '100',
-    maxOutstandingCustodyMicroUsdg: '100',
+    perCycleCapMicroUsd: '100',
+    lossCapMicroUsd: '100',
+    maxOutstandingCustodyMicroUsd: '100',
     manualApprovalCycles: 0,
     configurationRevision: 0,
     ...overrides,
@@ -55,7 +55,7 @@ function status(revision, config = configuration()) {
       transactionIds: null,
     }],
     cap: {
-      offChain24Hour: { usedMicroUsdg: '40', limitMicroUsdg: '100', remainingMicroUsdg: '60' },
+      offChain24Hour: { usedMicroUsd: '40', limitMicroUsd: '100', remainingMicroUsd: '60' },
       loss: null,
       outstandingCustody: null,
       onChainRemainingCapacity: null,
@@ -186,11 +186,11 @@ test('bootstrap accepts the proxy credential and an optional valid Access assert
 });
 
 test('bootstrap projects only its published hard caps when runner custody caps are present', async t => {
-  assert.equal(OPERATOR_HARD_CAPS.maxHeldPositions, '1000');
+  assert.equal(OPERATOR_HARD_CAPS.maxHeldPositions, '10');
   const server = await buildTestServer(t);
   const result = await server.get('/operator/api/bootstrap', AUTH);
   assert.equal(result.status, 200, result.diagnostics);
-  const fields = ['maxBoostersPerCycle', 'maxUnitPriceMicroUsdg', 'maxCycleBudgetMicroUsdg', 'max24HourBudgetMicroUsdg'];
+  const fields = ['maxBoostersPerCycle', 'maxUnitPriceMicroUsd', 'maxCycleBudgetMicroUsd', 'max24HourBudgetMicroUsd'];
   assert.deepEqual(result.body.hardCaps, Object.fromEntries(fields.map(field => [field, OPERATOR_HARD_CAPS[field]])));
 });
 
@@ -255,9 +255,9 @@ test('owner dashboard read projections use the injected authority and expose the
     identities: { operationsEvm: '0xabc', operationsSolana: 'PublicSolanaIdentity' },
   });
   const dashboard = await server.get('/operator/api/dashboard', AUTH);
-  assert.equal(dashboard.status, 200);
+  assert.equal(dashboard.status, 200, dashboard.diagnostics);
   assert.equal(dashboard.body.cycles[0].cycleId, 'cycle-one');
-  assert.equal(dashboard.body.cap.offChain24Hour.remainingMicroUsdg, '60');
+  assert.equal(dashboard.body.cap.offChain24Hour.remainingMicroUsd, '60');
   assert.deepEqual((await server.get('/operator/api/identities', AUTH)).body, {
     identities: { operationsEvm: '0xabc', operationsSolana: 'PublicSolanaIdentity' },
   });
@@ -305,10 +305,10 @@ test('authority-backed dashboard and public status never read a cycle from the s
     readOperatorState: async () => { throw new Error('state-file cycle read is forbidden'); },
   });
   const dashboard = await server.get('/operator/api/dashboard', AUTH);
-  assert.equal(dashboard.status, 200);
+  assert.equal(dashboard.status, 200, dashboard.diagnostics);
   assert.equal(dashboard.body.activeCycle.cycleId, 'cycle-one');
   assert.equal(dashboard.body.cycles[0].requests[0].requestDigest, `sha256:${'c'.repeat(64)}`);
-  assert.equal(dashboard.body.cap.offChain24Hour.remainingMicroUsdg, '60');
+  assert.equal(dashboard.body.cap.offChain24Hour.remainingMicroUsd, '60');
   const publicStatus = await server.get('/public/api/cycle-status');
   assert.equal(publicStatus.status, 200);
   assert.doesNotThrow(() => normalizePublicCycleStatus(publicStatus.body, 'mainnet'));
@@ -385,11 +385,11 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
     },
     policyEngine: { async recordManualApproval() { throw new Error('not used'); } },
     readCustody: async () => ({
-      realizedLossMicroUsdg: '0',
-      atRiskMicroUsdg: '0',
-      outstandingMicroUsdg: '0',
+      realizedLossMicroUsd: '0',
+      atRiskMicroUsd: '0',
+      outstandingMicroUsd: '0',
       heldAssets: false,
-      heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+      heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
       unattributed: false,
       unvaluedExposure: false,
     }),
@@ -402,17 +402,17 @@ test('the HTTP control path records cap-plus-one and stale-revision refusals as 
     command: {
       type: 'update-configuration',
       configuration: {
-        maxUnitPriceMicroUsdg: '25000001',
-        maxCycleBudgetMicroUsdg: '50000000',
-        max24HourBudgetMicroUsdg: '3600000000',
+        maxUnitPriceMicroUsd: (BigInt(OPERATOR_HARD_CAPS.maxUnitPriceMicroUsd) + 1n).toString(),
+        maxCycleBudgetMicroUsd: OPERATOR_HARD_CAPS.maxCycleBudgetMicroUsd,
+        max24HourBudgetMicroUsd: OPERATOR_HARD_CAPS.max24HourBudgetMicroUsd,
       },
     },
   }, AUTH);
 
-  assert.equal(result.status, 409);
+  assert.equal(result.status, 409, result.diagnostics);
   assert.equal(result.body.code, 'COMMAND_REJECTED');
   assert.equal(result.body.commandState, 'REJECTED');
-  assert.equal((await readOperatorState(statePath)).configuration.maxUnitPriceMicroUsdg, '0');
+  assert.equal((await readOperatorState(statePath)).configuration.maxUnitPriceMicroUsd, '0');
 
   const stale = await server.post('/operator/api/decisions', {
     requestId: 'stale-revision', expectedVersion: 1, command: { type: 'pause' },

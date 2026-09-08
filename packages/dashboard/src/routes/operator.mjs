@@ -111,7 +111,7 @@ function auditCommandHttpStatus(commandState) {
 function isDeterministicAuthorityRejection(error) {
   if (!error || typeof error.message !== 'string') return false;
   return error.message === 'stale operator state revision'
-    || /^operator configuration (maxBoostersPerCycle|maxUnitPriceMicroUsdg|maxCycleBudgetMicroUsdg|max24HourBudgetMicroUsdg) exceeds the fixed hard cap$/.test(error.message);
+    || /^operator configuration (maxBoostersPerCycle|maxUnitPriceMicroUsdg?|maxCycleBudgetMicroUsdg?|max24HourBudgetMicroUsdg?) exceeds the fixed hard cap$/.test(error.message);
 }
 
 export function createBootstrapHandler(ctx) {
