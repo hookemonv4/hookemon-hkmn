@@ -6282,39 +6282,8 @@
       ]
     },
     "scripts/programmable/lib/package.mjs": {
-      "sha256": "0cb9b75035e5d2bbad7ab2a60717fbc03a6fb02e902be27f4be139c960d021fc",
-      "matches": [
-        {
-          "rule": "historical-architecture",
-          "offset": 21589,
-          "length": 8,
-          "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 21589,
-          "tokenLength": 8,
-          "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
-        },
-        {
-          "rule": "historical-architecture",
-          "offset": 22042,
-          "length": 8,
-          "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 22042,
-          "tokenLength": 8,
-          "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
-        },
-        {
-          "rule": "historical-architecture",
-          "offset": 22659,
-          "length": 8,
-          "sha256": "fece2f9ba2b4a27ced51850c0517ec962c53b5ed76a82f35b12ace4e0a4b545c",
-          "tokenStart": 22659,
-          "tokenLength": 8,
-          "tokenSha256": "235415fe2a292d514523fbdb55652815b81fe91b9172cfd93db560efd21bb3ca",
-          "basis": "reviewed-native-71-or-retained-provider-source"
-        }
-      ]
+      "sha256": "d7e117916249ab4b865f1752821c7cc9b61fbfac56cb7ba37b9b7d8c617d43dd",
+      "matches": []
     },
     "specs/requirements.json": {
       "sha256": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d",

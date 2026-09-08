@@ -792,7 +792,7 @@
       "bytes": 8550,
       "kind": "source-entry",
       "path": "packages/contracts/script/release/PhaseThreeReleasePlan.sol",
-      "sha256": "72500c0fdb6f628f9c0cec5db676a0a167a5124a86152c9d83384f2cd5b95b55"
+      "sha256": "17a429958bf19e640da9f444a16c0d8e66bec3a82b2e4f68bc064b5a966b0453"
     },
     {
       "bytes": 2740,
@@ -906,7 +906,7 @@
       "bytes": 11654,
       "kind": "dependency-lock",
       "path": "product/dependency-pins.json",
-      "sha256": "3e10954d0303496222701d0ced4bf2369c30eec4fd5f64b6386249b5ffa1349a"
+      "sha256": "39d010456da942d565fcb6613ea706acdbe69c6a6116ba3cb3c686b3e167be2c"
     },
     {
       "bytes": 2323,
@@ -939,10 +939,10 @@
       "sha256": "1b4d6620a88e8d874ba215b0e0d231e95757c146dbc948a9b5ee034d19ac138a"
     },
     {
-      "bytes": 9913,
+      "bytes": 9911,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/address-manifest.json",
-      "sha256": "690be767e5a2814f2a636173537e3b65166bc5de49b89118753ffbcc597eb7d7"
+      "sha256": "cbfef74257ec3f697267accb69d613531990304a30a2048eb18d8555271ca8bf"
     },
     {
       "bytes": 71953,
@@ -975,28 +975,28 @@
       "sha256": "5c5b3dc39827bbe77af2099a0f86a2a3a45c8888dbfb7ace23228894817bd120"
     },
     {
-      "bytes": 305654,
+      "bytes": 299507,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/custody.json",
-      "sha256": "f7ae50ab539a48335f42024826a13e28c0543da534f924a99241ef3bd1386857"
+      "sha256": "d618a60be3470c29cef847a9db46bd2c7870a7b1b262c607c98e0ef30ef8811a"
     },
     {
-      "bytes": 1082000,
+      "bytes": 1034941,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/hook.json",
-      "sha256": "204a6a44991682b316ed86b0ae5d241d3760c4f1f90c8cdbb2a6d4d42ffc39c8"
+      "sha256": "3f1d8c2c6c0e12e4d2633c9003623c36abd419ebb5ba40c11f436a1295a23080"
     },
     {
-      "bytes": 175639,
+      "bytes": 170734,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/artifacts/token.json",
-      "sha256": "d8674b134236f56b3aefa4152b4ab920aaf472d8685a596595084965aa0819af"
+      "sha256": "7b3b75b1ddf253a3bcab2f7c9fecf18fc1085d44cb1db0f4b753d58d16c7c100"
     },
     {
-      "bytes": 253682,
+      "bytes": 253680,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/build-info/launch.json",
-      "sha256": "4dee83f3709307e4f12a95e0876b235242e2016c4b9dcf978b84a06885f6759c"
+      "sha256": "6a05177d18a63d265d8b68d2a373a01bc0775cdf48b8697c662f7e2149a08457"
     },
     {
       "bytes": 16196,
@@ -1047,22 +1047,22 @@
       "sha256": "5a941b14ce16a7148f0cfd184916daec275a92981b9abc5a4cf1f57aa9c42788"
     },
     {
-      "bytes": 425379,
+      "bytes": 406859,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/create-request.json",
-      "sha256": "cd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b"
+      "sha256": "b8874972e5729f0da20d4efa06ef2cf5a875105ca85b962b03b1698d12c387b0"
     },
     {
-      "bytes": 11728,
+      "bytes": 11726,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/graph-draft.json",
-      "sha256": "779727c54271ffa04d1455e2b9e8ac548022cdb54cda9af7d30f30115a32ac07"
+      "sha256": "3b1e8d415ca046edf2ebd7df7d3b9a88178d475cff0930a3759974988303141d"
     },
     {
       "bytes": 3101,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "04bce4ad4ebf7b35e9e0ce2bd98a20fe20eaba8f26b77fe3089878fbca0634ee"
+      "sha256": "56377d1982e4dce99e1a49e09f8e64adc3af1d3f3ed92e7add5a8e6b6dfc99dc"
     },
     {
       "bytes": 77516,
@@ -2388,7 +2388,7 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:22beb698b3921727ef9e4fb2c8d23d8e85259ec68c407144d031f3b7fa0c8d05",
+  "reviewTargetHash": "sha256:838b7c283e55f2e3b82c930453f67493582d0c454c491e57372bd6d6e44f069d",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
   "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"

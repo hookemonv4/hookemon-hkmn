@@ -17,9 +17,9 @@
     "decisions/owner-approvals/revision-72-native-commitments-approved.json": "eef9e64fbd86db39d4a825dc4fc2f8b532931b997eb7f6903abd574d95c62cef",
     "feasibility/interface-freeze.json": "e5b6fade85bd5ef9c0ae0cefaeffbf23ae7926460f21ccea52debd8484f1818d",
     "feasibility/phase3-offchain-interface-amendment.json": "3e91a11ca644f1664f670979a772628690caf4f3eeda53e0ecb2722f91daa6b0",
-    "packages/contracts/foundry.toml": "2b1d724039460a2ca32166acddc989ef190a79d0f63b4a061c6ffb5ec2f8e258",
+    "packages/contracts/foundry.toml": "08b1caa2387cf1800162893b5612c32f6bc2fc1cd4e80e59fd796639ff18f597",
     "packages/contracts/remappings.txt": "1c4a68fb5b2e49b88df6bfbd52d85b24bc899aaf3cbb4367a680e2d455d02341",
-    "product/dependency-pins.json": "3e10954d0303496222701d0ced4bf2369c30eec4fd5f64b6386249b5ffa1349a",
+    "product/dependency-pins.json": "39d010456da942d565fcb6613ea706acdbe69c6a6116ba3cb3c686b3e167be2c",
     "specs/requirements.json": "cf8ca1e3d36cc6019b7555b4dd7815730bfadba9543803fff62ff11734b2983d"
   }
 }
