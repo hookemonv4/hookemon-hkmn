@@ -1,0 +1,1 @@
+{"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo", "params": ["99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2", {"encoding": "base64", "commitment": "finalized"}]}
