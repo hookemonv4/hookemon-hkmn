@@ -4,12 +4,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { addTask, claimTask, completeTask, openLedger, projectTasks, recoverTaskRequirements, releaseTask } from '../lib/ledger.mjs';
-import { prepareTaskBindingRecovery } from '../lib/task-binding-recovery.mjs';
+import { addTask, claimTask, completeTask, openLedger, projectTasks, recoverTaskRequirements, releaseTask, acceptOperationalTask } from '../lib/ledger.mjs';
+import { prepareTaskBindingRecovery, prepareOperationalAcceptance } from '../lib/task-binding-recovery.mjs';
 import { hashFile, readJson, writeJson } from '../lib/util.mjs';
 import { taskEvidenceContext, traceCheck } from '../lib/reqs.mjs';
 import { addReceipt } from '../lib/receipts.mjs';
 import { writeOwnerApproval } from './helpers/owner-approval.mjs';
+import { checkGate } from '../lib/gates.mjs';
 
 const cli = resolve(import.meta.dirname, '../v4.mjs');
 function fixture(t, done = true) {
@@ -51,7 +52,7 @@ function fixture(t, done = true) {
   return { root, db, head, git, descriptor, options, save, approve };
 }
 function snapshot(db) {
-  return ['tasks', 'attempts', 'task_binding_recoveries'].map(table => db.prepare(`SELECT * FROM ${table}`).all());
+  return ['tasks', 'attempts', 'task_binding_recoveries', 'task_operational_acceptances'].map(table => db.prepare(`SELECT * FROM ${table}`).all());
 }
 function refuses(f, pattern) {
   const before = snapshot(f.db);
@@ -142,4 +143,102 @@ test('CLI applies approved bindings and refuses another orphan before canonical 
   const passed = run(); assert.equal(passed.status, 0, passed.stderr);
   assert.deepEqual(JSON.parse(passed.stdout).reqs, ['REQ-a']);
   assert.equal(readJson(join(f.root, 'tasks.json')).tasks.find(task => task.id === 'T1').commitSha, f.head);
+});
+
+function operation(t) {
+  const f = fixture(t);
+  writeJson(join(f.root, 'policy/policy.json'), { autonomy: { never: ['Approve your own work on behalf of the owner'] } });
+  const current = prepareOperationalAcceptance(f.db, 'T1');
+  f.options = { record: 'decisions/task-operations/T1.json', approval: 'decisions/owner-approvals/t1-operation.json' };
+  f.descriptor = {
+    schema: 'v4-task-operational-acceptance-v1', action: 'TASK_ACCEPT_OPERATIONAL', taskId: 'T1',
+    prestate: current.prestate, prestateFingerprint: current.fingerprint,
+    processSources: { 'policy/policy.json': hashFile(join(f.root, 'policy/policy.json')) },
+    rationale: 'Accept the completed maintenance work under the governing process, without product coverage',
+  };
+  f.save = () => writeJson(join(f.root, f.options.record), f.descriptor);
+  f.approve = () => writeOwnerApproval(f.root, f.options.approval, {
+    action: f.descriptor.action, phase: 'build', itemId: 'T1', rationale: f.descriptor.rationale,
+  }, [f.options.record]);
+  f.save(); f.approve(); return f;
+}
+function refusesOperation(f, pattern) {
+  const before = snapshot(f.db);
+  assert.throws(() => acceptOperationalTask(f.db, 'T1', f.options), pattern);
+  assert.deepEqual(snapshot(f.db), before);
+}
+function operationEvidence(f, includeAuthority = true) {
+  const context = taskEvidenceContext(f.root, 'T1');
+  addReceipt(f.root, { type: 'evidence', phase: 'build', result: 'PASSED', data: context.data,
+    inputs: [...(includeAuthority ? context.inputs : ['specs/requirements.json']), 'evidence.txt'] });
+}
+
+test('operational acceptance preserves history, still needs evidence, and contributes no product coverage', t => {
+  const f = operation(t); const before = snapshot(f.db);
+  acceptOperationalTask(f.db, 'T1', f.options); projectTasks(f.db, f.root);
+  const after = snapshot(f.db);
+  assert.deepEqual(after.slice(0, 3), before.slice(0, 3));
+  assert.equal(after[3].length, 1);
+  assert.deepEqual(traceCheck(f.root).gaps, ['T1: done without valid evidence receipt']);
+  operationEvidence(f, false);
+  assert.deepEqual(traceCheck(f.root).gaps, ['T1: done without valid evidence receipt']);
+  operationEvidence(f);
+  assert.deepEqual(traceCheck(f.root).gaps, []);
+  writeJson(join(f.root, 'gates/tasks.json'), { id: 'tasks', version: 1, items: [] });
+  checkGate(f.root, 'tasks');
+  assert.deepEqual(traceCheck(f.root).gaps, ['REQ-a: no task covers this requirement', 'REQ-unrelated: no task covers this requirement', 'REQ-old: no task covers this requirement']);
+  refusesOperation(f, /already recorded/);
+  assert.throws(() => recoverTaskRequirements(f.db, 'T1', {}), /cannot acquire product/);
+});
+
+test('operational projection fails closed on forged classification, task changes and missing approval', t => {
+  const f = operation(t); acceptOperationalTask(f.db, 'T1', f.options); projectTasks(f.db, f.root);
+  const original = readJson(join(f.root, 'tasks.json'));
+  for (const mutate of [
+    task => { task.operationalAcceptance = {}; },
+    task => { task.reqs = ['REQ-a']; },
+    task => { task.status = 'ready'; },
+    task => { task.title = 'Different work'; },
+    task => { task.commitSha = 'a'.repeat(40); },
+  ]) {
+    const changed = structuredClone(original); mutate(changed.tasks[0]); writeJson(join(f.root, 'tasks.json'), changed);
+    assert.match(traceCheck(f.root).gaps.join('\n'), /operational acceptance invalid/);
+  }
+  writeJson(join(f.root, 'tasks.json'), original);
+  rmSync(join(f.root, f.options.approval));
+  assert.match(traceCheck(f.root).gaps.join('\n'), /operational acceptance invalid/);
+});
+
+test('process changes require fresh exact acceptance and invalidate prior evidence without erasing history', t => {
+  const f = operation(t); acceptOperationalTask(f.db, 'T1', f.options); projectTasks(f.db, f.root); operationEvidence(f);
+  writeJson(join(f.root, 'policy/policy.json'), { reviewed: 'New governing policy' });
+  assert.match(traceCheck(f.root).gaps.join('\n'), /process source is stale/);
+  assert.throws(() => projectTasks(f.db, f.root), /process source is stale/);
+  refusesOperation(f, /process source is stale/);
+  f.descriptor.processSources['policy/policy.json'] = hashFile(join(f.root, 'policy/policy.json')); f.save();
+  refusesOperation(f, /hash/);
+  f.approve(); acceptOperationalTask(f.db, 'T1', f.options); projectTasks(f.db, f.root);
+  assert.equal(snapshot(f.db)[3].length, 2);
+  assert.deepEqual(traceCheck(f.root).gaps, ['T1: done without valid evidence receipt']);
+  operationEvidence(f); assert.deepEqual(traceCheck(f.root).gaps, []);
+});
+
+test('operation requires completed unbound work, exact governing sources and current completion', t => {
+  const ready = fixture(t, false); assert.throws(() => prepareOperationalAcceptance(ready.db, 'T1'), /completed task/);
+  const bound = fixture(t); recoverTaskRequirements(bound.db, 'T1', bound.options);
+  assert.throws(() => prepareOperationalAcceptance(bound.db, 'T1'), /no product requirements/);
+  const f = operation(t); f.descriptor.processSources = {}; f.save(); f.approve(); refusesOperation(f, /governing policy/);
+  f.descriptor.processSources = { 'policy/policy.json': hashFile(join(f.root, 'policy/policy.json')) };
+  f.descriptor.prestate.completion.seq++; f.save(); f.approve(); refusesOperation(f, /prestate/);
+});
+
+test('operational CLI preserves orphan refusal and emits revalidated disposition', t => {
+  const f = operation(t);
+  const run = () => spawnSync(process.execPath, [cli, 'task', 'accept-operation', 'T1', '--record', f.options.record, '--approval', f.options.approval], { cwd: f.root, encoding: 'utf8' });
+  f.git('checkout', '--quiet', '--orphan', 'replacement'); f.git('commit', '--quiet', '--allow-empty', '-m', 'replacement');
+  const before = snapshot(f.db); assert.equal(run().status, 1); assert.deepEqual(snapshot(f.db), before);
+  f.git('checkout', '--quiet', '--detach', f.head);
+  const result = run(); assert.equal(result.status, 0, result.stderr);
+  assert.ok(JSON.parse(result.stdout).operationalAcceptance.recordHash);
+  assert.equal(readJson(join(f.root, 'tasks.json')).tasks[0].operationalAcceptance.record, f.options.record);
 });

@@ -11,7 +11,7 @@ import {
   validateTaskDeferralApproval,
 } from './gates.mjs';
 import { resolveReceiptInput } from './receipts.mjs';
-import { validateTaskBindingRecovery } from './task-binding-recovery.mjs';
+import { validateTaskBindingRecovery, validateOperationalAcceptance } from './task-binding-recovery.mjs';
 
 const LEDGER_ROOTS = new WeakMap();
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
@@ -65,6 +65,10 @@ export function openLedger(root) {
       seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
       recorded_at TEXT NOT NULL, provenance TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS task_operational_acceptances(
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+      recorded_at TEXT NOT NULL, provenance TEXT NOT NULL
+    );
   `);
   const taskColumns = new Set(db.prepare('PRAGMA table_info(tasks)').all().map(column => column.name));
   for (const [name, type] of [
@@ -97,6 +101,9 @@ export function recoverTaskRequirements(db, taskId, options) {
   try {
     const root = LEDGER_ROOTS.get(db);
     if (!root) throw new Error('ledger has no repository root');
+    if (db.prepare('SELECT 1 FROM task_operational_acceptances WHERE task_id=?').get(taskId)) {
+      throw new Error('operationally accepted task cannot acquire product bindings');
+    }
     const recovery = validateTaskBindingRecovery(root, db, taskId, options);
     if (recovery.descriptor.prestate.status === 'done') {
       validateCompletionCommit(root, recovery.descriptor.prestate.completion?.commitSha);
@@ -106,6 +113,30 @@ export function recoverTaskRequirements(db, taskId, options) {
       .run(taskId, nowIso(), JSON.stringify(recovery));
     db.exec('COMMIT');
     return { taskId, reqs: recovery.reqs, prestateFingerprint: recovery.prestateFingerprint };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+export function acceptOperationalTask(db, taskId, options) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const root = LEDGER_ROOTS.get(db);
+    if (!root) throw new Error('ledger has no repository root');
+    const acceptance = validateOperationalAcceptance(root, db, taskId, options);
+    // Validate every done completion before appending authority, including other orphan history.
+    for (const task of listTasks(db).filter(task => task.status === 'done')) {
+      validateCompletionCommit(root, latestCompletionCommit(db, task.id));
+    }
+    const previous = db.prepare('SELECT provenance FROM task_operational_acceptances WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(taskId);
+    if (previous && JSON.stringify(JSON.parse(previous.provenance).binding) === JSON.stringify(acceptance.binding)) {
+      throw new Error('operational acceptance already recorded');
+    }
+    db.prepare('INSERT INTO task_operational_acceptances(task_id,recorded_at,provenance) VALUES(?,?,?)')
+      .run(taskId, nowIso(), JSON.stringify(acceptance));
+    db.exec('COMMIT');
+    return acceptance.binding;
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
@@ -883,6 +914,13 @@ export function projectTasks(db, root) {
     if (task.status !== 'done') return task;
     const commitSha = completion.get(task.id)?.commit_sha ?? null;
     validateCompletionCommit(root, commitSha);
+    const operational = db.prepare('SELECT provenance FROM task_operational_acceptances WHERE task_id=? ORDER BY seq DESC LIMIT 1').get(task.id);
+    if (operational) {
+      const stored = JSON.parse(operational.provenance);
+      const current = validateOperationalAcceptance(root, db, task.id, stored.binding);
+      if (JSON.stringify(current.binding) !== JSON.stringify(stored.binding)) throw new Error('operational acceptance authority changed since recording');
+      return { ...task, commitSha, operationalAcceptance: current.binding };
+    }
     return { ...task, commitSha };
   });
   writeJson(join(root, 'tasks.json'), { generatedAt: nowIso(), tasks });

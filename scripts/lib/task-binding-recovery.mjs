@@ -85,3 +85,68 @@ export function validateTaskBindingRecovery(root, db, taskId, { record, approval
     record, recordHash: hashFile(path), approval, approvalHash: hashFile(join(root, approval)),
   };
 }
+
+export function prepareOperationalAcceptance(db, taskId) {
+  const current = prepareTaskBindingRecovery(db, taskId);
+  if (current.prestate.status !== 'done' || current.prestate.reqs.length) {
+    throw new Error('operational acceptance requires a completed task with no product requirements');
+  }
+  return current;
+}
+
+function readOperationalAcceptance(root, taskId, { record, approval }) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(taskId)
+      || record !== `decisions/task-operations/${taskId}.json`) {
+    throw new Error('operational descriptor must be decisions/task-operations/<task-id>.json');
+  }
+  const path = resolve(realpathSync(root), record);
+  if (!lstatSync(path).isFile() || realpathSync(path) !== path) throw new Error('operational descriptor must be a regular repo-internal file without symlinks');
+  resolveReceiptInput(root, record);
+  const descriptor = readJson(path);
+  exactKeys(descriptor, ['schema', 'action', 'taskId', 'prestate', 'prestateFingerprint', 'processSources', 'rationale'], 'operational descriptor');
+  if (descriptor.schema !== 'v4-task-operational-acceptance-v1'
+      || descriptor.action !== 'TASK_ACCEPT_OPERATIONAL' || descriptor.taskId !== taskId) throw new Error('operational descriptor identity mismatch');
+  const p = descriptor.prestate;
+  exactKeys(p, ['id', 'title', 'phase', 'risk', 'deps', 'reqs', 'status', 'leaseToken', 'completion'], 'operational prestate');
+  if (p.id !== taskId || p.status !== 'done' || !Array.isArray(p.reqs) || p.reqs.length
+      || !Number.isInteger(p.leaseToken) || p.leaseToken < 0
+      || !p.completion || !Number.isInteger(p.completion.seq) || p.completion.seq < 1
+      || fingerprint(p) !== descriptor.prestateFingerprint) throw new Error('invalid operational prestate');
+  exactKeys(p.completion, ['seq', 'commitSha'], 'operational completion');
+  if (typeof descriptor.rationale !== 'string' || !descriptor.rationale.trim()) throw new Error('operational rationale required');
+  const sources = descriptor.processSources;
+  if (!sources || typeof sources !== 'object' || Array.isArray(sources)
+      || !Object.hasOwn(sources, 'policy/policy.json')) throw new Error('operational acceptance must bind governing policy');
+  for (const [input, digest] of Object.entries(sources)) {
+    if (digest !== hashFile(resolveReceiptInput(root, input))) throw new Error('operational process source is stale');
+  }
+  const ownerApproval = readOwnerApproval(root, approval, {
+    action: descriptor.action, phase: p.phase, itemId: taskId,
+    rationale: descriptor.rationale, subjectInputs: [record],
+  });
+  return {
+    descriptor, ownerApproval,
+    binding: { record, recordHash: hashFile(path), approval, approvalHash: hashFile(join(root, approval)), prestateFingerprint: descriptor.prestateFingerprint },
+  };
+}
+
+export function validateOperationalAcceptance(root, db, taskId, options) {
+  const result = readOperationalAcceptance(root, taskId, options);
+  if (prepareOperationalAcceptance(db, taskId).fingerprint !== result.binding.prestateFingerprint) {
+    throw new Error('operational prestate is stale');
+  }
+  return result;
+}
+
+export function validateProjectedOperationalAcceptance(root, task) {
+  const binding = task.operationalAcceptance;
+  exactKeys(binding, ['record', 'recordHash', 'approval', 'approvalHash', 'prestateFingerprint'], 'operational projection');
+  const result = readOperationalAcceptance(root, task.id, binding);
+  if (fingerprint(binding) !== fingerprint(result.binding)) throw new Error('operational projection authority is stale');
+  const p = result.descriptor.prestate;
+  for (const field of ['id', 'title', 'phase', 'risk', 'deps', 'reqs', 'status']) {
+    if (JSON.stringify(task[field]) !== JSON.stringify(p[field])) throw new Error('operational projection differs from approved task');
+  }
+  if (task.commitSha !== p.completion.commitSha) throw new Error('operational completion differs from approval');
+  return [binding.record, binding.approval, ...Object.keys(result.descriptor.processSources)];
+}

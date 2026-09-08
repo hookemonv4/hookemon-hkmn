@@ -18,8 +18,9 @@ import {
   prepareCompositeProvenanceRebind, validateCompositeProvenanceRebindApproval,
   rebindCompletionCompositeProvenance,
   recoverTaskRequirements,
+  acceptOperationalTask,
 } from './lib/ledger.mjs';
-import { prepareTaskBindingRecovery } from './lib/task-binding-recovery.mjs';
+import { prepareTaskBindingRecovery, prepareOperationalAcceptance } from './lib/task-binding-recovery.mjs';
 
 const root = process.cwd();
 const [cmd, sub, ...rest] = process.argv.slice(2);
@@ -132,6 +133,12 @@ try {
       out({ ok: true, id, commitSha: values.commit });
     }
     else if (sub === 'prepare-bindings') out(prepareTaskBindingRecovery(db, id));
+    else if (sub === 'prepare-operation') out(prepareOperationalAcceptance(db, id));
+    else if (sub === 'accept-operation') {
+      const operationalAcceptance = acceptOperationalTask(db, id, { record: values.record, approval: values.approval });
+      projectTasks(db, root);
+      out({ ok: true, id, operationalAcceptance });
+    }
     else if (sub === 'recover-bindings') {
       // Refuse existing global projection failures before changing a binding.
       projectTasks(db, root);
