@@ -108,6 +108,9 @@ test('init I6 binds the exact current control surface without mutable projection
     'scripts/tests/phase1-release.test.mjs',
     'scripts/tests/phase1-reproducibility.test.mjs',
     'scripts/tests/fork-pin.test.mjs',
+    // Inactive proposal and direct native build checks are not I6 control inputs.
+    'scripts/tests/native-hook-commitments-proposal.test.mjs',
+    'scripts/tests/native-interface-build-binding.test.mjs',
     'scripts/verify-phase1-release.mjs',
     'scripts/verify-phase1-reproducibility.mjs',
     'scripts/release/build-local-candidate.mjs',

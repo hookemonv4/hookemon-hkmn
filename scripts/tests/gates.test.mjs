@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import {
   cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
@@ -18,10 +19,19 @@ import {
   overrideSubjectInputs, writeOwnerApproval as writeBoundOwnerApproval,
 } from './helpers/owner-approval.mjs';
 import { writeRawReceipt } from './helpers/raw-receipt.mjs';
-import { interfaceFreezeInputDigest } from '../../feasibility/verify-robinhood-binding.mjs';
+import { INTERFACE_FREEZE_INPUTS, interfaceFreezeInputDigest } from '../../feasibility/verify-robinhood-binding.mjs';
 
 const OWNER_NOT_APPLICABLE_RECEIPT_TYPE = 'owner-not-applicable-authorized';
 const projectRoot = fileURLToPath(new URL('../..', import.meta.url));
+// Immutable historical inputs only; all gate/verifier functions are imported from this branch.
+const historicalRoot = mkdtempSync(join(tmpdir(), 'v4-historical-gate-inputs-'));
+const historicalArchive = execFileSync('git', ['archive', 'b2cb737a298522e3944652e862c4eeab195667d8',
+  ...INTERFACE_FREEZE_INPUTS, 'feasibility/interface-freeze.json', 'feasibility/phase3-offchain-interface-amendment.json',
+  'decisions/owner-approvals', 'architecture/capability-map.json', 'docs/modules'],
+  { cwd: projectRoot, maxBuffer: 64 * 1024 * 1024 });
+execFileSync('tar', ['-xf', '-', '-C', historicalRoot], { input: historicalArchive });
+test.after(() => rmSync(historicalRoot, { recursive: true, force: true }));
+
 
 function proj() {
   const root = mkdtempSync(join(tmpdir(), 'v4-'));
@@ -49,7 +59,7 @@ function proj() {
   return root;
 }
 
-function copyFreezeClosure(root) {
+function copyFreezeClosure(root, projectRoot = historicalRoot) {
   const freeze = JSON.parse(readFileSync(join(projectRoot, 'feasibility/interface-freeze.json'), 'utf8'));
   const amendment = JSON.parse(readFileSync(join(projectRoot, freeze.offchainAmendment.path), 'utf8'));
   const inputs = [...Object.keys(freeze.inputHashes), 'feasibility/interface-freeze.json', freeze.offchainAmendment.path, ...Object.keys(amendment.ownerApprovalHashes)];
@@ -60,10 +70,11 @@ function copyFreezeClosure(root) {
   return inputs;
 }
 
-function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = true } = {}) {
+function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = true, sourceRoot = historicalRoot } = {}) {
+  const projectRoot = sourceRoot;
   const root = mkdtempSync(join(tmpdir(), 'v4-feasibility-'));
-  const architecture = JSON.parse(readFileSync(join(projectRoot, 'gates', 'architecture.json'), 'utf8'));
-  const feasibility = JSON.parse(readFileSync(join(projectRoot, 'gates', 'feasibility.json'), 'utf8'));
+  const architecture = JSON.parse(readFileSync(new URL('../../gates/architecture.json', import.meta.url), 'utf8'));
+  const feasibility = JSON.parse(readFileSync(new URL('../../gates/feasibility.json', import.meta.url), 'utf8'));
   writeJson(join(root, 'gates', 'architecture.json'), {
     ...architecture,
     items: [architecture.items.find(item => item.id === 'A2')],
@@ -89,7 +100,7 @@ function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = t
     mkdirSync(dirname(join(root, input)), { recursive: true });
     cpSync(join(projectRoot, input), join(root, input));
   }
-  copyFreezeClosure(root);
+  copyFreezeClosure(root, projectRoot);
   const freezePath = join(root, 'feasibility', 'interface-freeze.json');
   const freeze = JSON.parse(readFileSync(freezePath, 'utf8'));
   for (const input of Object.keys(freeze.inputHashes)) {
@@ -110,7 +121,7 @@ function feasibilityEvidenceProject({ bindFinalInterfaces = true, compatible = t
 
 function integrationSpikeProject(integrationSpikes) {
   const root = mkdtempSync(join(tmpdir(), 'v4-integration-spikes-'));
-  const feasibility = JSON.parse(readFileSync(join(projectRoot, 'gates', 'feasibility.json'), 'utf8'));
+  const feasibility = JSON.parse(readFileSync(new URL('../../gates/feasibility.json', import.meta.url), 'utf8'));
   writeJson(join(root, 'gates', 'feasibility.json'), {
     ...feasibility,
     items: [feasibility.items.find(item => item.id === 'F3')],
@@ -119,10 +130,11 @@ function integrationSpikeProject(integrationSpikes) {
   return root;
 }
 
-function moduleIndexProject() {
+function moduleIndexProject({ sourceRoot = historicalRoot } = {}) {
+  const projectRoot = sourceRoot;
   const root = mkdtempSync(join(tmpdir(), 'v4-module-index-'));
-  copyFreezeClosure(root);
-  const architecture = JSON.parse(readFileSync(join(projectRoot, 'gates', 'architecture.json'), 'utf8'));
+  copyFreezeClosure(root, projectRoot);
+  const architecture = JSON.parse(readFileSync(new URL('../../gates/architecture.json', import.meta.url), 'utf8'));
   writeJson(join(root, 'gates', 'architecture.json'), {
     ...architecture,
     items: [architecture.items.find(item => item.id === 'A6')],
@@ -419,7 +431,7 @@ test('architecture A2 can bind the post-feasibility interface freeze on recheck'
   ]);
 });
 
-test('architecture A6 accepts the provisional Phase 3 module index and binds every card', () => {
+test('architecture A6 accepts the historical provisional Phase 3 module index and binds every card', () => {
   const root = moduleIndexProject();
   const receipt = recordGateEvidence(root, 'architecture', 'A6', ['docs/modules/index.json']);
   const index = JSON.parse(readFileSync(join(root, 'docs', 'modules', 'index.json'), 'utf8'));
@@ -697,7 +709,7 @@ test('feasibility F4 requires the latest architecture gate to bind the final fre
   );
 });
 
-test('feasibility F4 accepts the current fail-closed build-only freeze after architecture recheck', () => {
+test('feasibility F4 accepts the historical revision-70 build-only freeze after architecture recheck', () => {
   const root = feasibilityEvidenceProject();
 
   const evidence = recordGateEvidence(root, 'feasibility', 'F4', [
@@ -1216,4 +1228,18 @@ test('architecture A6 binds exact amendment approval evidence and rejects drift'
   const approval = Object.keys(amendment.ownerApprovalHashes).at(-1);
   writeFileSync(join(root, approval), `${readFileSync(join(root, approval), 'utf8')}\n`);
   assert.throws(() => recordGateEvidence(root, 'architecture', 'A6', ['docs/modules/index.json']), /owner approval hash mismatch/);
+});
+
+
+test('current native provisional interfaces cannot satisfy architecture A6 or feasibility F4', () => {
+  const moduleRoot = moduleIndexProject({ sourceRoot: projectRoot });
+  assert.throws(() => recordGateEvidence(moduleRoot, 'architecture', 'A6', ['docs/modules/index.json']),
+    /native provisional build binding cannot satisfy an interface freeze gate/);
+  const freezeRoot = feasibilityEvidenceProject({ sourceRoot: projectRoot });
+  assert.throws(() => recordGateEvidence(freezeRoot, 'feasibility', 'F4', [
+    'architecture/interfaces.json', 'feasibility/interface-freeze.json',
+  ]), /native provisional build binding cannot satisfy an interface freeze gate/);
+  assert.deepEqual(listReceipts(moduleRoot), []);
+  rmSync(moduleRoot, { recursive: true, force: true });
+  rmSync(freezeRoot, { recursive: true, force: true });
 });

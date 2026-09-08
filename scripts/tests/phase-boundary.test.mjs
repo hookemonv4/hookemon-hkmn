@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { validateInterfaceFreeze } from '../../feasibility/verify-robinhood-binding.mjs';
 
 const repoRoot = join(import.meta.dirname, '..', '..');
 
@@ -33,7 +34,7 @@ function activeControlInputs() {
   return [...registryInputs, ...gateInputs];
 }
 
-test('the machine-readable delivery boundary opens Phase 3 under revision 65 and architecture revision 9', () => {
+test('the machine-readable delivery boundary keeps Phase 3 open under native revision 71 and architecture revision 11', () => {
   const boundary = readJson('product/delivery-boundary.json');
   const requirements = readJson('specs/requirements.json');
   const interfaces = readJson('architecture/interfaces.json');
@@ -44,10 +45,12 @@ test('the machine-readable delivery boundary opens Phase 3 under revision 65 and
     2: 'COMPLETE',
     3: 'OPEN',
   });
-  assert.equal(requirements.revision, readJson('feasibility/phase3-offchain-interface-amendment.json').approvedRequirementsRevision);
+  assert.equal(requirements.revision, 71);
+  assert.equal(readJson('feasibility/phase3-offchain-interface-amendment.json').approvedRequirementsRevision, 70,
+    'the retained amendment is historical and does not approve native revision 71');
   assert.equal(interfaces.productPhase, 3);
-  assert.equal(interfaces.requirementsRevision, 67);
-  assert.equal(interfaces.architectureRevision, 10);
+  assert.equal(interfaces.requirementsRevision, 71);
+  assert.equal(interfaces.architectureRevision, 11);
 });
 
 test('future decision storage is excluded from machine-effective inputs', () => {
@@ -62,7 +65,7 @@ test('future decision storage is excluded from machine-effective inputs', () => 
   assert.deepEqual(unexpected, []);
 });
 
-test('Phase 3 interfaces and module index share the active provisional boundary', () => {
+test('native Phase 3 interfaces retain the provisional module registry without freeze authority', () => {
   const interfaces = readJson('architecture/interfaces.json');
   const provisional = readJson('architecture/provisional-interfaces.json');
   const capabilityMap = readJson('architecture/capability-map.json');
@@ -71,14 +74,20 @@ test('Phase 3 interfaces and module index share the active provisional boundary'
   const provisionalIds = provisional.modules.map(module => module.id);
   const indexIds = moduleIndex.modules.map(module => module.id);
 
-  assert.equal(interfaces.requirementsRevision, 67);
-  assert.equal(interfaces.architectureRevision, 10);
-  for (const artifact of [provisional, capabilityMap, moduleIndex]) {
+  assert.equal(interfaces.requirementsRevision, 71);
+  assert.equal(interfaces.architectureRevision, 11);
+  assert.equal(provisional.productPhase, 3);
+  assert.equal(provisional.requirementsRevision, 71);
+  assert.equal(provisional.architectureRevision, 9);
+  for (const artifact of [capabilityMap, moduleIndex]) {
     assert.equal(artifact.productPhase, 3);
     assert.equal(artifact.requirementsRevision, 65);
     assert.equal(artifact.architectureRevision, 9);
   }
   assert.equal(interfaces.status, 'PROVISIONAL_PHASE3_PENDING_FEASIBILITY');
+  assert.equal(interfaces.nativeMigration.launchEligible, false);
+  assert.throws(() => validateInterfaceFreeze({ frozen: interfaces }),
+    /native provisional build binding cannot satisfy an interface freeze gate/);
   assert.equal(provisional.status, 'PROVISIONAL');
   assert.equal(moduleIndex.interfaceStatus, 'PROVISIONAL');
   assert.deepEqual(interfaceIds, provisionalIds);
