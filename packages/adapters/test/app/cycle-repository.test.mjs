@@ -1869,15 +1869,15 @@ test('does not reuse normal dust after a newer cycle consumes it', async t => {
 
 test('peekActiveCycle skips a resolved completed cycle while a newer cycle is active', async t => {
   let nowMs = 1_700_000_000_000;
-  const repository = await CycleRepository.open(await tempDirectory(t), () => nowMs);
-  const older = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => nowMs, { testAuthority: createTestProfileMutationAuthority() });
+  const older = await createNativeHeldCycle(repository, '25', 'pack-1');
   const position = await repository.recordHeldPosition(older.cycleId, {
     packId: 'pack-1',
     memo: 'memo-resolved-peek',
     mint: 'mint-resolved-peek',
     cardRef: 'mint-resolved-peek',
-    costMicroUsdg: '25',
-    valueMicroUsdg: '25',
+    costMicroUsd: '25',
+    valueMicroUsd: '25',
     insuredValue: null,
     reason: 'SENT_UNKNOWN_DEADLINE',
     terminalState: 'HELD_UNRESOLVED',
@@ -1969,16 +1969,15 @@ test('persists every supplementary settlement boundary across a restart without 
 });
 
 test('closes a resolved held position after a completed cycle without retaining its limit value', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '17', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-resolve',
     mint: 'mint-resolve',
     cardRef: 'mint-resolve',
-    costMicroUsdg: '17',
-    valueMicroUsdg: '17',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '17',
+    valueMicroUsd: '17',
     insuredValue: null,
     reason: 'SENT_UNKNOWN_DEADLINE',
     terminalState: 'HELD_UNRESOLVED',
@@ -2000,10 +1999,10 @@ test('closes a resolved held position after a completed cycle without retaining 
     heldAssets: false,
     unattributed: false,
     unresolvedObligations: false,
-    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+    heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
   });
   const state = await repository.describeCycle(cycleId);
-  assert.equal(state.custodyLedgers.get('4663\u0000asset-usdg').heldPositions, '0');
+  assert.equal(state.custodyLedgers.size, 0, 'resolved USD cost never creates native custody');
   assert.deepEqual(await repository.listHeldPositions({ includeResolved: true }), [resolved]);
 });
 
@@ -2088,15 +2087,15 @@ test('resolves a deadline-held position as sold, refunded, or never sent only on
 });
 
 test('projects open held positions from completed cycles as bounded claim exposure', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-1',
     mint: 'mint-1',
     cardRef: 'mint-1',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'BUYBACK_UNAVAILABLE',
     terminalState: 'HELD_UNAVAILABLE',
@@ -2111,7 +2110,7 @@ test('projects open held positions from completed cycles as bounded claim exposu
     unresolvedObligations: false,
     heldPositions: {
       count: 1,
-      valueMicroUsdg: '25000000',
+      valueMicroUsd: '25000000',
       positions: [position],
     },
   });
