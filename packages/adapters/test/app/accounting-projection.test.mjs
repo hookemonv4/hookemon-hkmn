@@ -1,3 +1,4 @@
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -41,9 +42,10 @@ test('projectCycleAccounting requires a cycleRepository and a cycleId', async ()
   await assert.rejects(() => projectCycleAccounting({ cycleRepository: repository, cycleId: '' }), /cycleId/);
 });
 
-function custodyLedger({ cycleId, chainId, assetId, decimals = 6, ...buckets }) {
+function custodyLedger({ cycleId, chainId, assetId, decimals = assetId === 'native' ? 18 : 6, ...buckets }) {
   return {
-    schema: 'hookemon.custody-ledger.v1',
+    schema: assetId === 'native' ? 'hookemon.custody-ledger.v3' : 'hookemon.custody-ledger.v1',
+    ...(assetId === 'native' ? { verifiedCurrentBalance: null, expectedCycleAsset: null } : {}),
     cycleId,
     chainId,
     assetId,
@@ -73,15 +75,22 @@ function custodyRepository(cycles) {
   };
 }
 
-const evmUsdg = Object.freeze({ chainId: 'eip155:4663', assetId: 'erc20:usdg', decimals: 6 });
+const nativeAsset = Object.freeze({ chainId: '4663', assetId: 'native', decimals: 18 });
 
-test('policy custody keeps each cycle partitioned and never converts a foreign stable balance into micro-USDG', async () => {
+// Isolated quote response: two micro-USD per wei, never an assumed ETH/USD parity.
+async function syntheticUsdValuation(amount) {
+  return (await nativeProducedAdmissionFixture('accounting-valuation', {
+    amountWei: amount.amountAtomic, costMicroUsd: (BigInt(amount.amountAtomic) * 2n).toString(), nowMs: 1000,
+  })).aggregateFundingUsd;
+}
+
+test('policy custody keeps each cycle partitioned and never converts a foreign stable balance into USD', async () => {
   const repository = custodyRepository({
     archived: {
       cycleId: 'archived',
       terminalState: 'COMPLETED',
       custodyLedgers: new Map([['evm', custodyLedger({
-        cycleId: 'archived', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+        cycleId: 'archived', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId,
         claimed: '11', returnReceived: '7', residual: '2', payoutLiability: '3', dust: '1', refunds: '4',
       })]]),
     },
@@ -90,7 +99,7 @@ test('policy custody keeps each cycle partitioned and never converts a foreign s
       terminalState: null,
       custodyLedgers: new Map([
         ['evm', custodyLedger({
-          cycleId: 'active', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+          cycleId: 'active', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId,
           claimed: '9', returnReceived: '5', residual: '6', payoutLiability: '7', dust: '8', refunds: '9',
         })],
         ['solana', custodyLedger({
@@ -101,25 +110,26 @@ test('policy custody keeps each cycle partitioned and never converts a foreign s
     },
   });
 
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
-  assert.equal(custody.realizedLossMicroUsdg, '4');
-  assert.equal(custody.atRiskMicroUsdg, '4');
-  assert.equal(custody.outstandingMicroUsdg, '48');
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
+  // Missing frozen cost/proceeds remain unvalued; current quotes cannot establish realized loss.
+  assert.equal(custody.realizedLossMicroUsd, '0');
+  assert.equal(custody.atRiskMicroUsd, '8');
+  assert.equal(custody.outstandingMicroUsd, '88');
   assert.equal(custody.heldAssets, true);
   assert.equal(custody.unattributed, true);
   assert.equal(custody.unvaluedExposure, true);
-  assert.deepEqual(custody.cycles.map(cycle => [cycle.cycleId, cycle.outstandingMicroUsdg]), [
-    ['active', '34'],
-    ['archived', '14'],
+  assert.deepEqual(custody.cycles.map(cycle => [cycle.cycleId, cycle.outstandingMicroUsd]), [
+    ['active', '68'],
+    ['archived', '20'],
   ]);
 });
 
-test('policy custody carries open held positions at their recorded USDG values', async () => {
-  const position = ({ positionId, cycleId, valueMicroUsdg, resolution = null }) => ({
+test('policy custody carries open held positions at their recorded USD purchase costs', async () => {
+  const position = ({ positionId, cycleId, valueMicroUsd, resolution = null }) => ({
     positionId,
     cycleId,
-    costMicroUsdg: valueMicroUsdg,
-    valueMicroUsdg,
+    costMicroUsd: valueMicroUsd,
+    valueMicroUsd,
     insuredValue: null,
     reason: 'HELD_UNRESOLVED',
     terminalState: 'HELD_UNRESOLVED',
@@ -135,11 +145,11 @@ test('policy custody carries open held positions at their recorded USDG values',
       terminalState: 'COMPLETED',
       custodyLedgers: new Map(),
       heldPositions: new Map([
-        ['held-alpha', position({ positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsdg: '19' })],
+        ['held-alpha', position({ positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsd: '19' })],
         ['held-resolved', position({
           positionId: 'held-resolved',
           cycleId: 'cycle-alpha',
-          valueMicroUsdg: '23',
+          valueMicroUsd: '23',
           resolution: { state: 'SOLD' },
         })],
       ]),
@@ -149,26 +159,26 @@ test('policy custody carries open held positions at their recorded USDG values',
       terminalState: 'COMPLETED',
       custodyLedgers: new Map(),
       heldPositions: new Map([
-        ['held-beta', position({ positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsdg: '31' })],
+        ['held-beta', position({ positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsd: '31' })],
       ]),
     },
   });
 
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.heldPositions.count, 2);
-  assert.equal(custody.heldPositions.valueMicroUsdg, '50');
+  assert.equal(custody.heldPositions.valueMicroUsd, '50');
   assert.deepEqual(
-    custody.heldPositions.positions.map(({ positionId, cycleId, valueMicroUsdg }) => ({ positionId, cycleId, valueMicroUsdg })),
+    custody.heldPositions.positions.map(({ positionId, cycleId, valueMicroUsd }) => ({ positionId, cycleId, valueMicroUsd })),
     [
-      { positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsdg: '19' },
-      { positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsdg: '31' },
+      { positionId: 'held-alpha', cycleId: 'cycle-alpha', valueMicroUsd: '19' },
+      { positionId: 'held-beta', cycleId: 'cycle-beta', valueMicroUsd: '31' },
     ],
   );
   assert.deepEqual(custody.heldPositions.positions[0], {
     positionId: 'held-alpha',
     cycleId: 'cycle-alpha',
-    costMicroUsdg: '19',
-    valueMicroUsdg: '19',
+    costMicroUsd: '19',
+    valueMicroUsd: '19',
     insuredValue: null,
     reason: 'HELD_UNRESOLVED',
     terminalState: 'HELD_UNRESOLVED',
@@ -193,8 +203,8 @@ test('does not classify a separately valued foreign held-position bucket as unva
       heldPositions: new Map([['held-card', {
         positionId: 'held-card',
         cycleId: 'held',
-        costMicroUsdg: '40',
-        valueMicroUsdg: '40',
+        costMicroUsd: '40',
+        valueMicroUsd: '40',
         insuredValue: null,
         reason: 'EPIC_THRESHOLD',
         terminalState: 'HELD_OWNER_DECISION',
@@ -207,10 +217,10 @@ test('does not classify a separately valued foreign held-position bucket as unva
     },
   });
 
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, false);
   assert.equal(custody.heldPositions.count, 1);
-  assert.equal(custody.heldPositions.valueMicroUsdg, '40');
+  assert.equal(custody.heldPositions.valueMicroUsd, '40');
 });
 
 test('policy custody partition property never offsets one cycle against another', async () => {
@@ -232,16 +242,16 @@ test('policy custody partition property never offsets one cycle against another'
       cycleId,
       terminalState: null,
       custodyLedgers: new Map([['evm', custodyLedger({
-        cycleId, chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+        cycleId, chainId: nativeAsset.chainId, assetId: nativeAsset.assetId,
         claimed: claimed.toString(), returnReceived: returned.toString(), residual: residual.toString(),
         payoutLiability: payoutLiability.toString(), dust: dust.toString(), refunds: refunds.toString(),
       })]]),
     };
   }
 
-  const custody = await projectPolicyCustody({ cycleRepository: custodyRepository(cycles), evmUsdg });
-  assert.equal(custody.outstandingMicroUsdg, expectedOutstanding.toString());
-  assert.equal(custody.atRiskMicroUsdg, expectedAtRisk.toString());
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: custodyRepository(cycles), nativeAsset });
+  assert.equal(custody.outstandingMicroUsd, (expectedOutstanding * 2n).toString());
+  assert.equal(custody.atRiskMicroUsd, (expectedAtRisk * 2n).toString());
   assert.equal(custody.cycles.length, 64);
 });
 
@@ -255,7 +265,7 @@ test('a settled foreign custody flow without a current balance does not remain u
       })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, false);
 });
 
@@ -269,20 +279,20 @@ test('a foreign current balance remains unvalued until it is reconciled or class
       })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, true);
 });
 
-function custodyLedgerV2({ cycleId, chainId, assetId, decimals = 6, verifiedCurrentBalance = null, expectedCycleAsset = null, ...buckets }) {
+function custodyLedgerV3({ cycleId, chainId, assetId, decimals = assetId === 'native' ? 18 : 6, verifiedCurrentBalance = null, expectedCycleAsset = null, ...buckets }) {
   return {
     ...custodyLedger({ cycleId, chainId, assetId, decimals, ...buckets }),
-    schema: 'hookemon.custody-ledger.v2',
+    schema: 'hookemon.custody-ledger.v3',
     verifiedCurrentBalance,
     expectedCycleAsset,
   };
 }
 
-function custodyBalanceObservation({ chainId, assetId, decimals = 6, amountAtomic = '999' }) {
+function custodyBalanceObservation({ chainId, assetId, decimals = assetId === 'native' ? 18 : 6, amountAtomic = '999' }) {
   return {
     schema: 'hookemon.custody-balance-observation.v1',
     account: '0x2222222222222222222222222222222222222222',
@@ -291,91 +301,91 @@ function custodyBalanceObservation({ chainId, assetId, decimals = 6, amountAtomi
   };
 }
 
-test('a canonical EVM USDG v2 row with a null observation and a positive unresolved claim is unvalued', async () => {
+test('a canonical native ETH v3 row with a null observation and a positive unresolved claim is unvalued', async () => {
   const repository = custodyRepository({
     cycle: {
       cycleId: 'cycle',
       terminalState: null,
-      custodyLedgers: new Map([['evm', custodyLedgerV2({
-        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, claimed: '10', returnReceived: '3',
+      custodyLedgers: new Map([['evm', custodyLedgerV3({
+        cycleId: 'cycle', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId, claimed: '10', returnReceived: '3',
       })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, true);
-  assert.equal(custody.atRiskMicroUsdg, '7');
+  assert.equal(custody.atRiskMicroUsd, '14');
 });
 
-test('a canonical EVM USDG v2 row with a null observation and a nonzero current-custody bucket is unvalued', async () => {
+test('a canonical native ETH v3 row with a null observation and a nonzero current-custody bucket is unvalued', async () => {
   const repository = custodyRepository({
     cycle: {
       cycleId: 'cycle',
       terminalState: null,
-      custodyLedgers: new Map([['evm', custodyLedgerV2({
-        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, residual: '1',
+      custodyLedgers: new Map([['evm', custodyLedgerV3({
+        cycleId: 'cycle', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId, residual: '1',
       })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, true);
 });
 
-test('a canonical EVM USDG v2 row with a non-null observation is never marked unvalued by this rule', async () => {
+test('a canonical native ETH v3 row with a non-null observation is never marked unvalued by this rule', async () => {
   const repository = custodyRepository({
     cycle: {
       cycleId: 'cycle',
       terminalState: null,
-      custodyLedgers: new Map([['evm', custodyLedgerV2({
-        cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId, claimed: '10', returnReceived: '3',
-        verifiedCurrentBalance: custodyBalanceObservation({ chainId: evmUsdg.chainId, assetId: evmUsdg.assetId }),
+      custodyLedgers: new Map([['evm', custodyLedgerV3({
+        cycleId: 'cycle', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId, claimed: '10', returnReceived: '3',
+        verifiedCurrentBalance: custodyBalanceObservation({ chainId: nativeAsset.chainId, assetId: nativeAsset.assetId }),
       })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, false);
-  assert.equal(custody.atRiskMicroUsdg, '7');
+  assert.equal(custody.atRiskMicroUsd, '14');
 });
 
-test('a genuine first-write v2 row with both new fields null and zero buckets leaves the projection unaffected', async () => {
+test('a genuine first-write v3 row with both new fields null and zero buckets leaves the projection unaffected', async () => {
   const repository = custodyRepository({
     cycle: {
       cycleId: 'cycle',
       terminalState: null,
-      custodyLedgers: new Map([['evm', custodyLedgerV2({ cycleId: 'cycle', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId })]]),
+      custodyLedgers: new Map([['evm', custodyLedgerV3({ cycleId: 'cycle', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, false);
-  assert.equal(custody.outstandingMicroUsdg, '0');
-  assert.equal(custody.atRiskMicroUsdg, '0');
+  assert.equal(custody.outstandingMicroUsd, '0');
+  assert.equal(custody.atRiskMicroUsd, '0');
 });
 
 test('two cycles sharing one wallet observation are still reduced independently, never summed', async () => {
-  const sharedObservation = custodyBalanceObservation({ chainId: evmUsdg.chainId, assetId: evmUsdg.assetId });
+  const sharedObservation = custodyBalanceObservation({ chainId: nativeAsset.chainId, assetId: nativeAsset.assetId });
   const repository = custodyRepository({
     alpha: {
       cycleId: 'alpha',
       terminalState: null,
-      custodyLedgers: new Map([['evm', custodyLedgerV2({
-        cycleId: 'alpha', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+      custodyLedgers: new Map([['evm', custodyLedgerV3({
+        cycleId: 'alpha', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId,
         claimed: '10', returnReceived: '0', verifiedCurrentBalance: sharedObservation,
       })]]),
     },
     beta: {
       cycleId: 'beta',
       terminalState: null,
-      custodyLedgers: new Map([['evm', custodyLedgerV2({
-        cycleId: 'beta', chainId: evmUsdg.chainId, assetId: evmUsdg.assetId,
+      custodyLedgers: new Map([['evm', custodyLedgerV3({
+        cycleId: 'beta', chainId: nativeAsset.chainId, assetId: nativeAsset.assetId,
         claimed: '20', returnReceived: '5', verifiedCurrentBalance: sharedObservation,
       })]]),
     },
   });
-  const custody = await projectPolicyCustody({ cycleRepository: repository, evmUsdg });
+  const custody = await projectPolicyCustody({ valueAmountUsd: syntheticUsdValuation, now: () => 1000, cycleRepository: repository, nativeAsset });
   assert.equal(custody.unvaluedExposure, false);
-  assert.equal(custody.atRiskMicroUsdg, '25');
-  assert.deepEqual(custody.cycles.map(cycle => [cycle.cycleId, cycle.atRiskMicroUsdg]), [
-    ['alpha', '10'],
-    ['beta', '15'],
+  assert.equal(custody.atRiskMicroUsd, '50');
+  assert.deepEqual(custody.cycles.map(cycle => [cycle.cycleId, cycle.atRiskMicroUsd]), [
+    ['alpha', '20'],
+    ['beta', '30'],
   ]);
 });
 
