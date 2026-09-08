@@ -2143,6 +2143,31 @@ for (const failure of ['no-transports', 'outgoing-finalized', 'owner-changed']) 
     assert.equal(cycleRepository.heldPositions.length, 0);
     assert.equal(cycleRepository.held.length, 1);
     assert.equal(cycleRepository.held[0].terminalState, 'HELD_DATA_UNVERIFIED');
+    assert.equal(cycleRepository.held[0].evidence.verificationStep, {
+      'no-transports': 'transports', 'owner-changed': 'finalized-ownership',
+      'outgoing-finalized': 'finalized-signature-and-transfer',
+    }[failure]);
+    assert.equal(cycleRepository.ledgers.length, 0);
+  });
+}
+
+for (const errorName of ['AbortError', 'TypeError']) {
+  test(`overdue buyback propagates ${errorName} without a custody mutation`, async () => {
+    const amount = { ...settlementAsset(), amountAtomic: '85' };
+    const submitted = { packIndex: 0, decision: 'submitted', memo: MEMO, mint: CARD_ASSET,
+      signature: BUYBACK_SIGNATURE, quote: amount, refundAmount: amount };
+    const cycleRepository = repository({
+      stages: { open: { status: 'COMPLETE', evidence: { packs: [openedPack()] } } },
+      attempts: { buyback: { attempt: { state: 'RESPONSE_RECORDED' }, sentAtMs: 1_700_000_000_000, responseEvidence: { packs: [submitted] } } },
+    });
+    const original = new Error('verification interrupted'); original.name = errorName;
+    const client = rpcClient({ cardOwner: () => { throw original; } });
+    await assert.rejects(reconcileLiveBuyback({
+      adapters: { collectorCrypt: { async getBuybackCheck() { return { exists: false }; } }, solana: { client } },
+      config: baseConfig(), cycleRepository, context: { cycleId: CYCLE_ID, nowMs: 1_700_001_800_000 },
+    }), error => error === original || error.cause === original);
+    assert.equal(cycleRepository.held.length, 0);
+    assert.equal(cycleRepository.heldPositions.length, 0);
     assert.equal(cycleRepository.ledgers.length, 0);
   });
 }

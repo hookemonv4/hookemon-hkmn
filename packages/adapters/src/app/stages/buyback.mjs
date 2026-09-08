@@ -885,22 +885,32 @@ export async function reconcileLiveBuyback({ adapters, config, cycleRepository, 
       // A deadline ends automatic waiting; it does not prove that Operations still owns the card.
       // Missing transports, ownership uncertainty or a finalized outgoing transfer hold the cycle
       // without inventing a held-asset position or treating unattributed proceeds as available.
+      let verificationStep = 'transports';
       try {
         if (!canReconcile) throw new Error('verification transports are unavailable');
+        verificationStep = 'finalized-ownership';
         await verifyFinalizedOwnership({ adapters, config, pack: submitted, openEvidencePacks });
         if (typeof submitted.signature === 'string') {
+          verificationStep = 'finalized-signature-and-transfer';
           const status = await readFinalizedSignatureStatus(adapters.solana.client, submitted.signature);
           if (status !== null && !status.err && await cardLeftOperator({ adapters, signature: submitted.signature,
             mint: submitted.mint, owner: config.accounts.solana, assetKind })) {
             throw new Error('finalized outgoing card transfer remains unresolved with the provider');
           }
         }
-      } catch {
+      } catch (error) {
+        // Cancellation and programming defects must not become a terminal custody decision.
+        const seen = new Set();
+        for (let cause = error; cause && !seen.has(cause); cause = cause.cause) {
+          seen.add(cause);
+          if (['AbortError', 'TypeError', 'ReferenceError', 'SyntaxError'].includes(cause.name)) throw error;
+        }
         return holdWholeCycleForUnattributableCard(cycleRepository, context, {
           stage: 'buyback', memo: submitted.memo, mint: submitted.mint,
           ...(typeof submitted.signature === 'string' ? { signature: submitted.signature } : {}),
           sentAtMs: record.sentAtMs, deadlineMinutes: unresolvedCardDeadlineMinutes(config),
           reason: 'unresolved buyback has no verified current Operations custody at its deadline',
+          verificationStep,
         });
       }
       outcome = await holdPack(cycleRepository, config, context, submitted.packIndex, submitted.memo, submitted.mint, 'HELD_UNRESOLVED', {
