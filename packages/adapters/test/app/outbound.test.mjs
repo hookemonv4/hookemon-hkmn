@@ -18,8 +18,8 @@ import {
   reconcileLiveOutbound,
 } from '../../src/app/stages/outbound.mjs';
 
-const EVM_ACCOUNT = '0x000000000000000000000000000000000000dEaD';
-const SOLANA_ACCOUNT = '8PJ6Nrp5eyzBzYCvApEZCGpdw9AreDAnM2Haf4QRGUto';
+const EVM_ACCOUNT = '0xB54AAF746eb1e80AFDb5eb0992a75b08DB2E4384';
+const SOLANA_ACCOUNT = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const TEST_PREFLIGHT_AUTHORITY = createTestProfileMutationAuthority();
 
@@ -28,14 +28,14 @@ function fixture(name) {
 }
 
 const chains = fixture('chains.json');
-const quoteFixture = fixture('quote-outbound.json');
+const quoteFixture = JSON.parse(readFileSync(new URL('../native/relay-outbound-captured.json', import.meta.url), 'utf8'));
 // This fixture remains a deterministic recorded EVM envelope, but the admission path below
 // models an EXACT_OUTPUT quote: the requested settlement target and minimum are both 25 atomic units.
 quoteFixture.details.currencyOut.amount = '25000000';
 quoteFixture.details.currencyOut.minimumAmount = '25000000';
 quoteFixture.protocol.v2.orderData.output.payments[0].expectedAmount = '25000000';
 quoteFixture.protocol.v2.orderData.output.payments[0].minimumAmount = '25000000';
-const RELAY_DEPOSITORY = quoteFixture.steps[1].items[0].data.to;
+const RELAY_DEPOSITORY = quoteFixture.steps[0].items[0].data.to;
 
 function response(body) {
   return { ok: true, status: 200, text: async () => JSON.stringify(body) };
@@ -62,8 +62,8 @@ function admittedQuote(raw = quoteFixture) {
     deadlineUnixSeconds: raw.protocol.v2.orderData.output.deadline,
     origin: {
       chainId: 4663,
-      address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-      decimals: 6,
+      address: '0x0000000000000000000000000000000000000000',
+      decimals: 18,
       amount: raw.details.currencyIn.amount,
     },
     destination: {
@@ -79,15 +79,15 @@ function admittedQuote(raw = quoteFixture) {
 }
 
 function admission(cycleId, quote = admittedQuote()) {
-  const usdg = { chainId: '4663', assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', decimals: 6, amountAtomic: quote.origin.amount };
+  const eth = { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: quote.origin.amount };
   const destinationAsset = { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: quote.destination.amount };
   return {
-    schema: 'hookemon.policy-admission.v2',
+    schema: 'hookemon.policy-admission.v3',
     cycleId,
     quoteDigest: quote.quoteDigest,
     quantity: 1,
-    unitFundingQuote: usdg,
-    aggregateFundingQuote: usdg,
+    unitFundingQuote: eth,
+    aggregateFundingQuote: eth,
     aggregatePurchase: destinationAsset,
     relay: {
       tradeType: 'EXACT_OUTPUT',
@@ -103,17 +103,17 @@ function admission(cycleId, quote = admittedQuote()) {
   };
 }
 
-function repository(releaseAmount = '25000000') {
+function repository(releaseAmount = quoteFixture.details.currencyIn.amount) {
   return { async describeCycle(cycleId) { return { releaseAmount, admission: admission(cycleId) }; } };
 }
 
-test('prepareOutboundRequest refuses an absent MoneyConfigurationV1 before requesting a Relay quote', async () => {
+test('prepareOutboundRequest refuses an absent MoneyConfigurationV2 before requesting a Relay quote', async () => {
   let quoteCalls = 0;
   const adapters = {
     relay: {
       async quoteOutboundBridge() {
         quoteCalls += 1;
-        throw new Error('Relay must not be queried without MoneyConfigurationV1');
+        throw new Error('Relay must not be queried without MoneyConfigurationV2');
       },
     },
   };
@@ -129,7 +129,7 @@ test('prepareOutboundRequest refuses an absent MoneyConfigurationV1 before reque
       context: { cycleId: 'cycle-outbound-missing-money-configuration' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
-    /requires MoneyConfigurationV1/,
+    /requires MoneyConfigurationV2/,
   );
   assert.equal(quoteCalls, 0);
 });
@@ -147,12 +147,12 @@ test('prepareOutboundRequest binds the same cycle reserve to the configured Sola
     context: { cycleId: 'cycle-outbound-1' },
     nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
   });
-  assert.equal(request.schema, 'hookemon.outbound-relay-request.v1');
+  assert.equal(request.schema, 'hookemon.outbound-relay-request.v2');
   assert.deepEqual(request.inputAmount, {
     chainId: '4663',
-    assetId: '0x5fc5360d0400a0fd4f2af552add042d716f1d168',
-    decimals: 6,
-    amountAtomic: '25000000',
+    assetId: 'native',
+    decimals: 18,
+    amountAtomic: quoteFixture.details.currencyIn.amount,
   });
   assert.deepEqual(request.destinationAmount, {
     chainId: '792703809',
@@ -161,10 +161,9 @@ test('prepareOutboundRequest binds the same cycle reserve to the configured Sola
     amountAtomic: quoteFixture.details.currencyOut.amount,
   });
   assert.equal(request.intent.requestId, quoteFixture.requestId);
-  assert.equal(request.transactions.length, 2);
+  assert.equal(request.transactions.length, 1);
   assert.deepEqual(request.transactions.map(transaction => transaction.transaction), [
     quoteFixture.steps[0].items[0].data,
-    quoteFixture.steps[1].items[0].data,
   ]);
 });
 
@@ -187,7 +186,7 @@ test('prepareOutboundRequest consumes the admitted exact-output quote without re
         relay: { solanaMint: SOLANA_MINT, evmDepository: RELAY_DEPOSITORY },
         moneyConfiguration: moneyConfiguration(),
       },
-      cycleRepository: { async describeCycle() { return { releaseAmount: '25000000', admission: admission(cycleId, shortQuote) }; } },
+      cycleRepository: { async describeCycle() { return { releaseAmount: quoteFixture.details.currencyIn.amount, admission: admission(cycleId, shortQuote) }; } },
       context: { cycleId },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
@@ -233,7 +232,7 @@ test('prepareOutboundRequest fails closed when the exact configured Solana mint 
 
 test('prepareOutboundRequest rejects a recorded-shaped Relay transaction whose depository is outside the explicit allowlist', async () => {
   const altered = structuredClone(quoteFixture);
-  altered.steps[1].items[0].data.to = `0x${'9'.repeat(40)}`;
+  altered.steps[0].items[0].data.to = `0x${'9'.repeat(40)}`;
   await assert.rejects(
     () => prepareOutboundRequest({
       adapters: { relay: relayClient(altered) },
@@ -247,7 +246,7 @@ test('prepareOutboundRequest rejects a recorded-shaped Relay transaction whose d
       context: { cycleId: 'cycle-outbound-depository' },
       nowMs: (quoteFixture.protocol.v2.orderData.output.deadline * 1000) - 1,
     }),
-    /depository/,
+    /native outbound deposit target\/value differs from the bound principal/,
   );
 });
 
@@ -1800,15 +1799,15 @@ test('reconcileLiveOutbound independently finalizes the approval and deposit bef
 
 function moneyConfiguration({ solanaMint = SOLANA_MINT } = {}) {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(), decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: { chainId: '792703809', assetId: solanaMint, decimals: 6 },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(), decimals: 6, amountAtomic: '0' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       solanaReceive: { chainId: '792703809', assetId: solanaMint, decimals: 6, amountAtomic: '0' },
-      returnUsdg: { chainId: '4663', assetId: quoteFixture.details.currencyIn.currency.address.toLowerCase(), decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '600000000' },
