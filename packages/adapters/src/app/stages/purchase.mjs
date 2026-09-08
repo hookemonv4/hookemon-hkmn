@@ -427,9 +427,6 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       || generation.endpoint !== 'generatePack' || generation.turbo !== false || quantity !== 1)) {
       throw new Error('purchase generation must bind one non-turbo generatePack request');
     }
-    if (generation !== undefined && typeof adapters.collectorCrypt.generatePack !== 'function') {
-      throw new Error('purchase requires the bound generatePack transport');
-    }
     requireCollectorOnlyMutationAuthority(config, preflightAuthority);
 
     // Canonical typed-money validation of the immutable admitted per-pack amount, and proof its
@@ -480,6 +477,10 @@ export async function mutatePurchase({ liveMode, adapters, signerClient, config,
       }
     } else {
       legacyPolicy = requirePolicy(config, 'purchase');
+    }
+
+    if (generation !== undefined && typeof adapters.collectorCrypt.generatePack !== 'function') {
+      throw new Error('purchase requires the bound generatePack transport');
     }
 
     // Persist exactly what is about to be requested -- cycle, quantity, and pack code -- before
