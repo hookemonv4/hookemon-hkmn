@@ -1,0 +1,125 @@
+{
+  "schema": "hookemon.native-eth-interface-proposal.v1",
+  "status": "PROPOSED_NOT_AUTHORITATIVE",
+  "baseCommit": "56f185e07dfafe5533df617ec1dad473ecb63f68",
+  "baseRequirementsRevision": 70,
+  "baseRequirementsSha256": "d8162e9fdbcc0e2b2f2e4091b25bca9d51e6250afbcc1dabd8817cf762826d51",
+  "proposedRequirementsRevision": 71,
+  "proposedRequirementsSha256": "28c74cd1b99ffe33a525684a8e30eda66eb48109943d7cc95f0a8b34dfcfe76c",
+  "patchSha256": "6e80411c4b7830cca8c48a2dc1e4781d20674f2157f85f461da70a0d3b5cbafd",
+  "changes": [
+    {
+      "requirementId": "REQ-provider-binding-1",
+      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+    },
+    {
+      "requirementId": "REQ-canonical-market-1",
+      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+    },
+    {
+      "requirementId": "REQ-canonical-market-3",
+      "rationale": "Native currency has one valid order, not two token-address permutations."
+    },
+    {
+      "requirementId": "REQ-fee-accounting-1",
+      "rationale": "Only native currency0 is canonical; existing cumulative remainder rules remain controlling."
+    },
+    {
+      "requirementId": "REQ-fee-accounting-3",
+      "rationale": "Keep claim authorization and rollback while changing only the native transfer proof."
+    },
+    {
+      "requirementId": "REQ-fee-accounting-4",
+      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+    },
+    {
+      "requirementId": "REQ-fee-accounting-5",
+      "rationale": "Preserve excluded legacy contracts while testing native adversaries."
+    },
+    {
+      "requirementId": "REQ-canonical-market-4",
+      "rationale": "Only native currency0 is canonical."
+    },
+    {
+      "requirementId": "REQ-canonical-market-5",
+      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+    },
+    {
+      "requirementId": "REQ-fee-accounting-6",
+      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+    },
+    {
+      "requirementId": "REQ-fee-accounting-7",
+      "rationale": "The selected quote and settlement asset is native ETH; preserve the existing economic rule."
+    },
+    {
+      "requirementId": "REQ-operations-wallet-1",
+      "rationale": "A trusted post-payment event is the native internal-claim proof."
+    },
+    {
+      "requirementId": "REQ-operations-wallet-2",
+      "rationale": "Preserve time/count/rotation rules while changing cap units."
+    },
+    {
+      "requirementId": "REQ-launch-orchestration-2",
+      "rationale": "Exact native debt must be checked against real pinned manager behavior."
+    },
+    {
+      "requirementId": "REQ-canonical-market-7",
+      "rationale": "Only native currency0 is canonical."
+    },
+    {
+      "requirementId": "REQ-cycle-repository-1",
+      "rationale": "Keep held cost attribution and exclude unverified USD/USDC parity."
+    },
+    {
+      "requirementId": "REQ-cycle-runner-3",
+      "rationale": "Add exact native proof negative cases."
+    },
+    {
+      "requirementId": "REQ-eligibility-snapshot-1",
+      "rationale": "Contract recipients remain eligible; native feasibility replaces token freeze checks."
+    },
+    {
+      "requirementId": "REQ-direct-payout-1",
+      "rationale": "Preserve terminal quarantine and unpaid rights without inventing a retry feature."
+    },
+    {
+      "requirementId": "REQ-policy-engine-1",
+      "rationale": "Preserve economic caps and extend the existing engine with exact quote-based USD accounting."
+    },
+    {
+      "requirementId": "REQ-provider-binding-4",
+      "rationale": "Historical fee evidence cannot establish current native custom-model admission."
+    },
+    {
+      "requirementId": "REQ-policy-engine-2",
+      "rationale": "Native assets have no ERC20 decimals/pause/freeze calls."
+    }
+  ],
+  "unchangedCollectorRequirement": "REQ-transaction-policy-1",
+  "preservedHistoricalRequirements": [
+    "REQ-provider-binding-2",
+    "REQ-release-evidence-4",
+    "REQ-phase-boundary-1"
+  ],
+  "historicalScopeMap": {
+    "REQ-provider-binding-2": {
+      "classification": "HISTORICAL_SELECTED_RELEASE_EXCLUDED",
+      "nativeReleaseAuthority": false,
+      "disposition": "Preserved unchanged; selected Phase3 deployment excludes vault/Phase1 paths and this requirement must not be used as native release authority."
+    },
+    "REQ-release-evidence-4": {
+      "classification": "HISTORICAL_SELECTED_RELEASE_EXCLUDED",
+      "nativeReleaseAuthority": false,
+      "disposition": "Preserved unchanged; selected Phase3 deployment excludes vault/Phase1 paths and this requirement must not be used as native release authority."
+    },
+    "REQ-phase-boundary-1": {
+      "classification": "HISTORICAL_SELECTED_RELEASE_EXCLUDED",
+      "nativeReleaseAuthority": false,
+      "disposition": "Preserved unchanged; selected Phase3 deployment excludes vault/Phase1 paths and this requirement must not be used as native release authority."
+    }
+  },
+  "providerEvidenceCommit": "acce05b40340310ef76f86ea77ae23deaf5d1369",
+  "fundingEvidenceCommit": "07f32246d3acb89f7df0ad552388cdcc1d5bf383"
+}
