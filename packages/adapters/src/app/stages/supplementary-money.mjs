@@ -35,6 +35,7 @@ import {
   extractRelaySolanaInstructionPlan,
   readReturnLegDestinationProof,
   isProcessRpcReturnLegDestinationProof,
+  requireReturnMutationAuthority,
   returnPolicyRecoveryContext,
   returnRecoveryContext,
   typedAmount,
@@ -300,6 +301,7 @@ export async function mutateSupplementaryReturn({
       preflightAuthority,
     });
     await assertReturnLamportReserve({ client, configured, money, decoded: approved.decoded });
+    requireReturnMutationAuthority(preflightAuthority);
     const policyRecovery = returnPolicyRecoveryContext(attempt.recoveryContext);
     const result = await recoverTransactionPolicyBroadcast({
       client: approved.policySigner,

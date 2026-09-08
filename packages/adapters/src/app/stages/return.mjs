@@ -805,7 +805,7 @@ function returnDecodeOptions({ client, blockhash, blockhashLastValidHeight }) {
   });
 }
 
-function requireReturnMutationAuthority(preflightAuthority) {
+export function requireReturnMutationAuthority(preflightAuthority) {
   if (preflightAuthority === TEST_PROFILE_MUTATION_AUTHORITY) {
     if (process.env.NODE_TEST_CONTEXT === undefined) {
       throw new Error('return fixture authority is available only from the Node test runner');

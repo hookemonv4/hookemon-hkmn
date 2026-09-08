@@ -324,6 +324,16 @@ test('mutateSupplementaryReturn signs durably before broadcast, resumes after a 
   assert.equal(attempt.state, 'SIGNED');
   assert.equal(attempt.rawSignedBytes, persistedBytes);
 
+  // Durable signed bytes do not grant a replacement caller live mutation authority.
+  await assert.rejects(() => mutateSupplementaryReturn({
+    liveMode: true, adapters, config, signerClient, cycleRepository: repository, context,
+    confirmedSale: confirmedSale(), now: () => 1_700_000_000_000,
+    preflightAuthority: Object.freeze({}),
+  }), /return fixture authority is invalid/);
+  assert.equal(broadcastCalls, 1, 'an invalid authority must not rebroadcast persisted bytes');
+  assert.equal(signCalls, 1, 'authority refusal must not sign again');
+  assert.equal((await repository.readPagedPayoutState(repository.cycleId, supplementaryReturnStageId(POSITION_ID))).state, 'SIGNED');
+
   // Restart resumes the SAME persisted signed bytes -- never re-signs.
   await mutateSupplementaryReturn({
     liveMode: true, adapters, config, signerClient, cycleRepository: repository, context,

@@ -104,3 +104,5 @@ node --test packages/adapters/test/app/supplementary-buyback-production-binding.
   were signed under. If the production binding registry has changed since signing, restore the
   original registered binding before retrying recovery; never re-sign different bytes to route
   around a drifted binding.
+
+A supplementary return rechecks the same live mutation authority as the main return immediately before recovering a broadcast from durable signed bytes. Invalid authority leaves the signed attempt intact and performs no signing or broadcast; the approved recovery reuses those exact bytes.
