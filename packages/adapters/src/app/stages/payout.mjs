@@ -1,6 +1,6 @@
+import { applyNativeCustodyGasPayment, createNativeTransactionGasProof, createNativePaymentProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
 import { createHash } from 'node:crypto';
 import {
-  encodeFunctionData,
   getAddress,
   isAddress,
   keccak256,
@@ -12,19 +12,18 @@ import {
 
 import {
   compileDirectPayoutPlan,
-  createUsdgPayoutAmount,
+  createNativePayoutAmount,
   directPayoutPlanDigest,
 } from '../../../../runner/src/distribution/payout-plan.mjs';
 import { digest as canonicalDigest } from '../../../../runner/src/cycle/journal.mjs';
 import { assertMoneyConfiguration } from '../../../../runner/src/cycle/money-schemas.mjs';
 import {
-  createEvmCustodyBalanceObservationReader,
+  createNativeCustodyBalanceObservationReader,
   EVM_CUSTODY_BALANCE_OBSERVATION_SCHEMA,
 } from '../../evm-custody-balance-observation.mjs';
 import { requireLiveRetainedCustodyMutationAuthority } from '../../../../runner/src/cycle/preflight.mjs';
 import { buildAuthorizePayoutCall, buildFundPayoutFromPegCycleCall, readPendingAuthorization } from '../../hook-contract-client.mjs';
 import {
-  readFinalizedErc20TransferProof,
   readFinalizedTransactionReceipt,
   readTransaction,
 } from '../../robinhood-rpc.mjs';
@@ -75,29 +74,11 @@ const HELD_POSITION_EXCLUSIONS_FIELDS = ['schema', 'cycleId', 'count', 'position
 const HELD_POSITION_EXCLUSION_FIELDS = ['positionId', 'evidenceDigest', 'reason', 'terminalState'];
 const HELD_POSITION_ID = /^held:[0-9a-f]{64}$/;
 const HELD_POSITION_REASON = /^[A-Z][A-Z0-9_]{2,63}$/;
-const ERC20_TRANSFER_ABI = [{
-  type: 'function',
-  name: 'transfer',
-  stateMutability: 'nonpayable',
-  inputs: [
-    { name: 'to', type: 'address' },
-    { name: 'amount', type: 'uint256' },
-  ],
-  outputs: [{ name: 'ok', type: 'bool' }],
-}];
-const FROZEN_ABI = [{
-  type: 'function',
-  name: 'isFrozen',
-  stateMutability: 'view',
-  inputs: [{ name: 'account', type: 'address' }],
-  outputs: [{ type: 'bool' }],
-}];
-
 export class DirectPayoutError extends Error {}
 
 export class DirectPayoutFrozenAssetError extends DirectPayoutError {
   constructor({ operations }) {
-    super(`direct payout USDG is frozen for the Operations sender ${operations}: nothing was admitted or spent`);
+    super(`direct payout native ETH is frozen for the Operations sender ${operations}: nothing was admitted or spent`);
     this.name = 'DirectPayoutFrozenAssetError';
     this.operations = operations;
   }
@@ -115,7 +96,7 @@ export class DirectPayoutNonceInterferenceError extends DirectPayoutError {
 
 export class DirectPayoutBridgeShortfallError extends DirectPayoutError {
   constructor({ deficit }) {
-    super(`direct payout finalized available USDG is short of the attributable distributable pool by ${deficit}: nothing was admitted or spent`);
+    super(`direct payout finalized available native ETH is short of the attributable distributable pool by ${deficit}: nothing was admitted or spent`);
     this.name = 'DirectPayoutBridgeShortfallError';
     this.deficit = deficit;
   }
@@ -123,7 +104,7 @@ export class DirectPayoutBridgeShortfallError extends DirectPayoutError {
 
 export class DirectPayoutBridgeAvailabilityUnknownError extends DirectPayoutError {
   constructor() {
-    super('direct payout requires an authoritative cycle-attributable finalized-available USDG reader before admission: nothing was admitted or spent');
+    super('direct payout requires an authoritative cycle-attributable finalized-available native ETH reader before admission: nothing was admitted or spent');
     this.name = 'DirectPayoutBridgeAvailabilityUnknownError';
   }
 }
@@ -253,20 +234,20 @@ function assertAtomic(value, label, { positive = false } = {}) {
   return value;
 }
 
-function assertUsdAmount(value, label, expectedAssetId = null) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} must be a typed USDG amount`);
+function assertPrincipalAmount(value, label, expectedAssetId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} must be a typed native ETH amount`);
   const fields = ['chainId', 'assetId', 'decimals', 'amountAtomic'];
   if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) {
     fail(`${label} must use the exact typed amount schema`);
   }
-  if (!(value.chainId === 4663 || value.chainId === '4663') || value.decimals !== 6) {
-    fail(`${label} must identify USDG on chain 4663 with six decimals`);
+  if (!(value.chainId === 4663 || value.chainId === '4663') || value.decimals !== 18) {
+    fail(`${label} must identify native ETH on chain 4663 with eighteen decimals`);
   }
-  const assetId = assertAddress(value.assetId, `${label} assetId`);
-  if (expectedAssetId !== null && assetId !== assertAddress(expectedAssetId, `${label} expected assetId`)) {
-    fail(`${label} must identify the configured USDG asset`);
+  const assetId = assertNativeAsset(value.assetId);
+  if (expectedAssetId !== null && assetId !== assertNativeAsset(expectedAssetId)) {
+    fail(`${label} must identify the configured native ETH asset`);
   }
-  return createUsdgPayoutAmount({ assetId, amountAtomic: assertAtomic(value.amountAtomic, `${label} amountAtomic`) });
+  return createNativePayoutAmount({ assetId, amountAtomic: assertAtomic(value.amountAtomic, `${label} amountAtomic`) });
 }
 
 function assertHkmnAmount(value, label) {
@@ -284,7 +265,7 @@ function assertHkmnAmount(value, label) {
     fail(`${label} must identify a configured HKMN amount on chain 4663`);
   }
   return {
-    chainId: 4663,
+    chainId: '4663',
     assetId: assertAddress(value.assetId, `${label} assetId`),
     decimals: value.decimals,
     amountAtomic: assertAtomic(value.amountAtomic, `${label} amountAtomic`, { positive: true }),
@@ -349,7 +330,7 @@ function assertPlan(value) {
   if (Object.keys(value).length !== PLAN_FIELDS.length || !PLAN_FIELDS.every(field => Object.hasOwn(value, field))) {
     fail('direct payout plan must use the immutable plan schema');
   }
-  if (value.schema !== 'hookemon.direct-payout-plan.v1') fail('direct payout plan schema is invalid');
+  if (value.schema !== 'hookemon.direct-payout-plan.v2') fail('direct payout plan schema is invalid');
   if (typeof value.cycleId !== 'string' || value.cycleId.length === 0) fail('direct payout plan cycleId is invalid');
   if (typeof value.planDigest !== 'string' || !DIGEST.test(value.planDigest)) fail('direct payout plan digest is invalid');
   if (!Array.isArray(value.allocations)) fail('direct payout plan allocations are invalid');
@@ -369,11 +350,11 @@ function assertPlan(value) {
   if (!sameAmount(totalEligibleHkmn, rebuilt.totalEligibleHkmn)) {
     fail('direct payout plan total eligible HKMN does not match its frozen eligibility evidence');
   }
-  const distributablePool = assertUsdAmount(value.distributablePool, 'direct payout distributable pool');
-  const dust = assertUsdAmount(value.dust, 'direct payout dust');
-  const totalAllocated = assertUsdAmount(value.totalAllocated, 'direct payout total allocated');
-  const returnDelta = assertUsdAmount(value.returnDelta, 'direct payout return delta');
-  const previousDust = assertUsdAmount(value.previousDust, 'direct payout previous dust');
+  const distributablePool = assertPrincipalAmount(value.distributablePool, 'direct payout distributable pool');
+  const dust = assertPrincipalAmount(value.dust, 'direct payout dust');
+  const totalAllocated = assertPrincipalAmount(value.totalAllocated, 'direct payout total allocated');
+  const returnDelta = assertPrincipalAmount(value.returnDelta, 'direct payout return delta');
+  const previousDust = assertPrincipalAmount(value.previousDust, 'direct payout previous dust');
   if (BigInt(returnDelta.amountAtomic) + BigInt(previousDust.amountAtomic) !== BigInt(distributablePool.amountAtomic)) {
     fail('direct payout plan return delta and prior dust do not match the distributable pool');
   }
@@ -396,7 +377,7 @@ function assertPlan(value) {
     const recipient = assertAddress(allocation.recipient, `direct payout allocation ${index} recipient`);
     if (seen.has(recipient)) fail('direct payout plan recipients must be unique');
     seen.add(recipient);
-    return { recipient, amount: assertUsdAmount(allocation.amount, `direct payout allocation ${index} amount`) };
+    return { recipient, amount: assertPrincipalAmount(allocation.amount, `direct payout allocation ${index} amount`) };
   });
   const allocated = allocations.reduce((sum, allocation) => sum + BigInt(allocation.amount.amountAtomic), 0n);
   if (allocated !== BigInt(totalAllocated.amountAtomic)) fail('direct payout plan allocation total is invalid');
@@ -508,13 +489,9 @@ function heldPositionExclusionsForCycle(cycleId, cycle) {
   }, cycleId);
 }
 
-function directTransferCalldata(recipient, amountAtomic) {
-  return encodeFunctionData({
-    abi: ERC20_TRANSFER_ABI,
-    functionName: 'transfer',
-    args: [recipient, BigInt(amountAtomic)],
-  }).toLowerCase();
-}
+function assertNativeAsset(value) { if (value !== 'native') fail('payout asset must be native'); return value; }
+
+function directTransferCalldata() { return '0x'; }
 
 function requiredNativeAmount(plan) {
   const amount = plan.feasibility?.requiredNativeAmount;
@@ -537,7 +514,7 @@ function normalizeNonce(value, label) {
 function normalizedState(stateValue) {
   const state = copy(stateValue);
   if (!state || typeof state !== 'object' || Array.isArray(state)) fail('direct payout state is invalid');
-  if (state.schema !== 'hookemon.direct-payout-state.v1') fail('direct payout state schema is invalid');
+  if (state.schema !== 'hookemon.direct-payout-state.v2') fail('direct payout state schema is invalid');
   if (typeof state.cycleId !== 'string' || state.cycleId.length === 0) fail('direct payout state cycleId is invalid');
   if (typeof state.planDigest !== 'string' || !DIGEST.test(state.planDigest)) fail('direct payout state planDigest is invalid');
   const planInfo = assertPlan(state.plan);
@@ -545,17 +522,17 @@ function normalizedState(stateValue) {
     fail('direct payout state does not retain its immutable payout plan');
   }
   state.operations = assertAddress(state.operations, 'direct payout state Operations address');
-  state.usdgAddress = assertAddress(state.usdgAddress, 'direct payout state USDG address');
+  state.assetId = assertNativeAsset(state.assetId);
   if (state.operations !== planInfo.plan.returnEvidence.operations
-    || state.usdgAddress !== planInfo.plan.returnEvidence.usdgAddress) {
+    || state.assetId !== planInfo.plan.returnEvidence.assetId) {
     fail('direct payout state identities must match the bound finalized return identities');
   }
   if (typeof state.manifestFrozen !== 'boolean' || typeof state.feasibilityChecked !== 'boolean') {
     fail('direct payout state flags are invalid');
   }
   state.heldPositionExclusions = normalizeHeldPositionExclusions(state.heldPositionExclusions, state.cycleId);
-  state.distributablePool = assertUsdAmount(state.distributablePool, 'direct payout state distributable pool');
-  state.dust = assertUsdAmount(state.dust, 'direct payout state dust');
+  state.distributablePool = assertPrincipalAmount(state.distributablePool, 'direct payout state distributable pool');
+  state.dust = assertPrincipalAmount(state.dust, 'direct payout state dust');
   if (state.distributablePool.amountAtomic !== planInfo.distributablePool.amountAtomic
     || state.dust.amountAtomic !== planInfo.dust.amountAtomic) {
     fail('direct payout state totals do not match its immutable payout plan');
@@ -592,95 +569,34 @@ function sameAmount(left, right) {
 }
 
 function normalizeFinalizedTransfer(value, index, attempt, operations) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    fail(`direct payout recipient attempt ${index} finality evidence is invalid`);
-  }
-  const fields = [
-    'from', 'to', 'amount', 'finalizedBlockNumber', 'finalizedBlockHash',
-    'receiptBlockNumber', 'receiptBlockHash', 'previousBlockNumber', 'previousBlockHash',
-    'sourceBalanceBeforeAtomic', 'sourceBalanceAfterAtomic', 'sourceBalanceDeltaAtomic',
-    'recipientBalanceBeforeAtomic', 'recipientBalanceAfterAtomic', 'recipientBalanceDeltaAtomic', 'logIndexes',
-  ];
-  if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) {
-    fail(`direct payout recipient attempt ${index} finality evidence must use the exact schema`);
-  }
-  if (!equalAddress(value.from, operations) || !equalAddress(value.to, attempt.recipient)) {
-    fail(`direct payout recipient attempt ${index} finality evidence has the wrong transfer endpoints`);
-  }
-  const amount = assertUsdAmount(value.amount, `direct payout recipient attempt ${index} finalized amount`);
-  if (!sameAmount(amount, attempt.amount)) fail(`direct payout recipient attempt ${index} finality evidence has the wrong transfer amount`);
-  const decimalFields = [
-    'finalizedBlockNumber', 'receiptBlockNumber', 'previousBlockNumber',
-    'sourceBalanceBeforeAtomic', 'sourceBalanceAfterAtomic', 'sourceBalanceDeltaAtomic',
-    'recipientBalanceBeforeAtomic', 'recipientBalanceAfterAtomic', 'recipientBalanceDeltaAtomic',
-  ];
-  for (const field of decimalFields) {
-    assertAtomic(value[field], `direct payout recipient attempt ${index} ${field}`, { positive: field === 'finalizedBlockNumber' || field === 'receiptBlockNumber' });
-  }
-  for (const field of ['finalizedBlockHash', 'receiptBlockHash', 'previousBlockHash']) {
-    if (typeof value[field] !== 'string' || !TRANSACTION_HASH.test(value[field])) {
-      fail(`direct payout recipient attempt ${index} ${field} is invalid`);
-    }
-  }
-  if (value.sourceBalanceDeltaAtomic !== attempt.amount.amountAtomic
-    || value.recipientBalanceDeltaAtomic !== attempt.amount.amountAtomic) {
-    fail(`direct payout recipient attempt ${index} finality evidence has the wrong balance delta`);
-  }
-  if (!Array.isArray(value.logIndexes) || value.logIndexes.length === 0) {
-    fail(`direct payout recipient attempt ${index} finality evidence must include transfer log indexes`);
-  }
-  const seenLogIndexes = new Set();
-  for (const logIndex of value.logIndexes) {
-    const canonical = assertAtomic(logIndex, `direct payout recipient attempt ${index} finality log index`);
-    if (seenLogIndexes.has(canonical)) fail(`direct payout recipient attempt ${index} finality log indexes must be unique`);
-    seenLogIndexes.add(canonical);
-  }
-  return {
-    from: assertAddress(value.from, `direct payout recipient attempt ${index} finality from`),
-    to: assertAddress(value.to, `direct payout recipient attempt ${index} finality to`),
-    amount,
-    finalizedBlockNumber: value.finalizedBlockNumber,
-    finalizedBlockHash: value.finalizedBlockHash.toLowerCase(),
-    receiptBlockNumber: value.receiptBlockNumber,
-    receiptBlockHash: value.receiptBlockHash.toLowerCase(),
-    previousBlockNumber: value.previousBlockNumber,
-    previousBlockHash: value.previousBlockHash.toLowerCase(),
-    sourceBalanceBeforeAtomic: value.sourceBalanceBeforeAtomic,
-    sourceBalanceAfterAtomic: value.sourceBalanceAfterAtomic,
-    sourceBalanceDeltaAtomic: value.sourceBalanceDeltaAtomic,
-    recipientBalanceBeforeAtomic: value.recipientBalanceBeforeAtomic,
-    recipientBalanceAfterAtomic: value.recipientBalanceAfterAtomic,
-    recipientBalanceDeltaAtomic: value.recipientBalanceDeltaAtomic,
-    logIndexes: [...value.logIndexes],
-  };
+  const fields = ['schema', 'kind', 'chainId', 'assetId', 'decimals', 'transactionHash', 'transactionDigest', 'blockNumber', 'blockHash', 'timestampUnixSeconds', 'source', 'recipient', 'amountWei', 'calldataDigest', 'nonce', 'receiptStatus', 'gasSpentWei', 'evidenceDigest'];
+  if (!value || Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) fail(`direct payout recipient attempt ${index} native proof must use the exact schema`);
+  if (value.schema !== 'hookemon.native-payment-proof.v1' || value.kind !== 'direct' || value.chainId !== '4663' || value.assetId !== 'native' || value.decimals !== 18
+    || value.receiptStatus !== 'success' || value.source !== operations || value.recipient !== attempt.recipient
+    || value.amountWei !== attempt.amount.amountAtomic || value.calldataDigest !== keccak256('0x')
+    || (attempt.txHash && value.transactionHash !== attempt.txHash)
+    || (attempt.nonce !== undefined && value.nonce !== attempt.nonce)) fail('direct payout native proof does not match the bound successful payment');
+  for (const field of ['blockNumber', 'timestampUnixSeconds', 'amountWei', 'nonce', 'gasSpentWei']) assertAtomic(value[field], `native proof ${field}`);
+  for (const field of ['blockHash', 'transactionHash', 'calldataDigest']) if (!TRANSACTION_HASH.test(value[field])) fail(`native proof ${field} is invalid`);
+  if (!DIGEST.test(value.transactionDigest) || (attempt.rawSignedBytes && value.transactionDigest !== canonicalDigest(attempt.rawSignedBytes))) fail('native proof signed-byte digest is invalid');
+  const { evidenceDigest, ...facts } = value;
+  if (canonicalDigest(facts) !== evidenceDigest) fail('native proof evidence digest is invalid');
+  return { ...value };
 }
 
-/**
- * Read-only seam for external projections (e.g. public accounting) that need to verify a
- * FINALIZED recipient's persisted evidence without re-implementing or weakening the producer's
- * canonical finality-proof validator. Reuses the exact same 16-field schema/endpoint/amount/
- * block/balance-delta/log-index checks that gate a live FINALIZED transition in
- * `normalizeAttempt` -- never a duplicated, amount-only check -- plus a transaction-hash format
- * check the raw evidence alone does not carry. Throws `DirectPayoutError` on any malformed,
- * incomplete, or mismatched evidence.
- *
- * Callers MUST supply `operations`, `recipient`, and `amount` from their own trusted context
- * (the frozen plan, configured USDG asset, and configured Operations address) -- never derived
- * from the evidence under verification. This is what binds the asset to the actually-configured
- * USDG contract instead of any syntactically valid same-chain, same-decimals token the evidence
- * happens to assert.
- */
+/** Read-only persisted proof integrity check. Trusted Operations, recipient and amount come from
+ * the frozen plan; live payment authorization additionally requires the process RPC capability. */
 export function assertFinalizedPayoutTransferEvidence({ transactionHash, finalizedTransfer, operations, recipient, amount }) {
   if (typeof transactionHash !== 'string' || !TRANSACTION_HASH.test(transactionHash)) {
     fail('finalized payout transfer evidence transactionHash is invalid');
   }
   const expectedOperations = assertAddress(operations, 'finalized payout transfer evidence operations');
   const expectedRecipient = assertAddress(recipient, 'finalized payout transfer evidence recipient');
-  const expectedAmount = assertUsdAmount(amount, 'finalized payout transfer evidence amount');
+  const expectedAmount = assertPrincipalAmount(amount, 'finalized payout transfer evidence amount');
   return normalizeFinalizedTransfer(
     finalizedTransfer,
     'external verification',
-    { recipient: expectedRecipient, amount: expectedAmount },
+    { recipient: expectedRecipient, amount: expectedAmount, txHash: transactionHash.toLowerCase() },
     expectedOperations,
   );
 }
@@ -722,7 +638,7 @@ function normalizeAttempt(value, index, recipients, { operations, maxGasPriceWei
   const recipient = assertAddress(value.recipient, `direct payout recipient attempt ${index} recipient`);
   if (recipients.has(recipient)) fail('direct payout recipient attempts must be unique');
   recipients.add(recipient);
-  const amount = assertUsdAmount(value.amount, `direct payout recipient attempt ${index} amount`);
+  const amount = assertPrincipalAmount(value.amount, `direct payout recipient attempt ${index} amount`);
   const states = new Set(['PREPARED', 'SIGNED', 'BROADCAST', 'FINALIZED', 'REFUSED', 'NONCE_INTERFERENCE']);
   if (!states.has(value.state)) fail(`direct payout recipient attempt ${index} state is invalid`);
   const nonce = value.nonce === null ? null : assertAtomic(value.nonce, `direct payout recipient attempt ${index} nonce`);
@@ -825,7 +741,7 @@ function normalizeRefusalEvidence(value, index, attempt) {
   if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) {
     fail(`direct payout recipient attempt ${index} refusal evidence must use the exact schema`);
   }
-  if (!['USDG_FROZEN', 'TRANSACTION_REVERTED'].includes(value.reason)) {
+  if (!['TRANSACTION_REVERTED'].includes(value.reason)) {
     fail(`direct payout recipient attempt ${index} refusal reason is invalid`);
   }
   const transactionRequired = attempt.nonce !== null;
@@ -851,10 +767,10 @@ function normalizeRefusalEvidence(value, index, attempt) {
 
 function normalizeQuarantine(value, index) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`direct payout quarantine ${index} is invalid`);
-  if (!['USDG_FROZEN', 'TRANSACTION_REVERTED', 'NONCE_INTERFERENCE'].includes(value.reason)) fail(`direct payout quarantine ${index} reason is invalid`);
+  if (!['TRANSACTION_REVERTED', 'NONCE_INTERFERENCE'].includes(value.reason)) fail(`direct payout quarantine ${index} reason is invalid`);
   return {
     recipient: assertAddress(value.recipient, `direct payout quarantine ${index} recipient`),
-    amount: assertUsdAmount(value.amount, `direct payout quarantine ${index} amount`),
+    amount: assertPrincipalAmount(value.amount, `direct payout quarantine ${index} amount`),
     reason: value.reason,
   };
 }
@@ -907,9 +823,9 @@ function buildTransaction(state, attempt) {
     chainId: 4663,
     nonce: attempt.nonce,
     from: state.operations,
-    to: state.usdgAddress,
+    to: attempt.recipient,
     data: attempt.calldata,
-    value: '0',
+    value: attempt.amount.amountAtomic,
     gas: state.plan.feasibility.measuredTransferGas,
     gasPrice: attempt.gasPriceWei,
   };
@@ -920,9 +836,6 @@ function parsedFeePerGas(parsed, state) {
   const allowedGasLimit = BigInt(state.plan.feasibility.measuredTransferGas);
   if (gasLimit === null || gasLimit === 0n || gasLimit > allowedGasLimit) {
     fail('direct payout signed transaction exceeds the frozen transfer gas envelope');
-  }
-  if (BigInt(parsed.value ?? 0n) !== 0n) {
-    fail('direct payout signed transaction must not transfer native value');
   }
   const fee = parsed.gasPrice ?? parsed.maxFeePerGas;
   if (fee === undefined || fee === null || BigInt(fee) === 0n
@@ -950,7 +863,8 @@ async function assertSignedTransaction({ rawSignedBytes, state, attempt }) {
   }
   const parsedChainId = parsed.chainId === undefined || parsed.chainId === null ? null : BigInt(parsed.chainId);
   if (parsedChainId !== 4663n || BigInt(parsed.nonce) !== BigInt(attempt.nonce)
-    || !equalAddress(parsed.to, state.usdgAddress)
+    || !equalAddress(parsed.to, attempt.recipient)
+    || BigInt(parsed.value ?? 0n) !== BigInt(attempt.amount.amountAtomic)
     || (parsed.data ?? '0x').toLowerCase() !== attempt.calldata
     || !equalAddress(sender, state.operations)) {
     fail('direct payout signed transaction does not match its persisted recipient, nonce, and calldata');
@@ -968,7 +882,7 @@ async function assertSignedTransaction({ rawSignedBytes, state, attempt }) {
 }
 
 async function assertFirstSignatureFeasibility({ state, client }) {
-  const required = requiredNativeAmount(state.plan);
+  const required = requiredNativeAmount(state.plan) + BigInt(state.distributablePool.amountAtomic);
   if (typeof client?.getBalance !== 'function') {
     fail('direct payout requires getBalance before the first payout signature');
   }
@@ -977,13 +891,6 @@ async function assertFirstSignatureFeasibility({ state, client }) {
   if (observedAtomic < required) {
     fail('direct payout native balance is below the frozen feasibility envelope');
   }
-}
-
-async function isRecipientFrozen(client, token, recipient) {
-  if (typeof client?.readContract !== 'function') fail('direct payout requires a USDG readContract client');
-  const result = await client.readContract({ address: token, abi: FROZEN_ABI, functionName: 'isFrozen', args: [recipient] });
-  if (typeof result !== 'boolean') fail('USDG isFrozen(address) returned a non-boolean value');
-  return result;
 }
 
 async function persist(payoutStore, state) {
@@ -1003,8 +910,8 @@ function assertRuntimeConfiguration(state, config) {
   if (!config || typeof config !== 'object') fail('direct payout configuration is required');
   if (config.payout?.legacyVault === true) fail('legacy payout mode is explicitly disabled for Operations EOA payouts');
   if (config.chainId !== undefined && Number(config.chainId) !== 4663) fail('direct payout requires chainId 4663');
-  if (!equalAddress(config.accounts?.evm, state.operations) || !equalAddress(config.contracts?.usdg, state.usdgAddress)) {
-    fail('direct payout runtime configuration does not match the persisted Operations or USDG identity');
+  if (!equalAddress(config.accounts?.evm, state.operations) || config.moneyConfiguration?.assets?.eth?.assetId !== state.assetId) {
+    fail('direct payout runtime configuration does not match the persisted Operations or native ETH identity');
   }
 }
 
@@ -1063,56 +970,48 @@ function assertDirectPayoutMoneyConfiguration(state, config) {
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'direct payout money configuration');
   } catch (error) {
-    fail(`direct payout requires MoneyConfigurationV1: ${error.message}`);
+    fail(`direct payout requires MoneyConfigurationV2: ${error.message}`);
   }
-  if (money.assets.usdg.chainId !== '4663'
-    || money.assets.usdg.decimals !== 6
-    || money.assets.usdg.assetId.toLowerCase() !== state.usdgAddress) {
-    fail('direct payout MoneyConfigurationV1 USDG asset does not match the persisted payout state');
+  if (money.assets.eth.chainId !== '4663'
+    || money.assets.eth.decimals !== 18
+    || money.assets.eth.assetId.toLowerCase() !== state.assetId) {
+    fail('direct payout MoneyConfigurationV2 native ETH asset does not match the persisted payout state');
   }
   const reserve = state.plan.feasibility.nativeReserve;
   if (!reserve || String(reserve.chainId) !== money.evm.nativeReserve.chainId
     || reserve.assetId !== money.evm.nativeReserve.assetId
     || reserve.decimals !== money.evm.nativeReserve.decimals
     || BigInt(reserve.amountAtomic) < BigInt(money.evm.nativeReserve.amountAtomic)) {
-    fail('direct payout frozen feasibility reserve does not meet MoneyConfigurationV1');
+    fail('direct payout frozen feasibility reserve does not meet MoneyConfigurationV2');
   }
   if (BigInt(state.plan.feasibility.maxGasPriceWei) > BigInt(money.evm.perTransactionGasPriceCap.amountAtomic)) {
-    fail('direct payout frozen gas-price envelope exceeds MoneyConfigurationV1');
+    fail('direct payout frozen gas-price envelope exceeds MoneyConfigurationV2');
   }
   return money;
 }
 
-function directPayoutDecodeOptions(state) {
-  return Object.freeze({
-    family: 'evm',
-    chainId: '4663',
-    tokenMetadata: Object.freeze({
-      [state.usdgAddress]: Object.freeze({ assetId: state.usdgAddress, decimals: 6 }),
-    }),
-  });
-}
+function directPayoutDecodeOptions() { return Object.freeze({ family: 'evm', chainId: '4663', tokenMetadata: Object.freeze({}) }); }
 
 function assertDecodedDirectPayout({ decoded, state, attempt, money }) {
-  const decodedAmountMatchesAttempt = decoded.amount !== null
-    && String(decoded.amount.chainId) === String(attempt.amount.chainId)
-    && decoded.amount.assetId.toLowerCase() === attempt.amount.assetId.toLowerCase()
-    && decoded.amount.decimals === attempt.amount.decimals
-    && decoded.amount.amountAtomic === attempt.amount.amountAtomic;
+  const decodedAmountMatchesAttempt = decoded.amount === null
+    && String(decoded.nativeValue?.chainId) === String(attempt.amount.chainId)
+    && decoded.nativeValue?.assetId === attempt.amount.assetId
+    && decoded.nativeValue?.decimals === attempt.amount.decimals
+    && decoded.nativeValue?.amountAtomic === attempt.amount.amountAtomic;
   if (decoded.family !== 'evm'
     || decoded.chainId !== '4663'
     || !equalAddress(decoded.source, state.operations)
-    || !equalAddress(decoded.target, state.usdgAddress)
-    || !equalAddress(decoded.mint, state.usdgAddress)
-    || !equalAddress(decoded.token, state.usdgAddress)
+    || !equalAddress(decoded.target, attempt.recipient)
+    || decoded.mint !== null
+    || decoded.token !== null
     || !equalAddress(decoded.destination, attempt.recipient)
     || !decodedAmountMatchesAttempt
     || decoded.nonce !== attempt.nonce
-    || decoded.nativeValue?.amountAtomic !== '0') {
+    || decoded.nativeValue?.amountAtomic !== attempt.amount.amountAtomic) {
     fail('direct payout decoded transaction does not match the durable recipient attempt');
   }
   if (BigInt(attempt.gasPriceWei) > BigInt(money.evm.perTransactionGasPriceCap.amountAtomic)) {
-    fail('direct payout recipient gas price exceeds MoneyConfigurationV1');
+    fail('direct payout recipient gas price exceeds MoneyConfigurationV2');
   }
 }
 
@@ -1139,7 +1038,7 @@ async function createDirectPayoutPolicySignerForAttempt({ signerClient, state, a
       decoded,
       stage: STAGE,
       requestDigest: canonicalDigest({
-        schema: 'hookemon.direct-payout-policy-request.v1',
+        schema: 'hookemon.direct-payout-policy-request.v2',
         cycleId: state.cycleId,
         planDigest: state.planDigest,
         recipient: attempt.recipient,
@@ -1170,7 +1069,7 @@ export async function createDirectPayoutPolicySigner({ signerClient, state, reci
 export function createDirectPayoutState({
   plan,
   operations,
-  usdgAddress,
+  assetId,
   firstNonce,
   gasPriceWei,
   heldPositionExclusions = undefined,
@@ -1181,8 +1080,8 @@ export function createDirectPayoutState({
   }
   const { plan: sourcePlan, distributablePool, dust, allocations } = assertPlan(plan);
   const operationAddress = assertAddress(operations, 'Operations address');
-  const tokenAddress = assertAddress(usdgAddress, 'USDG address');
-  if (operationAddress !== sourcePlan.returnEvidence.operations || tokenAddress !== sourcePlan.returnEvidence.usdgAddress) {
+  const tokenAddress = assertNativeAsset(assetId);
+  if (operationAddress !== sourcePlan.returnEvidence.operations || tokenAddress !== sourcePlan.returnEvidence.assetId) {
     fail('direct payout state identities must match the bound finalized return identities');
   }
   const initialNonce = normalizeNonce(firstNonce, 'first payout nonce');
@@ -1220,12 +1119,12 @@ export function createDirectPayoutState({
     });
   }
   return {
-    schema: 'hookemon.direct-payout-state.v1',
+    schema: 'hookemon.direct-payout-state.v2',
     cycleId: sourcePlan.cycleId,
     planDigest: sourcePlan.planDigest,
     plan: copy(sourcePlan),
     operations: operationAddress,
-    usdgAddress: tokenAddress,
+    assetId: tokenAddress,
     manifestFrozen: false,
     feasibilityChecked: false,
     heldPositionExclusions: exclusions,
@@ -1244,7 +1143,7 @@ export async function initializeDirectPayout({
   payoutStore,
   plan,
   operations,
-  usdgAddress,
+  assetId,
   firstNonce,
   gasPriceWei,
   heldPositionExclusions = undefined,
@@ -1253,7 +1152,7 @@ export async function initializeDirectPayout({
   const state = createDirectPayoutState({
     plan,
     operations,
-    usdgAddress,
+    assetId,
     firstNonce,
     gasPriceWei,
     heldPositionExclusions,
@@ -1265,7 +1164,7 @@ export async function initializeDirectPayout({
     const recovered = normalizedState(existing);
     if (recovered.planDigest !== state.planDigest
       || recovered.operations !== state.operations
-      || recovered.usdgAddress !== state.usdgAddress
+      || recovered.assetId !== state.assetId
       || recovered.heldPositionExclusions.evidenceDigest !== state.heldPositionExclusions.evidenceDigest) {
       fail('direct payout refuses to replace an existing immutable payout state');
     }
@@ -1384,33 +1283,10 @@ async function refuseRecipient({ payoutStore, cycleRepository, state, index, att
 }
 
 function matchingFinalTransfer(proof, state, attempt) {
-  if (!proof.successful || !proof.proofAvailable) {
-    fail(`direct payout transaction ${attempt.txHash} lacks exact finalized transfer proof`);
-  }
-  const matching = proof.transfers.filter(transfer => transfer.from.toLowerCase() === state.operations
-    && transfer.to.toLowerCase() === attempt.recipient);
-  const amountAtomic = matching.reduce((sum, transfer) => sum + BigInt(transfer.amountAtomic), 0n).toString();
-  if (matching.length === 0 || amountAtomic !== attempt.amount.amountAtomic) {
-    fail('direct payout finality lacks the exact USDG transfer delta to the planned recipient');
-  }
-  return {
-    from: state.operations,
-    to: attempt.recipient,
-    amount: attempt.amount,
-    finalizedBlockNumber: proof.finalizedBlockNumber.toString(),
-    finalizedBlockHash: proof.finalizedBlockHash,
-    receiptBlockNumber: proof.receiptBlockNumber.toString(),
-    receiptBlockHash: proof.receiptBlockHash,
-    previousBlockNumber: proof.previousBlockNumber.toString(),
-    previousBlockHash: proof.previousBlockHash,
-    sourceBalanceBeforeAtomic: proof.sourceBalanceBeforeAtomic,
-    sourceBalanceAfterAtomic: proof.sourceBalanceAfterAtomic,
-    sourceBalanceDeltaAtomic: proof.sourceBalanceDeltaAtomic,
-    recipientBalanceBeforeAtomic: proof.recipientBalanceBeforeAtomic,
-    recipientBalanceAfterAtomic: proof.recipientBalanceAfterAtomic,
-    recipientBalanceDeltaAtomic: proof.recipientBalanceDeltaAtomic,
-    logIndexes: matching.map(transfer => transfer.logIndex),
-  };
+  if (!isProcessNativePaymentProof(proof, { kind: 'direct', chainId: '4663', assetId: 'native', decimals: 18,
+    source: state.operations, recipient: attempt.recipient, amountWei: attempt.amount.amountAtomic,
+    transactionHash: attempt.txHash, nonce: attempt.nonce, calldataDigest: keccak256(attempt.calldata) })) fail('direct payout requires process-authenticated native payment proof');
+  return normalizeFinalizedTransfer(proof, 'finalizing', attempt, state.operations);
 }
 
 function currentMaterial(attempt) {
@@ -1444,6 +1320,14 @@ function finalizingAttempt(attempt, candidate, finalizedTransfer) {
   };
 }
 
+async function persistPayoutGas(cycleRepository, state, proof) {
+  if (typeof cycleRepository?.recordCustodyLedger !== 'function') return;
+  const cycle = await cycleRepository.describeCycle(state.cycleId);
+  const ledger = cycle.custodyLedgers.get('4663' + String.fromCharCode(0) + 'native');
+  if (!ledger) fail('native payout gas requires its existing custody ledger');
+  await cycleRepository.recordCustodyLedger(state.cycleId, { ...ledger, ...applyNativeCustodyGasPayment(ledger, proof) });
+}
+
 async function reconcileRecipientAttempt(client, evidenceClient, state, attempt) {
   const candidates = [currentMaterial(attempt), ...attempt.replacementHistory];
   for (const candidate of candidates) {
@@ -1451,35 +1335,26 @@ async function reconcileRecipientAttempt(client, evidenceClient, state, attempt)
     await assertSignedTransaction({ rawSignedBytes: candidate.rawSignedBytes, state, attempt: candidateAttempt });
     let proof;
     try {
-      proof = await readFinalizedErc20TransferProof(client, {
-        hash: candidate.txHash,
-        token: state.usdgAddress,
-        source: state.operations,
-        recipient: attempt.recipient,
-        amountAtomic: attempt.amount.amountAtomic,
-        evidenceClient,
-      });
+      const observed = await readFinalizedTransactionReceipt(client, candidate.txHash);
+      if (!observed.finalized) continue;
+      if (observed.receipt.status !== 'success') {
+        return { candidate, refused: true, processProof: await createNativeTransactionGasProof({client,signedTransaction:candidate.rawSignedBytes,expected:{chainId:'4663',assetId:'native',decimals:18,source:state.operations,recipient:attempt.recipient,amountWei:attempt.amount.amountAtomic,transactionHash:candidate.txHash,calldataDigest:keccak256(attempt.calldata),nonce:candidate.nonce}}), refusalEvidence: {
+          transactionHash: candidate.txHash, receiptBlockNumber: observed.receiptBlockNumber?.toString() ?? null,
+          receiptBlockHash: observed.receiptBlockHash ?? null, finalizedBlockNumber: observed.finalizedBlockNumber?.toString() ?? null,
+          finalizedBlockHash: observed.finalizedBlockHash ?? null, reason: 'TRANSACTION_REVERTED',
+        } };
+      }
+      proof = await createNativePaymentProof({ client, signedTransaction: candidate.rawSignedBytes,
+        expected: { kind: 'direct', chainId: '4663', assetId: 'native', decimals: 18,
+          source: state.operations, recipient: attempt.recipient, amountWei: attempt.amount.amountAtomic,
+          transactionHash: candidate.txHash, calldataDigest: keccak256(attempt.calldata), nonce: candidate.nonce } });
     } catch (error) {
-      if (error instanceof TransactionReceiptNotFoundError) continue;
+      if (error instanceof TransactionReceiptNotFoundError || error instanceof TransactionNotFoundError) continue;
       throw error;
-    }
-    if (!proof.finalized) continue;
-    if (!proof.successful) {
-      return {
-        candidate,
-        refused: true,
-        refusalEvidence: {
-          transactionHash: candidate.txHash,
-          receiptBlockNumber: proof.receiptBlockNumber?.toString() ?? null,
-          receiptBlockHash: proof.receiptBlockHash ?? null,
-          finalizedBlockNumber: proof.finalizedBlockNumber?.toString() ?? null,
-          finalizedBlockHash: proof.finalizedBlockHash ?? null,
-          reason: 'TRANSACTION_REVERTED',
-        },
-      };
     }
     return {
       candidate,
+      processProof: proof,
       finalizedTransfer: matchingFinalTransfer(proof, state, candidateAttempt),
     };
   }
@@ -1790,17 +1665,6 @@ export async function advanceDirectPayout({
   assertRecipientAdvanceable(state, attempt);
 
   if (attempt.state === 'PREPARED') {
-    if (await isRecipientFrozen(client, state.usdgAddress, attempt.recipient)) {
-      return refuseRecipient({
-        payoutStore,
-        cycleRepository,
-        state,
-        index,
-        attempt,
-        reason: 'USDG_FROZEN',
-        releaseNonce: attempt.nonce !== null,
-      });
-    }
     if (typeof client.getTransactionCount !== 'function') fail('direct payout requires getTransactionCount for nonce interference checks');
     await evmNonceFence?.();
     const observedNonce = normalizeNonce(await client.getTransactionCount({ address: state.operations, blockTag: 'pending' }), 'observed payout nonce');
@@ -1850,6 +1714,7 @@ export async function advanceDirectPayout({
     const reconciled = await reconcileRecipientAttempt(client, evidenceClient, state, attempt);
     if (reconciled) {
       if (reconciled.refused) {
+        await persistPayoutGas(cycleRepository, state, reconciled.processProof);
         return refuseRecipient({
           payoutStore,
           cycleRepository,
@@ -1862,6 +1727,7 @@ export async function advanceDirectPayout({
       }
       const next = copy(state);
       next.manifestFrozen = true;
+      await persistPayoutGas(cycleRepository, state, reconciled.processProof);
       next.recipients[index] = finalizingAttempt(attempt, reconciled.candidate, reconciled.finalizedTransfer);
       await persist(payoutStore, next);
       return next;
@@ -1892,6 +1758,7 @@ export async function advanceDirectPayout({
   if (attempt.state === 'BROADCAST') {
     const reconciled = await reconcileRecipientAttempt(client, evidenceClient, state, attempt);
     if (reconciled?.refused) {
+      await persistPayoutGas(cycleRepository, state, reconciled.processProof);
       return refuseRecipient({
         payoutStore,
         cycleRepository,
@@ -1937,7 +1804,8 @@ export async function advanceDirectPayout({
       return state;
     }
     const next = copy(state);
-    next.recipients[index] = finalizingAttempt(attempt, reconciled.candidate, reconciled.finalizedTransfer);
+    await persistPayoutGas(cycleRepository, state, reconciled.processProof);
+      next.recipients[index] = finalizingAttempt(attempt, reconciled.candidate, reconciled.finalizedTransfer);
     await persist(payoutStore, next);
     return next;
   }
@@ -2089,11 +1957,11 @@ export function createCycleRepositoryPayoutStore({ cycleRepository, cycleId }) {
 function normalizedReturnDelta(returnEvidence, config) {
   if (!returnEvidence || returnEvidence.finalized !== true) fail('payout requires a finalized return evidence record');
   if (!equalAddress(returnEvidence.destinationAccount, config.accounts?.evm)
-    || !equalAddress(returnEvidence.destinationAsset, config.contracts?.usdg)) {
-    fail('payout return evidence does not prove a USDG credit to Operations');
+    || returnEvidence.destinationAsset !== 'native') {
+    fail('payout return evidence does not prove a native ETH credit to Operations');
   }
-  return createUsdgPayoutAmount({
-    assetId: config.contracts.usdg,
+  return createNativePayoutAmount({
+    assetId: config.moneyConfiguration.assets.eth.assetId,
     amountAtomic: assertAtomic(returnEvidence.destinationCreditAmount, 'payout return delta'),
   });
 }
@@ -2101,9 +1969,9 @@ function normalizedReturnDelta(returnEvidence, config) {
 function returnBinding(returnEvidence, config, cycleId) {
   return {
     operations: assertAddress(config.accounts?.evm, 'payout return Operations address'),
-    usdgAddress: assertAddress(config.contracts?.usdg, 'payout return USDG address'),
+    assetId: assertNativeAsset(config.moneyConfiguration?.assets?.eth?.assetId),
     evidenceDigest: canonicalDigest({
-      schema: 'hookemon.direct-payout-finalized-return.v1',
+      schema: 'hookemon.direct-payout-finalized-return.v2',
       cycleId,
       returnEvidence,
     }),
@@ -2113,7 +1981,7 @@ function returnBinding(returnEvidence, config, cycleId) {
 function payoutRequestForPlan(planValue, heldPositionExclusions = undefined) {
   const plan = assertPlan(planValue).plan;
   return Object.freeze({
-    schema: 'hookemon.direct-payout-request.v1',
+    schema: 'hookemon.direct-payout-request.v2',
     cycleId: plan.cycleId,
     planDigest: plan.planDigest,
     recipientCount: plan.payableRecipientCount,
@@ -2189,8 +2057,8 @@ export async function preparePayoutRequest({ config, cycleRepository, context, p
   }
   const dustAsset = {
     chainId: String(config.chainId ?? 4663),
-    assetId: assertAddress(config.contracts?.usdg, 'payout USDG asset').toLowerCase(),
-    decimals: 6,
+    assetId: assertNativeAsset(config.moneyConfiguration?.assets?.eth?.assetId),
+    decimals: 18,
   };
   const consumed = typeof cycleRepository.readPayoutDustConsumption === 'function'
     ? await cycleRepository.readPayoutDustConsumption(context.cycleId, dustAsset)
@@ -2260,7 +2128,7 @@ function buildLegacyPayoutAuthorization({
     cycleId: onchainCycleId,
     hook: config.contracts.hook,
     vault: config.contracts.vault,
-    usdg: config.contracts.usdg,
+    nativePrincipal: config.moneyConfiguration.assets.eth,
     operationsTrigger: config.accounts.operationsTrigger,
     bindingManifestDigest: toLegacyBytes32(bindingManifestDigest),
     payoutId: toLegacyBytes32(payoutId),
@@ -2470,7 +2338,7 @@ function payoutTerminalEvidence(stateValue) {
   const state = normalizedState(stateValue);
   if (!isDirectPayoutComplete(state)) fail('direct payout terminal evidence requires exact recipient conservation');
   return {
-    schema: 'hookemon.direct-payout-result.v1',
+    schema: 'hookemon.direct-payout-result.v2',
     cycleId: state.cycleId,
     planDigest: state.planDigest,
     distributablePool: state.distributablePool,
@@ -2512,23 +2380,18 @@ function custodyLedgerBuckets(row) {
 }
 
 /**
- * ADR-0026 / interfaces.json revision 67: the canonical identity for the EVM USDG custody row is
- * built from the trusted `MoneyConfigurationV1.assets.usdg`, exactly the formula
+ * ADR-0026 / interfaces.json revision 67: the canonical identity for the EVM native ETH custody row is
+ * built from the trusted `MoneyConfigurationV2.assets.eth`, exactly the formula
  * `claim-process.mjs#claimCustodyAsset` already applies -- never from a raw returnDelta or an
  * existing candidate ledger row's own chainId/assetId.
  */
-function canonicalEvmUsdgCustodyIdentity(money) {
-  const chainId = `eip155:${money.assets.usdg.chainId}`;
-  return {
-    chainId,
-    assetId: `${chainId}/erc20:${money.assets.usdg.assetId.toLowerCase()}`,
-    decimals: money.assets.usdg.decimals,
-  };
+function canonicalEvmNativeCustodyIdentity(money) {
+  return { chainId: money.assets.eth.chainId, assetId: money.assets.eth.assetId, decimals: money.assets.eth.decimals };
 }
 
 /**
- * Independently proves the canonical identity before any custody write: MoneyConfigurationV1 must
- * identify chain 4663 with six decimals and the exact configured USDG contract, and the raw payout
+ * Independently proves the canonical identity before any custody write: MoneyConfigurationV2 must
+ * identify chain 4663 with eighteen decimals and the exact configured native ETH contract, and the raw payout
  * returnDelta itself must match that same configured contract -- never trusting RPC output or a
  * candidate ledger's own identity fields.
  */
@@ -2537,17 +2400,17 @@ function assertPayoutCustodyMoneyConfiguration({ config, returnDelta }) {
   try {
     money = assertMoneyConfiguration(config?.moneyConfiguration, 'direct payout custody ledger money configuration');
   } catch (error) {
-    fail(`direct payout custody ledger requires MoneyConfigurationV1: ${error.message}`);
+    fail(`direct payout custody ledger requires MoneyConfigurationV2: ${error.message}`);
   }
   if (config.chainId !== undefined && Number(config.chainId) !== 4663) {
     fail('direct payout custody ledger requires chainId 4663');
   }
-  if (money.assets.usdg.chainId !== '4663' || money.assets.usdg.decimals !== 6
-    || money.assets.usdg.assetId.toLowerCase() !== assertAddress(config?.contracts?.usdg, 'direct payout custody ledger configured USDG contract')) {
-    fail('direct payout custody ledger MoneyConfigurationV1 USDG asset does not match the configured USDG contract');
+  if (money.assets.eth.chainId !== '4663' || money.assets.eth.decimals !== 18
+    || money.assets.eth.assetId.toLowerCase() !== assertNativeAsset(config?.moneyConfiguration?.assets?.eth?.assetId)) {
+    fail('direct payout custody ledger MoneyConfigurationV2 native ETH asset does not match the configured native ETH contract');
   }
-  const normalizedReturnDelta = assertUsdAmount(returnDelta, 'direct payout custody ledger return delta', config.contracts.usdg);
-  return { identity: canonicalEvmUsdgCustodyIdentity(money), normalizedReturnDelta };
+  const normalizedReturnDelta = assertPrincipalAmount(returnDelta, 'direct payout custody ledger return delta', config.moneyConfiguration.assets.eth.assetId);
+  return { identity: canonicalEvmNativeCustodyIdentity(money), normalizedReturnDelta };
 }
 
 /**
@@ -2563,7 +2426,7 @@ async function readPayoutCustodyBalanceObservation({ adapters, config, identity 
   const account = assertAddress(config.accounts?.evm, 'direct payout custody ledger Operations account');
   let readObservation;
   try {
-    readObservation = createEvmCustodyBalanceObservationReader({
+    readObservation = createNativeCustodyBalanceObservationReader({
       publicClient,
       archiveClient,
       identity: { ...identity, account },
@@ -2578,9 +2441,9 @@ async function readPayoutCustodyBalanceObservation({ adapters, config, identity 
   }
 }
 
-function freshPayoutCustodyLedgerV2({ cycleId, identity, returnDelta, observation }) {
+function freshPayoutCustodyLedgerV3({ cycleId, identity, returnDelta, observation, gasReserve }) {
   return {
-    schema: 'hookemon.custody-ledger.v2',
+    schema: 'hookemon.custody-ledger.v3',
     cycleId,
     chainId: identity.chainId,
     assetId: identity.assetId,
@@ -2603,11 +2466,14 @@ function freshPayoutCustodyLedgerV2({ cycleId, identity, returnDelta, observatio
     }),
     verifiedCurrentBalance: observation,
     expectedCycleAsset: null,
+    gasReserve,
+    gasSpent: { ...identity, amountAtomic: '0' },
+    gasPayments: [],
   };
 }
 
 /**
- * Writes the canonical EVM USDG custody row for this payout admission (interfaces.json revision
+ * Writes the canonical EVM native ETH custody row for this payout admission (interfaces.json revision
  * 67, ADR-0026). Never invents `returnReceived` backing over an already-populated row: when a
  * canonical row already exists (written by claim/return, or by a prior payout write), every one of
  * its fourteen buckets and its `expectedCycleAsset` are carried forward byte-for-byte -- this
@@ -2633,19 +2499,13 @@ async function loadPayoutCustodyLedgerState({ cycleRepository, cycleId, returnDe
   const key = `${identity.chainId}${String.fromCharCode(0)}${identity.assetId}`;
   // The pre-canonical writer keyed this exact asset by the raw (non-CAIP) chainId/assetId pair --
   // `normalizedReturnDelta.chainId`/`.assetId` are that same raw pair, already independently proven
-  // to identify the configured USDG contract by `assertPayoutCustodyMoneyConfiguration`. A row still
+  // to identify the configured native ETH contract by `assertPayoutCustodyMoneyConfiguration`. A row still
   // sitting at that raw key is reachable historical state from before this migration (or from a
   // return/claim writer that has not migrated yet); it must never be treated as absent just because
   // the canonical key has no row. Detecting it here never reads or resolves it -- only refuses.
-  const rawKey = `${String(normalizedReturnDelta.chainId)}${String.fromCharCode(0)}${normalizedReturnDelta.assetId}`;
   const state = await cycleRepository.describeCycle(cycleId);
   const existing = state?.custodyLedgers?.get?.(key) ?? null;
-  const rawPredecessor = state?.custodyLedgers?.get?.(rawKey) ?? null;
-  if (rawPredecessor !== null) {
-    fail('direct payout custody ledger found a legacy raw-identity USDG predecessor row for this cycle: '
-      + 'refuses pending explicit return-consumer migration instead of creating a competing canonical row '
-      + 'or fabricating its backing');
-  }
+  if (existing !== null && existing.schema !== 'hookemon.custody-ledger.v3') fail('native payout refuses historical custody state');
   if (existing !== null
     && (existing.decimals !== identity.decimals || BigInt(existing.returnReceived) < BigInt(normalizedReturnDelta.amountAtomic))) {
     fail('direct payout custody ledger does not prove the finalized return backing');
@@ -2672,11 +2532,12 @@ async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta
     const observation = shouldObserve
       ? await readPayoutCustodyBalanceObservation({ adapters, config, identity })
       : null;
-    await cycleRepository.recordCustodyLedger(cycleId, freshPayoutCustodyLedgerV2({
+    await cycleRepository.recordCustodyLedger(cycleId, freshPayoutCustodyLedgerV3({
       cycleId,
       identity,
       returnDelta: normalizedReturnDelta,
       observation,
+      gasReserve: config.moneyConfiguration.evm.nativeReserve,
     }));
     return;
   }
@@ -2685,14 +2546,17 @@ async function ensurePayoutCustodyLedger({ cycleRepository, cycleId, returnDelta
 
   const observation = await readPayoutCustodyBalanceObservation({ adapters, config, identity });
   await cycleRepository.recordCustodyLedger(cycleId, {
-    schema: 'hookemon.custody-ledger.v2',
+    schema: 'hookemon.custody-ledger.v3',
     cycleId,
     chainId: identity.chainId,
     assetId: identity.assetId,
     decimals: identity.decimals,
     ...custodyLedgerBuckets(existing),
     verifiedCurrentBalance: observation,
-    expectedCycleAsset: existing.schema === 'hookemon.custody-ledger.v2' ? existing.expectedCycleAsset : null,
+    expectedCycleAsset: existing.expectedCycleAsset,
+    gasReserve: existing.gasReserve,
+    gasSpent: existing.gasSpent,
+    gasPayments: existing.gasPayments,
   });
 }
 
@@ -2719,7 +2583,7 @@ function assertPersistedPayoutCustodyObservation({ existing, identity, config })
     || balance.assetId !== identity.assetId
     || balance.decimals !== identity.decimals
     || typeof balance.amountAtomic !== 'string' || !ATOMIC.test(balance.amountAtomic)) {
-    fail('direct payout reconciliation persisted custody balance observation does not match the configured USDG identity');
+    fail('direct payout reconciliation persisted custody balance observation does not match the configured native ETH identity');
   }
   const finality = observation.finality;
   if (!finality || typeof finality !== 'object' || Array.isArray(finality)
@@ -2824,7 +2688,7 @@ export function evaluateDirectPayoutBridgeAdmission({ attributableDistributableA
 /**
  * Pure pre-admission check: when the payout asset itself is frozen for the Operations sender, the
  * whole distributable pool becomes non-spending unsent liability rather than being partially
- * dispatched -- distinct from the existing per-recipient USDG_FROZEN quarantine, which only ever
+ * dispatched -- distinct from the existing per-recipient historical USDG_FROZEN quarantine, which only ever
  * refuses one already-admitted recipient after admission has begun.
  */
 export function evaluateDirectPayoutFrozenAssetAdmission({ frozen, attributableDistributableAmount, dust }) {
@@ -2859,18 +2723,18 @@ export function evaluateDirectPayoutNativeGasAdmission({ requiredNativeAmount, o
 
 /**
  * Explicit I-owned admission input: the authoritative, cycle-attributable finalized-available
- * USDG amount actually backing this cycle's payout right now -- never a wallet-wide balance, since
+ * native ETH amount actually backing this cycle's payout right now -- never a wallet-wide balance, since
  * the same Operations wallet can hold unrelated cycles' funds that must never fund this cycle's
  * shortfall. Composition injects adapters.robinhood.client.readCycleAttributableFinalizedAvailable();
  * its absence, or a reader that cannot yet produce a value, fails closed (returns null here) rather
  * than skipping the bridge-shortfall check or trusting the plan's own accounting.
  */
-async function readCycleAttributableFinalizedAvailableUsdg({ client, config, cycleId, plan }) {
+async function readCycleAttributableFinalizedAvailableNative({ client, config, cycleId, plan }) {
   if (!client || typeof client.readCycleAttributableFinalizedAvailable !== 'function') return null;
   const result = await client.readCycleAttributableFinalizedAvailable({
     cycleId,
     operations: config.accounts.evm,
-    usdgAddress: config.contracts.usdg,
+    assetId: config.moneyConfiguration.assets.eth.assetId,
     returnDelta: plan.returnDelta,
     returnEvidence: plan.returnEvidence,
     previousDust: plan.previousDust,
@@ -2878,10 +2742,10 @@ async function readCycleAttributableFinalizedAvailableUsdg({ client, config, cyc
     planDigest: plan.planDigest,
   });
   if (result === null || result === undefined) return null;
-  return assertUsdAmount(
+  return assertPrincipalAmount(
     result,
-    'direct payout cycle-attributable finalized available USDG',
-    config.contracts.usdg,
+    'direct payout cycle-attributable finalized available native ETH',
+    config.moneyConfiguration.assets.eth.assetId,
   ).amountAtomic;
 }
 
@@ -2935,29 +2799,9 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
     fail('direct payout production execution requires atomic prior-dust consumption and payout-state storage');
   }
   if (preparedPlan.plan.payableRecipientCount > 0) {
-    const freezeCheckClient = adapters?.robinhood?.client;
-    if (freezeCheckClient && typeof freezeCheckClient.readContract === 'function') {
-      const frozen = await isRecipientFrozen(freezeCheckClient, config.contracts.usdg, config.accounts.evm);
-      if (frozen) {
-        const admission = evaluateDirectPayoutFrozenAssetAdmission({
-          frozen: true,
-          attributableDistributableAmount: request.plan.distributablePool.amountAtomic,
-          dust: request.plan.dust.amountAtomic,
-        });
-        if (typeof cycleRepository.holdCycle === 'function') {
-          await cycleRepository.holdCycle(context.cycleId, 'HELD_UNAVAILABLE', {
-            stage: STAGE,
-            category: 'frozen-asset',
-            reason: 'PAYOUT_FROZEN_ASSET',
-            admission,
-            planDigest: request.plan.planDigest,
-          });
-        }
-        throw new DirectPayoutFrozenAssetError({ operations: config.accounts.evm });
-      }
-    }
-    const finalizedAvailableAmount = await readCycleAttributableFinalizedAvailableUsdg({
-      client: freezeCheckClient,
+    const admissionClient = adapters?.robinhood?.client;
+    const finalizedAvailableAmount = await readCycleAttributableFinalizedAvailableNative({
+      client: admissionClient,
       config,
       cycleId: context.cycleId,
       plan: request.plan,
@@ -2991,10 +2835,10 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
       }
       throw new DirectPayoutBridgeShortfallError({ deficit: bridgeAdmission.deficit });
     }
-    if (!freezeCheckClient || typeof freezeCheckClient.getBalance !== 'function') {
+    if (!admissionClient || typeof admissionClient.getBalance !== 'function') {
       fail('direct payout requires getBalance before durable admission');
     }
-    const observedNativeRaw = await freezeCheckClient.getBalance({ address: config.accounts.evm });
+    const observedNativeRaw = await admissionClient.getBalance({ address: config.accounts.evm });
     const observedNative = typeof observedNativeRaw === 'bigint' ? observedNativeRaw : BigInt(observedNativeRaw);
     const gasAdmission = evaluateDirectPayoutNativeGasAdmission({
       requiredNativeAmount: requiredNativeAmount(preparedPlan.plan).toString(),
@@ -3029,7 +2873,7 @@ async function ensureDirectPayoutState({ cycleRepository, context, request, adap
   const initialState = createDirectPayoutState({
     plan: request.plan,
     operations: config.accounts.evm,
-    usdgAddress: config.contracts.usdg,
+    assetId: config.moneyConfiguration.assets.eth.assetId,
     firstNonce,
     heldPositionExclusions,
     inFlightWindow: directPayoutInFlightWindow(config),
@@ -3214,16 +3058,16 @@ async function recoverDirectPayoutWalletNonce({ cycleRepository, context, config
 }
 
 export async function probePayout({ adapters, config }) {
-  if (usesLegacyVaultPayout(config) || !(config?.contracts?.usdg && config?.accounts?.evm)) {
+  if (usesLegacyVaultPayout(config) || !(config?.moneyConfiguration?.assets?.eth?.assetId && config?.accounts?.evm)) {
     return probeLegacyPayout({ adapters, config });
   }
-  const configured = Boolean(adapters?.robinhood?.client && config?.contracts?.usdg && config?.accounts?.evm);
+  const configured = Boolean(adapters?.robinhood?.client && config?.moneyConfiguration?.assets?.eth?.assetId && config?.accounts?.evm);
   return {
     wouldPayout: true,
     configured,
     reason: configured
       ? 'direct Operations payout is ready for its frozen eligibility and finalized return evidence'
-      : 'USDG, Operations EVM account, or chain 4663 client is not configured',
+      : 'native ETH, Operations EVM account, or chain 4663 client is not configured',
   };
 }
 
@@ -3318,7 +3162,7 @@ export async function reconcileLivePayout(args = {}) {
   try {
     if (!isDirectPayoutComplete(state)) return null;
     const normalized = normalizedState(state);
-    // Bind reconciliation to the exact Operations/USDG identity this payout state was built and
+    // Bind reconciliation to the exact Operations/native ETH identity this payout state was built and
     // signed against, not whatever the caller's current runtime config happens to say -- a config
     // that drifted after the state was persisted must never let a stale state finalize (or, for
     // that matter, borrow a custody row) under a different identity's authority.
@@ -3348,4 +3192,89 @@ export async function reconcileLivePayout(args = {}) {
     if (error instanceof DirectPayoutError) return null;
     throw error;
   }
+}
+
+// Historical USDG evidence is readable through this explicit seam and never enters native execution.
+function assertHistoricalUsdAmount(value, label) {
+  if (!value || Object.keys(value).length !== 4 || !(value.chainId === 4663 || value.chainId === '4663') || value.decimals !== 6) fail(`${label} must be historical USDG`);
+  return { chainId: 4663, assetId: assertAddress(value.assetId, `${label} asset`), decimals: 6, amountAtomic: assertAtomic(value.amountAtomic, `${label} amount`) };
+}
+
+function normalizeHistoricalFinalizedTransfer(value, index, attempt, operations) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`direct payout recipient attempt ${index} finality evidence is invalid`);
+  }
+  const fields = [
+    'from', 'to', 'amount', 'finalizedBlockNumber', 'finalizedBlockHash',
+    'receiptBlockNumber', 'receiptBlockHash', 'previousBlockNumber', 'previousBlockHash',
+    'sourceBalanceBeforeAtomic', 'sourceBalanceAfterAtomic', 'sourceBalanceDeltaAtomic',
+    'recipientBalanceBeforeAtomic', 'recipientBalanceAfterAtomic', 'recipientBalanceDeltaAtomic', 'logIndexes',
+  ];
+  if (Object.keys(value).length !== fields.length || !fields.every(field => Object.hasOwn(value, field))) {
+    fail(`direct payout recipient attempt ${index} finality evidence must use the exact schema`);
+  }
+  if (!equalAddress(value.from, operations) || !equalAddress(value.to, attempt.recipient)) {
+    fail(`direct payout recipient attempt ${index} finality evidence has the wrong transfer endpoints`);
+  }
+  const amount = assertHistoricalUsdAmount(value.amount, `direct payout recipient attempt ${index} finalized amount`);
+  if (!sameAmount(amount, attempt.amount)) fail(`direct payout recipient attempt ${index} finality evidence has the wrong transfer amount`);
+  const decimalFields = [
+    'finalizedBlockNumber', 'receiptBlockNumber', 'previousBlockNumber',
+    'sourceBalanceBeforeAtomic', 'sourceBalanceAfterAtomic', 'sourceBalanceDeltaAtomic',
+    'recipientBalanceBeforeAtomic', 'recipientBalanceAfterAtomic', 'recipientBalanceDeltaAtomic',
+  ];
+  for (const field of decimalFields) {
+    assertAtomic(value[field], `direct payout recipient attempt ${index} ${field}`, { positive: field === 'finalizedBlockNumber' || field === 'receiptBlockNumber' });
+  }
+  for (const field of ['finalizedBlockHash', 'receiptBlockHash', 'previousBlockHash']) {
+    if (typeof value[field] !== 'string' || !TRANSACTION_HASH.test(value[field])) {
+      fail(`direct payout recipient attempt ${index} ${field} is invalid`);
+    }
+  }
+  if (value.sourceBalanceDeltaAtomic !== attempt.amount.amountAtomic
+    || value.recipientBalanceDeltaAtomic !== attempt.amount.amountAtomic) {
+    fail(`direct payout recipient attempt ${index} finality evidence has the wrong balance delta`);
+  }
+  if (!Array.isArray(value.logIndexes) || value.logIndexes.length === 0) {
+    fail(`direct payout recipient attempt ${index} finality evidence must include transfer log indexes`);
+  }
+  const seenLogIndexes = new Set();
+  for (const logIndex of value.logIndexes) {
+    const canonical = assertAtomic(logIndex, `direct payout recipient attempt ${index} finality log index`);
+    if (seenLogIndexes.has(canonical)) fail(`direct payout recipient attempt ${index} finality log indexes must be unique`);
+    seenLogIndexes.add(canonical);
+  }
+  return {
+    from: assertAddress(value.from, `direct payout recipient attempt ${index} finality from`),
+    to: assertAddress(value.to, `direct payout recipient attempt ${index} finality to`),
+    amount,
+    finalizedBlockNumber: value.finalizedBlockNumber,
+    finalizedBlockHash: value.finalizedBlockHash.toLowerCase(),
+    receiptBlockNumber: value.receiptBlockNumber,
+    receiptBlockHash: value.receiptBlockHash.toLowerCase(),
+    previousBlockNumber: value.previousBlockNumber,
+    previousBlockHash: value.previousBlockHash.toLowerCase(),
+    sourceBalanceBeforeAtomic: value.sourceBalanceBeforeAtomic,
+    sourceBalanceAfterAtomic: value.sourceBalanceAfterAtomic,
+    sourceBalanceDeltaAtomic: value.sourceBalanceDeltaAtomic,
+    recipientBalanceBeforeAtomic: value.recipientBalanceBeforeAtomic,
+    recipientBalanceAfterAtomic: value.recipientBalanceAfterAtomic,
+    recipientBalanceDeltaAtomic: value.recipientBalanceDeltaAtomic,
+    logIndexes: [...value.logIndexes],
+  };
+}
+
+export function assertHistoricalFinalizedPayoutTransferEvidence({ transactionHash, finalizedTransfer, operations, recipient, amount }) {
+  if (typeof transactionHash !== 'string' || !TRANSACTION_HASH.test(transactionHash)) {
+    fail('finalized payout transfer evidence transactionHash is invalid');
+  }
+  const expectedOperations = assertAddress(operations, 'finalized payout transfer evidence operations');
+  const expectedRecipient = assertAddress(recipient, 'finalized payout transfer evidence recipient');
+  const expectedAmount = assertHistoricalUsdAmount(amount, 'finalized payout transfer evidence amount');
+  return normalizeHistoricalFinalizedTransfer(
+    finalizedTransfer,
+    'external verification',
+    { recipient: expectedRecipient, amount: expectedAmount },
+    expectedOperations,
+  );
 }

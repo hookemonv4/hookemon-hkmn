@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The eligibility-snapshot stage freezes HKMN holder weights and a pre-claim payout-feasibility envelope. It is read-only: it never signs, broadcasts, prepares a claim, or reads historical contract state.
+The eligibility-snapshot stage freezes HKMN holder weights and a pre-claim native ETH payout-feasibility envelope. It is read-only: it never signs, broadcasts, prepares a claim, or reads historical contract state.
 
 ## Public interface
 
@@ -58,3 +58,5 @@ The runtime configuration requires `chainId`, `hkmn.{address,deployBlock,decimal
   payout-capacity/storage revision before creating a new immutable manifest. Never shorten the
   holder set to fit the current limit.
 - For lease loss, let the current lease holder reconcile the cycle. Do not write a terminal state from a stale worker.
+
+Native payout uses the frozen HKMN weights without changing token supply or exclusions. The eligibility envelope measures native gas separately; payout admission and the first signature verify that current ETH covers both attributed principal and the frozen fee envelope plus reserve.

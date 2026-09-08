@@ -9,6 +9,7 @@
 //      to reach terminal state before the next may even be signed
 //      (packages/adapters/src/app/stages/payout.mjs).
 import assert from 'node:assert/strict';
+import { digest as canonicalDigest } from '../../../runner/src/cycle/journal.mjs';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 
 import {
   compileDirectPayoutPlan,
-  createUsdgPayoutAmount,
+  createNativePayoutAmount,
   DIRECT_PAYOUT_RECIPIENT_LIMIT,
 } from '../../../runner/src/distribution/payout-plan.mjs';
 import { DurableCycleStore } from '../../../runner/src/cycle/durable-store.mjs';
@@ -42,12 +43,13 @@ import {
   mutatePayout,
 } from '../../src/app/stages/payout.mjs';
 
+const signedFixtures = new Map();
 const TOKEN = `0x${'a'.repeat(40)}`;
 const ACCOUNT = privateKeyToAccount(`0x${'6'.repeat(64)}`);
 const OPERATIONS = ACCOUNT.address.toLowerCase();
 const RETURN_BINDING = Object.freeze({
   operations: OPERATIONS,
-  usdgAddress: TOKEN,
+  assetId: 'native',
   evidenceDigest: `sha256:${'f'.repeat(64)}`,
 });
 
@@ -56,7 +58,7 @@ function address(index) {
 }
 
 function usdg(amountAtomic) {
-  return createUsdgPayoutAmount({ assetId: TOKEN, amountAtomic: String(amountAtomic) });
+  return createNativePayoutAmount({ assetId: 'native', amountAtomic: String(amountAtomic) });
 }
 
 function eligibilityManifest(count) {
@@ -120,7 +122,7 @@ for (const count of [1025, 1026, 10_000]) {
     assert.equal(plan.payableRecipientCount, count);
     assert.equal(plan.outcome, 'ALLOCATED');
 
-    const state = createDirectPayoutState({ plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0' });
+    const state = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
 
     assert.equal(state.recipients.length, count);
     assert.equal(new Set(state.recipients.map(attempt => attempt.recipient)).size, count);
@@ -132,7 +134,7 @@ for (const count of [1025, 1026, 10_000]) {
 test('a real compiled 10,000-recipient payout state persists and reopens through the actual durable paged store, not a synthetic fixture', async t => {
   const count = 10_000;
   const plan = planFor(count);
-  const state = createDirectPayoutState({ plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0' });
+  const state = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
 
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-payout-resume-scale-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -181,24 +183,13 @@ function finalizeRecipient(prepared, index, operations) {
     rawSignedBytes,
     rawSignedBytesHash,
     txHash: rawSignedBytesHash,
-    finalizedTransfer: {
-      from: operations,
-      to: prepared.recipient,
-      amount,
-      finalizedBlockNumber: '100',
-      finalizedBlockHash,
-      receiptBlockNumber: '100',
-      receiptBlockHash: finalizedBlockHash,
-      previousBlockNumber: '99',
-      previousBlockHash,
-      sourceBalanceBeforeAtomic: SOURCE_BALANCE_BEFORE.toString(),
-      sourceBalanceAfterAtomic: (SOURCE_BALANCE_BEFORE - BigInt(amount.amountAtomic)).toString(),
-      sourceBalanceDeltaAtomic: amount.amountAtomic,
-      recipientBalanceBeforeAtomic: '0',
-      recipientBalanceAfterAtomic: amount.amountAtomic,
-      recipientBalanceDeltaAtomic: amount.amountAtomic,
-      logIndexes: ['0'],
-    },
+    finalizedTransfer: (() => {
+      const facts = {schema:'hookemon.native-payment-proof.v1',kind:'direct',chainId:'4663',assetId:'native',decimals:18,
+        transactionHash:rawSignedBytesHash,transactionDigest:canonicalDigest(rawSignedBytes),blockNumber:'100',blockHash:finalizedBlockHash,
+        timestampUnixSeconds:'1700000000',source:operations,recipient:prepared.recipient,amountWei:amount.amountAtomic,
+        calldataDigest:keccak256('0x'),nonce,receiptStatus:'success',gasSpentWei:'100000'};
+      return {...facts,evidenceDigest:canonicalDigest(facts)};
+    })(),
     approvalContext: {
       requestDigest: null,
       fencingToken: null,
@@ -221,7 +212,7 @@ function finalizeRecipient(prepared, index, operations) {
 test('a real compiled 10,000-recipient payout plan, upgraded to a domain-valid fully-FINALIZED state, persists and reopens through the durable paged store and stays isDirectPayoutComplete/assertPayoutManifestUnchanged-valid before and after', async t => {
   const count = 10_000;
   const plan = planFor(count);
-  const initial = createDirectPayoutState({ plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0' });
+  const initial = createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' });
 
   const finalizedState = {
     ...initial,
@@ -267,7 +258,7 @@ function memoryStore(initial) {
 }
 
 function lifecycleConfig() {
-  const usdgAsset = { chainId: '4663', assetId: TOKEN, decimals: 6 };
+  const usdgAsset = { chainId: '4663', assetId: 'native', decimals: 18 };
   const solanaStablecoin = {
     chainId: '792703809',
     assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -278,12 +269,12 @@ function lifecycleConfig() {
     accounts: { evm: OPERATIONS },
     contracts: { usdg: TOKEN },
     moneyConfiguration: {
-      schema: 'hookemon.money-configuration.v1',
-      assets: { usdg: usdgAsset, solanaStablecoin },
+      schema: 'hookemon.money-configuration.v2',
+      assets: { eth: usdgAsset, solanaStablecoin },
       minimums: {
         robinhoodReceive: { ...usdgAsset, amountAtomic: '0' },
         solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-        returnUsdg: { ...usdgAsset, amountAtomic: '0' },
+        returnEth: { ...usdgAsset, amountAtomic: '0' },
       },
       evm: {
         perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '5' },
@@ -306,7 +297,7 @@ function receiptFor({ transactionHash, recipient, amountAtomic }) {
     transactionHash,
     blockNumber: 100n,
     blockHash: `0x${'9'.repeat(64)}`,
-    status: 'success',
+    status: 'success',gasUsed:50000n,effectiveGasPrice:2n,
     logs: [{
       address: TOKEN,
       topics: [ERC20_TRANSFER_TOPIC, addressTopic(OPERATIONS), addressTopic(recipient)],
@@ -326,10 +317,12 @@ function windowRpc() {
       assert.equal(functionName, 'isFrozen');
       return false;
     },
+    async getChainId() { return 4663; },
+    async getTransaction({hash}) { return {...signedFixtures.get(hash),blockNumber:100n,blockHash:`0x${'9'.repeat(64)}`}; },
     async getTransactionCount() { return nonce; },
     async getBalance() { return 1_000_000_000n; },
     async readCycleAttributableFinalizedAvailable() {
-      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '999999999999999999999999' };
+      return { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '999999999999999999999999' };
     },
     async getTransactionReceipt({ hash }) {
       const receipt = receipts.get(hash);
@@ -368,7 +361,9 @@ function lifecycleSigner(counter) {
           for (const field of ['nonce', 'value', 'gas', 'gasPrice']) {
             signingTransaction[field] = BigInt(signingTransaction[field]);
           }
-          return { signedTx: await ACCOUNT.signTransaction(signingTransaction) };
+          const signedTx=await ACCOUNT.signTransaction(signingTransaction);
+          signedFixtures.set(keccak256(signedTx),{...signingTransaction,hash:keccak256(signedTx),from:OPERATIONS});
+          return {signedTx};
         },
         async broadcast({ signedTx }) {
           counter.broadcasts ??= [];
@@ -391,7 +386,7 @@ async function advanceUntil({ store, recipient, adapters, signerClient, config, 
 
 test('a window of 1 keeps the original fully-serial requirement: a later recipient cannot be touched before the earlier one is broadcast', async () => {
   const plan = planFor(3);
-  const store = memoryStore(createDirectPayoutState({ plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0' }));
+  const store = memoryStore(createDirectPayoutState({ plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0' }));
   const client = windowRpc();
   const counter = { sign: 0 };
   const signerClient = lifecycleSigner(counter);
@@ -406,7 +401,7 @@ test('a window of 1 keeps the original fully-serial requirement: a later recipie
 test('a wider in-flight window lets several recipients await finality concurrently, bounded by the window', async () => {
   const plan = planFor(4);
   const state = createDirectPayoutState({
-    plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0', inFlightWindow: 2,
+    plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0', inFlightWindow: 2,
   });
   const store = memoryStore(state);
   const client = windowRpc();
@@ -478,7 +473,7 @@ test('a wider in-flight window lets several recipients await finality concurrent
 test('an in-flight recipient resumes after a simulated restart without re-signing', async () => {
   const plan = planFor(2);
   const state = createDirectPayoutState({
-    plan, operations: OPERATIONS, usdgAddress: TOKEN, firstNonce: '0', inFlightWindow: 2,
+    plan, operations: OPERATIONS, assetId: 'native', firstNonce: '0', inFlightWindow: 2,
   });
   const store = memoryStore(state);
   const client = windowRpc();
@@ -532,60 +527,6 @@ test('frozen-asset admission preserves the full pool as unsent liability plus du
 
   const notFrozen = evaluateDirectPayoutFrozenAssetAdmission({ frozen: false, attributableDistributableAmount: '101', dust: '1' });
   assert.equal(notFrozen.outcome, 'OK');
-});
-
-test('mutatePayout admits and signs nothing when USDG is frozen for the Operations sender, and holds the cycle', async () => {
-  const plan = planFor(2);
-  const context = {
-    cycleId: plan.cycleId,
-    requestDigest: `sha256:${'b'.repeat(64)}`,
-    fencingToken: 'payout-fence-frozen-1',
-  };
-  let stored = null;
-  const holds = [];
-  const cycleRepository = {
-    async readPagedPayoutState() { return stored === null ? null : structuredClone(stored); },
-    async persistPagedPayoutState(_cycleId, _stage, state) { stored = structuredClone(state); },
-    async consumePayoutDustAndPersistPagedPayoutState(_cycleId, input) {
-      stored = structuredClone(input.evidence);
-      return { evidence: structuredClone(stored), consumption: null };
-    },
-    async describeCycle() { return { custodyLedgers: new Map() }; },
-    async recordCustodyLedger() {},
-    async reserveWalletNonce() {},
-    async assertWalletNonce() {},
-    async holdCycle(cycleId, terminalState, evidence) { holds.push({ cycleId, terminalState, evidence }); },
-  };
-  const baseClient = windowRpc();
-  const frozenClient = {
-    ...baseClient,
-    async readContract({ functionName, args }) {
-      assert.equal(functionName, 'isFrozen');
-      return args[0].toLowerCase() === OPERATIONS;
-    },
-  };
-  const counter = { sign: 0 };
-
-  await assert.rejects(
-    mutatePayout({
-      liveMode: true,
-      config: lifecycleConfig(),
-      cycleRepository,
-      context,
-      request: { plan },
-      adapters: { robinhood: { client: frozenClient } },
-      signerClient: lifecycleSigner(counter),
-    }),
-    error => error instanceof DirectPayoutFrozenAssetError,
-  );
-
-  assert.equal(counter.sign, 0);
-  assert.equal(stored, null, 'no recipient state is ever persisted for a frozen-asset admission refusal');
-  assert.equal(holds.length, 1);
-  assert.equal(holds[0].terminalState, 'HELD_UNAVAILABLE');
-  assert.equal(holds[0].evidence.admission.outcome, 'NON_SPENDING_FROZEN_ASSET');
-  assert.equal(holds[0].evidence.admission.unsentLiability, plan.totalAllocated.amountAtomic);
-  assert.equal(holds[0].evidence.admission.remainingDust, plan.dust.amountAtomic);
 });
 
 test('native-gas admission reports the exact wei deficit and never claims OK when balance falls short', () => {
@@ -647,7 +588,7 @@ test('mutatePayout refuses a 100-required/99-available bridge shortfall before t
     ...windowRpc(),
     async getBalance() { return 999_999_999_999n; }, // unrelated wallet-wide funds; must never fund the shortfall
     async readCycleAttributableFinalizedAvailable() {
-      return { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '99' };
+      return { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '99' };
     },
   };
   const counter = { sign: 0 };

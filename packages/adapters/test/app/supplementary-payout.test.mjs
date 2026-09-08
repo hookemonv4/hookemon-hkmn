@@ -6,7 +6,7 @@ import test from 'node:test';
 import { keccak256, TransactionReceiptNotFoundError } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { createUsdgPayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
+import { createNativePayoutAmount } from '../../../runner/src/distribution/payout-plan.mjs';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 import { wrapSignerClient } from '../../src/signing/signer-client.mjs';
@@ -25,6 +25,7 @@ import {
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { digest } from '../../../runner/src/cycle/journal.mjs';
 
+const signedFixtures = new Map();
 const TOKEN = `0x${'a'.repeat(40)}`;
 const OPERATIONS = `0x${'b'.repeat(40)}`;
 const RECIPIENT_A = `0x${'c'.repeat(40)}`;
@@ -35,7 +36,7 @@ const PAYOUT_ACCOUNT = privateKeyToAccount(`0x${'1'.repeat(64)}`);
 const PAYOUT_OPERATIONS = PAYOUT_ACCOUNT.address.toLowerCase();
 
 function lifecycleConfig() {
-  const usdg = { chainId: '4663', assetId: TOKEN, decimals: 6 };
+  const usdg = { chainId: '4663', assetId: 'native', decimals: 18 };
   const solanaStablecoin = {
     chainId: '792703809',
     assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -46,12 +47,12 @@ function lifecycleConfig() {
     accounts: { evm: PAYOUT_OPERATIONS },
     contracts: { usdg: TOKEN },
     moneyConfiguration: {
-      schema: 'hookemon.money-configuration.v1',
-      assets: { usdg, solanaStablecoin },
+      schema: 'hookemon.money-configuration.v2',
+      assets: { eth: usdg, solanaStablecoin },
       minimums: {
         robinhoodReceive: { ...usdg, amountAtomic: '0' },
         solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-        returnUsdg: { ...usdg, amountAtomic: '0' },
+        returnEth: { ...usdg, amountAtomic: '0' },
       },
       evm: {
         perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '5' },
@@ -79,6 +80,7 @@ function lifecycleSigner(counter) {
             signingTransaction[field] = BigInt(signingTransaction[field]);
           }
           const signedTx = await PAYOUT_ACCOUNT.signTransaction(signingTransaction);
+          signedFixtures.set(keccak256(signedTx),{...signingTransaction,hash:keccak256(signedTx),from:PAYOUT_OPERATIONS});
           counter.signed ??= [];
           counter.signed.push(signedTx);
           return { signedTx };
@@ -121,13 +123,15 @@ function lifecycleRpc() {
       assert.equal(functionName, 'isFrozen');
       return false;
     },
+    async getChainId() { return 4663; },
+    async getTransaction({hash}) { return {...signedFixtures.get(hash),blockNumber:100n,blockHash:`0x${'9'.repeat(64)}`}; },
     async getTransactionCount() { return nonce; },
     async getBalance() { return 1_000_000n; },
     async getTransactionReceipt({ hash }) {
       const receipt = await receiptResolver?.(hash);
       if (!receipt) throw new TransactionReceiptNotFoundError({ hash });
       observedReceipt = receipt;
-      return receipt;
+      return {...receipt,gasUsed:50000n,effectiveGasPrice:2n};
     },
     async getBlock({ blockNumber } = {}) {
       if (blockNumber === 99n) {
@@ -169,9 +173,9 @@ function lifecyclePayoutSource(identity, finalized = lifecycleFinalizedReturnEvi
     ...payoutSource(identity, finalized),
     returnBinding: {
       operations: PAYOUT_OPERATIONS,
-      usdgAddress: TOKEN,
+      assetId: 'native',
       evidenceDigest: digest({
-        schema: 'hookemon.supplementary-finalized-return-binding.v1',
+        schema: 'hookemon.supplementary-finalized-return-binding.v2',
         positionId: finalized.positionId,
         cycleId: finalized.cycleId,
         manifestId: finalized.manifestId,
@@ -189,7 +193,7 @@ function directStore(store, requestValue) {
 }
 
 function usdg(amountAtomic) {
-  return createUsdgPayoutAmount({ assetId: TOKEN, amountAtomic });
+  return createNativePayoutAmount({ assetId: 'native', amountAtomic });
 }
 
 function eligibilityManifest(cycleId) {
@@ -232,9 +236,9 @@ function eligibilityManifest(cycleId) {
 function returnBinding(finalizedReturnEvidence) {
   return {
     operations: OPERATIONS,
-    usdgAddress: TOKEN,
+    assetId: 'native',
     evidenceDigest: digest({
-      schema: 'hookemon.supplementary-finalized-return-binding.v1',
+      schema: 'hookemon.supplementary-finalized-return-binding.v2',
       positionId: finalizedReturnEvidence.positionId,
       cycleId: finalizedReturnEvidence.cycleId,
       manifestId: finalizedReturnEvidence.manifestId,
@@ -253,12 +257,12 @@ function settlementIdentity(cycleId = 'cycle-supplementary-payout') {
 
 function finalizedReturnEvidence(identity, overrides = {}) {
   return {
-    schema: 'hookemon.supplementary-finalized-return.v1',
+    schema: 'hookemon.supplementary-finalized-return.v2',
     positionId: identity.positionId,
     cycleId: identity.cycleId,
     manifestId: identity.manifestId,
     operations: OPERATIONS,
-    usdgAddress: TOKEN,
+    assetId: 'native',
     amountAtomic: '9',
     finalityEvidence: { transactionHash: `0x${'5'.repeat(64)}`, finalized: true },
     ...overrides,
@@ -267,7 +271,7 @@ function finalizedReturnEvidence(identity, overrides = {}) {
 
 function payoutSource(identity, finalized = finalizedReturnEvidence(identity), overrides = {}) {
   return {
-    schema: 'hookemon.supplementary-payout-source.v1',
+    schema: 'hookemon.supplementary-payout-source.v2',
     positionId: identity.positionId,
     cycleId: identity.cycleId,
     manifestId: identity.manifestId,
@@ -281,7 +285,7 @@ function payoutSource(identity, finalized = finalizedReturnEvidence(identity), o
 
 function returnBoundary(identity, { finalized = finalizedReturnEvidence(identity), source = payoutSource(identity, finalized) } = {}) {
   const evidence = {
-    schema: 'hookemon.supplementary-return-boundary.v1',
+    schema: 'hookemon.supplementary-return-boundary.v2',
     positionId: identity.positionId,
     cycleId: identity.cycleId,
     manifestId: identity.manifestId,
@@ -290,7 +294,7 @@ function returnBoundary(identity, { finalized = finalizedReturnEvidence(identity
   return {
     state: 'RETURN_BROADCAST',
     evidenceDigest: digest({
-      schema: 'hookemon.supplementary-settlement-evidence.v1',
+      schema: 'hookemon.supplementary-settlement-evidence.v2',
       positionId: identity.positionId,
       manifestId: identity.manifestId,
       state: 'RETURN_BROADCAST',
@@ -342,7 +346,7 @@ test('persists a supplementary payout separately while binding the original froz
   const state = createDirectPayoutState({
     plan: prepared.plan.payoutPlan,
     operations: OPERATIONS,
-    usdgAddress: TOKEN,
+    assetId: 'native',
     firstNonce: '7',
   });
 
@@ -434,12 +438,12 @@ test('rejects a persisted supplementary payout envelope for a different manifest
   const directState = createDirectPayoutState({
     plan: prepared.plan.payoutPlan,
     operations: OPERATIONS,
-    usdgAddress: TOKEN,
+    assetId: 'native',
     firstNonce: '0',
   });
   const { recipients, ...payoutState } = directState;
   const records = new Map([[`${sourceSettlement.cycleId}\u0000${stage}`, {
-    schema: 'hookemon.supplementary-payout-state.v1',
+    schema: 'hookemon.supplementary-payout-state.v2',
     positionId: POSITION_ID,
     cycleId: sourceSettlement.cycleId,
     manifestId: `${sourceSettlement.cycleId}:supplementary:2`,
@@ -516,7 +520,7 @@ test('pays the original supplementary snapshot recipients once when finality res
     payoutStore: firstPayoutStore,
     plan: prepared.plan.payoutPlan,
     operations: PAYOUT_OPERATIONS,
-    usdgAddress: TOKEN,
+    assetId: 'native',
     firstNonce: '0',
     gasPriceWei: '2',
   });
