@@ -1,16 +1,18 @@
 --- a/architecture/interfaces.json
 +++ b/architecture/interfaces.json
-@@ -1,8 +1,8 @@
+@@ -1,9 +1,9 @@
  {
    "schemaVersion": "hookemon.interfaces.v1",
 -  "source": "Approved Phase 3 plan sections 4, 6, 9, and 11",
 +  "source": "Native revision 71 proposal 31b79355 applied to PR39 56f185e; pending coordinator integration and feasibility freeze",
    "productPhase": 3,
 -  "requirementsRevision": 67,
+-  "architectureRevision": 10,
 +  "requirementsRevision": 71,
-   "architectureRevision": 10,
++  "architectureRevision": 11,
    "status": "PROVISIONAL_PHASE3_PENDING_FEASIBILITY",
    "bindingManifest": "release/phase3/deployment-manifest.json",
+   "bindingManifestDigest": null,
 @@ -25,21 +25,21 @@
      "enabledCallbacks": ["beforeInitialize", "beforeSwap", "afterSwap", "beforeSwapReturnDelta", "afterSwapReturnDelta"],
      "externalBeforeInitialize": "REVERT",
@@ -121,7 +123,7 @@
        "nonEvmEvidenceConstructionContract": {
          "source": "packages/adapters/src/solana-custody-balance-observation.mjs",
          "sourceDigest": "sha256:08b85e992141a3e2abc8122d857cb3fd8c7d9e165b7cb44dd3fa7c75f54e0274",
-@@ -181,8 +181,8 @@
+@@ -181,14 +181,14 @@
          "trustInputs": "a caller-pinned canonical {chainId, assetId, decimals, mint, owner, tokenProgramId} identity plus two independently configured finalized-commitment read sides; performs no RPC I/O and selects no chain/asset identity itself",
          "status": "an allowed pure combiner shape only; not itself a durable producer, canonical chain/asset identity source, custody-ledger writer, valuation, or live readiness proof for any row"
        },
@@ -132,13 +134,21 @@
        "liveBindingStatus": "no bindings/index.json entry exists for this interface; none is created until a real, independently approved binding path, digest, and value exist"
      },
      "terminalHold": {"states": "HELD_*", "nextTransition": "idempotent-owner-decision"},
-@@ -301,17 +301,17 @@
+     "writeAhead": true,
+     "walletLock": "one-wallet-wide-nonce-and-fencing-lock",
+-    "return": "finalized-cycle-attributed-delta-only"
++    "return": "finalized-cycle-attributed-native-payment-proof-only; preserve separate Solana proceeds evidence"
+   },
+   "transactionPolicy": {
+     "formats": ["EVM", "Solana legacy", "Solana v0 with address lookup tables"],
+@@ -301,25 +301,25 @@
      "feasibility": ["recipient-count", "measured-gas", "gas-price-cap", "native-balance", "transaction-count"]
    },
    "payout": {
 -    "model": "direct-per-holder-usdg-transfer",
+-    "states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED"],
 +    "model": "direct-per-holder-native-ETH-value-transfer",
-     "states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED"],
++    "states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED", "REFUSED"],
      "manifest": "immutable-after-first-broadcast",
      "replacement": "same-nonce-and-calldata-only",
 -    "frozenRecipient": "quarantine-liability",
@@ -154,11 +164,12 @@
        "dustCarry": "persist and atomically consume provenance-bound carry between cycles"
      }
    },
-@@ -319,7 +319,7 @@
+   "policyEngine": {
      "controls": ["dashboard-caps-and-allowlists-atomic-at-claim-and-purchase", "rolling-24h-spend", "max-cycles-per-day", "per-cycle-cap", "rolling-realized-plus-at-risk-loss-cap", "max-outstanding-custody", "pause-or-kill-switch-before-every-signature", "digest-bound-manual-approval-for-first-N-production-cycles"],
      "epicRule": "hold iff offerAtomic * 100 < insuredValueAtomic * 40; equality sells",
-     "held": "HELD_* is fail-closed, alarmed, never-auto-sold, and blocks-new-claims-in-v1",
+-    "held": "HELD_* is fail-closed, alarmed, never-auto-sold, and blocks-new-claims-in-v1",
 -    "canaries": ["chain-id", "runtime-hashes", "USDG-decimals-pause-freeze", "roles", "protocol-fee", "router-and-quoter-hashes", "provider-policy-digest", "nonce-or-blockhash", "gas-reserves", "pause-and-loss-limits", "unattributed-custody"],
++    "held": "Pending epic decisions do not independently refuse claims; refuse only at the unchanged held count/cost limits or unresolved custody/valuation boundaries. Never auto-sell held cards.",
 +    "canaries": ["chain-id", "runtime-hashes", "native-ETH-identity-and-finalized-payment-producer", "roles", "protocol-fee", "router-and-quoter-hashes", "provider-policy-digest", "nonce-or-blockhash", "gas-reserves", "pause-and-loss-limits", "unattributed-custody"],
      "rehearsal": "runner mode with bounded cycles, cap, restart injection, and evidence JSON"
    },

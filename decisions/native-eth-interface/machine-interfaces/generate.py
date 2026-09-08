@@ -9,11 +9,11 @@ import tempfile
 
 OUT = Path(__file__).resolve().parent
 BASE = '56f185e07dfafe5533df617ec1dad473ecb63f68'
-PROPOSAL = '31b79355'
+PROPOSAL = '31b7935514ebf85da805677128e2555eecc7fef5'
 REQUIREMENTS_HASH = '750a12abf47a771d1181dd6a1782c1b6fbcc4eebb4632e5d1927bf52f4193425'
 
 def git(*args):
-    return subprocess.check_output(['git', *args]).decode()
+    return subprocess.check_output(['git', '--no-replace-objects', *args]).decode()
 
 def sha(text):
     return hashlib.sha256(text.encode()).hexdigest()
@@ -60,6 +60,10 @@ for old, new in [
  ('"USDG-decimals-pause-freeze"', '"native-ETH-identity-and-finalized-payment-producer"'),
 ]:
     text = replace(text, old, new)
+text = replace(text, '"architectureRevision": 10', '"architectureRevision": 11')
+text = replace(text, '"held": "HELD_* is fail-closed, alarmed, never-auto-sold, and blocks-new-claims-in-v1"', '"held": "Pending epic decisions do not independently refuse claims; refuse only at the unchanged held count/cost limits or unresolved custody/valuation boundaries. Never auto-sell held cards."')
+text = replace(text, '"return": "finalized-cycle-attributed-delta-only"', '"return": "finalized-cycle-attributed-native-payment-proof-only; preserve separate Solana proceeds evidence"')
+text = replace(text, '"states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED"],', '"states": ["PREPARED", "SIGNED", "BROADCAST", "FINALIZED", "REFUSED"],')
 # Rename module record references only; do not touch transactionPolicy itself.
 for old, new in [('RelayLegV1', 'RelayLegV2'), ('CustodyLedgerV2', 'CustodyLedgerV3'), ('MoneyConfigurationV1', 'MoneyConfigurationV2'), ('quarantineFrozenRecipient', 'quarantineRejectingRecipient')]:
     start = text.index('  "moduleInterfaces":')
