@@ -1,0 +1,15 @@
+{
+  "checkedAt": "2026-09-07T17:16:20.359893+00:00",
+  "sourceSha256": "91e3a72520be1d2b87c30c7c272d735402422c14ece75aef294862bda5bc1398",
+  "receiptCount": 32,
+  "distinctBlocks": 32,
+  "allReceiptStatusSuccess": true,
+  "receiptGas": 8381513,
+  "usdgTransferDeltas": {
+    "0x8366a39cc670b4001a1121b8f6a443a643e40951": "16",
+    "0x09ec14bfa800f9d349816df0a57912d79eee20cc": "31134616",
+    "0x000000000000000000000000000000000000cafe": "-31134632"
+  },
+  "capitalConservationAtomic": "150000000",
+  "scope": "Independent receipt aggregation only; no live execution or total cost bound."
+}

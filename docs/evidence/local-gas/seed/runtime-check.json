@@ -1,0 +1,14 @@
+{
+  "hook": {
+    "runtimeBytes": 30033,
+    "matchesTrackedRuntimeOutsideImmutableReferences": true
+  },
+  "token": {
+    "runtimeBytes": 3201,
+    "matchesTrackedRuntimeOutsideImmutableReferences": true
+  },
+  "custody": {
+    "runtimeBytes": 3040,
+    "matchesTrackedRuntimeOutsideImmutableReferences": true
+  }
+}

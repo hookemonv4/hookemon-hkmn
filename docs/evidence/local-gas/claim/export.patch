@@ -1,0 +1,110 @@
+--- a/packages/contracts/test/integration/LocalGasClaimExport.t.sol
++++ b/packages/contracts/test/integration/LocalGasClaimExport.t.sol
+@@ -27,7 +27,7 @@
+     RobinhoodBindings
+ } from "../../src/bindings/RobinhoodBindings.sol";
+ import { HKMNToken } from "../../src/launch/HKMNToken.sol";
+-import { ProgrammableGraphHarness } from "../launch/LaunchComposition.t.sol";
++import { ProgrammableGraphHarness } from "../launch/LocalClaimLaunchComposition.t.sol";
+ 
+ interface IArchiveForkVm {
+     function getRawBlockHeader(uint256 blockNumber) external view returns (bytes memory rlpHeader);
+@@ -194,14 +194,14 @@
+         returns (bytes4);
+ }
+ 
+-contract RobinhoodV4ArchiveForkTest is Test {
++contract LocalGasClaimExportTest is Test {
+     using PoolIdLibrary for PoolKey;
+     using StateLibrary for IPoolManager;
+ 
+     uint256 private constant ROBINHOOD_CHAIN_ID = 4663;
+-    uint256 private constant PINNED_BLOCK = 54_484_625;
++    uint256 private constant PINNED_BLOCK = 57006586;
+     bytes32 private constant PINNED_BLOCK_HASH =
+-        0x88959d6f23a8b713b923fbed50459580c56a1ba5acb4e65707594673bcc26743;
++        0xa866fb20b9ac600602f2a661a558fa3153bfcf96106264fc4a14631deb570b92;
+     address private constant POOL_MANAGER = 0x8366a39CC670B4001A1121B8F6A443A643e40951;
+     bytes32 private constant POOL_MANAGER_RUNTIME_CODEHASH =
+         0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626;
+@@ -243,9 +243,9 @@
+     );
+     uint160 private constant ALL_HOOK_MASK = (1 << 14) - 1;
+     uint160 private constant REQUIRED_HOOK_MASK = 0x20CC;
+-    uint128 private constant USDG_SEED_AMOUNT = 240_000_000;
++    uint128 private constant USDG_SEED_AMOUNT = 100_000_000;
+     uint256 private constant HKMN_POOL_ALLOCATION = 1_000_000_000e18;
+-    uint128 private constant USDG_CURRENCY0_LIQUIDITY = 489897948556635619;
++    uint128 private constant USDG_CURRENCY0_LIQUIDITY = 316227766016837933;
+     uint128 private constant HKMN_CURRENCY0_LIQUIDITY = 489897948572597439;
+     int24 private constant TICK_LOWER = -887220;
+     int24 private constant TICK_UPPER = 887220;
+@@ -254,7 +254,7 @@
+     uint128 private constant NON_DIVISIBLE_USDG_ROUTER_TRADE_AMOUNT = 1_499;
+     uint128 private constant USDG_ROUTER_EXACT_OUTPUT_AMOUNT = 5_000_000;
+     uint128 private constant HKMN_ROUTER_EXACT_OUTPUT_AMOUNT = 5_000_000e18;
+-    uint128 private constant USDG_ROUTER_FUNDING_AMOUNT = 250_000_000;
++    uint128 private constant USDG_ROUTER_FUNDING_AMOUNT = 50_000_000;
+     uint128 private constant HKMN_PARTIAL_FILL_AMOUNT = 10 ** 37;
+     uint256 private constant GENESIS_GAS_ENVELOPE_LIMIT = 30_000_000;
+     uint256 private constant PROVIDER_ROUTE_GAS_MARGIN = 1_000_000;
+@@ -262,7 +262,7 @@
+     uint256 private constant EVM_ZERO_CALLDATA_BYTE_GAS = 4;
+     uint256 private constant EVM_NONZERO_CALLDATA_BYTE_GAS = 16;
+     uint160 private constant USDG_CURRENCY0_SQRT_PRICE_X96 =
+-        161723809515207654588927258648643645224;
++        250541448375047931344782464160941919862;
+     uint160 private constant HKMN_CURRENCY0_SQRT_PRICE_X96 = 38813714284914462669;
+     bytes32 private constant TARGET_SALT_TYPEHASH = keccak256(
+         "ProgrammableCreate2GraphTargetSaltV1(uint256 chainId,address factory,bytes32 routeNamespace,bytes32 routeNonce,bytes32 targetIdHash,bytes32 applicantSalt,address authorizedLauncher)"
+@@ -485,7 +485,7 @@
+     mapping(address target => uint256 gross) private observedGrossUsdg;
+     mapping(address target => FeeRemainders remainders) private observedFeeRemainders;
+ 
+-    function setUp() external {
++    function _setUpExport() private {
+         vm.createSelectFork(vm.envString("ROBINHOOD_FORK_RPC_URL"), PINNED_BLOCK);
+         _assertPinnedRuntimeBundle();
+         manager = IPoolManager(POOL_MANAGER);
+@@ -956,7 +956,7 @@
+     }
+ 
+     function _fundRouterTrader(HKMNToken token, address trader) private {
+-        deal(address(token), trader, HKMN_POOL_ALLOCATION);
++        assertEq(token.balanceOf(trader), 0, "trader must start without HKMN");
+         _fundUsdg(trader, USDG_ROUTER_FUNDING_AMOUNT);
+         deal(trader, 100 ether);
+ 
+@@ -2689,4 +2689,32 @@
+         );
+         assertEq(router.CHAIN_ID(), ROBINHOOD_CHAIN_ID, "router chain binding drifted");
+     }
++
++    function testExportExistingFixtureOnly() external {
++        _setUpExport();
++        _fundRouterTrader(hkmn, TRADER);
++        assertEq(address(hook).code.length, 30033, "tracked launch hook size");
++        assertEq(address(hkmn).code.length, 3201, "tracked launch token size");
++        assertEq(address(custody).code.length, 3040, "tracked launch custody size");
++        assertEq(IArchiveErc20(USDG).balanceOf(TRADER), 50_000_000);
++        assertEq(hkmn.balanceOf(TRADER), 0);
++        assertEq(hkmn.balanceOf(address(hook)), 0);
++        assertEq(hkmn.balanceOf(POOL_MANAGER), HKMN_POOL_ALLOCATION);
++        assertEq(hook.processLiability(), 0);
++        assertEq(hook.activeProcessClaimLimit(), 50_000_000_000);
++        assertEq(hook.processClaimLimitMax(), 500_000_000_000);
++        assertEq(hook.processClaimMaxCount(), 8);
++        vm.serializeString("fixture", "initialManagerUsdgAtomic", vm.toString(IArchiveErc20(USDG).balanceOf(POOL_MANAGER)));
++        vm.serializeString("fixture", "initialTraderUsdgAtomic", "50000000");
++        vm.serializeString("fixture", "initialHookUsdgAtomic", vm.toString(IArchiveErc20(USDG).balanceOf(address(hook))));
++        vm.serializeAddress("fixture", "custody", address(custody));
++        vm.serializeAddress("fixture", "trader", TRADER);
++        vm.serializeAddress("fixture", "usdg", USDG);
++        vm.serializeAddress("fixture", "hkmn", address(hkmn));
++        vm.serializeAddress("fixture", "hook", address(hook));
++        vm.serializeAddress("fixture", "router", UNIVERSAL_ROUTER);
++        string memory metadata = vm.serializeUint("fixture", "timestamp", block.timestamp);
++        vm.writeJson(metadata, "./test/release/.generated/local-gasclaim-metadata.json");
++        vm.dumpState("./test/release/.generated/local-gasclaim-alloc.json");
++    }
+ }
