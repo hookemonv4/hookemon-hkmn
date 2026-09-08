@@ -165,6 +165,12 @@ export const CYCLE_REPOSITORY_INTERFACE = Object.freeze([
   'completeStage',
   'completeCycle',
   'holdCycle',
+  'recordPackOrderReconciliation',
+  'readPackOrderReconciliation',
+  'recordPackOrderIntent',
+  'recordPackOrderRequest',
+  'readPackOrderIntent',
+  'readPackOrderRequest',
   'recordPackBatchIntent',
   'readPackBatchIntent',
   'recordPackBatchRequest',
@@ -666,25 +672,20 @@ function assertOutboundQuoteIdentity(value, label) {
 
 function assertOutboundQuoteExpiryEvidence(value, cycleId) {
   const label = 'cycle-repository outbound quote expiry evidence';
-  exactObject(value, ['schema', 'cycleId', 'admissionDigest', 'aggregateQuote', 'unitQuote', 'observedAtMs'], label);
-  if (value.schema !== OUTBOUND_QUOTE_EXPIRY_EVIDENCE_SCHEMA) throw new Error(`${label} schema is invalid`);
+  const plan = value?.schema === 'hookemon.outbound-quote-expiry-evidence.v2';
+  exactObject(value, ['schema', 'cycleId', 'admissionDigest', 'aggregateQuote', plan ? 'unitQuotes' : 'unitQuote', 'observedAtMs'], label);
+  if (!plan && value.schema !== OUTBOUND_QUOTE_EXPIRY_EVIDENCE_SCHEMA) throw new Error(`${label} schema is invalid`);
   if (value.cycleId !== cycleId) throw new Error(`${label} does not name this cycle`);
   assertDigest(value.admissionDigest, `${label} admissionDigest`);
   const aggregateQuote = assertOutboundQuoteIdentity(value.aggregateQuote, `${label} aggregateQuote`);
-  const unitQuote = assertOutboundQuoteIdentity(value.unitQuote, `${label} unitQuote`);
+  const rawUnits = plan ? value.unitQuotes : [value.unitQuote];
+  if (!Array.isArray(rawUnits) || !rawUnits.length || rawUnits.length > 64) throw new Error(`${label} unit quotes are invalid`);
+  const units = rawUnits.map(unit => assertOutboundQuoteIdentity(unit, `${label} unit quote`));
   if (!Number.isSafeInteger(value.observedAtMs) || value.observedAtMs <= 0) throw new Error(`${label} observedAtMs is invalid`);
-  const observedUnixSeconds = Math.floor(value.observedAtMs / 1000);
-  if (observedUnixSeconds < aggregateQuote.deadlineUnixSeconds && observedUnixSeconds < unitQuote.deadlineUnixSeconds) {
-    throw new Error(`${label} requires the aggregate or unit quote to actually be expired at the observed time`);
-  }
-  return Object.freeze({
-    schema: value.schema,
-    cycleId,
-    admissionDigest: value.admissionDigest,
-    aggregateQuote,
-    unitQuote,
-    observedAtMs: value.observedAtMs,
-  });
+  const observed = Math.floor(value.observedAtMs / 1000);
+  if ([aggregateQuote, ...units].every(quote => observed < quote.deadlineUnixSeconds)) throw new Error(`${label} requires the aggregate or unit quote to actually be expired at the observed time`);
+  return Object.freeze({ schema: value.schema, cycleId, admissionDigest: value.admissionDigest, aggregateQuote,
+    ...(plan ? { unitQuotes: units } : { unitQuote: units[0] }), observedAtMs: value.observedAtMs });
 }
 
 /**
@@ -702,11 +703,12 @@ function assertOutboundQuoteExpiryEvidenceMatchesAdmission(evidence, admission) 
     || evidence.aggregateQuote.quoteDigest !== admission.relay.quoteDigest) {
     throw new Error('cycle-repository outbound quote expiry evidence: aggregateQuote does not match this cycle\'s admitted aggregate quote');
   }
-  if (evidence.unitQuote.requestId !== admission.unitRelay.requestId
-    || evidence.unitQuote.deadlineUnixSeconds !== admission.unitRelay.deadlineUnixSeconds
-    || evidence.unitQuote.quoteDigest !== admission.unitRelay.quoteDigest) {
-    throw new Error('cycle-repository outbound quote expiry evidence: unitQuote does not match this cycle\'s admitted unit quote');
-  }
+  const units = admissionUnitRows(admission);
+  const evidenceUnits = admission.schema === 'hookemon.policy-admission.v4' ? evidence.unitQuotes : [evidence.unitQuote];
+  if (!Array.isArray(evidenceUnits) || evidenceUnits.length !== units.length || units.some((unit, i) => {
+    const quote = evidenceUnits[i];
+    return quote.requestId !== unit.unitRelay.requestId || quote.deadlineUnixSeconds !== unit.unitRelay.deadlineUnixSeconds || quote.quoteDigest !== unit.unitRelay.quoteDigest;
+  })) throw new Error('cycle-repository outbound quote expiry evidence: unitQuote does not match this cycle\'s admitted unit quote');
 }
 
 /** Any outbound stage request digest, Relay leg, or chain attempt of any state blocks refresh. */
@@ -730,11 +732,12 @@ function hasOutboundEffectRecords(state) {
  */
 function assertOutboundQuoteReplacementIdentity(normalized, admission, releaseAmount, label) {
   if (!admission) throw new Error(`${label}: this cycle has no original durable admission to bind against`);
-  if (normalized.packId !== admission.packId || normalized.quantity !== admission.quantity) {
-    throw new Error(`${label}: replacement pack/quantity does not match the original admission`);
-  }
+  if (normalized.schema !== admission.schema || normalized.quantity !== admission.quantity
+    || (admission.schema === 'hookemon.policy-admission.v4'
+      ? canonicalJson(normalized.packPlan) !== canonicalJson(admission.packPlan)
+      : normalized.packId !== admission.packId)) throw new Error(`${label}: replacement pack/quantity does not match the original admission`);
   if (canonicalJson(normalized.aggregatePurchase) !== canonicalJson(admission.aggregatePurchase)
-    || canonicalJson(normalized.unitPurchase) !== canonicalJson(admission.unitPurchase)) {
+    || canonicalJson(admissionUnitRows(normalized).map(unit => unit.unitPurchase)) !== canonicalJson(admissionUnitRows(admission).map(unit => unit.unitPurchase))) {
     throw new Error(`${label}: replacement destination target does not match the original admission`);
   }
   if (normalized.aggregateFundingQuote.amountAtomic !== releaseAmount) {
@@ -749,7 +752,7 @@ function assertOutboundQuoteReplacementIdentity(normalized, admission, releaseAm
 function assertOutboundQuoteReplacementFreshness(replacement, selectedAtMs, label) {
   const selectedUnixSeconds = Math.floor(selectedAtMs / 1000);
   if (replacement.relay.deadlineUnixSeconds <= selectedUnixSeconds
-    || replacement.unitRelay.deadlineUnixSeconds <= selectedUnixSeconds) {
+    || admissionUnitRows(replacement).some(unit => unit.unitRelay.deadlineUnixSeconds <= selectedUnixSeconds)) {
     throw new Error(`${label}: replacement quote deadlines must be strictly later than the selection time`);
   }
 }
@@ -2988,6 +2991,13 @@ function assertHeldOwnerDecisionTransition(state, decision) {
 }
 
 function assertReconciledCompletion(state, stage, evidence) {
+  if (stage === 'purchase' && state.admission?.schema === 'hookemon.policy-admission.v4') {
+    const batch = state.packBatchRequests.get('purchase');
+    if (batch?.generationComplete !== true || !Array.isArray(evidence?.packs) || evidence.packs.length !== state.admission.quantity
+      || evidence.packs.some((pack, i) => pack.packIndex !== i || pack.memo !== batch.packs[i].memo)) {
+      throw new Error('plan purchase requires reconciliation of every admitted order');
+    }
+  }
   const operational = state.operationalAttempts.get(stage);
   if (operational) {
     if (operational.attempt.state !== 'RECONCILED') {
@@ -3073,18 +3083,88 @@ function validateNativeReturnValuation(leg) {
     || (BigInt(whole) * 1000000n + BigInt(fraction.slice(0, 6).padEnd(6, '0'))).toString() !== value.amountMicroUsd) throw new Error('native return USD proceeds must round down from the exact response');
 }
 
+function isNativeAdmission(value) {
+  return value?.schema === 'hookemon.policy-admission.v3' || value?.schema === 'hookemon.policy-admission.v4';
+}
+function admissionUnitRows(admission) {
+  return admission.schema === 'hookemon.policy-admission.v4' ? admission.orders : [admission];
+}
 function validateNativeAdmissionProvenance(provenance, admission, cycleId) {
-  exactObject(provenance, ['schema', 'cycleId', 'authority', 'admissionDigest', 'unit', 'aggregate'], 'native admission provenance');
-  if (provenance.schema !== 'hookemon.native-admission-provenance.v1' || provenance.cycleId !== cycleId
-    || provenance.admissionDigest !== digest(admission)) throw new Error('native admission provenance differs from its immutable cycle admission');
-  for (const [key, field, quoteField] of [['unit', 'unitFundingUsd', 'unitRelayQuote'], ['aggregate', 'aggregateFundingUsd', 'relayQuote']]) {
-    const evidence = provenance[key], value = admission[field], quote = admission[quoteField];
+  const plan = admission.schema === 'hookemon.policy-admission.v4';
+  exactObject(provenance, ['schema', 'cycleId', 'authority', 'admissionDigest', plan ? 'units' : 'unit', 'aggregate'], 'native admission provenance');
+  if (provenance.schema !== (plan ? 'hookemon.native-admission-provenance.v2' : 'hookemon.native-admission-provenance.v1')
+    || provenance.cycleId !== cycleId || provenance.admissionDigest !== digest(admission)) {
+    throw new Error('native admission provenance differs from its immutable cycle admission');
+  }
+  const units = plan ? provenance.units : [provenance.unit];
+  if (!Array.isArray(units) || units.length !== admissionUnitRows(admission).length) throw new Error('native admission unit provenance mismatch');
+  const legs = admissionUnitRows(admission).map((unit, i) => [units[i], unit.unitFundingUsd, unit.unitRelayQuote]);
+  legs.push([provenance.aggregate, admission.aggregateFundingUsd, admission.relayQuote]);
+  for (const [evidence, value, quote] of legs) {
     exactObject(evidence, ['request', 'rawDigest', 'valuationDigest'], 'native valuation provenance');
     if (evidence.valuationDigest !== digest(value) || evidence.rawDigest !== digest(quote.raw)
       || digest(evidence.request) !== value.requestDigest || quote.quoteDigest !== value.quoteDigest
       || quote.requestId !== value.quoteRequestId) throw new Error('native valuation provenance request or response mismatch');
   }
   return provenance;
+}
+
+function assertPackOrderReconciliation(admission, batch, orderIndex, outcomes) {
+  const order = admission?.schema === 'hookemon.policy-admission.v4' ? admission.orders[orderIndex] : null;
+  if (!order || !batch || !Array.isArray(outcomes) || outcomes.length !== order.quantity) throw new Error('pack order reconciliation requires the complete generated order');
+  return outcomes.map((outcome, i) => {
+    const pack = batch.packs[i];
+    if (!outcome || outcome.packIndex !== pack.packIndex || outcome.memo !== pack.memo || !['purchased', 'not_purchased'].includes(outcome.status)) throw new Error('pack order reconciliation identity is invalid');
+    if (outcome.status === 'purchased') {
+      const cost = assertTypedAmount(outcome.packCost, 'pack order observed debit');
+      if (typeof outcome.signature !== 'string' || !outcome.signature || outcome.expectedCardCount !== pack.expectedCardCount
+        || ![order.unitPurchase.chainId, 'solana-mainnet'].includes(cost.chainId) || cost.assetId !== order.unitPurchase.assetId
+        || cost.decimals !== order.unitPurchase.decimals || BigInt(cost.amountAtomic) <= 0n
+        || BigInt(cost.amountAtomic) > BigInt(order.unitPurchase.amountAtomic)) throw new Error('pack order reconciliation exceeds its admitted debit or identity');
+    }
+    return structuredClone(outcome);
+  });
+}
+
+function applyPackOrderEvent({ admission, cycleId, payload, kind, intents, requests, requestDigests }) {
+  const order = admission?.schema === 'hookemon.policy-admission.v4' ? admission.orders[payload.orderIndex] : null;
+  if (!order || !Number.isSafeInteger(payload.orderIndex) || payload.orderIndex < 0 || payload.stage !== 'purchase') {
+    throw new Error('pack order event requires an admitted plan order');
+  }
+  const key = `purchase:${payload.orderIndex}`;
+  if (kind === 'pack-order-intent-recorded') {
+    const intent = assertPackBatchIntent(payload.intent, 'pack order intent');
+    if (!(requestDigests.get('purchase') ?? []).includes(payload.requestDigest)) throw new Error('pack order intent requires the recorded parent request digest');
+    if (intent.packType !== order.packId || intent.quantity !== order.quantity || payload.admissionDigest !== digest(admission)
+      || !digestPattern.test(payload.requestDigest ?? '') || !Number.isSafeInteger(payload.recordedAtMs) || payload.recordedAtMs < 0) {
+      throw new Error('pack order intent does not bind its admission');
+    }
+    if (intents.has('purchase') && intents.get('purchase').intent.playerAddress !== intent.playerAddress) throw new Error('pack order player differs from the cycle purchase');
+    if (payload.orderIndex > 0 && !requests.has(`purchase:${payload.orderIndex - 1}`)) throw new Error('pack orders must generate in sequence');
+    const record = { intent, admissionDigest: payload.admissionDigest, requestDigest: payload.requestDigest, recordedAtMs: payload.recordedAtMs };
+    const old = intents.get(key);
+    if (old && canonicalJson({ ...old, recordedAtMs: 0 }) !== canonicalJson({ ...record, recordedAtMs: 0 })) throw new Error('pack order intent conflicts with prior intent');
+    if (!old) intents.set(key, record);
+    if (!intents.has('purchase')) intents.set('purchase', record);
+  } else {
+    const intent = intents.get(key);
+    if (!intent) throw new Error('pack order response has no durable intent');
+    const offset = admission.orders.slice(0, payload.orderIndex).reduce((sum, item) => sum + item.quantity, 0);
+    if (!Array.isArray(payload.packs) || payload.packs.length !== order.quantity) throw new Error('pack order response quantity mismatch');
+    const local = assertPackBatchRequest(payload.packs.map((pack, i) => {
+      if (pack.packIndex !== offset + i || pack.packType !== order.packId || pack.expectedCardCount !== intent.intent.expectedCardCountPerPack) throw new Error('pack order response identity mismatch');
+      return { ...pack, packIndex: i };
+    }));
+    if (!Number.isSafeInteger(payload.requestedAtMs) || payload.requestedAtMs < intent.recordedAtMs) throw new Error('pack order response time is invalid');
+    const packs = local.map((pack, i) => ({ ...pack, packIndex: offset + i }));
+    const old = requests.get(key);
+    if (old && canonicalJson(old.packs) !== canonicalJson(packs)) throw new Error('pack order response conflicts with prior response');
+    if (!old) requests.set(key, { packs, requestedAtMs: payload.requestedAtMs });
+    const generated = admission.orders.flatMap((_, i) => requests.get(`purchase:${i}`)?.packs ?? []);
+    assertPackBatchRequest(generated); // Includes cross-order duplicate memo and global index checks.
+    requests.set('purchase', { packs: generated, requestedAtMs: requests.get('purchase:0').requestedAtMs,
+      generationComplete: generated.length === admission.quantity });
+  }
 }
 
 export class CycleRepository {
@@ -3136,8 +3216,7 @@ export class CycleRepository {
     let authority;
     try { authority = this.#valuationAuthority(); } catch { return; }
     if (digest(authority) !== digest(provenance.authority)) return;
-    for (const field of ['unitFundingUsd', 'aggregateFundingUsd']) {
-      const value = admission[field];
+    for (const value of [...admissionUnitRows(admission).map(unit => unit.unitFundingUsd), admission.aggregateFundingUsd]) {
       if (this.#now() < value.observedAtMs || this.#now() >= value.validUntilMs) continue;
       this.#durableValuations.set(value, { authority, digest: digest(value) });
     }
@@ -3227,6 +3306,7 @@ export class CycleRepository {
     const payoutQuarantines = new Map();
     const evmNonceLocks = new Map();
     const packBatchRequests = new Map();
+    const packOrderReconciliations = new Map();
     const packBatchIntents = new Map();
     const supplementaryChainAttempts = new Map();
     const supplementaryChainAttemptRecoveryContexts = new Map();
@@ -3260,6 +3340,7 @@ export class CycleRepository {
       payoutQuarantines,
       evmNonceLocks,
       packBatchRequests,
+      packOrderReconciliations,
       packBatchIntents,
     };
     let completed = false;
@@ -3298,6 +3379,8 @@ export class CycleRepository {
           // stored admission certify its own accounts and assets, which is exactly the check this
           // is here to perform.
           admission = assertDurableCycleAdmission(entry.payload.admission, cycleId, null, 'stored cycle admission', { historicalRead: true });
+          replayState.admission = admission;
+          if (admission.schema === 'hookemon.policy-admission.v4' && canonicalJson(packPlanSnapshot?.plan ?? null) !== canonicalJson(admission.packPlan)) throw new Error('cycle plan snapshot differs from admitted plan');
           if (entry.payload.nativeAdmissionProvenance !== undefined) nativeAdmissionProvenance = validateNativeAdmissionProvenance(entry.payload.nativeAdmissionProvenance, admission, cycleId);
         }
         if (Object.hasOwn(entry.payload, 'mode')) {
@@ -3341,7 +3424,18 @@ export class CycleRepository {
           throw new Error(`stored stage "${entry.payload.stage}" has conflicting completion evidence`);
         }
         stages.set(entry.payload.stage, { status: 'COMPLETE', evidence: entry.payload.evidence });
+      } else if (entry.kind === 'pack-order-reconciled') {
+        const { orderIndex, outcomes, admissionDigest, responseDigest } = entry.payload;
+        const batch = packBatchRequests.get(`purchase:${orderIndex}`);
+        if (admissionDigest !== digest(admission) || responseDigest !== digest(batch)) throw new Error('pack order reconciliation binding mismatch');
+        const checked = assertPackOrderReconciliation(admission, batch, orderIndex, outcomes);
+        const old = packOrderReconciliations.get(orderIndex);
+        if (old && canonicalJson(old) !== canonicalJson(checked)) throw new Error('pack order reconciliation conflicts with prior outcome');
+        packOrderReconciliations.set(orderIndex, checked);
+      } else if (['pack-order-intent-recorded', 'pack-order-request-recorded'].includes(entry.kind)) {
+        applyPackOrderEvent({ admission, cycleId, payload: entry.payload, kind: entry.kind, intents: packBatchIntents, requests: packBatchRequests, requestDigests: stageRequestDigests });
       } else if (entry.kind === 'pack-batch-intent-recorded') {
+        if (admission?.schema === 'hookemon.policy-admission.v4') throw new Error('plan admission refuses legacy batch events');
         assertPackOperationStageName(entry.payload.stage);
         const intent = assertPackBatchIntent(entry.payload.intent, 'stored pack batch intent');
         if (!Number.isSafeInteger(entry.payload.recordedAtMs) || entry.payload.recordedAtMs < 0) {
@@ -3354,6 +3448,7 @@ export class CycleRepository {
         }
         if (!previous) packBatchIntents.set(entry.payload.stage, record);
       } else if (entry.kind === 'pack-batch-request-recorded') {
+        if (admission?.schema === 'hookemon.policy-admission.v4') throw new Error('plan admission refuses legacy batch events');
         assertPackOperationStageName(entry.payload.stage);
         const packs = assertPackBatchRequest(entry.payload.packs, 'stored pack batch request');
         if (!Number.isSafeInteger(entry.payload.requestedAtMs) || entry.payload.requestedAtMs < 0) {
@@ -3819,7 +3914,7 @@ export class CycleRepository {
           throw new Error('stored supplementary settlement transition is invalid');
         }
         const returnBoundary = entry.payload.nextState === 'RETURN_BROADCAST'
-          ? (admission?.schema === 'hookemon.policy-admission.v3' ? assertSupplementaryReturnBoundaryEvidence : assertSupplementaryReturnBoundaryEvidenceHistorical)(
+          ? (isNativeAdmission(admission) ? assertSupplementaryReturnBoundaryEvidence : assertSupplementaryReturnBoundaryEvidenceHistorical)(
             entry.payload.evidence,
             previous,
             'stored supplementary settlement return boundary',
@@ -3844,7 +3939,7 @@ export class CycleRepository {
           : null;
         const payoutSource = returnBoundary === null
           ? (carriedReturnBoundary?.payoutSource ?? null)
-          : (admission?.schema === 'hookemon.policy-admission.v3' ? assertSupplementaryPayoutSource : assertSupplementaryPayoutSourceHistorical)(
+          : (isNativeAdmission(admission) ? assertSupplementaryPayoutSource : assertSupplementaryPayoutSourceHistorical)(
             entry.payload.payoutSource,
             previous,
             'stored supplementary payout source',
@@ -3859,7 +3954,7 @@ export class CycleRepository {
             throw new Error('stored supplementary payout source is not derived from the position return boundary');
           }
         }
-        if (returnBoundary !== null && admission?.schema === 'hookemon.policy-admission.v3') {
+        if (returnBoundary !== null && isNativeAdmission(admission)) {
           const realized = entry.payload.realizedProceedsUsd ?? null;
           if (realized !== null) {
             const expected = supplementaryRealizedProceeds(realized, returnBoundary.finalizedReturnEvidence.finalityEvidence);
@@ -3883,7 +3978,7 @@ export class CycleRepository {
             evidence,
             payoutSource,
             carriedReturnBoundary,
-            admission?.schema === 'hookemon.policy-admission.v3' ? supplementarySettlementEvidenceSchema : 'hookemon.supplementary-settlement-evidence.v1',
+            isNativeAdmission(admission) ? supplementarySettlementEvidenceSchema : 'hookemon.supplementary-settlement-evidence.v1',
           ),
         );
       } else if (entry.kind === 'held-position-resolved') {
@@ -3923,7 +4018,7 @@ export class CycleRepository {
           throw new Error('stored supplementary gas payload fields are invalid');
         }
         const settlement = supplementarySettlements.get(positionId);
-        if (admission?.schema !== 'hookemon.policy-admission.v3' || !settlement
+        if (!isNativeAdmission(admission) || !settlement
           || settlement.manifestId !== manifestId || !digestPattern.test(planDigest)) {
           throw new Error('stored supplementary gas does not bind its original position manifest');
         }
@@ -4119,6 +4214,7 @@ export class CycleRepository {
       payoutQuarantines,
       evmNonceLocks,
       packBatchRequests,
+      packOrderReconciliations,
       packBatchIntents,
       outboundQuoteRefresh,
       completed,
@@ -4284,19 +4380,21 @@ export class CycleRepository {
     if (admitted !== null && admitted.aggregateFundingQuote.amountAtomic !== releaseAmount) {
       throw new Error('cycle-repository createCycle: release amount does not equal the admitted aggregate funding quote');
     }
+    if (admitted?.schema === 'hookemon.policy-admission.v4' && canonicalJson(packPlanSnapshot?.plan ?? null) !== canonicalJson(admitted.packPlan)) throw new Error('cycle plan snapshot differs from admitted plan');
     let nativeAdmissionProvenance = null;
-    if (admitted?.schema === 'hookemon.policy-admission.v3') {
-      for (const [field, amount, quote] of [['unitFundingUsd', 'unitFundingQuote', 'unitRelay'], ['aggregateFundingUsd', 'aggregateFundingQuote', 'relay']]) {
-        const value = admission[field];
-        if (!isProcessQuoteUsdValuation(value, { amount: admitted[amount], quoteDigest: admitted[quote].quoteDigest,
-          quoteRequestId: admitted[quote].requestId, sourcePath: 'details.currencyIn.amountUsd', rounding: 'up' })
-          || this.#now() < value.observedAtMs || this.#now() >= value.validUntilMs) {
-          throw new Error('native cycle creation requires fresh original producer valuation capabilities');
-        }
+    if (['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(admitted?.schema)) {
+      const legs = admissionUnitRows(admission).map(unit => [unit.unitFundingUsd, unit.unitFundingQuote, unit.unitRelay]);
+      legs.push([admission.aggregateFundingUsd, admitted.aggregateFundingQuote, admitted.relay]);
+      for (const [value, amount, quote] of legs) {
+        if (!isProcessQuoteUsdValuation(value, { amount, quoteDigest: quote.quoteDigest,
+          quoteRequestId: quote.requestId, sourcePath: 'details.currencyIn.amountUsd', rounding: 'up' })
+          || this.#now() < value.observedAtMs || this.#now() >= value.validUntilMs) throw new Error('native cycle creation requires fresh original producer valuation capabilities');
       }
-      nativeAdmissionProvenance = validateNativeAdmissionProvenance({ schema: 'hookemon.native-admission-provenance.v1', cycleId: openedCycleId,
-        authority: this.#valuationAuthority(), admissionDigest: digest(admitted),
-        unit: readProcessQuoteUsdProvenance(admission.unitFundingUsd), aggregate: readProcessQuoteUsdProvenance(admission.aggregateFundingUsd) }, admitted, openedCycleId);
+      const plan = admitted.schema === 'hookemon.policy-admission.v4';
+      nativeAdmissionProvenance = validateNativeAdmissionProvenance({ schema: plan ? 'hookemon.native-admission-provenance.v2' : 'hookemon.native-admission-provenance.v1',
+        cycleId: openedCycleId, authority: this.#valuationAuthority(), admissionDigest: digest(admitted),
+        ...(plan ? { units: admission.orders.map(unit => readProcessQuoteUsdProvenance(unit.unitFundingUsd)) } : { unit: readProcessQuoteUsdProvenance(admission.unitFundingUsd) }),
+        aggregate: readProcessQuoteUsdProvenance(admission.aggregateFundingUsd) }, admitted, openedCycleId);
     }
     await this.#append(openedCycleId, 'cycle-opened', {
       releaseAmount,
@@ -4669,18 +4767,59 @@ export class CycleRepository {
     });
   }
 
-  /**
-   * Durably persists the exact quantity and pack code this cycle is about to request from a
-   * batch provider call, before that call is ever made. This is the pre-call counterpart to
-   * `recordPackBatchRequest`: an operator recovering a cycle whose batch call's response was
-   * lost with no memo at all still has a durable, human-readable record of what was attempted
-   * (cycle, quantity, pack code) to reconcile against provider support, rather than only the
-   * generic stage-attempt's opaque request digest.
-   */
+  /** Terminal per-memo outcomes authorize resuming a known generated plan prefix. */
+  async readPackOrderReconciliation(cycleId, orderIndex) {
+    return structuredClone((await this.#replay(cycleId)).packOrderReconciliations.get(orderIndex) ?? null);
+  }
+  async recordPackOrderReconciliation(cycleId, orderIndex, outcomes) {
+    const state = await this.#replay(cycleId);
+    const batch = state.packBatchRequests.get(`purchase:${orderIndex}`);
+    const checked = assertPackOrderReconciliation(state.admission, batch, orderIndex, outcomes);
+    const existing = state.packOrderReconciliations.get(orderIndex);
+    if (existing) {
+      if (canonicalJson(existing) !== canonicalJson(checked)) throw new Error('pack order reconciliation conflicts with prior outcome');
+      return structuredClone(existing);
+    }
+    await this.#append(cycleId, 'pack-order-reconciled', { orderIndex, outcomes: checked,
+      admissionDigest: digest(state.admission), responseDigest: digest(batch) }, { operation: 'recordPackOrderReconciliation', assertState: current => {
+      if (current.terminalState || canonicalJson(current.packBatchRequests.get(`purchase:${orderIndex}`)) !== canonicalJson(batch)) throw new Error('pack order changed during reconciliation');
+    } });
+    return checked;
+  }
+
+  async readPackOrderIntent(cycleId, orderIndex) {
+    return structuredClone((await this.#replay(cycleId)).packBatchIntents.get(`purchase:${orderIndex}`) ?? null);
+  }
+  async readPackOrderRequest(cycleId, orderIndex) {
+    return structuredClone((await this.#replay(cycleId)).packBatchRequests.get(`purchase:${orderIndex}`) ?? null);
+  }
+  async recordPackOrderIntent(cycleId, orderIndex, intent, requestDigest) {
+    const state = await this.#replay(cycleId);
+    const payload = { stage: 'purchase', orderIndex, intent, requestDigest, admissionDigest: digest(state.admission), recordedAtMs: this.#now() };
+    return this.#recordPackOrder(cycleId, state, 'pack-order-intent-recorded', payload);
+  }
+  async recordPackOrderRequest(cycleId, orderIndex, packs) {
+    const state = await this.#replay(cycleId);
+    return this.#recordPackOrder(cycleId, state, 'pack-order-request-recorded', { stage: 'purchase', orderIndex, packs, requestedAtMs: this.#now() });
+  }
+  async #recordPackOrder(cycleId, state, kind, payload) {
+    const apply = current => {
+      if (current.terminalState) throw new Error('terminal cycle refuses pack order mutation');
+      applyPackOrderEvent({ admission: current.admission, cycleId, payload, kind,
+        intents: new Map(current.packBatchIntents), requests: new Map(current.packBatchRequests), requestDigests: current.stageRequestDigests });
+    };
+    apply(state);
+    const key = `purchase:${payload.orderIndex}`;
+    const existing = (kind === 'pack-order-intent-recorded' ? state.packBatchIntents : state.packBatchRequests).get(key);
+    if (!existing) await this.#append(cycleId, kind, payload, { operation: kind === 'pack-order-intent-recorded' ? 'recordPackOrderIntent' : 'recordPackOrderRequest', assertState: apply });
+    return kind === 'pack-order-intent-recorded' ? this.readPackOrderIntent(cycleId, payload.orderIndex) : this.readPackOrderRequest(cycleId, payload.orderIndex);
+  }
+
   async recordPackBatchIntent(cycleId, stage, intentValue) {
     assertPackOperationStageName(stage);
     const intent = assertPackBatchIntent(intentValue, `${stage} pack batch intent`);
     const state = await this.#replay(cycleId);
+    if (state.admission?.schema === 'hookemon.policy-admission.v4') throw new Error('plan admission refuses legacy batch mutation');
     if (state.terminalState) {
       throw new Error(`cycle-repository recordPackBatchIntent: cycle is terminal as ${state.terminalState}`);
     }
@@ -4722,6 +4861,7 @@ export class CycleRepository {
     assertPackOperationStageName(stage);
     const packs = assertPackBatchRequest(packsValue, `${stage} pack batch request`);
     const state = await this.#replay(cycleId);
+    if (state.admission?.schema === 'hookemon.policy-admission.v4') throw new Error('plan admission refuses legacy batch mutation');
     if (state.terminalState) {
       throw new Error(`cycle-repository recordPackBatchRequest: cycle is terminal as ${state.terminalState}`);
     }
@@ -4760,7 +4900,7 @@ export class CycleRepository {
   async recordHeldPosition(cycleId, input) {
     const { position, evidence, ledgerAsset } = heldPositionInput(cycleId, input, currentRepositoryTime(this.#now));
     const state = await this.#replay(cycleId);
-    if (state.admission?.schema !== 'hookemon.policy-admission.v3' || position.costMicroUsd !== state.admission.aggregateFundingUsd?.amountMicroUsd) throw new Error('held USD cost is not the committed admission basis');
+    if (!isNativeAdmission(state.admission) || position.costMicroUsd !== state.admission.aggregateFundingUsd?.amountMicroUsd) throw new Error('held USD cost is not the committed admission basis');
     const existing = state.heldPositions.get(position.positionId) ?? null;
     if (existing !== null) {
       if (existing.evidenceDigest === position.evidenceDigest) {
@@ -5143,7 +5283,7 @@ export class CycleRepository {
     if (location.state.archived) {
       throw new Error('cycle-repository advanceSupplementarySettlement: archived settlement requires recovery');
     }
-    if (location.state.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native supplementary settlement refuses historical cycle resume');
+    if (!isNativeAdmission(location.state.admission)) throw new Error('native supplementary settlement refuses historical cycle resume');
     const current = location.state.supplementarySettlements.get(positionId);
     let nativeReturnReservations = [];
     let realizedProceedsUsd = null;
@@ -6817,7 +6957,7 @@ export class CycleRepository {
   /** Accounts for finalized gas only; completed-cycle principal buckets remain immutable. */
   async recordSupplementaryPayoutGas(cycleId, { planDigest, proof }) {
     const state = await this.#replay(cycleId);
-    if (state.archived || state.admission?.schema !== 'hookemon.policy-admission.v3' || !digestPattern.test(planDigest)) {
+    if (state.archived || !isNativeAdmission(state.admission) || !digestPattern.test(planDigest)) {
       throw new Error('supplementary payout gas requires an unarchived native cycle');
     }
     const key = custodyLedgerKey({ chainId: '4663', assetId: 'native' });

@@ -83,3 +83,7 @@ node --test packages/runner/test/automation/automated-cycle-service.test.mjs \
   Outbound and return may reauthorize only their exact bytes with a matching combined Relay recovery
   record; direct payout reads its exact authority from the self-contained recipient record. A held
   terminal state advances only through an idempotent owner decision.
+
+A composed live service reads `readPackPlan()` once when opening a cycle. Empty plans admit nothing. The same canonical plan supplies quote admission and the atomic cycle snapshot; subsequent ticks and restarts derive pack identity from that cycle's admission. Each later cycle reads the saved plan again, so selections repeat until edited and edits affect only future cycles.
+
+A v4 purchase may resume a `PREPARED` or `SENT_UNKNOWN` parent only when a strict prefix of its orders has durable matching responses, no intent lacks a response, and the reconstructed parent request digest is unchanged. The driver retains that parent attempt and never regenerates the completed prefix. An uncertain provider-generation response remains observation-only. Outbound checks the deadline of every v4 unit quote as well as its aggregate before preparing an effect.

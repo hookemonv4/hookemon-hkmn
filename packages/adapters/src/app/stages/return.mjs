@@ -334,7 +334,7 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   const configured = assertReturnConfiguration(config);
   const money = assertReturnMoneyConfiguration(config, configured);
   const cycle = await cycleRepository.describeCycle(context.cycleId);
-  if (cycle.admission?.schema !== 'hookemon.policy-admission.v3') throw new Error('native return refuses historical cycle resume');
+  if (!['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(cycle.admission?.schema)) throw new Error('native return refuses historical cycle resume');
   const nativeIdentity = resolveReturnNativeSolanaCustodyIdentity(config, configured, money);
   assertNoCompetingReturnCustodyLedger(cycle, nativeIdentity);
   const ledger = custodyLedgerFor(cycle, { chainId: nativeIdentity.chainId, assetId: nativeIdentity.assetId });

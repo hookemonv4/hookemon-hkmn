@@ -3092,7 +3092,7 @@ function fullRelayClient({ now = () => 1_000 } = {}) {
 test('liveMode true fails closed before claim signing when canonical nonce reads are unavailable', async t => {
   const stateDir = await tempStateDir(t);
   const statePath = join(stateDir, 'operator-state.json');
-  await writeOperatorState(statePath, livePolicyPatch('collector-nova'));
+  await writeOperatorState(statePath, { ...livePolicyPatch('collector-nova'), packPlan: { orders: [{ pack: 'collector-nova', quantity: 1 }] } });
   const distributionDir = await mkdtemp(join(tmpdir(), 'hookemon-compose-distribution-'));
   t.after(() => rm(distributionDir, { recursive: true, force: true }));
 

@@ -185,7 +185,7 @@ function assertAdmittedAmount(value, expected, label) {
  * deliberately has no quote fallback: the signed Relay steps must be for that one admission.
  */
 function assertOutboundAdmission(admission, configured, money, cycleId) {
-  if (!admission || typeof admission !== 'object' || admission.schema !== 'hookemon.policy-admission.v3') {
+  if (!admission || typeof admission !== 'object' || !['hookemon.policy-admission.v3', 'hookemon.policy-admission.v4'].includes(admission.schema)) {
     throw new Error('outbound requires a durable policy-admission.v3 record');
   }
   if (admission.cycleId !== cycleId) throw new Error('outbound admission cycle identity does not match the request');
@@ -194,10 +194,19 @@ function assertOutboundAdmission(admission, configured, money, cycleId) {
   }
   const usdg = { chainId: EVM_CHAIN_ID, assetId: 'native', decimals: money.assets.eth.decimals };
   const solana = { chainId: SOLANA_CHAIN_ID, assetId: configured.solanaMint, decimals: money.assets.solanaStablecoin.decimals };
-  const unitFunding = assertAdmittedAmount(admission.unitFundingQuote, usdg, 'outbound admission unit funding quote');
+  const units = admission.schema === 'hookemon.policy-admission.v4' ? admission.orders : [admission];
+  if (!Array.isArray(units) || units.length === 0) throw new Error('outbound admission requires unit orders');
+  const unitFunding = units.map(order => assertAdmittedAmount(order.unitFundingQuote, usdg, 'outbound admission unit funding quote'));
+  if (admission.schema === 'hookemon.policy-admission.v4') {
+    for (const order of units) {
+      if (assertAdmittedAmount(order.unitPurchase, solana, 'outbound admission unit purchase target') === '0') {
+        throw new Error('outbound admission amounts must be positive');
+      }
+    }
+  }
   const aggregateFunding = assertAdmittedAmount(admission.aggregateFundingQuote, usdg, 'outbound admission aggregate funding quote');
   const aggregatePurchase = assertAdmittedAmount(admission.aggregatePurchase, solana, 'outbound admission aggregate purchase target');
-  if (aggregatePurchase === '0' || aggregateFunding === '0' || unitFunding === '0') {
+  if (aggregatePurchase === '0' || aggregateFunding === '0' || unitFunding.some(amount => amount === '0')) {
     throw new Error('outbound admission amounts must be positive');
   }
   const relay = admission.relay;
@@ -346,7 +355,8 @@ async function verifiedOutboundPlans({
  */
 function outboundQuoteExpiryEvidence(admission, observedAtMs) {
   return {
-    schema: 'hookemon.outbound-quote-expiry-evidence.v1',
+    schema: admission.schema === 'hookemon.policy-admission.v4'
+      ? 'hookemon.outbound-quote-expiry-evidence.v2' : 'hookemon.outbound-quote-expiry-evidence.v1',
     cycleId: admission.cycleId,
     admissionDigest: digest(admission),
     aggregateQuote: {
@@ -354,11 +364,17 @@ function outboundQuoteExpiryEvidence(admission, observedAtMs) {
       deadlineUnixSeconds: admission.relay.deadlineUnixSeconds,
       quoteDigest: admission.relay.quoteDigest,
     },
-    unitQuote: {
+    ...(admission.schema === 'hookemon.policy-admission.v4' ? {
+      unitQuotes: admission.orders.map(order => ({
+        requestId: order.unitRelay.requestId,
+        deadlineUnixSeconds: order.unitRelay.deadlineUnixSeconds,
+        quoteDigest: order.unitRelay.quoteDigest,
+      })),
+    } : { unitQuote: {
       requestId: admission.unitRelay.requestId,
       deadlineUnixSeconds: admission.unitRelay.deadlineUnixSeconds,
       quoteDigest: admission.unitRelay.quoteDigest,
-    },
+    } }),
     observedAtMs,
   };
 }
@@ -389,6 +405,9 @@ export async function prepareOutboundRequest({ adapters, config, cycleRepository
   assertQuoteMatchesAdmission(quote, admitted);
   try {
     assertQuoteUsable({ quote, nowMs });
+    if (effectiveAdmission.schema === 'hookemon.policy-admission.v4') {
+      for (const order of effectiveAdmission.orders) assertQuoteUsable({ quote: order.unitRelayQuote, nowMs });
+    }
   } catch (error) {
     if (!(error instanceof RelayQuoteExpiredError)) throw error;
     if (refresh === null) {
