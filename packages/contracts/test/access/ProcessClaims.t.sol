@@ -234,7 +234,8 @@ contract ProcessClaimsTest is Test {
         ProcessClaimsHookHarness hook = _deploy(OPERATIONS_ONE, 100, 200, 2);
         _accrue(hook);
 
-        uint256 scheduledAt = block.timestamp;
+        // Snapshot through Vm so optimization cannot reload TIMESTAMP after a warp.
+        uint256 scheduledAt = vm.getBlockTimestamp();
         vm.prank(TREASURY);
         hook.setProcessClaimLimit(200);
         vm.warp(scheduledAt + 1);
@@ -242,9 +243,11 @@ contract ProcessClaimsTest is Test {
         assertEq(hook.activeProcessClaimLimit(), 100);
         assertEq(hook.remainingProcessClaimCapacity(), 40);
         vm.warp(scheduledAt + WINDOW - 1);
+        assertEq(vm.getBlockTimestamp(), scheduledAt + WINDOW - 1);
         assertEq(hook.activeProcessClaimLimit(), 100);
         assertEq(hook.remainingProcessClaimCapacity(), 40);
         vm.warp(scheduledAt + WINDOW);
+        assertEq(vm.getBlockTimestamp(), scheduledAt + WINDOW);
         assertEq(hook.activeProcessClaimLimit(), 200);
         assertEq(hook.remainingProcessClaimCapacity(), 140);
         assertTrue(hook.processClaimCycleUsed(CYCLE_ONE));
