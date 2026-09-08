@@ -72,3 +72,15 @@ test('reverted native transaction grants only idempotent gas cost authority', as
   input.expected.amountWei = '43';
   await assert.rejects(createNativeTransactionGasProof(input));
 });
+
+test('synthetic binding injection requires both the original branded binding and exact test authority', async () => {
+  const { createTestNativePaymentBinding, isTestNativePaymentBinding } = await import('../src/native-payment-proof.mjs');
+  const { createTestProfileMutationAuthority } = await import('../../runner/src/cycle/preflight.mjs');
+  const authority = createTestProfileMutationAuthority();
+  const value = { schema: 'hookemon.native-payment-binding.v1', chainId: '4663', hook: { address: `0x${'22'.repeat(20)}`, runtimeHash: keccak256('0x6000') }, relay: null };
+  const binding = createTestNativePaymentBinding(value, authority);
+  assert.equal(isTestNativePaymentBinding(binding, authority), true);
+  assert.equal(isTestNativePaymentBinding(structuredClone(binding), authority), false);
+  assert.equal(isTestNativePaymentBinding(binding, structuredClone(authority)), false);
+  assert.equal(isTestNativePaymentBinding(value, authority), false);
+});

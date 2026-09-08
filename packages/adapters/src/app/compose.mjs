@@ -1,4 +1,5 @@
-import { requireNativePaymentBinding } from '../native-payment-proof.mjs';
+import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
+import { requireNativePaymentBinding, isTestNativePaymentBinding } from '../native-payment-proof.mjs';
 // The production composition root: wires the real scheduler (packages/runner/src/scheduler), the
 // real automation service (packages/runner/src/automation/automated-cycle-service.mjs), the durable
 // cycle repository and on-disk lease store (this directory), and the real provider adapters
@@ -111,6 +112,18 @@ function collectorOnlyPackPrice(config) {
     throw new Error('live collector-only rehearsal requires a configured pack and typed positive pack price');
   }
   return amountAtomic;
+}
+
+export function collectorOnlyPackUsdCost(config) {
+  const amountAtomic = collectorOnlyPackPrice(config);
+  const price = config.collectorCrypt.packPrice, valuation = config.collectorCrypt.packFundingUsd;
+  const amount = { chainId: '792703809', assetId: price.assetId, decimals: price.decimals, amountAtomic };
+  const timestamp = (config.now ?? Date.now)();
+  if (!isProcessQuoteUsdValuation(valuation, { amount, rounding: 'up', sourcePath: 'details.currencyIn.amountUsd' })
+    || timestamp < valuation.observedAtMs || timestamp >= valuation.validUntilMs) {
+    throw new Error('collector-only policy requires fresh authenticated exact USDC purchase USD valuation');
+  }
+  return valuation.amountMicroUsd;
 }
 
 async function readPolicyConfiguration(statePath) {
@@ -832,14 +845,14 @@ export function buildQuoteRefreshPlanner({ config, adapters }) {
  * and an insolvent hook each refuse outright.
  *
  * There is no latest read, no configured literal, and no wallet balance anywhere on this path: an
- * Operations USDG balance is post-claim custody and can include unrelated deposits, so it cannot
+ * Operations native balance is post-claim custody and can include unrelated deposits, so it cannot
  * authorize a new claim.
  */
 export function buildProcessLiabilityReader({ config, adapters }) {
   const publicClient = adapters?.robinhood?.client ?? null;
   const archive = adapters?.robinhood?.historicalEvidenceClient ?? null;
   const hook = config.contracts?.hook ?? null;
-  const fundingAsset = config.moneyConfiguration?.assets?.usdg ?? null;
+  const fundingAsset = config.moneyConfiguration?.assets?.eth ?? null;
   return {
     async read({ cycleId }) {
       if (publicClient === null || hook === null || fundingAsset === null
@@ -1197,12 +1210,12 @@ export async function compose(config) {
     // `bindings/robinhood-chain.json`'s `market.poolKey` resolves; `poolManager` is deliberately
     // absent from this default — like `usdg`, it is always read from that binding file directly,
     // and exists on `config.contracts` only as a test-only override, never operator configuration).
-    contracts: { vault: null, hook: null, usdg: null, usdgDecimals: null, treasury: null, pool: null, poolManager: null },
+    contracts: { vault: null, hook: null, quoteCurrency: null, quoteDecimals: null, treasury: null, pool: null, poolManager: null },
     accounts: { evm: null, solana: null },
     pack: { code: null },
     moneyConfiguration: null,
     execution: {
-      profile: 'inspection', networkProfile: 'mainnet', providerMode: 'live', dryRun: false, rehearsalCapUsdg: null, rehearsalSessionId: null, enforceProfile: false,
+      profile: 'inspection', networkProfile: 'mainnet', providerMode: 'live', dryRun: false, rehearsalCapMicroUsd: null, rehearsalSessionId: null, enforceProfile: false,
     },
     // WP-36: distribution.mjs's own configuration — the HKMN token contract (once launched; see
     // docs/modules/composition-root.md's "What remains unimplemented" for the current
@@ -1232,7 +1245,8 @@ export async function compose(config) {
   }
 
   if (resolved.execution?.profile === 'production' && resolved.execution?.dryRun !== true) {
-    resolved.nativePaymentBinding = requireNativePaymentBinding(resolved.nativePaymentBindingPath);
+    resolved.nativePaymentBinding = isTestNativePaymentBinding(config.nativePaymentBinding, config.preflightAuthority)
+      ? config.nativePaymentBinding : requireNativePaymentBinding(resolved.nativePaymentBindingPath);
     if (resolved.nativePaymentBinding.hook.address.toLowerCase() !== resolved.contracts.hook?.toLowerCase()) {
       throw new Error('native payment release binding names a different hook');
     }
@@ -1258,16 +1272,16 @@ export async function compose(config) {
   if (typeof resolved.execution.dryRun !== 'boolean') {
     throw new Error('compose execution dryRun is invalid');
   }
-  if (resolved.execution.rehearsalCapUsdg !== null && resolved.execution.rehearsalCapUsdg !== undefined) {
-    assertDecimal(resolved.execution.rehearsalCapUsdg, 'compose execution rehearsalCapUsdg');
+  if (resolved.execution.rehearsalCapMicroUsd !== null && resolved.execution.rehearsalCapMicroUsd !== undefined) {
+    assertDecimal(resolved.execution.rehearsalCapMicroUsd, 'compose execution rehearsalCapMicroUsd');
   }
   if (resolved.rehearsal?.mode === 'relay-roundtrip') {
     if (resolved.execution.profile !== 'rehearsal' || resolved.execution.providerMode !== 'fake') {
       throw new Error('compose relay-roundtrip rehearsal requires fake rehearsal execution');
     }
-    if (resolved.execution.rehearsalCapUsdg === null || resolved.execution.rehearsalCapUsdg === undefined
-      || resolved.execution.rehearsalCapUsdg === '0') {
-      throw new Error('compose relay-roundtrip rehearsal requires a positive explicit rehearsalCapUsdg');
+    if (resolved.execution.rehearsalCapMicroUsd === null || resolved.execution.rehearsalCapMicroUsd === undefined
+      || resolved.execution.rehearsalCapMicroUsd === '0') {
+      throw new Error('compose relay-roundtrip rehearsal requires a positive explicit rehearsalCapMicroUsd');
     }
   }
   if (resolved.execution.rehearsalSessionId !== null && resolved.execution.rehearsalSessionId !== undefined
@@ -1363,7 +1377,7 @@ export async function compose(config) {
     });
   }
 
-  const cycleRepository = await CycleRepository.open(join(config.stateDir, 'cycles'), now);
+  const cycleRepository = await CycleRepository.open(join(config.stateDir, 'cycles'), now, { testAuthority: resolved.preflightAuthority === createTestProfileMutationAuthority() ? resolved.preflightAuthority : null });
   assertCycleRepositoryInterface(cycleRepository);
   if (resolved.execution.profile === 'production') {
     // The owned reader closes over this private repository instance and the distinct archive
@@ -1390,7 +1404,7 @@ export async function compose(config) {
   const readConfiguration = () => readPolicyConfiguration(resolved.statePath);
   const readCustody = buildPolicyCustodyReader({ config: resolved, cycleRepository, relay: adapters.relay });
   const policyEngine = createPolicyEngine({
-    verifyQuoteUsdValuation: isProcessQuoteUsdValuation,
+    verifyQuoteUsdValuation: (value, expected) => isProcessQuoteUsdValuation(value, expected) || cycleRepository.isDurableQuoteUsdValuation(value, expected),
     now,
     readConfiguration,
     readCustody,
@@ -1410,6 +1424,7 @@ export async function compose(config) {
     assertCollectorOnlyRehearsalPolicy(configuration, {
       packCode: resolved.pack.code,
       packPriceAtomic: collectorOnlyPackPrice(resolved),
+      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
     });
     return configuration;
   }
@@ -1485,7 +1500,7 @@ export async function compose(config) {
     if (!result || !Array.isArray(result.drift) || typeof result.ok !== 'boolean') {
       throw new Error('native principal canary returned an invalid result');
     }
-    const heldDrift = result.drift.filter(item => item?.code === 'NATIVE_PRINCIPAL_IDENTITY_DRIFT' || item?.code === 'NATIVE_BALANCE_INSUFFICIENT');
+    const heldDrift = result.drift.filter(item => item?.code === 'NATIVE_PRINCIPAL_IDENTITY_DRIFT' || item?.code === 'NATIVE_BALANCE_INSUFFICIENT' || item?.code === 'NATIVE_PRINCIPAL_UNVERIFIED');
     if (heldDrift.length > 0) {
       assertLease();
       const active = await cycleRepository.readActiveCycle();
@@ -1563,6 +1578,7 @@ export async function compose(config) {
         assertCollectorOnlyRehearsalPolicy(configuration, {
           packCode: resolved.pack.code,
           packPriceAtomic: collectorOnlyPackPrice(resolved),
+      packCostMicroUsd: collectorOnlyPackUsdCost(resolved),
         });
       }
     }
@@ -1642,7 +1658,7 @@ export async function compose(config) {
       // previous unadmitted path, where decideCycleBudget still uses its configured static sum and
       // outbound still refuses for want of a repository-owned admission.
       ...(liveMode && mode === 'production'
-        && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.usdg
+        && resolved.moneyConfiguration?.assets?.solanaStablecoin && resolved.moneyConfiguration?.assets?.eth
         && typeof resolved.accounts?.evm === 'string' && typeof resolved.accounts?.solana === 'string'
         ? {
           admissionPlanner: buildAdmissionPlanner({
@@ -1676,8 +1692,8 @@ export async function compose(config) {
       && resolved.execution.dryRun !== true) {
       serviceConfig.beforeMutation = requireNativeStatusCanary;
     }
-    if (mode === 'rehearsal' && resolved.execution.rehearsalCapUsdg !== null && resolved.execution.rehearsalCapUsdg !== undefined) {
-      serviceConfig.policyCapMicroUsd = resolved.execution.rehearsalCapUsdg;
+    if (mode === 'rehearsal' && resolved.execution.rehearsalCapMicroUsd !== null && resolved.execution.rehearsalCapMicroUsd !== undefined) {
+      serviceConfig.policyCapMicroUsd = resolved.execution.rehearsalCapMicroUsd;
     }
     if (resolved.execution.rehearsalSessionId !== null && resolved.execution.rehearsalSessionId !== undefined) {
       serviceConfig.rehearsalSessionId = resolved.execution.rehearsalSessionId;

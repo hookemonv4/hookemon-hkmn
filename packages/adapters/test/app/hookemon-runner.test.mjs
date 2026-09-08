@@ -1,3 +1,5 @@
+import { createRelayClient, createQuoteUsdValuation } from '../../src/relay-client.mjs';
+import { nativeAdmissionFixture } from '../native/admission-fixture.mjs';
 // Subprocess coverage for the literal CLI entrypoint: `node bin/hookemon-runner.mjs <command>`,
 // exactly as an operator would invoke it, configured entirely through HOOKEMON_* environment
 // variables (never a file inside this repository). Most URLs used here are `.invalid` placeholders
@@ -55,6 +57,22 @@ function baseEnv(stateDir) {
   };
 }
 
+async function pricedCollectorConfig() {
+  const nowMs = 1_700_000_000_000, mint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  const sender = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE', recipient = `0x${'aa'.repeat(20)}`, zero = `0x${'00'.repeat(20)}`;
+  const raw = { requestId: 'synthetic-collector-usd', details: { sender, recipient,
+    currencyIn: { currency: { chainId: 792703809, address: mint, decimals: 6 }, amount: '25000000', amountUsd: '25.000001' },
+    currencyOut: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: '42', minimumAmount: '42', amountUsd: '24' } },
+    protocol: { v2: { orderId: `0x${'44'.repeat(32)}`, orderData: { inputs: [{ payment: { chainId: 'solana', currency: mint, amount: '25000000' },
+      refunds: [{ chainId: 'solana', currency: mint, recipient: sender, deadline: 2_000_000_000 }] }], output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [],
+      payments: [{ recipient, currency: zero, expectedAmount: '42', minimumAmount: '42' }] } } } }, steps: [] };
+  const client = createRelayClient({ now: () => nowMs, quoteValidityMs: 60000, fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(raw) }) });
+  const quote = await client.quoteReturnBridge({ user: sender, recipient, amount: '25000000', skipRouteCheck: true });
+  const amount = { chainId: '792703809', assetId: mint, decimals: 6, amountAtomic: '25000000' };
+  return { now: () => nowMs, pack: { code: 'collector-25' }, collectorCrypt: { packPrice: amount,
+    packFundingUsd: createQuoteUsdValuation({ quote, side: 'origin', amount, rounding: 'up', nowMs }) } };
+}
+
 test('compositionInput pins enforceProfile for every composed run and resume profile', () => {
   const base = {
     stateDir: '/tmp/hookemon-runner-composition',
@@ -93,7 +111,7 @@ test('compositionInput pins enforceProfile for every composed run and resume pro
       dashboard: null,
       signerClient: null,
       signerReadiness: null,
-      rehearsalCapUsdg: null,
+      rehearsalCapMicroUsd: null,
       rehearsalSessionId: null,
       restartInjector: null,
       operatorAuditLogPath: undefined,
@@ -180,7 +198,7 @@ test('compositionInput resolves a persisted authority artifact bound to the veri
     dashboard: null,
     signerClient: null,
     signerReadiness: null,
-    rehearsalCapUsdg: null,
+    rehearsalCapMicroUsd: null,
     rehearsalSessionId: null,
     restartInjector: null,
     operatorAuditLogPath: undefined,
@@ -205,7 +223,7 @@ test('compositionInput resolves a persisted authority artifact bound to the veri
     dashboard: null,
     signerClient: null,
     signerReadiness: null,
-    rehearsalCapUsdg: null,
+    rehearsalCapMicroUsd: null,
     rehearsalSessionId: null,
     restartInjector: null,
     operatorAuditLogPath: undefined,
@@ -284,7 +302,7 @@ test('operator initializer creates one exact Collector-only policy only in an ab
     stateDir,
     execution: { providerMode: 'live' },
     rehearsal: { mode: 'collector-only' },
-    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+    ...await pricedCollectorConfig(),
     pack: { code: 'collector-25' },
   };
 
@@ -299,9 +317,9 @@ test('operator initializer creates one exact Collector-only policy only in an ab
   assert.deepEqual(initialized.configuration.allowedPackIds, ['collector-25']);
   assert.equal(initialized.configuration.requestedOrders, 1);
   assert.equal(initialized.configuration.maxBoostersPerCycle, 1);
-  assert.equal(initialized.configuration.maxUnitPriceMicroUsdg, '25000000');
-  assert.equal(initialized.configuration.maxCycleBudgetMicroUsdg, '25000000');
-  assert.equal(initialized.configuration.max24HourBudgetMicroUsdg, '25000000');
+  assert.equal(initialized.configuration.maxUnitPriceMicroUsd, '25000001');
+  assert.equal(initialized.configuration.maxCycleBudgetMicroUsd, '25000001');
+  assert.equal(initialized.configuration.max24HourBudgetMicroUsd, '25000001');
   assert.equal(initialized.configuration.maxCyclesPerDay, 1);
   assert.equal(initialized.configuration.manualApprovalCycles, 1);
   assert.equal(initialized.configuration.liveMode, true);
@@ -356,14 +374,14 @@ async function fakeRehearsalEnv(t, stateDir) {
     HOOKEMON_PACK_CODE: 'collector-25',
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_MIN_SOLANA_RECEIVE: '0',
-    HOOKEMON_MIN_RETURN_USDG: '0',
+    HOOKEMON_MIN_RETURN_ETH: '0',
     HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0',
     HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '30',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '30',
-    HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0',
-    HOOKEMON_BUDGET_RETURN_CAP_USDG: '0',
-    HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '30',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '30',
+    HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0',
+    HOOKEMON_BUDGET_RETURN_CAP_WEI: '0',
+    HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
     HOOKEMON_PROVIDER_MODE: 'fake',
     HOOKEMON_RELAY_SOLANA_MINT: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     HOOKEMON_RELAY_SOLANA_DECIMALS: '6',
@@ -372,6 +390,7 @@ async function fakeRehearsalEnv(t, stateDir) {
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
     HOOKEMON_REHEARSAL_MODE: 'collector-only',
+    HOOKEMON_REHEARSAL_SETTLEMENT_AMOUNT_ATOMS: '17',
     HOOKEMON_REHEARSAL_PROCEEDS_ACCOUNT: '11111111111111111111111111111111',
     HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: '22222222222222222222222222222222',
     HOOKEMON_REHEARSAL_PAYOUT_SPLIT: 'equal',
@@ -381,19 +400,19 @@ async function fakeRehearsalEnv(t, stateDir) {
 
 test('rehearsal restart injection requires one explicit fake rehearsal profile', () => {
   const parsed = parseArgv([
-    'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-usdg', '30', '--relay-roundtrip', '--restart-inject',
+    'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-micro-usd', '30', '--relay-roundtrip', '--restart-inject',
   ]);
   assert.equal(parsed.mode, 'rehearsal');
   assert.equal(parsed.collectorOnly, false);
   assert.equal(parsed.relayRoundtrip, true);
   assert.equal(parsed.restartInject, true);
   assert.throws(
-    () => parseArgv(['run', '--mode', 'rehearsal', '--cycles', '2', '--cap-usdg', '30', '--restart-inject']),
+    () => parseArgv(['run', '--mode', 'rehearsal', '--cycles', '2', '--cap-micro-usd', '30', '--restart-inject']),
     /requires --collector-only or --relay-roundtrip/,
   );
   assert.throws(
     () => parseArgv([
-      'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-usdg', '30', '--collector-only', '--relay-roundtrip',
+      'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-micro-usd', '30', '--collector-only', '--relay-roundtrip',
     ]),
     /cannot combine --collector-only and --relay-roundtrip/,
   );
@@ -419,12 +438,12 @@ test('the literal rehearsal command relaunches a restart worker with one durable
   });
 
   await runCli([
-    'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-usdg', '30', '--collector-only', '--restart-inject',
+    'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-micro-usd', '30', '--collector-only', '--restart-inject',
   ], { runRehearsalSupervisorFn: supervisor });
 
   assert.equal(invocations.length, 2);
   assert.deepEqual(invocations[0], [
-    'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-usdg', '30', '--collector-only', '--restart-inject',
+    'run', '--mode', 'rehearsal', '--cycles', '2', '--cap-micro-usd', '30', '--collector-only', '--restart-inject',
   ]);
   assert.deepEqual(invocations[1], invocations[0]);
   assert.equal((await readRehearsalSession({ path: sessionPath })).restartCount, 1);
@@ -437,7 +456,7 @@ test('relay-roundtrip restart workers retain the explicit profile flag', async t
   await runRehearsalSupervisor({
     statePathOverride: null,
     cycles: 1,
-    capUsdg: '30',
+    capMicroUsd: '30',
     collectorOnly: false,
     relayRoundtrip: true,
   }, {
@@ -448,7 +467,7 @@ test('relay-roundtrip restart workers retain the explicit profile flag', async t
     },
   });
   assert.deepEqual(invocations, [[
-    'run', '--mode', 'rehearsal', '--cycles', '1', '--cap-usdg', '30', '--relay-roundtrip', '--restart-inject',
+    'run', '--mode', 'rehearsal', '--cycles', '1', '--cap-micro-usd', '30', '--relay-roundtrip', '--restart-inject',
   ]]);
 });
 
@@ -462,9 +481,9 @@ test('a manual-approval refusal has a digest-bound handoff without creating an e
       allowedPackIds: ['collector-25'],
       requestedOrders: 1,
       maxBoostersPerCycle: 1,
-      maxUnitPriceMicroUsdg: '30',
-      maxCycleBudgetMicroUsdg: '30',
-      max24HourBudgetMicroUsdg: '60',
+      maxUnitPriceMicroUsd: '30',
+      maxCycleBudgetMicroUsd: '30',
+      max24HourBudgetMicroUsd: '60',
       paused: false,
       liveMode: false,
     }),
@@ -474,6 +493,7 @@ test('a manual-approval refusal has a digest-bound handoff without creating an e
       cycleRepository: {
         readActiveCycle: async () => ({
           cycleId: 'cycle-manual-approval', releaseAmount: '30', mode: 'rehearsal', providerMode: 'fake',
+          admission: { ...nativeAdmissionFixture('cycle-manual-approval', { amountWei: '30', costMicroUsd: '30' }), packId: 'collector-25' },
         }),
       },
     },
@@ -493,12 +513,12 @@ test('a live collector-only manual-approval handoff binds the live policy digest
     allowedPackIds: ['collector-25'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '25000000',
-    maxCycleBudgetMicroUsdg: '25000000',
-    max24HourBudgetMicroUsdg: '25000000',
+    maxUnitPriceMicroUsd: '25000000',
+    maxCycleBudgetMicroUsd: '25000000',
+    max24HourBudgetMicroUsd: '25000000',
     maxCyclesPerDay: 1,
-    lossCapMicroUsdg: '25000000',
-    maxOutstandingCustodyMicroUsdg: '25000000',
+    lossCapMicroUsd: '25000000',
+    maxOutstandingCustodyMicroUsd: '25000000',
     manualApprovalCycles: 1,
     paused: false,
     liveMode: true,
@@ -506,6 +526,7 @@ test('a live collector-only manual-approval handoff binds the live policy digest
   await mutateOperatorState(statePath, null, state => ({ ...(state ?? createEmptyOperatorState()), configuration }));
   const active = {
     cycleId: 'cycle-live-manual-approval', releaseAmount: '25000000', mode: 'rehearsal', providerMode: 'live',
+    admission: { ...nativeAdmissionFixture('cycle-live-manual-approval', { amountWei: '25000000', costMicroUsd: '25000000' }), packId: 'collector-25' },
   };
   const handoff = await buildManualApprovalHandoff({
     composition: { cycleRepository: { readActiveCycle: async () => active } },
@@ -523,7 +544,9 @@ test('a live collector-only manual-approval handoff binds the live policy digest
     cycleDigest: deriveCyclePolicyDigest({
       configuration,
       cycleId: active.cycleId,
-      releaseAmountMicroUsdg: active.releaseAmount,
+      releaseAmountWei: active.releaseAmount,
+      releaseCostMicroUsd: active.admission.aggregateFundingUsd.amountMicroUsd,
+      admission: active.admission,
       packId: 'collector-25',
       liveMode: true,
       mode: 'rehearsal',
@@ -531,26 +554,26 @@ test('a live collector-only manual-approval handoff binds the live policy digest
   });
 });
 
-test('live collector-only rehearsal accepts only one exact-price cycle without restart injection', () => {
+test('live collector-only rehearsal accepts only one exact-price cycle without restart injection', async () => {
   const env = {
     execution: { providerMode: 'live' },
     rehearsal: { mode: 'collector-only' },
-    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+    ...await pricedCollectorConfig(),
   };
   assert.doesNotThrow(() => assertRehearsalProfile({ env, collectorOnly: true, relayRoundtrip: false }));
   assert.doesNotThrow(() => assertLiveCollectorOnlyRunOptions({
-    env, cycles: 1, capUsdg: '25000000', restartInject: false,
+    env, cycles: 1, capMicroUsd: '25000001', restartInject: false,
   }));
   assert.throws(
-    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 2, capUsdg: '25000000', restartInject: false }),
+    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 2, capMicroUsd: '25000001', restartInject: false }),
     /exactly one cycle/i,
   );
   assert.throws(
-    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 1, capUsdg: '1', restartInject: false }),
-    /exact configured pack price/i,
+    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 1, capMicroUsd: '1', restartInject: false }),
+    /exact authenticated USD purchase cost/i,
   );
   assert.throws(
-    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 1, capUsdg: '25000000', restartInject: true }),
+    () => assertLiveCollectorOnlyRunOptions({ env, cycles: 1, capMicroUsd: '25000001', restartInject: true }),
     /restart injection/i,
   );
 });
@@ -563,14 +586,14 @@ test('live collector-only rehearsal completes preflight before starting its cycl
     stateDir,
     execution: { providerMode: 'live' },
     rehearsal: { mode: 'collector-only' },
-    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+    ...await pricedCollectorConfig(),
   };
 
   await assert.rejects(
     () => runRehearsal({
       statePathOverride: null,
       cycles: 1,
-      capUsdg: '25000000',
+      capMicroUsd: '25000001',
       collectorOnly: true,
       relayRoundtrip: false,
       restartInject: false,
@@ -608,14 +631,14 @@ test('live collector-only rehearsal refuses before composing or starting a cycle
     stateDir,
     execution: { providerMode: 'live' },
     rehearsal: { mode: 'collector-only' },
-    collectorCrypt: { packPrice: { amountAtomic: '25000000' } },
+    ...await pricedCollectorConfig(),
   };
 
   await assert.rejects(
     () => runRehearsal({
       statePathOverride: null,
       cycles: 1,
-      capUsdg: '25000000',
+      capMicroUsd: '25000001',
       collectorOnly: true,
       relayRoundtrip: false,
       restartInject: false,
@@ -743,7 +766,7 @@ test('hookemon-runner dry-run exits 0 and prints a JSON outcome when nothing is 
 
 test('hookemon-runner dry-run runs a complete cycle end to end and exits 0 when a budget is configured', async t => {
   const stateDir = await tempStateDir(t);
-  const env = { ...baseEnv(stateDir), HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '10', HOOKEMON_BUDGET_PACK_PRICE_USDG: '1' };
+  const env = { ...baseEnv(stateDir), HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '10', HOOKEMON_BUDGET_PACK_PRICE_WEI: '1' };
   const { stdout } = await execFileAsync(process.execPath, [BIN_PATH, 'dry-run'], { env });
   const outcome = JSON.parse(stdout);
   assert.equal(outcome.status, 'COMPLETE');
@@ -757,9 +780,10 @@ test('hookemon-runner dry-run in collector-only rehearsal mode routes bridge sta
   const stateDir = await tempStateDir(t);
   const env = {
     ...baseEnv(stateDir),
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '10',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '1',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '10',
+    HOOKEMON_BUDGET_PACK_PRICE_WEI: '1',
     HOOKEMON_REHEARSAL_MODE: 'collector-only',
+    HOOKEMON_REHEARSAL_SETTLEMENT_AMOUNT_ATOMS: '17',
     HOOKEMON_SOLANA_ACCOUNT: 'CxV9v9g5eyiQtFWHx1uUTpt9LRC78LcjSTGas7ihX7wQ',
     HOOKEMON_REHEARSAL_PAYOUT_RECIPIENTS: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t',
   };
@@ -1278,15 +1302,15 @@ async function seedProductionReturnCycle(stateDir) {
     allowedPackIds: ['return-fixture'],
     requestedOrders: 1,
     maxBoostersPerCycle: 1,
-    maxUnitPriceMicroUsdg: '17',
-    maxCycleBudgetMicroUsdg: '17',
-    max24HourBudgetMicroUsdg: '17',
+    maxUnitPriceMicroUsd: '17',
+    maxCycleBudgetMicroUsd: '17',
+    max24HourBudgetMicroUsd: '17',
     paused: false,
     liveMode: true,
     maxCyclesPerDay: 3,
-    perCycleCapMicroUsdg: '17',
-    lossCapMicroUsdg: '1000',
-    maxOutstandingCustodyMicroUsdg: '1000',
+    perCycleCapMicroUsd: '17',
+    lossCapMicroUsd: '1000',
+    maxOutstandingCustodyMicroUsd: '1000',
     executionPaused: false,
     killSwitch: false,
     manualApprovalCycles: 3,
@@ -1294,7 +1318,8 @@ async function seedProductionReturnCycle(stateDir) {
   const cycleDigest = deriveCyclePolicyDigest({
     configuration: policy,
     cycleId: cycle.cycleId,
-    releaseAmountMicroUsdg: cycle.releaseAmount,
+    releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: '17',
     packId: 'return-fixture',
     liveMode: true,
     mode: 'production',
@@ -1308,12 +1333,13 @@ async function seedProductionReturnCycle(stateDir) {
       cycleDigest,
       mode: 'production',
       openedAtMs: now,
-      releaseAmountMicroUsdg: cycle.releaseAmount,
+      releaseAmountWei: cycle.releaseAmount,
+    releaseCostMicroUsd: '17',
     }],
     spendLedger: [{
       cycleId: cycle.cycleId,
       cycleDigest,
-      amountMicroUsdg: cycle.releaseAmount,
+      amountMicroUsd: cycle.releaseAmount,
       reservedAtMs: now,
     }],
   };
@@ -1324,7 +1350,7 @@ async function seedProductionReturnCycle(stateDir) {
   return { cycle, repository };
 }
 
-test('fresh production resume composes keychain and observability before refusing a frozen-interface mutation', { timeout: 30_000 }, async t => {
+test('fresh production resume refuses missing frozen native authority before RPC or signing', { timeout: 30_000 }, async t => {
   const stateDir = await tempStateDir(t);
   const [chains, quote] = await Promise.all([
     readFile(new URL('../fixtures/relay/chains.json', import.meta.url), 'utf8').then(JSON.parse),
@@ -1365,18 +1391,18 @@ test('fresh production resume composes keychain and observability before refusin
     HOOKEMON_PACK_CODE: 'return-fixture',
     HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0',
     HOOKEMON_MIN_SOLANA_RECEIVE: '0',
-    HOOKEMON_MIN_RETURN_USDG: '0',
+    HOOKEMON_MIN_RETURN_ETH: '0',
     HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0',
     HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0',
     HOOKEMON_EVM_GAS_PRICE_CAP: '2',
     HOOKEMON_EVM_NATIVE_RESERVE: '2',
     HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2',
     HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '17',
-    HOOKEMON_BUDGET_PACK_PRICE_USDG: '17',
-    HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '17',
-    HOOKEMON_BUDGET_RETURN_CAP_USDG: '17',
-    HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '17',
+    HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '17',
+    HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '17',
+    HOOKEMON_BUDGET_RETURN_CAP_WEI: '17',
+    HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0',
     HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath,
     HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath,
     HKMN_KEYCHAIN_LOG: keychainLogPath,
@@ -1393,13 +1419,11 @@ test('fresh production resume composes keychain and observability before refusin
     },
   );
 
-  assert.ok(fixtureServer.requests.evmChainId > 0, 'production composition must probe the configured EVM RPC');
-  assert.ok(fixtureServer.requests.evmStatusRead >= 2, 'the production resume must verify USDG pause and Operations freeze status');
-  assert.ok(fixtureServer.requests.solanaGenesis > 0, 'production composition must verify the configured Solana network');
-  assert.ok(fixtureServer.requests.solanaBlockhash > 0, 'observability start preflight must probe the configured Solana RPC');
+  assert.equal(fixtureServer.requests.evmChainId, 0);
+  assert.equal(fixtureServer.requests.solanaGenesis, 0);
   const keychainCalls = (await readFile(keychainLogPath, 'utf8')).trim().split('\n');
   assert.deepEqual(new Set(keychainCalls), new Set(['probe:operator-evm', 'probe:operator-solana']));
-  assert.equal(keychainCalls.length, 2, 'the frozen interface must refuse before a keychain sign or broadcast');
+  assert.equal(keychainCalls.length, 2, 'only backend probes are allowed before authority refusal');
   const description = await repository.describeCycle(cycle.cycleId);
   assert.equal(description.chainAttempts.size, 0);
   assert.equal((await repository.readStage(cycle.cycleId, 'return')).status, 'PENDING');

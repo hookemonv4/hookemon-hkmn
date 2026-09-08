@@ -1,3 +1,4 @@
+import { createRelayClient } from '../../src/relay-client.mjs';
 import { createProductionSupplementaryStageHandlers } from '../../src/app/compose.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -114,47 +115,21 @@ function splTransferCheckedPlan({ owner, source, destination, amountAtomic }) {
 }
 
 function fakeRelayAdapter({ requestId, instructionPlan, destinationAmountAtomic = '16', pointer = null }) {
-  return {
-    async quoteReturnBridge({ user, recipient, amount, originCurrency }) {
-      return {
-        direction: DIRECTIONS.RETURN,
-        requestId,
-        deadlineUnixSeconds: 2_000_000_000,
-        origin: { chainId: RELAY_CONSTANTS.SOLANA_CHAIN_ID, address: originCurrency, decimals: 6, amount },
-        destination: { chainId: RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID, address: '0x0000000000000000000000000000000000000000', decimals: 18, amount: destinationAmountAtomic },
-        sender: user,
-        recipient,
-      };
-    },
-    prepareExecution({ quote }) {
-      return {
-        intent: {
-          schema: 'hookemon.relay-intent.v1',
-          requestId: quote.requestId,
-          orderId: `order-${quote.requestId}`,
-          direction: 'RETURN',
-          originChainId: quote.origin.chainId,
-          destinationChainId: quote.destination.chainId,
-          originAssetId: quote.origin.address,
-          originDecimals: quote.origin.decimals,
-          destinationAssetId: quote.destination.address,
-          destinationDecimals: quote.destination.decimals,
-          originAmount: quote.origin.amount,
-          quotedDestinationAmount: quote.destination.amount,
-          quotedDestinationMinimumAmount: quote.destination.amount,
-          sender: quote.sender,
-          recipient: quote.recipient,
-          deadlineUnixSeconds: 2_000_000_000,
-        },
-        steps: [{ kind: 'transaction', requestId: quote.requestId, items: [{ data: instructionPlan }] }],
-      };
-    },
-    restoreIntent() {},
-    async getTerminalDestinationTransactionPointer({ intentDigest }) {
-      assert.equal(intentDigest, requestId);
-      return pointer;
-    },
-  };
+  const zero = '0x0000000000000000000000000000000000000000';
+  const client = createRelayClient({ now: () => 1_700_000_000_000, quoteValidityMs: 60000,
+    fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      const raw = { requestId, details: { sender: request.user, recipient: request.recipient,
+        currencyIn: { currency: { chainId: 792703809, address: request.originCurrency, decimals: 6 }, amount: request.amount, amountUsd: '17' },
+        currencyOut: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic, amountUsd: '16.0000009' } },
+        protocol: { v2: { orderId: `0x${'44'.repeat(32)}`, orderData: { inputs: [{ payment: { chainId: 'solana', currency: request.originCurrency, amount: request.amount },
+          refunds: [{ chainId: 'solana', currency: request.originCurrency, recipient: request.user, deadline: 2_000_000_000 }] }],
+          output: { chainId: 'robinhood', deadline: 2_000_000_000, calls: [], payments: [{ recipient: request.recipient, currency: zero, expectedAmount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic }] } } } },
+        steps: [{ kind: 'transaction', requestId, items: [{ data: instructionPlan }] }] };
+      return { ok: true, status: 200, text: async () => JSON.stringify(raw) };
+    } });
+  return { ...client, quoteReturnBridge: params => client.quoteReturnBridge({ ...params, skipRouteCheck: true }),
+    restoreIntent() {}, async getTerminalDestinationTransactionPointer({ intentDigest }) { assert.equal(intentDigest, requestId); return pointer; } };
 }
 
 function returnSolanaClient(blockhash, state = { blockHeight: 10, balance: 10_000 }) {

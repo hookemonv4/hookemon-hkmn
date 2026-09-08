@@ -184,3 +184,5 @@ Native return legs and destination proofs use version 2. Historical version 1 ev
 readable, but cannot enter the active return settlement path. Native custody uses version 3 and
 requires separately typed gas reserve and spent gas. A return hold clears the pending expectation
 without creating payout principal; an exact attributed return credits and clears atomically.
+
+Native rehearsal sessions and stage evidence use v2. Session caps are microUSD, source principal is native wei, and simulated Solana settlement requires an explicit USDC atomic amount. Historical v1 sessions remain readable with their original units and cannot resume native execution.

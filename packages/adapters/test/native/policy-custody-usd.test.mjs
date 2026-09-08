@@ -35,3 +35,26 @@ test('native risk projection refuses cloned, expired and missing valuation autho
     assert.equal(result.atRiskMicroUsd, '0');
   }
 });
+test('completed native loss freezes committed USD cost minus timely exact settled proceeds and never reprices with FX', async () => {
+  const received = '5000000000000000', claimed = '10000000000000000';
+  const settled = { direction: 'return', state: 'SETTLED', relayRequestId: 'settled-order', netDeltaAtomic: received,
+    finalizedAtDestination: { timestampUnixSeconds: '100' }, returnAttribution: { schema: 'hookemon.return-leg-attribution-context.v2',
+      destinationUsd: { amount: { ...nativeAsset, amountAtomic: received }, amountMicroUsd: '20000000', quoteRequestId: 'settled-order',
+        sourcePath: 'details.currencyOut.amountUsd', rounding: 'down', observedAtMs: 90000, validUntilMs: 110000 } } };
+  const description = { terminalState: 'COMPLETED', releaseAmount: claimed, admission: { schema: 'hookemon.policy-admission.v3',
+      aggregateFundingUsd: { amount: { ...nativeAsset, amountAtomic: claimed }, amountMicroUsd: '30000000', rounding: 'up' } },
+    custodyLedgers: new Map([['native', { ...ledger, claimed, returnReceived: received }]]), heldPositions: new Map(), relayLegs: new Map([['return', settled]]) };
+  const repository = { listKnownCycleIds: async () => ['cycle'], describeCycle: async () => description };
+  for (const timestamp of [200000, 900000]) {
+    const result = await projectPolicyCustody({ cycleRepository: repository, nativeAsset, now: () => timestamp,
+      valueAmountUsd: async () => assert.fail('completed loss cannot request a new price') });
+    assert.equal(result.realizedLossMicroUsd, '10000000'); assert.equal(result.unvaluedExposure, false);
+  }
+  for (const mutate of [x => { x.netDeltaAtomic = '1'; }, x => { x.finalizedAtDestination.timestampUnixSeconds = '110'; },
+    x => { delete x.returnAttribution.destinationUsd; }, x => { x.returnAttribution.destinationUsd.rounding = 'up'; }]) {
+    const original = structuredClone(settled); mutate(settled);
+    const result = await projectPolicyCustody({ cycleRepository: repository, nativeAsset, valueAmountUsd: async () => assert.fail('no FX fallback') });
+    assert.equal(result.unvaluedExposure, true);
+    Object.keys(settled).forEach(key => delete settled[key]); Object.assign(settled, original);
+  }
+});

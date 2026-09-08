@@ -372,7 +372,8 @@ function createMutationGuard(context, stageRequestDigest) {
   const metadata = Object.freeze({
     cycleId: context.cycleId,
     stage: context.stage,
-    releaseAmountMicroUsdg: context.releaseAmountMicroUsdg ?? null,
+    releaseAmountWei: context.releaseAmountWei ?? null,
+    releaseCostMicroUsd: context.releaseCostMicroUsd ?? null,
     packId: context.packId ?? null,
     requestDigest: stageRequestDigest,
     fencingToken: context.fencingToken ?? null,

@@ -22,9 +22,9 @@ test('a restart injected after a recorded fake effect reconciles the persisted a
     cycleRepository: repository,
     config: {
       chainId: 4663,
-      contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+      moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: 'native', decimals: 18 } } },
       relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-      rehearsal: { mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+      rehearsal: { settlementAmountAtomic: '17', mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
     },
     onEffect: async () => { effects += 1; },
     restartInjector: async () => { throw new RehearsalRestartInjectedError(); },
@@ -32,7 +32,7 @@ test('a restart injected after a recorded fake effect reconciles the persisted a
   const context = {
     cycleId: cycle.cycleId,
     stage: 'eligibility-snapshot',
-    releaseAmountMicroUsdg: '30',
+    releaseAmountWei: '30',
     assertMutationAllowed: async () => {},
   };
 
@@ -54,9 +54,9 @@ test('a prepared or unknown fake effect is never fabricated as reconciled eviden
     cycleRepository: repository,
     config: {
       chainId: 4663,
-      contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+      moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: 'native', decimals: 18 } } },
       relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-      rehearsal: { mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+      rehearsal: { settlementAmountAtomic: '17', mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
       execution: { providerMode: 'fake' },
     },
     providers: {
@@ -67,7 +67,7 @@ test('a prepared or unknown fake effect is never fabricated as reconciled eviden
   const context = {
     cycleId: cycle.cycleId,
     stage: 'purchase',
-    releaseAmountMicroUsdg: '30',
+    releaseAmountWei: '30',
     assertMutationAllowed: async () => {},
   };
   await repository.prepareStageAttempt(cycle.cycleId, 'purchase', {
@@ -96,9 +96,9 @@ test('a collector-only rehearsal dispatches collector effects through the sealed
     cycleRepository: repository,
     config: {
       chainId: 4663,
-      contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+      moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: 'native', decimals: 18 } } },
       relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-      rehearsal: { mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+      rehearsal: { settlementAmountAtomic: '17', mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
       execution: { providerMode: 'fake' },
     },
     providers: {
@@ -112,7 +112,7 @@ test('a collector-only rehearsal dispatches collector effects through the sealed
   const context = {
     cycleId: cycle.cycleId,
     stage: 'purchase',
-    releaseAmountMicroUsdg: '30',
+    releaseAmountWei: '30',
     assertMutationAllowed: async () => {},
   };
 
@@ -132,9 +132,9 @@ test('a collector-only rehearsal durably skips outbound and return without a Rel
     cycleRepository: repository,
     config: {
       chainId: 4663,
-      contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+      moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: 'native', decimals: 18 } } },
       relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-      rehearsal: { mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+      rehearsal: { settlementAmountAtomic: '17', mode: 'collector-only', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
       execution: { providerMode: 'fake' },
     },
     providers: {
@@ -152,7 +152,7 @@ test('a collector-only rehearsal durably skips outbound and return without a Rel
     const context = {
       cycleId: cycle.cycleId,
       stage,
-      releaseAmountMicroUsdg: '30',
+      releaseAmountWei: '30',
       assertMutationAllowed: async () => {},
     };
     await driver.execute(context);
@@ -175,9 +175,9 @@ test('a relay-roundtrip rehearsal refuses to construct without its explicit posi
       cycleRepository: repository,
       config: {
         chainId: 4663,
-        contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+        moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: 'native', decimals: 18 } } },
         relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-        rehearsal: { mode: 'relay-roundtrip', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+        rehearsal: { settlementAmountAtomic: '17', mode: 'relay-roundtrip', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
         execution: { providerMode: 'fake' },
       },
       providers: {
@@ -198,10 +198,10 @@ test('a capped relay-roundtrip rehearsal invokes the Relay fake provider', async
     cycleRepository: repository,
     config: {
       chainId: 4663,
-      contracts: { usdg: `0x${'a'.repeat(40)}`, usdgDecimals: 6 },
+      moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: 'native', decimals: 18 } } },
       relay: { solanaMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
-      rehearsal: { mode: 'relay-roundtrip', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
-      execution: { providerMode: 'fake', rehearsalCapUsdg: '30' },
+      rehearsal: { settlementAmountAtomic: '17', mode: 'relay-roundtrip', proceedsAccount: '8Jw81w1ktEoZx18C4ZP6HhgnbtbzYAKZB7qL3WTmRS3t' },
+      execution: { providerMode: 'fake', rehearsalCapMicroUsd: '30' },
     },
     providers: {
       relay: {
@@ -214,7 +214,7 @@ test('a capped relay-roundtrip rehearsal invokes the Relay fake provider', async
   const context = {
     cycleId: cycle.cycleId,
     stage: 'outbound',
-    releaseAmountMicroUsdg: '30',
+    releaseAmountWei: '30',
     assertMutationAllowed: async () => {},
   };
 

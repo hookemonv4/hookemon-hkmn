@@ -266,7 +266,7 @@ driver’s lease and authority checks; the Keychain child remains sign-only.
 (cd packages/adapters && npm ci --ignore-scripts && \
   node --test --test-timeout=120000 test/app/cycle-repository.test.mjs test/app/stage-driver.test.mjs test/app/observability.test.mjs test/app/compose.test.mjs)
 node packages/adapters/bin/hookemon-runner.mjs dry-run
-node packages/adapters/bin/hookemon-runner.mjs run --mode rehearsal --cycles 1 --cap-usdg 25000000 --collector-only --restart-inject
+node packages/adapters/bin/hookemon-runner.mjs run --mode rehearsal --cycles 1 --cap-micro-usd 25000000 --collector-only --restart-inject
 node --test packages/runner/test/cycle/money-schemas.test.mjs packages/runner/test/cycle/failure-matrix.test.mjs
 ```
 
@@ -367,3 +367,13 @@ positive millisecond input; absence grants no valuation capability. Historical p
 environment names are refused. Public accounting receives the configured Operations address and
 exact `4663/native/18` identity as trusted payout context. Operator USD limits and native principal
 remain separate throughout configuration and projection.
+
+The policy valuation verifier accepts fresh Relay producer references or private references restored by the configured cycle repository under its original admission authority and expiry. Plain persisted valuation objects alone confer no new-risk authority.
+
+Production native money configuration activates the admission planner and the finalized hook-liability reader through `assets.eth`. Hook native liability and capacity, never Operations wallet balance, bound the two independently fetched funding quotes and their USD producer capabilities.
+
+Synthetic production-shaped tests may inject a native payment binding only through its original test-branded reference and the exact test mutation authority. Cloned bindings and ordinary configuration still require the frozen release file. A native principal evidence failure holds an active cycle before its mutation boundary.
+
+Collector-only readiness requires `collectorCrypt.packFundingUsd`, a fresh producer valuation of the exact Solana USDC pack amount rounded up. Pack atoms are never USD policy limits. Explicit test mutation authority is also passed to the repository so its restored admission references remain usable in isolated production-shaped tests.
+
+Rehearsal limits use `rehearsalCapMicroUsd`. Collector pack amounts come from `HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS`; policy cost requires an authenticated USD quote. Fake rehearsal settlement uses an explicit `HOOKEMON_REHEARSAL_SETTLEMENT_AMOUNT_ATOMS`, independent of native principal.

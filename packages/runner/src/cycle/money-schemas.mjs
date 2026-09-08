@@ -620,8 +620,23 @@ function assertReturnRelayIntent(value, relayRequestId, label) {
 }
 
 function assertReturnLegAttribution(value, leg, label) {
-  assertPlainObject(value, RETURN_LEG_ATTRIBUTION_FIELDS, label);
-  if (value.schema !== 'hookemon.return-leg-attribution-context.v1') throw new Error(`${label} schema is invalid`);
+  const native = value?.schema === 'hookemon.return-leg-attribution-context.v2';
+  assertPlainObject(value, native ? [...RETURN_LEG_ATTRIBUTION_FIELDS, 'destinationUsd', 'destinationUsdEvidence'] : RETURN_LEG_ATTRIBUTION_FIELDS, label);
+  if (!native && value.schema !== 'hookemon.return-leg-attribution-context.v1') throw new Error(`${label} schema is invalid`);
+  if (native) {
+    if (leg.schema !== 'hookemon.relay-leg.v2') throw new Error(`${label} native valuation requires native leg`);
+    const usd = value.destinationUsd;
+    assertPlainObject(usd, ['schema', 'quoteDigest', 'requestDigest', 'quoteRequestId', 'sourcePath', 'amount', 'amountMicroUsd', 'rounding', 'observedAtMs', 'validUntilMs'], `${label} destination USD`);
+    if (usd.schema !== 'hookemon.quote-usd-valuation.v1' || usd.rounding !== 'down' || usd.sourcePath !== 'details.currencyOut.amountUsd'
+      || usd.quoteRequestId !== leg.relayRequestId) throw new Error(`${label} destination USD binding is invalid`);
+    const amount = assertTypedAmount(usd.amount);
+    if (amount.chainId !== leg.destinationChainId || amount.assetId !== leg.destinationAssetId || amount.decimals !== leg.destinationDecimals
+      || amount.amountAtomic !== leg.destinationAmountAtomic) throw new Error(`${label} destination USD amount is invalid`);
+    assertAtomic(usd.amountMicroUsd, `${label} destination USD amountMicroUsd`);
+    for (const key of ['quoteDigest', 'requestDigest']) assertDigest(usd[key], `${label} ${key}`);
+    if (!Number.isSafeInteger(usd.observedAtMs) || !Number.isSafeInteger(usd.validUntilMs) || usd.observedAtMs < 0 || usd.validUntilMs <= usd.observedAtMs) throw new Error(`${label} destination USD validity is invalid`);
+    assertPlainObject(value.destinationUsdEvidence, ['request', 'rawDigest', 'valuationDigest', 'quote'], `${label} destination USD evidence`);
+  }
   const intent = assertReturnRelayIntent(value.intent, leg.relayRequestId, `${label} intent`);
   if (String(intent.originChainId) !== leg.sourceChainId
     || intent.originAssetId !== leg.sourceAssetId
@@ -643,6 +658,7 @@ function assertReturnLegAttribution(value, leg, label) {
     intent,
     requestCreatedAtUnixSeconds: value.requestCreatedAtUnixSeconds,
     maxSettlementWindowSeconds: value.maxSettlementWindowSeconds,
+    ...(native ? { destinationUsd: clone(value.destinationUsd), destinationUsdEvidence: clone(value.destinationUsdEvidence) } : {}),
   });
 }
 

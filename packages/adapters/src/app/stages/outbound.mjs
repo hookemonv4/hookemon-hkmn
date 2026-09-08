@@ -1,7 +1,7 @@
 import { applyNativeCustodyGasPayment } from '../../native-payment-proof.mjs';
 import { createRelayNativePaymentProof } from '../../native-payment-proof.mjs';
 import { createNativeCustodyBalanceObservationReader } from '../../evm-custody-balance-observation.mjs';
-import { createNativePaymentProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
+import { createNativePaymentProof, createNativeTransactionGasProof, isProcessNativePaymentProof } from '../../native-payment-proof.mjs';
 import {
   DIRECTIONS,
   RELAY_CONSTANTS,
@@ -1242,7 +1242,7 @@ export function nativeOutboundCustodyAfterPayment(existing, proof, observation) 
     ...applyNativeCustodyGasPayment(existing, proof) };
 }
 
-async function recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof }) {
+async function recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof, gasOnly = false }) {
   const cycle = await cycleRepository.describeCycle(context.cycleId);
   const key = '4663\u0000native';
   const existing = cycle.custodyLedgers?.get(key);
@@ -1251,7 +1251,9 @@ async function recordNativeOutboundCustody({ cycleRepository, context, adapters,
     identity: { chainId: '4663', assetId: 'native', decimals: 18, account: configured.evm.toLowerCase() },
   })();
   context.assertLease?.();
-  const next = nativeOutboundCustodyAfterPayment(existing, proof, observation);
+  const next = gasOnly
+    ? { ...existing, verifiedCurrentBalance: observation, ...applyNativeCustodyGasPayment(existing, proof) }
+    : nativeOutboundCustodyAfterPayment(existing, proof, observation);
   await cycleRepository.recordCustodyLedger(context.cycleId, next);
   context.assertLease?.();
 }
@@ -1329,6 +1331,7 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
   if (!robinhoodClient) return null;
 
   let sourceProof;
+  let gasProof;
   try {
     const signed = parseTransaction(record.attempt.rawBytes);
     const recovery = await cycleRepository.readChainAttemptRecoveryContext(context.cycleId, { stage: 'outbound', recipient: null, requestDigest: record.attempt.requestDigest, rawSignedBytesHash: record.attempt.hash });
@@ -1337,14 +1340,20 @@ export async function reconcileLiveOutbound({ adapters, config, cycleRepository,
     assertOutboundRelayEnvelope([{ transaction: { to: signed.to, value: String(signed.value), data: signed.data } }], {
       operationsAccount: configured.evm, depository: configured.evmDepository, amountAtomic: leg.sourceAmountAtomic, orderId: recoveryIntent.orderId,
     });
-    sourceProof = await createNativePaymentProof({ client: robinhoodClient, signedTransaction: record.attempt.rawBytes,
+    const proofInput = { client: robinhoodClient, signedTransaction: record.attempt.rawBytes,
       expected: { kind: 'direct', chainId: EVM_CHAIN_ID, assetId: 'native', decimals: 18, source: configured.evm,
         recipient: configured.evmDepository, amountWei: leg.sourceAmountAtomic, transactionHash: leg.sourceTxHash,
-        calldataDigest: keccak256(signed.data), nonce: String(signed.nonce) } });
-
+        calldataDigest: keccak256(signed.data), nonce: String(signed.nonce) } };
+    gasProof = await createNativeTransactionGasProof(proofInput);
+    if (gasProof.receiptStatus === 'success') sourceProof = await createNativePaymentProof(proofInput);
   } catch {
     return null;
   }
+  if (gasProof.receiptStatus === 'reverted') {
+    await recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof: gasProof, gasOnly: true });
+    throw new OutboundRecoveryRequiredError('OUTBOUND_SOURCE_REVERTED', 'the finalized outbound source reverted; gas is recorded and principal remains reserved');
+  }
+
   const sourceFinality = observedOutboundSourceProof(sourceProof, leg);
   if (sourceFinality === null) return null;
   await recordNativeOutboundCustody({ cycleRepository, context, adapters, configured, proof: sourceProof });

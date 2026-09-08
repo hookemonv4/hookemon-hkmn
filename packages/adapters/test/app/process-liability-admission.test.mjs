@@ -1,3 +1,4 @@
+import { createRelayClient, isProcessQuoteUsdValuation } from '../../src/relay-client.mjs';
 // The focused negatives the frozen process-liability interface requires. Every case drives the real
 // archive read, the real admission planner, or the real pre-sign veto against isolated in-memory
 // chain state; none contacts a provider, and no address here stands in for a deployed one.
@@ -13,7 +14,7 @@ import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/pr
 import { MAXIMUM_PACK_BATCH_SIZE } from '../../../runner/src/cycle/money-schemas.mjs';
 
 const HOOK = `0x${'1'.repeat(40)}`;
-const USDG = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const ETH = 'native';
 const BLOCK_HASH = `0x${'1'.repeat(64)}`;
 const OTHER_HASH = `0x${'2'.repeat(64)}`;
 const CYCLE_ID = 'cycle-process-liability-1';
@@ -23,15 +24,15 @@ const PLANNER_OPERATIONS = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const SETTLEMENT_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 function moneyConfiguration() {
-  const usdg = { chainId: '4663', assetId: USDG, decimals: 6 };
+  const eth = { chainId: '4663', assetId: ETH, decimals: 18 };
   const solanaStablecoin = { chainId: '792703809', assetId: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', decimals: 6 };
   return {
-    schema: 'hookemon.money-configuration.v1',
-    assets: { usdg, solanaStablecoin },
+    schema: 'hookemon.money-configuration.v2',
+    assets: { eth, solanaStablecoin },
     minimums: {
-      robinhoodReceive: { ...usdg, amountAtomic: '0' },
+      robinhoodReceive: { ...eth, amountAtomic: '0' },
       solanaReceive: { ...solanaStablecoin, amountAtomic: '0' },
-      returnUsdg: { ...usdg, amountAtomic: '0' },
+      returnEth: { ...eth, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
@@ -56,7 +57,7 @@ function isolatedChain({ state = {}, blockHashAt = () => BLOCK_HASH, operations 
     processClaimCycleUsed: false,
     activeProcessClaimLimit: 4n,
     totalLiability: COVERS,
-    hookUsdgBalance: COVERS,
+    hookNativeBalance: COVERS,
     isSolvent: true,
     ...state,
   };
@@ -69,6 +70,7 @@ function isolatedChain({ state = {}, blockHashAt = () => BLOCK_HASH, operations 
         if (functionName === 'readRoles') {
           return [{ programmableBeneficiary: HOOK, treasury: HOOK, operations }, {}, {}, {}];
         }
+        if (functionName === 'hookEthBalance') return values.hookNativeBalance;
         if (!(functionName in values)) throw new Error(`unexpected getter ${functionName}`);
         return values[functionName];
       },
@@ -161,13 +163,14 @@ test('a read failure refuses with no latest or configured fallback', async () =>
 function reorgAfterArchiveReadClient({ operations }) {
   const values = {
     processLiability: COVERS, remainingProcessClaimCapacity: COVERS, processClaimsPaused: false,
-    processClaimCycleUsed: false, activeProcessClaimLimit: 4n, totalLiability: COVERS, hookUsdgBalance: COVERS, isSolvent: true,
+    processClaimCycleUsed: false, activeProcessClaimLimit: 4n, totalLiability: COVERS, hookNativeBalance: COVERS, isSolvent: true,
   };
   let getBlockCalls = 0;
   return {
     async readContract({ functionName }) {
       if (functionName === 'readRoles') return [{ programmableBeneficiary: HOOK, treasury: HOOK, operations }, {}, {}, {}];
-      if (!(functionName in values)) throw new Error(`unexpected getter ${functionName}`);
+      if (functionName === 'hookEthBalance') return values.hookNativeBalance;
+        if (!(functionName in values)) throw new Error(`unexpected getter ${functionName}`);
       return values[functionName];
     },
     async getBlock({ blockNumber } = {}) {
@@ -188,7 +191,7 @@ test('a public reorg discovered after the archive read refuses admission-time ev
     config: {
       contracts: { hook: HOOK },
       accounts: { evm: operations },
-      moneyConfiguration: { assets: { usdg: { chainId: '4663', assetId: USDG, decimals: 6 } } },
+      moneyConfiguration: { assets: { eth: { chainId: '4663', assetId: ETH, decimals: 18 } } },
     },
     adapters: { robinhood: { client, historicalEvidenceClient: createHistoricalErc20EvidenceClient({ client }) } },
   });
@@ -203,14 +206,15 @@ test('a public reorg discovered after the archive read refuses admission-time ev
  * above.
  */
 function plannerFixture({ processLiabilityReader, quantity = 1, unitAtomic = '1000000' }) {
-  const usdg = { chainId: '4663', assetId: USDG, decimals: 6 };
+  const eth = { chainId: '4663', assetId: ETH, decimals: 18 };
   const settlement = { chainId: '792703809', assetId: SETTLEMENT_MINT, decimals: 6 };
   let quoteCount = 0;
   const planner = buildAdmissionPlanner({
     config: {
+      now: () => 1_700_000_000_000,
       contracts: { hook: HOOK },
       accounts: { evm: PLANNER_OPERATIONS, solana: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE' },
-      moneyConfiguration: { assets: { usdg, solanaStablecoin: settlement } },
+      moneyConfiguration: { assets: { eth, solanaStablecoin: settlement } },
     },
     adapters: {
       collectorCrypt: {
@@ -218,23 +222,21 @@ function plannerFixture({ processLiabilityReader, quantity = 1, unitAtomic = '10
           return { machines: [{ code: 'base-pack', price: '1', available: true, enabled: true }] };
         },
       },
-      relay: {
-        async quoteOutboundBridge({ amount }) {
-          quoteCount += 1;
-          return {
-            requestId: `req-${quoteCount}`,
-            orderId: `0x${String(quoteCount).padStart(64, '0')}`,
-            deadlineUnixSeconds: 2_000_000_000,
-            sender: PLANNER_OPERATIONS,
-            recipient: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE',
-            // Funding cost tracks the requested settlement amount 1:1; the fixture only needs a
-            // controllable number to compare against the evidence ceiling, not a realistic price.
-            origin: { amount },
-            destination: { amount, minimumAmount: amount },
-            quoteDigest: `sha256:${String(quoteCount).padStart(64, '0')}`,
-          };
-        },
-      },
+      relay: (() => {
+        const client = createRelayClient({ now: () => 1_700_000_000_000, quoteValidityMs: 60000,
+          fetchImpl: async (_url, options) => {
+            const request = JSON.parse(options.body); quoteCount += 1;
+            const zero = `0x${'00'.repeat(20)}`;
+            const raw = { requestId: `req-${quoteCount}`, details: { sender: request.user, recipient: request.recipient,
+              currencyIn: { currency: { chainId: 4663, address: zero, decimals: 18 }, amount: request.amount, amountUsd: '1' },
+              currencyOut: { currency: { chainId: 792703809, address: SETTLEMENT_MINT, decimals: 6 }, amount: request.amount, minimumAmount: request.amount } },
+              protocol: { v2: { orderId: `0x${String(quoteCount).padStart(64, '0')}`, orderData: { inputs: [{ payment: { chainId: 'robinhood', currency: zero, amount: request.amount },
+                refunds: [{ chainId: 'robinhood', currency: zero, recipient: request.user, deadline: 2_000_000_000 }] }],
+                output: { chainId: 'solana', deadline: 2_000_000_000, calls: [], payments: [{ recipient: request.recipient, currency: SETTLEMENT_MINT, expectedAmount: request.amount, minimumAmount: request.amount }] } } } }, steps: [] };
+            return { ok: true, status: 200, text: async () => JSON.stringify(raw) };
+          } });
+        return { quoteOutboundBridge: params => client.quoteOutboundBridge({ ...params, skipRouteCheck: true }) };
+      })(),
     },
     readConfiguration: async () => ({ liveMode: true, requestedOrders: quantity, allowedPackIds: ['base-pack'] }),
     processLiabilityReader,
@@ -245,10 +247,10 @@ function plannerFixture({ processLiabilityReader, quantity = 1, unitAtomic = '10
 /** A finalized evidence record a real reader would only produce once every control passed. */
 function fakeProcessLiabilityEvidence(cycleId, overrides = {}) {
   return {
-    schema: 'hookemon.process-liability-evidence.v1',
+    schema: 'hookemon.process-liability-evidence.v2',
     chainId: '4663',
-    assetId: USDG,
-    decimals: 6,
+    assetId: ETH,
+    decimals: 18,
     hook: HOOK,
     cycleId,
     onchainCycleId: deriveOnchainCycleId(cycleId),
@@ -261,7 +263,7 @@ function fakeProcessLiabilityEvidence(cycleId, overrides = {}) {
     processClaimCycleUsed: false,
     activeProcessClaimLimit: COVERS.toString(),
     totalLiability: COVERS.toString(),
-    hookUsdgBalance: COVERS.toString(),
+    hookNativeBalance: COVERS.toString(),
     isSolvent: true,
     operations: PLANNER_OPERATIONS,
     ceilingAtomic: COVERS.toString(),
@@ -276,7 +278,10 @@ function fakeProcessLiabilityReader(overrides = {}) {
 test('an empty Operations wallet still admits when the planner is handed sufficient hook liability', async () => {
   const { planner } = plannerFixture({ processLiabilityReader: fakeProcessLiabilityReader() });
   const admission = await planner.plan({ cycleId: 'cycle-planner-sufficient', packId: 'base-pack' });
-  assert.equal(admission.schema, 'hookemon.policy-admission.v2');
+  assert.equal(admission.schema, 'hookemon.policy-admission.v3');
+  assert.ok(isProcessQuoteUsdValuation(admission.aggregateFundingUsd));
+  assert.equal(admission.aggregateFundingQuote.assetId, 'native');
+  assert.equal(admission.aggregateFundingQuote.decimals, 18);
   assert.equal(admission.aggregateFundingQuote.amountAtomic, '1000000');
   assert.equal(admission.processLiabilityEvidence.ceilingAtomic, COVERS.toString());
 });
@@ -323,13 +328,13 @@ test('requestedOrders above the shared batch/catalog ceiling is refused before a
   let getMachinesCalls = 0;
   let quoteCalls = 0;
   let liabilityReadCalls = 0;
-  const usdg = { chainId: '4663', assetId: USDG, decimals: 6 };
+  const eth = { chainId: '4663', assetId: ETH, decimals: 18 };
   const settlement = { chainId: '792703809', assetId: SETTLEMENT_MINT, decimals: 6 };
   const planner = buildAdmissionPlanner({
     config: {
       contracts: { hook: HOOK },
       accounts: { evm: PLANNER_OPERATIONS, solana: 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE' },
-      moneyConfiguration: { assets: { usdg, solanaStablecoin: settlement } },
+      moneyConfiguration: { assets: { eth, solanaStablecoin: settlement } },
     },
     adapters: {
       collectorCrypt: {
@@ -371,11 +376,11 @@ test('each independent hook control refuses admission at the planner boundary, f
   for (const [override, pattern] of [
     [{ processClaimsPaused: true }, /refuses while hook process claims are paused/],
     [{ processClaimCycleUsed: true }, /refuses a cycle id the hook already used/],
-    [{ isSolvent: false, hookUsdgBalance: '0' }, /refuses while the hook is not solvent/],
+    [{ isSolvent: false, hookNativeBalance: '0' }, /refuses while the hook is not solvent/],
     [{ operations: `0x${'9'.repeat(40)}` }, /Operations role does not match the configured Operations account/],
     [{ activeProcessClaimLimit: '0' }, /remainingProcessClaimCapacity exceeds activeProcessClaimLimit/],
     [{ totalLiability: '0' }, /processLiability exceeds totalLiability/],
-    [{ isSolvent: true, hookUsdgBalance: '0' }, /isSolvent does not match hookUsdgBalance and totalLiability/],
+    [{ isSolvent: true, hookNativeBalance: '0' }, /isSolvent does not match hookNativeBalance and totalLiability/],
     [{ notARecognizedField: '1' }, /unrecognized field/],
   ]) {
     const { planner } = plannerFixture({ processLiabilityReader: fakeProcessLiabilityReader(override) });
@@ -390,7 +395,7 @@ test('each independent hook control refuses admission at the planner boundary, f
 function claimFixture({ operations, chain, estimate }) {
   const config = {
     chainId: 4663,
-    contracts: { hook: HOOK, usdg: USDG },
+    contracts: { hook: HOOK, eth: ETH },
     accounts: { evm: operations },
     nativeGasCaps: { robinhood: '999999' },
     moneyConfiguration: moneyConfiguration(),
@@ -411,7 +416,7 @@ function claimFixture({ operations, chain, estimate }) {
   const cycleRepository = {
     async readStage() { return { status: 'COMPLETE', evidence: { finalizedBlock: '123' } }; },
     async readClaimPreconditions() { return { heldAssets: false, unattributed: false, unresolvedObligations: false }; },
-    async describeCycle() { return { releaseAmount: '25000000', chainAttempts: new Map(), custodyLedgers: new Map() }; },
+    async describeCycle() { return { admission: { schema: 'hookemon.policy-admission.v3' }, releaseAmount: '25000000', chainAttempts: new Map(), custodyLedgers: new Map() }; },
     async readOperationalStageAttempt() { return null; },
     async readChainTransactionAttempt() { return prepared; },
     async prepareChainTransactionAttempt(_cycleId, _stage, attempt) {

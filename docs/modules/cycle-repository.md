@@ -350,3 +350,15 @@ Native custody records gas costs as append-only `gasPayments` entries containing
 transaction hash and canonical `amountWei`. Their exact sum equals typed `gasSpent`.
 `applyNativeCustodyGasPayment` accepts a process-authenticated payment proof and returns the same
 fields on replay of that hash and cost. A changed cost, removed entry or duplicate hash refuses.
+
+Native supplementary return boundaries require the persisted signed source and a process-authenticated destination payment. A single journal event consumes the destination transaction globally and credits the existing native custody row. The row retains its gas reservation and payment history; a missing native row refuses settlement. Historical v1 supplementary evidence retains its original decoder and cannot resume native execution.
+
+A finalized reverted claim or outbound deposit records its signed-transaction gas proof before recovery reports the failure. Repeated reconciliation preserves the unique gas entry and every principal bucket; failed transactions never grant payment authority.
+
+Native admission creation requires original Relay USD producer capabilities. Its immutable opening event records `nativeAdmissionProvenance` v1: cycle identity, current mutation authority, admission digest, and exact request/response and valuation digests for both quotes. Repository replay can issue private in-process valuation references only under the same authority and original expiry. Ordinary JSON, caller paths, and records without provenance cannot authorize new risk. This boundary trusts the configured durable repository; its journal integrity is not external provider attestation.
+
+Native return attribution v2 freezes a downward-rounded `destinationUsd` and its exact request, raw response digest, valuation digest, and quote before source effects. Creating the native return expectation requires its original producer capability; replay validates the retained evidence. Completed USD loss uses original committed admission cost minus exact settled proceeds observed inside that original valuation window. Missing, expired, or mismatched realized proceeds remain unvalued and prohibit new risk; current ETH pricing never revises completed loss.
+
+A supplementary return atomically reserves both source and destination transaction identities in the shared Relay namespace, plus its order identity. A second position cannot consume one signed source through a different destination event.
+
+Supplementary return preparation accepts USD proceeds only from the original fresh producer capability and binds the paged attempt to its position manifest. Source bytes become immutable when present; source identity, quote, and USD evidence cannot change on later writes. The authenticated return boundary stores exact timely realized proceeds in the same journal event as native credit. `supplementaryRealizedProceedsUsd` exposes that frozen value for completed-loss accounting; absent or expired valuation leaves the credited principal unvalued for new-risk policy.

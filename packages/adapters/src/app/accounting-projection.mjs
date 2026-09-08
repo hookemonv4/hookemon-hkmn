@@ -895,13 +895,42 @@ export async function projectPolicyCustody({ cycleRepository, nativeAsset, value
           return parsePolicyAtomic(valuation.amountMicroUsd, 'authenticated USD valuation');
         } catch { unvaluedExposure = true; return null; }
       }
-      const unresolvedUsd = await valueWei(unresolvedClaim);
-      const outstandingUsd = principalOutstanding === unresolvedClaim ? unresolvedUsd : await valueWei(principalOutstanding);
-      if (unresolvedUsd !== null) {
-        if (description.terminalState === 'COMPLETED') cycleRealizedLoss += unresolvedUsd;
-        else cycleAtRisk += unresolvedUsd;
+      if (description.terminalState === 'COMPLETED') {
+        const cost = description.admission?.aggregateFundingUsd;
+        let proceedsWei = 0n, proceedsUsd = 0n, valued = description.admission?.schema === 'hookemon.policy-admission.v3'
+          && cost?.amount?.amountAtomic === description.releaseAmount && cost?.rounding === 'up';
+        for (const leg of description.relayLegs?.values?.() ?? []) {
+          if (leg.direction !== 'return' || leg.state !== 'SETTLED') continue;
+          const usd = leg.returnAttribution?.destinationUsd;
+          const settledAtMs = Number(leg.finalizedAtDestination?.timestampUnixSeconds) * 1000;
+          if (leg.returnAttribution?.schema !== 'hookemon.return-leg-attribution-context.v2' || !usd
+            || usd.rounding !== 'down' || usd.sourcePath !== 'details.currencyOut.amountUsd'
+            || usd.amount?.chainId !== asset.chainId || usd.amount?.assetId !== asset.assetId || usd.amount?.decimals !== asset.decimals
+            || usd.amount?.amountAtomic !== leg.netDeltaAtomic || usd.quoteRequestId !== leg.relayRequestId
+            || !Number.isSafeInteger(settledAtMs) || settledAtMs < usd.observedAtMs || settledAtMs >= usd.validUntilMs) { valued = false; continue; }
+          proceedsWei += BigInt(leg.netDeltaAtomic);
+          proceedsUsd += parsePolicyAtomic(usd.amountMicroUsd, 'frozen realized USD proceeds');
+        }
+        for (const realized of description.supplementaryRealizedProceedsUsd?.values?.() ?? []) {
+          const usd = realized.destinationUsd;
+          proceedsWei += parsePolicyAtomic(usd.amount.amountAtomic, 'frozen supplementary native proceeds');
+          proceedsUsd += parsePolicyAtomic(usd.amountMicroUsd, 'frozen supplementary USD proceeds');
+        }
+        if (proceedsWei !== returned) valued = false;
+        if (valued) {
+          const committedCost = claimed === 0n ? 0n : parsePolicyAtomic(cost.amountMicroUsd, 'frozen committed USD cost');
+          cycleRealizedLoss += committedCost > proceedsUsd ? committedCost - proceedsUsd : 0n;
+        } else unvaluedExposure = true;
+        // Completed expenses never change with current FX. Only remaining liquid custody uses a current quote.
+        const liquid = principalOutstanding - unresolvedClaim;
+        const liquidUsd = await valueWei(liquid);
+        if (liquidUsd !== null) cycleOutstanding += liquidUsd;
+      } else {
+        const unresolvedUsd = await valueWei(unresolvedClaim);
+        const outstandingUsd = principalOutstanding === unresolvedClaim ? unresolvedUsd : await valueWei(principalOutstanding);
+        if (unresolvedUsd !== null) cycleAtRisk += unresolvedUsd;
+        if (outstandingUsd !== null) cycleOutstanding += outstandingUsd;
       }
-      if (outstandingUsd !== null) cycleOutstanding += outstandingUsd;
     }
     cycleExposureMicroUsd[cycleId] = cycleAtRisk.toString();
     realizedLoss += cycleRealizedLoss;
