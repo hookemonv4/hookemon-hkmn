@@ -1,4 +1,4 @@
-import { isProcessQuoteUsdValuation, readProcessQuoteUsdProvenance } from '../relay-client.mjs';
+import { isProcessQuoteUsdValuation, readProcessQuoteUsdProvenance, relayQuoteDigest, parseQuoteResponse } from '../relay-client.mjs';
 import { requireLiveMutationAuthority, createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createHash } from 'node:crypto';
 import { isProcessNativePaymentProof } from '../native-payment-proof.mjs';
@@ -3007,6 +3007,21 @@ function assertCycleClosure(state) {
   }
 }
 
+function validateNativeReturnValuation(leg) {
+  const attribution = leg.returnAttribution;
+  if (attribution?.schema !== 'hookemon.return-leg-attribution-context.v2') throw new Error('native return requires frozen destination USD provenance');
+  const value = attribution.destinationUsd, evidence = attribution.destinationUsdEvidence, quote = evidence.quote;
+  if (evidence.valuationDigest !== digest(value) || evidence.rawDigest !== digest(quote.raw) || digest(evidence.request) !== value.requestDigest
+    || relayQuoteDigest(quote) !== value.quoteDigest || quote.quoteDigest !== value.quoteDigest
+    || quote.requestId !== leg.relayRequestId || quote.orderId !== attribution.intent.orderId) throw new Error('native return valuation evidence differs from the exact quote');
+  if (evidence.request.destinationCurrency !== '0x0000000000000000000000000000000000000000' || evidence.request.destinationChainId !== 4663) throw new Error('native return valuation request destination is invalid');
+  const parsed = parseQuoteResponse(quote.raw, { direction: 'RETURN', ...evidence.request, destinationCurrency: undefined });
+  if (parsed.quoteDigest !== quote.quoteDigest) throw new Error('native return valuation response does not match its request');
+  const [whole, fraction = ''] = quote.raw.details.currencyOut.amountUsd.split('.');
+  if (!/^(0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(quote.raw.details.currencyOut.amountUsd)
+    || (BigInt(whole) * 1000000n + BigInt(fraction.slice(0, 6).padEnd(6, '0'))).toString() !== value.amountMicroUsd) throw new Error('native return USD proceeds must round down from the exact response');
+}
+
 function validateNativeAdmissionProvenance(provenance, admission, cycleId) {
   exactObject(provenance, ['schema', 'cycleId', 'authority', 'admissionDigest', 'unit', 'aggregate'], 'native admission provenance');
   if (provenance.schema !== 'hookemon.native-admission-provenance.v1' || provenance.cycleId !== cycleId
@@ -3570,6 +3585,7 @@ export class CycleRepository {
       } else if (entry.kind === 'return-relay-leg-expectation-recorded') {
         exactObject(entry.payload, ['leg', 'ledger'], 'stored return relay leg expectation');
         const leg = assertRelayLeg(entry.payload.leg, 'stored return relay leg expectation leg');
+        if (leg.returnAttribution?.schema === 'hookemon.return-leg-attribution-context.v2') validateNativeReturnValuation(leg);
         const legKey = relayLegKey(leg.relayRequestId);
         if (leg.cycleId !== cycleId || leg.direction !== 'return' || leg.state !== 'RECORDED'
           || leg.sourceTxHash !== null || relayLegs.has(legKey)) {
@@ -6715,7 +6731,7 @@ export class CycleRepository {
    * for the same resolved destination chain/asset is refused before append, leaving the first leg's
    * row-level expectation exactly as it was.
    */
-  async recordReturnRelayLegExpectation(cycleId, legValue, ledgerValue) {
+  async recordReturnRelayLegExpectation(cycleId, legValue, ledgerValue, { destinationUsd = null } = {}) {
     const leg = assertRelayLeg(legValue, 'return Relay leg expectation');
     if (leg.cycleId !== cycleId || leg.direction !== 'return' || leg.state !== 'RECORDED' || leg.sourceTxHash !== null) {
       throw new Error('cycle-repository recordReturnRelayLegExpectation requires an unsigned recorded return Relay leg for this cycle');
@@ -6751,6 +6767,13 @@ export class CycleRepository {
         throw new Error('cycle-repository recordReturnRelayLegExpectation: Relay request id already has a different custody ledger association');
       }
       return structuredClone(currentLeg);
+    }
+    if (leg.schema === 'hookemon.relay-leg.v2') {
+      validateNativeReturnValuation(leg);
+      if (!isProcessQuoteUsdValuation(destinationUsd, { amount: leg.returnAttribution.destinationUsd.amount, quoteDigest: leg.returnAttribution.destinationUsd.quoteDigest,
+        quoteRequestId: leg.relayRequestId, sourcePath: 'details.currencyOut.amountUsd', rounding: 'down' })
+        || digest(destinationUsd) !== digest(leg.returnAttribution.destinationUsd)
+        || this.#now() < destinationUsd.observedAtMs || this.#now() >= destinationUsd.validUntilMs) throw new Error('native return expectation requires fresh producer USD proceeds capability');
     }
     if (unresolvedReturnLegConflict(state, leg)) {
       throw new Error('cycle-repository recordReturnRelayLegExpectation: an unresolved return leg for this destination already exists');

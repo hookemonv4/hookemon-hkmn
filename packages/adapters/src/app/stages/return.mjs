@@ -3,6 +3,8 @@ import {
   DIRECTIONS,
   RELAY_CONSTANTS,
   assertQuoteUsable,
+  createQuoteUsdValuation,
+  readProcessQuoteUsdProvenance,
 } from '../../relay-client.mjs';
 import {
   buildRelayLegacyTransaction,
@@ -354,8 +356,11 @@ export async function prepareReturnRequest({ adapters, config, cycleRepository, 
   assertReturnQuote(quote, configured, money);
   assertQuoteUsable({ quote, nowMs });
   const execution = adapters.relay.prepareExecution({ quote, liveMode: true });
+  const destinationUsd = createQuoteUsdValuation({ quote, side: 'destination', amount: typedAmount(quote.destination), rounding: 'down', nowMs });
   return Object.freeze({
     schema: 'hookemon.return-relay-request.v2',
+    destinationUsd,
+    destinationUsdEvidence: { ...readProcessQuoteUsdProvenance(destinationUsd), quote },
     cycleId: context.cycleId,
     inputAmount: typedAmount(quote.origin),
     destinationAmount: typedAmount(quote.destination),
@@ -569,7 +574,9 @@ function returnRelayLeg(context, request) {
     source: request.inputAmount,
     destination: request.destinationAmount,
     returnAttribution: {
-      schema: 'hookemon.return-leg-attribution-context.v1',
+      schema: 'hookemon.return-leg-attribution-context.v2',
+      destinationUsd: request.destinationUsd,
+      destinationUsdEvidence: request.destinationUsdEvidence,
       intent: request.intent,
       requestCreatedAtUnixSeconds: request.requestCreatedAtUnixSeconds,
       maxSettlementWindowSeconds: request.maxSettlementWindowSeconds,
@@ -583,7 +590,7 @@ function returnCustodyAsset(money) {
 }
 
 function returnCustodyLedgerKey(asset) {
-  return `${asset.chainId} ${asset.assetId}`;
+  return `${asset.chainId}\u0000${asset.assetId}`;
 }
 
 /**
@@ -592,7 +599,7 @@ function returnCustodyLedgerKey(asset) {
  * for a leg with no durable canonical association (ADR-0026).
  */
 function legacyRawReturnCustodyKey(leg) {
-  return `${leg.destinationChainId} ${leg.destinationAssetId}`;
+  return `${leg.destinationChainId}\u0000${leg.destinationAssetId}`;
 }
 
 /**
@@ -649,7 +656,7 @@ function hasConflictingUnresolvedReturnExpectation(existing) {
  * -- the observation's own multi-RPC round trip, then the custody refresh write -- so a lease lost
  * during either await reaches zero further durable calls.
  */
-async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, configured, money, adapters, context }) {
+async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, configured, money, adapters, context, destinationUsd }) {
   const asset = returnCustodyAsset(money);
   const canonicalKey = returnCustodyLedgerKey(asset);
   const rawKey = legacyRawReturnCustodyKey(leg);
@@ -692,7 +699,7 @@ async function recordReturnCustodyExpectation({ cycleRepository, cycle, leg, con
   if (existing !== null) await cycleRepository.recordCustodyLedger(leg.cycleId, refreshed);
   context?.assertLease?.();
   const ledger = Object.freeze({ ...refreshed, expectedCycleAsset });
-  return cycleRepository.recordReturnRelayLegExpectation(leg.cycleId, leg, ledger);
+  return cycleRepository.recordReturnRelayLegExpectation(leg.cycleId, leg, ledger, { destinationUsd });
 }
 
 function assertReturnRequest({ request, context, cycle, configured, money, nativeIdentity }) {
@@ -1025,7 +1032,7 @@ export async function mutateReturn({
     // A genuinely new leg: the atomic custody-v2 creator runs exactly once, here, before any
     // nonce reservation or signing. `sourceTxHash`/`state` only ever advance after this point, so
     // this call is never repeated against the same relayRequestId.
-    await recordReturnCustodyExpectation({ cycleRepository, cycle, leg: candidateLeg, configured, money, adapters, context });
+    await recordReturnCustodyExpectation({ cycleRepository, cycle, leg: candidateLeg, configured, money, adapters, context, destinationUsd: request.destinationUsd });
   } else {
     if (canonicalDigest(returnLegIdentity(existingLeg)) !== canonicalDigest(returnLegIdentity(candidateLeg))) {
       throw new Error('return Relay request id already has different durable leg evidence');
