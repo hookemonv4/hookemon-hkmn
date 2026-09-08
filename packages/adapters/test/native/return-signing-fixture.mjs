@@ -22,9 +22,11 @@ export function returnSigningFixture({sender,recipient='0x2222222222222222222222
 
 // Isolated synthetic HTTP quote with the captured instruction grammar. The real adapter creates
 // the valuation capability; these fixture prices confer no live provider or release authority.
-export async function producedReturnSigningFixture({cycleId='cycle-return-fixture',nowMs=1700000000000,...options}={}) {
- const native=returnSigningFixture(options),{intent}=native.request;
+export async function producedReturnSigningFixture({cycleId='cycle-return-fixture',nowMs=1700000000000,requestId=null,destinationAmount=null,...options}={}) {
+ const native=returnSigningFixture(options),intent={...native.request.intent};
  const raw=JSON.parse(readFileSync(new URL('../../../../docs/evidence/native-relay-source-instruction-20260908/relay-return-scenario-response.json',import.meta.url)));
+ if(requestId!==null){raw.requestId=requestId;raw.steps[0].requestId=requestId;}
+ if(destinationAmount!==null){intent.quotedDestinationAmount=destinationAmount;intent.quotedDestinationMinimumAmount=destinationAmount;}
  raw.details.sender=intent.sender;raw.details.recipient=intent.recipient;
  Object.assign(raw.details.currencyIn,{amount:intent.originAmount,minimumAmount:intent.originAmount,amountUsd:'0.000016'});
  Object.assign(raw.details.currencyOut,{amount:intent.quotedDestinationAmount,minimumAmount:intent.quotedDestinationMinimumAmount,amountUsd:'0.000015'});
@@ -36,10 +38,10 @@ export async function producedReturnSigningFixture({cycleId='cycle-return-fixtur
  raw.steps[0].items[0].data=native.request.solanaInstructionPlan;
  const relay=createRelayClient({now:()=>nowMs,quoteValidityMs:60000,fetchImpl:async()=>({ok:true,status:200,text:async()=>JSON.stringify(raw)})});
  const quote=await relay.quote({direction:'RETURN',tradeType:'EXACT_INPUT',user:intent.sender,recipient:intent.recipient,amount:intent.originAmount,skipRouteCheck:true});
- const destinationAmount={chainId:'4663',assetId:'native',decimals:18,amountAtomic:quote.destination.amount};
- const destinationUsd=createQuoteUsdValuation({quote,side:'destination',amount:destinationAmount,rounding:'down',nowMs});
+ const destinationTypedAmount={chainId:'4663',assetId:'native',decimals:18,amountAtomic:quote.destination.amount};
+ const destinationUsd=createQuoteUsdValuation({quote,side:'destination',amount:destinationTypedAmount,rounding:'down',nowMs});
  native.request={...native.request,schema:'hookemon.return-relay-request.v2',cycleId,intent:relay.prepareExecution({quote,liveMode:true}).intent,
-  destinationAmount,destinationUsd,destinationUsdEvidence:{...readProcessQuoteUsdProvenance(destinationUsd),quote},
+  destinationAmount:destinationTypedAmount,destinationUsd,destinationUsdEvidence:{...readProcessQuoteUsdProvenance(destinationUsd),quote},
   requestCreatedAtUnixSeconds:String(Math.floor(nowMs/1000)),maxSettlementWindowSeconds:'600'};
  return {...native,relay};
 }

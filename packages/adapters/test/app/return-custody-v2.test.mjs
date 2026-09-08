@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { producedReturnSigningFixture, returnSigningFixture } from '../native/return-signing-fixture.mjs';
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,28 +9,13 @@ import test from 'node:test';
 import { createTestProfileMutationAuthority } from '../../../runner/src/cycle/preflight.mjs';
 import { createRecordedRelayLeg } from '../../../runner/src/cycle/money-schemas.mjs';
 import { digest as canonicalDigest } from '../../../runner/src/cycle/journal.mjs';
-import { createSolanaRpcClient, TOKEN_PROGRAM_ID } from '../../src/solana-rpc.mjs';
+import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
 import { mutateReturn, reconcileLiveReturn, ReturnRecoveryRequiredError } from '../../src/app/stages/return.mjs';
 import { CycleRepository } from '../../src/app/cycle-repository.mjs';
 import { createStageDriver } from '../../src/app/stage-driver.mjs';
 
-// Focused coverage for ordinary return's EVM USDG custody-v2 write introduced by interfaces.json
-// revision 67 / ADR-0026: `recordReturnCustodyExpectation` inside `stages/return.mjs`, which
-// replaces the bare `recordRelayLeg` call with the atomic `recordReturnRelayLegExpectation`
-// primitive, called exactly once per leg (mutateReturn skips it entirely once the leg already
-// durably exists, so the leg's own lifecycle fields can freely advance afterward). Every genuinely
-// new leg obtains a fresh, non-null observation regardless of whether its destination row already
-// exists as v1 or v2 for some unrelated reason (an earlier claim, payout, or a different,
-// already-cleared return); only a genuine resume of the same durable leg skips the repository call
-// entirely. Drives the real `mutateReturn` entrypoint (and, once, the real stage-driver) against a
-// real, durable `CycleRepository` and the real `createEvmCustodyBalanceObservationReader` producer
-// -- never a bare unit-tested helper -- so every assertion here observes what the actual repository
-// journal and the actual observation reader produced. The atomic creation primitive's own CAS
-// semantics (replay, conflict refusal) are already proven in cycle-repository.test.mjs; this file
-// proves the stage's own wiring around it instead.
-
-// Fixed by relay-client.mjs's RELAY_CONSTANTS (chain 4663 / USDG_ADDRESS) -- return.mjs binds
-// MoneyConfigurationV1.assets.usdg to this exact route, never an arbitrary configured token.
+// Native return custody observations and the atomic leg/ledger association are exercised through
+// mutateReturn and the durable repository. Historical token inputs remain explicit refusal cases.
 const TOKEN = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const OPERATIONS = `0x${'b'.repeat(40)}`;
 const SOLANA_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -37,31 +24,33 @@ const SOLANA_SOURCE = '8MWgLuNVQAhpoTUQZiUUkG9Q1569HCkJbmAivoQ5VhDN';
 const SOLANA_DESTINATION = '4nvJ5zWdVspxJiNZzB127U6amPH98SFFkBx2JZrAduia';
 const NUL = String.fromCharCode(0);
 
-const CANONICAL_CHAIN_ID = 'eip155:4663';
-const CANONICAL_ASSET_ID = `eip155:4663/erc20:${TOKEN}`;
+const CANONICAL_CHAIN_ID = '4663';
+const CANONICAL_ASSET_ID = 'native';
 const CANONICAL_KEY = `${CANONICAL_CHAIN_ID}${NUL}${CANONICAL_ASSET_ID}`;
 const RAW_KEY = `4663${NUL}${TOKEN}`;
 
 const TEST_PREFLIGHT_AUTHORITY = createTestProfileMutationAuthority();
 const MARKER_STOP = 'MARKER_STOP_AFTER_CUSTODY_WRITE';
+const NATIVE_SOURCE = returnSigningFixture({ sender: SOLANA_OPERATOR, recipient: OPERATIONS });
 
 function baseConfig() {
   return {
     chainId: 4663,
+    nativePaymentBinding: NATIVE_SOURCE.nativePaymentBinding,
     accounts: { evm: OPERATIONS, solana: SOLANA_OPERATOR },
     solana: { chainId: 'solana-mainnet' },
     collectorCrypt: { settlementAsset: { chainId: 'solana-mainnet', assetId: SOLANA_MINT, decimals: 6 } },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: {
-      schema: 'hookemon.money-configuration.v1',
+      schema: 'hookemon.money-configuration.v2',
       assets: {
-        usdg: { chainId: '4663', assetId: TOKEN, decimals: 6 },
+        eth: { chainId: '4663', assetId: 'native', decimals: 18 },
         solanaStablecoin: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6 },
       },
       minimums: {
-        robinhoodReceive: { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '0' },
+        robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
         solanaReceive: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic: '0' },
-        returnUsdg: { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: '0' },
+        returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       },
       evm: {
         perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '100' },
@@ -73,6 +62,17 @@ function baseConfig() {
       },
     },
   };
+}
+
+function historicalConfig() {
+  const config = baseConfig();
+  config.moneyConfiguration.schema = 'hookemon.money-configuration.v1';
+  delete config.moneyConfiguration.assets.eth;
+  config.moneyConfiguration.assets.usdg = { chainId: '4663', assetId: TOKEN, decimals: 6 };
+  config.moneyConfiguration.minimums.robinhoodReceive = { ...config.moneyConfiguration.assets.usdg, amountAtomic: '0' };
+  delete config.moneyConfiguration.minimums.returnEth;
+  config.moneyConfiguration.minimums.returnUsdg = { ...config.moneyConfiguration.assets.usdg, amountAtomic: '0' };
+  return config;
 }
 
 function rpc({
@@ -95,7 +95,7 @@ function rpc({
   let archiveClient = null;
   if (historicalEvidenceClient === 'default') {
     archiveClient = {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) {
         return {
           value: archiveBalance,
           blockNumber: archiveBlockNumber ?? blockNumber,
@@ -113,26 +113,6 @@ function rpc({
 
 const UNTOUCHABLE_ROBINHOOD = new Proxy({}, { get() { throw new Error('must not read the balance observer here'); } });
 
-function splTransferCheckedPlan(amountAtomic) {
-  const data = Buffer.alloc(10);
-  data.writeUInt8(12, 0);
-  data.writeBigUInt64LE(BigInt(amountAtomic), 1);
-  data.writeUInt8(6, 9);
-  return {
-    instructions: [{
-      programId: TOKEN_PROGRAM_ID,
-      keys: [
-        { pubkey: SOLANA_SOURCE, isSigner: false, isWritable: true },
-        { pubkey: SOLANA_MINT, isSigner: false, isWritable: false },
-        { pubkey: SOLANA_DESTINATION, isSigner: false, isWritable: true },
-        { pubkey: SOLANA_OPERATOR, isSigner: true, isWritable: false },
-      ],
-      data: data.toString('hex'),
-    }],
-    addressLookupTableAddresses: [],
-  };
-}
-
 function solanaClient(blockhash = '11111111111111111111111111111111') {
   return createSolanaRpcClient({
     fetchImpl: async (_url, options) => {
@@ -142,6 +122,7 @@ function solanaClient(blockhash = '11111111111111111111111111111111') {
         getLatestBlockhash: { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 100 } },
         isBlockhashValid: { context: { slot: 10 }, value: true },
         getBlockHeight: 10,
+        getSlot: 11, getMultipleAccounts: NATIVE_SOURCE.observation,
       };
       if (!Object.hasOwn(resultByMethod, body.method)) throw new Error(`unexpected Solana RPC ${body.method}`);
       return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: body.id, result: resultByMethod[body.method] }) };
@@ -156,8 +137,9 @@ function markerSigner() {
 async function durableCycle(t, cycleId = 'cycle-return-custody-v2-1') {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-return-custody-v2-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const repository = await CycleRepository.open(directory);
-  await repository.createCycle({ releaseAmount: '1', mode: 'production', cycleId });
+  const repository = await CycleRepository.open(directory, () => 1700000000000, { testAuthority: TEST_PREFLIGHT_AUTHORITY });
+  const admission = await nativeProducedAdmissionFixture(cycleId);
+  await repository.createCycle({ releaseAmount: '42', mode: 'production', cycleId, admission });
   return { directory, repository, cycleId };
 }
 
@@ -198,18 +180,20 @@ async function canonicalRow(cycleRepository, cycleId, overrides = {}) {
 
 async function canonicalV2Row(cycleRepository, cycleId, overrides = {}) {
   const row = {
-    schema: 'hookemon.custody-ledger.v2',
+    schema: 'hookemon.custody-ledger.v3',
     cycleId,
     chainId: CANONICAL_CHAIN_ID,
     assetId: CANONICAL_ASSET_ID,
-    decimals: 6,
+    decimals: 18,
     ...evmCustodyBuckets(overrides),
     verifiedCurrentBalance: {
       schema: 'hookemon.custody-balance-observation.v1',
       account: OPERATIONS.toLowerCase(),
-      balance: { chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, amountAtomic: '250000' },
+      balance: { chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 18, amountAtomic: '250000' },
       finality: { height: '50', hash: `0x${'5'.repeat(64)}`, timestampUnixSeconds: '1699999999' },
     },
+    gasReserve: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
+    gasSpent: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' }, gasPayments: [],
     expectedCycleAsset: null,
     ...overrides,
   };
@@ -230,36 +214,10 @@ async function rawRow(cycleRepository, cycleId, overrides = {}) {
   return row;
 }
 
-function returnRequest({ cycleId, requestId, amountAtomic = '17', destinationAmountAtomic = '16', deadlineUnixSeconds = 4_102_444_800 }) {
-  return {
-    schema: 'hookemon.return-relay-request.v1',
-    cycleId,
-    inputAmount: { chainId: '792703809', assetId: SOLANA_MINT, decimals: 6, amountAtomic },
-    destinationAmount: { chainId: '4663', assetId: TOKEN, decimals: 6, amountAtomic: destinationAmountAtomic },
-    requestCreatedAtUnixSeconds: '1700000000',
-    maxSettlementWindowSeconds: '600',
-    intent: {
-      schema: 'hookemon.relay-intent.v1',
-      requestId,
-      orderId: `0x${'9'.repeat(64)}`,
-      direction: 'RETURN',
-      tradeType: 'EXACT_INPUT',
-      quoteDigest: `sha256:${'7'.repeat(64)}`,
-      originChainId: 792703809,
-      destinationChainId: 4663,
-      originAssetId: SOLANA_MINT,
-      originDecimals: 6,
-      destinationAssetId: TOKEN,
-      destinationDecimals: 6,
-      originAmount: amountAtomic,
-      quotedDestinationAmount: destinationAmountAtomic,
-      quotedDestinationMinimumAmount: destinationAmountAtomic,
-      sender: SOLANA_OPERATOR,
-      recipient: OPERATIONS,
-      deadlineUnixSeconds,
-    },
-    solanaInstructionPlan: splTransferCheckedPlan(amountAtomic),
-  };
+async function returnRequest({ cycleId, requestId, amountAtomic = '17', destinationAmountAtomic = '16' }) {
+  const native = await producedReturnSigningFixture({ cycleId, requestId, sender: SOLANA_OPERATOR, recipient: OPERATIONS,
+    amount: amountAtomic, destinationAmount: destinationAmountAtomic });
+  return native.request;
 }
 
 function returnContext(cycleId, seed = '1') {
@@ -271,6 +229,7 @@ function returnContext(cycleId, seed = '1') {
 }
 
 async function runMutateReturn({ cycleRepository, cycleId, config, robinhood, request, ctx, signerClient = markerSigner() }) {
+  request = await request;
   return mutateReturn({
     liveMode: true,
     config,
@@ -305,7 +264,8 @@ function bareReturnRelayLeg(request) {
     source: request.inputAmount,
     destination: request.destinationAmount,
     returnAttribution: {
-      schema: 'hookemon.return-leg-attribution-context.v1',
+      schema: 'hookemon.return-leg-attribution-context.v2',
+      destinationUsd: request.destinationUsd, destinationUsdEvidence: request.destinationUsdEvidence,
       intent: request.intent,
       requestCreatedAtUnixSeconds: request.requestCreatedAtUnixSeconds,
       maxSettlementWindowSeconds: request.maxSettlementWindowSeconds,
@@ -332,17 +292,17 @@ function countingNonceRepository(cycleRepository, counters) {
   return cycleRepository;
 }
 
-test('refuses a raw-only legacy USDG predecessor before any leg creation, nonce reservation, or signing', async t => {
+test('refuses historical USDG configuration before any leg creation, nonce reservation, or signing', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
   await rawRow(cycleRepository, cycleId, { claimed: '100' });
 
   await assert.rejects(
     () => runMutateReturn({
-      cycleRepository, cycleId, config: baseConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD },
+      cycleRepository, cycleId, config: historicalConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD },
       request: returnRequest({ cycleId, requestId: 'relay-return-raw-only' }), ctx: returnContext(cycleId),
     }),
-    error => error instanceof ReturnRecoveryRequiredError && error.recoveryState === 'RETURN_LEGACY_RAW_CUSTODY_PREDECESSOR',
+    /return requires MoneyConfigurationV2/,
   );
 
   const state = await cycleRepository.describeCycle(cycleId);
@@ -350,7 +310,7 @@ test('refuses a raw-only legacy USDG predecessor before any leg creation, nonce 
   assert.equal(state.custodyLedgers.get(CANONICAL_KEY), undefined, 'must not create a competing canonical row');
 });
 
-test('refuses when a raw predecessor coexists with a canonical row, leaving both untouched', async t => {
+test('refuses historical USDG configuration with retained token and native rows, leaving both untouched', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
   const raw = await rawRow(cycleRepository, cycleId, { claimed: '40' });
@@ -358,10 +318,10 @@ test('refuses when a raw predecessor coexists with a canonical row, leaving both
 
   await assert.rejects(
     () => runMutateReturn({
-      cycleRepository, cycleId, config: baseConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD },
+      cycleRepository, cycleId, config: historicalConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD },
       request: returnRequest({ cycleId, requestId: 'relay-return-raw-and-canonical' }), ctx: returnContext(cycleId),
     }),
-    error => error instanceof ReturnRecoveryRequiredError && error.recoveryState === 'RETURN_LEGACY_RAW_CUSTODY_PREDECESSOR',
+    /return requires MoneyConfigurationV2/,
   );
 
   const state = await cycleRepository.describeCycle(cycleId);
@@ -370,9 +330,10 @@ test('refuses when a raw predecessor coexists with a canonical row, leaving both
   assert.deepEqual(state.custodyLedgers.get(CANONICAL_KEY), canonical);
 });
 
-test('creates a new canonical v2 row and the RECORDED leg expectation together, with a real observation', async t => {
+test('creates a new native v3 row and the RECORDED leg expectation together, with a real observation', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
+  const historical = await rawRow(cycleRepository, cycleId, { claimed: '7000000' });
 
   await assert.rejects(
     () => runMutateReturn({
@@ -383,45 +344,34 @@ test('creates a new canonical v2 row and the RECORDED leg expectation together, 
   );
 
   const state = await cycleRepository.describeCycle(cycleId);
+  assert.deepEqual(state.custodyLedgers.get(RAW_KEY), historical, 'native credit must not reinterpret or consume retained USDG history');
   const leg = state.relayLegs.get('relay-return-new-row');
   assert.equal(leg.state, 'RECORDED');
   const row = state.custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
+  assert.equal(row.schema, 'hookemon.custody-ledger.v3');
   assert.equal(row.returnReceived, '0');
   assert.ok(row.verifiedCurrentBalance, 'expected a non-null verifiedCurrentBalance on the fresh write');
   assert.equal(row.verifiedCurrentBalance.balance.amountAtomic, '500000');
   assert.equal(row.verifiedCurrentBalance.finality.height, '100');
   assert.deepEqual(row.expectedCycleAsset, {
-    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, amountAtomic: '16',
+    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 18, amountAtomic: '16',
   });
   assert.equal(state.returnLegLedgerKeys.get('relay-return-new-row'), CANONICAL_KEY);
 });
 
-test('upgrades a legitimate existing canonical v1 row, retaining every bucket, only with a genuine observation', async t => {
+test('refuses historical custody reinterpretation at the native key without changing its buckets', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
-  await canonicalRow(cycleRepository, cycleId, { claimed: '100', bridgeIn: '20' });
-
-  await assert.rejects(
-    () => runMutateReturn({
-      cycleRepository, cycleId, config: baseConfig(), robinhood: rpc(),
-      request: returnRequest({ cycleId, requestId: 'relay-return-v1-upgrade' }), ctx: returnContext(cycleId),
-    }),
-    new RegExp(MARKER_STOP),
-  );
-
+  const previous = await canonicalRow(cycleRepository, cycleId, { claimed: '100', bridgeIn: '20' });
+  await assert.rejects(() => runMutateReturn({ cycleRepository, cycleId, config: baseConfig(), robinhood: UNTOUCHABLE_ROBINHOOD,
+    request: returnRequest({ cycleId, requestId: 'relay-return-historical-refusal' }), ctx: returnContext(cycleId) }),
+    /native return refuses historical custody reinterpretation/);
   const state = await cycleRepository.describeCycle(cycleId);
-  const row = state.custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2');
-  assert.equal(row.claimed, '100');
-  assert.equal(row.bridgeIn, '20');
-  assert.ok(row.verifiedCurrentBalance);
-  assert.deepEqual(row.expectedCycleAsset, {
-    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, amountAtomic: '16',
-  });
+  assert.deepEqual(state.custodyLedgers.get(CANONICAL_KEY), previous);
+  assert.equal(state.relayLegs.size, 0);
 });
 
-test('a genuinely new leg on an existing v2 row (written earlier by claim or payout) still obtains a fresh observation', async t => {
+test('a genuinely new leg on an existing native v3 row (written earlier by claim or payout) still obtains a fresh observation', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
   const existing = await canonicalV2Row(cycleRepository, cycleId, { claimed: '9' });
@@ -441,7 +391,7 @@ test('a genuinely new leg on an existing v2 row (written earlier by claim or pay
   assert.equal(row.verifiedCurrentBalance.balance.amountAtomic, '500000');
   assert.equal(row.verifiedCurrentBalance.finality.height, '100');
   assert.deepEqual(row.expectedCycleAsset, {
-    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, amountAtomic: '16',
+    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 18, amountAtomic: '16',
   });
 });
 
@@ -449,7 +399,7 @@ test('a restarted resume replays the same leg and ledger association byte-identi
   const { directory, repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
   const ctx = returnContext(cycleId);
-  const request = returnRequest({ cycleId, requestId: 'relay-return-resume' });
+  const request = await returnRequest({ cycleId, requestId: 'relay-return-resume' });
 
   await assert.rejects(
     () => runMutateReturn({ cycleRepository, cycleId, config: baseConfig(), robinhood: rpc(), request, ctx }),
@@ -459,7 +409,7 @@ test('a restarted resume replays the same leg and ledger association byte-identi
   const firstLeg = first.relayLegs.get('relay-return-resume');
   const firstRow = first.custodyLedgers.get(CANONICAL_KEY);
 
-  const reopened = await CycleRepository.open(directory);
+  const reopened = await CycleRepository.open(directory, () => 1700000000000, { testAuthority: TEST_PREFLIGHT_AUTHORITY });
   await assert.rejects(
     () => runMutateReturn({
       cycleRepository: reopened, cycleId, config: baseConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD }, request, ctx,
@@ -506,7 +456,7 @@ test('a conflicting second unresolved leg for the same destination refuses befor
 test('a leg durably recorded only through the legacy bare recordRelayLeg, with no association at all, refuses on resume before any nonce reservation or signing', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
-  const request = returnRequest({ cycleId, requestId: 'relay-return-legacy-unassociated' });
+  const request = await returnRequest({ cycleId, requestId: 'relay-return-legacy-unassociated' });
   await cycleRepository.recordRelayLeg(cycleId, bareReturnRelayLeg(request));
 
   const counters = {};
@@ -529,7 +479,7 @@ test('a leg durably recorded only through the legacy bare recordRelayLeg, with n
 test('a leg durably recorded only through the legacy bare recordRelayLeg over a raw-identity row refuses on resume before any nonce reservation or signing', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
-  const request = returnRequest({ cycleId, requestId: 'relay-return-legacy-raw' });
+  const request = await returnRequest({ cycleId, requestId: 'relay-return-legacy-raw' });
   await cycleRepository.recordRelayLeg(cycleId, bareReturnRelayLeg(request));
   await rawRow(cycleRepository, cycleId, { returnReceived: '16' });
 
@@ -546,28 +496,28 @@ test('a leg durably recorded only through the legacy bare recordRelayLeg over a 
   assert.equal(counters.sign, undefined, 'must not sign before the association check');
 });
 
-test('a resumed leg whose canonical association coexists with a later raw-identity predecessor refuses before any nonce reservation or signing', async t => {
+test('a resumed native leg refuses historical USDG configuration before any nonce reservation or signing', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
   const ctx = returnContext(cycleId);
-  const request = returnRequest({ cycleId, requestId: 'relay-return-split-on-resume' });
+  const request = await returnRequest({ cycleId, requestId: 'relay-return-split-on-resume' });
 
   await assert.rejects(
     () => runMutateReturn({ cycleRepository, cycleId, config: baseConfig(), robinhood: rpc(), request, ctx }),
     new RegExp(MARKER_STOP),
   );
-  // A raw-identity row for the same asset appears later (e.g. an unrelated legacy write) --
-  // resuming the already-durable leg must refuse rather than proceed on its still-valid association.
+  // Retained USDG history remains readable, but a stale USDG configuration cannot resume
+  // this native leg or acquire another signing reservation.
   await rawRow(cycleRepository, cycleId, { claimed: '5' });
 
   const counters = {};
   countingNonceRepository(cycleRepository, counters);
   await assert.rejects(
     () => runMutateReturn({
-      cycleRepository, cycleId, config: baseConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD },
+      cycleRepository, cycleId, config: historicalConfig(), robinhood: { client: UNTOUCHABLE_ROBINHOOD, historicalEvidenceClient: UNTOUCHABLE_ROBINHOOD },
       request, ctx, signerClient: countingSigner(counters),
     }),
-    error => error instanceof ReturnRecoveryRequiredError && error.recoveryState === 'RETURN_CUSTODY_IDENTITY_SPLIT',
+    /return requires MoneyConfigurationV2/,
   );
   assert.equal(counters.nonce, undefined, 'must not reserve a second wallet nonce before the association check');
   assert.equal(counters.sign, undefined, 'must not sign before the association check');
@@ -601,7 +551,7 @@ test('a lease lost while the final public recheck is suspended reaches zero cust
       },
     },
     historicalEvidenceClient: {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) {
         return { value: 500_000n, blockNumber, blockHash };
       },
     },
@@ -628,7 +578,7 @@ test('a lease lost while the final public recheck is suspended reaches zero cust
 test('a lease lost immediately after the custody refresh write reaches zero atomic leg-creation calls', async t => {
   const { repository: cycleRepository, cycleId } = await durableCycle(t);
   await seedSolanaProceeds(cycleRepository, cycleId);
-  await canonicalRow(cycleRepository, cycleId, { claimed: '9' });
+  await canonicalV2Row(cycleRepository, cycleId, { claimed: '9' });
 
   let recordExpectationCalls = 0;
   const originalRecordExpectation = cycleRepository.recordReturnRelayLegExpectation.bind(cycleRepository);
@@ -654,7 +604,7 @@ test('a lease lost immediately after the custody refresh write reaches zero atom
   const state = await cycleRepository.describeCycle(cycleId);
   assert.equal(state.relayLegs.size, 0, 'the leg must never be created once the lease was lost after the refresh write');
   const row = state.custodyLedgers.get(CANONICAL_KEY);
-  assert.equal(row.schema, 'hookemon.custody-ledger.v2', 'the refresh write itself already durably happened before the lease loss');
+  assert.equal(row.schema, 'hookemon.custody-ledger.v3', 'the refresh write itself already durably happened before the lease loss');
 });
 
 test('propagates the observation reader\'s refusal for a missing archive client, writing no leg or row', async t => {
@@ -666,7 +616,7 @@ test('propagates the observation reader\'s refusal for a missing archive client,
       cycleRepository, cycleId, config: baseConfig(), robinhood: rpc({ historicalEvidenceClient: 'none' }),
       request: returnRequest({ cycleId, requestId: 'relay-return-no-archive' }), ctx: returnContext(cycleId),
     }),
-    /distinct archive-capable historical evidence client is required/,
+    /distinct native archive evidence reader required/,
   );
 
   const state = await cycleRepository.describeCycle(cycleId);
@@ -683,7 +633,7 @@ test('propagates the observation reader\'s refusal for a public reorg between th
       cycleRepository, cycleId, config: baseConfig(), robinhood: rpc({ recheckHash: `0x${'2'.repeat(64)}` }),
       request: returnRequest({ cycleId, requestId: 'relay-return-reorg' }), ctx: returnContext(cycleId),
     }),
-    /public finalized block hash changed after the archive read/,
+    /native custody checkpoint changed/,
   );
 
   const state = await cycleRepository.describeCycle(cycleId);
@@ -698,28 +648,9 @@ test('the real stage-driver dispatches mutateReturn into the real repository thr
 
   const config = baseConfig();
   const requestId = 'relay-return-driver-case';
-  const quote = {
-    direction: 'RETURN',
-    requestId,
-    origin: { chainId: 792703809, address: SOLANA_MINT, decimals: 6, amount: '17' },
-    destination: { chainId: 4663, address: TOKEN, decimals: 6, amount: '16', minimumAmount: '16' },
-    sender: SOLANA_OPERATOR,
-    recipient: OPERATIONS,
-    deadlineUnixSeconds: 4_102_444_800,
-  };
-  const intent = returnRequest({ cycleId, requestId }).intent;
-  const steps = [{
-    kind: 'transaction',
-    requestId,
-    items: [{ data: splTransferCheckedPlan('17') }],
-  }];
-  const relay = {
-    async quoteReturnBridge() { return quote; },
-    prepareExecution({ liveMode }) {
-      if (liveMode !== true) throw new Error('return driver fixture requires liveMode');
-      return { intent, steps };
-    },
-  };
+  const native = await producedReturnSigningFixture({ cycleId, requestId, sender: SOLANA_OPERATOR, recipient: OPERATIONS, destinationAmount: '16' });
+  config.now = () => 1700000000000;
+  const relay = { ...native.relay, quoteReturnBridge: input => native.relay.quote({ ...input, direction: 'RETURN', tradeType: 'EXACT_INPUT', skipRouteCheck: true }) };
 
   const driver = createStageDriver({
     liveMode: true,
@@ -752,7 +683,7 @@ test('the real stage-driver dispatches mutateReturn into the real repository thr
   assert.equal(state.returnLegLedgerKeys.get(requestId), CANONICAL_KEY);
   const row = state.custodyLedgers.get(CANONICAL_KEY);
   assert.deepEqual(row.expectedCycleAsset, {
-    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6, amountAtomic: '16',
+    chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 18, amountAtomic: '16',
   });
 });
 
@@ -769,24 +700,9 @@ test('the real stage-driver reaches zero custody or leg-creation writes when the
 
   const config = baseConfig();
   const requestId = 'relay-return-driver-lease-race';
-  const quote = {
-    direction: 'RETURN',
-    requestId,
-    origin: { chainId: 792703809, address: SOLANA_MINT, decimals: 6, amount: '17' },
-    destination: { chainId: 4663, address: TOKEN, decimals: 6, amount: '16', minimumAmount: '16' },
-    sender: SOLANA_OPERATOR,
-    recipient: OPERATIONS,
-    deadlineUnixSeconds: 4_102_444_800,
-  };
-  const intent = returnRequest({ cycleId, requestId }).intent;
-  const steps = [{ kind: 'transaction', requestId, items: [{ data: splTransferCheckedPlan('17') }] }];
-  const relay = {
-    async quoteReturnBridge() { return quote; },
-    prepareExecution({ liveMode }) {
-      if (liveMode !== true) throw new Error('return driver fixture requires liveMode');
-      return { intent, steps };
-    },
-  };
+  const native = await producedReturnSigningFixture({ cycleId, requestId, sender: SOLANA_OPERATOR, recipient: OPERATIONS, destinationAmount: '16' });
+  config.now = () => 1700000000000;
+  const relay = { ...native.relay, quoteReturnBridge: input => native.relay.quote({ ...input, direction: 'RETURN', tradeType: 'EXACT_INPUT', skipRouteCheck: true }) };
 
   let signalSuspended;
   const suspended = new Promise(resolve => { signalSuspended = resolve; });
@@ -805,7 +721,7 @@ test('the real stage-driver reaches zero custody or leg-creation writes when the
       },
     },
     historicalEvidenceClient: {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) {
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) {
         return { value: 500_000n, blockNumber, blockHash };
       },
     },
@@ -849,14 +765,14 @@ function fakeReturnLegRepository({ state, associated, rawRowPresent, canonicalRo
     state,
     sourceTxHash: state === 'RECORDED' ? null : 'return-source-fake',
     destinationChainId: '4663',
-    destinationAssetId: TOKEN,
-    destinationDecimals: 6,
+    destinationAssetId: 'native',
+    destinationDecimals: 18,
     destinationAmountAtomic: '16',
   };
   const custodyLedgers = new Map();
   if (rawRowPresent) custodyLedgers.set(RAW_KEY, { schema: 'hookemon.custody-ledger.v1', chainId: '4663', assetId: TOKEN, decimals: 6 });
   if (canonicalRowPresent) {
-    custodyLedgers.set(CANONICAL_KEY, { schema: 'hookemon.custody-ledger.v2', chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 6 });
+    custodyLedgers.set(CANONICAL_KEY, { schema: 'hookemon.custody-ledger.v3', chainId: CANONICAL_CHAIN_ID, assetId: CANONICAL_ASSET_ID, decimals: 18 });
   }
   const returnLegLedgerKeys = new Map();
   if (associated) returnLegLedgerKeys.set(leg.relayRequestId, CANONICAL_KEY);
@@ -875,11 +791,11 @@ test('the SETTLED fast path refuses when the attributed custody row is missing i
   );
 });
 
-test('the SETTLED fast path refuses when a raw predecessor coexists alongside the settled leg\'s own canonical row', async () => {
+test('the SETTLED fast path refuses historical USDG configuration despite retained custody rows', async () => {
   const cycleRepository = fakeReturnLegRepository({ state: 'SETTLED', associated: true, rawRowPresent: true, canonicalRowPresent: true });
   await assert.rejects(
-    () => reconcileLiveReturn({ adapters: null, config: baseConfig(), cycleRepository, context: { cycleId: 'cycle-return-settled-split' } }),
-    error => error instanceof ReturnRecoveryRequiredError && error.recoveryState === 'RETURN_CUSTODY_IDENTITY_SPLIT',
+    () => reconcileLiveReturn({ adapters: null, config: historicalConfig(), cycleRepository, context: { cycleId: 'cycle-return-settled-split' } }),
+    /return requires MoneyConfigurationV2/,
   );
 });
 
