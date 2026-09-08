@@ -232,9 +232,9 @@ function assertConfiguredPackQuantity(value, label = 'config.pack.quantity') {
 async function assertHeldHeadroom({ cycleRepository, context, config, quantity }) {
   if (typeof cycleRepository?.listHeldPositions !== 'function') return;
   const maxHeldPositions = config?.maxHeldPositions;
-  const maxHeldValueMicroUsdg = config?.maxHeldValueMicroUsdg;
+  const maxHeldValueMicroUsd = config?.maxHeldValueMicroUsd;
   const checksCount = Number.isSafeInteger(maxHeldPositions);
-  const checksValue = typeof maxHeldValueMicroUsdg === 'string' && canonicalUnsignedInteger.test(maxHeldValueMicroUsdg);
+  const checksValue = typeof maxHeldValueMicroUsd === 'string' && canonicalUnsignedInteger.test(maxHeldValueMicroUsd);
   if (!checksCount && !checksValue) return;
   const positions = await cycleRepository.listHeldPositions({ includeResolved: false });
   if (checksCount) {
@@ -244,18 +244,21 @@ async function assertHeldHeadroom({ cycleRepository, context, config, quantity }
     }
   }
   if (checksValue) {
-    const currentValue = positions.reduce((sum, position) => sum + BigInt(position.valueMicroUsdg ?? '0'), 0n);
+    const currentValue = positions.reduce((sum, position) => {
+      if (typeof position.costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(position.costMicroUsd)) throw new Error('purchase refuses unvalued historical held position');
+      return sum + BigInt(position.costMicroUsd);
+    }, 0n);
     let worstCasePerPack = 0n;
     if (typeof context?.cycleId === 'string' && typeof cycleRepository.describeCycle === 'function') {
       const description = await cycleRepository.describeCycle(context.cycleId);
-      if (typeof description?.releaseAmount === 'string' && canonicalUnsignedInteger.test(description.releaseAmount)) {
-        worstCasePerPack = BigInt(description.releaseAmount) / BigInt(quantity);
-      }
+      const basis = description?.admission?.aggregateFundingUsd?.amountMicroUsd;
+      if (typeof basis !== 'string' || !canonicalUnsignedInteger.test(basis)) throw new Error('purchase requires committed USD held cost basis');
+      worstCasePerPack = BigInt(basis);
     }
     const projectedValue = currentValue + (worstCasePerPack * BigInt(quantity));
-    const maximum = BigInt(maxHeldValueMicroUsdg);
+    const maximum = BigInt(maxHeldValueMicroUsd);
     if (projectedValue > maximum) {
-      throw new Error(`purchase admission refused: HELD_LIMIT would exceed maxHeldValueMicroUsdg by ${(projectedValue - maximum).toString()} (worst case ${projectedValue.toString()} > ${maximum.toString()})`);
+      throw new Error(`purchase admission refused: HELD_LIMIT would exceed maxHeldValueMicroUsd by ${(projectedValue - maximum).toString()} (worst case ${projectedValue.toString()} > ${maximum.toString()})`);
     }
   }
 }

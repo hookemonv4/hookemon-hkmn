@@ -174,31 +174,9 @@ function optionalTypedAmount(value) {
   }
 }
 
-function heldPositionValueMicroUsdg(costMicroUsdg, insuredValue, config) {
-  const usdg = config?.moneyConfiguration?.assets?.usdg;
-  if (insuredValue !== null && sameAsset(insuredValue, usdg) && insuredValue.chainId === '4663' && insuredValue.decimals === 6) {
-    return insuredValue.amountAtomic;
-  }
-  return costMicroUsdg;
-}
+function heldPositionValueMicroUsd(costMicroUsd) { return costMicroUsd; }
 
-const HELD_POSITION_EVM_ADDRESS_PATTERN = /^0x[0-9a-f]{40}$/;
 
-/**
- * ADR-0026: the sole raw-to-canonical relation this repository recognizes for the configured USDG
- * asset -- chain 4663, six decimals, a normalized lower-case 20-byte EVM token -- matching
- * `evmUsdgCanonicalCustodyIdentity` in cycle-repository.mjs exactly, so this held write lands on
- * the same custody row claim and payout already maintain instead of a competing raw identity.
- */
-function heldPositionLedgerAsset(config) {
-  const asset = config?.moneyConfiguration?.assets?.usdg;
-  const typed = assertTypedAmount({ ...asset, amountAtomic: '0' }, 'held buyback USDG ledger asset');
-  if (typed.chainId !== '4663' || typed.decimals !== 6 || !HELD_POSITION_EVM_ADDRESS_PATTERN.test(typed.assetId)) {
-    throw new Error('held buyback USDG ledger asset must use the configured six-decimal normalized USDG asset');
-  }
-  const chainId = `eip155:${typed.chainId}`;
-  return { chainId, assetId: `${chainId}/erc20:${typed.assetId}`, decimals: typed.decimals };
-}
 
 /** Carves one pack's card out as held. Never terminalizes the cycle or blocks another pack. */
 async function holdPack(cycleRepository, config, context, packIndex, memo, mint, terminalState, evidence, reason = heldPositionReason(terminalState)) {
@@ -209,9 +187,9 @@ async function holdPack(cycleRepository, config, context, packIndex, memo, mint,
     throw new Error('buyback requires held-position attribution capabilities');
   }
   const description = await cycleRepository.describeCycle(context.cycleId);
-  const costMicroUsdg = description?.releaseAmount;
+  const costMicroUsd = description?.admission?.aggregateFundingUsd?.amountMicroUsd;
   const packId = config?.pack?.code;
-  if (typeof costMicroUsdg !== 'string' || !canonicalUnsignedInteger.test(costMicroUsdg)
+  if (typeof costMicroUsd !== 'string' || !canonicalUnsignedInteger.test(costMicroUsd)
     || typeof packId !== 'string' || packId.length === 0) {
     throw new Error('buyback cannot attribute a held card without attributable cycle purchase evidence');
   }
@@ -221,9 +199,8 @@ async function holdPack(cycleRepository, config, context, packIndex, memo, mint,
     memo,
     mint,
     cardRef: mint,
-    costMicroUsdg,
-    valueMicroUsdg: heldPositionValueMicroUsdg(costMicroUsdg, insuredValue, config),
-    ledgerAsset: heldPositionLedgerAsset(config),
+    costMicroUsd,
+    valueMicroUsd: heldPositionValueMicroUsd(costMicroUsd, insuredValue, config),
     insuredValue,
     reason,
     terminalState,

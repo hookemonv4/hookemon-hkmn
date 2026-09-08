@@ -167,3 +167,20 @@ attempt is created.
   decision. A decision recorded before expiry may replay only through
   `verifyAndRecordStepAuthorization`, which reuses its exact durable reservations rather than
   calling the synchronous verifier at a signing boundary.
+
+## Native money boundary
+
+Active money configuration uses `hookemon.money-configuration.v2`, `assets.eth` and
+`minimums.returnEth`, with exact internal identity `4663/native/18`. The historical v1 decoder
+is read-only. A native claim requires admission v3 and writes claim-process-request.v2. Its
+finalized proof matches persisted signed bytes, the successful post-payment hook event and
+release-pinned runtime at the payment block. Finalized recovery reauthenticates that proof.
+Native balance observations use a distinct archive reader and public canonical-block recheck.
+Custody v3 retains the existing obligation buckets and adds typed `gasReserve`/`gasSpent`;
+claim gas is charged once, separately from claimed principal. Historical EVM rows cannot be
+reinterpreted as native rows.
+
+Native return legs and destination proofs use version 2. Historical version 1 evidence remains
+readable, but cannot enter the active return settlement path. Native custody uses version 3 and
+requires separately typed gas reserve and spent gas. A return hold clears the pending expectation
+without creating payout principal; an exact attributed return credits and clears atomically.

@@ -1,3 +1,4 @@
+import { isProcessQuoteUsdValuation } from '../relay-client.mjs';
 // Projects one cycle's real per-cycle accounting from `cycleRepository`'s durable stage evidence
 // (this package's own journal — see cycle-repository.mjs's header for why it is a fresh, independent
 // journal rather than a wrapper around CycleRunner) into the exact `RoundAccounting` shape
@@ -594,12 +595,10 @@ const atomicAmountPattern = /^(0|[1-9][0-9]*)$/;
 
 function assertPolicyAssetIdentity(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('projectPolicyCustody requires an evmUsdg asset identity');
+    throw new Error('projectPolicyCustody requires a native asset identity');
   }
-  if (typeof value.chainId !== 'string' || value.chainId.length === 0
-    || typeof value.assetId !== 'string' || value.assetId.length === 0
-    || !Number.isInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
-    throw new Error('projectPolicyCustody evmUsdg asset identity is invalid');
+  if (value.chainId !== '4663' || value.assetId !== 'native' || value.decimals !== 18) {
+    throw new Error('projectPolicyCustody nativeAsset asset identity is invalid');
   }
   return value;
 }
@@ -634,9 +633,9 @@ function ledgerHasCurrentCustody(ledger) {
 function freezePolicyCycle(value) {
   return Object.freeze({
     cycleId: value.cycleId,
-    realizedLossMicroUsdg: value.realizedLossMicroUsdg.toString(),
-    atRiskMicroUsdg: value.atRiskMicroUsdg.toString(),
-    outstandingMicroUsdg: value.outstandingMicroUsdg.toString(),
+    realizedLossMicroUsd: value.realizedLossMicroUsd.toString(),
+    atRiskMicroUsd: value.atRiskMicroUsd.toString(),
+    outstandingMicroUsd: value.outstandingMicroUsd.toString(),
   });
 }
 
@@ -652,8 +651,8 @@ function openHeldPositions(description, cycleId) {
       || position.cycleId !== cycleId || !Object.hasOwn(position, 'resolution')) {
       throw new Error('projectPolicyCustody held position identity is invalid');
     }
-    parsePolicyAtomic(position.costMicroUsdg, 'held position costMicroUsdg');
-    const valueMicroUsdg = parsePolicyAtomic(position.valueMicroUsdg, 'held position valueMicroUsdg');
+    parsePolicyAtomic(position.costMicroUsd, 'held position costMicroUsd');
+    const valueMicroUsd = parsePolicyAtomic(position.costMicroUsd, 'held position purchase cost');
     if (typeof position.reason !== 'string' || position.reason.length === 0
       || typeof position.terminalState !== 'string' || position.terminalState.length === 0
       || typeof position.evidenceDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(position.evidenceDigest)
@@ -672,8 +671,8 @@ function openHeldPositions(description, cycleId) {
     positions.push(Object.freeze({
       positionId,
       cycleId,
-      costMicroUsdg: position.costMicroUsdg,
-      valueMicroUsdg: valueMicroUsdg.toString(),
+      costMicroUsd: position.costMicroUsd,
+      valueMicroUsd: valueMicroUsd.toString(),
       insuredValue: position.insuredValue === null ? null : structuredClone(position.insuredValue),
       reason: position.reason,
       terminalState: position.terminalState,
@@ -686,17 +685,13 @@ function openHeldPositions(description, cycleId) {
   return positions.sort((left, right) => left.positionId.localeCompare(right.positionId));
 }
 
-/**
- * Projects the policy engine's USDG-only custody controls from every active and archived cycle.
- * It never applies a price or decimal conversion: any non-USDG ledger with a nonzero balance marks
- * the projection unvalued so the policy engine pauses the next claim. Each cycle is reduced on its
- * own before totals are added, so a return or balance from one cycle cannot offset another cycle.
- */
-export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
+/** Each cycle's native exposure requires current authenticated USD pricing. Held cards retain
+ * original purchase cost; unsupported custody remains unvalued and stops new risk. */
+export async function projectPolicyCustody({ cycleRepository, nativeAsset, valueAmountUsd, now = Date.now }) {
   if (!cycleRepository || typeof cycleRepository.listKnownCycleIds !== 'function' || typeof cycleRepository.describeCycle !== 'function') {
     throw new Error('projectPolicyCustody requires a cycleRepository exposing listKnownCycleIds/describeCycle');
   }
-  const asset = assertPolicyAssetIdentity(evmUsdg);
+  const asset = assertPolicyAssetIdentity(nativeAsset);
   const cycleIds = await cycleRepository.listKnownCycleIds();
   if (!Array.isArray(cycleIds) || cycleIds.some(cycleId => typeof cycleId !== 'string' || cycleId.length === 0)) {
     throw new Error('projectPolicyCustody cycle repository returned invalid cycle ids');
@@ -710,6 +705,7 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
   let unattributed = false;
   let unvaluedExposure = false;
   const cycles = [];
+  const cycleExposureMicroUsd = {};
   const heldPositions = [];
 
   for (const cycleId of [...cycleIds].sort()) {
@@ -722,7 +718,7 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
     let cycleOutstanding = 0n;
     const cycleHeldPositions = openHeldPositions(description, cycleId);
     for (const position of cycleHeldPositions) {
-      heldPositionValue += BigInt(position.valueMicroUsdg);
+      heldPositionValue += BigInt(position.valueMicroUsd);
       heldPositions.push(position);
     }
     for (const ledgerValue of description.custodyLedgers.values()) {
@@ -740,36 +736,51 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
       const claimed = parsePolicyAtomic(ledger.claimed, 'custody ledger claimed');
       const returned = parsePolicyAtomic(ledger.returnReceived, 'custody ledger returnReceived');
       const unresolvedClaim = claimed > returned ? claimed - returned : 0n;
-      if (ledger.schema === 'hookemon.custody-ledger.v2' && ledger.verifiedCurrentBalance === null
+      if (ledger.schema === 'hookemon.custody-ledger.v3' && ledger.verifiedCurrentBalance === null
         && (unresolvedClaim > 0n || ledgerHasCurrentCustody(ledger))) {
         unvaluedExposure = true;
       }
-      if (description.terminalState === 'COMPLETED') cycleRealizedLoss += unresolvedClaim;
-      else cycleAtRisk += unresolvedClaim;
-      cycleOutstanding += unresolvedClaim;
-      for (const bucket of POLICY_CUSTODY_BUCKETS) {
-        cycleOutstanding += parsePolicyAtomic(ledger[bucket], `custody ledger ${bucket}`);
+      let principalOutstanding = unresolvedClaim;
+      for (const bucket of POLICY_CUSTODY_BUCKETS) principalOutstanding += parsePolicyAtomic(ledger[bucket], `custody ledger ${bucket}`);
+      async function valueWei(amountAtomic) {
+        if (amountAtomic === 0n) return 0n;
+        if (typeof valueAmountUsd !== 'function') { unvaluedExposure = true; return null; }
+        const amount = { ...asset, amountAtomic: amountAtomic.toString() };
+        try {
+          const valuation = await valueAmountUsd(amount, { rounding: 'up' });
+          if (!isProcessQuoteUsdValuation(valuation, { amount, rounding: 'up', sourcePath: 'details.currencyIn.amountUsd' })
+            || now() < valuation.observedAtMs || now() >= valuation.validUntilMs) { unvaluedExposure = true; return null; }
+          return parsePolicyAtomic(valuation.amountMicroUsd, 'authenticated USD valuation');
+        } catch { unvaluedExposure = true; return null; }
       }
+      const unresolvedUsd = await valueWei(unresolvedClaim);
+      const outstandingUsd = principalOutstanding === unresolvedClaim ? unresolvedUsd : await valueWei(principalOutstanding);
+      if (unresolvedUsd !== null) {
+        if (description.terminalState === 'COMPLETED') cycleRealizedLoss += unresolvedUsd;
+        else cycleAtRisk += unresolvedUsd;
+      }
+      if (outstandingUsd !== null) cycleOutstanding += outstandingUsd;
     }
+    cycleExposureMicroUsd[cycleId] = cycleAtRisk.toString();
     realizedLoss += cycleRealizedLoss;
     atRisk += cycleAtRisk;
     outstanding += cycleOutstanding;
     cycles.push(freezePolicyCycle({
       cycleId,
-      realizedLossMicroUsdg: cycleRealizedLoss,
-      atRiskMicroUsdg: cycleAtRisk,
-      outstandingMicroUsdg: cycleOutstanding,
+      realizedLossMicroUsd: cycleRealizedLoss,
+      atRiskMicroUsd: cycleAtRisk,
+      outstandingMicroUsd: cycleOutstanding,
     }));
   }
 
   return Object.freeze({
-    realizedLossMicroUsdg: realizedLoss.toString(),
-    atRiskMicroUsdg: atRisk.toString(),
-    outstandingMicroUsdg: outstanding.toString(),
+    realizedLossMicroUsd: realizedLoss.toString(),
+    atRiskMicroUsd: atRisk.toString(),
+    outstandingMicroUsd: outstanding.toString(),
     heldAssets,
     heldPositions: Object.freeze({
       count: heldPositions.length,
-      valueMicroUsdg: heldPositionValue.toString(),
+      valueMicroUsd: heldPositionValue.toString(),
       positions: Object.freeze(heldPositions.sort((left, right) => (
         left.cycleId.localeCompare(right.cycleId) || left.positionId.localeCompare(right.positionId)
       ))),
@@ -777,5 +788,6 @@ export async function projectPolicyCustody({ cycleRepository, evmUsdg }) {
     unattributed,
     unvaluedExposure,
     cycles: Object.freeze(cycles),
+    cycleExposureMicroUsd: Object.freeze(cycleExposureMicroUsd),
   });
 }

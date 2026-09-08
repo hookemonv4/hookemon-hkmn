@@ -122,3 +122,23 @@ export function createEvmCustodyBalanceObservationReader({ publicClient, archive
     });
   };
 }
+
+/** Native identity has one spelling across principal and gas; custody buckets distinguish them. */
+export function createNativeCustodyBalanceObservationReader({ publicClient, archiveClient, identity }) {
+  if (!publicClient || !archiveClient || publicClient === archiveClient
+    || typeof archiveClient.readNativeBalanceAtBlock !== 'function') refuse('distinct native archive evidence reader required');
+  if (!identity || Object.keys(identity).length !== 4 || identity.chainId !== '4663'
+    || identity.assetId !== 'native' || identity.decimals !== 18) refuse('native custody requires chain 4663/native/18');
+  const account = assertRawAddress(identity.account, 'native account');
+  return async function readNativeCustodyBalance() {
+    const block = await readFinalizedBlock(publicClient);
+    const observed = await archiveClient.readNativeBalanceAtBlock({ account, blockNumber: block.number, blockHash: block.hash });
+    if (typeof observed?.value !== 'bigint' || observed.value < 0n || observed.blockNumber !== block.number
+      || observed.blockHash !== block.hash) refuse('native archive evidence checkpoint mismatch');
+    const after = await readBlockByNumber(publicClient, block.number);
+    if (after.hash !== block.hash) refuse('native custody checkpoint changed');
+    return Object.freeze({ schema: EVM_CUSTODY_BALANCE_OBSERVATION_SCHEMA, account,
+      balance: Object.freeze({ chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: observed.value.toString() }),
+      finality: Object.freeze({ height: block.number.toString(), hash: block.hash, timestampUnixSeconds: block.timestamp.toString() }) });
+  };
+}
