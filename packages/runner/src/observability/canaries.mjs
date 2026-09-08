@@ -60,14 +60,6 @@ function reserveShape(value) {
   return { chainId: value.chainId, assetId: value.assetId, decimals: value.decimals, amountAtomic };
 }
 
-function canonicalFreezeTargets(config, destinations) {
-  if (!Array.isArray(destinations) || destinations.length === 0) return null;
-  const operations = canonicalAddress(config?.roles?.operations);
-  const targets = destinations.map(canonicalAddress);
-  if (!operations || targets.some(target => target === null)) return null;
-  return [...new Set([operations, ...targets])].sort();
-}
-
 function requiredNativeGasReserves(config) {
   const expectedEvmChainId = config?.chainId;
   const rawReserves = Array.isArray(config?.nativeGasReserves) ? config.nativeGasReserves : [];
@@ -76,7 +68,7 @@ function requiredNativeGasReserves(config) {
   if (reserves.some(reserve => reserve === null)) return null;
   const evm = reserves.filter(reserve => String(reserve.chainId) === String(expectedEvmChainId));
   const solana = reserves.filter(reserve => String(reserve.chainId).toLowerCase() === 'solana');
-  return evm.length === 1 && solana.length === 1 ? [evm[0], solana[0]] : null;
+  return evm.length === 1 && evm[0].assetId === 'native' && evm[0].decimals === 18 && solana.length === 1 ? [evm[0], solana[0]] : null;
 }
 
 function isUnattributed(value) {
@@ -115,8 +107,6 @@ function checkOperatorState(value) {
 function contractPins(config) {
   const contracts = isPlainObject(config?.contracts) ? config.contracts : {};
   return [
-    ['usdg-proxy-runtime', 'USDG proxy runtime', contracts.usdg?.proxy],
-    ['usdg-implementation-runtime', 'USDG implementation runtime', contracts.usdg?.implementation],
     ['pool-manager-runtime', 'PoolManager runtime', contracts.poolManager],
     ['position-manager-runtime', 'PositionManager runtime', contracts.positionManager],
     ['router-runtime', 'router runtime', contracts.router],
@@ -193,19 +183,6 @@ export async function runPreSignatureCanaries(context = {}) {
       : drift('CHAIN_ID_MISMATCH', 'chain id', String(config.chainId), String(observed), 'stop signing and restore the configured chain connection');
   });
 
-  await check('usdg-proxy-implementation', 'USDG proxy implementation', async () => {
-    const proxy = config?.contracts?.usdg?.proxy;
-    const implementation = config?.contracts?.usdg?.implementation;
-    const proxyAddress = canonicalAddress(proxy?.address);
-    const expected = canonicalAddress(implementation?.address);
-    if (!proxyAddress || !expected) return missingConfiguration('USDG proxy implementation', 'pinned proxy and implementation addresses');
-    const observed = canonicalAddress(await readRequired(readers, 'readProxyImplementation', proxyAddress));
-    if (!observed) return drift('USDG_PROXY_IMPLEMENTATION_UNVERIFIED', 'USDG proxy implementation', expected, null, 'restore proxy implementation readback before signing');
-    return observed === expected
-      ? null
-      : drift('USDG_PROXY_IMPLEMENTATION_MISMATCH', 'USDG proxy implementation', expected, observed, 'stop signing and investigate the proxy implementation change');
-  });
-
   for (const [checkId, target, pin] of contractPins(config)) {
     // eslint-disable-next-line no-await-in-loop -- chain reads are intentionally ordered for an auditable pre-signature record.
     await check(checkId, target, async () => {
@@ -220,41 +197,15 @@ export async function runPreSignatureCanaries(context = {}) {
     });
   }
 
-  await check('usdg-decimals', 'USDG decimals', async () => {
-    const proxyAddress = canonicalAddress(config?.contracts?.usdg?.proxy?.address);
-    const expected = config?.contracts?.usdg?.decimals;
-    if (!proxyAddress || !Number.isInteger(expected) || expected < 0 || expected > 255) return missingConfiguration('USDG decimals', 'pinned USDG decimals');
-    const observed = await readRequired(readers, 'readUsdgDecimals', proxyAddress);
-    const normalized = typeof observed === 'bigint' ? Number(observed) : observed;
-    if (!Number.isInteger(normalized) || normalized < 0 || normalized > 255) {
-      return drift('USDG_DECIMALS_UNVERIFIED', 'USDG decimals', expected, null, 'restore USDG decimals readback before signing');
+  await check('native-principal-identity', 'native principal identity', async () => {
+    const expected = config?.nativePrincipal;
+    if (expected?.chainId !== '4663' || expected?.assetId !== 'native' || expected?.decimals !== 18) {
+      return missingConfiguration('native principal identity', '4663/native/18');
     }
-    return normalized === expected
-      ? null
-      : drift('USDG_DECIMALS_MISMATCH', 'USDG decimals', expected, normalized, 'stop signing and investigate the USDG contract');
+    const observed = await readRequired(readers, 'readNativePrincipalIdentity', source);
+    return observed?.chainId === '4663' && observed?.assetId === 'native' && observed?.decimals === 18
+      ? null : drift('NATIVE_PRINCIPAL_IDENTITY_MISMATCH', 'native principal identity', expected, observed, 'restore the native principal route before signing');
   });
-
-  await check('usdg-paused', 'USDG pause state', async () => {
-    const proxyAddress = canonicalAddress(config?.contracts?.usdg?.proxy?.address);
-    if (!proxyAddress) return missingConfiguration('USDG pause state', 'USDG proxy address');
-    const paused = await readRequired(readers, 'readUsdgPaused', proxyAddress);
-    if (typeof paused !== 'boolean') return drift('USDG_PAUSE_UNVERIFIED', 'USDG pause state', false, null, 'restore USDG pause readback before signing');
-    return paused ? drift('USDG_PAUSED', 'USDG pause state', false, true, 'wait for the USDG pause to be lifted before signing') : null;
-  });
-
-  const freezeTargets = canonicalFreezeTargets(config, source.destinations);
-  if (freezeTargets === null) {
-    await check('usdg-destinations', 'USDG freeze targets', async () => missingConfiguration('USDG freeze targets', 'operations address and at least one canonical signature destination'));
-  } else for (const target of freezeTargets) {
-    // eslint-disable-next-line no-await-in-loop -- each target requires a separate exact USDG readback.
-    await check(`usdg-frozen:${target}`, 'USDG freeze state', async () => {
-      const proxyAddress = canonicalAddress(config?.contracts?.usdg?.proxy?.address);
-      if (!proxyAddress || !target) return missingConfiguration('USDG freeze state', 'operations or destination address');
-      const frozen = await readRequired(readers, 'readUsdgFrozen', proxyAddress, target);
-      if (typeof frozen !== 'boolean') return drift('USDG_FREEZE_UNVERIFIED', 'USDG freeze state', false, null, 'restore USDG freeze readback before signing');
-      return frozen ? drift('USDG_FROZEN', 'USDG freeze state', false, true, 'use an unfrozen operations or destination account before signing') : null;
-    });
-  }
 
   await check('hook-roles', 'hook treasury and operations roles', async () => {
     const hookAddress = canonicalAddress(config?.roles?.hookAddress);
@@ -346,9 +297,12 @@ export async function runPreSignatureCanaries(context = {}) {
       if (String(observed.chainId) !== String(reserve.chainId) || observed.assetId !== reserve.assetId || observed.decimals !== reserve.decimals) {
         return drift('NATIVE_GAS_ASSET_MISMATCH', 'native gas reserve', { chainId: reserve.chainId, assetId: reserve.assetId, decimals: reserve.decimals }, { chainId: observed.chainId, assetId: observed.assetId, decimals: observed.decimals }, 'restore the configured native balance reader before signing');
       }
-      return BigInt(observed.amountAtomic) >= BigInt(reserve.amountAtomic)
+      const principal = String(reserve.chainId) === '4663' ? reserveShape(source.nativePrincipal) : null;
+      if (String(reserve.chainId) === '4663' && (!principal || principal.chainId !== '4663' || principal.assetId !== 'native' || principal.decimals !== 18)) return missingConfiguration('native principal reserve', 'separate exact native principal TypedAmount');
+      const required = BigInt(reserve.amountAtomic) + BigInt(principal?.amountAtomic ?? '0');
+      return BigInt(observed.amountAtomic) >= required
         ? null
-        : drift('NATIVE_GAS_BELOW_MINIMUM', 'native gas reserve', reserve.amountAtomic, observed.amountAtomic, 'fund the native gas reserve before signing');
+        : drift('NATIVE_GAS_BELOW_MINIMUM', 'native gas reserve', required.toString(), observed.amountAtomic, 'fund the native gas reserve before signing');
     });
   }
 
