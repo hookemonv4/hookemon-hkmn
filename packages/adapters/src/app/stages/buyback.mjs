@@ -479,6 +479,9 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
       stage: 'buyback',
       config,
     });
+  if (config?.execution?.profile === 'production' && resolvedBinding === null) {
+    throw new Error('production buyback requires a resolved production binding before provider mutation');
+  }
   // The resolved binding's own proceeds asset identity must already agree with the configured
   // settlement asset before any provider mutation: a mismatched trusted registry entry refuses
   // here rather than generating a candidate and relying on a later transfer/receipt failure.
@@ -517,7 +520,10 @@ async function sellPack({ adapters, config, signerClient, cycleRepository, conte
         if (typeof config.solana.originalBlockhashContextResolver !== 'function') throw new Error('Core buyback requires an original blockhash resolver');
         const observed = await decodeProviderTransaction({ ...trustedSolanaDecodeOptions({ adapters, config, coreProfile: true }), transaction: built.serializedTransaction });
         if (observed.deadline?.type !== 'rpc-blockhash-validity' || observed.deadline.valid !== true) throw new Error('Core buyback original blockhash is invalid');
-        blockhashContext = { ...observed.deadline, blockhash: observed.blockhash };
+        // The decoder has already required the RPC observation's hash to equal the message hash.
+        // Its normalized deadline deliberately omits that duplicate hash field.
+        const { type, valid, observedSlot } = observed.deadline;
+        blockhashContext = { type, blockhash: observed.blockhash, valid, observedSlot };
       } else {
         const latest = await readUsableLatestBlockhash(adapters.solana.client);
         const currentHeight = await readBlockHeight(adapters.solana.client);
@@ -808,7 +814,12 @@ async function reconcileUnknownPack({ adapters, config, cycleRepository, context
     return null;
   }
   if (!plainObject(check) || typeof check.exists !== 'boolean' || !check.exists) return null;
-  if (typeof check.status !== 'string' || check.status === '' || check.status !== 'complete') return null;
+  if (check.status === '') return null;
+  if (typeof check.status !== 'string' || check.status !== 'complete') {
+    return holdPack(cycleRepository, config, context, unknown.packIndex, unknown.memo, unknown.mint, 'HELD_DATA_UNVERIFIED', {
+      stage: 'buyback', ...unknown, check, reason: 'buyback check status is not a documented pending or complete value',
+    });
+  }
   const asset = configuredSettlementAsset(config);
   let checkedQuote;
   try {
@@ -844,26 +855,44 @@ async function reconcileUnknownPack({ adapters, config, cycleRepository, context
 
 export async function reconcileLiveBuyback({ adapters, config, cycleRepository, context }) {
   const record = await cycleRepository.readOperationalStageAttempt(context.cycleId, 'buyback');
-  const evidence = record?.responseEvidence;
+  let evidence = record?.responseEvidence;
+  const overdue = Number.isSafeInteger(record?.sentAtMs) && pastDeadline(record.sentAtMs, config, context);
   if (!plainObject(evidence) || !Array.isArray(evidence.packs)) {
-    if (record?.attempt?.state === 'SENT_UNKNOWN' && Number.isSafeInteger(record.sentAtMs)
-      && pastDeadline(record.sentAtMs, config, context)) {
-      return holdLegacySentUnknownDeadline({ cycleRepository, config, context, record });
+    if (record?.attempt?.state !== 'SENT_UNKNOWN') return null;
+    const epic = await cycleRepository.readStage(context.cycleId, 'epic-gate');
+    const open = await cycleRepository.readStage(context.cycleId, 'open');
+    if (epic?.status === 'COMPLETE' && Array.isArray(epic.evidence?.packs)
+      && open?.status === 'COMPLETE' && Array.isArray(open.evidence?.packs)) {
+      // The completed decision and opened-asset records predate the ambiguous mutation.
+      // Recover by their memos only; never regenerate a buyback or assume no send occurred.
+      const packs = epicGatePacks(epic);
+      for (const pack of packs) if (pack.decision !== 'held') boundOpenEvidence(open.evidence.packs, pack);
+      evidence = { packs: packs.map(pack => pack.decision === 'held' ? pack : {
+        packIndex: pack.packIndex, decision: 'unknown', memo: pack.memo, mint: pack.mint, quote: pack.offer,
+      }) };
+    } else {
+      return overdue ? holdLegacySentUnknownDeadline({ cycleRepository, config, context, record }) : null;
     }
-    return null;
   }
-  if (!adapters?.collectorCrypt || !adapters?.solana?.client) return null;
-
+  const canReconcile = Boolean(adapters?.collectorCrypt && adapters?.solana?.client);
+  if (!canReconcile && !overdue) return null;
   const open = await cycleRepository.readStage(context.cycleId, 'open');
-  const openEvidencePacks = plainObject(open.evidence) && Array.isArray(open.evidence.packs) ? open.evidence.packs : [];
+  const openEvidencePacks = plainObject(open?.evidence) && Array.isArray(open.evidence.packs) ? open.evidence.packs : [];
 
   const outcomes = [];
   for (const submitted of evidence.packs) {
     const assetKind = assetKindOf(openEvidencePacks, submitted.packIndex);
-    const outcome = submitted.decision === 'unknown'
+    let outcome = submitted.decision === 'held' ? submitted : !canReconcile ? null : submitted.decision === 'unknown'
       ? await reconcileUnknownPack({ adapters, config, cycleRepository, context, unknown: submitted, assetKind })
       : await reconcilePack({ adapters, config, cycleRepository, context, submitted, assetKind });
-    if (outcome === null) return null;
+    if (outcome === null) {
+      if (!overdue) return null;
+      outcome = await holdPack(cycleRepository, config, context, submitted.packIndex, submitted.memo, submitted.mint, 'HELD_UNRESOLVED', {
+        stage: 'buyback', ...submitted, attempt: record.attempt, sentAtMs: record.sentAtMs,
+        deadlineMinutes: unresolvedCardDeadlineMinutes(config),
+        reason: 'buyback outcome remained unverified past the reconcile deadline',
+      }, 'SENT_UNKNOWN_DEADLINE');
+    }
     outcomes.push(outcome);
   }
 

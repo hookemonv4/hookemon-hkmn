@@ -7237,7 +7237,7 @@
       ]
     },
     "packages/adapters/test/app/stages-collector-lifecycle.test.mjs": {
-      "sha256": "680167c25e323e8e48ae31b010ff0aeeef8fb88621d907255d6e35a2f981194b",
+      "sha256": "5f6bcdbe55146e275cdf83d46ab2b6190532170bddd5279cdd59331c2e1ed6c8",
       "matches": [
         {
           "file": "packages/adapters/test/app/stages-collector-lifecycle.test.mjs",
@@ -7918,7 +7918,7 @@
       ]
     },
     "packages/adapters/test/signing/collector-buyback-policy.test.mjs": {
-      "sha256": "cc73c81a2c0d8ba066295701a69e59c12a2a813717e99a9963a22f8927a1d875",
+      "sha256": "ae5973540fd943796427b426254d27173b1017ea12cd80533ac88b47e5acf9a5",
       "matches": [
         {
           "file": "packages/adapters/test/signing/collector-buyback-policy.test.mjs",

@@ -471,6 +471,7 @@ test('Core provider-first signature is verified before Operations and preserved 
   client:{role:OPERATOR_SOLANA_ROLE,async sign(bytes){signs++;const tx=Transaction.from(Buffer.from(bytes,'base64'));tx.partialSign(operator);return {signedTxBase64:tx.serialize().toString('base64')};}},
   broadcast:async signed=>{broadcasts++;return {signature:expectedBroadcastIdentifier(signed,'solana')};}};
  const wrapper=wrapTransactionPolicySignerClient(options),signed=await wrapper.sign(f.bytes),approval=wrapper.readApprovalContext(signed);
+ context={...coreContext,observedSlot:String(BigInt(coreContext.observedSlot)+10n)};
  const resumed=wrapTransactionPolicySignerClient(options);await resumed.recoverApproval(signed,approval);
  assert.equal(signs,1);await resumed.broadcast(signed);assert.equal(broadcasts,1);assert.equal(signs,1);
  const stale=wrapTransactionPolicySignerClient(options);context={...coreContext,valid:false};await assert.rejects(()=>stale.recoverApproval(signed,approval));
