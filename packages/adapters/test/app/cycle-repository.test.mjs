@@ -1501,15 +1501,15 @@ test('all held cards complete a cycle with zero main settlement', async t => {
 });
 
 test('records a position-bound held owner decision without terminally holding the cycle', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-1',
     mint: 'mint-1',
     cardRef: 'mint-1',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -1536,16 +1536,15 @@ test('records a position-bound held owner decision without terminally holding th
 });
 
 test('starts a supplementary settlement for a held position after its main cycle completes', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const position = await repository.recordHeldPosition(cycleId, {
     packId: 'pack-1',
     memo: 'memo-supplementary',
     mint: 'mint-supplementary',
     cardRef: 'mint-supplementary',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -1583,9 +1582,8 @@ async function preparedSupplementarySettlement(repository, cycleId) {
     memo: 'memo-supplementary',
     mint: 'mint-supplementary',
     cardRef: 'mint-supplementary',
-    costMicroUsdg: '25000000',
-    valueMicroUsdg: '25000000',
-    ledgerAsset: { chainId: '4663', assetId: 'asset-usdg', decimals: 6 },
+    costMicroUsd: '25000000',
+    valueMicroUsd: '25000000',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -1617,8 +1615,8 @@ function supplementaryChainAttempt(positionId, overrides = {}) {
 }
 
 test('prepares, signs, and broadcasts a position-scoped supplementary chain attempt without colliding with the main cycle stage', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const positionId = await preparedSupplementarySettlement(repository, cycleId);
   const requestDigest = `sha256:${'7'.repeat(64)}`;
 
@@ -1647,8 +1645,8 @@ test('prepares, signs, and broadcasts a position-scoped supplementary chain atte
 });
 
 test('recordSupplementarySignedTransaction refuses to re-sign an already-broadcast attempt', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const positionId = await preparedSupplementarySettlement(repository, cycleId);
   const requestDigest = `sha256:${'7'.repeat(64)}`;
   await repository.prepareSupplementaryChainTransactionAttempt(positionId, supplementaryChainAttempt(positionId));
@@ -1661,8 +1659,8 @@ test('recordSupplementarySignedTransaction refuses to re-sign an already-broadca
 });
 
 test('supplementary chain attempt recovery context binds to the exact signed-bytes hash and rejects a conflicting retry', async t => {
-  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(await tempDirectory(t), () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const positionId = await preparedSupplementarySettlement(repository, cycleId);
   const requestDigest = `sha256:${'7'.repeat(64)}`;
   const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
@@ -1694,8 +1692,8 @@ test('supplementary chain attempt recovery context binds to the exact signed-byt
 
 test('atomically persists supplementary signed bytes and recovery context across restart', async t => {
   const directory = await tempDirectory(t);
-  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000);
-  const { cycleId } = await repository.createCycle({ releaseAmount: '1', mode: 'production' });
+  const repository = await CycleRepository.open(directory, () => 1_700_000_000_000, { testAuthority: createTestProfileMutationAuthority() });
+  const { cycleId } = await createNativeHeldCycle(repository, '25000000', 'pack-1');
   const positionId = await preparedSupplementarySettlement(repository, cycleId);
   const requestDigest = `sha256:${'7'.repeat(64)}`;
   const rawSignedBytesHash = `hash:${'a'.repeat(64)}`;
