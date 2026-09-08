@@ -57,6 +57,8 @@ or moving custody.
   expected revision, normalized command, and note. A duplicate request ID with the same digest
   reports its latest durable state without another effect. A reused ID with another digest is
   rejected.
+- Fixed USD cap refusals are deterministic pre-effect rejections: the audit records `REJECTED` and
+  HTTP returns 409. Unclassified authority errors retain `UNCERTAIN` and HTTP 503.
 - The owner page retains a request ID across lost responses, reloads, `PREPARED`, and `UNCERTAIN`
   results. It clears that key only after `APPLIED` or a deterministic `REJECTED` result, so an
   unresolved effect cannot be retried under a new request ID.
@@ -115,8 +117,9 @@ audit log if its projection is missing or stale.
   require the operator to inspect the runner before issuing a new ID.
 - OPEN FACT: The authority has no typed outcome for a validation failure known to be non-mutating,
   such as a fixed-cap configuration refusal. Resolve it by documenting a typed `REJECTED` authority
-  result and retaining it in the audit lifecycle. Verified safe alternative: record an authority
-  exception as `UNCERTAIN` rather than infer that no effect occurred.
+  result and retaining it in the audit lifecycle. Verified alternative: the exact-message classifier
+  recognizes stale-revision and fixed-cap refusals as `REJECTED`; unclassified authority exceptions
+  remain `UNCERTAIN`.
 
 The bootstrap hard-cap projection exposes only its four published pack-spend fields. Additional runner custody limits remain enforced by the operator authority and do not change the dashboard response schema.
 
@@ -144,5 +147,3 @@ not establish payment. Native cycle history retains the status-and-timestamp-onl
 Focused verification: `node --experimental-strip-types --test apps/web/tests/native-accounting.test.mjs`
 exercises projection, both public parser boundaries, the served comic dashboard, exact wei averages
 and parser parity. Historical contract and dashboard presentation tests exercise the old readers.
-
-A fixed USD cap refusal is a deterministic pre-effect rejection: the command audit records `REJECTED` and HTTP returns 409. The same classification recognizes retained historical cap-error field names. Unclassified authority errors retain `UNCERTAIN` and HTTP 503.
