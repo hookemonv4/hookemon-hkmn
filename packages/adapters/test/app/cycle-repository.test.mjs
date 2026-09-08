@@ -4180,7 +4180,7 @@ test('marks a thrown post-send mutation unknown and retains custody obligations 
     heldAssets: false,
     unattributed: false,
     unresolvedObligations: true,
-    heldPositions: { count: 0, valueMicroUsdg: '0', positions: [] },
+    heldPositions: { count: 0, valueMicroUsd: '0', positions: [] },
   });
 });
 
@@ -4677,13 +4677,11 @@ async function setupCompletedClaimProcess(t, {
 /** The exact custody row `claim-process.mjs`'s own identity rule derives for the funding asset. */
 function claimCustodyLedger(cycleId, admission, overrides = {}) {
   const funding = admission.aggregateFundingQuote;
-  return custodyLedger(cycleId, {
-    chainId: `eip155:${funding.chainId}`,
-    assetId: `eip155:${funding.chainId}/erc20:${funding.assetId.toLowerCase()}`,
-    decimals: funding.decimals,
-    claimed: funding.amountAtomic,
-    ...overrides,
-  });
+  const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
+  return { schema: 'hookemon.custody-ledger.v3', cycleId, ...asset,
+    ...Object.fromEntries(CUSTODY_LEDGER_BUCKETS.map(key => [key, '0'])),
+    claimed: funding.amountAtomic, expectedCycleAsset: null, verifiedCurrentBalance: null,
+    gasReserve: { ...asset, amountAtomic: '0' }, gasSpent: { ...asset, amountAtomic: '0' }, gasPayments: [], ...overrides };
 }
 
 test('readFinalizedClaimCustodyEvidence requires exactly one finalized cycle-owned claim-process chain attempt whose finality evidence the completed stage evidence exactly matches, plus the exact claim custody row', async t => {
