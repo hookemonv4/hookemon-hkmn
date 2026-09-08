@@ -75,7 +75,6 @@ body.public-landscape { isolation:isolate; }
 #cards .iconic-gallery .card-display { background:radial-gradient(ellipse at center, #fffdf5cc, color-mix(in srgb,var(--rarity-tint) 80%,transparent)); }
 #economics .fee-breakdown > div { font-size:13.2px; padding-block:14.3px; }
 #economics .fee-breakdown dd { font-size:15.4px; }
-.site-footer .footer-page-links { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:12px; padding:14px 18px; }
 @media(max-width:800px) {
  #journey .scene-controls button { font-size:13px; }
  #journey .scene-controls button > span { font-size:11px; }
@@ -126,3 +125,12 @@ body.public-landscape { isolation:isolate; }
 .story-transcript.shell[open] { background:rgb(255 253 246 / 60%); }
 .story-transcript.shell[open] > summary { background:transparent; }
 #cards .iconic-details[open] { background:rgb(255 253 246 / 60%); border:1px solid rgb(21 52 95 / 40%); border-radius:10px; padding:12px; }
+
+/* Match the existing mobile hero breakpoint; desktop keeps its two-column alignment. */
+@media(max-width:734px) {
+ .public-landscape main h1,.public-landscape main h2 { text-align:center; }
+ .public-landscape .section-heading { justify-content:center; text-align:center; }
+ .public-landscape :is(#machine > .section-heading > div,#cards > .section-heading > div,.loop-intro-box,.story-panel,.economics-layout > div:first-child,.faq-intro) {
+  margin-inline:auto; justify-self:center; text-align:center;
+ }
+}
