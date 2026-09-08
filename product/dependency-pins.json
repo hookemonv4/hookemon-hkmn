@@ -26,7 +26,7 @@
     },
     "forkProof": {
       "path": ".github/workflows/fork-proof.yml",
-      "sha256": "487e589ae7e7af7a82317b200ed109f135591a37bb428736f0500a0f01c41d79"
+      "sha256": "653b730bf55aba2f5959e61828af1d142e8ebbc5871b972b0e4819bb0b37b60b"
     },
     "forkPinCanary": {
       "path": ".github/workflows/fork-pin-canary.yml",
@@ -54,7 +54,7 @@
     },
     "archiveForkProofTest": {
       "path": "packages/contracts/test/integration/RobinhoodV4ArchiveFork.t.sol",
-      "sha256": "993dfea53f3b486bbca7d7432b6e27e1a126ba7c3b0e4f157aec8ecb2da9a1c8"
+      "sha256": "cf8d8f5fce4d4051a0c2ecd49b2b9eb036315b2ad20178b023d11b2a95894c00"
     },
     "githubActions": {
       "actions/checkout": "d23441a48e516b6c34aea4fa41551a30e30af803",
