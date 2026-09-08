@@ -909,28 +909,28 @@
       "sha256": "a125fe9564b49f50d71f4e1dd2a76de38115be3db644201d1e660b4ad913456e"
     },
     {
-      "bytes": 2842,
+      "bytes": 2365,
       "kind": "package:EVIDENCE.md",
       "path": "release/phase3/EVIDENCE.md",
-      "sha256": "8eb37f8ae86f9c5b7c548538f030135141d37e7b58c76b7fc75003a2888ed739"
+      "sha256": "2e343d11cd5686958dfc011bbd8d8e3dc73ae72bf660daeea18c391afd014e3f"
     },
     {
-      "bytes": 2499,
+      "bytes": 1780,
       "kind": "package:PROPOSAL.md",
       "path": "release/phase3/PROPOSAL.md",
-      "sha256": "84b1ad4dcf6d438ab84af8b6d822f276e4bb31cf90108a8e2a65afb3600a3925"
+      "sha256": "2666557abef5a59c49001512d5c082c5172c258b42a99264960fbc737055b944"
     },
     {
-      "bytes": 1761,
+      "bytes": 2066,
       "kind": "package:TEST_PLAN.md",
       "path": "release/phase3/TEST_PLAN.md",
-      "sha256": "a3e29bf166119563948d3d67eb96cd597a2aa98f0794913fb7544a1cae269f96"
+      "sha256": "25ac425e184e524f58700801216d525d7de9553580b70c796c7c14681f1d7dcd"
     },
     {
-      "bytes": 1820,
+      "bytes": 2066,
       "kind": "package:THREAT_MODEL.md",
       "path": "release/phase3/THREAT_MODEL.md",
-      "sha256": "dc4a0f78ec5c3ab7b526a1fb1bb1bb5a3a24717db129353167aa5dbe4f8657a4"
+      "sha256": "439d1c0d61a58b34a0ed3e4c8fd0d9e7030f4d9ec7552985ae0901c865dbee5b"
     },
     {
       "bytes": 42352,
@@ -939,10 +939,10 @@
       "sha256": "1b4d6620a88e8d874ba215b0e0d231e95757c146dbc948a9b5ee034d19ac138a"
     },
     {
-      "bytes": 9923,
+      "bytes": 9913,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/address-manifest.json",
-      "sha256": "b7193bee97b2268863aca972b2529d6d41cd9ee3ddf45550af138ae6c8c770a6"
+      "sha256": "690be767e5a2814f2a636173537e3b65166bc5de49b89118753ffbcc597eb7d7"
     },
     {
       "bytes": 71953,
@@ -1035,16 +1035,16 @@
       "sha256": "6f500b6b290c32fe827dfcfc56b08051e5c354ca66986910e4d83c768fbd4ff1"
     },
     {
-      "bytes": 6369,
+      "bytes": 6316,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-inputs.json",
-      "sha256": "09ceba70dcb3771554a1299b201e2e375fe34c78e584b53377347878caac0fbf"
+      "sha256": "973b0e512374878512d702e4d6dca87713f3010a0ca065750f204497280ba566"
     },
     {
-      "bytes": 6842,
+      "bytes": 7425,
       "kind": "project-surface-evidence:canonical-pool-hook",
       "path": "release/phase3/launch-plan.md",
-      "sha256": "5134fa0a3bc6c395589ff7011991baeeb274bc9f15c2ecfacb6f49d710e0f75b"
+      "sha256": "5a941b14ce16a7148f0cfd184916daec275a92981b9abc5a4cf1f57aa9c42788"
     },
     {
       "bytes": 425379,
@@ -1053,22 +1053,22 @@
       "sha256": "cd2813906aabd63d9ba7d5540fb30f75c032e3679468ee2ebad8232d1beab26b"
     },
     {
-      "bytes": 11791,
+      "bytes": 11728,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/graph-draft.json",
-      "sha256": "6bb50019227eea70d7a89c8d7d13b8ef589330e48204f7834d74fe9bf0b30fed"
+      "sha256": "779727c54271ffa04d1455e2b9e8ac548022cdb54cda9af7d30f30115a32ac07"
     },
     {
       "bytes": 3101,
       "kind": "capability-evidence:phase-three-launch-graph",
       "path": "release/phase3/package/package-manifest.json",
-      "sha256": "3d871507b28ae58379a8b12fe79dfb65e8c223b02ae658fe48334c20927bae88"
+      "sha256": "04bce4ad4ebf7b35e9e0ce2bd98a20fe20eaba8f26b77fe3089878fbca0634ee"
     },
     {
-      "bytes": 77476,
+      "bytes": 77516,
       "kind": "package:submission.json",
       "path": "release/phase3/submission.json",
-      "sha256": "c639e1bb06197390548023b4c51504ede424ac72250ec3f6bc1fd4bcb35595f5"
+      "sha256": "607d12c9c7b9db881e01bc94bcb4e1649115390890b77f1892351c976ee4869c"
     },
     {
       "bytes": 3619,
@@ -2388,8 +2388,8 @@
     }
   ],
   "javascriptImportResolutions": [],
-  "reviewTargetHash": "sha256:c3842901c16a93768b431ae82a9b254a499cb00b71dfdd4d980467e9b798e8ee",
+  "reviewTargetHash": "sha256:3adc7655013918d2cc57e94ebc6943d9f61a68de3a8c71dd0282b23d36cb69a3",
   "schemaVersion": 1,
   "standardVersion": "1.5.0",
-  "submissionHash": "sha256:570acdbcd46df5060ece63e03f01a251b25d4b40c28d9382224c716def3d0d08"
+  "submissionHash": "sha256:2050a999d23af7df709e8454621feed76eb76c74168d32b9330eea4485168c75"
 }

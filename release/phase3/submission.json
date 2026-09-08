@@ -161,7 +161,7 @@
     "poolInitialization": {
       "applicable": true,
       "actor": "Resolved HookemonHook",
-      "valueFlow": "The proposed hook call would initialize the one canonical PoolKey with zero LP fee and the address-order-selected price candidate.",
+      "valueFlow": "The hook initializes the canonical native-currency0 PoolKey at the deterministic native price candidate.",
       "custody": "The hook owns the unseeded canonical pool binding until the owner seed succeeds.",
       "failure": "A wrong hook mask, pool key or price candidate reverts initialization and leaves no seed.",
       "event": "Canonical pool initialization event.",
@@ -169,10 +169,10 @@
     },
     "liquidityFormation": {
       "applicable": true,
-      "actor": "Launch wallet after Permit2 approval",
+      "actor": "Launch wallet supplies native ETH through the payable seed",
       "valueFlow": "The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.",
       "custody": "The permanent custody target receives the initial v4 position after the seed call.",
-      "failure": "An expired or non-exact Permit2 allowance, wrong range or failed mint reverts the seed atomically.",
+      "failure": "Wrong native value, expired deadline, wrong range, failed mint or rejected refund reverts the seed atomically.",
       "event": "Seed and custody binding events.",
       "notApplicableReason": null
     },
@@ -206,7 +206,7 @@
     "dependencyFailure": {
       "applicable": true,
       "actor": "Launch wallet and hook",
-      "valueFlow": "No transfer proceeds after a failed provider route, Permit2 allowance, PoolManager callback or token settlement.",
+      "valueFlow": "No transfer proceeds after a failed provider route, native value check, HKMN approval, PoolManager callback or token settlement.",
       "custody": "The owner wallet or hook retains the pre-action asset state because the transaction reverts atomically.",
       "failure": "Record the mismatch and prepare a new reviewed graph rather than fabricating a route or retrying with broader permissions.",
       "event": "Revert receipt or failed preflight record.",
@@ -915,7 +915,7 @@
       "failure": null,
       "fallback": null
     },
-    "monitoring": "Monitor graph runtime hashes, hook mask, PoolKey, PoolId, Permit2 allowance and custody position before and after the owner seed.",
+    "monitoring": "Monitor graph runtime hashes, hook mask, PoolKey, PoolId, native seed value, temporary HKMN approvals and permanent custody before and after seeding.",
     "incidentResponse": "Stop before the seed on any graph, source, fee-policy, allowance or code-hash mismatch. Preserve the unseeded graph and prepare a new reviewed package; do not broaden approvals or send compensating transfers."
   },
   "integration": {
@@ -1742,7 +1742,7 @@
         "release/phase3/address-manifest.json",
         "release/phase3/launch-plan.md"
       ],
-      "trustBoundary": "The package binds local facts and the recorded provider acceptance, but does not establish deployment authorization or a signing-ready calldata payload.",
+      "trustBoundary": "The package binds local native inputs; current provider admission and runtime authority remain separate and no signing-ready payload is established.",
       "failureMode": "A missing provider encoding, route field, or source-configuration match must stop the proposed seed path and require a new reviewed graph.",
       "schemaPath": null,
       "sourcePaths": [

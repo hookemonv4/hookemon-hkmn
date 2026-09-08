@@ -56,6 +56,15 @@ import {
 import * as seedIntentCodec from '../programmable/lib/seed-intent.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
+// These v1 compatibility vectors use the integrated pre-native release inputs.
+// The imported implementation and CLI remain current. Native v2 acceptance lives in
+// native-release-package.test.mjs, native-seed-intent.test.mjs and phase3-launch-package.test.mjs.
+const legacyRoot = mkdtempSync(resolve(tmpdir(), 'phase3-v1-release-fixtures-'));
+const legacyArchive = execFileSync('git', ['archive', 'b2cb737a298522e3944652e862c4eeab195667d8', 'release/phase3'], {
+  cwd: root, maxBuffer: 32 * 1024 * 1024,
+});
+execFileSync('tar', ['-xf', '-', '-C', legacyRoot], { input: legacyArchive });
+test.after(() => rmSync(legacyRoot, { recursive: true, force: true }));
 const buildCli = resolve(root, 'scripts/programmable/build-launch-package.mjs');
 const verifyCli = resolve(root, 'scripts/programmable/verify-launch-package.mjs');
 
@@ -84,7 +93,7 @@ function readJson(path) {
 }
 
 function writePhaseThreeBuildInfoFixture(directory) {
-  const evidence = readJson(resolve(root, 'release/phase3/build-info/launch.json'));
+  const evidence = readJson(resolve(legacyRoot, 'release/phase3/build-info/launch.json'));
   const input = structuredClone(evidence.input ?? evidence);
   delete input.version;
   const standardInputDirectory = resolve(directory, 'build-info');
@@ -93,12 +102,12 @@ function writePhaseThreeBuildInfoFixture(directory) {
 }
 
 function writePhaseThreeDraftFixture(directory) {
-  const launchInputs = readJson(resolve(root, 'release/phase3/launch-inputs.json'));
-  const addressManifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+  const launchInputs = readJson(resolve(legacyRoot, 'release/phase3/launch-inputs.json'));
+  const addressManifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
   addressManifest.compiler.solcLongVersion = '0.8.26+commit.8a97fa7a';
   addressManifest.targets.find(({ targetId }) => targetId === 'token').sourcePath = 'packages/contracts/src/launch/HKMNToken.sol';
   addressManifest.targets.find(({ targetId }) => targetId === 'hook').initializer.function = 'initializeGraphLaunch(address,uint160)';
-  addressManifest.requiredGraphCalls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(root, 'release/phase3/artifacts'));
+  addressManifest.requiredGraphCalls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(legacyRoot, 'release/phase3/artifacts'));
   addressManifest.postDeployAssertions[0] = 'No graph transaction is signable until the provider supplies the encoded token-allocate, custody-bind-hook and hook-initialize-graph-launch calls in that order.';
   const launchInputsPath = resolve(directory, 'launch-inputs.json');
   const addressManifestPath = resolve(directory, 'address-manifest.json');
@@ -110,7 +119,7 @@ function writePhaseThreeDraftFixture(directory) {
 
 test('materializes the recorded Phase 3 request envelope without fabricating unresolved graph values', () => {
   const result = materializePhaseThreeCreateRequest({ root });
-  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
 
   assert.doesNotThrow(() => validateRecordedV4RequestTemplate(result.request, providerDocuments.v4RequestContract));
   assert.deepEqual(Object.keys(result.request).sort(), [...providerDocuments.v4RequestContract.required].sort());
@@ -164,7 +173,7 @@ test('materializes the recorded Phase 3 request envelope without fabricating unr
 });
 
 test('validates the fundingPlan field added in provider profile 4.1.0', () => {
-  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
   const { request } = materializePhaseThreeCreateRequest({ root });
   assert.equal(request.fundingPlan, null);
   assert.ok(providerDocuments.v4RequestContract.required.includes('fundingPlan'));
@@ -201,7 +210,7 @@ test('validates the fundingPlan field added in provider profile 4.1.0', () => {
 });
 
 test('records and enforces the nonce shape learned from the preflight probe', () => {
-  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
   assert.deepEqual(providerDocuments.v4RequestContract.nonce, {
     format: 'lowercase-bytes32',
     nonzero: true,
@@ -220,7 +229,7 @@ test('records and enforces the nonce shape learned from the preflight probe', ()
 });
 
 test('records and enforces the source descriptor object required by the preflight probe', () => {
-  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
   assert.deepEqual(providerDocuments.v4RequestContract.sourceDescriptor, {
     type: 'object',
     required: [
@@ -262,7 +271,7 @@ test('records and enforces the source descriptor object required by the prefligh
 });
 
 test('builds the source record shapes that reached manifest-digest validation', () => {
-  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+  const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
   assert.deepEqual(providerDocuments.v4RequestContract.sourceBundleManifest, {
     type: 'object',
     required: ['schemaVersion', 'entries'],
@@ -541,8 +550,8 @@ test('regression: every selected graph target source path is covered by the decl
 });
 
 test('records the provider statement that settles the V4 digest and nonce rules', () => {
-  const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
-  const statement = readJson(resolve(root, 'release/phase3/admission/provider-statement-2026-09-05.json'));
+  const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
+  const statement = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-statement-2026-09-05.json'));
 
   assert.equal(statement.date, '2026-09-05');
   assert.equal(statement.channel, 'Programmable answer relayed by the owner in chat');
@@ -677,10 +686,10 @@ function seedCalldata(params) {
 }
 
 test('materializes the immutable seed intent for the selected price tuple', () => {
-  const launchInputs = readJson(resolve(root, 'release/phase3/launch-inputs.json'));
+  const launchInputs = readJson(resolve(legacyRoot, 'release/phase3/launch-inputs.json'));
   const materialized = materializePhaseThreePriceSelection({
     launchInputs,
-    submission: readJson(resolve(root, 'release/phase3/submission.json')),
+    submission: readJson(resolve(legacyRoot, 'release/phase3/submission.json')),
     materializedManifest: materializedPriceSelectionFixture(launchInputs),
   });
 
@@ -1108,7 +1117,7 @@ test('package materialization accepts Foundry object and raw metadata compiler r
 });
 
 test('source content commitment accepts a bare Standard JSON input', () => {
-  const evidence = readJson(resolve(root, 'release/phase3/build-info/launch.json'));
+  const evidence = readJson(resolve(legacyRoot, 'release/phase3/build-info/launch.json'));
   const input = structuredClone(evidence.input ?? evidence);
   delete input.version;
   assert.doesNotThrow(() => sourceContentCommitment(input));
@@ -1164,7 +1173,7 @@ test('the Phase 3 rebuild can materialize into isolated output paths', () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-rebuild-options-test-'));
   try {
     const defaults = {
-      releaseDirectory: resolve(root, 'release/phase3'),
+      releaseDirectory: resolve(legacyRoot, 'release/phase3'),
       releasePlanPath: resolve(root, 'packages/contracts/script/release/PhaseThreeReleasePlan.sol'),
     };
     assert.deepEqual(
@@ -1268,7 +1277,7 @@ test('the CLI never serializes inherited environment values', () => {
 });
 
 test('phase three records both address-order price candidates and the C3 hook route', () => {
-  const launchInputs = readJson(resolve(root, 'release/phase3/launch-inputs.json'));
+  const launchInputs = readJson(resolve(legacyRoot, 'release/phase3/launch-inputs.json'));
   assert.equal(launchInputs.pool.tickSpacing, 60);
   assert.deepEqual(launchInputs.pool.fullRange, { minimumTick: -887220, maximumTick: 887220 });
   assert.equal(
@@ -1313,7 +1322,7 @@ test('phase three records both address-order price candidates and the C3 hook ro
     },
   );
 
-  const submission = readJson(resolve(root, 'release/phase3/submission.json'));
+  const submission = readJson(resolve(legacyRoot, 'release/phase3/submission.json'));
   assert.equal(submission.hook.permissions.beforeInitialize, true);
   assert.equal(submission.hook.permissions.beforeSwapReturnDelta, true);
   assert.equal(submission.hook.permissions.afterSwapReturnDelta, true);
@@ -1339,7 +1348,7 @@ test('phase three records both address-order price candidates and the C3 hook ro
 });
 
 test('phase three submission keeps resolved allocation and preflight disclosures complete', () => {
-  const submission = readJson(resolve(root, 'release/phase3/submission.json'));
+  const submission = readJson(resolve(legacyRoot, 'release/phase3/submission.json'));
   assert.equal(submission.builder.github, null);
   assert.equal(submission.builder.contact, null);
   assert.equal(Object.hasOwn(submission.builder, 'builderNote'), false);
@@ -1360,9 +1369,9 @@ test('phase three submission keeps resolved allocation and preflight disclosures
 });
 
 test('phase three submission mirrors the source accounting and initialization model', () => {
-  const submission = readJson(resolve(root, 'release/phase3/submission.json'));
-  const launchInputs = readJson(resolve(root, 'release/phase3/launch-inputs.json'));
-  const manifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+  const submission = readJson(resolve(legacyRoot, 'release/phase3/submission.json'));
+  const launchInputs = readJson(resolve(legacyRoot, 'release/phase3/launch-inputs.json'));
+  const manifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
 
   assert.equal(
     submission.publicMetadata.project.description,
@@ -1403,14 +1412,14 @@ test('phase three submission mirrors the source accounting and initialization mo
 });
 
 test('phase three graph calls are ordered and selected from compiled target ABIs', () => {
-  const calls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(root, 'release/phase3/artifacts'));
+  const calls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(legacyRoot, 'release/phase3/artifacts'));
   const contracts = [
     ['token', 'token-allocate', 'allocate'],
     ['custody', 'custody-bind-hook', 'configureBindingHook'],
     ['hook', 'hook-initialize-graph-launch', 'initializeGraphLaunch'],
   ];
   const expected = contracts.map(([targetId, callId, name]) => {
-    const artifact = readJson(resolve(root, 'release/phase3/artifacts', `${targetId}.json`));
+    const artifact = readJson(resolve(legacyRoot, 'release/phase3/artifacts', `${targetId}.json`));
     const entry = artifact.abi.find((candidate) => candidate.type === 'function' && candidate.name === name);
     assert.ok(entry, `${targetId} ABI must expose ${name}`);
     const signature = `${entry.name}(${entry.inputs.map(({ type }) => type).join(',')})`;
@@ -1436,17 +1445,17 @@ test('phase three draft accepts only the ABI-derived three-call graph', () => {
     const fixture = writePhaseThreeDraftFixture(directory);
     const launchInputsPath = fixture.launchInputsPath;
     const addressManifestPath = resolve(directory, 'address-manifest.json');
-    const manifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+    const manifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
     manifest.targets.find(({ targetId }) => targetId === 'token').sourcePath = 'packages/contracts/src/launch/HKMNToken.sol';
     manifest.targets.find(({ targetId }) => targetId === 'hook').initializer.function = 'initializeGraphLaunch(address,uint160)';
-    manifest.requiredGraphCalls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(root, 'release/phase3/artifacts'));
+    manifest.requiredGraphCalls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(legacyRoot, 'release/phase3/artifacts'));
     manifest.postDeployAssertions[0] = 'No graph transaction is signable until the provider can encode token-allocate, custody-bind-hook and hook-initialize-graph-launch in that order.';
     delete manifest.compiler.solcLongVersion;
     writeJson(addressManifestPath, manifest);
 
     assertFailure(
       () => buildLaunchPackage({
-        artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+        artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
         standardInputDirectory: fixture.standardInputDirectory,
         launchInputsPath,
         addressManifestPath,
@@ -1460,7 +1469,7 @@ test('phase three draft accepts only the ABI-derived three-call graph', () => {
     writeJson(addressManifestPath, manifest);
 
     const result = buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath,
       addressManifestPath,
@@ -1472,7 +1481,7 @@ test('phase three draft accepts only the ABI-derived three-call graph', () => {
     writeJson(addressManifestPath, manifest);
     assertFailure(
       () => buildLaunchPackage({
-        artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+        artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
         standardInputDirectory: fixture.standardInputDirectory,
         launchInputsPath,
         addressManifestPath,
@@ -1487,15 +1496,15 @@ test('phase three draft accepts only the ABI-derived three-call graph', () => {
 });
 
 test('phase three address-manifest schemas reject graph and target mutations', () => {
-  const manifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+  const manifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
   manifest.targets.find(({ targetId }) => targetId === 'token').sourcePath = 'packages/contracts/src/launch/HKMNToken.sol';
   manifest.targets.find(({ targetId }) => targetId === 'hook').initializer.function = 'initializeGraphLaunch(address,uint160)';
   manifest.compiler.solcLongVersion = '0.8.26+commit.8a97fa7a';
-  manifest.requiredGraphCalls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(root, 'release/phase3/artifacts'));
+  manifest.requiredGraphCalls = derivePhaseThreeGraphCallsFromCompiledAbi(resolve(legacyRoot, 'release/phase3/artifacts'));
   manifest.postDeployAssertions[0] = 'No graph transaction is signable until the provider can encode token-allocate, custody-bind-hook and hook-initialize-graph-launch in that order.';
   const schemas = [
-    readJson(resolve(root, 'release/phase3/address-manifest.schema.json')),
-    readJson(resolve(root, 'release/phase3/address-manifest-draft.schema.json')),
+    readJson(resolve(legacyRoot, 'release/phase3/address-manifest.schema.json')),
+    readJson(resolve(legacyRoot, 'release/phase3/address-manifest-draft.schema.json')),
   ];
 
   for (const schema of schemas) {
@@ -1527,8 +1536,8 @@ test('phase three address-manifest schemas reject graph and target mutations', (
 });
 
 test('standalone draft schema pins each target definition', () => {
-  const schema = readJson(resolve(root, 'release/phase3/address-manifest-draft.schema.json'));
-  const manifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+  const schema = readJson(resolve(legacyRoot, 'release/phase3/address-manifest-draft.schema.json'));
+  const manifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
 
   const sourceMutation = structuredClone(manifest);
   sourceMutation.targets[0].sourcePath = 'packages/contracts/src/fixtures/ResolvedTarget.sol';
@@ -1562,7 +1571,7 @@ test('standalone draft schema pins each target definition', () => {
 });
 
 test('phase three address-manifest schema pins provider addresses in EIP-55 form', () => {
-  const schema = readJson(resolve(root, 'release/phase3/address-manifest.schema.json'));
+  const schema = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.schema.json'));
   const router = '0x34965F2A2ee9254522232C32F02056E92BE0C98a';
   const usdg = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168';
 
@@ -1576,19 +1585,19 @@ test('phase three address-manifest schema pins provider addresses in EIP-55 form
 
 test('phase three normalizers preserve the accepted graph and pin the token deployment source', () => {
   const addressManifest = normalizePhaseThreeAddressManifestDraft(
-    readJson(resolve(root, 'release/phase3/address-manifest.json')),
+    readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json')),
   );
   assert.ok(addressManifest.openFacts.some((fact) => fact.includes('accepted three-call initialization sequence')));
   assert.match(addressManifest.openFacts.join('\n'), /token\.allocate\(hook\)/i);
 
-  const deploymentManifest = readJson(resolve(root, 'release/phase3/deployment-manifest.json'));
+  const deploymentManifest = readJson(resolve(legacyRoot, 'release/phase3/deployment-manifest.json'));
   deploymentManifest.deployed.find(({ name }) => name === 'HKMNToken').sourcePath = 'packages/contracts/src/launch/HookemonIssuance.sol';
   assert.equal(
     normalizePhaseThreeDeploymentManifest(deploymentManifest).deployed.find(({ name }) => name === 'HKMNToken').sourcePath,
     'packages/contracts/src/launch/HKMNToken.sol',
   );
 
-  const submission = normalizePhaseThreeSubmissionDraft(readJson(resolve(root, 'release/phase3/submission.json')));
+  const submission = normalizePhaseThreeSubmissionDraft(readJson(resolve(legacyRoot, 'release/phase3/submission.json')));
   const submissionText = [
     ...submission.disclosures,
     ...submission.unresolved,
@@ -1601,10 +1610,10 @@ test('phase three normalizers preserve the accepted graph and pin the token depl
 });
 
 test('keeps the seed intent digest nullable until the address-order fixed point is materialized', () => {
-  const manifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+  const manifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
   const schemas = [
-    readJson(resolve(root, 'release/phase3/address-manifest.schema.json')),
-    readJson(resolve(root, 'release/phase3/address-manifest-draft.schema.json')),
+    readJson(resolve(legacyRoot, 'release/phase3/address-manifest.schema.json')),
+    readJson(resolve(legacyRoot, 'release/phase3/address-manifest-draft.schema.json')),
   ];
 
   assert.equal(manifest.targets[2].constructor.seedIntentDigest, null);
@@ -1624,15 +1633,15 @@ test('phase three draft retains the owner-recorded revision-65 baseline and prov
     assert.match(fixture.launchInputs.token.sourceCompatibility.reason, /owner's 2026-09-05 decision/i);
     assert.match(fixture.launchInputs.token.sourceCompatibility.reason, /complete supply.*zero other allocations/i);
     assert.match(fixture.launchInputs.token.sourceCompatibility.reason, /DRAFT_UNSIGNED/i);
-    const evidence = readFileSync(resolve(root, 'release/phase3/EVIDENCE.md'), 'utf8');
+    const evidence = readFileSync(resolve(legacyRoot, 'release/phase3/EVIDENCE.md'), 'utf8');
     assert.match(evidence, /Requirements revision 65/i);
     assert.match(evidence, /canonical market with zero other allocation/i);
-    const launchPlan = readFileSync(resolve(root, 'release/phase3/launch-plan.md'), 'utf8');
+    const launchPlan = readFileSync(resolve(legacyRoot, 'release/phase3/launch-plan.md'), 'utf8');
     assert.match(launchPlan, /Requirements revision 65/i);
     assert.match(launchPlan, /canonical market.*no other HKMN allocation exists/i);
     assert.match(launchPlan, /DRAFT_UNSIGNED/i);
 
-    const submission = normalizePhaseThreeSubmissionDraft(readJson(resolve(root, 'release/phase3/submission.json')));
+    const submission = normalizePhaseThreeSubmissionDraft(readJson(resolve(legacyRoot, 'release/phase3/submission.json')));
     const submissionText = [
       ...submission.disclosures,
       ...submission.capabilityExtensions.map(({ summary }) => summary),
@@ -1647,7 +1656,7 @@ test('phase three draft retains the owner-recorded revision-65 baseline and prov
     writeJson(fixture.addressManifestPath, fixture.addressManifest);
     const packageDirectory = resolve(directory, 'package');
     buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1679,7 +1688,7 @@ test('phase three source documents retain the full-pool three-call launch model'
 });
 
 test('phase three submission normalization removes builder notes and binds mutable recipient controls', () => {
-  const source = readJson(resolve(root, 'release/phase3/submission.json'));
+  const source = readJson(resolve(legacyRoot, 'release/phase3/submission.json'));
   for (const recipient of source.hook.feeMechanism.recipients) {
     if (recipient.role === 'treasury' || recipient.role === 'process') {
       recipient.mutationController = 'none';
@@ -1730,7 +1739,7 @@ test('phase three draft package binds unresolved graph inputs without materializ
     const packageDirectory = resolve(directory, 'package');
     const fixture = writePhaseThreeDraftFixture(directory);
     const result = buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1769,7 +1778,7 @@ test('phase three draft package binds unresolved graph inputs without materializ
 
     assertFailure(
       () => verifyLaunchPackage({
-        artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+        artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
         standardInputDirectory: fixture.standardInputDirectory,
         launchInputsPath: fixture.launchInputsPath,
         addressManifestPath: fixture.addressManifestPath,
@@ -1780,7 +1789,7 @@ test('phase three draft package binds unresolved graph inputs without materializ
     );
 
     const verification = verifyLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1800,7 +1809,7 @@ test('phase three draft package retains the recorded provider request template',
     const packageDirectory = resolve(directory, 'package');
     const fixture = writePhaseThreeDraftFixture(directory);
     const result = buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1809,7 +1818,7 @@ test('phase three draft package retains the recorded provider request template',
     });
 
     const request = readJson(resolve(packageDirectory, 'create-request.json'));
-    const providerDocuments = readJson(resolve(root, 'release/phase3/admission/provider-documents.json'));
+    const providerDocuments = readJson(resolve(legacyRoot, 'release/phase3/admission/provider-documents.json'));
     assert.doesNotThrow(() => validateRecordedV4RequestTemplate(request, providerDocuments.v4RequestContract));
     assert.equal(result.createRequestSha256, sha256(Buffer.from(JSON.stringify(request, null, 2) + '\n')));
     const packageManifest = readJson(resolve(packageDirectory, 'package-manifest.json'));
@@ -1817,7 +1826,7 @@ test('phase three draft package retains the recorded provider request template',
     assert.deepEqual(packageManifest.sourceBundleCoverage, derivePhaseThreeSourceBundleCoverage({ root }));
 
     const verification = verifyLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1838,7 +1847,7 @@ test('build CLI writes the V4 request template only with an explicit materializa
     const packageDirectory = resolve(directory, 'package');
     const result = spawnSync(process.execPath, [
       buildCli,
-      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--artifacts', resolve(legacyRoot, 'release/phase3/artifacts'),
       '--standard-json-inputs', fixture.standardInputDirectory,
       '--launch-inputs', fixture.launchInputsPath,
       '--address-manifest', fixture.addressManifestPath,
@@ -1876,7 +1885,7 @@ test('materializes the derived price selection into the manifest, graph draft, a
     const materializedManifest = materializedPriceSelectionFixture(fixture.launchInputs);
     const materialized = materializePhaseThreePriceSelection({
       launchInputs: fixture.launchInputs,
-      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      submission: readJson(resolve(legacyRoot, 'release/phase3/submission.json')),
       materializedManifest,
     });
 
@@ -1906,7 +1915,7 @@ test('materializes the derived price selection into the manifest, graph draft, a
     writeJson(fixture.launchInputsPath, materialized.launchInputs);
     const packageDirectory = resolve(directory, 'package');
     buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1941,11 +1950,11 @@ test('builds a materialized phase three graph draft and submission from one publ
     const packageDirectory = resolve(directory, 'package');
     const phaseThreeMaterialization = {
       materializedManifest,
-      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      submission: readJson(resolve(legacyRoot, 'release/phase3/submission.json')),
     };
 
     const result = buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -1976,7 +1985,7 @@ test('builds a materialized phase three graph draft and submission from one publ
       assert.equal(quadrant.currency, 'currency1');
     }
     const verification = verifyLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -2008,7 +2017,7 @@ test('rejects a seed transaction supplied with a non-rederivable materialized ma
     const materializedManifest = materializedPriceSelectionFixture(fixture.launchInputs);
     const selected = materializePhaseThreePriceSelection({
       launchInputs: fixture.launchInputs,
-      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      submission: readJson(resolve(legacyRoot, 'release/phase3/submission.json')),
       materializedManifest,
     });
     const materializedSeed = {
@@ -2030,7 +2039,7 @@ test('rejects a seed transaction supplied with a non-rederivable materialized ma
     };
     const phaseThreeMaterialization = {
       materializedManifest,
-      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      submission: readJson(resolve(legacyRoot, 'release/phase3/submission.json')),
       materializedSeed,
     };
     const packageDirectory = resolve(directory, 'package');
@@ -2042,7 +2051,7 @@ test('rejects a seed transaction supplied with a non-rederivable materialized ma
     writeJson(materializedSeedPath, materializedSeed);
 
     assertFailure(() => buildLaunchPackage({
-      artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+      artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
       standardInputDirectory: fixture.standardInputDirectory,
       launchInputsPath: fixture.launchInputsPath,
       addressManifestPath: fixture.addressManifestPath,
@@ -2053,7 +2062,7 @@ test('rejects a seed transaction supplied with a non-rederivable materialized ma
     const cliVerification = spawnSync(process.execPath, [
       verifyCli,
       '--allow-unverified',
-      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--artifacts', resolve(legacyRoot, 'release/phase3/artifacts'),
       '--standard-json-inputs', fixture.standardInputDirectory,
       '--launch-inputs', fixture.launchInputsPath,
       '--address-manifest', fixture.addressManifestPath,
@@ -2089,13 +2098,13 @@ test('CLI materializes one fixed-point selection and writes a separate submissio
     const materializedSubmissionOutputPath = resolve(directory, 'materialized-submission.json');
     const packageDirectory = resolve(directory, 'package');
     const materializedManifest = materializedPriceSelectionFixture(fixture.launchInputs);
-    const sourceSubmission = readJson(resolve(root, 'release/phase3/submission.json'));
+    const sourceSubmission = readJson(resolve(legacyRoot, 'release/phase3/submission.json'));
     writeJson(materializedManifestPath, materializedManifest);
     writeJson(submissionPath, sourceSubmission);
 
     const result = spawnSync(process.execPath, [
       buildCli,
-      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--artifacts', resolve(legacyRoot, 'release/phase3/artifacts'),
       '--standard-json-inputs', fixture.standardInputDirectory,
       '--launch-inputs', fixture.launchInputsPath,
       '--address-manifest', fixture.addressManifestPath,
@@ -2130,7 +2139,7 @@ test('CLI materializes one fixed-point selection and writes a separate submissio
 
     const overwrite = spawnSync(process.execPath, [
       buildCli,
-      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--artifacts', resolve(legacyRoot, 'release/phase3/artifacts'),
       '--standard-json-inputs', fixture.standardInputDirectory,
       '--launch-inputs', fixture.launchInputsPath,
       '--address-manifest', fixture.addressManifestPath,
@@ -2169,7 +2178,7 @@ test('build CLI rejects an optional seed transaction with a non-rederivable mani
     const materializedManifest = materializedPriceSelectionFixture(fixture.launchInputs);
     const selected = materializePhaseThreePriceSelection({
       launchInputs: fixture.launchInputs,
-      submission: readJson(resolve(root, 'release/phase3/submission.json')),
+      submission: readJson(resolve(legacyRoot, 'release/phase3/submission.json')),
       materializedManifest,
     });
     const materializedSeed = {
@@ -2190,12 +2199,12 @@ test('build CLI rejects an optional seed transaction with a non-rederivable mani
     const materializedSubmissionOutputPath = resolve(directory, 'materialized-submission.json');
     const packageDirectory = resolve(directory, 'package');
     writeJson(materializedManifestPath, materializedManifest);
-    writeJson(submissionPath, readJson(resolve(root, 'release/phase3/submission.json')));
+    writeJson(submissionPath, readJson(resolve(legacyRoot, 'release/phase3/submission.json')));
     writeJson(materializedSeedPath, materializedSeed);
 
     const result = spawnSync(process.execPath, [
       buildCli,
-      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--artifacts', resolve(legacyRoot, 'release/phase3/artifacts'),
       '--standard-json-inputs', fixture.standardInputDirectory,
       '--launch-inputs', fixture.launchInputsPath,
       '--address-manifest', fixture.addressManifestPath,
@@ -2224,7 +2233,7 @@ test('CLI rejects incomplete Phase 3 materialization arguments', () => {
     const fixture = writePhaseThreeDraftFixture(directory);
     const result = spawnSync(process.execPath, [
       buildCli,
-      '--artifacts', resolve(root, 'release/phase3/artifacts'),
+      '--artifacts', resolve(legacyRoot, 'release/phase3/artifacts'),
       '--standard-json-inputs', fixture.standardInputDirectory,
       '--launch-inputs', fixture.launchInputsPath,
       '--address-manifest', fixture.addressManifestPath,
@@ -2252,7 +2261,7 @@ test('phase three package rejects a nonzero allocation outside the canonical poo
 
     assertFailure(
       () => buildLaunchPackage({
-        artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+        artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
         standardInputDirectory: fixture.standardInputDirectory,
         launchInputsPath: fixture.launchInputsPath,
         addressManifestPath: fixture.addressManifestPath,
@@ -2277,7 +2286,7 @@ test('phase three package rejects Standard JSON evidence with a version field', 
 
     assertFailure(
       () => buildLaunchPackage({
-        artifactDirectory: resolve(root, 'release/phase3/artifacts'),
+        artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
         standardInputDirectory: fixture.standardInputDirectory,
         launchInputsPath: fixture.launchInputsPath,
         addressManifestPath: fixture.addressManifestPath,
@@ -2294,8 +2303,8 @@ test('phase three package rejects Standard JSON evidence with a version field', 
 test('phase three draft rejects incomplete compiler and graph facts', () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-package-validation-test-'));
   try {
-    const launchInputs = readJson(resolve(root, 'release/phase3/launch-inputs.json'));
-    const addressManifest = readJson(resolve(root, 'release/phase3/address-manifest.json'));
+    const launchInputs = readJson(resolve(legacyRoot, 'release/phase3/launch-inputs.json'));
+    const addressManifest = readJson(resolve(legacyRoot, 'release/phase3/address-manifest.json'));
     const launchInputsPath = resolve(directory, 'launch-inputs.json');
     const addressManifestPath = resolve(directory, 'address-manifest.json');
 
@@ -2307,8 +2316,8 @@ test('phase three draft rejects incomplete compiler and graph facts', () => {
       writeJson(addressManifestPath, manifest);
       assertFailure(
         () => buildLaunchPackage({
-          artifactDirectory: resolve(root, 'release/phase3/artifacts'),
-          standardInputDirectory: resolve(root, 'release/phase3/build-info'),
+          artifactDirectory: resolve(legacyRoot, 'release/phase3/artifacts'),
+          standardInputDirectory: resolve(legacyRoot, 'release/phase3/build-info'),
           launchInputsPath,
           addressManifestPath,
           outputDirectory: resolve(directory, 'package'),
@@ -2365,15 +2374,15 @@ test('phase three draft rejects incomplete compiler and graph facts', () => {
 
 test('phase three draft checks compiler evidence directories before rendering a package', () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'phase-three-build-evidence-test-'));
-  const launchInputsPath = resolve(root, 'release/phase3/launch-inputs.json');
-  const addressManifestPath = resolve(root, 'release/phase3/address-manifest.json');
-  const artifactDirectory = resolve(root, 'release/phase3/artifacts');
-  const buildInfoPath = resolve(root, 'release/phase3/build-info/launch.json');
+  const launchInputsPath = resolve(legacyRoot, 'release/phase3/launch-inputs.json');
+  const addressManifestPath = resolve(legacyRoot, 'release/phase3/address-manifest.json');
+  const artifactDirectory = resolve(legacyRoot, 'release/phase3/artifacts');
+  const buildInfoPath = resolve(legacyRoot, 'release/phase3/build-info/launch.json');
   try {
     assertFailure(
       () => buildLaunchPackage({
         artifactDirectory: resolve(directory, 'missing-artifacts'),
-        standardInputDirectory: resolve(root, 'release/phase3/build-info'),
+        standardInputDirectory: resolve(legacyRoot, 'release/phase3/build-info'),
         launchInputsPath,
         addressManifestPath,
         outputDirectory: resolve(directory, 'package-missing'),
@@ -2405,7 +2414,7 @@ test('phase three draft checks compiler evidence directories before rendering a 
     assertFailure(
       () => buildLaunchPackage({
         artifactDirectory,
-        standardInputDirectory: resolve(root, 'release/phase3/build-info'),
+        standardInputDirectory: resolve(legacyRoot, 'release/phase3/build-info'),
         launchInputsPath,
         addressManifestPath: mismatchedManifestPath,
         outputDirectory: resolve(directory, 'package-mismatch'),

@@ -380,6 +380,12 @@ export function normalizePhaseThreeAddressManifestDraft(addressManifest) {
       return text !== PHASE_THREE_GRAPH_OPEN_FACT && !isRetiredPhaseThreeGraphFact(text);
     }),
   ];
+  if (normalized.schemaVersion === 'hookemon.phase3.address-manifest-draft.v2') {
+    normalized.postDeployAssertions = normalized.postDeployAssertions.map(value => value.startsWith('The Permit2 allowance must')
+      ? 'The native seed value must equal amount0Max; temporary HKMN approvals are exact and cleared by the seed path.' : value);
+    normalized.openFacts = normalized.openFacts.map(value => value.startsWith('Missing: final token and hook addresses.')
+      ? 'Missing: final token and hook addresses. Resolve: derive the approved native graph and its canonical PoolKey and PoolId. Verified alternative: retain the native-currency0 price candidate and leave pool identifiers unset.' : value);
+  }
   return normalized;
 }
 
@@ -470,6 +476,12 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     normalized.model.summary = 'A fixed-supply HKMN market uses native ETH and a cumulative inclusive 3% gross quote-side fee.';
     normalized.model.userOutcome = 'A reviewed graph and separate payable seed establish the canonical ETH and HKMN pool with permanent liquidity custody.';
     liquidityFormation.valueFlow = 'The graph allocates the complete HKMN stock to the hook. A separately authorized payable seed supplies the explicitly reviewed native maximum.';
+    liquidityFormation.actor = 'Launch wallet supplies native ETH through the payable seed';
+    liquidityFormation.failure = 'Wrong native value, expired deadline, wrong range, failed mint or rejected refund reverts the seed atomically.';
+    normalized.launchLifecycle.poolInitialization.valueFlow = 'The hook initializes the canonical native-currency0 PoolKey at the deterministic native price candidate.';
+    normalized.launchLifecycle.dependencyFailure.valueFlow = 'No transfer proceeds after a failed provider route, native value check, HKMN approval, PoolManager callback or token settlement.';
+    normalized.operations.monitoring = 'Monitor graph runtime hashes, hook mask, PoolKey, PoolId, native seed value, temporary HKMN approvals and permanent custody before and after seeding.';
+    launchGraph.trustBoundary = 'The package binds local native inputs; current provider admission and runtime authority remain separate and no signing-ready payload is established.';
     initialTransaction.custody = 'The seed caller supplies ETH; the hook refunds only msg.value minus exact PositionManager debt to the specified payer.';
     normalized.launchLifecycle.trading.valueFlow = 'Each canonical ETH and HKMN swap follows its specified gross native fee quadrant.';
     normalized.launchLifecycle.feesAndClaims.custody = 'The hook holds native liabilities until successful payment to the authorized beneficiary destination.';
@@ -517,7 +529,7 @@ export function normalizePhaseThreeSubmissionDraft(submission, { native = false 
     if (feeCapability) feeCapability.summary = 'Calculate inclusive cumulative native fees in all four canonical swap quadrants.';
     normalized.capabilities.externalCalls.targets = normalized.capabilities.externalCalls.targets.filter(target => target !== 'USDG token');
     normalized.risk.rationales.externalDependencies = 'Provider admission, exact manager runtimes and native Relay source/order proofs remain separately verified release facts.';
-    normalized.disclosures = normalized.disclosures.filter(value => !value.includes('USDG') && !value.includes('240000000') && !value.includes('accepted 10 bps'));
+    normalized.disclosures = normalized.disclosures.filter(value => !value.includes('USDG') && !value.includes('240000000') && !value.includes('accepted 10 bps') && !value.startsWith('Native ETH is currency0.'));
     normalized.disclosures.push('The unchanged inclusive 10/40/250 basis-point native model and separate seed require current provider admission; historical acceptance does not establish it.', 'Native ETH is currency0. Seed and wei claim ceilings require reviewed per-action limits and gas reserves. Complete EUR 250 affordability proof is deferred by the owner until functional testing.');
     normalized.disclosures = [...new Set(normalized.disclosures)];
     launchGraph.summary = 'The native graph preserves complete HKMN allocation and cumulative 10/40/250 basis-point streams. Native provider admission, funding, route fields and final runtime identities remain required.';

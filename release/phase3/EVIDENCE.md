@@ -1,26 +1,13 @@
-# Phase 3 evidence record
+# Native release evidence
 
-## Pinned local evidence
+The pinned local launch compilation binds HKMNToken, PermanentPositionCustody and HookemonHook. The compiler is solc 0.8.26+commit.8a97fa7a, optimizer runs 1000, Cancun, with metadata disabled. `build-info/launch.json` embeds the standard JSON input; target artifacts retain creation and runtime templates. Actual constructor-bound runtime identities require the final graph.
 
-The Phase 3 draft binds `HKMNToken`, `PermanentPositionCustody`, and `HookemonHook` in provider order. The launch profile is solc `0.8.26+commit.8a97fa7a`, optimizer runs `1000`, Cancun, and metadata disabled. `release/phase3/build-info/launch.json` is the single build-info record. The address manifest binds sorted source-content SHA-256 and each target's artifact, creation-bytecode, and runtime-template hashes.
+The native market allocates the full one-billion HKMN stock, uses native ETH as currency0 and permanently custodies the full-range LP position. No native seed amount or wei claim ceiling has been selected. `feasibility/native-funding/` records a local experiment with real contracts and synthetic graph bindings; it proves neither a live complete cycle nor an all-in budget.
 
-Requirements revision 65 binds `1000000000000000000000000000` atomic HKMN to the canonical market with zero other allocation. The owner selected a `240000000` atomic USDG seed from a 300 USD total budget. The generated candidates consume the complete HKMN maximum for either address order, and the graph seed rejects any residual HKMN. Permanent custody holds only the initial v4 position.
+`native-interface-build-binding.json` under `feasibility/` binds the revision-71 build inputs provisionally. Its historical freeze and offchain amendment provide no current native feasibility credit. `verify-launch-package.mjs --allow-unverified` checks draft consistency while returning `readyForPreflight:false`; it is not a release pass. `review-target.json` inventories package files and exact digests.
 
-The package remains `ADDRESS_DERIVATION_PENDING`. It retains exactly four readiness inputs: provider launch-intent preimage, execution-only provider API key, owner wallet funding, and builder identity. The launch-intent preimage specifically needs the provider route namespace, route nonce, topology hash, target-id hashes, and serialized graph calls. The approved X profile is persisted as `https://x.com/hookemon4`.
+The three target artifacts are checked against pinned chain deployment size limits retained in `genesis-evidence.json`. `scripts/verify-deployment-manifest.mjs` computes code and initcode headroom locally. Current required CI on the exact candidate supplies contract, adapter, runner, web, archive-fork and control evidence; an older passing head does not approve a changed candidate.
 
-## Generated records
+The incomplete provider request needs exact source/runtime commitments, graph derivation, metadata, native funding choices, identity and current admission. `feasibility/native-provider-admission/README.md` records the actual public schema and model difference. Credentials are separate execution inputs and are not package contents. Current block-bound runtime observations, exact unsigned transactions and actual cycle receipts remain to be collected.
 
-`scripts/programmable/rebuild-phase3-release.mjs` rebuilds the artifacts, source commitment, launch inputs, address manifest, graph draft, submission, deployment manifest, and Solidity release constants from the pinned compiler profile. The review target is generated after the release records and closure verification recomputes every listed digest and the submission digest.
-
-## Robinhood genesis deployment limits
-
-[`genesis-evidence.json`](genesis-evidence.json) pins the official [Robinhood genesis](https://cdn.robinhood.com/assets/generated_assets/hoodchain_docsite/chain-node-configs/robinhood-genesis.json), its SHA-256 digest, and its 2026-09-05 retrieval date. The pinned limits are a 30,000,000 block-gas limit, 98,304 runtime-code bytes, and 196,608 initcode bytes.
-
-`node scripts/verify-deployment-manifest.mjs` derives runtime and initcode size headroom plus runtime code-deposit-gas headroom for the token, custody, and hook artifacts. The launch-profile deployment test measures each constructor under the same compiler profile. Neither check reads network state.
-
-## Open facts
-
-- `UNVERIFIED_LAUNCH_INTENT_PREIMAGE` remains limited to the provider route and encoded graph-call fields named above.
-- `PROVIDER_API_KEY_PENDING` is an execution-only preflight input and is never stored in the repository.
-- `OWNER_WALLET_FUNDING_PENDING` covers owner funding and the final wallet-side values created after preflight.
-- `BUILDER_IDENTITY_PENDING` retains null builder identity fields until the owner supplies public details.
+The owner plans EUR 250 and prioritizes functional testing before complete cost analysis. Keep that instruction distinct from the active revision-71 USD capital-envelope sentence until its approved successor is adopted. `launch-plan.md` defines the staged test and required observations; no signature, spend or launch is evidenced here.

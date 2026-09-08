@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { buildLaunchPackage, normalizePhaseThreeSubmissionDraft } from '../programmable/lib/package.mjs';
+import { buildLaunchPackage, normalizePhaseThreeSubmissionDraft, normalizePhaseThreeAddressManifestDraft } from '../programmable/lib/package.mjs';
 import { validateJsonSchema } from '../programmable/lib/json-schema.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -69,4 +69,24 @@ test('native submission uses protocol ETH identity and retains explicit provider
   assert.match(submission.integration.permit2, /Only HKMN/);
   assert.match(submission.disclosures.join(' '), /require current provider admission/);
   assert.doesNotMatch(JSON.stringify(submission), /USDG|240000000/);
+});
+
+
+test('native review disclosures remove obsolete seed instructions and remain idempotent', () => {
+  const submission = read('release/phase3/submission.json');
+  submission.disclosures.push('Native ETH is currency0. An obsolete complete-budget prerequisite.');
+  const normalized = normalizePhaseThreeSubmissionDraft(submission, { native: true });
+  assert.deepEqual(normalizePhaseThreeSubmissionDraft(normalized, { native: true }), normalized);
+  assert.equal(normalized.disclosures.filter(value => value.startsWith('Native ETH is currency0.')).length, 1);
+  assert.match(normalized.launchLifecycle.liquidityFormation.actor, /native ETH/);
+  assert.match(normalized.launchLifecycle.liquidityFormation.failure, /native value/);
+  assert.match(normalized.operations.monitoring, /native seed value/);
+  assert.match(normalized.integration.permit2, /Only HKMN approvals/);
+  assert.match(normalized.capabilityExtensions.find(x => x.capabilityId === 'phase-three-launch-graph').trustBoundary, /current provider admission/);
+  const manifest = read('release/phase3/address-manifest.json');
+  manifest.postDeployAssertions.push('The Permit2 allowance must be exact, live at signing time and cleared by the seed path.');
+  const bound = normalizePhaseThreeAddressManifestDraft(manifest);
+  assert.deepEqual(normalizePhaseThreeAddressManifestDraft(bound), bound);
+  assert.equal(bound.postDeployAssertions.some(value => value.startsWith('The Permit2 allowance must')), false);
+  assert.equal(bound.openFacts.some(value => value.includes('two address-order')), false);
 });

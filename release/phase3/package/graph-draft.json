@@ -45,7 +45,7 @@
       "The hook address must satisfy permission mask 0x20cc.",
       "The resolved PoolKey must use fee 0, spacing 60, the resolved currency ordering and the resolved hook.",
       "The token balance and custody position must match the reconciled token allocation before the launch is considered complete.",
-      "The Permit2 allowance must be exact, live at signing time and cleared by the seed path."
+      "The native seed value must equal amount0Max; temporary HKMN approvals are exact and cleared by the seed path."
     ],
     "requiredGraphCalls": [
       {
@@ -136,8 +136,8 @@
     ]
   },
   "inputDigests": {
-    "addressManifestSha256": "sha256:055f7c65f030934d4cae3e8a86f3d8db3cbb253c53930413e64e9de0f3902f36",
-    "launchInputsSha256": "sha256:5af599ce89b073416c6316fe53b391686ea27b7fd96198be24eb34ec4b32f412"
+    "addressManifestSha256": "sha256:240fa7f212cf163bf24e49fcc61f3e0f9238b0e08596fdbd3c49ecf0930f4197",
+    "launchInputsSha256": "sha256:7464b0bd95d3c8ca2538bfbdc47d6433d3070b808a7de86ae095f7cb1d1b97cc"
   },
   "metadata": {
     "banner": {
@@ -156,14 +156,14 @@
   },
   "openFacts": [
     "Missing: provider-supplied encoded preimage for the accepted three-call initialization sequence token.allocate(hook), custody.configureBindingHook(hook), and hook.initializeGraphLaunch(custody,sqrtPriceX96). Resolve: obtain the route namespace, route nonce, topology hash, target-id hashes, and serialized provider graph call data. Verified alternative: retain no encoded call data, target addresses, or signing payload.",
-    "Missing: owner-selected seed deadline, Permit2 expiration, wallet nonce and gas parameters. Resolve: collect them from Rabby after final preflight and record the signed values. Verified alternative: retain the 900-second deadline ceiling and exact-allowance rule without a transaction payload.",
+    "Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.",
     "Missing: icon and banner bytes, content hashes and immutable publication locations. Resolve: add the supplied assets to the package and bind their SHA-256 values. Verified alternative: publish no public metadata artifact and retain the owner text only.",
     "Missing: the explicit native seed maximum, initial price and wei claim ceilings. Resolve: select reviewed per-action funding and gas reserves; calculate complete test affordability after functional testing under the owner decision. Verified alternative: funding values remain null and no seed can materialize until those explicit limits are selected.",
     "Missing: current provider admission of the unchanged inclusive 10/40/250 basis-point fee model with separate native seed. Resolve: submit the exact native graph to authenticated preflight and retain its admission result. Verified alternative: local native compilation and tests proceed without deployment authority.",
     "Missing: provider route fields, applicant salts and effective salts. Resolve: bind the provider route record and run deterministic address derivation. Verified alternative: keep addresses and graph digest unset while retaining only template hash evidence.",
     "Missing: address-bound constructor arguments and encoded graph calls. Resolve: derive final target addresses, bind authority values and encode the required graph-call sequence. Verified alternative: retain null initializer calldata and prohibit signing.",
     "Missing: the minted position token ID. Resolve: read the PositionManager mint result after the owner seed transaction and bind it through PermanentPositionCustody.bindMintedPosition. Verified alternative: deploy custody with constructor tokenId 0 and do not claim a bound position before seed.",
-    "Missing: final token and hook addresses. Resolve: run CREATE2 derivation after route fields are frozen and calculate the canonical PoolKey and PoolId. Verified alternative: retain the two address-order price candidates and leave pool identifiers unset.",
+    "Missing: final token and hook addresses. Resolve: derive the approved native graph and its canonical PoolKey and PoolId. Verified alternative: retain the native-currency0 price candidate and leave pool identifiers unset.",
     "Missing: native seed maximum and explicit wei claim ceilings. Resolve: bind reviewed per-action native limits and gas reserves. The owner defers complete EUR 250 affordability proof until functional testing. Verified alternative: no seed or address-bound graph is materialized."
   ],
   "schemaVersion": "hookemon.phase3.graph-draft.v2",

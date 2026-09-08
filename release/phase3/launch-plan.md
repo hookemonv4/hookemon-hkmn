@@ -12,16 +12,20 @@ Status: preparation for review; no signable launch transaction is present. This 
 | Programmable recipient | `0x4957f49620AFf3Adbbe8195a4f633E49cc93376c` |
 | Stock | Exactly 1 billion HKMN at 18 decimals, entirely allocated to the canonical market |
 | Pool | Native ETH currency0, HKMN currency1; zero LP fee, spacing 60, full-range ticks -887220 through 887220 |
-| Fees | 300 bps total: 250 process, 40 treasury, 10 Programmable; no additional platform fee selected |
+| Project fee | 300 bps: 250 process, 40 treasury, 10 Programmable. The provider publishes an additional 20 bps requirement; this difference remains unadmitted. |
 | Liquidity custody | Permanent position custody; the test provides no withdrawal route |
 | Seed and process claim ceilings | Explicit wei values required before materialization; currently unset |
 | Total test funding | Owner plans EUR 250; adequacy is deliberately unproven and measured after the test |
 
 The 0.04 ETH seed and 0.02 ETH recycled float in `feasibility/native-funding/` are local experiment inputs, not selected wallet actions. Their 32 swaps reach one expired historical bridge principal. They do not prove two complete cycles, a fresh quote, a production slippage limit or sufficient gas. USD comparisons in that evidence use a historical ratio and are not an EUR conversion.
 
+The EUR amount is a planned contribution, not a conversion of the earlier USD 250 spec envelope. The owner-approved revision must replace that earlier envelope before this draft becomes an executable test plan; ordinary per-action USD controls remain in force.
+
+Signing or broadcasting requires separate owner authorization for the concrete transaction or bounded test scope, including its network, signer, operations and limits. Funding a wallet alone grants no transaction authority. This also applies to a second cycle.
+
 ## Preparation before wallet review
 
-1. Finish the approved source and runtime commitments, reproduce all three deployed addresses and immutable runtime code, and bind the exact source revision, compiler, roles, PoolKey and provider graph. Hashing a supplied runtime record alone does not authenticate it.
+1. Finish the approved source and runtime commitments, reproduce all three predicted addresses and immutable runtime code, and bind the exact source revision, compiler, roles, PoolKey and provider graph. Hashing a supplied runtime record alone does not authenticate it.
 2. Produce the complete provider request using verified official packing rules. Obtain exact-request admission of the separate native seed and inclusive fee model. Current public provider terms describe a different fee and funded-launch model; retain that difference until a concrete response resolves it.
 3. Select explicit native seed and claim limits in the review candidate. After funding, measure available ETH, Solana USD Coin and SOL independently. Obtain fresh quotes, minimum pack requirements, transaction simulations, gas/rent reserves and deadlines for the next action. Complete-process affordability is not a prerequisite; the next action must still fit its own reviewed amount and reserve.
 4. Present each unsigned transaction with chain, sender, recipient, calldata digest, native value, token approvals, maximum fees, expected state change and expiry. Missing fields remain unset. A preflight response never authorizes a signature or a create request.

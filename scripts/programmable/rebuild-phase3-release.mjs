@@ -203,6 +203,10 @@ function normalizeAddresses(value) {
 function updateLaunchInputs(launchInputs) {
   const native = launchInputs.schemaVersion === 'hookemon.phase3.release-launch-inputs.v2';
   if (native) {
+    launchInputs.openFacts = launchInputs.openFacts.map(value => value.startsWith('Missing: owner-selected seed deadline,')
+      ? 'Missing: owner-reviewed seed deadline, wallet nonce and gas parameters. Resolve: bind them to the exact unsigned native transaction after preflight. Verified alternative: retain the 900-second deadline ceiling without a transaction payload.'
+      : value.startsWith('Missing: the explicit native seed maximum,')
+        ? 'Missing: the explicit native seed maximum, initial price and wei claim ceilings. Resolve: select reviewed per-action funding and gas reserves; calculate complete test affordability after functional testing under the owner decision. Verified alternative: funding values remain null and no seed can materialize until those explicit limits are selected.' : value);
     const maximum = launchInputs.pool.quoteAsset.amountAtomic;
     launchInputs.pool.priceCandidates.nativeCurrency0 = maximum === null ? null : deriveNativePriceCandidate({ nativeWei: maximum, hkmnAtomic: launchInputs.pool.baseAsset.amountAtomic });
     launchInputs.token.sourceCompatibility = { status: 'VERIFIED', compiledSupplyAtomic: '1000000000000000000000000000', reason: 'The pinned native launch compilation binds the complete HKMN stock and zero quote currency. It grants no funding or transaction authority.' };
@@ -253,7 +257,7 @@ function updateAddressManifest(manifest, records, buildInfo, launchInputs) {
     delete hook.constructor.processClaimLimitMax;
     hook.constructor.processClaimLimit6hWei ??= null;
     hook.constructor.processClaimLimitMaxWei ??= null;
-    manifest.openFacts = manifest.openFacts.filter(fact => !fact.includes('USDG'));
+    manifest.openFacts = manifest.openFacts.filter(fact => !fact.includes('USDG') && !fact.startsWith('Missing: native seed maximum and explicit wei claim ceilings.'));
     manifest.openFacts = [...new Set([...manifest.openFacts, 'Missing: native seed maximum and explicit wei claim ceilings. Resolve: bind reviewed per-action native limits and gas reserves. The owner defers complete EUR 250 affordability proof until functional testing. Verified alternative: no seed or address-bound graph is materialized.'])];
   }
 

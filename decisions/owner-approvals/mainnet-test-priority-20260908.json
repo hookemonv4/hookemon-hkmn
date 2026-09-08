@@ -1,6 +1,6 @@
 {
   "schema": "hookemon.owner-decision.v1",
-  "ownerStatement": "Mach das jetzt so weit fertig, dass es kontrolliert werden kann. Ich werde dann das Geld schon raufbringen, die 250 Euro. Du musst jetzt auch nicht gucken, ob diese 250 Euro f\u00fcr den kompletten Prozess ausreichen. Wichtig ist, dass es funktioniert. Das ist oberste Priorit\u00e4t.",
+  "ownerStatement": "Mach das jetzt so weit fertig, dass es kontrolliert werden kann. Ich werde dann das Geld schon raufbringen, die 250 Euro, und dann werden wir das Ganze doch einmal testen. Also wie gesagt, du musst jetzt auch nicht gucken, ob diese 250 Euro jetzt f\u00fcr den kompletten Prozess jetzt erst mal ausreichen. Das ist jetzt erst mal egal. Wichtig ist: Wir machen diesen Mainnet-Test, ich lade ein bisschen Geld auf, wir simulieren diesen kompletten Zyklus gerne ein-, zweimal, um zu gucken, ob es \u00fcberhaupt funktioniert, ob es Probleme gibt. Wir werden dann das Ganze beheben und anschlie\u00dfend k\u00f6nnen wir dann sozusagen noch mal ausrechnen: reichen 250 oder m\u00fcsste ich doch noch mal ein bisschen mehr reintun oder nicht. Wichtig ist, dass es funktioniert. Das ist oberste Priorit\u00e4t.",
   "scope": "Prepare a reviewable mainnet test package for one or two controlled end-to-end cycles. Defer proof that EUR 250 covers the complete process until actual test costs are observed.",
   "preservedRequirements": [
     "Exact transaction intents, per-action amounts and fee limits",
@@ -8,5 +8,14 @@
     "Real provider and runtime evidence; no fabricated admission",
     "Unsigned preparation; no secret access, spending, deployment, signature or broadcast by this decision"
   ],
-  "budgetEvidence": "Retain conditional cost evidence as incomplete; do not report allInBudgetProven true or treat EUR and USD as equivalent."
+  "budgetEvidence": "Retain conditional cost evidence as incomplete; do not report allInBudgetProven true or treat EUR and USD as equivalent.",
+  "recordPurpose": "Owner direction and coordinator scope interpretation only; not a v4 owner gate approval or executable authority capability.",
+  "canonicalReceipt": {
+    "id": "r-00652",
+    "type": "owner-approval",
+    "at": "2026-09-08T14:37:07.832Z",
+    "inputSha256": "81f6215573dd4057b947d29d16c28fb3a17b0660582521e0c71bab09669c22ff",
+    "note": "The canonical ledger records the initial scope note. This expanded record preserves the verbatim statement; its own bytes are not claimed to match that earlier note."
+  },
+  "specStatus": "The EUR contribution and deferred complete-process costing are approved for the next spec revision. Active revision71 still contains the earlier USD250 capital-envelope sentence; it must be revised before executable test authorization. Per-action USD controls remain unchanged."
 }
