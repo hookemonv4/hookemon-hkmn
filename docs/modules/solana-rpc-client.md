@@ -17,6 +17,7 @@
 
 - Finalized helpers always request finalized commitment. A lower-confirmation signature is unresolved, not settlement evidence.
 - A provider transaction is checked with `isBlockhashValid` before signing. A caller may fetch a fresh blockhash only before a transaction has been signed or sent; it must not replace signed bytes after an ambiguous send.
+- `buildRelayLegacyTransaction` permits an empty account list only for the Compute Budget program’s exact SetComputeUnitLimit (tag 2, five bytes) and SetComputeUnitPrice (tag 3, nine bytes) layouts. Other accountless instructions are refused. These layouts and empty lists follow pinned `@solana/web3.js` 1.98.4, `src/programs/compute-budget.ts`; signing policy still validates the complete instruction allowlist and fee limits.
 - Priority fees require an explicit positive compute-unit limit and canonical atomic-unit string. The helper adds only the standard Compute Budget instructions.
 - Associated token-account validation fails closed on a missing, malformed, wrong-program, wrong-mint, or wrong-owner account.
 - Token balance helpers preserve raw atomic strings and do not infer which asset represents the economic transfer. Lifecycle code attributes an exact owner and configured mint before recording a typed amount.
