@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { producedReturnSigningFixture, returnSigningFixture } from '../native/return-signing-fixture.mjs';
+import { nativeProducedAdmissionFixture } from '../native/admission-fixture.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { DIRECTIONS, RELAY_CONSTANTS } from '../../src/relay-client.mjs';
-import { createSolanaRpcClient, TOKEN_PROGRAM_ID } from '../../src/solana-rpc.mjs';
+import { RELAY_CONSTANTS } from '../../src/relay-client.mjs';
+import { createSolanaRpcClient } from '../../src/solana-rpc.mjs';
 import {
   ReturnRecoveryRequiredError,
   mutateReturn,
@@ -36,12 +38,14 @@ const NATIVE_CHAIN_ID = 'solana-mainnet';
 const RELAY_WIRE_CHAIN_ID = String(RELAY_CONSTANTS.SOLANA_CHAIN_ID);
 const TEST_PREFLIGHT_AUTHORITY = createTestProfileMutationAuthority();
 const MARKER_STOP = 'MARKER_STOP_AFTER_RETURN_CHAIN_IDENTITY';
+const NATIVE_SOURCE = returnSigningFixture({ sender: SOLANA_OPERATOR, recipient: EVM_ACCOUNT });
 
 async function durableCycle(t, cycleId = 'cycle-return-chain-identity-1') {
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-return-chain-identity-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const repository = await CycleRepository.open(directory);
-  await repository.createCycle({ releaseAmount: '1', mode: 'production', cycleId });
+  const repository = await CycleRepository.open(directory, () => 1700000000000, { testAuthority: TEST_PREFLIGHT_AUTHORITY });
+  const admission = await nativeProducedAdmissionFixture(cycleId);
+  await repository.createCycle({ releaseAmount: '42', mode: 'production', cycleId, admission });
   return { repository, cycleId };
 }
 
@@ -84,8 +88,8 @@ async function seedHeldPosition(repository, cycleId, suffix = '1') {
     memo: `memo-${suffix}`,
     mint: `mint-${suffix}`,
     cardRef: `mint-${suffix}`,
-    costMicroUsdg: '1000000',
-    valueMicroUsdg: '1000000',
+    costMicroUsd: '35000000',
+    valueMicroUsd: '35000000',
     insuredValue: null,
     reason: 'EPIC_THRESHOLD',
     terminalState: 'HELD_OWNER_DECISION',
@@ -115,15 +119,15 @@ async function seedSoldBuybackAttemptWithoutLedger(repository, cycleId, { procee
 
 function moneyConfiguration() {
   return {
-    schema: 'hookemon.money-configuration.v1',
+    schema: 'hookemon.money-configuration.v2',
     assets: {
-      usdg: { chainId: '4663', assetId: USDG_TOKEN, decimals: 6 },
+      eth: { chainId: '4663', assetId: 'native', decimals: 18 },
       solanaStablecoin: { chainId: RELAY_WIRE_CHAIN_ID, assetId: SOLANA_MINT, decimals: 6 },
     },
     minimums: {
-      robinhoodReceive: { chainId: '4663', assetId: USDG_TOKEN, decimals: 6, amountAtomic: '0' },
+      robinhoodReceive: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
       solanaReceive: { chainId: RELAY_WIRE_CHAIN_ID, assetId: SOLANA_MINT, decimals: 6, amountAtomic: '0' },
-      returnUsdg: { chainId: '4663', assetId: USDG_TOKEN, decimals: 6, amountAtomic: '0' },
+      returnEth: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '0' },
     },
     evm: {
       perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '100' },
@@ -139,6 +143,7 @@ function moneyConfiguration() {
 function baseConfig(overrides = {}) {
   return {
     chainId: 4663,
+    now: () => 1700000000000, nativePaymentBinding: NATIVE_SOURCE.nativePaymentBinding,
     accounts: { evm: EVM_ACCOUNT, solana: SOLANA_OPERATOR },
     relay: { solanaMint: SOLANA_MINT, maxSettlementWindowSeconds: '600' },
     moneyConfiguration: moneyConfiguration(),
@@ -148,80 +153,21 @@ function baseConfig(overrides = {}) {
   };
 }
 
-function splTransferCheckedPlan(amountAtomic) {
-  const data = Buffer.alloc(10);
-  data.writeUInt8(12, 0);
-  data.writeBigUInt64LE(BigInt(amountAtomic), 1);
-  data.writeUInt8(6, 9);
-  return {
-    instructions: [{
-      programId: TOKEN_PROGRAM_ID,
-      keys: [
-        { pubkey: SOLANA_SOURCE, isSigner: false, isWritable: true },
-        { pubkey: SOLANA_MINT, isSigner: false, isWritable: false },
-        { pubkey: SOLANA_DESTINATION, isSigner: false, isWritable: true },
-        { pubkey: SOLANA_OPERATOR, isSigner: true, isWritable: false },
-      ],
-      data: data.toString('hex'),
-    }],
-    addressLookupTableAddresses: [],
-  };
-}
-
-function returnIntentFor({ requestId, amountAtomic, destinationAmountAtomic, sender, recipient }) {
-  return {
-    schema: 'hookemon.relay-intent.v1',
-    requestId,
-    orderId: `0x${'9'.repeat(64)}`,
-    direction: 'RETURN',
-    tradeType: 'EXACT_INPUT',
-    quoteDigest: `sha256:${'7'.repeat(64)}`,
-    originChainId: RELAY_CONSTANTS.SOLANA_CHAIN_ID,
-    destinationChainId: RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID,
-    originAssetId: SOLANA_MINT,
-    originDecimals: 6,
-    destinationAssetId: USDG_TOKEN,
-    destinationDecimals: 6,
-    originAmount: amountAtomic,
-    quotedDestinationAmount: destinationAmountAtomic,
-    quotedDestinationMinimumAmount: destinationAmountAtomic,
-    sender,
-    recipient,
-    deadlineUnixSeconds: 4_102_444_800,
-  };
-}
-
-/** A minimal, self-contained Relay double: never real network, but a faithful quote/execution shape. */
+// Quote responses are local synthetic inputs; parsing and valuation authority come from the
+// real Relay client. Destination wei are independent of the source USDC atomic count.
 function relayStub() {
-  const quoteCalls = [];
+  const quoteCalls = [], producers = new WeakMap();
   return {
     quoteCalls,
     async quoteReturnBridge(args) {
       quoteCalls.push(args);
-      const destinationAmountAtomic = (BigInt(args.amount) - 1n).toString();
-      return {
-        direction: DIRECTIONS.RETURN,
-        requestId: `relay-return-chain-identity-${quoteCalls.length}`,
-        origin: { chainId: RELAY_CONSTANTS.SOLANA_CHAIN_ID, address: args.originCurrency, decimals: 6, amount: args.amount },
-        destination: { chainId: RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID, address: USDG_TOKEN, decimals: 6, amount: destinationAmountAtomic, minimumAmount: destinationAmountAtomic },
-        sender: args.user,
-        recipient: args.recipient,
-        deadlineUnixSeconds: 4_102_444_800,
-      };
+      const native = await producedReturnSigningFixture({ requestId: `relay-return-chain-identity-${quoteCalls.length}`,
+        sender: args.user, recipient: args.recipient, amount: args.amount });
+      const quote = native.request.destinationUsdEvidence.quote;
+      producers.set(quote, native.relay);
+      return quote;
     },
-    prepareExecution({ quote, liveMode }) {
-      if (liveMode !== true) throw new Error('return-chain-identity relay stub requires liveMode');
-      return {
-        intent: returnIntentFor({
-          requestId: quote.requestId,
-          amountAtomic: quote.origin.amount,
-          destinationAmountAtomic: quote.destination.amount,
-          sender: quote.sender,
-          recipient: quote.recipient,
-        }),
-        steps: [{ kind: 'transaction', requestId: quote.requestId, items: [{ data: splTransferCheckedPlan(quote.origin.amount) }] }],
-      };
-    },
+    prepareExecution(input) { return producers.get(input.quote).prepareExecution(input); },
     simulateExecution({ quote }) { return { quote }; },
   };
 }
@@ -235,6 +181,7 @@ function solanaClient(blockhash = '11111111111111111111111111111111') {
         getLatestBlockhash: { context: { slot: 10 }, value: { blockhash, lastValidBlockHeight: 100 } },
         isBlockhashValid: { context: { slot: 10 }, value: true },
         getBlockHeight: 10,
+        getSlot: 11, getMultipleAccounts: NATIVE_SOURCE.observation,
       };
       if (!Object.hasOwn(resultByMethod, body.method)) throw new Error(`unexpected Solana RPC ${body.method}`);
       return { ok: true, status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: body.id, result: resultByMethod[body.method] }) };
@@ -246,7 +193,7 @@ function robinhoodObservationClient({ archiveBalance = 0n } = {}) {
   return {
     client: { async getBlock() { return { number: 100n, hash: `0x${'f'.repeat(64)}`, timestamp: 1_700_000_000n }; } },
     historicalEvidenceClient: {
-      async readErc20BalanceAtBlock({ blockNumber, blockHash }) { return { value: archiveBalance, blockNumber, blockHash }; },
+      async readNativeBalanceAtBlock({ blockNumber, blockHash }) { return { value: archiveBalance, blockNumber, blockHash }; },
     },
   };
 }
@@ -274,7 +221,7 @@ test('prepareReturnRequest quotes exactly the native ledger delta despite a dist
 
   assert.equal(relay.quoteCalls.length, 1, 'quoteReturnBridge must be called exactly once');
   assert.equal(relay.quoteCalls[0].amount, '90');
-  assert.equal(request.schema, 'hookemon.return-relay-request.v1');
+  assert.equal(request.schema, 'hookemon.return-relay-request.v2');
   assert.equal(request.inputAmount.amountAtomic, '90');
   assert.equal(request.inputAmount.chainId, RELAY_WIRE_CHAIN_ID, 'the Relay-facing typed amount keeps Relay\'s own wire chain id');
 });
@@ -385,16 +332,7 @@ test('a competing Relay-wire-identity custody row refuses prepare, probe, and mu
   assert.equal(probe.configured, true);
   assert.match(probe.reason, /conflicting with the native settlement identity/);
 
-  const request = {
-    schema: 'hookemon.return-relay-request.v1',
-    cycleId,
-    inputAmount: { chainId: RELAY_WIRE_CHAIN_ID, assetId: SOLANA_MINT, decimals: 6, amountAtomic: '90' },
-    destinationAmount: { chainId: '4663', assetId: USDG_TOKEN, decimals: 6, amountAtomic: '89' },
-    requestCreatedAtUnixSeconds: '1700000000',
-    maxSettlementWindowSeconds: '600',
-    intent: returnIntentFor({ requestId: 'relay-return-conflict', amountAtomic: '90', destinationAmountAtomic: '89', sender: SOLANA_OPERATOR, recipient: EVM_ACCOUNT }),
-    solanaInstructionPlan: splTransferCheckedPlan('90'),
-  };
+  const { request } = await producedReturnSigningFixture({ cycleId, sender: SOLANA_OPERATOR, recipient: EVM_ACCOUNT, amount: '90' });
   await assert.rejects(
     () => mutateReturn({
       liveMode: true,
@@ -449,7 +387,7 @@ test('a genuine all-held zero return persists final evidence, replays byte-ident
     context: { cycleId },
     nowMs: 1_700_000_000_000,
   });
-  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v1');
+  assert.equal(request.schema, 'hookemon.return-zero-proceeds-request.v2');
   assert.equal(request.inputAmount.amountAtomic, '0');
 
   const context = { cycleId, stage: 'return', requestDigest: `sha256:${'c'.repeat(64)}` };
@@ -457,7 +395,7 @@ test('a genuine all-held zero return persists final evidence, replays byte-ident
     liveMode: true, adapters: null, signerClient: UNTOUCHABLE_SIGNER, config, cycleRepository: repository,
     context, request, preflightAuthority: TEST_PREFLIGHT_AUTHORITY,
   });
-  assert.equal(first.schema, 'hookemon.return-zero-proceeds-evidence.v1');
+  assert.equal(first.schema, 'hookemon.return-zero-proceeds-evidence.v2');
 
   const replay = await mutateReturn({
     liveMode: true, adapters: null, signerClient: UNTOUCHABLE_SIGNER, config, cycleRepository: repository,
@@ -486,7 +424,7 @@ test('a false zero-proceeds evidence recorded before this fix cannot finalize or
     liveMode: true, adapters: null, signerClient: UNTOUCHABLE_SIGNER, config, cycleRepository: repository,
     context, request: zeroRequest, preflightAuthority: TEST_PREFLIGHT_AUTHORITY,
   });
-  assert.equal(staleEvidence.schema, 'hookemon.return-zero-proceeds-evidence.v1');
+  assert.equal(staleEvidence.schema, 'hookemon.return-zero-proceeds-evidence.v2');
 
   // A genuinely sold pack settles after the stale zero evidence was already durably recorded --
   // exactly the false-zero scenario this identity fix closes.
@@ -568,7 +506,7 @@ test('mutateReturn refuses a preexisting zero-proceeds request once durable sold
     context: { cycleId },
     nowMs: 1_700_000_000_000,
   });
-  assert.equal(zeroRequest.schema, 'hookemon.return-zero-proceeds-request.v1');
+  assert.equal(zeroRequest.schema, 'hookemon.return-zero-proceeds-request.v2');
 
   // A durable buyback sold outcome now surfaces (e.g. a resumed buyback reconciliation) with its
   // custody-ledger write still missing -- inconsistent with the request built a moment earlier.
@@ -605,7 +543,7 @@ test('reconcileLiveReturn refuses preexisting zero-proceeds evidence once durabl
     liveMode: true, adapters: null, signerClient: UNTOUCHABLE_SIGNER, config, cycleRepository: repository,
     context, request: zeroRequest, preflightAuthority: TEST_PREFLIGHT_AUTHORITY,
   });
-  assert.equal(zeroEvidence.schema, 'hookemon.return-zero-proceeds-evidence.v1');
+  assert.equal(zeroEvidence.schema, 'hookemon.return-zero-proceeds-evidence.v2');
 
   // The durable sold outcome surfaces only after the zero evidence was already finalized.
   await seedSoldBuybackAttemptWithoutLedger(repository, cycleId, { proceeds: '90' });
