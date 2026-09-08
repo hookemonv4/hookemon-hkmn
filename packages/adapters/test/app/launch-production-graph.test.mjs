@@ -1,6 +1,9 @@
 // Production acceptance harness. This deliberately uses the literal CLI and loopback HTTP/RPC
 // services; it has no composition, stage, signer, or authority injection seam.
 import assert from 'node:assert/strict';
+import { setup as nativeRelaySetup } from '../native/relay-native-proof-fixture.mjs';
+import { createTestNativePaymentBinding } from '../../src/native-payment-proof.mjs';
+import { productionMoneyConfiguration } from '../../../runner/test/cycle/production-cycle.mjs';
 import { execFile, spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign as signMessage } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
@@ -35,7 +38,7 @@ import { supplementaryPayoutStageId } from '../../src/app/stages/supplementary-p
 import { attachOwnerSignature, buildCanonicalStandingAuthorityDocument } from '../../src/signing/standing-authority.mjs';
 import {
   buildRelayLegacyTransaction, buildTransferCheckedInstruction, createSolanaRpcClient, deriveAssociatedTokenAddress,
-  signedSolanaTransactionSignature, TOKEN_PROGRAM_ID, MPL_CORE_PROGRAM_ID,
+  signedSolanaTransactionSignature, TOKEN_PROGRAM_ID, MPL_CORE_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID,
 } from '../../src/solana-rpc.mjs';
 import { COLLECTOR_PURCHASE_BINDING_SCHEMA, COLLECTOR_PURCHASE_BINDING_VERSION } from '../../src/signing/collector-purchase-policy.mjs';
 import { COLLECTOR_BUYBACK_BINDING_SCHEMA, COLLECTOR_BUYBACK_BINDING_VERSION } from '../../src/signing/collector-buyback-policy.mjs';
@@ -49,7 +52,7 @@ import {
 import {
   createCanonicalTransactionPolicy, createTransactionPolicy, decodeProviderTransaction, evaluate as evaluateTransactionPolicy, readTransactionPolicyRules,
 } from '../../src/signing/transaction-policy.mjs';
-import { createRelayClient, DIRECTIONS as RELAY_DIRECTIONS, RELAY_CONSTANTS } from '../../src/relay-client.mjs';
+import { createRelayClient, createQuoteUsdValuation, DIRECTIONS as RELAY_DIRECTIONS, RELAY_CONSTANTS } from '../../src/relay-client.mjs';
 import { OPERATOR_EVM_ROLE } from '../../src/signing/signer-client.mjs';
 import { ERC20_TRANSFER_TOPIC } from '../../src/robinhood-rpc.mjs';
 
@@ -64,8 +67,8 @@ const RELAY_SOLANA_CHAIN_ID = 792703809;
 const BALANCE_OF_SELECTOR = '0x70a08231';
 // One pack costs 0.000008 settlement units, i.e. 8 atomic at 6 decimals, so an N=2 cycle targets 16.
 const PACK_PRICE = '0.000008';
-const PROCESS_USDG_ATOMIC = 1_000_000n;
-// Priced so the unit quote lands exactly on maxUnitPriceMicroUsdg and the aggregate exactly on the
+const PROCESS_NATIVE_WEI = 1_000_000n;
+// Priced so the unit quote lands exactly on maxUnitPriceMicroUsd and the aggregate exactly on the
 // per-cycle and 24-hour caps. The aggregate is deliberately NOT twice the unit: a linear pair would
 // let a division or multiplication bug pass unnoticed.
 const UNIT_FUNDING_ATOMIC = 17n;
@@ -83,7 +86,7 @@ const OUTBOUND_DESTINATION_SIGNATURE = `${'z'.repeat(44)}${'4'.repeat(44)}`;
 
 const RELAY_CHAINS = Object.freeze({
   chains: [
-    { id: ROBINHOOD_CHAIN_ID, depositEnabled: true, erc20Currencies: [{ address: USDG, supportsBridging: true }] },
+    { id: ROBINHOOD_CHAIN_ID, depositEnabled: true, erc20Currencies: [{ address: USDG, supportsBridging: true }, { address: `0x${'00'.repeat(20)}`, supportsBridging: true }] },
     { id: RELAY_SOLANA_CHAIN_ID, depositEnabled: true, solverCurrencies: [{ address: SOLANA_MINT }] },
   ],
 });
@@ -96,7 +99,7 @@ const HOOK_STATE_SELECTORS = new Map([
   [toFunctionSelector('function remainingProcessClaimCapacity() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
   [toFunctionSelector('function activeProcessClaimLimit() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
   [toFunctionSelector('function totalLiability() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
-  [toFunctionSelector('function hookUsdgBalance() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
+  [toFunctionSelector('function hookEthBalance() view returns (uint256)'), () => abiUint(HOOK_LIABILITY_ATOMIC)],
   [toFunctionSelector('function processClaimsPaused() view returns (bool)'), () => abiUint(0n)],
   [toFunctionSelector('function processClaimCycleUsed(bytes32) view returns (bool)'), () => abiUint(0n)],
   [toFunctionSelector('function isSolvent() view returns (bool)'), () => abiUint(1n)],
@@ -124,7 +127,7 @@ function abiUint(value) {
 }
 
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3';
-const RELAY_DEPOSIT_SELECTOR = '0xe8017952';
+const RELAY_DEPOSIT_SELECTOR = toFunctionSelector('function depositNative(address depositor, bytes32 id)');
 const RELAY_DEPOSITORY = `0x${'a'.repeat(40)}`;
 
 function abiWord(value) {
@@ -142,26 +145,11 @@ function abiAddressWord(address) {
  * so the fixture cannot smuggle a different spender, amount or order past outbound.
  */
 function relayExecutionSteps({ requestId, orderId, originAmount, sender }) {
-  // Fees sit at the fixture's configured EVM gas-price cap, so the cap is exercised rather than
-  // bypassed, and two transactions at this limit still fit the loopback native balance.
-  const item = data => ({
-    data: {
-      chainId: 4663, from: sender, to: data.to, data: data.data, value: '0',
-      gas: '21000', maxFeePerGas: '2', maxPriorityFeePerGas: '1',
-    },
-  });
-  return [{
-    kind: 'transaction',
-    id: `deposit-${requestId}`,
-    requestId,
-    items: [
-      item({ to: USDG, data: `${ERC20_APPROVE_SELECTOR}${abiAddressWord(RELAY_DEPOSITORY)}${abiWord(originAmount)}` }),
-      item({
-        to: RELAY_DEPOSITORY,
-        data: `${RELAY_DEPOSIT_SELECTOR}${abiAddressWord(sender)}${abiAddressWord(USDG)}${abiWord(originAmount)}${orderId.replace(/^0x/, '')}`,
-      }),
-    ],
-  }];
+  return [{ kind: 'transaction', id: `deposit-${requestId}`, requestId, items: [{ data: {
+    chainId: 4663, from: sender, to: RELAY_DEPOSITORY,
+    data: `${RELAY_DEPOSIT_SELECTOR}${abiAddressWord(sender)}${orderId.slice(2)}`, value: originAmount,
+    gas: '21000', maxFeePerGas: '2', maxPriorityFeePerGas: '1',
+  } }] }];
 }
 
 /**
@@ -170,8 +158,9 @@ function relayExecutionSteps({ requestId, orderId, originAmount, sender }) {
  * to fail a planner that derives one quote from the other.
  */
 function relayQuote(request) {
-  const destinationAmount = String(request.amount);
-  const originAmount = destinationAmount === '8'
+  const exactInput = request.tradeType === 'EXACT_INPUT';
+  const destinationAmount = exactInput ? '1' : String(request.amount);
+  const originAmount = exactInput ? String(request.amount) : destinationAmount === '8'
     ? UNIT_FUNDING_ATOMIC.toString()
     : AGGREGATE_FUNDING_ATOMIC.toString();
   const deadline = Math.floor(Date.now() / 1000) + 900;
@@ -185,7 +174,7 @@ function relayQuote(request) {
     details: {
       sender,
       recipient,
-      currencyIn: { currency: { chainId: ROBINHOOD_CHAIN_ID, address: USDG, symbol: 'USDG', decimals: 6 }, amount: originAmount },
+      currencyIn: { currency: { chainId: ROBINHOOD_CHAIN_ID, address: `0x${'00'.repeat(20)}`, symbol: 'ETH', decimals: 18 }, amount: originAmount, amountUsd: `${BigInt(originAmount) / 1000000n}.${(BigInt(originAmount) % 1000000n).toString().padStart(6, '0')}` },
       currencyOut: {
         currency: { chainId: RELAY_SOLANA_CHAIN_ID, address: SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
         amount: destinationAmount,
@@ -205,8 +194,8 @@ function relayQuote(request) {
             }],
           },
           inputs: [{
-            payment: { chainId: 'robinhood', currency: USDG, amount: originAmount },
-            refunds: [{ chainId: 'robinhood', currency: USDG, recipient: sender, deadline }],
+            payment: { chainId: 'robinhood', currency: `0x${'00'.repeat(20)}`, amount: originAmount, amountUsd: `${BigInt(originAmount) / 1000000n}.${(BigInt(originAmount) % 1000000n).toString().padStart(6, '0')}` },
+            refunds: [{ chainId: 'robinhood', currency: `0x${'00'.repeat(20)}`, recipient: sender, deadline }],
           }],
         },
       },
@@ -229,19 +218,6 @@ function executionLogs(parsed) {
   // source leg from exactly that finalized transfer, so the chain has to emit it for the same bytes
   // it accepted -- decoded from the deposit calldata, never from what the runner intended.
   const data = parsed.data ?? '0x';
-  if (data.toLowerCase().startsWith(RELAY_DEPOSIT_SELECTOR)) {
-    // Calldata word layout: sender, USDG address, originAmount, orderId (see relayExecutionSteps).
-    const [sender, , amount] = [0, 1, 2].map(i => data.slice(10 + (i * 64), 10 + ((i + 1) * 64)));
-    return [{
-      address: USDG,
-      topics: encodeEventTopics({
-        abi: HOOK_ABI,
-        eventName: 'Transfer',
-        args: { from: `0x${sender.slice(-40)}`, to: parsed.to },
-      }),
-      data: `0x${amount}`,
-    }];
-  }
   let call;
   try {
     call = decodeFunctionData({ abi: HOOK_ABI, data });
@@ -259,13 +235,6 @@ function executionLogs(parsed) {
         [{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
         [amountAtomicUsdg, 1n, amountAtomicUsdg, amountAtomicUsdg],
       ),
-    },
-    // The USDG credit the claim actually moves. The stage verifies this transfer independently of
-    // the hook's own event, so both have to agree on sender, recipient, and amount.
-    {
-      address: USDG,
-      topics: encodeEventTopics({ abi: HOOK_ABI, eventName: 'Transfer', args: { from: parsed.to, to: destination } }),
-      data: amount,
     },
   ];
 }
@@ -570,6 +539,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
   const returnTemplates = new Map();
   const returnTransactions = new Map();
   const balanceEvents = [];
+  const sourceRuntimeFixture = await nativeRelaySetup({ runtimeMutation: observation => { const bytes = Buffer.from(observation.value[1].data[0], 'base64'); bytes.writeBigUInt64LE(1n, 4); observation.value[1].data[0] = bytes.toString('base64'); } });
   let holdersChanged = false;
   let holdersChangedAt = null;
   const offerForMemo = memo => memo === 'graph-purchase-pack-1' ? '45' : EPIC_GATE_SELL_OFFER_ATOMIC;
@@ -581,7 +551,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
     return { address: USDG, topics: [ERC20_TRANSFER_TOPIC, `0x${abiAddressWord(from)}`, `0x${abiAddressWord(to)}`], data: `0x${abiWord(amount)}` };
   }
   function balanceAt(account, height) {
-    let balance = [RELAY_RETURN_SOLVER_EVM.toLowerCase(), `0x${'c'.repeat(40)}`].includes(account) ? PROCESS_USDG_ATOMIC : 0n;
+    let balance = [RELAY_RETURN_SOLVER_EVM.toLowerCase(), `0x${'c'.repeat(40)}`].includes(account) ? PROCESS_NATIVE_WEI : account === operationsAccount().toLowerCase() ? 400000n : 0n;
     for (const event of balanceEvents) if (event.height <= height) {
       if (event.from === account) balance -= event.amount;
       if (event.to === account) balance += event.amount;
@@ -866,7 +836,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
       const quoteRequest = await body(request);
       calls.quotes.push({ amount: quoteRequest.amount, tradeType: quoteRequest.tradeType });
       if (String(quoteRequest.originChainId) === String(RELAY_SOLANA_CHAIN_ID)) {
-        const instruction = relayReturnInstruction({ source: deriveAssociatedTokenAddress(operationsSolanaAccount(), SOLANA_MINT).toBase58(), destination: RELAY_RETURN_DEPOSITORY_SOLANA, owner: operationsSolanaAccount(), mint: SOLANA_MINT, amount: BigInt(quoteRequest.amount), decimals: 6 });
+        const instruction = relayReturnInstruction({ source: deriveAssociatedTokenAddress(operationsSolanaAccount(), SOLANA_MINT).toBase58(), destination: RELAY_RETURN_DEPOSITORY_SOLANA, owner: operationsSolanaAccount(), mint: SOLANA_MINT, amount: BigInt(quoteRequest.amount), decimals: 6, orderId: quoteRequest.amount === '45' ? RELAY_SUPPLEMENTARY_RETURN_ORDER_ID : RELAY_RETURN_ORDER_ID });
         const raw = relayReturnQuoteRawResponse({ sender: quoteRequest.user, recipient: quoteRequest.recipient, amountAtomic: quoteRequest.amount, instruction, ...(quoteRequest.amount === '45' ? {requestId: RELAY_SUPPLEMENTARY_RETURN_REQUEST_ID, orderId: RELAY_SUPPLEMENTARY_RETURN_ORDER_ID} : {}) });
         const unsigned = buildRelayLegacyTransaction({ feePayer: operationsSolanaAccount(), recentBlockhash: FIXED_LATEST_BLOCKHASH, instructionPlan: { instructions: [instruction], addressLookupTableAddresses: [] } });
         returnTemplates.set(raw.requestId, { message: Transaction.from(Buffer.from(unsigned, 'base64')).serializeMessage(), amount: BigInt(quoteRequest.amount), recipient: quoteRequest.recipient });
@@ -888,7 +858,8 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
       calls.methods.push(`evm:${rpc.method}`);
       if (rpc.method === 'eth_chainId') return reply('0x1237');
       if (rpc.method === 'eth_getTransactionCount') return reply(toHex([...broadcasts.values()].filter(entry => entry.from === operationsAccount().toLowerCase()).length));
-      if (rpc.method === 'eth_getBalance') return reply('0x61a80');
+      if (rpc.method === 'eth_getBalance') return reply(toHex(balanceAt(rpc.params[0].toLowerCase(), rpc.params[1] === 'latest' || rpc.params[1] === 'finalized' ? finalizedHeight : Number(BigInt(rpc.params[1])))));
+      if (rpc.method === 'eth_getCode') return reply('0x6000');
       if (rpc.method === 'eth_maxPriorityFeePerGas') return reply('0x1');
       if (rpc.method === 'eth_gasPrice') return reply('0x2');
       if (rpc.method === 'eth_estimateGas') return reply('0x5208');
@@ -963,13 +934,11 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
         const height = ++finalizedHeight;
         blockTimestamps.set(height, Math.floor(Date.now() / 1000));
         let logs = executionLogs(parsed);
-        if (parsed.to?.toLowerCase() === USDG && parsed.data?.startsWith('0xa9059cbb')) {
-          const to = `0x${parsed.data.slice(34, 74)}`.toLowerCase();
-          const amount = BigInt(`0x${parsed.data.slice(74, 138)}`);
-          logs = [transferLog(sender, to, amount)];
-        }
-        for (const log of logs) if (log.address.toLowerCase() === USDG && log.topics[0] === ERC20_TRANSFER_TOPIC) {
-          balanceEvents.push({height, from: `0x${log.topics[1].slice(-40)}`.toLowerCase(), to: `0x${log.topics[2].slice(-40)}`.toLowerCase(), amount: BigInt(log.data)});
+        balanceEvents.push({ height, from: sender.toLowerCase(), to: null, amount: 42000n });
+        if ((parsed.value ?? 0n) > 0n) balanceEvents.push({ height, from: sender.toLowerCase(), to: parsed.to.toLowerCase(), amount: parsed.value });
+        if (logs.some(log => log.address.toLowerCase() === `0x${'c'.repeat(40)}`)) {
+          const claim = decodeFunctionData({ abi: HOOK_ABI, data: parsed.data });
+          balanceEvents.push({ height, from: parsed.to.toLowerCase(), to: claim.args[2].toLowerCase(), amount: claim.args[1] });
         }
         broadcasts.set(hash, { hash, raw, parsed, from: sender.toLowerCase(), logs, height });
         return reply(hash);
@@ -1012,19 +981,21 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
       if (returnTransactions.has(signature)) { assert.equal(returnTransactions.get(signature).wire, wire); return reply(signature); }
       const [requestId, template] = [...returnTemplates].find(([, value]) => value.message.equals(transaction.serializeMessage())) ?? [];
       assert.ok(template, 'return must exactly match its independently issued quote');
-      const amount = transaction.instructions[0].data.readBigUInt64LE(1);
+      const amount = transaction.instructions[0].data.readBigUInt64LE(8);
       assert.equal(amount, template.amount);
       const height = ++finalizedHeight;
       blockTimestamps.set(height, Math.floor(Date.now() / 1000));
       const destinationHash = requestId === RELAY_SUPPLEMENTARY_RETURN_REQUEST_ID ? RELAY_SUPPLEMENTARY_RETURN_DESTINATION_TX_HASH : RELAY_RETURN_DESTINATION_TX_HASH;
       const entry = Object.freeze({ wire, wireDigest: `sha256:${createHash('sha256').update(Buffer.from(wire, 'base64')).digest('hex')}`, signature, requestId, amount, destinationHash, height });
       returnTransactions.set(signature, entry);
-      balanceEvents.push({ height, from: RELAY_RETURN_SOLVER_EVM.toLowerCase(), to: template.recipient.toLowerCase(), amount });
+      balanceEvents.push({ height, from: RELAY_RETURN_SOLVER_EVM.toLowerCase(), to: template.recipient.toLowerCase(), amount: quotedNativeReturnWei(amount) });
       broadcasts.set(destinationHash, { hash: destinationHash, from: RELAY_RETURN_SOLVER_EVM, height,
-        parsed: { to: USDG, data: '0x', nonce: 0, value: 0n, gas: 21000n, chainId: 4663, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n },
-        logs: [transferLog(RELAY_RETURN_SOLVER_EVM, template.recipient, amount)] });
+        parsed: { to: RELAY_RETURN_SOLVER_EVM, data: '0x', nonce: 0, value: 0n, gas: 21000n, chainId: 4663, maxFeePerGas: 2n, maxPriorityFeePerGas: 1n },
+        logs: [{ address: RELAY_RETURN_SOLVER_EVM, topics: encodeEventTopics({ abi: parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']), eventName: 'FundsMovement' }), data: encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }], [RELAY_RETURN_SOLVER_EVM, template.recipient, `0x${'00'.repeat(20)}`, quotedNativeReturnWei(amount), requestId === RELAY_SUPPLEMENTARY_RETURN_REQUEST_ID ? RELAY_SUPPLEMENTARY_RETURN_ORDER_ID : RELAY_RETURN_ORDER_ID]) }] });
       return reply(signature);
     }
+    if (rpc.method === 'getSlot') return reply(11);
+    if (rpc.method === 'getMultipleAccounts') return reply(sourceRuntimeFixture.observation);
     if (rpc.method === 'getGenesisHash') return reply('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
     if (rpc.method === 'getBalance') return reply({ context: { slot: 1 }, value: 10000000 });
     if (rpc.method === 'getLatestBlockhash') return reply({ context: { slot: 1 }, value: { blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 1000 } });
@@ -1125,7 +1096,9 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
     if (rpc.method === 'getTransaction') {
       const [signature] = rpc.params ?? [];
       if (signature === OUTBOUND_DESTINATION_SIGNATURE) {
-        return reply({ ...outboundDestinationTransaction(operationsSolanaAccount()), blockTime: blockTimestamps.get(100) ?? blockTimestamp });
+        const deposit = [...broadcasts.values()].find(value => value.parsed.data?.startsWith(RELAY_DEPOSIT_SELECTOR));
+        assert.ok(deposit, 'outbound destination follows an accepted native deposit');
+        return reply({ ...outboundDestinationTransaction(operationsSolanaAccount()), blockTime: blockTimestamps.get(deposit.height) });
       }
       const returned = returnTransactions.get(signature);
       if (returned) {
@@ -1134,7 +1107,7 @@ async function fixtureServer(t, directory, operationsAccount = () => `0x${'0'.re
         assert.ok(sourceIndex >= 0);
         return reply({ slot: 6, blockTime: blockTimestamps.get(returned.height),
           meta: { err: null, preTokenBalances: [{accountIndex: sourceIndex, mint: SOLANA_MINT, owner: operationsSolanaAccount(), uiTokenAmount: {amount: returned.amount.toString(), decimals: 6}}], postTokenBalances: [{accountIndex: sourceIndex, mint: SOLANA_MINT, owner: operationsSolanaAccount(), uiTokenAmount: {amount: '0', decimals: 6}}] },
-          transaction: { signatures: [signature], message: {accountKeys} } });
+          transaction: rpc.params[1]?.encoding === 'base64' ? [returned.wire, 'base64'] : { signatures: [signature], message: {accountKeys} } });
       }
       const accepted = acceptedPurchaseTransactionsBySignature.get(signature);
       if (accepted !== undefined) {
@@ -1234,6 +1207,8 @@ function observability(baseUrl, directory, operations) {
   const pin = address => ({ address, runtimeHash: hash });
   return {
     canaries: {
+      nativePrincipal: { chainId: '4663', assetId: 'native', decimals: 18 },
+      gasAccounts: { '4663': operations },
       chainId: 4663,
       contracts: { usdg: { proxy: pin(USDG), implementation: pin(`0x${'2'.repeat(40)}`), decimals: 6 }, poolManager: pin(`0x${'3'.repeat(40)}`), positionManager: pin(`0x${'4'.repeat(40)}`), router: pin(`0x${'5'.repeat(40)}`), quoter: pin(`0x${'6'.repeat(40)}`) },
       roles: { hookAddress: `0x${'7'.repeat(40)}`, cycleId: `0x${'0'.repeat(64)}`, treasury: `0x${'8'.repeat(40)}`, operations },
@@ -1266,15 +1241,15 @@ async function activateTwoPackPolicy(directory) {
     allowedPackIds: ['return-fixture'],
     requestedOrders: 2,
     maxBoostersPerCycle: 2,
-    maxUnitPriceMicroUsdg: '17',
-    maxCycleBudgetMicroUsdg: '34',
-    max24HourBudgetMicroUsdg: '34',
+    maxUnitPriceMicroUsd: '17',
+    maxCycleBudgetMicroUsd: '34',
+    max24HourBudgetMicroUsd: '34',
     paused: false,
     liveMode: true,
     maxCyclesPerDay: 1,
-    perCycleCapMicroUsdg: '34',
-    lossCapMicroUsdg: '1000',
-    maxOutstandingCustodyMicroUsdg: '1000',
+    perCycleCapMicroUsd: '34',
+    lossCapMicroUsd: '1000',
+    maxOutstandingCustodyMicroUsd: '1000',
     executionPaused: false,
     killSwitch: false,
     manualApprovalCycles: 0,
@@ -1363,9 +1338,9 @@ async function testPolicyAuthority(t, directory, operations) {
       assert.match(amountAtomic, /^[1-9][0-9]*$/);
       const onchainCycleId = deriveOnchainCycleId(cycle.cycleId);
       const request = {
-        schema: 'hookemon.claim-process-request.v1', cycleId: cycle.cycleId, onchainCycleId,
+        schema: 'hookemon.claim-process-request.v2', cycleId: cycle.cycleId, onchainCycleId,
         destination: operations,
-        amount: { chainId: '4663', assetId: USDG.toLowerCase(), decimals: 6, amountAtomic },
+        amount: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic },
         call: buildClaimProcessCall(`0x${'c'.repeat(40)}`, onchainCycleId, amountAtomic, operations),
       };
       // stage-driver canonicalizes the production call's bigint argument before hashing.
@@ -1388,7 +1363,7 @@ async function testPolicyAuthority(t, directory, operations) {
         const state = manifest.state;
         assertPayoutManifestUnchanged(state, state.plan);
         const request = {
-          schema: 'hookemon.direct-payout-request.v1', cycleId: cycle.cycleId,
+          schema: 'hookemon.direct-payout-request.v2', cycleId: cycle.cycleId,
           planDigest: state.plan.planDigest, recipientCount: state.plan.payableRecipientCount,
           distributablePool: state.plan.distributablePool,
           heldPositionExclusions: state.heldPositionExclusions, plan: state.plan,
@@ -1481,8 +1456,8 @@ async function testPolicyAuthority(t, directory, operations) {
     policyPublicKeyPath,
     diagnostics,
     publish,
-    assertClaimSubjectsMatched() {
-      assert.ok(futureClaims.size > 0);
+    assertClaimSubjectsMatched(diagnostics) {
+      assert.ok(futureClaims.size > 0, diagnostics);
       assert.deepEqual([...matchedClaims].sort(), [...futureClaims.keys()].sort());
     },
     // The assertions below reopen the same durable store, and `open()` takes the store's exclusive
@@ -1547,6 +1522,22 @@ async function repointCopiedDeploymentIdentity(root, { evm, solana }) {
   return { path, changedLines };
 }
 
+async function isolatedNativeBindingBytes() {
+  const fixture = await nativeRelaySetup({ runtimeMutation: observation => {
+    const data = Buffer.from(observation.value[1].data[0], 'base64'); data.writeBigUInt64LE(1n, 4);
+    observation.value[1].data[0] = data.toString('base64');
+  } });
+  return Buffer.from(JSON.stringify({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663',
+    hook: { address: `0x${'c'.repeat(40)}`, runtimeHash: keccak256('0x6000') },
+    relay: { ...fixture.route, sourceInstruction: capturedSourceInstruction, emitter: RELAY_RETURN_SOLVER_EVM, refundsSupported: true } }));
+}
+async function isolatedFrozenInterfaces() {
+  return { schemaVersion: 'hookemon.interfaces.v1', productPhase: 3, requirementsRevision: 71, architectureRevision: 11,
+    status: 'FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING', bindingManifestDigest: `sha256:${'a'.repeat(64)}`,
+    nativeMigration: { nativePaymentBindingSha256: createHash('sha256').update(await isolatedNativeBindingBytes()).digest('hex') },
+    fixture: 'I-03 isolated test authority; not a release approval' };
+}
+
 async function assertCopiedProductionBytes(root, identity) {
   async function check(relative) {
     for (const entry of await readdir(join(SOURCE_ROOT, relative), {withFileTypes: true})) {
@@ -1558,11 +1549,7 @@ async function assertCopiedProductionBytes(root, identity) {
         if (path === POLICY_ENGINE_RELATIVE) expected = Buffer.from(expected.toString('utf8')
           .replace(PINNED_OPERATIONS_EVM, `const OPERATIONS_EVM = '${identity.evmAddress.toLowerCase()}';`)
           .replace(PINNED_OPERATIONS_SOLANA, `const OPERATIONS_SOLANA = '${identity.solanaPublicKey}';`));
-        if (path === 'architecture/interfaces.json') expected = Buffer.from(`${JSON.stringify({
-          schemaVersion: 'hookemon.interfaces.v1', productPhase: 3, requirementsRevision: 65, architectureRevision: 9,
-          status: 'FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING', bindingManifestDigest: `sha256:${'a'.repeat(64)}`,
-          fixture: 'I-03 isolated test authority; not a release approval',
-        })}\n`);
+        if (path === 'architecture/interfaces.json') expected = Buffer.from(`${JSON.stringify(await isolatedFrozenInterfaces())}\n`);
         assert.deepEqual(await readFile(join(root, path)), expected, `copied runtime byte allowlist: ${path}`);
       }
     }
@@ -1570,6 +1557,7 @@ async function assertCopiedProductionBytes(root, identity) {
   for (const directory of ['adapters', 'runner', 'contracts', 'dashboard', 'domain']) await check(join('packages', directory));
   await check('architecture');
   await check('bindings');
+  assert.deepEqual(await readFile(join(root, 'native-payment-binding.json')), await isolatedNativeBindingBytes());
 }
 
 async function isolatedSource(directory) {
@@ -1585,11 +1573,8 @@ async function isolatedSource(directory) {
     cp(join(SOURCE_ROOT, 'bindings'), join(root, 'bindings'), { recursive: true }),
   ]);
   await symlink(join(SOURCE_ROOT, 'packages', 'adapters', 'node_modules'), join(root, 'packages', 'adapters', 'node_modules'));
-  await writeFile(join(root, 'architecture', 'interfaces.json'), `${JSON.stringify({
-    schemaVersion: 'hookemon.interfaces.v1', productPhase: 3, requirementsRevision: 65, architectureRevision: 9,
-    status: 'FROZEN_BUILD_CONTRACT_PRODUCTION_INTEGRATION_PENDING', bindingManifestDigest: `sha256:${'a'.repeat(64)}`,
-    fixture: 'I-03 isolated test authority; not a release approval',
-  })}\n`);
+  await writeFile(join(root, 'architecture', 'interfaces.json'), `${JSON.stringify(await isolatedFrozenInterfaces())}\n`);
+  await writeFile(join(root, 'native-payment-binding.json'), await isolatedNativeBindingBytes());
   const binPath = await realpath(join(root, 'packages', 'adapters', 'bin', 'hookemon-runner.mjs'));
   let entrypointOutput = '';
   try {
@@ -1686,6 +1671,7 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
     // Keep the existing bounded lease window; authority readiness is coordinated independently.
     HOOKEMON_LEASE_TTL_MS: '30000',
     HOOKEMON_ROBINHOOD_RPC_URL: `${fixture.baseUrl}/rpc`, HOOKEMON_ROBINHOOD_ARCHIVE_RPC_URL: `${fixture.baseUrl}/archive`, HOOKEMON_SOLANA_RPC_URL: `${fixture.baseUrl}/solana`,
+    HOOKEMON_NATIVE_PAYMENT_BINDING_PATH: join(root, 'native-payment-binding.json'), HOOKEMON_RELAY_QUOTE_VALIDITY_MS: '600000',
     HOOKEMON_RELAY_BASE_URL: fixture.baseUrl, HOOKEMON_RELAY_MAX_SETTLEMENT_WINDOW_SECONDS: '300', HOOKEMON_RELAY_API_KEY: RELAY_SYNTHETIC_API_KEY, HOOKEMON_RELAY_SOLANA_MINT: SOLANA_MINT, HOOKEMON_RELAY_SOLANA_DECIMALS: '6', HOOKEMON_RELAY_EVM_DEPOSITORY: `0x${'a'.repeat(40)}`,
     HOOKEMON_COLLECTOR_CRYPT_BASE_URL: `${fixture.baseUrl}/collector`, HOOKEMON_COLLECTOR_CRYPT_API_KEY: COLLECTOR_SYNTHETIC_API_KEY,
     HOOKEMON_COLLECTOR_PRODUCTION_BINDING_AUTHORITY: COLLECTOR_PRODUCTION_BINDING_AUTHORITY_SYNTHETIC_OFFLINE,
@@ -1701,14 +1687,14 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
     // isolated setup itself already agrees with (`identity.command`), never trusted directly.
     HOOKEMON_SIGNER_BACKEND: 'keychain', HOOKEMON_SIGNER_LIVE_MODE: 'true', HOOKEMON_KEYCHAIN_COMMAND: identity.command, HOOKEMON_KEYCHAIN_EVM_ACCOUNT: 'operator-evm', HOOKEMON_KEYCHAIN_SOLANA_ACCOUNT: 'operator-solana',
     HOOKEMON_STANDING_AUTHORITY_PATH: authority.documentPath, HOOKEMON_STANDING_AUTHORITY_OWNER_PUBLIC_KEY_PATH: authority.ownerPublicKeyPath, HOOKEMON_STANDING_AUTHORITY_POLICY_PUBLIC_KEY_PATH: authority.policyPublicKeyPath,
-    HOOKEMON_PACK_CODE: 'return-fixture', HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0', HOOKEMON_MIN_SOLANA_RECEIVE: '0', HOOKEMON_MIN_RETURN_USDG: '0', HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0', HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0', HOOKEMON_EVM_GAS_PRICE_CAP: '2', HOOKEMON_EVM_NATIVE_RESERVE: '2', HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2', HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
-    HOOKEMON_BUDGET_AVAILABLE_PROCESS_USDG: '85', HOOKEMON_BUDGET_PACK_PRICE_USDG: '17', HOOKEMON_BUDGET_OUTBOUND_CAP_USDG: '0', HOOKEMON_BUDGET_RETURN_CAP_USDG: '0', HOOKEMON_BUDGET_OPERATING_MARGIN_USDG: '0', HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath, HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath, NODE_EXTRA_CA_CERTS: fixture.caCert,
+    HOOKEMON_PACK_CODE: 'return-fixture', HOOKEMON_MIN_ROBINHOOD_RECEIVE: '0', HOOKEMON_MIN_SOLANA_RECEIVE: '0', HOOKEMON_MIN_RETURN_ETH: '0', HOOKEMON_NATIVE_GAS_CAP_ROBINHOOD: '0', HOOKEMON_NATIVE_GAS_CAP_SOLANA: '0', HOOKEMON_EVM_GAS_PRICE_CAP: '2', HOOKEMON_EVM_NATIVE_RESERVE: '2', HOOKEMON_SOLANA_PRIORITY_FEE_CAP: '2', HOOKEMON_SOLANA_LAMPORT_RESERVE: '2',
+    HOOKEMON_BUDGET_AVAILABLE_PROCESS_WEI: '85', HOOKEMON_COLLECTOR_PACK_PRICE_ATOMS: '8', HOOKEMON_BUDGET_PACK_PRICE_WEI: '17', HOOKEMON_BUDGET_OUTBOUND_CAP_WEI: '0', HOOKEMON_BUDGET_RETURN_CAP_WEI: '0', HOOKEMON_BUDGET_OPERATING_MARGIN_WEI: '0', HOOKEMON_OBSERVABILITY_CONFIG_PATH: observabilityPath, HOOKEMON_ELIGIBILITY_SNAPSHOT_CONFIG_PATH: eligibilitySnapshotPath, NODE_EXTRA_CA_CERTS: fixture.caCert,
   };
   await assertCopiedProductionBytes(root, identity);
   const run = await runProductionWindow(binPath, env, GRAPH_WINDOW_MS);
   authority.assertHealthy();
   await authority.publish();
-  authority.assertClaimSubjectsMatched();
+  authority.assertClaimSubjectsMatched(JSON.stringify({ run, calls: fixture.calls }));
   const { stderr } = run;
   // Read back through the same copied tree the run used. The real tree validates a stored admission
   // against the production pins, which this run's isolated keys deliberately are not.
@@ -1751,24 +1737,25 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   for (const stage of ['eligibility-snapshot', 'claim-process', 'outbound', 'purchase', 'open', 'epic-gate', 'buyback', 'return', 'payout']) {
     assert.equal(cycle.stages.get(stage)?.status, 'COMPLETE', `stage ${stage} must complete; ${await diagnostics()}`);
   }
-  assert.equal(cycle.stages.get('return')?.evidence?.destinationCreditAmount, '90', await diagnostics());
+  assert.equal(cycle.stages.get('return')?.evidence?.destinationCreditAmount, '9090', await diagnostics());
   assert.equal(cycle.terminalState, 'COMPLETED', await diagnostics());
   const ordinary = fixture.evidence();
   const payout = cycle.stages.get('payout').evidence;
-  assert.equal(payout.totalAllocated.amountAtomic, '90', await diagnostics());
+  assert.equal(payout.totalAllocated.amountAtomic, '9090', await diagnostics());
   assert.equal(payout.recipients.length, 1, await diagnostics());
   const recipient = payout.recipients[0];
   assert.equal(recipient.state, 'FINALIZED');
   assert.equal(recipient.recipient.toLowerCase(), `0x${'9'.repeat(40)}`);
-  assert.deepEqual(recipient.amount, {chainId: 4663, assetId: USDG, decimals: 6, amountAtomic: '90'});
+  assert.deepEqual(recipient.amount, {chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '9090'});
   assert.equal(recipient.refusalEvidence, null);
-  assert.equal(payout.distributablePool.amountAtomic, '90');
+  assert.equal(payout.distributablePool.amountAtomic, '9090');
   assert.equal(payout.dust.amountAtomic, '0');
   assert.equal(payout.quarantine.length, 0);
   assert.equal(BigInt(payout.distributablePool.amountAtomic), BigInt(payout.totalAllocated.amountAtomic) + BigInt(payout.dust.amountAtomic));
-  assert.equal(recipient.finalizedTransfer.from.toLowerCase(), identity.evmAddress.toLowerCase());
-  assert.equal(recipient.finalizedTransfer.sourceBalanceDeltaAtomic, '90');
-  assert.equal(recipient.finalizedTransfer.recipientBalanceDeltaAtomic, '90');
+  assert.equal(recipient.finalizedTransfer.source.toLowerCase(), identity.evmAddress.toLowerCase());
+  assert.equal(recipient.finalizedTransfer.amountWei, '9090');
+  assert.equal(recipient.finalizedTransfer.gasSpentWei, '42000');
+  assert.equal(recipient.finalizedTransfer.calldataDigest, keccak256('0x'));
   assert.ok(ordinary.broadcasts.some(entry => entry.hash === recipient.transactionHash));
   assert.equal(cycle.admission.unitFundingQuote.amountAtomic, '17');
   assert.equal(cycle.admission.aggregateFundingQuote.amountAtomic, '33');
@@ -1776,16 +1763,16 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   assert.equal(cycle.admission.aggregatePurchase.amountAtomic, '16');
   assert.equal(ordinary.purchases.length, 2);
   assert.equal(ordinary.buybacks.length, 1);
-  assert.deepEqual(ordinary.broadcasts.filter(value => value.raw && value.from === identity.evmAddress.toLowerCase()).map(value => value.parsed.nonce), [0, 1, 2, 3]);
-  const custody = cycle.custodyLedgers.get(`eip155:4663\0eip155:4663/erc20:${USDG}`);
-  assert.equal(custody.returnReceived, '90');
-  assert.equal(custody.heldPositions, '33');
+  assert.deepEqual(ordinary.broadcasts.filter(value => value.raw && value.from === identity.evmAddress.toLowerCase()).map(value => value.parsed.nonce), [0, 1, 2]);
+  const custody = cycle.custodyLedgers.get(`4663\0native`);
+  assert.equal(custody.returnReceived, '9090');
+  assert.equal(custody.heldPositions, '0');
   assert.equal(custody.payoutLiability, '0');
   assert.ok(custody.verifiedCurrentBalance);
   assert.equal(cycle.custodyLedgers.get(`4663\0${USDG}`) ?? null, null);
 
-  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 102), 90n);
-  assert.equal(ordinary.finalizedHeight, 102);
+  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 101), 9090n);
+  assert.equal(ordinary.finalizedHeight, 101);
   const frozenEligibility = canonicalJson(cycle.stages.get('eligibility-snapshot').evidence);
   const frozenOrdinaryAttempts = canonicalJson({chain: [...cycle.chainAttempts], operational: [...cycle.operationalAttempts], payout});
   const ordinaryRestart = await runProductionWindow(binPath, env, GRAPH_WINDOW_MS);
@@ -1820,10 +1807,10 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   assert.equal(finalHeld.ownerDecision.choice, 'sell');
   assert.equal(finalHeld.resolution, null);
   assert.equal((await finalRepository.readSupplementarySettlementEvidence(held[0].positionId)).state, 'COMPLETE');
-  const finalCustody = finalCycle.custodyLedgers.get(`eip155:4663\0eip155:4663/erc20:${USDG}`);
-  assert.deepEqual(finalCustody, custody, 'supplementary settlement preserves the ordinary canonical custody buckets and observations');
-  assert.equal(finalCustody.returnReceived, '90');
-  assert.equal(finalCustody.heldPositions, '33');
+  const finalCustody = finalCycle.custodyLedgers.get(`4663\0native`);
+  for (const bucket of ['claimed', 'bridgeOut', 'payoutLiability', 'heldPositions']) assert.equal(finalCustody[bucket], custody[bucket], `ordinary ${bucket} remains unchanged`);
+  assert.equal(finalCustody.returnReceived, '13635');
+  assert.equal(finalCustody.heldPositions, '0');
   assert.equal(finalCustody.payoutLiability, '0');
   assert.ok(finalCustody.verifiedCurrentBalance);
   assert.equal(finalCycle.custodyLedgers.get(`4663\0${USDG}`) ?? null, null);
@@ -1835,15 +1822,14 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   const supplementaryRecipient = supplementaryPayout.recipients[0];
   assert.equal(supplementaryRecipient.state, 'FINALIZED');
   assert.equal(supplementaryRecipient.recipient.toLowerCase(), recipient.recipient.toLowerCase());
-  assert.deepEqual(supplementaryRecipient.amount, {...recipient.amount, amountAtomic: '45'});
+  assert.deepEqual(supplementaryRecipient.amount, {...recipient.amount, amountAtomic: '4545'});
   assert.equal(supplementaryRecipient.refusalEvidence, null);
-  assert.equal(supplementaryRecipient.finalizedTransfer.sourceBalanceDeltaAtomic, '45');
-  assert.equal(supplementaryRecipient.finalizedTransfer.recipientBalanceDeltaAtomic, '45');
-  assert.equal(supplementaryRecipient.finalizedTransfer.recipientBalanceBeforeAtomic, '90');
-  assert.equal(supplementaryRecipient.finalizedTransfer.recipientBalanceAfterAtomic, '135');
-  assert.equal(supplementaryRecipient.finalizedTransfer.from.toLowerCase(), identity.evmAddress.toLowerCase());
+  assert.equal(supplementaryRecipient.finalizedTransfer.amountWei, '4545');
+  assert.equal(supplementaryRecipient.finalizedTransfer.gasSpentWei, '42000');
+  assert.equal(supplementaryRecipient.finalizedTransfer.calldataDigest, keccak256('0x'));
+  assert.equal(supplementaryRecipient.finalizedTransfer.source.toLowerCase(), identity.evmAddress.toLowerCase());
   const supplementaryState = supplementaryPayout.payoutState;
-  assert.deepEqual(supplementaryState.distributablePool, { ...recipient.amount, amountAtomic: '45' });
+  assert.deepEqual(supplementaryState.distributablePool, { ...recipient.amount, amountAtomic: '4545' });
   assert.deepEqual(supplementaryState.plan.totalAllocated, supplementaryState.distributablePool);
   assert.deepEqual(supplementaryState.dust, { ...recipient.amount, amountAtomic: '0' });
   assert.equal(supplementaryState.quarantine.length, 0);
@@ -1860,7 +1846,7 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
 
 
   const completed = fixture.evidence();
-  assert.equal(completed.finalizedHeight, 105);
+  assert.equal(completed.finalizedHeight, 104);
   assert.match(supplementaryRecipient.txHash, /^0x[0-9a-f]{64}$/);
   assert.ok(completed.broadcasts.some(entry => entry.hash === supplementaryRecipient.txHash));
   assert.deepEqual(completed.buybacks.map(([, value]) => value.amountAtomic), [90n, 45n]);
@@ -1869,11 +1855,11 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   assert.equal(fixture.calls.collectorOpenPack, 2);
   assert.equal(fixture.calls.collectorBuyback, 2);
   assert.equal(fixture.calls.collectorSubmitTransaction, 4);
-  assert.deepEqual(completed.broadcasts.filter(value => value.raw && value.from === identity.evmAddress.toLowerCase()).map(value => value.parsed.nonce), [0, 1, 2, 3, 4]);
-  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 105), 135n);
-  assert.equal(fixture.balanceAt(`0x${'2'.repeat(40)}`, 105), 0n);
-  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 101), 0n);
-  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 102), 90n);
+  assert.deepEqual(completed.broadcasts.filter(value => value.raw && value.from === identity.evmAddress.toLowerCase()).map(value => value.parsed.nonce), [0, 1, 2, 3]);
+  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 104), 13635n);
+  assert.equal(fixture.balanceAt(`0x${'2'.repeat(40)}`, 104), 0n);
+  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 100), 0n);
+  assert.equal(fixture.balanceAt(`0x${'9'.repeat(40)}`, 101), 9090n);
   const frozenFinalCycle = canonicalJson({
     cycleIds: await finalRepository.listKnownCycleIds(), terminalState: finalCycle.terminalState,
     chainAttempts: [...finalCycle.chainAttempts], operationalAttempts: [...finalCycle.operationalAttempts],
@@ -1907,9 +1893,7 @@ test('I-01/I-02 literal production loader pays ordinary and held N=2 proceeds ac
   await authority.stop();
   authority.assertHealthy();
   await assertCopiedProductionBytes(root, identity);
-
-
-
+  assert.equal(BigInt(finalCustody.gasSpent.amountAtomic), BigInt(custody.gasSpent.amountAtomic) + 42000n, 'supplementary native payout adds exactly its own gas');
 });
 
 // Supporting in-process scenario uses real composed handlers with synthetic adapters.
@@ -1928,7 +1912,7 @@ const NATIVE_SOLANA_CHAIN_ID = 'solana-mainnet';
 const PRODUCTION_OPERATIONS_EVM = '0xb54aaf746eb1e80afdb5eb0992a75b08db2e4384';
 const PRODUCTION_OPERATIONS_SOLANA = 'BrvhPB9EeAukw8g3jibQDFBYY5abu3Vchdm9ri3PHZNE';
 const N2_GRAPH_PACK_CODE = 'return-fixture';
-const RELAY_FUNDING_ROUTE = Object.freeze({ chainId: '4663', assetId: USDG, decimals: 6 });
+const RELAY_FUNDING_ROUTE = Object.freeze({ chainId: '4663', assetId: 'native', decimals: 18 });
 // Admission purchase quotes use Relay's numeric namespace; Collector observations use native Solana.
 const RELAY_PURCHASE_ROUTE = Object.freeze({ chainId: String(RELAY_SOLANA_CHAIN_ID), assetId: SOLANA_MINT, decimals: 6 });
 
@@ -1971,15 +1955,22 @@ const RELAY_SUPPLEMENTARY_RETURN_ORDER_ID = `0x${'4'.repeat(64)}`;
  * candidate transaction -- this is the request side, independently constructed before any signer or
  * provider response exists.
  */
-function relayReturnInstruction({
-  source, destination, owner, mint, amount, decimals,
-}) {
-  const instruction = buildTransferCheckedInstruction({ source, destination, owner, mint, amount, decimals });
-  return {
-    programId: instruction.programId.toBase58(),
-    keys: instruction.keys.map(key => ({ pubkey: key.pubkey.toBase58(), isSigner: key.isSigner, isWritable: key.isWritable })),
-    data: `0x${instruction.data.toString('hex')}`,
-  };
+const SYNTHETIC_RELAY_PROGRAM = '99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2';
+// Isolated quote rate: each USDC atomic source unit buys 101 wei, never a unit alias.
+const quotedNativeReturnWei = amount => BigInt(amount) * 101n;
+const capturedSourceInstruction = Object.freeze({ programId: SYNTHETIC_RELAY_PROGRAM,
+  discriminatorHex: '0b9c60da27a3b413', dataLengthBytes: 48, amountOffsetBytes: 8, orderIdOffsetBytes: 16 });
+function relayReturnInstruction({ owner, mint, amount, orderId = RELAY_RETURN_ORDER_ID }) {
+  const program = new PublicKey(SYNTHETIC_RELAY_PROGRAM);
+  const depository = PublicKey.findProgramAddressSync([Buffer.from('relay_depository')], program)[0];
+  const vault = PublicKey.findProgramAddressSync([Buffer.from('vault')], program)[0];
+  const accounts = [depository.toBase58(), owner, owner, vault.toBase58(), mint,
+    deriveAssociatedTokenAddress(owner, mint).toBase58(), deriveAssociatedTokenAddress(vault, mint).toBase58(),
+    TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID];
+  const data = Buffer.alloc(48); Buffer.from(capturedSourceInstruction.discriminatorHex, 'hex').copy(data);
+  data.writeBigUInt64LE(BigInt(amount), 8); Buffer.from(orderId.slice(2), 'hex').copy(data, 16);
+  return { programId: SYNTHETIC_RELAY_PROGRAM,
+    keys: accounts.map((pubkey, i) => ({ pubkey, isSigner: i === 1, isWritable: [1, 5, 6].includes(i) })), data: data.toString('hex') };
 }
 
 /**
@@ -2000,8 +1991,8 @@ function relayReturnQuoteRawResponse({ sender, recipient, amountAtomic, instruct
       sender, recipient,
       currencyIn: { currency: { chainId: RELAY_CONSTANTS.SOLANA_CHAIN_ID, address: SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 }, amount: amountAtomic },
       currencyOut: {
-        currency: { chainId: RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID, address: USDG, symbol: 'USDG', decimals: 6 },
-        amount: amountAtomic, minimumAmount: amountAtomic,
+        currency: { chainId: RELAY_CONSTANTS.ROBINHOOD_CHAIN_ID, address: `0x${'00'.repeat(20)}`, symbol: 'ETH', decimals: 18 },
+        amount: quotedNativeReturnWei(amountAtomic).toString(), minimumAmount: quotedNativeReturnWei(amountAtomic).toString(), amountUsd: '0.000080',
       },
     },
     protocol: {
@@ -2010,7 +2001,7 @@ function relayReturnQuoteRawResponse({ sender, recipient, amountAtomic, instruct
         orderData: {
           output: {
             chainId: 'robinhood', deadline: COMPOSED_DEADLINE_UNIX_SECONDS, calls: [],
-            payments: [{ recipient, currency: USDG, expectedAmount: amountAtomic, minimumAmount: amountAtomic }],
+            payments: [{ recipient, currency: `0x${'00'.repeat(20)}`, expectedAmount: quotedNativeReturnWei(amountAtomic).toString(), minimumAmount: quotedNativeReturnWei(amountAtomic).toString() }],
           },
           inputs: [{
             payment: { chainId: 'solana', currency: SOLANA_MINT, amount: amountAtomic },
@@ -2026,7 +2017,7 @@ function relayReturnQuoteRawResponse({ sender, recipient, amountAtomic, instruct
  * (policy-engine.mjs) requires: solvent, unpaused, unused, and internally consistent. */
 function composedProcessLiabilityEvidence(cycleId) {
   return {
-    schema: 'hookemon.process-liability-evidence.v1',
+    schema: 'hookemon.process-liability-evidence.v2',
     chainId: RELAY_FUNDING_ROUTE.chainId,
     assetId: RELAY_FUNDING_ROUTE.assetId,
     decimals: RELAY_FUNDING_ROUTE.decimals,
@@ -2042,7 +2033,7 @@ function composedProcessLiabilityEvidence(cycleId) {
     processClaimCycleUsed: false,
     activeProcessClaimLimit: COMPOSED_EVIDENCE_CEILING_ATOMIC,
     totalLiability: COMPOSED_EVIDENCE_CEILING_ATOMIC,
-    hookUsdgBalance: COMPOSED_EVIDENCE_CEILING_ATOMIC,
+    hookNativeBalance: COMPOSED_EVIDENCE_CEILING_ATOMIC,
     isSolvent: true,
     operations: PRODUCTION_OPERATIONS_EVM,
     ceilingAtomic: COMPOSED_EVIDENCE_CEILING_ATOMIC,
@@ -2050,14 +2041,14 @@ function composedProcessLiabilityEvidence(cycleId) {
 }
 
 /** Relay's own raw exact-output outbound-bridge quote response for one target amount. */
-function composedRawRelayQuote({ requestId, orderId, originAmount, destinationAmount }) {
+function composedRawRelayQuote({ requestId, orderId, originAmount, destinationAmount, sender = PRODUCTION_OPERATIONS_EVM, recipient = PRODUCTION_OPERATIONS_SOLANA }) {
   return {
     requestId,
     steps: [{ kind: 'transaction', id: `step-${requestId}`, requestId, items: [] }],
     details: {
-      sender: PRODUCTION_OPERATIONS_EVM,
-      recipient: PRODUCTION_OPERATIONS_SOLANA,
-      currencyIn: { currency: { chainId: 4663, address: USDG, symbol: 'USDG', decimals: 6 }, amount: originAmount },
+      sender,
+      recipient,
+      currencyIn: { currency: { chainId: 4663, address: `0x${'00'.repeat(20)}`, symbol: 'ETH', decimals: 18 }, amount: originAmount, amountUsd: `${BigInt(originAmount) / 1000000n}.${(BigInt(originAmount) % 1000000n).toString().padStart(6, '0')}` },
       currencyOut: {
         currency: { chainId: RELAY_SOLANA_CHAIN_ID, address: SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6 },
         amount: destinationAmount, minimumAmount: destinationAmount,
@@ -2070,13 +2061,13 @@ function composedRawRelayQuote({ requestId, orderId, originAmount, destinationAm
           output: {
             chainId: 'solana', deadline: COMPOSED_DEADLINE_UNIX_SECONDS, calls: [],
             payments: [{
-              recipient: PRODUCTION_OPERATIONS_SOLANA, currency: SOLANA_MINT,
+              recipient, currency: SOLANA_MINT,
               expectedAmount: destinationAmount, minimumAmount: destinationAmount,
             }],
           },
           inputs: [{
-            payment: { chainId: 'robinhood', currency: USDG, amount: originAmount },
-            refunds: [{ chainId: 'robinhood', currency: USDG, recipient: PRODUCTION_OPERATIONS_EVM, deadline: COMPOSED_DEADLINE_UNIX_SECONDS }],
+            payment: { chainId: 'robinhood', currency: `0x${'00'.repeat(20)}`, amount: originAmount, amountUsd: `${BigInt(originAmount) / 1000000n}.${(BigInt(originAmount) % 1000000n).toString().padStart(6, '0')}` },
+            refunds: [{ chainId: 'robinhood', currency: `0x${'00'.repeat(20)}`, recipient: sender, deadline: COMPOSED_DEADLINE_UNIX_SECONDS }],
           }],
         },
       },
@@ -2090,7 +2081,7 @@ function composedParsedRelayQuote({ requestId, orderId, originAmount, destinatio
     direction: 'OUTBOUND', tradeType: 'EXACT_OUTPUT', requestId, orderId,
     sender: PRODUCTION_OPERATIONS_EVM, recipient: PRODUCTION_OPERATIONS_SOLANA,
     deadlineUnixSeconds: COMPOSED_DEADLINE_UNIX_SECONDS,
-    origin: { chainId: 4663, address: USDG, symbol: 'USDG', decimals: 6, amount: originAmount, amountFormatted: null, minimumAmount: null },
+    origin: { chainId: 4663, address: `0x${'00'.repeat(20)}`, symbol: 'ETH', decimals: 18, amount: originAmount, amountFormatted: null, minimumAmount: null },
     destination: {
       chainId: RELAY_SOLANA_CHAIN_ID, address: SOLANA_MINT, symbol: 'CIRCLE_USD', decimals: 6,
       amount: destinationAmount, amountFormatted: null, minimumAmount: destinationAmount,
@@ -2107,59 +2098,23 @@ function composedRelayIdentity(quote, destinationAmount) {
   };
 }
 
-/**
- * Recovers the digest the policy engine's own normalizer computes for one parsed Relay quote, by
- * submitting a throwaway one-pack admission built around it with a deliberately wrong digest and
- * reading the value the refusal reports back -- the engine is the only source of truth for this
- * value. Adapted from the identical technique in
- * packages/runner/test/automation/admission-identity.test.mjs.
- */
-function composedProbeQuoteDigest(quote) {
-  const probe = { ...quote, quoteDigest: `sha256:${'0'.repeat(64)}` };
-  const candidate = {
-    schema: 'hookemon.policy-admission.v2',
-    cycleId: 'n2-graph-quote-probe',
-    packId: N2_GRAPH_PACK_CODE,
-    quantity: 1,
-    quoteDigest: `sha256:${'0'.repeat(64)}`,
-    unitPurchase: composedTyped(RELAY_PURCHASE_ROUTE, probe.destination.amount),
-    aggregatePurchase: composedTyped(RELAY_PURCHASE_ROUTE, probe.destination.amount),
-    unitFundingQuote: composedTyped(RELAY_FUNDING_ROUTE, probe.origin.amount),
-    aggregateFundingQuote: composedTyped(RELAY_FUNDING_ROUTE, probe.origin.amount),
-    relay: composedRelayIdentity(probe, probe.destination.amount),
-    unitRelay: composedRelayIdentity(probe, probe.destination.amount),
-    unitRelayQuote: probe,
-    relayQuote: probe,
-    processLiabilityEvidence: composedProcessLiabilityEvidence('n2-graph-quote-probe'),
-  };
-  try {
-    assertPolicyAdmission(candidate);
-  } catch (error) {
-    const match = /recomputed (sha256:[0-9a-f]{64})/.exec(error.message);
-    if (match) return match[1];
-  }
-  throw new Error('N=2 graph composed admission: policy engine did not report a recomputed quote digest');
-}
-
-/**
- * A complete, self-consistent hookemon.policy-admission.v2 admission for the N=2 graph, validated
- * against the real, non-test PRODUCTION_ADMISSION_IDENTITY (no createTestOnlyAdmissionIdentity
- * override) -- the same admission a live cycle-start would produce, denominated exactly as
- * buildAdmissionPlanner denominates one.
- */
-function composedN2Admission(cycleId) {
-  const unit = composedParsedRelayQuote({
+async function composedN2Admission(cycleId, now = Date.now) {
+  let unit = composedParsedRelayQuote({
     requestId: `req-unit-${cycleId}`, orderId: `0x${'1'.repeat(64)}`,
     originAmount: UNIT_FUNDING_ATOMIC.toString(), destinationAmount: UNIT_PURCHASE_ATOMIC.toString(),
   });
-  const aggregate = composedParsedRelayQuote({
+  let aggregate = composedParsedRelayQuote({
     requestId: `req-aggregate-${cycleId}`, orderId: `0x${'2'.repeat(64)}`,
     originAmount: AGGREGATE_FUNDING_ATOMIC.toString(), destinationAmount: AGGREGATE_PURCHASE_ATOMIC.toString(),
   });
-  unit.quoteDigest = composedProbeQuoteDigest(unit);
-  aggregate.quoteDigest = composedProbeQuoteDigest(aggregate);
+  async function produced(quote) {
+    const client = createRelayClient({ now, quoteValidityMs: 600000, fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(quote.raw) }) });
+    return client.quote({ direction: 'OUTBOUND', amount: quote.destination.amount, tradeType: 'EXACT_OUTPUT',
+      user: quote.sender, recipient: quote.recipient, skipRouteCheck: true });
+  }
+  unit = await produced(unit); aggregate = await produced(aggregate);
   return {
-    schema: 'hookemon.policy-admission.v2',
+    schema: 'hookemon.policy-admission.v3',
     cycleId,
     packId: N2_GRAPH_PACK_CODE,
     quantity: 2,
@@ -2168,6 +2123,8 @@ function composedN2Admission(cycleId) {
     aggregatePurchase: composedTyped(RELAY_PURCHASE_ROUTE, AGGREGATE_PURCHASE_ATOMIC.toString()),
     unitFundingQuote: composedTyped(RELAY_FUNDING_ROUTE, UNIT_FUNDING_ATOMIC.toString()),
     aggregateFundingQuote: composedTyped(RELAY_FUNDING_ROUTE, AGGREGATE_FUNDING_ATOMIC.toString()),
+    unitFundingUsd: createQuoteUsdValuation({ quote: unit, side: 'origin', amount: composedTyped(RELAY_FUNDING_ROUTE, unit.origin.amount), rounding: 'up', nowMs: now() }),
+    aggregateFundingUsd: createQuoteUsdValuation({ quote: aggregate, side: 'origin', amount: composedTyped(RELAY_FUNDING_ROUTE, aggregate.origin.amount), rounding: 'up', nowMs: now() }),
     relay: composedRelayIdentity(aggregate, AGGREGATE_PURCHASE_ATOMIC.toString()),
     unitRelay: composedRelayIdentity(unit, UNIT_PURCHASE_ATOMIC.toString()),
     unitRelayQuote: unit,
@@ -2182,15 +2139,15 @@ function composedN2PolicyPatch() {
     allowedPackIds: [N2_GRAPH_PACK_CODE],
     requestedOrders: 2,
     maxBoostersPerCycle: 2,
-    maxUnitPriceMicroUsdg: UNIT_FUNDING_ATOMIC.toString(),
-    maxCycleBudgetMicroUsdg: AGGREGATE_FUNDING_ATOMIC.toString(),
-    max24HourBudgetMicroUsdg: AGGREGATE_FUNDING_ATOMIC.toString(),
+    maxUnitPriceMicroUsd: UNIT_FUNDING_ATOMIC.toString(),
+    maxCycleBudgetMicroUsd: AGGREGATE_FUNDING_ATOMIC.toString(),
+    max24HourBudgetMicroUsd: AGGREGATE_FUNDING_ATOMIC.toString(),
     paused: false,
     liveMode: true,
     maxCyclesPerDay: 1,
-    perCycleCapMicroUsdg: AGGREGATE_FUNDING_ATOMIC.toString(),
-    lossCapMicroUsdg: '1000',
-    maxOutstandingCustodyMicroUsdg: '1000',
+    perCycleCapMicroUsd: AGGREGATE_FUNDING_ATOMIC.toString(),
+    lossCapMicroUsd: '1000',
+    maxOutstandingCustodyMicroUsd: '1000',
     executionPaused: false,
     killSwitch: false,
     manualApprovalCycles: 0,
@@ -2313,6 +2270,8 @@ function composedCandidateTransaction({
 }
 
 test('N=2 composed offline scenario: real compose(config) drives purchase through the reviewed fixture binding', { timeout: 30000 }, async t => {
+  const graphTimeMs = Date.now();
+  const graphNow = () => graphTimeMs;
   const directory = await mkdtemp(join(tmpdir(), 'hookemon-n2-composed-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const stateDir = directory;
@@ -2326,9 +2285,9 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   const operationsEvmAccount = privateKeyToAccount(`0x${randomBytes(32).toString('hex')}`);
   const OPERATIONS_EVM_SIGNING_ADDRESS = operationsEvmAccount.address.toLowerCase();
 
-  const setupRepository = await CycleRepository.open(join(directory, 'cycles'));
+  const setupRepository = await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() });
   const cycleId = setupRepository.nextCycleId();
-  const admission = composedN2Admission(cycleId);
+  const admission = await composedN2Admission(cycleId, graphNow);
 
   await mutateOperatorState(statePath, null, state => ({
     ...(state ?? createEmptyOperatorState()),
@@ -2400,6 +2359,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // so `solanaClient`'s own `getTransaction` fixture (further below) can prove the exact same source
   // debit return.mjs's `readFinalizedRelaySourceDebit` independently re-derives.
   let returnSourceSignature = null;
+  const returnSignedBytes = new Map();
   let returnProceedsAtomic = null;
   // Populated by `evmClaimReceiptLogs`'s own `transfer` branch below, from the real decoded
   // arguments of direct payout's own actually-signed-and-broadcast ERC20 `transfer` call -- never a
@@ -2441,10 +2401,11 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
         const signature = signedSolanaTransactionSignature(transactionBase64);
         const transaction = Transaction.from(Buffer.from(transactionBase64, 'base64'));
         const transferChecked = transaction.instructions.find(
-          instruction => instruction.programId.toBase58() === TOKEN_PROGRAM_ID && instruction.data.length === 10 && instruction.data.readUInt8(0) === 12,
+          instruction => instruction.programId.toBase58() === SYNTHETIC_RELAY_PROGRAM && instruction.data.length === 48 && instruction.data.subarray(0, 8).toString('hex') === capturedSourceInstruction.discriminatorHex,
         );
         if (!transferChecked) throw new Error('N=2 composed scenario: return broadcast could not find its own TransferChecked instruction');
-        const proceeds = transferChecked.data.readBigUInt64LE(1);
+        const proceeds = transferChecked.data.readBigUInt64LE(8);
+        returnSignedBytes.set(signature, transactionBase64);
         // The main cycle's own return always broadcasts first, chronologically; the later
         // supplementary held-card sale's own return only ever broadcasts once the main one already
         // has -- a real, structural ordering this scenario's own sequence guarantees, never a guess.
@@ -2925,6 +2886,8 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   const solanaClient = createSolanaRpcClient({
     fetchImpl: async (_url, init) => {
       const body = JSON.parse(init.body);
+      if (body.method === 'getSlot') return jsonRpcResult(11, body.id);
+      if (body.method === 'getMultipleAccounts') return jsonRpcResult(runtimeFixture.observation, body.id);
       if (body.method === 'getAccountInfo') {
         const [address] = body.params;
         // Direct payout's own settlement ATA and, since buyback's own real finalized-ownership
@@ -3070,8 +3033,8 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
         if (signature === returnSourceSignature && returnProceedsAtomic !== null) {
           return jsonRpcResult({
             slot: 5,
-            blockTime: 1_700_000_000,
-            transaction: { message: { accountKeys: [operator.publicKey.toBase58()] } },
+            blockTime: Math.floor(graphTimeMs / 1000),
+            transaction: body.params[1]?.encoding === 'base64' ? [returnSignedBytes.get(signature), 'base64'] : { message: { accountKeys: [operator.publicKey.toBase58()] } },
             meta: {
               err: null,
               preTokenBalances: [{
@@ -3088,8 +3051,8 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
         if (signature === supplementaryReturnSourceSignature && supplementaryReturnProceedsAtomic !== null) {
           return jsonRpcResult({
             slot: 6,
-            blockTime: 1_700_000_100,
-            transaction: { message: { accountKeys: [operator.publicKey.toBase58()] } },
+            blockTime: Math.floor(graphTimeMs / 1000) + 2,
+            transaction: body.params[1]?.encoding === 'base64' ? [returnSignedBytes.get(signature), 'base64'] : { message: { accountKeys: [operator.publicKey.toBase58()] } },
             meta: {
               err: null,
               preTokenBalances: [{
@@ -3129,7 +3092,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   ]);
   // Timestamps deliberately pinned well beyond any realistic wall-clock "now": return's own
   // `returnRelayTerminalState` (cycle-repository.mjs) refuses a destination finality timestamp
-  // older than the real `Date.now()`-based request-creation time it independently records
+  // older than the real `graphNow()`-based request-creation time it independently records
   // (`HELD_RELAY_LATE`), so a receipt-block timestamp frozen in the past would eventually (and did,
   // once this scenario started exercising return for real) drift behind the actual clock.
   // One single, strictly monotonic chain of real, uniquely hashed EVM heights -- never a separate
@@ -3146,22 +3109,23 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // asserted explicitly below. Claim-process is the first real EVM mutation this scenario ever
   // broadcasts, chronologically well before return is even quoted -- its own receipt lands at a
   // distinct, strictly-earlier height, outside this advancing sequence entirely.
-  const EVM_CLAIM_RECEIPT_BLOCK = Object.freeze({ number: 10n, hash: `0x${'9'.repeat(64)}`, timestamp: 1_999_999_000n });
-  const EVM_BLOCK_INITIAL = Object.freeze({ number: 100n, hash: `0x${'e'.repeat(64)}`, timestamp: 2_000_000_100n });
+  const graphTimestamp = BigInt(Math.floor(graphNow() / 1000));
+  const EVM_CLAIM_RECEIPT_BLOCK = Object.freeze({ number: 10n, hash: `0x${'9'.repeat(64)}`, timestamp: graphTimestamp });
+  const EVM_BLOCK_INITIAL = Object.freeze({ number: 1n, hash: `0x${'e'.repeat(64)}`, timestamp: graphTimestamp - 1n });
   const EVM_BLOCK_AFTER_RETURN = Object.freeze({
-    number: 101n, hash: `0x${'d'.repeat(64)}`, timestamp: 2_000_000_101n, parentHash: EVM_BLOCK_INITIAL.hash,
+    number: 101n, hash: `0x${'d'.repeat(64)}`, timestamp: graphTimestamp + 1n, parentHash: EVM_CLAIM_RECEIPT_BLOCK.hash,
   });
   const EVM_BLOCK_AFTER_PAYOUT = Object.freeze({
-    number: 102n, hash: `0x${'c'.repeat(64)}`, timestamp: 2_000_000_102n, parentHash: EVM_BLOCK_AFTER_RETURN.hash,
+    number: 102n, hash: `0x${'c'.repeat(64)}`, timestamp: graphTimestamp + 2n, parentHash: EVM_BLOCK_AFTER_RETURN.hash,
   });
   // The later supplementary held-card sale's own real return/payout inclusion heights, continuing
   // this exact same one monotonic chain -- reachable only once the main cycle's own return/payout
   // have already landed, chained accordingly.
   const EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN = Object.freeze({
-    number: 103n, hash: `0x${'a'.repeat(64)}`, timestamp: 2_000_000_103n, parentHash: EVM_BLOCK_AFTER_PAYOUT.hash,
+    number: 103n, hash: `0x${'a'.repeat(64)}`, timestamp: graphTimestamp + 3n, parentHash: EVM_BLOCK_AFTER_PAYOUT.hash,
   });
   const EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT = Object.freeze({
-    number: 104n, hash: `0x${'f'.repeat(64)}`, timestamp: 2_000_000_104n, parentHash: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN.hash,
+    number: 104n, hash: `0x${'f'.repeat(64)}`, timestamp: graphTimestamp + 4n, parentHash: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN.hash,
   });
   const HOOK_PROCESS_LIABILITY_ATOMIC = 10_000_000n;
   const EVM_NATIVE_BALANCE_ATOMIC = 10_000_000_000_000n;
@@ -3173,73 +3137,27 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // two different real events.
   function evmClaimReceiptDetails(rawTransaction) {
     const parsed = parseTransaction(rawTransaction);
-    let call;
-    try {
-      call = decodeFunctionData({ abi: N2_HOOK_EVENT_ABI, data: parsed.data });
-    } catch {
-      return { logs: [], receiptBlock: EVM_CLAIM_RECEIPT_BLOCK };
-    }
-    if (call.functionName === 'claimProcess') {
-      const [claimCycleId, amountAtomicUsdg, destination] = call.args;
-      return {
-        receiptBlock: EVM_CLAIM_RECEIPT_BLOCK,
-        logs: [
-          {
-            address: COMPOSED_HOOK_ADDRESS,
-            topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'ProcessClaimed', args: { cycleId: claimCycleId, destination } }),
-            data: encodeAbiParameters(
-              [{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-              [amountAtomicUsdg, 1n, amountAtomicUsdg, amountAtomicUsdg],
-            ),
-          },
-          // The USDG credit the claim actually moves, from the hook to the claimed destination.
-          // claim-process's own `readFinalizedErc20TransferCredit` verifies this transfer
-          // independently of the hook's own `ProcessClaimed` event, so both have to agree.
-          {
-            address: USDG,
-            topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'Transfer', args: { from: COMPOSED_HOOK_ADDRESS, to: destination } }),
-            data: encodeAbiParameters([{ type: 'uint256' }], [amountAtomicUsdg]),
-          },
-        ],
-      };
-    }
-    if (call.functionName === 'transfer') {
-      // Direct payout's own real ERC20 `transfer` to a real eligible recipient
-      // (`directTransferCalldata`, payout.mjs) -- the one Transfer log
-      // `readFinalizedErc20TransferProof` (robinhood-rpc.mjs, called from payout's own
-      // `reconcileRecipientAttempt`) independently re-derives the recipient's exact finalized
-      // credit from. `from` is decoded from the transaction's own recovered sender (Operations),
-      // never a value this fixture invents. The main cycle's own payout transfer always lands
-      // first, chronologically, one real block after the return it depends on
-      // (`EVM_BLOCK_AFTER_PAYOUT`, parented to `EVM_BLOCK_AFTER_RETURN`); the later supplementary
-      // held-card sale's own payout transfer, discovered by `payoutTransferAmount` already being
-      // known, lands one real block after ITS OWN return (`EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT`,
-      // parented to `EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN`) -- never the same block as either.
-      const [to, amount] = call.args;
+    if (parsed.data === undefined || parsed.data === '0x') {
+      const amount = parsed.value ?? 0n;
+      assert.ok(amount > 0n, 'native payout carries a positive signed value');
       if (payoutTransferAmount === null) {
         payoutTransferAmount = amount;
-        payoutRecipientAddress = to;
-        return {
-          receiptBlock: EVM_BLOCK_AFTER_PAYOUT,
-          logs: [{
-            address: USDG,
-            topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'Transfer', args: { from: OPERATIONS_EVM_SIGNING_ADDRESS, to } }),
-            data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
-          }],
-        };
+        payoutRecipientAddress = parsed.to;
+        return { receiptBlock: EVM_BLOCK_AFTER_PAYOUT, logs: [] };
       }
       supplementaryPayoutTransferAmount = amount;
-      supplementaryPayoutRecipientAddress = to;
-      return {
-        receiptBlock: EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT,
-        logs: [{
-          address: USDG,
-          topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'Transfer', args: { from: OPERATIONS_EVM_SIGNING_ADDRESS, to } }),
-          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
-        }],
-      };
+      supplementaryPayoutRecipientAddress = parsed.to;
+      return { receiptBlock: EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT, logs: [] };
     }
-    return { logs: [], receiptBlock: EVM_BLOCK_AFTER_RETURN };
+    const call = decodeFunctionData({ abi: N2_HOOK_EVENT_ABI, data: parsed.data });
+    assert.equal(call.functionName, 'claimProcess');
+    const [claimCycleId, amountWei, destination] = call.args;
+    return { receiptBlock: EVM_CLAIM_RECEIPT_BLOCK, logs: [{
+      address: COMPOSED_HOOK_ADDRESS,
+      topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'ProcessClaimed', args: { cycleId: claimCycleId, destination } }),
+      data: encodeAbiParameters([{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
+        [amountWei, 1n, amountWei, amountWei]),
+    }] };
   }
 
   // The one append-only, real, chronologically ordered ledger of every EVM balance-changing event
@@ -3250,8 +3168,15 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // can never change once an entry's own triggering transaction has actually landed.
   function evmBalanceLedger() {
     const events = [];
+    for (const sent of evmBroadcasts.values()) {
+      let principal = 0n;
+      if (sent.parsed.to?.toLowerCase() === COMPOSED_HOOK_ADDRESS.toLowerCase()) {
+        principal = decodeFunctionData({ abi: N2_HOOK_EVENT_ABI, data: sent.parsed.data }).args[1];
+      }
+      events.push({ block: sent.receiptBlock, operationsDelta: principal - 21000n, recipient: null, recipientDelta: 0n });
+    }
     if (returnProceedsAtomic !== null) {
-      events.push({ block: EVM_BLOCK_AFTER_RETURN, operationsDelta: returnProceedsAtomic, recipient: null, recipientDelta: 0n });
+      events.push({ block: EVM_BLOCK_AFTER_RETURN, operationsDelta: quotedNativeReturnWei(returnProceedsAtomic), recipient: null, recipientDelta: 0n });
     }
     if (payoutTransferAmount !== null) {
       events.push({
@@ -3261,7 +3186,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     }
     if (supplementaryReturnProceedsAtomic !== null) {
       events.push({
-        block: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN, operationsDelta: supplementaryReturnProceedsAtomic,
+        block: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN, operationsDelta: quotedNativeReturnWei(supplementaryReturnProceedsAtomic),
         recipient: null, recipientDelta: 0n,
       });
     }
@@ -3271,7 +3196,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
         recipient: supplementaryPayoutRecipientAddress, recipientDelta: supplementaryPayoutTransferAmount,
       });
     }
-    return events;
+    return events.sort((left, right) => Number(left.block.number - right.block.number));
   }
 
   // The finalized head genuinely IS the real inclusion height of the latest real accepted
@@ -3298,12 +3223,13 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     return {
       hash: RELAY_RETURN_DESTINATION_TX_HASH,
       sender: RELAY_RETURN_SOLVER_EVM,
-      parsed: { to: USDG, data: '0x', value: 0n, nonce: 0, gas: 21_000n, chainId: 4663, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+      parsed: { to: RELAY_RETURN_SOLVER_EVM, data: '0x', value: 0n, nonce: 0, gas: 21_000n, chainId: 4663, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
       receiptBlock: EVM_BLOCK_AFTER_RETURN,
       logs: [{
-        address: USDG,
-        topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'Transfer', args: { from: RELAY_RETURN_SOLVER_EVM, to: OPERATIONS_EVM_SIGNING_ADDRESS } }),
-        data: encodeAbiParameters([{ type: 'uint256' }], [returnProceedsAtomic]),
+        address: RELAY_RETURN_SOLVER_EVM,
+        topics: encodeEventTopics({ abi: parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']), eventName: 'FundsMovement' }),
+        data: encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }],
+          [RELAY_RETURN_SOLVER_EVM, OPERATIONS_EVM_SIGNING_ADDRESS, `0x${'00'.repeat(20)}`, quotedNativeReturnWei(returnProceedsAtomic), RELAY_RETURN_ORDER_ID]),
       }],
     };
   }
@@ -3317,12 +3243,13 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     return {
       hash: RELAY_SUPPLEMENTARY_RETURN_DESTINATION_TX_HASH,
       sender: RELAY_RETURN_SOLVER_EVM,
-      parsed: { to: USDG, data: '0x', value: 0n, nonce: 0, gas: 21_000n, chainId: 4663, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
+      parsed: { to: RELAY_RETURN_SOLVER_EVM, data: '0x', value: 0n, nonce: 0, gas: 21_000n, chainId: 4663, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n },
       receiptBlock: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN,
       logs: [{
-        address: USDG,
-        topics: encodeEventTopics({ abi: N2_HOOK_EVENT_ABI, eventName: 'Transfer', args: { from: RELAY_RETURN_SOLVER_EVM, to: OPERATIONS_EVM_SIGNING_ADDRESS } }),
-        data: encodeAbiParameters([{ type: 'uint256' }], [supplementaryReturnProceedsAtomic]),
+        address: RELAY_RETURN_SOLVER_EVM,
+        topics: encodeEventTopics({ abi: parseAbi(['event FundsMovement(address from, address to, address currency, uint256 amount, bytes metadata)']), eventName: 'FundsMovement' }),
+        data: encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes' }],
+          [RELAY_RETURN_SOLVER_EVM, OPERATIONS_EVM_SIGNING_ADDRESS, `0x${'00'.repeat(20)}`, quotedNativeReturnWei(supplementaryReturnProceedsAtomic), RELAY_SUPPLEMENTARY_RETURN_ORDER_ID]),
       }],
     };
   }
@@ -3338,6 +3265,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
 
   const robinhoodStub = {
     async getChainId() { return 4663; },
+    async getCode() { return '0x6000'; },
     async readContract({ functionName } = {}) {
       // `isFrozen` is direct payout's own real pre-admission USDG freeze check
       // (`isRecipientFrozen`, payout.mjs) -- a real recipient, never frozen in this scenario.
@@ -3359,7 +3287,9 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     async getTransactionCount() { return evmNonce; },
     async estimateGas() { return 60_000n; },
     async estimateFeesPerGas() { return { maxFeePerGas: 2n, maxPriorityFeePerGas: 1n }; },
-    async getBalance() { return EVM_NATIVE_BALANCE_ATOMIC; },
+    async getBalance({ address, blockNumber } = {}) {
+      return (await historicalEvidenceStub.readNativeBalanceAtBlock({ account: address, blockNumber: blockNumber ?? currentEvmFinalizedBlock().number, blockHash: currentEvmFinalizedBlock().hash })).value;
+    },
     async sendRawTransaction({ serializedTransaction }) {
       const hash = keccak256(serializedTransaction);
       const parsed = parseTransaction(serializedTransaction);
@@ -3376,7 +3306,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
       if (!sent) return null;
       return {
         hash: sent.hash, from: sent.sender, to: sent.parsed.to, input: sent.parsed.data, data: sent.parsed.data,
-        value: sent.parsed.value ?? 0n, nonce: sent.parsed.nonce, gas: sent.parsed.gas, chainId: sent.parsed.chainId,
+        blockNumber: sent.receiptBlock.number, blockHash: sent.receiptBlock.hash, value: sent.parsed.value ?? 0n, nonce: sent.parsed.nonce, gas: sent.parsed.gas, chainId: sent.parsed.chainId,
         maxFeePerGas: sent.parsed.maxFeePerGas, maxPriorityFeePerGas: sent.parsed.maxPriorityFeePerGas,
       };
     },
@@ -3391,12 +3321,22 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
       // (`sent.receiptBlock`) -- never one shared block standing in for two different transactions.
       return {
         transactionHash: sent.hash, blockNumber: sent.receiptBlock.number, blockHash: sent.receiptBlock.hash,
-        status: 1, from: sent.sender, to: sent.parsed.to,
-        logs: sent.logs.map((log, index) => ({ ...log, logIndex: BigInt(index) })),
+        status: 'success', gasUsed: 21000n, effectiveGasPrice: 1n, from: sent.sender, to: sent.parsed.to,
+        logs: sent.logs.map((log, index) => ({ ...log, logIndex: index, transactionHash: sent.hash, blockHash: sent.receiptBlock.hash, blockNumber: sent.receiptBlock.number })),
       };
     },
   };
   const historicalEvidenceStub = {
+    async readNativeBalanceAtBlock({ account, blockNumber, blockHash }) {
+      const isOperations = account?.toLowerCase() === OPERATIONS_EVM_SIGNING_ADDRESS.toLowerCase();
+      let value = isOperations ? EVM_NATIVE_BALANCE_ATOMIC : 0n;
+      for (const event of evmBalanceLedger()) {
+        if (event.block.number > blockNumber) continue;
+        if (isOperations) value += event.operationsDelta;
+        else if (event.recipient?.toLowerCase() === account?.toLowerCase()) value += event.recipientDelta;
+      }
+      return { value, blockNumber, blockHash };
+    },
     async readHookProcessStateAtBlock({ blockNumber, blockHash }) {
       return {
         processLiability: HOOK_PROCESS_LIABILITY_ATOMIC,
@@ -3471,12 +3411,17 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     }
     if (path === '/quote/v2') {
       const body = JSON.parse(init.body);
+      if (body.originChainId === 4663) {
+        const raw = composedRawRelayQuote({ requestId: `valuation-${body.amount}`, orderId: `0x${'a'.repeat(64)}`,
+          originAmount: body.amount, destinationAmount: '1', sender: body.user, recipient: body.recipient });
+        return { ok: true, status: 200, text: async () => JSON.stringify(raw) };
+      }
       relayReturnQuoteCallCount += 1;
       const isSupplementary = relayReturnQuoteCallCount > 1;
       const sourceAta = deriveAssociatedTokenAddress(operator.publicKey.toBase58(), SOLANA_MINT).toBase58();
       const instruction = relayReturnInstruction({
         source: sourceAta, destination: RELAY_RETURN_DEPOSITORY_SOLANA, owner: operator.publicKey.toBase58(),
-        mint: SOLANA_MINT, amount: BigInt(body.amount), decimals: 6,
+        mint: SOLANA_MINT, amount: BigInt(body.amount), decimals: 6, orderId: isSupplementary ? RELAY_SUPPLEMENTARY_RETURN_ORDER_ID : RELAY_RETURN_ORDER_ID,
       });
       const raw = relayReturnQuoteRawResponse({
         sender: body.user, recipient: body.recipient, amountAtomic: body.amount, instruction,
@@ -3504,7 +3449,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     }
     throw new Error(`N=2 composed scenario: unexpected Relay request ${path}`);
   };
-  const relayStub = createRelayClient({ fetchImpl: relayFetchImpl });
+  const relayStub = createRelayClient({ now: graphNow, quoteValidityMs: 600000, fetchImpl: relayFetchImpl });
   if (process.env.N2_TRACE === '1') {
     const bi = v => (typeof v === 'bigint' ? v.toString() : v);
     for (const [obj, label] of [[robinhoodStub, 'robinhood'], [historicalEvidenceStub, 'archive']]) {
@@ -3524,7 +3469,12 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     }
   }
 
+  const runtimeFixture = await nativeRelaySetup({ runtimeMutation: observation => { const bytes = Buffer.from(observation.value[1].data[0], 'base64'); bytes.writeBigUInt64LE(1n, 4); observation.value[1].data[0] = bytes.toString('base64'); } });
+  const nativePaymentBinding = createTestNativePaymentBinding({ schema: 'hookemon.native-payment-binding.v1', chainId: '4663',
+    hook: { address: COMPOSED_HOOK_ADDRESS, runtimeHash: keccak256('0x6000') }, relay: { ...runtimeFixture.route, sourceInstruction: capturedSourceInstruction, emitter: RELAY_RETURN_SOLVER_EVM } }, createTestProfileMutationAuthority());
   const config = {
+    now: graphNow,
+    nativePaymentBinding,
     stateDir,
     statePath,
     workerOwner: 'n2-composed-worker',
@@ -3570,23 +3520,12 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
       vault: `0x${'b'.repeat(40)}`, hook: COMPOSED_HOOK_ADDRESS, usdg: USDG, usdgDecimals: 6,
       treasury: `0x${'8'.repeat(40)}`, pool: null,
     },
-    moneyConfiguration: {
-      schema: 'hookemon.money-configuration.v1',
-      assets: { usdg: RELAY_FUNDING_ROUTE, solanaStablecoin: RELAY_PURCHASE_ROUTE },
-      minimums: {
-        robinhoodReceive: { ...RELAY_FUNDING_ROUTE, amountAtomic: '0' },
-        solanaReceive: { ...RELAY_PURCHASE_ROUTE, amountAtomic: '0' },
-        returnUsdg: { ...RELAY_FUNDING_ROUTE, amountAtomic: '0' },
-      },
-      evm: {
-        perTransactionGasPriceCap: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
-        nativeReserve: { chainId: '4663', assetId: 'native', decimals: 18, amountAtomic: '2' },
-      },
-      solana: {
-        priorityFeeCap: { chainId: String(RELAY_SOLANA_CHAIN_ID), assetId: 'microlamports-per-compute-unit', decimals: 0, amountAtomic: '10000' },
-        lamportReserve: { chainId: String(RELAY_SOLANA_CHAIN_ID), assetId: 'native', decimals: 9, amountAtomic: '2' },
-      },
-    },
+    moneyConfiguration: productionMoneyConfiguration({
+      minimums: { robinhoodReceive: { ...RELAY_FUNDING_ROUTE, amountAtomic: '0' }, solanaReceive: { ...RELAY_PURCHASE_ROUTE, amountAtomic: '0' } },
+      evm: { nativeReserve: { ...RELAY_FUNDING_ROUTE, amountAtomic: '2' } },
+      solana: { priorityFeeCap: { chainId: '792703809', assetId: 'microlamports-per-compute-unit', decimals: 0, amountAtomic: '10000' },
+        lamportReserve: { chainId: '792703809', assetId: 'native', decimals: 9, amountAtomic: '2' } },
+    }),
     signerClient,
     preflightAuthority: createTestProfileMutationAuthority(),
     networkIdentity: {
@@ -3605,10 +3544,6 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     observabilityDeps: {
       fetchImpl: async () => ({ ok: true, status: 204 }),
       logger: { debug() {}, info() {}, warn() {}, error() {} },
-      readers: {
-        async readUsdgPaused() { return false; },
-        async readUsdgFrozen() { return false; },
-      },
     },
     adapters: {
       robinhood: { client: robinhoodStub, historicalEvidenceClient: historicalEvidenceStub },
@@ -3654,7 +3589,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   } finally {
     await claimComposition.shutdown();
   }
-  const claimRepository = await CycleRepository.open(join(directory, 'cycles'));
+  const claimRepository = await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() });
   const claimCycleAfterFirstTick = await claimRepository.describeCycle(cycleId);
   const claimStageAfterFirstTick = claimCycleAfterFirstTick.stages.get('claim-process') ?? null;
   assert.equal(
@@ -3695,8 +3630,9 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // Reopened fresh, like the literal-CLI test's own read-back above: durable state is read through
   // a new repository handle rather than the pre-run `setupRepository`, since compose() itself
   // opened and wrote through its own separate durable-store connection.
-  const repository = await CycleRepository.open(join(directory, 'cycles'));
+  const repository = await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() });
   const cycle = await repository.describeCycle(cycleId);
+
   const purchaseAttempt = await repository.readOperationalStageAttempt(cycleId, 'purchase');
   const buybackAttempt = await repository.readOperationalStageAttempt(cycleId, 'buyback');
   const returnAttempt = await repository.readOperationalStageAttempt(cycleId, 'return');
@@ -3786,34 +3722,30 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   assert.equal(cycle.terminalState, 'COMPLETED', `the cycle must reach full terminal closure now that every required stage, including payout, has genuinely completed; ${diagnostics()}`);
 
   const payoutEvidence = cycle.stages.get('payout').evidence;
-  assert.equal(payoutEvidence.schema, 'hookemon.direct-payout-result.v1', `payout must finalize with its own real result evidence shape; ${diagnostics()}`);
-  assert.equal(payoutEvidence.distributablePool.amountAtomic, '90', `the distributable pool must equal exactly the return's real 90-unit finalized credit; ${diagnostics()}`);
-  assert.equal(payoutEvidence.distributablePool.assetId?.toLowerCase(), USDG.toLowerCase(), `the distributable pool must be denominated in USDG; ${diagnostics()}`);
+  assert.equal(payoutEvidence.schema, 'hookemon.direct-payout-result.v2', `payout must finalize with its own real result evidence shape; ${diagnostics()}`);
+  assert.equal(payoutEvidence.distributablePool.amountAtomic, '9090', `the distributable pool must equal exactly the return's real 9090-wei finalized credit; ${diagnostics()}`);
+  assert.equal(payoutEvidence.distributablePool.assetId?.toLowerCase(), 'native', `the distributable pool must be denominated in ETH; ${diagnostics()}`);
   assert.equal(payoutEvidence.dust.amountAtomic, '0', `no dust may be retained when the one eligible holder's exact share consumes the whole pool; ${diagnostics()}`);
-  assert.equal(payoutEvidence.totalAllocated.amountAtomic, '90', `the total allocated amount must exactly conserve the distributable pool against the recorded dust (90 = 90 + 0); ${diagnostics()}`);
+  assert.equal(payoutEvidence.totalAllocated.amountAtomic, '9090', `the total allocated amount must exactly conserve the distributable pool against the recorded dust (9090 = 9090 + 0); ${diagnostics()}`);
   assert.equal(payoutEvidence.quarantine.length, 0, `no recipient may be quarantined in this scenario; ${diagnostics()}`);
   assert.equal(payoutEvidence.recipients.length, 1, `exactly the one eligible holder must receive a payout attempt; ${diagnostics()}`);
   const [payoutRecipientEntry] = payoutEvidence.recipients;
   assert.equal(payoutRecipientEntry.recipient?.toLowerCase(), ELIGIBLE_HOLDER_ADDRESS.toLowerCase(), `the payout must credit exactly the one eligible holder, never a different or invented address; ${diagnostics()}`);
   assert.equal(payoutRecipientEntry.state, 'FINALIZED', `the recipient's own payout attempt must reach FINALIZED, a genuine finalized recipient payment; ${diagnostics()}`);
   assert.equal(payoutRecipientEntry.refusalEvidence, null, `a finalized recipient attempt must carry no refusal evidence; ${diagnostics()}`);
-  assert.equal(payoutRecipientEntry.amount.amountAtomic, '90', `the recipient must be credited exactly the real 90-unit return proceeds, never a partial or invented amount; ${diagnostics()}`);
-  assert.equal(payoutRecipientEntry.amount.assetId?.toLowerCase(), USDG.toLowerCase(), `the recipient's credit must be denominated in USDG; ${diagnostics()}`);
-  assert.equal(payoutRecipientEntry.amount.decimals, 6, `the recipient's credit must carry USDG's real decimals; ${diagnostics()}`);
+  assert.equal(payoutRecipientEntry.amount.amountAtomic, '9090', `the recipient must be credited exactly the real 90-unit return proceeds, never a partial or invented amount; ${diagnostics()}`);
+  assert.equal(payoutRecipientEntry.amount.assetId?.toLowerCase(), 'native', `the recipient's credit must be denominated in ETH; ${diagnostics()}`);
+  assert.equal(payoutRecipientEntry.amount.decimals, 18, `the recipient's credit must carry ETH's real decimals; ${diagnostics()}`);
   assert.equal(typeof payoutRecipientEntry.transactionHash, 'string', `a finalized payout attempt must record the real broadcast transaction hash; ${diagnostics()}`);
   const finalizedTransfer = payoutRecipientEntry.finalizedTransfer;
   assert.notEqual(finalizedTransfer, null, `a finalized payout attempt must carry its own independently re-derived finalized-transfer evidence; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.from?.toLowerCase(), OPERATIONS_EVM_SIGNING_ADDRESS.toLowerCase(), `the finalized transfer's own recovered sender must be the configured Operations EVM account; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.to?.toLowerCase(), ELIGIBLE_HOLDER_ADDRESS.toLowerCase(), `the finalized transfer's own recipient must be the one eligible holder; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.amount.amountAtomic, '90', `the finalized transfer's own re-derived amount must exactly equal the recipient's credited amount; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.sourceBalanceDeltaAtomic, '90', `the independently observed historical balance evidence must prove Operations' own USDG balance decreased by exactly 90; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.recipientBalanceDeltaAtomic, '90', `the independently observed historical balance evidence must prove the recipient's own USDG balance increased by exactly 90; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.receiptBlockHash, EVM_BLOCK_AFTER_PAYOUT.hash, `the finalized transfer must be anchored to payout's own real receipt block, distinct from return's; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.previousBlockHash, EVM_BLOCK_AFTER_RETURN.hash, `payout's own canonical-parent proof must bind to return's own real receipt block as its genuine parent -- payout's predecessor already, truthfully, contains the prior finalized return; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.sourceBalanceBeforeAtomic, '90', `at the block right before payout (return's own receipt block), Operations must already show the real settled return credit; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.sourceBalanceAfterAtomic, '0', `at payout's own receipt block, Operations must show the real credit fully debited by the real transfer; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.recipientBalanceBeforeAtomic, '0', `at the block right before payout, the recipient must show no prior credit; ${diagnostics()}`);
-  assert.equal(finalizedTransfer.recipientBalanceAfterAtomic, '90', `at payout's own receipt block, the recipient must show exactly the real transferred amount; ${diagnostics()}`);
+  assert.equal(finalizedTransfer.source?.toLowerCase(), OPERATIONS_EVM_SIGNING_ADDRESS.toLowerCase(), `the finalized transfer's own recovered sender must be the configured Operations EVM account; ${diagnostics()}`);
+  assert.equal(finalizedTransfer.recipient?.toLowerCase(), ELIGIBLE_HOLDER_ADDRESS.toLowerCase(), `the finalized transfer's own recipient must be the one eligible holder; ${diagnostics()}`);
+  assert.equal(finalizedTransfer.amountWei, '9090', `the finalized transfer's own re-derived amount must exactly equal the recipient's credited amount; ${diagnostics()}`);
+  assert.equal(finalizedTransfer.gasSpentWei, '21000', 'the signed native payment accounts for gas separately');
+  assert.equal(finalizedTransfer.calldataDigest, keccak256('0x'), 'the recipient payment carries no contract calldata');
+  assert.equal(finalizedTransfer.blockHash, EVM_BLOCK_AFTER_PAYOUT.hash);
+  assert.equal(finalizedTransfer.receiptStatus, 'success');
 
   // Explicit chronology and historic-stability proof: one single, strictly monotonic chain of real,
   // distinct, uniquely hashed EVM heights (claim outside the sequence; then initial, after-return,
@@ -3824,10 +3756,10 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     EVM_CLAIM_RECEIPT_BLOCK.hash, EVM_BLOCK_INITIAL.hash, EVM_BLOCK_AFTER_RETURN.hash, EVM_BLOCK_AFTER_PAYOUT.hash,
   ];
   assert.equal(new Set(composedBlockHashes).size, composedBlockHashes.length, `every distinct real EVM block height this scenario ever produces must carry its own distinct hash, never one hash reused across two heights; ${diagnostics()}`);
-  assert.ok(EVM_CLAIM_RECEIPT_BLOCK.number < EVM_BLOCK_INITIAL.number, `claim-process's own receipt must land strictly before the scenario's initial finalized head; ${diagnostics()}`);
+  assert.ok(EVM_BLOCK_INITIAL.number < EVM_CLAIM_RECEIPT_BLOCK.number, `claim-process's own receipt must land strictly before the scenario's initial finalized head; ${diagnostics()}`);
   assert.ok(EVM_BLOCK_INITIAL.number < EVM_BLOCK_AFTER_RETURN.number, `return's own inclusion height must land strictly after the initial finalized head; ${diagnostics()}`);
   assert.ok(EVM_BLOCK_AFTER_RETURN.number < EVM_BLOCK_AFTER_PAYOUT.number, `payout's own inclusion height must land strictly after return's; ${diagnostics()}`);
-  assert.equal(EVM_BLOCK_AFTER_RETURN.parentHash, EVM_BLOCK_INITIAL.hash, `return's own receipt block must chain to the initial finalized head as its real, direct parent; ${diagnostics()}`);
+  assert.equal(EVM_BLOCK_AFTER_RETURN.parentHash, EVM_CLAIM_RECEIPT_BLOCK.hash, `return's own receipt block must chain to the initial finalized head as its real, direct parent; ${diagnostics()}`);
   assert.equal(EVM_BLOCK_AFTER_PAYOUT.parentHash, EVM_BLOCK_AFTER_RETURN.hash, `payout's own receipt block must chain to return's own receipt block as its real, direct parent; ${diagnostics()}`);
   // The finalized head genuinely IS the latest real accepted transaction's own inclusion height by
   // the time the tick completes -- never a fixed marker disconnected from what actually landed.
@@ -3839,11 +3771,12 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // captured genuinely BEFORE payout ever ran (payout-availability's own pre-signing minimum-balance
   // check, reached only after return settled and only before payout signs) -- an immutable, durably
   // persisted "before" checkpoint this session never re-derives after the fact.
-  const evmCustodyCanonicalKey = `eip155:4663${String.fromCharCode(0)}eip155:4663/erc20:${USDG.toLowerCase()}`;
+  const evmCustodyCanonicalKey = `4663${String.fromCharCode(0)}native`;
   const evmCustodyLedgerRow = cycle.custodyLedgers?.get?.(evmCustodyCanonicalKey) ?? null;
-  assert.notEqual(evmCustodyLedgerRow, null, `the canonical EVM USDG custody row must be durable; ${diagnostics()}`);
+  assert.notEqual(evmCustodyLedgerRow, null, `the canonical EVM ETH custody row must be durable; ${diagnostics()}`);
+  const expectedReturnBalance = EVM_NATIVE_BALANCE_ATOMIC + AGGREGATE_FUNDING_ATOMIC - 21000n + quotedNativeReturnWei(90n);
   const verifiedBeforePayout = evmCustodyLedgerRow.verifiedCurrentBalance;
-  assert.equal(verifiedBeforePayout.balance.amountAtomic, '90', `production's own durably recorded pre-payout observation of Operations' balance at return's own receipt height must show exactly the settled return credit; ${diagnostics()}`);
+  assert.equal(verifiedBeforePayout.balance.amountAtomic, expectedReturnBalance.toString(), `production's own durably recorded pre-payout observation of Operations' balance at return's own receipt height must show exactly the settled return credit; ${diagnostics()}`);
   assert.equal(verifiedBeforePayout.finality.height, EVM_BLOCK_AFTER_RETURN.number.toString(), `production's own pre-payout observation must be pinned to return's own real inclusion height; ${diagnostics()}`);
   assert.equal(verifiedBeforePayout.finality.hash, EVM_BLOCK_AFTER_RETURN.hash, `production's own pre-payout observation must be pinned to return's own real inclusion hash; ${diagnostics()}`);
   // Directly re-querying that exact same height/hash/account triple, fresh, now that payout has
@@ -3851,24 +3784,24 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // byte-identical value production itself durably observed before payout ever ran -- proving this
   // fixture's own historical account state is never retroactively rewritten once a later real
   // transaction is accepted.
-  const returnHeightOperationsBalanceAfterPayout = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: OPERATIONS_EVM_SIGNING_ADDRESS,
+  const returnHeightOperationsBalanceAfterPayout = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: OPERATIONS_EVM_SIGNING_ADDRESS,
     blockNumber: EVM_BLOCK_AFTER_RETURN.number, blockHash: EVM_BLOCK_AFTER_RETURN.hash,
   });
-  assert.equal(returnHeightOperationsBalanceAfterPayout.value, 90n, `Operations' own historical balance at return's own receipt height must remain byte-identical to production's own pre-payout observation (90), even when queried fresh after payout's own later transfer has since been accepted; ${diagnostics()}`);
-  const returnHeightRecipientBalanceAfterPayout = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: ELIGIBLE_HOLDER_ADDRESS,
+  assert.equal(returnHeightOperationsBalanceAfterPayout.value, expectedReturnBalance, `Operations' own historical balance at return's own receipt height must remain byte-identical to production's own pre-payout observation (90), even when queried fresh after payout's own later transfer has since been accepted; ${diagnostics()}`);
+  const returnHeightRecipientBalanceAfterPayout = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: ELIGIBLE_HOLDER_ADDRESS,
     blockNumber: EVM_BLOCK_AFTER_RETURN.number, blockHash: EVM_BLOCK_AFTER_RETURN.hash,
   });
   assert.equal(returnHeightRecipientBalanceAfterPayout.value, 0n, `the recipient's own historical balance at return's own receipt height must remain stable at exactly 0 -- payout had not yet happened at that real height, and querying it later can never change that; ${diagnostics()}`);
   // The scenario's own initial finalized head (before return was even known) sits strictly below
   // both later thresholds and so must remain stable at exactly 0 for Operations, forever, however
   // many later real transactions are accepted.
-  const initialHeadOperationsBalanceAfterTick = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: OPERATIONS_EVM_SIGNING_ADDRESS,
+  const initialHeadOperationsBalanceAfterTick = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: OPERATIONS_EVM_SIGNING_ADDRESS,
     blockNumber: EVM_BLOCK_INITIAL.number, blockHash: EVM_BLOCK_INITIAL.hash,
   });
-  assert.equal(initialHeadOperationsBalanceAfterTick.value, 0n, `Operations' own historical balance at the scenario's initial finalized head must remain stable at exactly 0 after both return and payout have since been accepted; ${diagnostics()}`);
+  assert.equal(initialHeadOperationsBalanceAfterTick.value, EVM_NATIVE_BALANCE_ATOMIC, `Operations' own historical balance at the scenario's initial finalized head must remain stable at exactly 0 after both return and payout have since been accepted; ${diagnostics()}`);
   assert.equal(
     purchaseAttempt?.attempt?.state, 'RECONCILED',
     `purchase's operational attempt must remain durably reconciled from the prior checkpoint; ${diagnostics()}`,
@@ -3879,40 +3812,37 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   );
 
   const claimAttemptAfterMainTick = await repository.readOperationalStageAttempt(cycleId, 'claim-process');
-  const claimCanonicalKey = `eip155:4663${String.fromCharCode(0)}eip155:4663/erc20:${USDG.toLowerCase()}`;
+  const claimCanonicalKey = `4663${String.fromCharCode(0)}native`;
   const claimCanonicalLedger = cycle.custodyLedgers?.get?.(claimCanonicalKey) ?? null;
   assert.notEqual(claimCanonicalLedger, null, `claim-process's canonical CAIP-keyed custody row must be durable; ${diagnostics()}`);
-  assert.equal(claimCanonicalLedger.schema, 'hookemon.custody-ledger.v2', `the canonical EVM USDG custody row must be the v2 shape; ${diagnostics()}`);
+  assert.equal(claimCanonicalLedger.schema, 'hookemon.custody-ledger.v3', `the native ETH custody row must retain principal and gas in v3; ${diagnostics()}`);
   assert.equal(claimCanonicalLedger.claimed, AGGREGATE_FUNDING_ATOMIC.toString(), `claim-process must record exactly the aggregate cycle release as claimed; ${diagnostics()}`);
-  assert.equal(claimCanonicalLedger.heldPositions, '33', `pack 1's held-liability value must be recorded under this exact same canonical row, not a competing raw one; ${diagnostics()}`);
-  assert.equal(claimCanonicalLedger.returnReceived, '90', `return must have bridged exactly pack 0's real 90-unit Solana proceeds back to this one canonical EVM USDG custody row; ${diagnostics()}`);
+  assert.equal(claimCanonicalLedger.heldPositions, '0', `pack 1's held-liability value must be recorded under this exact same canonical row, not a competing raw one; ${diagnostics()}`);
+  assert.equal(claimCanonicalLedger.returnReceived, '9090', `return must have bridged exactly pack 0's real 90-unit Solana proceeds back to this one canonical EVM ETH custody row; ${diagnostics()}`);
   assert.equal(claimAttemptAfterMainTick, null, `claim-process's own attempt shape (a chain-transaction attempt, not the generic operational-attempt state machine) is not what \`readOperationalStageAttempt\` reads -- always null for this stage, by design; ${diagnostics()}`);
 
   const returnEvidence = cycle.stages.get('return').evidence;
-  assert.equal(returnEvidence.schema, 'hookemon.return-relay-settlement-evidence.v1', `return must finalize with its own real settled-leg evidence shape; ${diagnostics()}`);
+  assert.equal(returnEvidence.schema, 'hookemon.return-relay-settlement-evidence.v2', `return must finalize with its own real settled-leg evidence shape; ${diagnostics()}`);
   assert.equal(returnEvidence.finalized, true, `return's payout-facing projection must record itself as finalized; ${diagnostics()}`);
   assert.equal(returnEvidence.destinationAccount?.toLowerCase(), OPERATIONS_EVM_SIGNING_ADDRESS.toLowerCase(), `return's payout-facing projection must credit the configured Operations EVM account; ${diagnostics()}`);
-  assert.equal(returnEvidence.destinationAsset?.toLowerCase(), USDG.toLowerCase(), `return's payout-facing projection must credit USDG; ${diagnostics()}`);
-  assert.equal(returnEvidence.destinationCreditAmount, '90', `return's payout-facing credit must equal the leg's own observed netDeltaAtomic (90), never the quoted destinationAmountAtomic; ${diagnostics()}`);
+  assert.equal(returnEvidence.destinationAsset?.toLowerCase(), 'native', `return's payout-facing projection must credit ETH; ${diagnostics()}`);
+  assert.equal(returnEvidence.destinationCreditAmount, '9090', `return's payout-facing credit must equal the leg's own observed netDeltaAtomic (90), never the quoted destinationAmountAtomic; ${diagnostics()}`);
   assert.equal(returnEvidence.relayLeg.state, 'SETTLED', `the real Relay return leg must reach SETTLED; ${diagnostics()}`);
-  assert.equal(returnEvidence.relayLeg.netDeltaAtomic, '90', `the settled leg's own independently observed net delta must be exactly pack 0's real 90-unit proceeds; ${diagnostics()}`);
-  assert.equal(returnEvidence.relayLeg.destinationAssetId?.toLowerCase(), USDG.toLowerCase(), `the settled leg must credit USDG; ${diagnostics()}`);
-  assert.equal(returnEvidence.relayLeg.sourceAmountAtomic, '90', `the settled leg's own source amount must match its observed net delta (no fee modeled); ${diagnostics()}`);
+  assert.equal(returnEvidence.relayLeg.netDeltaAtomic, '9090', `the settled leg's own independently observed net delta must be exactly pack 0's real 90-unit proceeds; ${diagnostics()}`);
+  assert.equal(returnEvidence.relayLeg.destinationAssetId?.toLowerCase(), 'native', `the settled leg must credit ETH; ${diagnostics()}`);
+  assert.equal(returnEvidence.relayLeg.sourceAmountAtomic, '90', `the source remains 90 USDC atoms while the destination is the separately quoted 9090 wei; ${diagnostics()}`);
   const [[, settledReturnLeg]] = cycle.relayLegs instanceof Map ? [...cycle.relayLegs.entries()] : [];
   assert.equal(cycle.relayLegs.size, 1, `exactly one Relay leg (the real return bridge) may ever be recorded; ${diagnostics()}`);
   assert.equal(settledReturnLeg.direction, 'return', `the one recorded Relay leg must be the return leg; ${diagnostics()}`);
   assert.equal(settledReturnLeg.state, 'SETTLED', `the durably recorded return leg must be SETTLED, matching the stage evidence; ${diagnostics()}`);
 
-  // The exact raw-vs-canonical mismatch payout-availability.mjs refuses on, asserted directly: the
-  // settled leg's own raw destination identity (return.mjs's `typedAmount()`, unconditional for any
-  // leg) never matches the one canonical CAIP-keyed custody row every other writer/reader in this
-  // graph already agrees on.
-  assert.equal(settledReturnLeg.destinationChainId, '4663', `the settled leg's own raw destinationChainId must be the unconverted numeric chain id; ${diagnostics()}`);
-  assert.equal(settledReturnLeg.destinationAssetId?.toLowerCase(), USDG.toLowerCase(), `the settled leg's own raw destinationAssetId must be the unconverted lowercase USDG address; ${diagnostics()}`);
+  // Native MoneyV2 uses the same identity in Relay legs and the sole custody row.
+  assert.equal(settledReturnLeg.destinationChainId, '4663');
+  assert.equal(settledReturnLeg.destinationAssetId, 'native');
   const rawDestinationCustodyRow = [...cycle.custodyLedgers.values()].find(
     row => row?.chainId === settledReturnLeg.destinationChainId && row?.assetId === settledReturnLeg.destinationAssetId,
   ) ?? null;
-  assert.equal(rawDestinationCustodyRow, null, `no custody-ledger row may ever be keyed by the leg's own raw destination identity -- the only real EVM USDG row stays canonical CAIP-keyed, exactly why payout-availability.mjs's raw-keyed lookup above can never find it; ${diagnostics()}`);
+  assert.equal(rawDestinationCustodyRow, evmCustodyLedgerRow, 'native return and payout share one principal/gas custody row');
 
   const epicGateEvidence = cycle.stages.get('epic-gate').evidence;
   const epicPack0 = epicGateEvidence.packs.find(entry => entry.memo === MEMO_PACK_0);
@@ -3966,7 +3896,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     `a second tick must reach zero additional Collector mutation calls of any kind; ${diagnostics()}`,
   );
   assert.equal(signSpy.calls, 6, `a second tick must never reach the signer again; ${diagnostics()}`);
-  const repositoryAfterSecondTick = await CycleRepository.open(join(directory, 'cycles'));
+  const repositoryAfterSecondTick = await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() });
   const cycleAfterSecondTick = await repositoryAfterSecondTick.describeCycle(cycleId);
   const buybackAttemptAfterSecondTick = await repositoryAfterSecondTick.readOperationalStageAttempt(cycleId, 'buyback');
   assert.equal(
@@ -4029,7 +3959,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     supplementaryBuybackTickError = error;
   }
   assert.equal(supplementaryBuybackTickError, null, `the supplementary buyback tick must complete with no error; ${diagnostics()}`);
-  const settlementAfterBuyback = await (await CycleRepository.open(join(directory, 'cycles'))).readSupplementarySettlement(heldPosition.positionId);
+  const settlementAfterBuyback = await (await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() })).readSupplementarySettlement(heldPosition.positionId);
   assert.equal(settlementAfterBuyback?.state, 'BUYBACK_SENT_UNKNOWN', `the supplementary settlement must advance to BUYBACK_SENT_UNKNOWN after one real Collector resale; ${diagnostics()}`);
 
   let supplementaryReturnTickError = null;
@@ -4039,7 +3969,7 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     supplementaryReturnTickError = error;
   }
   assert.equal(supplementaryReturnTickError, null, `the supplementary return tick must complete with no error; ${diagnostics()}`);
-  const settlementAfterReturn = await (await CycleRepository.open(join(directory, 'cycles'))).readSupplementarySettlement(heldPosition.positionId);
+  const settlementAfterReturn = await (await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() })).readSupplementarySettlement(heldPosition.positionId);
   assert.equal(settlementAfterReturn?.state, 'RETURN_BROADCAST', `the supplementary settlement must advance to RETURN_BROADCAST after one real Solana-to-EVM return bridge; ${diagnostics()}`);
 
   let supplementaryPayoutTickError = null;
@@ -4049,17 +3979,17 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
     supplementaryPayoutTickError = error;
   }
   assert.equal(supplementaryPayoutTickError, null, `the supplementary payout tick must complete with no error; ${diagnostics()}`);
-  const settlementAfterPayout = await (await CycleRepository.open(join(directory, 'cycles'))).readSupplementarySettlement(heldPosition.positionId);
+  const settlementAfterPayout = await (await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() })).readSupplementarySettlement(heldPosition.positionId);
   assert.equal(settlementAfterPayout?.state, 'COMPLETE', `the supplementary settlement must reach COMPLETE after one real finalized EVM payout; ${diagnostics()}`);
 
-  const repositoryAfterSupplementary = await CycleRepository.open(join(directory, 'cycles'));
+  const repositoryAfterSupplementary = await CycleRepository.open(join(directory, 'cycles'), graphNow, { testAuthority: createTestProfileMutationAuthority() });
   const cycleAfterSupplementary = await repositoryAfterSupplementary.describeCycle(cycleId);
   const heldPositionAfterSupplementary = cycleAfterSupplementary.heldPositions.get(heldPosition.positionId);
   assert.equal(heldPositionAfterSupplementary.ownerDecision?.choice, 'sell', `the held position's own durable owner decision must record sell; ${diagnostics()}`);
   assert.equal(heldPositionAfterSupplementary.resolution, null, `the held position resolution itself remains a separate, still-unset field -- supplementary settlement completion is tracked on the settlement record, not by resolving the position; ${diagnostics()}`);
 
   assert.equal(supplementaryReturnProceedsAtomic, BigInt(EPIC_GATE_SUPPLEMENTARY_SELL_OFFER_ATOMIC), `the real supplementary return proceeds must equal exactly the real Collector resale offer; ${diagnostics()}`);
-  assert.equal(supplementaryPayoutTransferAmount, BigInt(EPIC_GATE_SUPPLEMENTARY_SELL_OFFER_ATOMIC), `the real supplementary payout transfer must credit exactly the real supplementary return proceeds; ${diagnostics()}`);
+  assert.equal(supplementaryPayoutTransferAmount, quotedNativeReturnWei(EPIC_GATE_SUPPLEMENTARY_SELL_OFFER_ATOMIC), `the real supplementary payout transfer must credit exactly the real supplementary return proceeds; ${diagnostics()}`);
   assert.equal(supplementaryPayoutRecipientAddress?.toLowerCase(), ELIGIBLE_HOLDER_ADDRESS.toLowerCase(), `the supplementary payout must credit exactly the ORIGINAL eligibility snapshot's one holder, never a different or newly current one; ${diagnostics()}`);
   assert.notEqual(supplementaryPayoutRecipientAddress?.toLowerCase(), OWNERSHIP_CHANGED_NEW_HOLDER_ADDRESS.toLowerCase(), `the supplementary payout must never credit the demonstrably different, newly "current" holder address; ${diagnostics()}`);
 
@@ -4069,8 +3999,8 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // Structural proof that the ownership-changed address never receives anything: its own real
   // historical EVM balance, read the exact same way payout's own independent proof reads any
   // account, must remain exactly 0 at every real height this scenario ever produces.
-  const newHolderFinalBalance = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: OWNERSHIP_CHANGED_NEW_HOLDER_ADDRESS,
+  const newHolderFinalBalance = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: OWNERSHIP_CHANGED_NEW_HOLDER_ADDRESS,
     blockNumber: EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT.number, blockHash: EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT.hash,
   });
   assert.equal(newHolderFinalBalance.value, 0n, `the demonstrably different, newly "current" holder address must never receive any historical proceeds for this old cycle; ${diagnostics()}`);
@@ -4079,28 +4009,28 @@ test('N=2 composed offline scenario: real compose(config) drives purchase throug
   // cycle's own: the real supplementary payout's own finalized-transfer evidence, and the real
   // EVM custody row, both agree, and no earlier height's own balance is retroactively rewritten.
   const evmCustodyLedgerRowAfterSupplementary = cycleAfterSupplementary.custodyLedgers?.get?.(evmCustodyCanonicalKey) ?? null;
-  assert.notEqual(evmCustodyLedgerRowAfterSupplementary, null, `the one canonical EVM USDG custody row must remain durable after the supplementary settlement; ${diagnostics()}`);
+  assert.notEqual(evmCustodyLedgerRowAfterSupplementary, null, `the one canonical EVM ETH custody row must remain durable after the supplementary settlement; ${diagnostics()}`);
   assert.equal(
     evmCustodyLedgerRowAfterSupplementary.chainId, evmCustodyLedgerRow.chainId,
     `the supplementary settlement must never create a competing raw-identity custody row; the one canonical CAIP-keyed row remains the single source of truth; ${diagnostics()}`,
   );
-  const operationsBalanceAtSupplementaryReturn = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: OPERATIONS_EVM_SIGNING_ADDRESS,
+  const operationsBalanceAtSupplementaryReturn = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: OPERATIONS_EVM_SIGNING_ADDRESS,
     blockNumber: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN.number, blockHash: EVM_BLOCK_AFTER_SUPPLEMENTARY_RETURN.hash,
   });
-  assert.equal(operationsBalanceAtSupplementaryReturn.value, BigInt(EPIC_GATE_SUPPLEMENTARY_SELL_OFFER_ATOMIC), `Operations' own balance right after the supplementary return lands must show exactly the real supplementary proceeds credited on top of the main cycle's already-fully-paid-out balance (which nets to zero); ${diagnostics()}`);
-  const operationsBalanceAtSupplementaryPayout = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: OPERATIONS_EVM_SIGNING_ADDRESS,
+  assert.equal(operationsBalanceAtSupplementaryReturn.value, EVM_NATIVE_BALANCE_ATOMIC + AGGREGATE_FUNDING_ATOMIC - 42000n + quotedNativeReturnWei(EPIC_GATE_SUPPLEMENTARY_SELL_OFFER_ATOMIC), `Operations' balance after the supplementary return includes its gas reserve and exactly the quoted native proceeds; ${diagnostics()}`);
+  const operationsBalanceAtSupplementaryPayout = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: OPERATIONS_EVM_SIGNING_ADDRESS,
     blockNumber: EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT.number, blockHash: EVM_BLOCK_AFTER_SUPPLEMENTARY_PAYOUT.hash,
   });
-  assert.equal(operationsBalanceAtSupplementaryPayout.value, 0n, `Operations' own balance right after the supplementary payout lands must return to exactly zero, fully conserved; ${diagnostics()}`);
-  // The main cycle's own already-observed pre-payout checkpoint (height 101, Operations = 90) must
+  assert.equal(operationsBalanceAtSupplementaryPayout.value, EVM_NATIVE_BALANCE_ATOMIC + AGGREGATE_FUNDING_ATOMIC - 63000n, `Operations' balance after supplementary payout retains its reserve less the three observed gas costs; ${diagnostics()}`);
+  // The main cycle's already-observed native pre-payout checkpoint (height 101) must
   // remain byte-identical, even now that two more real transactions have since been accepted.
-  const mainReturnHeightBalanceAfterSupplementary = await historicalEvidenceStub.readErc20BalanceAtBlock({
-    token: USDG, account: OPERATIONS_EVM_SIGNING_ADDRESS,
+  const mainReturnHeightBalanceAfterSupplementary = await historicalEvidenceStub.readNativeBalanceAtBlock({
+    account: OPERATIONS_EVM_SIGNING_ADDRESS,
     blockNumber: EVM_BLOCK_AFTER_RETURN.number, blockHash: EVM_BLOCK_AFTER_RETURN.hash,
   });
-  assert.equal(mainReturnHeightBalanceAfterSupplementary.value, 90n, `the main cycle's own already-observed height-101 checkpoint (Operations = 90) must remain stable even after both the supplementary return and supplementary payout have since been accepted; ${diagnostics()}`);
+  assert.equal(mainReturnHeightBalanceAfterSupplementary.value, expectedReturnBalance, `the main cycle's already-observed native height-101 checkpoint must remain stable even after both the supplementary return and supplementary payout have since been accepted; ${diagnostics()}`);
 });
 
 test('the isolated identity transformation touches only the two deployment pins', async t => {
