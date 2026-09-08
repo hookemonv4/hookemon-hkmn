@@ -206,3 +206,20 @@ export async function createRelayNativePaymentProof({ client, binding, sourcePro
   capabilities.set(proof, proof);
   return proof;
 }
+
+
+/** Idempotent per-transaction gas projection; spread these fields into the same custody write. */
+export function applyNativeCustodyGasPayment(ledger, proof) {
+  need(isProcessNativePaymentProof(proof, { chainId: '4663', assetId: 'native', decimals: 18 })
+    && typeof proof.gasSpentWei === 'string', 'gas cost requires a process native payment proof');
+  need(ledger?.schema === 'hookemon.custody-ledger.v3' && ledger.chainId === '4663' && ledger.assetId === 'native'
+    && ledger.decimals === 18 && Array.isArray(ledger.gasPayments), 'gas accounting requires native custody v3');
+  const gasPayments = ledger.gasPayments.map(item => ({ ...item }));
+  const existing = gasPayments.find(item => item.transactionHash === proof.transactionHash);
+  if (existing) need(existing.amountWei === proof.gasSpentWei, 'gas transaction cost changed');
+  else gasPayments.push({ transactionHash: proof.transactionHash, amountWei: proof.gasSpentWei });
+  const previousTotal = ledger.gasPayments.reduce((sum, item) => sum + BigInt(atomic(item.amountWei)), 0n);
+  need(previousTotal.toString() === ledger.gasSpent.amountAtomic, 'gas ledger sum is inconsistent');
+  return { gasPayments, gasSpent: { chainId: '4663', assetId: 'native', decimals: 18,
+    amountAtomic: (previousTotal + (existing ? 0n : BigInt(proof.gasSpentWei))).toString() } };
+}

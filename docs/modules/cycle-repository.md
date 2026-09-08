@@ -345,3 +345,8 @@ amounts require fresh exact-amount Relay USD valuation capabilities with upward 
 stale or serialized valuation objects make exposure unvalued and prevent new risk. Gas reserve and
 spent gas remain separate wei fields. Held positions contribute their original USD purchase cost
 and count even when they have no native principal ledger association.
+
+Native custody records gas costs as append-only `gasPayments` entries containing a unique
+transaction hash and canonical `amountWei`. Their exact sum equals typed `gasSpent`.
+`applyNativeCustodyGasPayment` accepts a process-authenticated payment proof and returns the same
+fields on replay of that hash and cost. A changed cost, removed entry or duplicate hash refuses.

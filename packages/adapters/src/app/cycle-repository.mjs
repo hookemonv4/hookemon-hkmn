@@ -755,6 +755,10 @@ function assertCustodyLedgerTransition(previous, next, label = 'cycle-repository
   if (previous.schema === 'hookemon.custody-ledger.v3' && next.schema !== previous.schema) throw new Error(`${label} cannot downgrade native custody`);
   if (next.schema === 'hookemon.custody-ledger.v3' && previous.schema !== next.schema) throw new Error(`${label} cannot reinterpret historical custody as native`);
   if (next.schema === 'hookemon.custody-ledger.v3' && BigInt(next.gasSpent.amountAtomic) < BigInt(previous.gasSpent.amountAtomic)) throw new Error(`${label} cannot erase native gas costs`);
+  if (next.schema === 'hookemon.custody-ledger.v3' && (next.gasPayments.length < previous.gasPayments.length
+    || previous.gasPayments.some((payment, index) => canonicalJson(payment) !== canonicalJson(next.gasPayments[index])))) {
+    throw new Error(`${label} native gas payment history is append-only`);
+  }
   if (previous.schema === 'hookemon.custody-ledger.v2' && next.schema !== 'hookemon.custody-ledger.v2') {
     throw new Error(`${label} cannot downgrade from hookemon.custody-ledger.v2 to v1 for this key`);
   }

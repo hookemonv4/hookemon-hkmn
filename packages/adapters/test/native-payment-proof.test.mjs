@@ -46,7 +46,7 @@ test('finalized native outbound spends principal once and records gas separately
   const proof = await createNativePaymentProof(setup());
   const asset = { chainId: '4663', assetId: 'native', decimals: 18 };
   const row = { schema: 'hookemon.custody-ledger.v3', ...asset, claimed: '42', bridgeOut: '0',
-    gasReserve: { ...asset, amountAtomic: '100000' }, gasSpent: { ...asset, amountAtomic: '12' } };
+    gasReserve: { ...asset, amountAtomic: '100000' }, gasSpent: { ...asset, amountAtomic: '12' }, gasPayments: [{ transactionHash: `0x${'99'.repeat(32)}`, amountWei: '12' }] };
   const spent = nativeOutboundCustodyAfterPayment(row, proof, null);
   assert.equal(spent.claimed, '42');
   assert.equal(spent.bridgeOut, '42');

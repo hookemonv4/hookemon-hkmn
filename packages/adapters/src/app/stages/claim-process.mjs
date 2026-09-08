@@ -1,3 +1,4 @@
+import { applyNativeCustodyGasPayment } from '../../native-payment-proof.mjs';
 import { createNativePaymentProof } from '../../native-payment-proof.mjs';
 import {
   decodeEventLog,
@@ -706,7 +707,7 @@ async function recordClaimCustodyLedger(cycleRepository, cycle, request, configu
       verifiedCurrentBalance,
       expectedCycleAsset,
       gasReserve: existing?.gasReserve ?? configured.gasReserve,
-      gasSpent: { ...asset, amountAtomic: (BigInt(existing?.gasSpent?.amountAtomic ?? '0') + (existing?.claimed === amountAtomic ? 0n : BigInt(nativeProof.gasSpentWei))).toString() },
+      ...applyNativeCustodyGasPayment(existing ?? { schema: 'hookemon.custody-ledger.v3', ...asset, gasPayments: [], gasSpent: { ...asset, amountAtomic: '0' } }, nativeProof),
     }),
   );
 }

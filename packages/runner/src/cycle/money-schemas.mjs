@@ -401,7 +401,7 @@ export function assertCustodyLedger(value, label = 'custody ledger', { allowLega
   const isV3 = value.schema === 'hookemon.custody-ledger.v3';
   const isV2 = value.schema === 'hookemon.custody-ledger.v2' || isV3;
   const fields = isV2
-    ? ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS, ...CUSTODY_LEDGER_V2_FIELDS, ...(isV3 ? ['gasReserve', 'gasSpent'] : [])]
+    ? ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS, ...CUSTODY_LEDGER_V2_FIELDS, ...(isV3 ? ['gasReserve', 'gasSpent', 'gasPayments'] : [])]
     : ['schema', 'cycleId', 'chainId', 'assetId', 'decimals', ...CUSTODY_LEDGER_BUCKETS];
   assertPlainObject(value, fields, label);
   assertNonEmptyString(value.cycleId, `${label} cycleId`);
@@ -415,6 +415,15 @@ export function assertCustodyLedger(value, label = 'custody ledger', { allowLega
       const gas = assertTypedAmount(value[name], `${label} ${name}`);
       assertCustodyRowIdentity(gas, value, `${label} ${name}`);
     }
+    if (!Array.isArray(value.gasPayments)) throw new Error(`${label} gasPayments must be an array`);
+    const seen = new Set(); let gasTotal = 0n;
+    for (const payment of value.gasPayments) {
+      assertPlainObject(payment, ['transactionHash', 'amountWei'], `${label} gas payment`);
+      if (!/^0x[0-9a-f]{64}$/.test(payment.transactionHash) || seen.has(payment.transactionHash)) throw new Error(`${label} gas transaction identity is invalid or duplicated`);
+      assertAtomic(payment.amountWei, `${label} gas payment amountWei`);
+      seen.add(payment.transactionHash); gasTotal += BigInt(payment.amountWei);
+    }
+    if (gasTotal.toString() !== value.gasSpent.amountAtomic) throw new Error(`${label} gasSpent must equal its unique transaction costs`);
   }
   if (!isV2) return clone(value);
   const rowIdentity = { chainId: value.chainId, assetId: value.assetId, decimals: value.decimals };
