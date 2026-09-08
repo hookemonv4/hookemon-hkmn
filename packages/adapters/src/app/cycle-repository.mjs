@@ -1548,9 +1548,13 @@ function assertOutboundRelayIntent(value, label, { allowLegacyIntent = false } =
     || !Number.isSafeInteger(value.deadlineUnixSeconds) || value.deadlineUnixSeconds <= 0) {
     throw new Error(`${label} is invalid`);
   }
+  const nativeOrigin = value.originAssetId === 'native';
+  if (nativeOrigin && (legacyIdentity || value.originChainId !== 4663 || value.originDecimals !== 18)) {
+    throw new Error(`${label} native origin identity is invalid`);
+  }
   return Object.freeze({
     ...structuredClone(value),
-    originAssetId: isEvmRelayChain(value.originChainId) ? assertEvmAddress(value.originAssetId, `${label} originAssetId`) : value.originAssetId,
+    originAssetId: nativeOrigin ? 'native' : isEvmRelayChain(value.originChainId) ? assertEvmAddress(value.originAssetId, `${label} originAssetId`) : value.originAssetId,
     sender: isEvmRelayChain(value.originChainId) ? assertEvmAddress(value.sender, `${label} sender`) : value.sender,
   });
 }
